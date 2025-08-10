@@ -3,13 +3,14 @@ import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 export default function ShoppingListScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<'marken' | 'nonames'>('nonames');
   const [showConversionModal, setShowConversionModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -173,15 +174,27 @@ export default function ShoppingListScreen() {
       <Stack.Screen 
         options={{
           title: 'Einkaufszettel',
-          headerStyle: { backgroundColor: colors.background },
-          headerTintColor: colors.text,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: 'white',
+          headerTitleStyle: { color: 'white', fontWeight: '600' },
+          headerBackVisible: false,
+          gestureEnabled: true,
+          animation: 'slide_from_right',
+          headerLeft: () => (
+            <TouchableOpacity 
+              onPress={() => router.back()}
+              style={{ paddingLeft: 16, paddingRight: 8, paddingVertical: 8 }}
+            >
+              <IconSymbol name="chevron.left" size={24} color="white" />
+            </TouchableOpacity>
+          ),
           headerRight: () => (
             <View style={styles.headerButtons}>
               <TouchableOpacity style={styles.headerButton}>
-                <IconSymbol name="star.fill" size={24} color={colors.primary} />
+                <IconSymbol name="star.fill" size={24} color="white" />
               </TouchableOpacity>
               <TouchableOpacity style={styles.headerButton}>
-                <IconSymbol name="star.fill" size={24} color={colors.primary} />
+                <IconSymbol name="star.fill" size={24} color="white" />
               </TouchableOpacity>
             </View>
           )

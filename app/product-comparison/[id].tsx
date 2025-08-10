@@ -3,16 +3,16 @@ import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
-  Dimensions,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View
+    Dimensions,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -23,6 +23,7 @@ export default function ProductComparisonScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [showProductDetails, setShowProductDetails] = useState(false);
   const [showRatingModal, setShowRatingModal] = useState(false);
 
@@ -130,6 +131,17 @@ export default function ProductComparisonScreen() {
             fontSize: 17
           },
           headerShadowVisible: false,
+          headerBackVisible: false,
+          gestureEnabled: true,
+          animation: 'slide_from_right',
+          headerLeft: () => (
+            <TouchableOpacity 
+              onPress={() => router.back()}
+              style={{ paddingLeft: 16, paddingRight: 8, paddingVertical: 8 }}
+            >
+              <IconSymbol name="chevron.left" size={24} color="white" />
+            </TouchableOpacity>
+          ),
         }} 
       />
 

@@ -74,8 +74,20 @@ export default function RatingScreen() {
       <Stack.Screen 
         options={{
           title: 'Bewertung abgeben (Markenprodukt)',
-          headerStyle: { backgroundColor: colors.background },
-          headerTintColor: colors.text,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: 'white',
+          headerTitleStyle: { color: 'white', fontWeight: '600' },
+          headerBackVisible: false,
+          gestureEnabled: true,
+          animation: 'slide_from_right',
+          headerLeft: () => (
+            <TouchableOpacity 
+              onPress={() => router.back()}
+              style={{ paddingLeft: 16, paddingRight: 8, paddingVertical: 8 }}
+            >
+              <IconSymbol name="chevron.left" size={24} color="white" />
+            </TouchableOpacity>
+          ),
         }} 
       />
 

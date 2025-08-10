@@ -5,15 +5,15 @@ import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 
 import {
-  Nunito_400Regular,
-  Nunito_500Medium,
-  Nunito_600SemiBold,
-  Nunito_700Bold,
+    Nunito_400Regular,
+    Nunito_500Medium,
+    Nunito_600SemiBold,
+    Nunito_700Bold,
 } from '@expo-google-fonts/nunito';
 
 import {
-  Lato_400Regular,
-  Lato_500Medium,
+    Lato_400Regular,
+    Lato_500Medium,
 } from '@expo-google-fonts/lato';
 
 import { useColorScheme } from '@/hooks/useColorScheme';
