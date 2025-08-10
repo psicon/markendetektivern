@@ -6,13 +6,13 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
-    Dimensions,
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    TouchableOpacity,
-    View
+  Dimensions,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -26,6 +26,7 @@ export default function ProductComparisonScreen() {
   const router = useRouter();
   const [showProductDetails, setShowProductDetails] = useState(false);
   const [showRatingModal, setShowRatingModal] = useState(false);
+  const [showRegionalInfo, setShowRegionalInfo] = useState(false);
 
   // Mock data - exakt wie im Screenshot
   const brandProduct = {
@@ -89,6 +90,14 @@ export default function ProductComparisonScreen() {
       ecoscore: 'A',
       nova: 3,
     }
+  ];
+
+  // Mock-Daten für regionale Informationen
+  const regionalData = [
+    { region: 'Bayern', hersteller: 'Soja Food GmbH', isActive: true },
+    { region: 'BaWü', hersteller: 'Soja Food GmbH' },
+    { region: 'Berlin', hersteller: 'Soja Food GmbH' },
+    { region: 'DE Rest', hersteller: 'Soja Food GmbH' }
   ];
 
   const getSimilarityColor = (level: number) => {
@@ -158,9 +167,11 @@ export default function ProductComparisonScreen() {
               <IconSymbol name="square.grid.2x2" size={12} color="white" />
               <ThemedText style={styles.chipText}>Markenprodukt</ThemedText>
             </View>
-            <ThemedText style={[styles.categoryText, { color: colors.icon }]}>
-              {brandProduct.category}
-            </ThemedText>
+            <View style={[styles.categoryMiniCard, { backgroundColor: colors.card }]}>
+              <ThemedText style={[styles.categoryText, { color: colors.icon }]}>
+                {brandProduct.category}
+              </ThemedText>
+            </View>
             <View style={styles.spacer} />
             <TouchableOpacity>
               <IconSymbol name="heart.fill" size={20} color={colors.error} />
@@ -229,19 +240,21 @@ export default function ProductComparisonScreen() {
             </View>
           </View>
 
-          {/* Details Button with Cart */}
-          <TouchableOpacity 
-            style={[styles.detailsRow, { borderColor: colors.primary }]}
-            onPress={() => setShowProductDetails(true)}
-          >
-            <IconSymbol name="info.circle" size={20} color={colors.primary} />
-            <ThemedText style={[styles.detailsText, { color: colors.primary }]}>
-              Details
-            </ThemedText>
-            <TouchableOpacity style={[styles.cartButtonLarge, { backgroundColor: colors.primary }]}>
+          {/* Details and Cart Button Row */}
+          <View style={styles.actionButtonsRow}>
+            <TouchableOpacity 
+              style={[styles.detailsButton, { borderColor: colors.primary }]}
+              onPress={() => setShowProductDetails(true)}
+            >
+              <IconSymbol name="info.circle" size={16} color={colors.primary} />
+              <ThemedText style={[styles.detailsText, { color: colors.primary }]}>
+                Details
+              </ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.cartButton, { backgroundColor: colors.primary }]}>
               <IconSymbol name="cart" size={20} color="white" />
             </TouchableOpacity>
-          </TouchableOpacity>
+          </View>
         </View>
 
         {/* Alternatives Section */}
@@ -260,15 +273,18 @@ export default function ProductComparisonScreen() {
                     {product.market.split(' ')[0]}
                   </ThemedText>
                 </View>
-                <ThemedText style={[styles.categoryText, { color: colors.icon }]}>
-                  {product.category}
-                </ThemedText>
+                <View style={[styles.categoryMiniCard, { backgroundColor: colors.card }]}>
+                  <ThemedText style={[styles.categoryText, { color: colors.icon }]}>
+                    {product.category}
+                  </ThemedText>
+                </View>
                 <View style={styles.spacer} />
                 <View style={[styles.stageChip, { backgroundColor: getSimilarityColor(product.similarityLevel) }]}>
-                  <IconSymbol name="star.fill" size={12} color="white" />
+                  <IconSymbol name="chart.bar" size={10} color="white" />
                   <ThemedText style={styles.chipText}>
                     Stufe {product.similarityLevel}
                   </ThemedText>
+                  <IconSymbol name="info.circle" size={12} color="white" />
                 </View>
               </View>
 
@@ -290,12 +306,6 @@ export default function ProductComparisonScreen() {
                   <ThemedText style={styles.productTitle}>
                     {product.name}
                   </ThemedText>
-                  <View style={styles.discountRow}>
-                    <IconSymbol name="star.fill" size={14} color={colors.success} />
-                    <ThemedText style={[styles.discountValue, { color: colors.success }]}>
-                      {product.discount}%
-                    </ThemedText>
-                  </View>
                   <View style={styles.ratingRow}>
                     <ThemedText style={[styles.ratingValue, { color: colors.warning }]}>
                       {product.rating.toFixed(1)}
@@ -323,6 +333,12 @@ export default function ProductComparisonScreen() {
 
                 {/* Price Section */}
                 <View style={styles.priceSection}>
+                  <View style={styles.discountRow}>
+                    <IconSymbol name="star.fill" size={14} color={colors.success} />
+                    <ThemedText style={[styles.discountValue, { color: colors.success }]}>
+                      {product.discount}%
+                    </ThemedText>
+                  </View>
                   <ThemedText style={[styles.mainPrice, { color: colors.success }]}>
                     € {product.price.toFixed(2)}
                   </ThemedText>
@@ -334,30 +350,92 @@ export default function ProductComparisonScreen() {
 
               {/* Regional Info for first item */}
               {index === 0 && (
-                <View style={styles.regionalSection}>
-                  <View style={styles.regionalHeader}>
+                <View style={[styles.regionalCard, { backgroundColor: colors.background }]}>
+                  <TouchableOpacity 
+                    style={styles.regionalHeader}
+                    onPress={() => setShowRegionalInfo(!showRegionalInfo)}
+                  >
                     <IconSymbol name="location" size={16} color={colors.primary} />
-                    <ThemedText style={[styles.regionalTitle, { color: colors.primary }]}>
+                    <ThemedText style={styles.regionalTitle}>
                       Regionale Produktinformation
                     </ThemedText>
-                    <IconSymbol name="chevron.down" size={16} color={colors.icon} />
-                  </View>
+                    <IconSymbol 
+                      name={showRegionalInfo ? "chevron.up" : "chevron.down"} 
+                      size={16} 
+                      color={colors.icon} 
+                    />
+                  </TouchableOpacity>
+                  
+                  {showRegionalInfo && (
+                    <View style={styles.regionalContent}>
+                      {/* Aktuelle Region */}
+                      <View style={styles.regionalRow}>
+                        <View style={styles.regionColumn}>
+                          <IconSymbol name="checkmark" size={12} color={colors.success} />
+                          <ThemedText style={[styles.regionText, { color: colors.text }]}>
+                            Bayern
+                          </ThemedText>
+                        </View>
+                        <ThemedText style={[styles.herstellerLabel, { color: colors.icon }]}>
+                          Hersteller:
+                        </ThemedText>
+                        <View style={[styles.stufeChip, { backgroundColor: colors.success }]}>
+                          <IconSymbol name="chart.bar" size={10} color="white" />
+                          <ThemedText style={styles.stufeText}>Stufe4</ThemedText>
+                        </View>
+                      </View>
+                      
+                      <View style={[styles.divider, { backgroundColor: colors.border }]} />
+                      
+                      <ThemedText style={[styles.weitereTitle, { color: colors.text }]}>
+                        Weitere Regionen
+                      </ThemedText>
+                      
+                      {regionalData.slice(1).map((data, regionIndex) => (
+                        <View key={regionIndex} style={styles.regionalRow}>
+                          <View style={styles.regionColumn}>
+                            <ThemedText style={[styles.regionText, { color: colors.text }]}>
+                              {data.region}
+                            </ThemedText>
+                          </View>
+                          <ThemedText style={[styles.herstellerLabel, { color: colors.icon }]}>
+                            Hersteller:
+                          </ThemedText>
+                          <View style={[styles.stufeChip, { backgroundColor: colors.success }]}>
+                            <IconSymbol name="chart.bar" size={10} color="white" />
+                            <ThemedText style={styles.stufeText}>Stufe4</ThemedText>
+                          </View>
+                        </View>
+                      ))}
+                      
+                      <View style={[styles.divider, { backgroundColor: colors.border }]} />
+                      
+                      {/* Settings Button */}
+                      <View style={styles.settingsContainer}>
+                        <TouchableOpacity style={[styles.settingsButton, { borderColor: colors.border }]}>
+                          <IconSymbol name="gearshape" size={16} color={colors.icon} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
                 </View>
               )}
 
-              {/* Details Button with Cart */}
-              <TouchableOpacity 
-                style={[styles.detailsRow, { borderColor: colors.primary }]}
-                onPress={() => setShowProductDetails(true)}
-              >
-                <IconSymbol name="info.circle" size={20} color={colors.primary} />
-                <ThemedText style={[styles.detailsText, { color: colors.primary }]}>
-                  Details
-                </ThemedText>
-                <TouchableOpacity style={[styles.cartButtonLarge, { backgroundColor: colors.primary }]}>
+              {/* Details and Cart Button Row */}
+              <View style={styles.actionButtonsRow}>
+                <TouchableOpacity 
+                  style={[styles.detailsButton, { borderColor: colors.primary }]}
+                  onPress={() => setShowProductDetails(true)}
+                >
+                  <IconSymbol name="info.circle" size={16} color={colors.primary} />
+                  <ThemedText style={[styles.detailsText, { color: colors.primary }]}>
+                    Details
+                  </ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.cartButton, { backgroundColor: colors.primary }]}>
                   <IconSymbol name="cart" size={20} color="white" />
                 </TouchableOpacity>
-              </TouchableOpacity>
+              </View>
             </View>
           ))}
         </View>
@@ -601,7 +679,7 @@ const styles = StyleSheet.create({
     margin: 16,
     marginBottom: 8,
     borderRadius: 16,
-    padding: 16,
+    padding: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -613,37 +691,44 @@ const styles = StyleSheet.create({
   chipsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
-    gap: 8,
+    marginBottom: 12,
+    gap: 6,
   },
   brandChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
   },
   marketChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
   },
   stageChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
   },
   chipText: {
     color: 'white',
     fontSize: 11,
     fontWeight: '600',
+  },
+  categoryMiniCard: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.1)',
   },
   categoryText: {
     fontSize: 12,
@@ -657,8 +742,8 @@ const styles = StyleSheet.create({
   productRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 16,
-    gap: 12,
+    marginBottom: 12,
+    gap: 10,
   },
 
   // Product Image
@@ -769,57 +854,134 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
 
-  // Details Row with Cart
-  detailsRow: {
+  // Action Buttons Row
+  actionButtonsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    gap: 10,
+    marginTop: 12,
+  },
+  detailsButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 1,
+    paddingHorizontal: 12,
+    borderRadius: 8,
     borderWidth: 1,
     backgroundColor: 'transparent',
-    gap: 8,
+    gap: 6,
+    height: 30,
   },
   detailsText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '500',
-    flex: 1,
   },
-  cartButtonLarge: {
-    width: 40,
-    height: 24,
-    borderRadius: 6,
+  cartButton: {
+    width: 35,
+    height: 30,
+    borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
   },
 
   // Alternatives Section
   alternativesContainer: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 0,
   },
   alternativesTitle: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: 'bold',
-    marginBottom: 16,
-    marginTop: 8,
+    marginBottom: 6,
+    marginTop: 32,
+    marginLeft: 16,
   },
 
-  // Regional Info
-  regionalSection: {
-    marginBottom: 16,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.1)',
+  // Regional Info Card
+  regionalCard: {
+    marginTop: 8,
+    marginBottom: 8,
+    borderRadius: 12,
+    padding: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   regionalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    paddingVertical: 4,
   },
   regionalTitle: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: 'black',
+    flex: 1,
+  },
+  regionalContent: {
+    marginTop: 8,
+    gap: 6,
+  },
+  regionalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    gap: 8,
+  },
+  regionColumn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    minWidth: 70,
+  },
+  regionText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  herstellerLabel: {
+    fontSize: 12,
+    flex: 1,
+  },
+  stufeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 8,
+    gap: 2,
+  },
+  stufeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  weitereTitle: {
     fontSize: 14,
     fontWeight: '600',
-    flex: 1,
+    marginTop: 6,
+    marginBottom: 2,
+  },
+  settingsContainer: {
+    alignItems: 'flex-end',
+    marginTop: 8,
+  },
+  settingsButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  divider: {
+    height: 1,
+    marginVertical: 8,
+    opacity: 0.3,
   },
 
   // Bottom Sheet Styles

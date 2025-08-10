@@ -23,9 +23,9 @@ function CustomTabBarButton({ children, onPress }: any) {
           top: -25,
           justifyContent: 'center',
           alignItems: 'center',
-          width: 66,
-          height: 66,
-          borderRadius: 33,
+          width: 70,
+          height: 70,
+          borderRadius: 35,
           backgroundColor: colors.primary,
           elevation: 10,
           shadowColor: colorScheme === 'dark' ? colors.primary : '#000',
@@ -89,7 +89,11 @@ export default function TabLayout() {
         options={{
           title: 'Stöbern',
           tabBarIcon: ({ color, focused }) => (
-            <IconSymbol size={28} name="magnifyingglass" color={focused ? 'white' : 'white'} />
+            <IconSymbol 
+              size={28} 
+              name="magnifyingglass" 
+              color={focused ? 'white' : 'white'}
+            />
           ),
           tabBarButton: (props) => <CustomTabBarButton {...props} />,
           tabBarLabelStyle: { display: 'none' },
@@ -99,7 +103,7 @@ export default function TabLayout() {
         name="more"
         options={{
           title: 'Mehr',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="person.circle" color={color} />,
+          tabBarIcon: ({ color }) => <IconSymbol size={24} name="line.3.horizontal" color={color} />,
           tabBarLabelStyle: { 
             fontSize: 11,
             fontFamily: 'Lato_400Regular',

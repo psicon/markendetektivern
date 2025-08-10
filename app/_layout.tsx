@@ -33,6 +33,9 @@ export default function RootLayout() {
     
     // Keep SpaceMono for fallback
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+    
+    // Custom Icon Font (testing)
+    MDAppIcons: require('../assets/fonts/md_app_icons.ttf'),
   });
 
   if (!loaded && !error) {
