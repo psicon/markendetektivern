@@ -140,32 +140,37 @@ interface Kategorien {
 
 ---
 
-## 8. `markenProdukte` - Brand Products
+## 8. `markenProdukte` - Brand Products (Original Brand Products)
 
 ```typescript
 interface MarkenProdukte {
-  name: string;                              // String
-  created_at: Date | FirebaseTimestamp;     // DateTime
-  bild: string;                              // Image Path
-  beschreibung: string;                      // String
-  hersteller: DocumentReference;             // Doc Reference (hersteller)
-  kategorie: DocumentReference;              // Doc Reference (kategorien)
-  packSize: number;                          // Double
-  packTyp: DocumentReference;               // Doc Reference (packungstypen)
-  preis: number;                             // Double
-  EAN: string;                               // String
-  rating: number;                            // Double
-  ratingCount: number;                       // Integer
-  relatedProdukte: DocumentReference[];     // List < Doc Reference (produkte) >
-  relatedProdukteIDs: string[];             // List < String >
-  EANs: string[];                           // List < String >
-  preisDatum: Date | FirebaseTimestamp;     // DateTime
-  averageRatingOverall: number;             // Double
-  averageRatingContent: number;             // Double
-  averageRatingPriceValue: number;          // Double
-  averageRatingSimilarity: number;          // Double
-  averageRatingTasteFunction: number;       // Double
+  name: string;                              // Product name (e.g., "Coca Cola")
+  created_at: Date | FirebaseTimestamp;     // Creation date
+  bild: string;                              // Product image URL
+  beschreibung: string;                      // Product description
+  hersteller: DocumentReference;             // Reference to manufacturer (hersteller)
+  kategorie: DocumentReference;              // Reference to category (kategorien)
+  packSize: number;                          // Package size (e.g., 500ml)
+  packTyp: DocumentReference;               // Reference to package type (packungstypen)
+  preis: number;                             // Price of brand product
+  EAN: string;                               // European Article Number
+  rating: number;                            // Average rating
+  ratingCount: number;                       // Number of ratings
+  relatedProdukte: DocumentReference[];     // DEPRECATED: Use reverse lookup instead
+  relatedProdukteIDs: string[];             // DEPRECATED: Use reverse lookup instead
+  EANs: string[];                           // List of EANs
+  preisDatum: Date | FirebaseTimestamp;     // Price date
+  averageRatingOverall: number;             // Average overall rating
+  averageRatingContent: number;             // Average content rating
+  averageRatingPriceValue: number;          // Average price-value rating
+  averageRatingSimilarity: number;          // Average similarity rating
+  averageRatingTasteFunction: number;       // Average taste/function rating
 }
+
+// NOTE: To find related NoName products, query produkte collection:
+// where("markenProdukt", "==", thisMarkenProduktDocumentReference)
+```
+
 ```
 
 ---
@@ -201,35 +206,45 @@ interface ProductRatings {
 
 ---
 
-## 11. `produkte` - NoName Products
+## 11. `produkte` - NoName/Private Label Products
 
 ```typescript
 interface Produkte {
-  name: string;                              // String
-  created_at: Date | FirebaseTimestamp;     // DateTime
-  bild: string;                              // Image Path
-  beschreibung: string;                      // String
-  kategorie: DocumentReference;              // Doc Reference (kategorien)
-  packSize: number;                          // Double
-  packTyp: DocumentReference;               // Doc Reference (packungstypen)
-  preis: number;                             // Double
-  EAN: string;                               // String
-  rating: number;                            // Double
-  ratingCount: number;                       // Integer
-  handelsmarke: DocumentReference;           // Doc Reference (handelsmarken)
-  discounter: DocumentReference;             // Doc Reference (discounter)
-  markenProdukt: DocumentReference;          // Doc Reference (markenProdukte)
-  EANs: string[];                           // List < String >
-  preisDatum: Date | FirebaseTimestamp;     // DateTime
-  same: boolean;                            // Boolean
-  stufe: string;                            // String
-  hersteller: DocumentReference;            // Doc Reference (hersteller_new)
-  averageRatingOverall: number;             // Double
-  averageRatingContent: number;             // Double
-  averageRatingPriceValue: number;          // Double
-  averageRatingSimilarity: number;          // Double
-  averageRatingTasteFunction: number;       // Double
+  name: string;                              // Product name (e.g., "Aldi Cola")
+  created_at: Date | FirebaseTimestamp;     // Creation date
+  bild: string;                              // Product image URL
+  beschreibung: string;                      // Product description
+  kategorie: DocumentReference;              // Reference to category (kategorien)
+  packSize: number;                          // Package size (e.g., 500ml)
+  packTyp: DocumentReference;               // Reference to package type (packungstypen)
+  preis: number;                             // Price of NoName product
+  EAN: string;                               // European Article Number
+  rating: number;                            // Average rating
+  ratingCount: number;                       // Number of ratings
+  
+  // CORE RELATIONSHIP FIELDS:
+  handelsmarke: DocumentReference;           // Which private label (e.g., "K-Classic")
+  discounter: DocumentReference;             // Which store (e.g., "Kaufland")
+  markenProdukt: DocumentReference;          // LINKED BRAND PRODUCT (e.g., "Coca Cola")
+  
+  EANs: string[];                           // List of EANs
+  preisDatum: Date | FirebaseTimestamp;     // Price date
+  same: boolean;                            // Is it exactly the same as brand product?
+  stufe: string;                            // Similarity level ("3", "4", "5")
+  hersteller: DocumentReference;            // Reference to manufacturer (hersteller_new)
+  averageRatingOverall: number;             // Average overall rating
+  averageRatingContent: number;             // Average content rating
+  averageRatingPriceValue: number;          // Average price-value rating
+  averageRatingSimilarity: number;          // Average similarity rating
+  averageRatingTasteFunction: number;       // Average taste/function rating
 }
+
+// EXAMPLE RELATIONSHIP:
+// NoName Product "Aldi Cola" has markenProdukt: "coca-cola-123"
+// NoName Product "Rewe Cola" has markenProdukt: "coca-cola-123"  
+// Both link to the same brand product "Coca Cola" (ID: "coca-cola-123")
+```
+
 ```
 
 ---

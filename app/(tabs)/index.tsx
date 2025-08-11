@@ -2,6 +2,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { FirestoreService } from '@/lib/services/firestore';
@@ -163,7 +164,14 @@ export default function HomeScreen() {
                     marginTop: 0,
                   }}
                 />
-                <ThemedText style={[styles.brandTitle, { color: colors.primary }]}>MarkenDetektive</ThemedText>
+                <ThemedText 
+                  style={[styles.brandTitle, { color: colors.primary }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                  minimumFontScale={0.8}
+                >
+                  MarkenDetektive
+                </ThemedText>
               </View>
               <ThemedText style={[styles.subtitle]}>NoNames enttarnen,{"\n"}clever sparen!</ThemedText>
             </View>
@@ -237,7 +245,7 @@ export default function HomeScreen() {
 
         {/* Level Card */}
         <LinearGradient
-          colors={['#BF8970', '#97a1887f']}
+          colors={['#BF8970', '#A1887F']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.levelCard}
@@ -289,7 +297,7 @@ export default function HomeScreen() {
                 <TouchableOpacity 
                   key={product.id} 
                   style={[styles.productCard, { backgroundColor: colors.cardBackground }]}
-                  onPress={() => router.push(`/product-comparison/${product.id}`)}
+                  onPress={() => router.push(`/product-comparison/${product.id}?type=noname`)}
                 >
                   <View style={styles.productImageWrapper}>
                     {product.bild ? (
@@ -299,12 +307,15 @@ export default function HomeScreen() {
                         <IconSymbol name="photo" size={24} color={colors.icon} />
                       </View>
                     )}
-                    <View style={[styles.levelBadge, { backgroundColor: colors.success }]}>
-                      <ThemedText style={styles.levelBadgeText}>{getStufeDisplay(product.stufe)}</ThemedText>
+                    <View style={[styles.levelBadge, { backgroundColor: getStufenColor(product.stufe) }]}>
+                      <IconSymbol name="chart.bar" size={10} color="white" />
+                      <ThemedText style={styles.levelBadgeText}>Stufe {product.stufe}</ThemedText>
                     </View>
                   </View>
                   <View style={styles.productInfo}>
-                    <ThemedText style={styles.productTitle} numberOfLines={2} ellipsizeMode="tail">{product.name}</ThemedText>
+                    <View style={styles.productTitleContainer}>
+                      <ThemedText style={styles.productTitle} numberOfLines={2} ellipsizeMode="tail">{product.name}</ThemedText>
+                    </View>
                     <ThemedText style={styles.productBrand} numberOfLines={1} ellipsizeMode="tail">
                       {handelsmarken[product.id] || 'NoName-Produkt'}
                     </ThemedText>
@@ -385,19 +396,22 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   titleWrap: {
-    flexShrink: 1,
+    flex: 1,
+    marginRight: 8,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     marginBottom: 4,
+    flexShrink: 1,
   },
   brandTitle: {
-    fontSize: 28,
+    fontSize: 26,
     fontFamily: 'Nunito_700Bold',
-    lineHeight: 33,
+    lineHeight: 30,
     marginTop: 2,
+    flexShrink: 1,
   },
   profileButton: {
     width: 48,
@@ -514,8 +528,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
+    shadowOpacity: 0.09,
+    shadowRadius: 2,
     elevation: 2,
   },
   levelContent: {
@@ -566,48 +580,61 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontFamily: 'Nunito_700SemiBold',
     marginBottom: 12,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
   },
   productCard: {
     width: 150,
-    padding: 12,
-    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    paddingTop: 0, // Kein Padding oben für vollflächiges Bild
     marginLeft: 12,
     marginRight: 3,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.09,
+    shadowRadius: 2,
+    borderRadius: 16,
     elevation: 2,
     justifyContent: 'flex-start',
-    height: 228,
+    height: 230,
   },
   productImageWrapper: {
-    alignItems: 'center',
-    marginBottom: 12,
+    marginLeft: -12,  // Übergeht das horizontale Padding
+    marginRight: -12, // Übergeht das horizontale Padding  
+    marginBottom: 2,
     position: 'relative',
-    height: 95,
-    justifyContent: 'center',
+    height: 120,
     overflow: 'hidden',
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
+    borderTopLeftRadius: 16, // Gleich dem Card-Radius
+    borderTopRightRadius: 16, // Gleich dem Card-Radius
   },
   productImageFile: {
     width: '100%',
     height: '100%',
     resizeMode: 'cover',
   },
+  productImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderTopLeftRadius: 16, // Gleich dem Card-Radius
+    borderTopRightRadius: 16, // Gleich dem Card-Radius
+  },
   levelBadge: {
     position: 'absolute',
     top: 3,
     right: 3,
     paddingHorizontal: 6,
-    paddingVertical: 3,
+    paddingVertical: 0,
     borderRadius: 10,
     backgroundColor: '#42a968',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
   },
   levelBadgeText: {
-    fontSize: 10,
+    fontSize: 9,
     fontFamily: 'Nunito_600SemiBold',
     color: 'white',
   },
@@ -615,12 +642,16 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
   },
+  productTitleContainer: {
+    height: 40, // Feste Höhe für 2 Zeilen
+    justifyContent: 'flex-end', // Text an untere Kante
+    marginBottom: 4,
+  },
   productTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    marginBottom: 4,
-    minHeight: 40,
     lineHeight: 20,
+    textAlignVertical: 'bottom',
   },
   productBrand: {
     fontSize: 12,
@@ -641,11 +672,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginLeft: 12,
     marginRight: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowColor: '#000',           // Shadow Color: schwarz
+    shadowOffset: { 
+      width: 0,                    // Offset X: 0.0
+      height: 2                    // Offset Y: 2.0
+    },
+    shadowOpacity: 0.09,           // 9% Transparenz (sehr subtil!)
+    shadowRadius: 2,               // Blur: 2.0
+    elevation: 2, 
   },
   newsImageFile: {
     width: 130,
@@ -656,7 +690,9 @@ const styles = StyleSheet.create({
   newsTitle: {
     fontSize: 14,
     fontFamily: 'Lato_500Medium',
+    fontWeight: '600', // Angepasst für bessere Lesbarkeit
     textAlign: 'center',
+    lineHeight: 16,   // Kompakter wie in Alle Level
   },
   fab: {
     position: 'absolute',

@@ -478,17 +478,18 @@ const styles = StyleSheet.create({
   savingsCard: {
     marginBottom: 12,
     borderRadius: 16,
-    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOpacity: 0.09,
+    shadowRadius: 2,
+    elevation: 2,
+    // KEIN overflow hier - Shadow muss sichtbar bleiben
   },
   gradientCard: {
-    padding: 12,
+    padding: 10,          // Reduziert von 12
     position: 'relative',
-    overflow: 'hidden',
+    borderRadius: 16,     // Abrundung für Gradient
+    overflow: 'hidden',   // Gradient wird abgerundet
   },
   savingsContent: {
     flexDirection: 'row',
@@ -546,17 +547,16 @@ const styles = StyleSheet.create({
   levelCard: {
     marginBottom: 25,
     borderRadius: 16,
-    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOpacity: 0.09,
+    shadowRadius: 2,
+    elevation: 2,
   },
   levelHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,       // Reduziert von 12
     gap: 8,
   },
   levelIcon: {
@@ -576,45 +576,47 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: '600',
-    lineHeight: 16,
+    lineHeight: 14,        // Reduziert von 16
+    marginBottom: 2,       // Weniger Abstand
   },
   levelName: {
     color: 'white',
-    fontSize: 23,
+    fontSize: 22,          // Reduziert von 23
     fontWeight: '600',
-    lineHeight: 26,
+    lineHeight: 24,        // Reduziert von 26
+    marginBottom: 2,       // Weniger Abstand
   },
   levelDescription: {
     color: 'white',
     fontSize: 12,
     fontWeight: '300',
-    lineHeight: 14,
+    lineHeight: 13,        // Reduziert von 14
   },
   rewardBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.25)',
     paddingHorizontal: 8,
-    paddingVertical: 8,
+    paddingVertical: 6,    // Reduziert von 8
     borderRadius: 6,
-    marginBottom: 12,
-    gap: 8,
+    marginBottom: 8,       // Reduziert von 12
+    gap: 6,               // Reduziert von 8
   },
   rewardText: {
     color: 'white',
     fontSize: 12,
     fontWeight: '600',
     flex: 1,
-    lineHeight: 14,
+    lineHeight: 13,        // Reduziert von 14
   },
   progressSection: {
-    gap: 6,
+    gap: 4,               // Reduziert von 6
   },
   progressLabel: {
     color: 'white',
     fontSize: 12,
     fontWeight: '600',
-    lineHeight: 14,
+    lineHeight: 13,        // Reduziert von 14
   },
   progressRow: {
     flexDirection: 'row',
@@ -625,25 +627,25 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 12,
     fontWeight: '600',
-    lineHeight: 14,
+    lineHeight: 13,        // Reduziert von 14
   },
   pointsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 6,
+    marginTop: 4,          // Reduziert von 6
   },
   remainingText: {
     color: 'white',
     fontSize: 12,
     fontWeight: '300',
-    marginTop: 3,
-    lineHeight: 14,
+    marginTop: 2,          // Reduziert von 3
+    lineHeight: 13,        // Reduziert von 14
   },
 
   // Progress Bar
   progressBarContainer: {
-    marginVertical: 6,
+    marginVertical: 4,     // Reduziert von 6
   },
   progressBarBackground: {
     height: 12,
