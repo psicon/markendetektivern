@@ -386,6 +386,18 @@ const ProductComparisonContent = ({
 
   return (
     <ScrollView style={{ flex: 1, paddingHorizontal: 8 }}>
+      {/* Header wie im Details Sheet */}
+      <View style={[styles.comparisonHeader, { backgroundColor: colors.cardBackground }]}>
+        <ThemedText style={[styles.comparisonHeaderTitle, { color: colors.primary }]}>
+          Produktvergleich
+        </ThemedText>
+        <ThemedText style={[styles.comparisonHeaderSubtitle, { color: colors.text }]}>
+          {mainProduct.marke?.markenname || 'Marke'} vs. {selectedProducts.map((product) => 
+            product.handelsmarke?.bezeichnung || product.discounter?.name || 'NoName'
+          ).join(' vs. ')}
+        </ThemedText>
+      </View>
+
       {/* Markenprodukt - Details Sheet Stil */}
       <View style={[styles.detailCard, { backgroundColor: colors.cardBackground }]}>
         {/* Header wie im Details Sheet */}

@@ -7,12 +7,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import { useEffect, useLayoutEffect, useState } from 'react';
 import {
-  Animated,
-  Dimensions,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View
+    Animated,
+    Dimensions,
+    ScrollView,
+    StyleSheet,
+    TouchableOpacity,
+    View
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
