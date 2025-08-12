@@ -3,15 +3,56 @@ import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAuth } from '@/lib/contexts/AuthContext';
 import { router } from 'expo-router';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 export default function MoreScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const { user, logout } = useAuth();
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Abmelden',
+      'Möchtest du dich wirklich abmelden?',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        { 
+          text: 'Abmelden', 
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await logout();
+              router.replace('/auth/welcome');
+            } catch (error) {
+              console.error('Logout error:', error);
+              Alert.alert('Fehler', 'Abmeldung fehlgeschlagen.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleMenuItemPress = (item: any) => {
+    // If user is not logged in and tries to access profile, redirect to login
+    if (!user && item.title === 'Profil') {
+      router.push('/auth/welcome');
+      return;
+    }
+
+    // Handle other menu items
+    if (item.title === 'Level & Errungenschaften') {
+      router.push('/achievements');
+    } else if (item.title === 'Einkaufszettel') {
+      router.push('/shopping-list');
+    }
+    // Add more navigation cases as needed
+  };
 
   const menuItems = [
-    { icon: 'person.circle', title: 'Profil', subtitle: 'Level 1 • Sparanfänger' },
+    { icon: 'person.circle', title: 'Profil', subtitle: user ? 'Dein Profil verwalten' : 'Anmelden erforderlich' },
     { icon: 'shopping.cart', title: 'Einkaufszettel', subtitle: 'Deine Listen verwalten' },
     { icon: 'heart.fill', title: 'Gespeicherte Produkte', subtitle: 'Deine Favoriten' },
     { icon: 'star.fill', title: 'Level & Errungenschaften', subtitle: 'Dein Fortschritt' },
@@ -29,11 +70,17 @@ export default function MoreScreen() {
       <View style={[styles.profileCard, { backgroundColor: colors.cardBackground }]}>
         <View style={styles.profileInfo}>
           <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-            <ThemedText style={styles.avatarText}>P</ThemedText>
+            <ThemedText style={styles.avatarText}>
+              {user?.displayName ? user.displayName.charAt(0).toUpperCase() : '?'}
+            </ThemedText>
           </View>
           <View style={styles.profileText}>
-            <ThemedText style={styles.profileName}>Patrick</ThemedText>
-            <ThemedText style={styles.profileEmail}>patrick@example.com</ThemedText>
+            <ThemedText style={styles.profileName}>
+              {user?.displayName || 'Nicht angemeldet'}
+            </ThemedText>
+            <ThemedText style={styles.profileEmail}>
+              {user?.email || 'Melde dich an, um alle Features zu nutzen'}
+            </ThemedText>
           </View>
         </View>
 
@@ -66,13 +113,7 @@ export default function MoreScreen() {
                       <TouchableOpacity
             key={index}
             style={[styles.menuItem, { borderBottomColor: colors.border }]}
-            onPress={() => {
-              if (item.title === 'Level & Errungenschaften') {
-                router.push('/achievements');
-              } else if (item.title === 'Einkaufszettel') {
-                router.push('/shopping-list');
-              }
-            }}
+            onPress={() => handleMenuItemPress(item)}
           >
             <IconSymbol name={item.icon} size={24} color={colors.primary} />
             <View style={styles.menuItemText}>
@@ -95,10 +136,22 @@ export default function MoreScreen() {
         </View>
       </View>
 
-      {/* Sign Out */}
-      <TouchableOpacity style={styles.signOutButton}>
-        <ThemedText style={[styles.signOutText, { color: colors.error }]}>Abmelden</ThemedText>
-      </TouchableOpacity>
+      {/* Sign Out - only show if user is logged in */}
+      {user && (
+        <TouchableOpacity style={styles.signOutButton} onPress={handleLogout}>
+          <ThemedText style={[styles.signOutText, { color: colors.error }]}>Abmelden</ThemedText>
+        </TouchableOpacity>
+      )}
+
+      {/* Sign In - only show if user is not logged in */}
+      {!user && (
+        <TouchableOpacity 
+          style={[styles.signOutButton, { backgroundColor: colors.primary }]} 
+          onPress={() => router.push('/auth/welcome')}
+        >
+          <ThemedText style={[styles.signOutText, { color: 'white' }]}>Anmelden</ThemedText>
+        </TouchableOpacity>
+      )}
     </ThemedView>
   );
 }

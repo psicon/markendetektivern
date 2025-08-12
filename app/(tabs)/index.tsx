@@ -316,10 +316,12 @@ export default function HomeScreen() {
                     <View style={styles.productTitleContainer}>
                       <ThemedText style={styles.productTitle} numberOfLines={2} ellipsizeMode="tail">{product.name}</ThemedText>
                     </View>
-                    <ThemedText style={styles.productBrand} numberOfLines={1} ellipsizeMode="tail">
-                      {handelsmarken[product.id] || 'NoName-Produkt'}
-                    </ThemedText>
-                    <ThemedText style={[styles.productPrice, { color: colors.primary }]}>{formatPrice(product.preis)}</ThemedText>
+                    <View style={styles.brandPriceRow}>
+                      <ThemedText style={styles.productBrand} numberOfLines={1} ellipsizeMode="tail">
+                        {handelsmarken[product.id] || 'NoName-Produkt'}
+                      </ThemedText>
+                      <ThemedText style={[styles.productPrice, { color: colors.primary }]}>{formatPrice(product.preis)}</ThemedText>
+                    </View>
                   </View>
                 </TouchableOpacity>
               ))}
@@ -465,6 +467,7 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 14,
+    fontFamily: 'Nunito_400Regular',
   },
   scanButton: {
     padding: 14,
@@ -495,7 +498,7 @@ const styles = StyleSheet.create({
   },
   categoriesLoadingText: {
     fontSize: 14,
-    fontFamily: 'Lato_400Regular',
+
   },
   categoryChip: {
     flexDirection: 'row',
@@ -519,7 +522,7 @@ const styles = StyleSheet.create({
   },
   categoryText: {
     fontSize: 14,
-    fontFamily: 'Lato_500Medium',
+    fontFamily: 'Nunito_500Medium',
   },
   levelCard: {
     marginHorizontal: 12,
@@ -557,7 +560,7 @@ const styles = StyleSheet.create({
   },
   levelSubtitle: {
     fontSize: 11,
-    fontFamily: 'Lato_400Regular',
+
     color: 'rgba(255, 255, 255, 0.8)',
     flexShrink: 1,
     lineHeight: 12,
@@ -578,17 +581,17 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 18,
-    fontFamily: 'Nunito_700SemiBold',
-    marginBottom: 12,
+    fontFamily: 'Nunito_600SemiBold',
+    marginBottom: 4,
     paddingHorizontal: 10,
   },
   productCard: {
-    width: 150,
-    paddingHorizontal: 12,
-    paddingBottom: 12,
+    width: 170, // Reduziert von 180 auf 162 (10% schmäler)
+    paddingHorizontal: 11, // Reduziert von 12 auf 11 (ca. 1px weniger)
+    paddingBottom: 8, // Reduziert von 12 auf 8
     paddingTop: 0, // Kein Padding oben für vollflächiges Bild
     marginLeft: 12,
-    marginRight: 3,
+     // Reduziert von 3 auf 2 (1px weniger Abstand)
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.09,
@@ -596,11 +599,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     elevation: 2,
     justifyContent: 'flex-start',
-    height: 230,
+    height: 200, // Reduziert von 210 auf 200
   },
   productImageWrapper: {
-    marginLeft: -12,  // Übergeht das horizontale Padding
-    marginRight: -12, // Übergeht das horizontale Padding  
+    marginLeft: -11,  // Übergeht das horizontale Padding (angepasst von -12 auf -11)
+    marginRight: -11, // Übergeht das horizontale Padding (angepasst von -12 auf -11)
     marginBottom: 2,
     position: 'relative',
     height: 120,
@@ -623,8 +626,8 @@ const styles = StyleSheet.create({
   },
   levelBadge: {
     position: 'absolute',
-    top: 3,
-    right: 3,
+    top: 5,
+    right: 5,
     paddingHorizontal: 6,
     paddingVertical: 0,
     borderRadius: 10,
@@ -641,29 +644,37 @@ const styles = StyleSheet.create({
   productInfo: {
     flex: 1,
     justifyContent: 'flex-end',
+    paddingHorizontal: 5, // Reduziert von 6 auf 5 (ca. 1px weniger)
+    paddingBottom: 6,
   },
   productTitleContainer: {
-    height: 40, // Feste Höhe für 2 Zeilen
+    height: 36, // Reduziert von 40 auf 36
     justifyContent: 'flex-end', // Text an untere Kante
-    marginBottom: 4,
+    marginBottom: 2, // Reduziert von 4 auf 2
+  },
+  brandPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   productTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    lineHeight: 20,
+    fontSize: 14, // Reduziert von 16 auf 14 (2 Größen kleiner)
+    fontFamily: 'Nunito_700Bold',
+    lineHeight: 16, // Angepasst von 18 auf 16
     textAlignVertical: 'bottom',
   },
   productBrand: {
     fontSize: 12,
-    fontFamily: 'Lato_400Regular',
     opacity: 0.7,
-    marginBottom: 8,
-    minHeight: 16,
-    lineHeight: 16,
+    flex: 2, // Nimmt 2/3 der verfügbaren Breite
+    lineHeight: 14,
   },
   productPrice: {
-    fontSize: 16,
+    fontSize: 14, // Reduziert von 20 auf 14 (gleiche Größe wie Titel)
     fontFamily: 'Nunito_700Bold',
+    flex: 1, // Nimmt 1/3 der verfügbaren Breite
+    textAlign: 'right',
   },
   newsCard: {
     width: 180,
@@ -689,7 +700,7 @@ const styles = StyleSheet.create({
   },
   newsTitle: {
     fontSize: 14,
-    fontFamily: 'Lato_500Medium',
+    fontFamily: 'Nunito_500Medium',
     fontWeight: '600', // Angepasst für bessere Lesbarkeit
     textAlign: 'center',
     lineHeight: 16,   // Kompakter wie in Alle Level
@@ -709,13 +720,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
   },
-  productImagePlaceholder: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   loadingContainer: {
     paddingHorizontal: 12,
     paddingVertical: 40,
@@ -725,7 +729,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 14,
-    fontFamily: 'Lato_400Regular',
+
   },
   errorContainer: {
     paddingHorizontal: 12,
@@ -735,7 +739,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 14,
-    fontFamily: 'Lato_400Regular',
+
     textAlign: 'center',
   },
 });

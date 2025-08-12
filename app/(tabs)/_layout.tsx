@@ -1,12 +1,13 @@
-import { Tabs } from 'expo-router';
+import { Tabs, useRouter } from 'expo-router';
 import React from 'react';
-import { Platform, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, TouchableOpacity, View } from 'react-native';
 
 import { HapticTab } from '@/components/HapticTab';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import TabBarBackground from '@/components/ui/TabBarBackground';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAuth } from '@/lib/contexts/AuthContext';
 
 function CustomTabBarButton({ children, onPress }: any) {
   const colorScheme = useColorScheme();
@@ -45,12 +46,37 @@ function CustomTabBarButton({ children, onPress }: any) {
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const { user, loading } = useAuth();
+  const router = useRouter();
+
+  // Temporarily disabled for testing - uncomment to enable auth guard
+  // useEffect(() => {
+  //   if (!loading && !user) {
+  //     router.replace('/auth/welcome');
+  //   }
+  // }, [user, loading, router]);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors[colorScheme ?? 'light'].background }}>
+        <ActivityIndicator size="large" color={Colors[colorScheme ?? 'light'].primary} />
+      </View>
+    );
+  }
+
+  // Temporarily allow access without authentication for testing
+  // if (!user) {
+  //   return null; // Will redirect to welcome screen
+  // }
 
   return (
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
+        headerTitleStyle: {
+          fontFamily: 'Nunito_600SemiBold',
+        },
         tabBarButton: HapticTab,
         tabBarBackground: TabBarBackground,
         tabBarStyle: {
@@ -79,7 +105,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="house.fill" color={color} />,
           tabBarLabelStyle: { 
             fontSize: 11,
-            fontFamily: 'Lato_400Regular',
+
             marginTop: 2,
           },
         }}
@@ -106,7 +132,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="line.3.horizontal" color={color} />,
           tabBarLabelStyle: { 
             fontSize: 11,
-            fontFamily: 'Lato_400Regular',
+
             marginTop: 2,
           },
         }}

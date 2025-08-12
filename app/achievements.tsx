@@ -4,8 +4,8 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Stack, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useNavigation, useRouter } from 'expo-router';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import {
   Animated,
   Dimensions,
@@ -14,16 +14,44 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 
 export default function AchievementsScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
   const router = useRouter();
-  
+
+  // Header-Optionen sofort setzen mit useLayoutEffect
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: 'Level & Errungenschaften',
+      headerStyle: { 
+        backgroundColor: colors.primary,
+      },
+      headerTintColor: 'white',
+      headerTitleStyle: { 
+        color: 'white',
+        fontFamily: 'Nunito_600SemiBold',
+      },
+      headerShadowVisible: false,
+      headerBackVisible: false,
+      headerLeft: () => (
+        <TouchableOpacity 
+          onPress={() => router.back()}
+          style={{ 
+            paddingLeft: 0, 
+            paddingRight: 8, 
+            paddingVertical: 8 
+          }}
+        >
+          <IconSymbol name="chevron.left" size={24} color="white" />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, router, colors.primary]);
+
   // Animation values
   const [shimmerAnim] = useState(new Animated.Value(0));
   const [fadeAnim] = useState(new Animated.Value(0));
@@ -233,25 +261,7 @@ export default function AchievementsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen 
-        options={{
-          title: 'Level & Errungenschaften',
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: 'white',
-          headerTitleStyle: { color: 'white', fontWeight: '600' },
-          headerBackVisible: false,
-          gestureEnabled: true,
-          animation: 'slide_from_right',
-          headerLeft: () => (
-            <TouchableOpacity 
-              onPress={() => router.back()}
-              style={{ paddingLeft: 16, paddingRight: 8, paddingVertical: 8 }}
-            >
-              <IconSymbol name="chevron.left" size={24} color="white" />
-            </TouchableOpacity>
-          ),
-        }} 
-      />
+
 
       <ScrollView 
         style={styles.scrollView}

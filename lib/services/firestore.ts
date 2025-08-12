@@ -1,4 +1,5 @@
 import {
+    addDoc,
     collection,
     doc,
     DocumentReference,
@@ -640,6 +641,69 @@ export class FirestoreService {
     } catch (error) {
       console.error('❌ Fehler beim Laden der Marken:', error);
       return [];
+    }
+  }
+
+  /**
+   * Fügt eine neue Bewertung zur productRatings Collection hinzu
+   */
+  static async addProductRating(ratingData: {
+    productID: string | null;           // NoName product ID
+    brandProductID: string | null;      // Brand product ID  
+    userID: string;                     // User ID
+    ratingOverall: number;              // 1-5 Gesamtbewertung (Pflicht)
+    ratingPriceValue?: number | null;   // 1-5 Preis-Leistung (Optional)
+    ratingTasteFunction?: number | null; // 1-5 Geschmack/Funktion (Optional)
+    ratingSimilarity?: number | null;   // 1-5 Ähnlichkeit (Optional)
+    ratingContent?: number | null;      // 1-5 Inhaltsstoffe (Optional)
+    comment?: string | null;            // Freitext Kommentar (Optional)
+    ratedate: Date;                     // Bewertungsdatum
+    updatedate: Date;                   // Update-Datum
+  }): Promise<string> {
+    try {
+      console.log('💾 Saving product rating to Firestore:', ratingData);
+      
+      // Validate required fields
+      if (!ratingData.userID) {
+        throw new Error('userID is required');
+      }
+      if (!ratingData.ratingOverall || ratingData.ratingOverall < 1 || ratingData.ratingOverall > 5) {
+        throw new Error('ratingOverall must be between 1 and 5');
+      }
+      if (!ratingData.productID && !ratingData.brandProductID) {
+        throw new Error('Either productID or brandProductID must be provided');
+      }
+
+      // Create product references if IDs are provided
+      const firestoreData: any = {
+        userID: ratingData.userID,
+        ratingOverall: ratingData.ratingOverall,
+        ratingPriceValue: ratingData.ratingPriceValue,
+        ratingTasteFunction: ratingData.ratingTasteFunction,
+        ratingSimilarity: ratingData.ratingSimilarity,
+        ratingContent: ratingData.ratingContent,
+        comment: ratingData.comment,
+        ratedate: ratingData.ratedate,
+        updatedate: ratingData.updatedate
+      };
+
+      // Add product references
+      if (ratingData.productID) {
+        firestoreData.productID = doc(db, 'produkte', ratingData.productID);
+      }
+      if (ratingData.brandProductID) {
+        firestoreData.brandProductID = doc(db, 'markenProdukte', ratingData.brandProductID);
+      }
+
+      // Add to productRatings collection
+      const docRef = await addDoc(collection(db, 'productRatings'), firestoreData);
+      
+      console.log('✅ Product rating saved with ID:', docRef.id);
+      return docRef.id;
+      
+    } catch (error) {
+      console.error('Error adding product rating:', error);
+      throw error;
     }
   }
 

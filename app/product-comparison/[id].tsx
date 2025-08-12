@@ -4,21 +4,24 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 import { getStufenColor, getStufenDescription, getStufenTitle } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAuth } from '@/lib/contexts/AuthContext';
 import { FirestoreService } from '@/lib/services/firestore';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
 import { MarkenProduktWithDetails, ProductWithDetails } from '@/lib/types/firestore';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { Stack, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -42,55 +45,71 @@ const calculateSavingsPercentage = (brandProduct: any, noNameProduct: any): numb
   const brandPricePerUnit = brandProduct.preis / brandProduct.packSize;
   const noNamePricePerUnit = noNameProduct.preis / noNameProduct.packSize;
   
-  // Ersparnis in Prozent
+  // Ersparnis in Prozent (kann positiv oder negativ sein)
   const savings = ((brandPricePerUnit - noNamePricePerUnit) / brandPricePerUnit) * 100;
   
-  return Math.round(Math.max(0, savings)); // Mindestens 0%, aufgerundet
+  return Math.round(savings); // Kann positiv (Ersparnis) oder negativ (Mehrkosten) sein
+};
+
+// Helper function to get savings display with correct sign and color
+const getSavingsDisplay = (brandProduct: any, noNameProduct: any, colors: any) => {
+  const savings = calculateSavingsPercentage(brandProduct, noNameProduct);
+  
+  if (savings > 0) {
+    // Ersparnis: grün mit Minus-Zeichen
+    return {
+      text: `-${savings}%`,
+      color: colors.success,
+      icon: "star.fill"
+    };
+  } else if (savings < 0) {
+    // Mehrkosten: rot mit Plus-Zeichen
+    return {
+      text: `+${Math.abs(savings)}%`,
+      color: '#FF3B30', // Rot
+      icon: "exclamationmark.triangle.fill"
+    };
+  } else {
+    // Gleicher Preis
+    return {
+      text: `±0%`,
+      color: colors.icon,
+      icon: "equal"
+    };
+  }
 };
 
 // Score Image component with real URLs (nutzt OpenFood Daten falls verfügbar)
-const ScoreImage = ({ type, productEAN, firestoreValue }: { 
+const ScoreImage = ({ type, openFoodProduct, firestoreValue }: { 
   type: 'nutri' | 'eco' | 'nova'; 
-  productEAN?: string;
+  openFoodProduct?: OpenFoodProduct | null;
   firestoreValue?: string;
 }) => {
-  // Debug: Log input values
-  console.log(`🔍 ScoreImage Debug - Type: ${type}, EAN: ${productEAN}, FirestoreValue: ${firestoreValue}`);
-  
   // Versuche zuerst OpenFood Daten zu nutzen, fallback auf Firestore
   const getScoreValue = () => {
-    if (productEAN && openFoodData.has(productEAN)) {
-      const openFoodProduct = openFoodData.get(productEAN);
-      console.log(`📊 OpenFood Product for EAN ${productEAN}:`, openFoodProduct);
-      
-      if (openFoodProduct && openFoodProduct.found) {
-        let scoreValue: string | undefined;
-        switch(type) {
-          case 'nutri':
-            scoreValue = openFoodProduct.nutriscore_grade;
-            break;
-          case 'eco':
-            scoreValue = openFoodProduct.ecoscore_grade;
-            break;
-          case 'nova':
-            scoreValue = openFoodProduct.nova_group?.toString();
-            break;
-        }
-        console.log(`🎯 OpenFood ${type} score: ${scoreValue}`);
-        if (scoreValue) return scoreValue;
+    if (openFoodProduct && openFoodProduct.found) {
+      let scoreValue: string | undefined;
+      switch(type) {
+        case 'nutri':
+          scoreValue = openFoodProduct.nutriscore_grade;
+          break;
+        case 'eco':
+          scoreValue = openFoodProduct.ecoscore_grade;
+          break;
+        case 'nova':
+          scoreValue = openFoodProduct.nova_group?.toString();
+          break;
       }
+      if (scoreValue) return scoreValue;
     }
     // Fallback auf Firestore Daten
-    console.log(`🔄 Using Firestore fallback for ${type}: ${firestoreValue}`);
     return firestoreValue;
   };
   
   const value = getScoreValue();
-  console.log(`✅ Final ${type} score value: ${value}`);
   
   // Nur anzeigen wenn der Score existiert
   if (!value) {
-    console.log(`❌ No ${type} score available - not rendering`);
     return null;
   }
   
@@ -108,10 +127,8 @@ const ScoreImage = ({ type, productEAN, firestoreValue }: {
   };
 
   const imageUrl = getScoreImageUrl();
-  console.log(`🖼️ Generated image URL for ${type}: ${imageUrl}`);
   
   if (!imageUrl) {
-    console.log(`❌ No image URL generated for ${type}`);
     return null;
   }
 
@@ -120,12 +137,48 @@ const ScoreImage = ({ type, productEAN, firestoreValue }: {
       source={{ uri: imageUrl }}
       style={styles.scoreImage}
       resizeMode="contain"
-      onError={(error) => {
-        console.error(`❌ Failed to load score image: ${imageUrl}`, error);
-        console.error(`❌ Error details:`, error.nativeEvent);
-      }}
-      onLoad={() => console.log(`✅ Score image loaded successfully: ${imageUrl}`)}
     />
+  );
+};
+
+// Star Rating Component
+const StarRating = ({ 
+  rating, 
+  onRatingChange, 
+  size = 28, 
+  colors 
+}: { 
+  rating: number; 
+  onRatingChange: (rating: number) => void; 
+  size?: number; 
+  colors: any;
+}) => {
+  const isCompact = size <= 20;
+  
+  return (
+    <View style={[styles.starRating, isCompact && styles.starRatingCompact]}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <TouchableOpacity 
+          key={star} 
+          style={[styles.starButton, isCompact && styles.starButtonCompact]}
+          onPress={() => onRatingChange(star)}
+          activeOpacity={0.7}
+        >
+          <ThemedText 
+            style={[
+              styles.starIconLarge, 
+              { 
+                color: star <= rating ? colors.warning : colors.border,
+                fontSize: size,
+                lineHeight: size + 2 // Verhindert Clipping
+              }
+            ]}
+          >
+            ★
+          </ThemedText>
+        </TouchableOpacity>
+      ))}
+    </View>
   );
 };
 
@@ -161,12 +214,385 @@ const SkeletonPlaceholder = ({ width, height, style }: { width?: number | string
 
 
 
+// Vergleichslogik Komponente
+const ProductComparisonContent = ({ 
+  mainProduct, 
+  selectedProducts, 
+  openFoodData, 
+  colors 
+}: { 
+  mainProduct: MarkenProduktWithDetails;
+  selectedProducts: ProductWithDetails[];
+  openFoodData: Map<string, OpenFoodProduct | null>;
+  colors: any;
+}) => {
+  // Ähnlichkeitsberechnung für Zutaten
+  const calculateIngredientSimilarity = (mainIngredients: string, compareIngredients: string): number => {
+    console.log('🔍 Calculating ingredient similarity:');
+    console.log('Main ingredients:', mainIngredients?.substring(0, 100));
+    console.log('Compare ingredients:', compareIngredients?.substring(0, 100));
+    
+    if (!mainIngredients || !compareIngredients) {
+      console.log('❌ Missing ingredients data');
+      return 0;
+    }
+    
+    const main = mainIngredients.toLowerCase().split(/[,;\s]+/).filter(i => i.length > 2);
+    const compare = compareIngredients.toLowerCase().split(/[,;\s]+/).filter(i => i.length > 2);
+    
+    console.log('Main ingredients parsed:', main.length, main.slice(0, 5));
+    console.log('Compare ingredients parsed:', compare.length, compare.slice(0, 5));
+    
+    if (main.length === 0 || compare.length === 0) {
+      console.log('❌ No valid ingredients found');
+      return 0;
+    }
+    
+    const matches = main.filter(ingredient => 
+      compare.some(comp => comp.includes(ingredient) || ingredient.includes(comp))
+    ).length;
+    
+    const similarity = Math.round((matches / Math.max(main.length, compare.length)) * 100);
+    console.log(`✅ Ingredient similarity: ${matches}/${Math.max(main.length, compare.length)} = ${similarity}%`);
+    
+    return similarity;
+  };
+
+  // Erweiterte Nährwert-Ähnlichkeitsberechnung
+  const calculateNutritionSimilarity = (mainNutrition: any, compareNutrition: any): number => {
+    if (!mainNutrition || !compareNutrition) return 0;
+    
+    const nutrients = [
+      'energy_100g', 'fat_100g', 'carbohydrates_100g', 'proteins_100g', 
+      'sugars_100g', 'salt_100g', 'fiber_100g', 'saturated-fat_100g'
+    ];
+    let totalDifference = 0;
+    let validComparisons = 0;
+    
+    nutrients.forEach(nutrient => {
+      const mainValue = mainNutrition[nutrient];
+      const compareValue = compareNutrition[nutrient];
+      
+      if (mainValue !== undefined && compareValue !== undefined && mainValue > 0) {
+        const difference = Math.abs(mainValue - compareValue) / mainValue;
+        totalDifference += difference;
+        validComparisons++;
+      }
+    });
+    
+    if (validComparisons === 0) return 0;
+    
+    const avgDifference = totalDifference / validComparisons;
+    return Math.round(Math.max(0, (1 - avgDifference) * 100));
+  };
+
+  // Zusätzliche Qualitätsbewertung basierend auf Scores
+  const calculateQualitySimilarity = (mainOpenFood: any, compareOpenFood: any): number => {
+    if (!mainOpenFood || !compareOpenFood) return 0;
+    
+    let score = 0;
+    let metrics = 0;
+    
+    // Nova-Score Vergleich (je niedriger, desto besser)
+    if (mainOpenFood.nova_group && compareOpenFood.nova_group) {
+      const diff = Math.abs(mainOpenFood.nova_group - compareOpenFood.nova_group);
+      score += Math.max(0, (4 - diff) / 4 * 100);
+      metrics++;
+    }
+    
+    // Nutri-Score Vergleich (A=5, B=4, C=3, D=2, E=1)
+    if (mainOpenFood.nutrition_grades && compareOpenFood.nutrition_grades) {
+      const scoreMap: Record<string, number> = { 'a': 5, 'b': 4, 'c': 3, 'd': 2, 'e': 1 };
+      const mainScore = scoreMap[mainOpenFood.nutrition_grades.toLowerCase()] || 0;
+      const compareScore = scoreMap[compareOpenFood.nutrition_grades.toLowerCase()] || 0;
+      const diff = Math.abs(mainScore - compareScore);
+      score += Math.max(0, (4 - diff) / 4 * 100);
+      metrics++;
+    }
+    
+    return metrics > 0 ? Math.round(score / metrics) : 0;
+  };
+
+  // Gesamt-Ähnlichkeit berechnen
+  const calculateOverallSimilarity = (product: ProductWithDetails): { 
+    ingredients: number; 
+    nutrition: number; 
+    quality: number;
+    overall: number; 
+  } => {
+    console.log('\n🔍 Calculating overall similarity for product:', product.produktName);
+    
+    // Gleiche EAN-Logik wie im Details Modal verwenden
+    const mainEAN = mainProduct.EANs?.[0] || mainProduct.gtin;
+    const productEAN = product.EANs?.[0] || product.gtin;
+    
+    console.log('Main product EAN:', mainEAN);
+    console.log('Compare product EAN:', productEAN);
+    
+    const mainOpenFood = openFoodData.get(mainEAN || '');
+    const productOpenFood = openFoodData.get(productEAN || '');
+    
+    console.log('Main OpenFood data available:', !!mainOpenFood);
+    console.log('Compare OpenFood data available:', !!productOpenFood);
+    console.log('OpenFood data map size:', openFoodData.size);
+    console.log('OpenFood data keys:', Array.from(openFoodData.keys()));
+    
+    const mainIngredients = OpenFoodService.formatIngredients(mainOpenFood) || '';
+    const productIngredients = OpenFoodService.formatIngredients(productOpenFood) || '';
+    
+    const ingredientSimilarity = calculateIngredientSimilarity(
+      mainIngredients, 
+      productIngredients
+    );
+    
+    const nutritionSimilarity = calculateNutritionSimilarity(
+      mainOpenFood?.nutriments,
+      productOpenFood?.nutriments
+    );
+    
+    const qualitySimilarity = calculateQualitySimilarity(
+      mainOpenFood,
+      productOpenFood
+    );
+    
+    // Gewichteter Durchschnitt: Zutaten 40%, Nährwerte 40%, Qualität 20%
+    const overall = Math.round(
+      (ingredientSimilarity * 0.4) + 
+      (nutritionSimilarity * 0.4) + 
+      (qualitySimilarity * 0.2)
+    );
+    
+    console.log(`📊 Final similarity scores - Ingredients: ${ingredientSimilarity}%, Nutrition: ${nutritionSimilarity}%, Quality: ${qualitySimilarity}%, Overall: ${overall}%`);
+    
+    return {
+      ingredients: ingredientSimilarity,
+      nutrition: nutritionSimilarity,
+      quality: qualitySimilarity,
+      overall
+    };
+  };
+
+  if (selectedProducts.length === 0) {
+    return (
+      <View style={[styles.emptyComparisonContainer, { backgroundColor: colors.cardBackground }]}>
+        <IconSymbol name="scale.3d" size={48} color={colors.icon} />
+        <ThemedText style={styles.emptyComparisonTitle}>Keine Produkte ausgewählt</ThemedText>
+        <ThemedText style={[styles.emptyComparisonText, { color: colors.icon }]}>
+          Wähle NoName-Produkte aus, um sie mit dem Markenprodukt zu vergleichen.
+        </ThemedText>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={{ flex: 1, paddingHorizontal: 8 }}>
+      {/* Markenprodukt - Details Sheet Stil */}
+      <View style={[styles.detailCard, { backgroundColor: colors.cardBackground }]}>
+        {/* Header wie im Details Sheet */}
+        <View style={styles.cardHeader}>
+          <ThemedText style={[styles.cardTitle, { color: colors.primary }]}>
+            {mainProduct.marke?.markenname || 'Markenprodukt'}
+          </ThemedText>
+          <ThemedText style={styles.cardSubtitle}>
+            {mainProduct.produktName}
+          </ThemedText>
+        </View>
+        
+        {/* Produktinformationen Grid */}
+        <View style={styles.infoGrid}>
+          <View style={styles.infoRow}>
+            <ThemedText style={styles.infoLabel}>Packung:</ThemedText>
+            <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+              {mainProduct.packSize ? `${mainProduct.packSize} ${mainProduct.packTypInfo?.typKurz || 'g'}` : 'Unbekannt'}
+            </ThemedText>
+          </View>
+          <View style={styles.infoRow}>
+            <ThemedText style={styles.infoLabel}>Preis:</ThemedText>
+            <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+              €{mainProduct.preis ? mainProduct.preis.toFixed(2) : '0.00'}
+            </ThemedText>
+          </View>
+          
+          {/* Nährwerte für Markenprodukt */}
+          <View style={styles.infoRow}>
+            <ThemedText style={styles.infoLabel}>Nährwerte:</ThemedText>
+            <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+              {(() => {
+                const mainEAN = mainProduct.EANs?.[0] || mainProduct.gtin;
+                const mainOpenFood = openFoodData.get(mainEAN || '');
+                const nutrition = OpenFoodService.formatNutrition(mainOpenFood?.nutriments);
+                return nutrition.slice(0, 3).map(n => `${n.label}: ${n.value}`).join(', ') || 'Keine Daten';
+              })()}
+            </ThemedText>
+          </View>
+          
+          {/* Zutaten für Markenprodukt */}
+          <View style={styles.infoRow}>
+            <ThemedText style={styles.infoLabel}>Zutaten:</ThemedText>
+            <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+              {(() => {
+                const mainEAN = mainProduct.EANs?.[0] || mainProduct.gtin;
+                const mainOpenFood = openFoodData.get(mainEAN || '');
+                const ingredients = OpenFoodService.formatIngredients(mainOpenFood);
+                return ingredients || 'Keine Informationen verfügbar';
+              })()}
+            </ThemedText>
+          </View>
+        </View>
+      </View>
+
+      {/* Vergleichsprodukte - Details Sheet Stil */}
+      {selectedProducts.map((product) => {
+        const similarity = calculateOverallSimilarity(product);
+        const productEAN = product.EANs?.[0] || product.gtin;
+        const productOpenFood = openFoodData.get(productEAN || '');
+        
+        return (
+          <View key={product.id} style={[styles.detailCard, { backgroundColor: colors.cardBackground, marginTop: 16 }]}>
+            {/* Header wie im Details Sheet */}
+            <View style={styles.cardHeader}>
+              <ThemedText style={[styles.cardTitle, { color: colors.primary }]}>
+                {product.handelsmarke?.bezeichnung || product.discounter?.name || 'NoName'}
+              </ThemedText>
+              <ThemedText style={styles.cardSubtitle}>
+                {product.produktName}
+              </ThemedText>
+              
+              {/* Ähnlichkeits-Badge */}
+              <View style={[
+                styles.similarityBadge, 
+                { backgroundColor: similarity.overall >= 70 ? colors.success : similarity.overall >= 50 ? colors.warning : colors.error }
+              ]}>
+                <ThemedText style={styles.similarityNumber}>
+                  {similarity.overall}% Ähnlichkeit
+                </ThemedText>
+              </View>
+            </View>
+            
+            {/* Produktinformationen Grid */}
+            <View style={styles.infoGrid}>
+              <View style={styles.infoRow}>
+                <ThemedText style={styles.infoLabel}>Packung:</ThemedText>
+                <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+                  {product.packSize ? `${product.packSize} ${product.packTypInfo?.typKurz || 'g'}` : 'Unbekannt'}
+                </ThemedText>
+              </View>
+              <View style={styles.infoRow}>
+                <ThemedText style={styles.infoLabel}>Preis:</ThemedText>
+                <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+                  €{product.preis ? product.preis.toFixed(2) : '0.00'}
+                </ThemedText>
+              </View>
+              {product.stufe && (
+                <View style={styles.infoRow}>
+                  <ThemedText style={styles.infoLabel}>Stufe:</ThemedText>
+                  <ThemedText style={[styles.infoValue, { color: colors.primary }]}>
+                    {product.stufe} Ähnlichkeit
+                  </ThemedText>
+                </View>
+              )}
+            </View>
+
+            {/* Ähnlichkeitsvergleich mit Progress Bars */}
+            <View style={styles.infoGrid}>
+              <View style={styles.similarityRow}>
+                <ThemedText style={styles.infoLabel}>Zutaten-Ähnlichkeit</ThemedText>
+                <View style={styles.progressBarContainer}>
+                  <View style={styles.progressBarBackground}>
+                    <View 
+                      style={[
+                        styles.progressBarFill, 
+                        { 
+                          backgroundColor: similarity.ingredients >= 70 ? colors.success : similarity.ingredients >= 50 ? colors.warning : colors.error,
+                          width: `${similarity.ingredients}%`
+                        }
+                      ]} 
+                    />
+                  </View>
+                  <ThemedText style={[styles.progressBarText, { color: colors.icon }]}>
+                    {similarity.ingredients}%
+                  </ThemedText>
+                </View>
+              </View>
+              
+              <View style={styles.similarityRow}>
+                <ThemedText style={styles.infoLabel}>Nährwert-Ähnlichkeit</ThemedText>
+                <View style={styles.progressBarContainer}>
+                  <View style={styles.progressBarBackground}>
+                    <View 
+                      style={[
+                        styles.progressBarFill, 
+                        { 
+                          backgroundColor: similarity.nutrition >= 70 ? colors.success : similarity.nutrition >= 50 ? colors.warning : colors.error,
+                          width: `${similarity.nutrition}%`
+                        }
+                      ]} 
+                    />
+                  </View>
+                  <ThemedText style={[styles.progressBarText, { color: colors.icon }]}>
+                    {similarity.nutrition}%
+                  </ThemedText>
+                </View>
+              </View>
+              
+              <View style={styles.similarityRow}>
+                <ThemedText style={styles.infoLabel}>Qualitäts-Ähnlichkeit</ThemedText>
+                <View style={styles.progressBarContainer}>
+                  <View style={styles.progressBarBackground}>
+                    <View 
+                      style={[
+                        styles.progressBarFill, 
+                        { 
+                          backgroundColor: similarity.quality >= 70 ? colors.success : similarity.quality >= 50 ? colors.warning : colors.error,
+                          width: `${similarity.quality}%`
+                        }
+                      ]} 
+                    />
+                  </View>
+                  <ThemedText style={[styles.progressBarText, { color: colors.icon }]}>
+                    {similarity.quality}%
+                  </ThemedText>
+                </View>
+              </View>
+            </View>
+
+            {/* Nährwerte und Zutaten */}
+            <View style={styles.infoGrid}>
+              <View style={styles.infoRow}>
+                <ThemedText style={styles.infoLabel}>Nährwerte:</ThemedText>
+                <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+                  {(() => {
+                    const nutrition = OpenFoodService.formatNutrition(productOpenFood?.nutriments);
+                    return nutrition.slice(0, 3).map(n => `${n.label}: ${n.value}`).join(', ') || 'Keine Daten';
+                  })()}
+                </ThemedText>
+              </View>
+              
+              <View style={styles.infoRow}>
+                <ThemedText style={styles.infoLabel}>Zutaten:</ThemedText>
+                <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+                  {(() => {
+                    const ingredients = OpenFoodService.formatIngredients(productOpenFood);
+                    return ingredients || 'Keine Informationen verfügbar';
+                  })()}
+                </ThemedText>
+              </View>
+            </View>
+          </View>
+        );
+      })}
+    </ScrollView>
+  );
+};
+
 export default function ProductComparisonScreen() {
   const { id, type } = useLocalSearchParams();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const navigation = useNavigation();
+  const { user } = useAuth();
 
   // Function to open image viewer
   const openImageViewer = (imageUrl: string) => {
@@ -183,7 +609,112 @@ export default function ProductComparisonScreen() {
   };
   const [showProductDetails, setShowProductDetails] = useState(false);
   const [showRatingModal, setShowRatingModal] = useState(false);
+  const [showRatingsView, setShowRatingsView] = useState(false);
   const [showRegionalInfo, setShowRegionalInfo] = useState(false);
+
+  // Rating form states
+  const [overallRating, setOverallRating] = useState(0);
+  const [tasteRating, setTasteRating] = useState(0);
+  const [priceValueRating, setPriceValueRating] = useState(0);
+  const [contentRating, setContentRating] = useState(0);
+  const [comment, setComment] = useState('');
+  const [isSubmittingRating, setIsSubmittingRating] = useState(false);
+  
+
+
+  // Submit rating function for productRatings table
+  const submitRating = async () => {
+    if (overallRating === 0) {
+      Alert.alert('Fehler', 'Bitte gib eine Gesamtbewertung ab.');
+      return;
+    }
+
+    setIsSubmittingRating(true);
+
+    try {
+      // Get the correct product ID and type
+      const productId = selectedProductForDetails?.id || comparisonData?.mainProduct?.id;
+      const isNoNameProduct = !!selectedProductForDetails;
+      
+      // Determine correct product references
+      const productRatingData = {
+        productID: isNoNameProduct ? productId : null,           // NoName product reference
+        brandProductID: isNoNameProduct ? null : productId,      // Brand product reference
+        userID: user?.uid || 'anonymous-user-' + Date.now(),     // Use authenticated user ID or fallback
+        ratingOverall: overallRating,
+        ratingPriceValue: priceValueRating || null,
+        ratingTasteFunction: tasteRating || null,
+        ratingSimilarity: null, // Not used in rating form
+        ratingContent: contentRating || null,
+        comment: comment || null,
+        ratedate: new Date(),
+        updatedate: new Date()
+      };
+
+      // Save to productRatings collection
+      await FirestoreService.addProductRating(productRatingData);
+
+      // Reset form
+      setOverallRating(0);
+      setTasteRating(0);
+      setPriceValueRating(0);
+      setContentRating(0);
+      setComment('');
+      
+      Alert.alert('Erfolg', 'Deine Bewertung wurde gespeichert!');
+      setShowRatingModal(false);
+      
+      // Reload comparison data to show updated ratings
+      await loadComparisonData();
+      
+    } catch (error) {
+      console.error('Error submitting rating:', error);
+      Alert.alert('Fehler', 'Bewertung konnte nicht gespeichert werden.');
+    } finally {
+      setIsSubmittingRating(false);
+    }
+  };
+
+  // Reset rating form when modal opens
+  const openRatingModal = () => {
+    setOverallRating(0);
+    setTasteRating(0);
+    setPriceValueRating(0);
+    setContentRating(0);
+    setComment('');
+    setShowRatingModal(true);
+  };
+
+  // Reload comparison data function
+  const loadComparisonData = async () => {
+    if (!id || typeof id !== 'string') {
+      return;
+    }
+
+    try {
+      console.log('Reloading product comparison for ID:', id, 'Type:', type);
+      
+      // Determine product type from URL parameter
+      const isMarkenProdukt = type === 'brand';
+      
+      // Get complete comparison data (brand product + related NoNames)
+      const data = await FirestoreService.getProductComparisonData(id, isMarkenProdukt);
+      
+      if (data) {
+        setComparisonData(data);
+        console.log('Product comparison reloaded:', {
+          mainProduct: data.mainProduct.name,
+          relatedCount: data.relatedNoNameProducts.length,
+          clickedWasNoName: data.clickedWasNoName
+        });
+        
+        // Nach dem Laden der Firestore-Daten: OpenFood API aufrufen
+        loadOpenFoodData(data);
+      }
+    } catch (err) {
+      console.error('Error reloading product comparison:', err);
+    }
+  };
   
   // Firestore data states
   const [comparisonData, setComparisonData] = useState<{
@@ -209,6 +740,107 @@ export default function ProductComparisonScreen() {
   
   // Stages Bottom Sheet State
   const [showStagesInfo, setShowStagesInfo] = useState(false);
+  
+  // Product Selection States für Vergleichsfunktion
+  const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
+  const [showComparisonSheet, setShowComparisonSheet] = useState(false);
+  
+  // Toggle product selection
+  const toggleProductSelection = (productId: string) => {
+    setSelectedProducts(prev => {
+      const newSelection = new Set(prev);
+      if (newSelection.has(productId)) {
+        newSelection.delete(productId);
+      } else {
+        newSelection.add(productId);
+      }
+      return newSelection;
+    });
+  };
+
+  // Header-Optionen sofort setzen mit useLayoutEffect
+  useLayoutEffect(() => {
+    // Produktnamen für Header sammeln - nur wenn Daten verfügbar sind
+    const headerTitle = selectedProducts.size > 0 && comparisonData?.mainProduct && comparisonData?.relatedNoNameProducts?.length > 0
+      ? `${comparisonData.mainProduct.produktName || 'Markenprodukt'} vs. ${Array.from(selectedProducts).map(id => {
+          const product = comparisonData.relatedNoNameProducts.find((p: any) => p.id === id);
+          return product?.produktName || 'NoName';
+        }).join(' & ')}`
+      : 'Produktvergleich';
+      
+    navigation.setOptions({
+      title: headerTitle.length > 30 ? 'Produktvergleich' : headerTitle,
+      headerStyle: { 
+        backgroundColor: colors.primary,
+        borderBottomWidth: 0,
+        elevation: 0,
+        shadowOpacity: 0,
+      },
+      headerTintColor: 'white',
+      headerTitleStyle: { 
+        color: 'white',
+        fontFamily: 'Nunito_600SemiBold',
+        fontSize: 17
+      },
+      headerShadowVisible: false,
+      headerBackVisible: false,
+      headerTransparent: false,
+      headerBlurEffect: 'none',
+      headerLargeTitle: false,
+      headerSearchBarOptions: undefined,
+      headerBackTitleVisible: false,
+      gestureEnabled: true,
+      animation: 'none',
+      headerLeft: () => (
+        <TouchableOpacity 
+          onPress={() => router.back()}
+          style={{ 
+            paddingLeft: 0, 
+            paddingRight: 8, 
+            paddingVertical: 8 
+          }}
+        >
+          <IconSymbol name="chevron.left" size={24} color="white" />
+        </TouchableOpacity>
+      ),
+      headerRight: selectedProducts.size > 0 ? () => (
+        <TouchableOpacity 
+          onPress={() => setShowComparisonSheet(true)}
+          style={{ 
+            paddingLeft: 8, 
+            paddingRight: 0, 
+            paddingVertical: 8,
+            position: 'relative'
+          }}
+        >
+          <IconSymbol name="scale.3d" size={24} color="white" />
+          {selectedProducts.size > 0 && (
+            <View style={{
+              position: 'absolute',
+              top: 4,
+              right: -2,
+              backgroundColor: colors.warning,
+              borderRadius: 10,
+              minWidth: 20,
+              height: 20,
+              justifyContent: 'center',
+              alignItems: 'center',
+              paddingHorizontal: 4,
+            }}>
+              <ThemedText style={{
+                color: 'white',
+                fontSize: 12,
+                fontWeight: 'bold',
+                textAlign: 'center',
+              }}>
+                {selectedProducts.size}
+              </ThemedText>
+            </View>
+          )}
+        </TouchableOpacity>
+      ) : undefined,
+    });
+  }, [navigation, router, colors.primary, colors.warning, selectedProducts, comparisonData]);
 
 
   // Load product comparison data from Firestore
@@ -269,15 +901,19 @@ export default function ProductComparisonScreen() {
       // Sammle alle EANs
       const allEANs: string[] = [];
       
-      // Hauptprodukt EAN
+      // Hauptprodukt EAN (gleiche Logik wie im Details Modal)
       if (data.mainProduct.EANs && data.mainProduct.EANs.length > 0) {
         allEANs.push(data.mainProduct.EANs[0]);
+      } else if (data.mainProduct.gtin) {
+        allEANs.push(data.mainProduct.gtin);
       }
       
-      // NoName Produkte EANs
+      // NoName Produkte EANs (gleiche Logik wie im Details Modal)
       data.relatedNoNameProducts.forEach(product => {
         if (product.EANs && product.EANs.length > 0) {
           allEANs.push(product.EANs[0]);
+        } else if (product.gtin) {
+          allEANs.push(product.gtin);
         }
       });
       
@@ -410,15 +1046,15 @@ export default function ProductComparisonScreen() {
 
   // Show skeleton while loading
   if (loading || !comparisonData) {
-    return (
+  return (
       <ThemedView style={[styles.container]}>
-        <Stack.Screen 
-          options={{
-            title: 'Produktvergleich',
+      <Stack.Screen 
+        options={{
+          title: 'Marke vs. NoNames',
             headerStyle: { 
               backgroundColor: colors.primary,
             },
-            headerTintColor: 'white',
+          headerTintColor: 'white',
             headerTitleStyle: { 
               color: 'white',
               fontWeight: '600',
@@ -432,7 +1068,7 @@ export default function ProductComparisonScreen() {
               <TouchableOpacity 
                 onPress={() => router.back()}
                 style={{ 
-                  paddingLeft: 16, 
+                  paddingLeft: 2, 
                   paddingRight: 8, 
                   paddingVertical: 8 
                 }}
@@ -454,19 +1090,19 @@ export default function ProductComparisonScreen() {
             <View style={styles.chipsRow}>
               <SkeletonPlaceholder width={100} height={28} style={{ borderRadius: 14 }} />
               <SkeletonPlaceholder width={80} height={28} style={{ borderRadius: 14 }} />
-            </View>
+          </View>
 
             {/* Skeleton Product Row */}
             <View style={styles.productRow}>
               <SkeletonPlaceholder width={80} height={80} style={{ borderRadius: 12 }} />
-              <View style={styles.productInfo}>
+          <View style={styles.productInfo}>
                 <SkeletonPlaceholder width="70%" height={16} style={{ marginBottom: 8 }} />
                 <SkeletonPlaceholder width="90%" height={20} style={{ marginBottom: 12 }} />
                 <View style={styles.ratingRow}>
                   <SkeletonPlaceholder width={40} height={16} />
                   <SkeletonPlaceholder width={100} height={16} />
                   <SkeletonPlaceholder width={50} height={16} />
-                </View>
+            </View>
 
               </View>
               <View style={styles.priceSection}>
@@ -547,7 +1183,7 @@ export default function ProductComparisonScreen() {
               <TouchableOpacity 
                 onPress={() => router.back()}
                 style={{ 
-                  paddingLeft: 16, 
+                  paddingLeft: 0, 
                   paddingRight: 8, 
                   paddingVertical: 8 
                 }}
@@ -560,7 +1196,7 @@ export default function ProductComparisonScreen() {
         <IconSymbol name="exclamationmark.triangle" size={48} color={colors.error || '#FF3B30'} />
         <ThemedText style={[styles.errorText, { color: colors.error || '#FF3B30' }]}>
           {error}
-        </ThemedText>
+              </ThemedText>
       </ThemedView>
     );
   }
@@ -589,7 +1225,7 @@ export default function ProductComparisonScreen() {
               <TouchableOpacity 
                 onPress={() => router.back()}
                 style={{ 
-                  paddingLeft: 16, 
+                  paddingLeft: 0, 
                   paddingRight: 8, 
                   paddingVertical: 8 
                 }}
@@ -602,44 +1238,21 @@ export default function ProductComparisonScreen() {
         <IconSymbol name="questionmark.circle" size={48} color={colors.icon} />
         <ThemedText style={[styles.notFoundText, { color: colors.icon }]}>
           Produkt nicht gefunden
-        </ThemedText>
+              </ThemedText>
       </ThemedView>
     );
   }
 
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen 
-        options={{
-          title: 'Marke vs. NoNames',
-          headerStyle: { 
-            backgroundColor: colors.primary,
-          },
-          headerTintColor: 'white',
-          headerTitleStyle: { 
-            color: 'white',
-            fontWeight: '600',
-            fontSize: 17
-          },
-          headerShadowVisible: false,
-          headerBackVisible: false,
-          gestureEnabled: true,
-          animation: 'slide_from_right',
-          headerLeft: () => (
-            <TouchableOpacity 
-              onPress={() => router.back()}
-              style={{ paddingLeft: 16, paddingRight: 8, paddingVertical: 8 }}
-            >
-              <IconSymbol name="chevron.left" size={24} color="white" />
-            </TouchableOpacity>
-          ),
-        }} 
-      />
 
       <ScrollView 
         style={styles.scrollView} 
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        contentInsetAdjustmentBehavior="never"
+        automaticallyAdjustContentInsets={false}
+        scrollEventThrottle={16}
       >
         {/* Main Brand Product Section */}
         <View style={[styles.productCard, { backgroundColor: colors.cardBackground }]}>
@@ -650,7 +1263,7 @@ export default function ProductComparisonScreen() {
               <ThemedText style={styles.chipText}>
               Markenprodukt
             </ThemedText>
-            </View>
+              </View>
             {comparisonData.mainProduct.kategorie && (
               <View style={[styles.categoryMiniCard, { backgroundColor: colors.card }]}>
                 <ThemedText style={[styles.categoryText, { color: colors.icon }]}>
@@ -662,7 +1275,7 @@ export default function ProductComparisonScreen() {
             <TouchableOpacity>
               <IconSymbol name="heart.fill" size={20} color={colors.error} />
             </TouchableOpacity>
-          </View>
+                </View>
 
           {/* Product Row */}
           <View style={styles.productRow}>
@@ -711,11 +1324,15 @@ export default function ProductComparisonScreen() {
                     </>
                   );
                 })()}
-            </View>
+                </View>
               <ThemedText style={styles.productTitle}>
                 {comparisonData.mainProduct.name}
               </ThemedText>
-              <View style={styles.ratingRow}>
+              <TouchableOpacity 
+                style={styles.ratingRow}
+                onPress={() => setShowRatingsView(true)}
+                activeOpacity={0.7}
+              >
                 <ThemedText style={[styles.ratingValue, { color: colors.warning }]}>
                   {(comparisonData.mainProduct.rating || 0).toFixed(1)}
               </ThemedText>
@@ -732,9 +1349,9 @@ export default function ProductComparisonScreen() {
                 <ThemedText style={[styles.reviewsText, { color: colors.icon }]}>
                   ({comparisonData.mainProduct.ratingCount || 0})
                 </ThemedText>
-              </View>
+              </TouchableOpacity>
 
-                </View>
+            </View>
 
             {/* Price Section */}
             <View style={styles.priceSection}>
@@ -773,8 +1390,25 @@ export default function ProductComparisonScreen() {
             No-Name Alternativen vom gleichen Hersteller
           </ThemedText>
 
-                      {comparisonData.relatedNoNameProducts.map((noNameProduct, index) => (
-              <View key={noNameProduct.id} style={[styles.productCard, { backgroundColor: colors.cardBackground }]}>
+                      {comparisonData.relatedNoNameProducts.map((noNameProduct, index) => {
+                const isSelected = selectedProducts.has(noNameProduct.id);
+                return (
+              <TouchableOpacity
+                key={noNameProduct.id} 
+                style={[
+                  styles.productCard, 
+                  { 
+                    backgroundColor: colors.cardBackground,
+                    shadowColor: isSelected ? colors.primary : '#000',
+                    shadowOffset: { width: 0, height: isSelected ? 4 : 2 },
+                    shadowOpacity: isSelected ? 0.3 : 0.1,
+                    shadowRadius: isSelected ? 8 : 4,
+                    elevation: isSelected ? 8 : 3,
+                  }
+                ]}
+                onPress={() => toggleProductSelection(noNameProduct.id)}
+                activeOpacity={0.7}
+              >
                 {/* Alternative Chips Row */}
                 <View style={styles.chipsRow}>
                   <View style={[styles.marketChip, { backgroundColor: noNameProduct.discounter?.color || colors.primary }]}>
@@ -787,7 +1421,10 @@ export default function ProductComparisonScreen() {
                   {noNameProduct.stufe && (
                     <TouchableOpacity 
                       style={[styles.stageChip, { backgroundColor: getStufenColor(noNameProduct.stufe) }]}
-                      onPress={() => setShowStagesInfo(true)}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        setShowStagesInfo(true);
+                      }}
                       activeOpacity={0.8}
                     >
                       <IconSymbol name="chart.bar" size={10} color="white" />
@@ -803,10 +1440,23 @@ export default function ProductComparisonScreen() {
                   
                   {/* Action Icons rechts oben */}
                   <View style={styles.topActionIcons}>
-                    <TouchableOpacity style={styles.actionIconButton}>
-                      <IconSymbol name="checkmark.circle" size={20} color={colors.primary} />
+                    <TouchableOpacity 
+                      style={styles.actionIconButton}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        toggleProductSelection(noNameProduct.id);
+                      }}
+                    >
+                      <IconSymbol 
+                        name={isSelected ? "checkmark.circle.fill" : "circle"} 
+                        size={20} 
+                        color={isSelected ? colors.primary : colors.icon} 
+                      />
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.actionIconButton}>
+                    <TouchableOpacity 
+                      style={styles.actionIconButton}
+                      onPress={(e) => e.stopPropagation()}
+                    >
                       <IconSymbol name="heart" size={20} color={colors.icon} />
                     </TouchableOpacity>
                 </View>
@@ -832,7 +1482,7 @@ export default function ProductComparisonScreen() {
                     )}
                   </TouchableOpacity>
 
-                  {/* Product Info */}
+              {/* Product Info */}
                   <View style={styles.productInfo}>
                     <ThemedText style={[styles.brandText, { color: colors.primary }]}>
                       {noNameProduct.handelsmarke?.bezeichnung || 'NoName-Produkt'}
@@ -840,7 +1490,11 @@ export default function ProductComparisonScreen() {
                     <ThemedText style={styles.productTitle}>
                       {noNameProduct.name}
                   </ThemedText>
-                    <View style={styles.ratingRow}>
+                    <TouchableOpacity 
+                      style={styles.ratingRow}
+                      onPress={() => setShowRatingsView(true)}
+                      activeOpacity={0.7}
+                    >
                       <ThemedText style={[styles.ratingValue, { color: colors.warning }]}>
                         {(noNameProduct.rating || 0).toFixed(1)}
                     </ThemedText>
@@ -857,26 +1511,33 @@ export default function ProductComparisonScreen() {
                       <ThemedText style={[styles.reviewsText, { color: colors.icon }]}>
                         ({noNameProduct.ratingCount || 0})
                       </ThemedText>
-                    </View>
+                    </TouchableOpacity>
 
                     </View>
 
                   {/* Price Section */}
                   <View style={styles.priceSection}>
                     <View style={styles.discountRow}>
-                      <IconSymbol name="star.fill" size={14} color={colors.success} />
-                      <ThemedText style={[styles.discountValue, { color: colors.success }]}>
-                        {calculateSavingsPercentage(comparisonData.mainProduct, noNameProduct)}%
+                      {(() => {
+                        const savingsDisplay = getSavingsDisplay(comparisonData.mainProduct, noNameProduct, colors);
+                        return (
+                          <>
+                            <IconSymbol name={savingsDisplay.icon} size={14} color={savingsDisplay.color} />
+                            <ThemedText style={[styles.discountValue, { color: savingsDisplay.color }]}>
+                              {savingsDisplay.text}
                     </ThemedText>
-                  </View>
+                          </>
+                        );
+                      })()}
+                    </View>
                     <ThemedText style={[styles.mainPrice, { color: colors.icon }]}>
                       {formatPrice(noNameProduct.preis)}
                   </ThemedText>
                     <ThemedText style={[styles.mainWeight, { color: colors.icon }]}>
                       {getPackageInfo(noNameProduct.packSize, noNameProduct.packTypInfo)}
                   </ThemedText>
-                </View>
-              </View>
+                    </View>
+                  </View>
 
               {/* Regional Info for first item */}
               {index === 0 && (
@@ -905,36 +1566,36 @@ export default function ProductComparisonScreen() {
                           <ThemedText style={[styles.regionText, { color: colors.text }]}>
                             Bayern
                           </ThemedText>
-                  </View>
+                </View>
                         <ThemedText style={[styles.herstellerLabel, { color: colors.icon }]}>
                           Hersteller:
-                        </ThemedText>
+                    </ThemedText>
                         <View style={[styles.stufeChip, { backgroundColor: colors.success }]}>
                           <IconSymbol name="chart.bar" size={10} color="white" />
                           <ThemedText style={styles.stufeText}>Stufe4</ThemedText>
-                        </View>
+                  </View>
                       </View>
                       
                       <View style={[styles.divider, { backgroundColor: colors.border }]} />
                       
                       <ThemedText style={[styles.weitereTitle, { color: colors.text }]}>
                         Weitere Regionen
-                      </ThemedText>
+                  </ThemedText>
                       
                       {regionalData.slice(1).map((data, regionIndex) => (
                         <View key={regionIndex} style={styles.regionalRow}>
                           <View style={styles.regionColumn}>
                             <ThemedText style={[styles.regionText, { color: colors.text }]}>
                               {data.region}
-                            </ThemedText>
-                          </View>
+                  </ThemedText>
+                </View>
                           <ThemedText style={[styles.herstellerLabel, { color: colors.icon }]}>
                             Hersteller:
                           </ThemedText>
                           <View style={[styles.stufeChip, { backgroundColor: colors.success }]}>
                             <IconSymbol name="chart.bar" size={10} color="white" />
                             <ThemedText style={styles.stufeText}>Stufe4</ThemedText>
-                          </View>
+              </View>
                         </View>
                       ))}
                       
@@ -946,7 +1607,7 @@ export default function ProductComparisonScreen() {
                           <IconSymbol name="gearshape" size={16} color={colors.icon} />
                         </TouchableOpacity>
                   </View>
-                    </View>
+                  </View>
                   )}
                 </View>
               )}
@@ -967,10 +1628,11 @@ export default function ProductComparisonScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.cartButton, { backgroundColor: colors.primary }]}>
                   <IconSymbol name="cart" size={20} color="white" />
-              </TouchableOpacity>
+                </TouchableOpacity>
               </View>
-            </View>
-          ))}
+              </TouchableOpacity>
+          )
+        })}
         </View>
       </ScrollView>
 
@@ -1296,10 +1958,10 @@ export default function ProductComparisonScreen() {
                 style={[styles.ratingButton, { backgroundColor: colors.primary }]}
                 onPress={() => {
                   setShowProductDetails(false);
-                  setShowRatingModal(true);
+                  setShowRatingsView(true);
                 }}
               >
-                <ThemedText style={styles.ratingButtonText}>Bewertungen</ThemedText>
+                <ThemedText style={styles.ratingButtonText}>Bewertungen anzeigen</ThemedText>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -1327,9 +1989,11 @@ export default function ProductComparisonScreen() {
                 <IconSymbol name="xmark" size={24} color={colors.icon} />
             </TouchableOpacity>
               <View style={styles.titleSection}>
-                <ThemedText style={styles.bottomSheetTitle}>Bewertung abgeben (Markenprodukt)</ThemedText>
+                <ThemedText style={styles.bottomSheetTitle}>
+                  Bewertung abgeben {selectedProductForDetails ? '(NoName-Produkt)' : '(Markenprodukt)'}
+                </ThemedText>
                 <ThemedText style={[styles.bottomSheetSubtitle, { color: colors.primary }]}>
-                  Bio Tofu Natur
+                  {selectedProductForDetails?.name || comparisonData?.mainProduct?.name || 'Produkt'}
                 </ThemedText>
               </View>
             </View>
@@ -1338,47 +2002,86 @@ export default function ProductComparisonScreen() {
           <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
             <View style={styles.ratingForm}>
               <ThemedText style={styles.ratingFormTitle}>Deine Gesamtbewertung</ThemedText>
-              <View style={styles.starRating}>
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <TouchableOpacity key={star} style={styles.starButton}>
-                    <ThemedText style={[styles.starIconLarge, { color: colors.warning }]}>⭐</ThemedText>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <StarRating 
+                rating={overallRating} 
+                onRatingChange={setOverallRating}
+                colors={colors}
+              />
 
               <ThemedText style={styles.ratingFormTitle}>Detail-Bewertung nach Kriterien (optional)</ThemedText>
               
-              {[
-                'Geschmack bzw. Funktion/Wirkung',
-                'Preis-Leistungsgefühl',
-                'Deine Bewertung der Inhaltsstoffe'
-              ].map((criterion, index) => (
-                <View key={index} style={styles.criterionRating}>
-                  <ThemedText style={styles.criterionLabel}>{criterion}</ThemedText>
-                  <View style={styles.starRating}>
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <TouchableOpacity key={star} style={styles.starButton}>
-                        <ThemedText style={[styles.starIconLarge, { color: colors.warning }]}>⭐</ThemedText>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+              <View style={styles.criterionRating}>
+                <View style={styles.criterionRow}>
+                  <ThemedText style={styles.criterionLabelCompact}>Geschmack/Wirkung</ThemedText>
+                  <StarRating 
+                    rating={tasteRating} 
+                    onRatingChange={setTasteRating}
+                    size={20}
+                    colors={colors}
+                  />
                 </View>
-              ))}
-
-              <ThemedText style={styles.ratingFormTitle}>Dein Kommentar (optional)</ThemedText>
-              <View style={[styles.commentInput, { borderColor: colors.border, backgroundColor: colors.cardBackground }]}>
-                <ThemedText style={[styles.commentPlaceholder, { color: colors.icon }]}>
-                  Teile deine Erfahrungen mit diesem Produkt...
-                </ThemedText>
               </View>
 
+              <View style={styles.criterionRating}>
+                <View style={styles.criterionRow}>
+                  <ThemedText style={styles.criterionLabelCompact}>Preis-Leistung</ThemedText>
+                  <StarRating 
+                    rating={priceValueRating} 
+                    onRatingChange={setPriceValueRating}
+                    size={20}
+                    colors={colors}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.criterionRating}>
+                <View style={styles.criterionRow}>
+                  <ThemedText style={styles.criterionLabelCompact}>Inhaltsstoffe</ThemedText>
+                  <StarRating 
+                    rating={contentRating} 
+                    onRatingChange={setContentRating}
+                    size={20}
+                    colors={colors}
+                  />
+                </View>
+              </View>
+
+              <ThemedText style={styles.ratingFormTitle}>Dein Kommentar (optional)</ThemedText>
+              <TextInput
+                style={[styles.commentInput, { 
+                  borderColor: colors.border, 
+                  backgroundColor: colors.cardBackground,
+                  color: colors.text 
+                }]}
+                placeholder="Teile deine Erfahrungen mit diesem Produkt..."
+                placeholderTextColor={colors.icon}
+                value={comment}
+                onChangeText={setComment}
+                multiline
+                numberOfLines={3}  // Reduziert von 4
+                textAlignVertical="top"
+              />
+
               <TouchableOpacity 
-                style={[styles.submitButton, { backgroundColor: colors.primary }]}
-                onPress={() => setShowRatingModal(false)}
+                style={[
+                  styles.submitButton, 
+                  { 
+                    backgroundColor: overallRating > 0 ? colors.primary : colors.border,
+                    opacity: isSubmittingRating ? 0.7 : 1
+                  }
+                ]}
+                onPress={submitRating}
+                disabled={overallRating === 0 || isSubmittingRating}
               >
-                <ThemedText style={styles.submitButtonText}>Bewertung speichern</ThemedText>
-              </TouchableOpacity>
-            </View>
+                {isSubmittingRating ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <ThemedText style={styles.submitButtonText}>
+                    Bewertung speichern
+                  </ThemedText>
+                )}
+                  </TouchableOpacity>
+              </View>
           </ScrollView>
         </View>
       </Modal>
@@ -1424,7 +2127,175 @@ export default function ProductComparisonScreen() {
                 />
               )}
             </View>
-          </TouchableOpacity>
+                      </TouchableOpacity>
+                  </View>
+      </Modal>
+
+      {/* Ratings View Bottom Sheet */}
+      <Modal
+        visible={showRatingsView}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowRatingsView(false)}
+      >
+        <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
+          {/* Header */}
+          <View style={styles.bottomSheetHeader}>
+            <View style={styles.handleContainer}>
+              <View style={styles.handle} />
+                </View>
+            <View style={styles.headerRow}>
+              <TouchableOpacity 
+                style={styles.closeButtonLeft}
+                onPress={() => setShowRatingsView(false)}
+              >
+                <IconSymbol name="xmark" size={24} color={colors.icon} />
+              </TouchableOpacity>
+              <View style={styles.titleSection}>
+                <ThemedText style={styles.bottomSheetTitle}>Bewertungen</ThemedText>
+                <ThemedText style={[styles.bottomSheetSubtitle, { color: colors.primary }]}>
+                  {selectedProductForDetails?.name || comparisonData?.mainProduct?.name || 'Produkt'}
+                </ThemedText>
+              </View>
+            </View>
+          </View>
+          
+          <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
+            {/* Overall Rating Card */}
+            <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
+              <View style={styles.ratingOverallSection}>
+                <View style={styles.ratingCircle}>
+                  <ThemedText style={styles.ratingCircleNumber}>
+                    {selectedProductForDetails?.averageRatingOverall?.toFixed(1) || 
+                     comparisonData?.mainProduct?.averageRatingOverall?.toFixed(1) || '0.0'}
+                  </ThemedText>
+                </View>
+                <View style={styles.ratingDetails}>
+                  <ThemedText style={styles.ratingTitle}>Allgemeine Bewertung</ThemedText>
+                  <View style={styles.starsRow}>
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <ThemedText 
+                        key={star} 
+                        style={[
+                          styles.starIconMedium, 
+                          { color: star <= (selectedProductForDetails?.averageRatingOverall || 
+                                          comparisonData?.mainProduct?.averageRatingOverall || 0) 
+                                  ? colors.warning : colors.border }
+                        ]}
+                      >
+                        ★
+                      </ThemedText>
+                    ))}
+                  </View>
+                  <ThemedText style={[styles.ratingsCount, { color: colors.icon }]}>
+                    Basierend auf {selectedProductForDetails?.ratingCount || 
+                                  comparisonData?.mainProduct?.ratingCount || 0} Bewertungen
+                  </ThemedText>
+                </View>
+              </View>
+            </View>
+
+            {/* Detailed Ratings Card */}
+            <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
+              <ThemedText style={styles.infoLabel}>Bewertung nach Kriterien</ThemedText>
+              
+              <View style={styles.criteriaRatings}>
+                <View style={styles.criteriaRow}>
+                  <ThemedText style={styles.criteriaLabel}>Geschmack/Wirkung/Funktion</ThemedText>
+                  <ThemedText style={[styles.criteriaValue, { color: colors.icon }]}>
+                    {selectedProductForDetails?.averageRatingTasteFunction?.toFixed(1) || 
+                     comparisonData?.mainProduct?.averageRatingTasteFunction?.toFixed(1) || '0'}
+                </ThemedText>
+              </View>
+
+                <View style={styles.criteriaRow}>
+                  <ThemedText style={styles.criteriaLabel}>Preis-Leistung</ThemedText>
+                  <ThemedText style={[styles.criteriaValue, { color: colors.icon }]}>
+                    {selectedProductForDetails?.averageRatingPriceValue?.toFixed(1) || 
+                     comparisonData?.mainProduct?.averageRatingPriceValue?.toFixed(1) || '0'}
+                  </ThemedText>
+                </View>
+                
+                <View style={styles.criteriaRow}>
+                  <ThemedText style={styles.criteriaLabel}>Inhaltsstoffe</ThemedText>
+                  <ThemedText style={[styles.criteriaValue, { color: colors.icon }]}>
+                    {selectedProductForDetails?.averageRatingContent?.toFixed(1) || 
+                     comparisonData?.mainProduct?.averageRatingContent?.toFixed(1) || '0'}
+                  </ThemedText>
+                </View>
+                
+                <View style={styles.criteriaRow}>
+                  <ThemedText style={styles.criteriaLabel}>Ähnlichkeit</ThemedText>
+                  <ThemedText style={[styles.criteriaValue, { color: colors.icon }]}>
+                    {selectedProductForDetails?.averageRatingSimilarity?.toFixed(1) || 
+                     comparisonData?.mainProduct?.averageRatingSimilarity?.toFixed(1) || '0'}
+                  </ThemedText>
+                </View>
+              </View>
+            </View>
+
+            {/* Rating Button */}
+            <View style={styles.buttonSection}>
+              <TouchableOpacity 
+                style={[styles.ratingButton, { backgroundColor: colors.primary }]}
+                onPress={() => {
+                  setShowRatingsView(false);
+                  openRatingModal();
+                }}
+              >
+                <ThemedText style={styles.ratingButtonText}>Bewertung abgeben</ThemedText>
+              </TouchableOpacity>
+            </View>
+
+            {/* Comments Section */}
+            <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
+              <ThemedText style={styles.infoLabel}>Neueste Kommentare</ThemedText>
+              <View style={styles.commentsPlaceholder}>
+                <ThemedText style={[styles.placeholderText, { color: colors.icon }]}>
+                  Oh, hier ist noch nichts!
+                </ThemedText>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Product Comparison Bottom Sheet */}
+      <Modal
+        visible={showComparisonSheet}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowComparisonSheet(false)}
+      >
+        <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
+          {/* Bottom Sheet Header */}
+          <View style={styles.bottomSheetHeader}>
+            <View style={styles.handleContainer}>
+              <View style={styles.handle} />
+            </View>
+            <View style={styles.headerRow}>
+              <TouchableOpacity 
+                style={styles.closeButtonLeft}
+                onPress={() => setShowComparisonSheet(false)}
+              >
+                <IconSymbol name="xmark" size={24} color={colors.icon} />
+              </TouchableOpacity>
+              <View style={styles.titleSection}>
+                <ThemedText style={styles.modalTitle}>Produktvergleich</ThemedText>
+              </View>
+            </View>
+          </View>
+          
+          <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
+            {comparisonData && (
+              <ProductComparisonContent
+                mainProduct={comparisonData.mainProduct}
+                selectedProducts={comparisonData.relatedNoNameProducts.filter(p => selectedProducts.has(p.id))}
+                openFoodData={openFoodData}
+                colors={colors}
+              />
+            )}
+          </ScrollView>
         </View>
       </Modal>
 
@@ -1646,7 +2517,7 @@ const styles = StyleSheet.create({
   },
   productTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Nunito_700Bold',
     marginBottom: 6,
     lineHeight: 20,
   },
@@ -1658,7 +2529,7 @@ const styles = StyleSheet.create({
   },
   priceText: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Nunito_700Bold',
   },
   weightText: {
     fontSize: 12,
@@ -1704,11 +2575,6 @@ const styles = StyleSheet.create({
     width: 32,
     height: 16,
   },
-  scoreImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'contain',
-  },
 
   // Price Section (Right)
   priceSection: {
@@ -1718,7 +2584,7 @@ const styles = StyleSheet.create({
   },
   mainPrice: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontFamily: 'Nunito_700Bold',
     marginBottom: 2,
   },
   mainWeight: {
@@ -1764,7 +2630,7 @@ const styles = StyleSheet.create({
   },
   alternativesTitle: {
     fontSize: 14,
-    fontWeight: 'bold',
+    fontFamily: 'Nunito_700Bold',
     marginBottom: 0, // Reduziert von 6 auf 3px
     marginTop: 12,   // Reduziert von 32 auf 16px für weniger Abstand
     marginLeft: 16,
@@ -1790,7 +2656,7 @@ const styles = StyleSheet.create({
   },
   regionalTitle: {
     fontSize: 13,
-    fontWeight: 'bold',
+    fontFamily: 'Nunito_700Bold',
     flex: 1,
   },
   regionalContent: {
@@ -1888,7 +2754,7 @@ const styles = StyleSheet.create({
   },
   bottomSheetTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: 'Nunito_700Bold',
   },
   bottomSheetSubtitle: {
     fontSize: 16,
@@ -1917,16 +2783,19 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   similarityBadge: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
   similarityNumber: {
     color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 12,
+    fontFamily: 'Nunito_600SemiBold',
   },
   similarityTextContainer: {
     flex: 1,
@@ -2025,6 +2894,7 @@ const styles = StyleSheet.create({
   scoreImage: {
     width: 28,
     height: 28,
+    resizeMode: 'contain',
   },
   
   // Rating Button
@@ -2045,41 +2915,71 @@ const styles = StyleSheet.create({
   
   // Rating Form Styles
   ratingForm: {
-    paddingBottom: 40,
+    paddingBottom: 20, // Reduziert von 40
   },
   ratingFormTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 16,
-    marginTop: 8,
+    fontFamily: 'Nunito_700Bold',
+    marginBottom: 12, // Reduziert von 16
+    marginTop: 4,     // Reduziert von 8
   },
   starRating: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginBottom: 24,
-    gap: 8,
+    marginBottom: 16, // Reduziert von 24
+    gap: 6,           // Reduziert von 8
+    paddingVertical: 4, // Padding für besseren Touch-Bereich
+  },
+  starRatingCompact: {
+    justifyContent: 'flex-end', // Rechtsbündig für horizontales Layout
+    marginBottom: 0,
+    gap: 3,           // Weniger Abstand bei kompakten Sternen
+    paddingVertical: 2,
   },
   starButton: {
-    padding: 4,
+    padding: 6,       // Erhöht von 4 für besseren Touch-Bereich
+    minWidth: 36,     // Mindestbreite für Touch-Target
+    minHeight: 36,    // Mindesthöhe für Touch-Target
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  starButtonCompact: {
+    padding: 3,       // Kompakter für kleine Sterne
+    minWidth: 24,     // Kleinerer Touch-Bereich
+    minHeight: 24,
   },
   starIconLarge: {
-    fontSize: 32,
+    fontSize: 28,     // Reduziert von 32
+    lineHeight: 28,   // Explizite Zeilenhöhe gegen Clipping
   },
   criterionRating: {
-    marginBottom: 24,
+    marginBottom: 12, // Weiter reduziert von 16
+  },
+  criterionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   criterionLabel: {
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 8,
   },
+  criterionLabelCompact: {
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
+    marginRight: 16,
+  },
   commentInput: {
     borderWidth: 1,
     borderRadius: 12,
-    padding: 16,
-    minHeight: 120,
-    marginBottom: 24,
+    padding: 12,      // Reduziert von 16
+    minHeight: 80,    // Reduziert von 120
+    marginBottom: 16, // Reduziert von 24
     textAlignVertical: 'top',
+    fontSize: 14,     // Explizite Schriftgröße
+    fontFamily: 'Nunito_400Regular',
   },
   commentPlaceholder: {
     fontSize: 14,
@@ -2095,6 +2995,74 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
+  // Ratings View Styles
+  ratingOverallSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    marginBottom: 16,
+  },
+  ratingCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#6B7280',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ratingCircleNumber: {
+    fontSize: 24,
+    fontFamily: 'Nunito_700Bold',
+    color: 'white',
+  },
+  ratingDetails: {
+    flex: 1,
+  },
+  ratingTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  starsRow: {
+    flexDirection: 'row',
+    gap: 4,
+    marginBottom: 4,
+  },
+  starIconMedium: {
+    fontSize: 16,
+  },
+  ratingsCount: {
+    fontSize: 12,
+    opacity: 0.7,
+  },
+  criteriaRatings: {
+    gap: 12,
+  },
+  criteriaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  criteriaLabel: {
+    fontSize: 14,
+    flex: 1,
+  },
+  criteriaValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    minWidth: 40,
+    textAlign: 'right',
+  },
+  commentsPlaceholder: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  placeholderText: {
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  
   // Top action icons
   topActionIcons: {
     flexDirection: 'row',
@@ -2103,11 +3071,7 @@ const styles = StyleSheet.create({
   actionIconButton: {
     padding: 4,
   },
-  scoreImage: {
-    width: 40,
-    height: 30,
-    marginRight: 8,
-  },
+
 
   // Image Viewer Modal Styles
   imageViewerContainer: {
@@ -2193,15 +3157,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
-  scoreContainer: {
-    width: 40,
-    height: 20,
-  },
-  scoreImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'contain',
-  },
   
   // Inline Scores Row (for Product Info Card)
   scoresInlineRow: {
@@ -2236,7 +3191,7 @@ const styles = StyleSheet.create({
   stageInfoNumber: {
     color: 'white',
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: 'Nunito_700Bold',
   },
   stageInfoTextContainer: {
     flex: 1,
@@ -2253,5 +3208,264 @@ const styles = StyleSheet.create({
     fontWeight: '300',
     lineHeight: 16,
     opacity: 0.7,
+  },
+
+  // Comparison Bottom Sheet Styles
+  emptyComparisonContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    margin: 16,
+  },
+  emptyComparisonTitle: {
+    fontSize: 18,
+    fontFamily: 'Nunito_600SemiBold',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyComparisonText: {
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  comparisonCard: {
+    marginHorizontal: 12,
+    marginVertical: 6,
+    padding: 12,
+    borderRadius: 8,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  comparisonCardTitle: {
+    fontSize: 14,
+    fontFamily: 'Nunito_600SemiBold',
+    marginBottom: 8,
+  },
+  comparisonHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  comparisonSimilarityBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  similarityBadgeText: {
+    color: 'white',
+    fontSize: 12,
+    fontFamily: 'Nunito_600SemiBold',
+  },
+  comparisonProductRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  comparisonProductImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 6,
+    marginRight: 10,
+  },
+  comparisonProductInfo: {
+    flex: 1,
+  },
+  comparisonProductName: {
+    fontSize: 13,
+    fontFamily: 'Nunito_600SemiBold',
+    marginBottom: 2,
+  },
+  comparisonProductBrand: {
+    fontSize: 11,
+    fontFamily: 'Nunito_400Regular',
+  },
+  comparisonProductDetails: {
+    marginTop: 2,
+    gap: 1,
+  },
+  comparisonProductDetail: {
+    fontSize: 10,
+    fontFamily: 'Nunito_400Regular',
+  },
+  comparisonDetails: {
+    marginBottom: 10,
+  },
+  comparisonMetric: {
+    marginBottom: 8,
+  },
+  comparisonMetricLabel: {
+    fontSize: 11,
+    fontFamily: 'Nunito_500Medium',
+    marginBottom: 4,
+  },
+  comparisonMetricBar: {
+    height: 6,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 2,
+  },
+  comparisonMetricFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  comparisonMetricValue: {
+    fontSize: 10,
+    fontFamily: 'Nunito_600SemiBold',
+    textAlign: 'right',
+  },
+  comparisonSectionTitle: {
+    fontSize: 12,
+    fontFamily: 'Nunito_600SemiBold',
+    marginBottom: 8,
+  },
+  ingredientsComparisonSection: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  ingredientsGrid: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  ingredientsColumn: {
+    flex: 1,
+  },
+  ingredientsColumnTitle: {
+    fontSize: 12,
+    fontFamily: 'Nunito_600SemiBold',
+    marginBottom: 6,
+  },
+  ingredientsText: {
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: 'Nunito_400Regular',
+  },
+
+  // Nährwerte-Vergleich Styles
+  nutrientsComparisonSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  nutrientsGrid: {
+    gap: 8,
+  },
+  nutrientRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  nutrientLabel: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+    flex: 1,
+  },
+  nutrientValues: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  nutrientValue: {
+    fontSize: 12,
+    fontFamily: 'Nunito_600SemiBold',
+    minWidth: 60,
+    textAlign: 'center',
+  },
+  nutrientVs: {
+    fontSize: 10,
+    fontFamily: 'Nunito_400Regular',
+    color: '#999',
+  },
+
+  // Zusätzliche Infos Styles
+  additionalInfoSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  additionalInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  additionalInfoLabel: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+    flex: 1,
+    marginRight: 8,
+  },
+  additionalInfoValue: {
+    fontSize: 12,
+    fontFamily: 'Nunito_400Regular',
+    flex: 2,
+    textAlign: 'right',
+  },
+  
+  // Neue Details Sheet Styles
+  detailCard: {
+    borderRadius: 12,
+    marginVertical: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cardHeader: {
+    marginBottom: 12,
+    position: 'relative',
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontFamily: 'Nunito_600SemiBold',
+    marginBottom: 4,
+  },
+  cardSubtitle: {
+    fontSize: 16,
+    fontFamily: 'Nunito_400Regular',
+    marginBottom: 8,
+  },
+
+  similarityRow: {
+    marginBottom: 8,
+  },
+  progressBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 8,
+  },
+  progressBarBackground: {
+    flex: 1,
+    height: 8,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  progressBarText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_600SemiBold',
+    minWidth: 35,
+    textAlign: 'right',
   },
 });

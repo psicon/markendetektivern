@@ -76,7 +76,7 @@ export default function RatingScreen() {
           title: 'Bewertung abgeben (Markenprodukt)',
           headerStyle: { backgroundColor: colors.primary },
           headerTintColor: 'white',
-          headerTitleStyle: { color: 'white', fontWeight: '600' },
+          headerTitleStyle: { color: 'white', fontFamily: 'Nunito_600SemiBold' },
           headerBackVisible: false,
           gestureEnabled: true,
           animation: 'slide_from_right',

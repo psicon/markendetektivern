@@ -57,6 +57,6 @@ const styles = StyleSheet.create({
     lineHeight: 30,
     fontSize: 16,
     color: '#0a7ea4',
-    fontFamily: 'Lato_500Medium',
+    fontFamily: 'Nunito_500Medium',
   },
 });
