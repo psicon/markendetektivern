@@ -11,17 +11,17 @@ import { MarkenProduktWithDetails, ProductWithDetails } from '@/lib/types/firest
 import { Stack, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useEffect, useLayoutEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Dimensions,
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -219,13 +219,28 @@ const ProductComparisonContent = ({
   mainProduct, 
   selectedProducts, 
   openFoodData, 
-  colors 
+  colors,
+  comparisonData
 }: { 
   mainProduct: MarkenProduktWithDetails;
   selectedProducts: ProductWithDetails[];
   openFoodData: Map<string, OpenFoodProduct | null>;
   colors: any;
+  comparisonData: {
+    mainProduct: MarkenProduktWithDetails;
+    relatedNoNameProducts: ProductWithDetails[];
+    clickedProductId: string;
+    clickedWasNoName: boolean;
+  } | null;
 }) => {
+  // Similarity Info Modal State
+  const [showSimilarityInfo, setShowSimilarityInfo] = useState(false);
+  
+  // Handler for showing similarity info
+  const handleShowSimilarityInfo = () => {
+    setShowSimilarityInfo(true);
+  };
+
   // Ähnlichkeitsberechnung für Zutaten
   const calculateIngredientSimilarity = (mainIngredients: string, compareIngredients: string): number => {
     console.log('🔍 Calculating ingredient similarity:');
@@ -237,41 +252,164 @@ const ProductComparisonContent = ({
       return 0;
     }
     
-    const main = mainIngredients.toLowerCase().split(/[,;\s]+/).filter(i => i.length > 2);
-    const compare = compareIngredients.toLowerCase().split(/[,;\s]+/).filter(i => i.length > 2);
+    // Erweiterte Normalisierungsfunktion für Schokoladen-Zutaten
+    const normalizeIngredient = (ingredient: string): string => {
+      return ingredient
+        .toLowerCase()
+        .trim()
+        // Entferne Prozentangaben und Klammern komplett
+        .replace(/\([^)]*\)/g, '')
+        .replace(/\[[^\]]*\]/g, '')
+        .replace(/\d+[,%\s]*%?/g, '')
+        // Entferne Präfixe wie "Emulgator:", "davon gesättigte" etc.
+        .replace(/^(emulgator:?\s*|natürliches?\s*|künstliches?\s*)/g, '')
+        .replace(/^(davon\s+)/g, '')
+        // Normalisiere Milchprodukte (sehr wichtig für Schokolade!)
+        .replace(/vollmilchpulver/g, 'milchpulver')
+        .replace(/magermilchpulver/g, 'milchpulver')
+        .replace(/süßmolkenpulver/g, 'molkenpulver')
+        .replace(/molkenpulver/g, 'milchpulver') // Molke = auch Milch
+        // Normalisiere Kakao-Varianten
+        .replace(/kakaobutter/g, 'kakao')
+        .replace(/kakaomasse/g, 'kakao')
+        // Normalisiere Fett-Varianten
+        .replace(/butterreinfett(\s*\([^)]*\))?/g, 'butter')
+        // Normalisiere Lecithin-Varianten
+        .replace(/lecithine?\s*(\([^)]*\))?/g, 'lecithin')
+        .replace(/emulgator\s*lecithin/g, 'lecithin')
+        // Normalisiere Nuss-Varianten
+        .replace(/gemahlene\s+haselnüsse/g, 'haselnüsse')
+        .replace(/gehackte\s+haselnüsse/g, 'haselnüsse')
+        .replace(/haselnuss/g, 'haselnüsse')
+        // Normalisiere Vanille-Varianten
+        .replace(/bourbon-?vanilleextrakt/g, 'vanille')
+        .replace(/vanilleextrakt/g, 'vanille')
+        .replace(/vanillearoma/g, 'vanille')
+        .replace(/vanilleschoten/g, 'vanille')
+        // Entferne E-Nummern komplett
+        .replace(/\be\d+[a-z]?\b/g, '')
+        // Entferne weitere Füllwörter
+        .replace(/\b(gemahlene?|gehackte?|getrocknete?|natürliches?|künstliches?|fein|grob)\b/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
     
-    console.log('Main ingredients parsed:', main.length, main.slice(0, 5));
-    console.log('Compare ingredients parsed:', compare.length, compare.slice(0, 5));
+    // Splitte und normalisiere die Zutaten
+    const main = mainIngredients
+      .split(/[,;.]/)
+      .map(normalizeIngredient)
+      .filter(i => i.length > 2)
+      .map(i => i.replace(/^\s+|\s+$/g, '')) // Trim nochmal
+      .filter(i => i.length > 0);
+      
+    const compare = compareIngredients
+      .split(/[,;.]/)
+      .map(normalizeIngredient)
+      .filter(i => i.length > 2)
+      .map(i => i.replace(/^\s+|\s+$/g, '')) // Trim nochmal
+      .filter(i => i.length > 0);
+    
+    console.log('Main ingredients normalized:', main);
+    console.log('Compare ingredients normalized:', compare);
     
     if (main.length === 0 || compare.length === 0) {
       console.log('❌ No valid ingredients found');
       return 0;
     }
     
-    const matches = main.filter(ingredient => 
-      compare.some(comp => comp.includes(ingredient) || ingredient.includes(comp))
-    ).length;
+    // Erweiterte Matching-Logik
+    const matches = new Set();
+    const usedCompareIndices = new Set();
     
-    const similarity = Math.round((matches / Math.max(main.length, compare.length)) * 100);
-    console.log(`✅ Ingredient similarity: ${matches}/${Math.max(main.length, compare.length)} = ${similarity}%`);
+    main.forEach((mainIngredient, mainIndex) => {
+      let bestMatch = null;
+      let bestScore = 0;
+      let bestCompareIndex = -1;
+      
+      compare.forEach((compareIngredient, compareIndex) => {
+        if (usedCompareIndices.has(compareIndex)) return;
+        
+        let score = 0;
+        
+        // 1. Exact match = 100 Punkte
+        if (mainIngredient === compareIngredient) {
+          score = 100;
+        }
+        // 2. Einer enthält den anderen komplett = 90 Punkte
+        else if (mainIngredient.includes(compareIngredient) || compareIngredient.includes(mainIngredient)) {
+          score = 90;
+        }
+        // 3. Ähnliche Hauptwörter (mindestens 4 Zeichen) = 80 Punkte
+        else {
+          const mainWords = mainIngredient.split(/\s+/).filter(w => w.length >= 4);
+          const compareWords = compareIngredient.split(/\s+/).filter(w => w.length >= 4);
+          
+          let wordMatches = 0;
+          mainWords.forEach(mainWord => {
+            compareWords.forEach(compareWord => {
+              if (mainWord === compareWord || mainWord.includes(compareWord) || compareWord.includes(mainWord)) {
+                wordMatches++;
+              }
+            });
+          });
+          
+          if (wordMatches > 0) {
+            score = Math.min(80, (wordMatches / Math.max(mainWords.length, compareWords.length)) * 80);
+          }
+        }
+        
+        if (score > bestScore && score >= 80) { // Mindestens 80% Übereinstimmung
+          bestScore = score;
+          bestMatch = compareIngredient;
+          bestCompareIndex = compareIndex;
+        }
+      });
+      
+      if (bestMatch) {
+        matches.add(mainIngredient);
+        usedCompareIndices.add(bestCompareIndex);
+        console.log(`✅ Match: "${mainIngredient}" → "${bestMatch}" (${bestScore}%)`);
+      } else {
+        console.log(`❌ No match for: "${mainIngredient}"`);
+      }
+    });
+    
+    // Berechne Ähnlichkeit basierend auf der Anzahl der Hauptzutaten
+    // Verwende die kleinere Liste als Basis (wichtiger für Ähnlichkeit)
+    const shorterList = Math.min(main.length, compare.length);
+    const similarity = Math.round((matches.size / shorterList) * 100);
+    
+    console.log(`✅ Ingredient similarity: ${matches.size}/${shorterList} ingredients matched = ${similarity}%`);
     
     return similarity;
   };
 
-  // Erweiterte Nährwert-Ähnlichkeitsberechnung
+  // Nährwert-Ähnlichkeitsberechnung (nur die 4 wichtigsten Werte)
   const calculateNutritionSimilarity = (mainNutrition: any, compareNutrition: any): number => {
     if (!mainNutrition || !compareNutrition) return 0;
     
+    // Nur die 4 wichtigsten Nährwerte für Vergleich
     const nutrients = [
-      'energy_100g', 'fat_100g', 'carbohydrates_100g', 'proteins_100g', 
-      'sugars_100g', 'salt_100g', 'fiber_100g', 'saturated-fat_100g'
+      { key: 'energy-kcal_100g', fallback: 'energy_100g', factor: 4.184 }, // Energie (kcal oder kJ->kcal)
+      { key: 'fat_100g' },                    // Fett
+      { key: 'carbohydrates_100g' },          // Kohlenhydrate  
+      { key: 'sugars_100g' }                  // Zucker
     ];
+    
     let totalDifference = 0;
     let validComparisons = 0;
     
     nutrients.forEach(nutrient => {
-      const mainValue = mainNutrition[nutrient];
-      const compareValue = compareNutrition[nutrient];
+      let mainValue = mainNutrition[nutrient.key];
+      let compareValue = compareNutrition[nutrient.key];
+      
+      // Fallback für Energie: kJ -> kcal Konvertierung
+      if (!mainValue && nutrient.fallback) {
+        mainValue = mainNutrition[nutrient.fallback] ? mainNutrition[nutrient.fallback] / nutrient.factor : undefined;
+      }
+      if (!compareValue && nutrient.fallback) {
+        compareValue = compareNutrition[nutrient.fallback] ? compareNutrition[nutrient.fallback] / nutrient.factor : undefined;
+      }
       
       if (mainValue !== undefined && compareValue !== undefined && mainValue > 0) {
         const difference = Math.abs(mainValue - compareValue) / mainValue;
@@ -286,38 +424,12 @@ const ProductComparisonContent = ({
     return Math.round(Math.max(0, (1 - avgDifference) * 100));
   };
 
-  // Zusätzliche Qualitätsbewertung basierend auf Scores
-  const calculateQualitySimilarity = (mainOpenFood: any, compareOpenFood: any): number => {
-    if (!mainOpenFood || !compareOpenFood) return 0;
-    
-    let score = 0;
-    let metrics = 0;
-    
-    // Nova-Score Vergleich (je niedriger, desto besser)
-    if (mainOpenFood.nova_group && compareOpenFood.nova_group) {
-      const diff = Math.abs(mainOpenFood.nova_group - compareOpenFood.nova_group);
-      score += Math.max(0, (4 - diff) / 4 * 100);
-      metrics++;
-    }
-    
-    // Nutri-Score Vergleich (A=5, B=4, C=3, D=2, E=1)
-    if (mainOpenFood.nutrition_grades && compareOpenFood.nutrition_grades) {
-      const scoreMap: Record<string, number> = { 'a': 5, 'b': 4, 'c': 3, 'd': 2, 'e': 1 };
-      const mainScore = scoreMap[mainOpenFood.nutrition_grades.toLowerCase()] || 0;
-      const compareScore = scoreMap[compareOpenFood.nutrition_grades.toLowerCase()] || 0;
-      const diff = Math.abs(mainScore - compareScore);
-      score += Math.max(0, (4 - diff) / 4 * 100);
-      metrics++;
-    }
-    
-    return metrics > 0 ? Math.round(score / metrics) : 0;
-  };
+
 
   // Gesamt-Ähnlichkeit berechnen
   const calculateOverallSimilarity = (product: ProductWithDetails): { 
     ingredients: number; 
     nutrition: number; 
-    quality: number;
     overall: number; 
   } => {
     console.log('\n🔍 Calculating overall similarity for product:', product.produktName);
@@ -350,24 +462,17 @@ const ProductComparisonContent = ({
       productOpenFood?.nutriments
     );
     
-    const qualitySimilarity = calculateQualitySimilarity(
-      mainOpenFood,
-      productOpenFood
-    );
-    
-    // Gewichteter Durchschnitt: Zutaten 40%, Nährwerte 40%, Qualität 20%
+    // Gewichteter Durchschnitt: Zutaten 60%, Nährwerte 40% (ohne Qualität)
     const overall = Math.round(
-      (ingredientSimilarity * 0.4) + 
-      (nutritionSimilarity * 0.4) + 
-      (qualitySimilarity * 0.2)
+      (ingredientSimilarity * 0.6) + 
+      (nutritionSimilarity * 0.4)
     );
     
-    console.log(`📊 Final similarity scores - Ingredients: ${ingredientSimilarity}%, Nutrition: ${nutritionSimilarity}%, Quality: ${qualitySimilarity}%, Overall: ${overall}%`);
+    console.log(`📊 Final similarity scores - Ingredients: ${ingredientSimilarity}%, Nutrition: ${nutritionSimilarity}%, Overall: ${overall}%`);
     
     return {
       ingredients: ingredientSimilarity,
       nutrition: nutritionSimilarity,
-      quality: qualitySimilarity,
       overall
     };
   };
@@ -385,90 +490,120 @@ const ProductComparisonContent = ({
   }
 
   return (
-    <ScrollView style={{ flex: 1, paddingHorizontal: 8 }}>
-      {/* Header wie im Details Sheet */}
-      <View style={[styles.comparisonHeader, { backgroundColor: colors.cardBackground }]}>
-        <ThemedText style={[styles.comparisonHeaderTitle, { color: colors.primary }]}>
-          Produktvergleich
-        </ThemedText>
-        <ThemedText style={[styles.comparisonHeaderSubtitle, { color: colors.text }]}>
-          {mainProduct.marke?.markenname || 'Marke'} vs. {selectedProducts.map((product) => 
-            product.handelsmarke?.bezeichnung || product.discounter?.name || 'NoName'
-          ).join(' vs. ')}
-        </ThemedText>
-      </View>
-
+    <ScrollView style={{ flex: 1, paddingHorizontal: 2 }}>
       {/* Markenprodukt - Details Sheet Stil */}
       <View style={[styles.detailCard, { backgroundColor: colors.cardBackground }]}>
-        {/* Header wie im Details Sheet */}
-        <View style={styles.cardHeader}>
-          <ThemedText style={[styles.cardTitle, { color: colors.primary }]}>
-            {mainProduct.marke?.markenname || 'Markenprodukt'}
-          </ThemedText>
-          <ThemedText style={styles.cardSubtitle}>
-            {mainProduct.produktName}
-          </ThemedText>
+        {/* Header mit Produktbild */}
+        <View style={styles.productHeader}>
+          <Image 
+            source={{ uri: mainProduct.bild }} 
+            style={styles.comparisonProductImage}
+          />
+          <View style={styles.productHeaderInfo}>
+            <ThemedText style={[styles.cardTitle, { color: colors.primary }]}>
+              Markenprodukt
+            </ThemedText>
+            <ThemedText style={styles.cardSubtitle}>
+{comparisonData?.mainProduct?.marke?.name || comparisonData?.mainProduct?.hersteller?.name || 'Unbekannte Marke'} - {comparisonData?.mainProduct?.name || 'Unbekanntes Produkt'}
+            </ThemedText>
+          </View>
         </View>
         
-        {/* Produktinformationen Grid */}
-        <View style={styles.infoGrid}>
-          <View style={styles.infoRow}>
-            <ThemedText style={styles.infoLabel}>Packung:</ThemedText>
-            <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-              {mainProduct.packSize ? `${mainProduct.packSize} ${mainProduct.packTypInfo?.typKurz || 'g'}` : 'Unbekannt'}
-            </ThemedText>
-          </View>
-          <View style={styles.infoRow}>
-            <ThemedText style={styles.infoLabel}>Preis:</ThemedText>
-            <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-              €{mainProduct.preis ? mainProduct.preis.toFixed(2) : '0.00'}
+        {/* Horizontal Icons wie Wanderapp */}
+        <View style={styles.wanderappDataRowBrand}>
+          {/* Packung */}
+          <View style={styles.wanderappDataItemBrand}>
+            <IconSymbol name="cube.box" size={18} color={colors.primary} />
+            <ThemedText style={[styles.wanderappDataValue, { color: colors.text }]}>
+              {comparisonData?.mainProduct?.packSize ? `${comparisonData.mainProduct.packSize}${comparisonData.mainProduct.packTypInfo?.typKurz || 'g'}` : '?'}
             </ThemedText>
           </View>
           
-          {/* Nährwerte für Markenprodukt */}
-          <View style={styles.infoRow}>
-            <ThemedText style={styles.infoLabel}>Nährwerte:</ThemedText>
-            <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-              {(() => {
-                const mainEAN = mainProduct.EANs?.[0] || mainProduct.gtin;
-                const mainOpenFood = openFoodData.get(mainEAN || '');
-                const nutrition = OpenFoodService.formatNutrition(mainOpenFood?.nutriments);
-                return nutrition.slice(0, 3).map(n => `${n.label}: ${n.value}`).join(', ') || 'Keine Daten';
-              })()}
+          {/* Preis */}
+          <View style={styles.wanderappDataItemBrand}>
+            <IconSymbol name="eurosign" size={18} color={colors.primary} />
+            <ThemedText style={[styles.wanderappDataValue, { color: colors.text }]}>
+              €{comparisonData?.mainProduct?.preis ? comparisonData.mainProduct.preis.toFixed(2) : '0.00'}
             </ThemedText>
           </View>
           
-          {/* Zutaten für Markenprodukt */}
-          <View style={styles.infoRow}>
-            <ThemedText style={styles.infoLabel}>Zutaten:</ThemedText>
-            <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-              {(() => {
-                const mainEAN = mainProduct.EANs?.[0] || mainProduct.gtin;
-                const mainOpenFood = openFoodData.get(mainEAN || '');
-                const ingredients = OpenFoodService.formatIngredients(mainOpenFood);
-                return ingredients || 'Keine Informationen verfügbar';
-              })()}
+          {/* Kategorie - mehr Platz */}
+          <View style={styles.wanderappDataItemBrandCategory}>
+            <IconSymbol name="square.grid.2x2" size={18} color={colors.primary} />
+            <ThemedText style={[styles.wanderappDataValue, { color: colors.text }]} numberOfLines={2}>
+              {comparisonData?.mainProduct?.kategorie?.bezeichnung || '?'}
             </ThemedText>
           </View>
+        </View>
+          
+        {/* Nährwerte Sektion wie im Screenshot */}
+        <View style={styles.nutritionSection}>
+          <View style={styles.sectionHeaderRow}>
+            <View style={styles.sectionHeaderWithIconContainer}>
+              <IconSymbol name="chart.bar.xaxis" size={16} color={colors.primary} />
+              <ThemedText style={[styles.sectionHeaderWithIcon, { color: colors.primary }]}>
+                Nährwerte
+              </ThemedText>
+            </View>
+            <IconSymbol name="info.circle" size={14} color={colors.icon} />
+          </View>
+          {(() => {
+            const mainEAN = mainProduct.EANs?.[0] || mainProduct.gtin;
+            const mainOpenFood = openFoodData.get(mainEAN || '');
+            const nutrition = OpenFoodService.formatNutrition(mainOpenFood?.nutriments);
+            
+            return nutrition.length > 0 ? nutrition.slice(0, 4).map((n, index) => (
+              <View key={index} style={styles.nutritionRow}>
+                <ThemedText style={styles.nutritionLabel}>{n.label}:</ThemedText>
+                <ThemedText style={[styles.nutritionValue, { color: colors.icon }]}>{n.value}</ThemedText>
+              </View>
+            )) : (
+              <ThemedText style={[styles.nutritionValue, { color: colors.icon }]}>Keine Daten verfügbar</ThemedText>
+            );
+          })()}
+        </View>
+        
+        {/* Zutaten Sektion wie im Screenshot */}
+        <View style={styles.nutritionSection}>
+          <View style={styles.sectionHeaderWithIconContainer}>
+            <IconSymbol name="list.bullet" size={16} color={colors.primary} />
+            <ThemedText style={[styles.sectionHeaderWithIcon, { color: colors.primary }]}>
+              Zutaten
+            </ThemedText>
+          </View>
+          <ThemedText style={[styles.ingredientsText, { color: colors.icon }]}>
+            {(() => {
+              const mainEAN = mainProduct.EANs?.[0] || mainProduct.gtin;
+              const mainOpenFood = openFoodData.get(mainEAN || '');
+              const ingredients = OpenFoodService.formatIngredients(mainOpenFood);
+              return ingredients || 'Keine Informationen verfügbar';
+            })()}
+          </ThemedText>
         </View>
       </View>
 
       {/* Vergleichsprodukte - Details Sheet Stil */}
-      {selectedProducts.map((product) => {
+      {selectedProducts.map((product, index) => {
         const similarity = calculateOverallSimilarity(product);
         const productEAN = product.EANs?.[0] || product.gtin;
         const productOpenFood = openFoodData.get(productEAN || '');
         
         return (
-          <View key={product.id} style={[styles.detailCard, { backgroundColor: colors.cardBackground, marginTop: 16 }]}>
-            {/* Header wie im Details Sheet */}
-            <View style={styles.cardHeader}>
-              <ThemedText style={[styles.cardTitle, { color: colors.primary }]}>
-                {product.handelsmarke?.bezeichnung || product.discounter?.name || 'NoName'}
-              </ThemedText>
-              <ThemedText style={styles.cardSubtitle}>
-                {product.produktName}
-              </ThemedText>
+          <View key={product.id} style={[styles.detailCard, { backgroundColor: colors.cardBackground, marginTop: 12 }]}>
+            {/* Header mit Produktbild */}
+            <View style={styles.productHeader}>
+              <Image 
+                source={{ uri: product.bild }} 
+                style={styles.comparisonProductImage}
+              />
+              <View style={styles.productHeaderInfo}>
+                <ThemedText style={[styles.cardTitle, { color: colors.primary }]}>
+                  NoName-Produkt {index + 1}
+                </ThemedText>
+                <ThemedText style={styles.cardSubtitle}>
+{product.handelsmarke?.bezeichnung || 'Unbekannte Handelsmarke'} - {product.name}
+                </ThemedText>
+              </View>
               
               {/* Ähnlichkeits-Badge */}
               <View style={[
@@ -476,39 +611,60 @@ const ProductComparisonContent = ({
                 { backgroundColor: similarity.overall >= 70 ? colors.success : similarity.overall >= 50 ? colors.warning : colors.error }
               ]}>
                 <ThemedText style={styles.similarityNumber}>
-                  {similarity.overall}% Ähnlichkeit
+                  {similarity.overall}%
                 </ThemedText>
               </View>
             </View>
             
-            {/* Produktinformationen Grid */}
-            <View style={styles.infoGrid}>
-              <View style={styles.infoRow}>
-                <ThemedText style={styles.infoLabel}>Packung:</ThemedText>
-                <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                  {product.packSize ? `${product.packSize} ${product.packTypInfo?.typKurz || 'g'}` : 'Unbekannt'}
+            {/* Horizontal Icons wie Wanderapp */}
+            <View style={styles.wanderappDataRow}>
+              {/* Supermarkt */}
+              <View style={styles.wanderappDataItem}>
+                <IconSymbol name="storefront" size={18} color={colors.primary} />
+                <ThemedText style={[styles.wanderappDataValue, { color: colors.text }]} numberOfLines={1}>
+                  {product.discounter?.name || '?'}
                 </ThemedText>
               </View>
-              <View style={styles.infoRow}>
-                <ThemedText style={styles.infoLabel}>Preis:</ThemedText>
-                <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+              
+              {/* Packung */}
+              <View style={styles.wanderappDataItem}>
+                <IconSymbol name="cube.box" size={18} color={colors.primary} />
+                <ThemedText style={[styles.wanderappDataValue, { color: colors.text }]}>
+                  {product.packSize ? `${product.packSize}${product.packTypInfo?.typKurz || 'g'}` : '?'}
+                </ThemedText>
+              </View>
+              
+              {/* Preis */}
+              <View style={styles.wanderappDataItem}>
+                <IconSymbol name="eurosign" size={18} color={colors.primary} />
+                <ThemedText style={[styles.wanderappDataValue, { color: colors.text }]}>
                   €{product.preis ? product.preis.toFixed(2) : '0.00'}
                 </ThemedText>
               </View>
+              
+              {/* Stufe falls vorhanden */}
               {product.stufe && (
-                <View style={styles.infoRow}>
-                  <ThemedText style={styles.infoLabel}>Stufe:</ThemedText>
-                  <ThemedText style={[styles.infoValue, { color: colors.primary }]}>
-                    {product.stufe} Ähnlichkeit
+                <View style={styles.wanderappDataItem}>
+                  <IconSymbol name="chart.bar" size={18} color={colors.primary} />
+                  <ThemedText style={[styles.wanderappDataValue, { color: colors.primary }]}>
+                    {product.stufe}
                   </ThemedText>
                 </View>
               )}
             </View>
 
             {/* Ähnlichkeitsvergleich mit Progress Bars */}
-            <View style={styles.infoGrid}>
+            <View style={styles.similaritySection}>
               <View style={styles.similarityRow}>
-                <ThemedText style={styles.infoLabel}>Zutaten-Ähnlichkeit</ThemedText>
+                <View style={styles.similarityRowHeader}>
+                  <ThemedText style={styles.infoLabel}>Zutaten-Ähnlichkeit</ThemedText>
+                  <TouchableOpacity 
+                    onPress={() => handleShowSimilarityInfo()}
+                    style={styles.similarityInfoIcon}
+                  >
+                    <IconSymbol name="info.circle" size={14} color={colors.icon} />
+                  </TouchableOpacity>
+                </View>
                 <View style={styles.progressBarContainer}>
                   <View style={styles.progressBarBackground}>
                     <View 
@@ -528,7 +684,15 @@ const ProductComparisonContent = ({
               </View>
               
               <View style={styles.similarityRow}>
-                <ThemedText style={styles.infoLabel}>Nährwert-Ähnlichkeit</ThemedText>
+                <View style={styles.similarityRowHeader}>
+                  <ThemedText style={styles.infoLabel}>Nährwert-Ähnlichkeit</ThemedText>
+                  <TouchableOpacity 
+                    onPress={() => handleShowSimilarityInfo()}
+                    style={styles.similarityInfoIcon}
+                  >
+                    <IconSymbol name="info.circle" size={14} color={colors.icon} />
+                  </TouchableOpacity>
+                </View>
                 <View style={styles.progressBarContainer}>
                   <View style={styles.progressBarBackground}>
                     <View 
@@ -547,52 +711,150 @@ const ProductComparisonContent = ({
                 </View>
               </View>
               
-              <View style={styles.similarityRow}>
-                <ThemedText style={styles.infoLabel}>Qualitäts-Ähnlichkeit</ThemedText>
-                <View style={styles.progressBarContainer}>
-                  <View style={styles.progressBarBackground}>
-                    <View 
-                      style={[
-                        styles.progressBarFill, 
-                        { 
-                          backgroundColor: similarity.quality >= 70 ? colors.success : similarity.quality >= 50 ? colors.warning : colors.error,
-                          width: `${similarity.quality}%`
-                        }
-                      ]} 
-                    />
+
+            </View>
+
+            {/* Nährwerte Sektion wie im Screenshot */}
+            <View style={styles.nutritionSection}>
+              <View style={styles.sectionHeaderRow}>
+                <View style={styles.sectionHeaderWithIconContainer}>
+                  <IconSymbol name="chart.bar.xaxis" size={16} color={colors.primary} />
+                  <ThemedText style={[styles.sectionHeaderWithIcon, { color: colors.primary }]}>
+                    Nährwerte
+                  </ThemedText>
+                </View>
+                <IconSymbol name="info.circle" size={14} color={colors.icon} />
+              </View>
+              {(() => {
+                const nutrition = OpenFoodService.formatNutrition(productOpenFood?.nutriments);
+                
+                return nutrition.length > 0 ? nutrition.slice(0, 4).map((n, index) => (
+                  <View key={index} style={styles.nutritionRow}>
+                    <ThemedText style={styles.nutritionLabel}>{n.label}:</ThemedText>
+                    <ThemedText style={[styles.nutritionValue, { color: colors.icon }]}>{n.value}</ThemedText>
                   </View>
-                  <ThemedText style={[styles.progressBarText, { color: colors.icon }]}>
-                    {similarity.quality}%
+                )) : (
+                  <ThemedText style={[styles.nutritionValue, { color: colors.icon }]}>Keine Daten verfügbar</ThemedText>
+                );
+              })()}
+            </View>
+            
+            {/* Zutaten Sektion wie im Screenshot */}
+            <View style={styles.nutritionSection}>
+              <View style={styles.sectionHeaderWithIconContainer}>
+                <IconSymbol name="list.bullet" size={16} color={colors.primary} />
+                <ThemedText style={[styles.sectionHeaderWithIcon, { color: colors.primary }]}>
+                  Zutaten
+                </ThemedText>
+              </View>
+              <ThemedText style={[styles.ingredientsText, { color: colors.icon }]}>
+                {(() => {
+                  const ingredients = OpenFoodService.formatIngredients(productOpenFood);
+                  return ingredients || 'Keine Informationen verfügbar';
+                })()}
+              </ThemedText>
+            </View>
+          </View>
+        );
+      })}
+      
+      {/* Extra Spacing für saubere Darstellung der letzten Card */}
+      <View style={{ height: 60 }} />
+
+      {/* Similarity Info Modal */}
+      <Modal
+        visible={showSimilarityInfo}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowSimilarityInfo(false)}
+      >
+        <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
+          {/* Bottom Sheet Header */}
+          <View style={styles.bottomSheetHeader}>
+            <View style={styles.handleContainer}>
+              <View style={styles.handle} />
+            </View>
+            <View style={styles.headerRow}>
+              <TouchableOpacity 
+                style={styles.closeButtonLeft}
+                onPress={() => setShowSimilarityInfo(false)}
+              >
+                <IconSymbol name="xmark" size={24} color={colors.icon} />
+              </TouchableOpacity>
+              <View style={styles.titleSection}>
+                <ThemedText style={styles.bottomSheetTitle}>
+                  Info
+                </ThemedText>
+                <ThemedText style={[styles.bottomSheetSubtitle, { color: colors.primary }]}>
+                  Wie wird die Ähnlichkeit berechnet?
+                </ThemedText>
+              </View>
+              <View style={styles.spacer} />
+            </View>
+          </View>
+
+          {/* Content */}
+          <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+            {/* Zutaten-Ähnlichkeit Card */}
+            <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
+              <View style={styles.infoCardHeader}>
+                <View style={styles.infoCardIconContainer}>
+                  <IconSymbol name="list.bullet" size={24} color={colors.primary} />
+                </View>
+                <ThemedText style={styles.infoCardTitle}>Zutaten-Vergleich</ThemedText>
+              </View>
+              
+              <View style={styles.infoCardContent}>
+                <ThemedText style={[styles.infoCardDescription, { color: colors.icon }]}>
+                  Die Zutaten werden normalisiert und verglichen. Dabei werden ähnliche Zutaten zusammengefasst und die Übereinstimmung in Prozent berechnet.
+                </ThemedText>
+                
+                <View style={styles.infoCardDivider} />
+                
+                <View style={styles.infoCardSubSection}>
+                  <View style={styles.infoCardSubHeader}>
+                    <IconSymbol name="gear" size={16} color={colors.primary} />
+                    <ThemedText style={styles.infoCardSubTitle}>Normalisierung</ThemedText>
+                  </View>
+                  <ThemedText style={[styles.infoCardSubDescription, { color: colors.icon }]}>
+                    Intelligente Normalisierung: &quot;Vollmilchpulver&quot; → &quot;Milchpulver&quot;, &quot;Kakaobutter&quot; → &quot;Kakao&quot;, etc.
                   </ThemedText>
                 </View>
               </View>
             </View>
 
-            {/* Nährwerte und Zutaten */}
-            <View style={styles.infoGrid}>
-              <View style={styles.infoRow}>
-                <ThemedText style={styles.infoLabel}>Nährwerte:</ThemedText>
-                <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                  {(() => {
-                    const nutrition = OpenFoodService.formatNutrition(productOpenFood?.nutriments);
-                    return nutrition.slice(0, 3).map(n => `${n.label}: ${n.value}`).join(', ') || 'Keine Daten';
-                  })()}
-                </ThemedText>
+            {/* Nährwert-Ähnlichkeit Card */}
+            <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
+              <View style={styles.infoCardHeader}>
+                <View style={styles.infoCardIconContainer}>
+                  <IconSymbol name="chart.bar.xaxis" size={24} color={colors.primary} />
+                </View>
+                <ThemedText style={styles.infoCardTitle}>Nährwert-Vergleich</ThemedText>
               </View>
               
-              <View style={styles.infoRow}>
-                <ThemedText style={styles.infoLabel}>Zutaten:</ThemedText>
-                <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                  {(() => {
-                    const ingredients = OpenFoodService.formatIngredients(productOpenFood);
-                    return ingredients || 'Keine Informationen verfügbar';
-                  })()}
+              <View style={styles.infoCardContent}>
+                <ThemedText style={[styles.infoCardDescription, { color: colors.icon }]}>
+                  Verglichen werden die 4 wichtigsten Nährwerte: Energie (kcal), Fett, Kohlenhydrate und Zucker. Die Ähnlichkeit ergibt sich aus den prozentualen Abweichungen.
                 </ThemedText>
+                
+                <View style={styles.infoCardDivider} />
+                
+                <View style={styles.infoCardSubSection}>
+                  <View style={styles.infoCardSubHeader}>
+                    <IconSymbol name="info.circle" size={16} color={colors.primary} />
+                    <ThemedText style={styles.infoCardSubTitle}>Bewertungskriterien</ThemedText>
+                  </View>
+                  <ThemedText style={[styles.infoCardSubDescription, { color: colors.icon }]}>
+                    • Energie bevorzugt in kcal (kJ automatisch umgerechnet){'\n'}
+                    • Alle Werte pro 100g normalisiert{'\n'}
+                    • Kleinere Abweichungen = höhere Ähnlichkeit
+                  </ThemedText>
+                </View>
               </View>
             </View>
-          </View>
-        );
-      })}
+          </ScrollView>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -774,9 +1036,9 @@ export default function ProductComparisonScreen() {
   useLayoutEffect(() => {
     // Produktnamen für Header sammeln - nur wenn Daten verfügbar sind
     const headerTitle = selectedProducts.size > 0 && comparisonData?.mainProduct && comparisonData?.relatedNoNameProducts?.length > 0
-      ? `${comparisonData.mainProduct.produktName || 'Markenprodukt'} vs. ${Array.from(selectedProducts).map(id => {
+      ? `${comparisonData.mainProduct.name || 'Markenprodukt'} vs. ${Array.from(selectedProducts).map(id => {
           const product = comparisonData.relatedNoNameProducts.find((p: any) => p.id === id);
-          return product?.produktName || 'NoName';
+          return product?.name || 'NoName';
         }).join(' & ')}`
       : 'Produktvergleich';
       
@@ -792,7 +1054,7 @@ export default function ProductComparisonScreen() {
       headerTitleStyle: { 
         color: 'white',
         fontFamily: 'Nunito_600SemiBold',
-        fontSize: 17
+        fontSize: 16
       },
       headerShadowVisible: false,
       headerBackVisible: false,
@@ -1070,7 +1332,7 @@ export default function ProductComparisonScreen() {
             headerTitleStyle: { 
               color: 'white',
               fontWeight: '600',
-              fontSize: 17
+              fontSize: 16
             },
             headerShadowVisible: false,
             headerBackVisible: false,
@@ -1185,7 +1447,7 @@ export default function ProductComparisonScreen() {
             headerTitleStyle: { 
               color: 'white',
               fontWeight: '600',
-              fontSize: 17
+              fontSize: 16
             },
             headerShadowVisible: false,
             headerBackVisible: false,
@@ -1227,7 +1489,7 @@ export default function ProductComparisonScreen() {
             headerTitleStyle: { 
               color: 'white',
               fontWeight: '600',
-              fontSize: 17
+              fontSize: 16
             },
             headerShadowVisible: false,
             headerBackVisible: false,
@@ -1385,7 +1647,7 @@ export default function ProductComparisonScreen() {
                 setShowProductDetails(true);
               }}
           >
-              <IconSymbol name="info.circle" size={16} color={colors.primary} />
+              <IconSymbol name="info.circle" size={18} color={colors.primary} />
               <ThemedText style={[styles.detailsText, { color: colors.primary }]}>
               Details
             </ThemedText>
@@ -1558,13 +1820,13 @@ export default function ProductComparisonScreen() {
                     style={styles.regionalHeader}
                     onPress={() => setShowRegionalInfo(!showRegionalInfo)}
                   >
-                    <IconSymbol name="location" size={16} color={colors.primary} />
+                    <IconSymbol name="location" size={18} color={colors.primary} />
                     <ThemedText style={styles.regionalTitle}>
                       Regionale Produktinformation
                     </ThemedText>
                     <IconSymbol 
                       name={showRegionalInfo ? "chevron.up" : "chevron.down"} 
-                      size={16} 
+                      size={18} 
                       color={colors.icon} 
                     />
                   </TouchableOpacity>
@@ -1616,7 +1878,7 @@ export default function ProductComparisonScreen() {
                       {/* Settings Button */}
                       <View style={styles.settingsContainer}>
                         <TouchableOpacity style={[styles.settingsButton, { borderColor: colors.border }]}>
-                          <IconSymbol name="gearshape" size={16} color={colors.icon} />
+                          <IconSymbol name="gearshape" size={18} color={colors.icon} />
                         </TouchableOpacity>
                   </View>
                   </View>
@@ -1633,7 +1895,7 @@ export default function ProductComparisonScreen() {
                     setShowProductDetails(true);
                   }}
               >
-                  <IconSymbol name="info.circle" size={16} color={colors.primary} />
+                  <IconSymbol name="info.circle" size={18} color={colors.primary} />
                   <ThemedText style={[styles.detailsText, { color: colors.primary }]}>
                   Details
                 </ThemedText>
@@ -1711,7 +1973,7 @@ export default function ProductComparisonScreen() {
             {/* Manufacturer Info Card */}
             <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
               <View style={styles.sectionHeader}>
-                <IconSymbol name="building.2" size={16} color={colors.primary} />
+                <IconSymbol name="building.2" size={18} color={colors.primary} />
                 <ThemedText style={styles.sectionTitleText}>Herstellerinformationen</ThemedText>
               </View>
               <View style={styles.infoGrid}>
@@ -1832,7 +2094,7 @@ export default function ProductComparisonScreen() {
             {/* Product Info Card */}
             <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
               <View style={styles.sectionHeader}>
-                <IconSymbol name="info.circle" size={16} color={colors.primary} />
+                <IconSymbol name="info.circle" size={18} color={colors.primary} />
                 <ThemedText style={styles.sectionTitleText}>Produktinformationen</ThemedText>
               </View>
               <View style={styles.infoGrid}>
@@ -1924,7 +2186,7 @@ export default function ProductComparisonScreen() {
             {/* Nutrition Info Card */}
             <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
               <View style={styles.sectionHeader}>
-                <IconSymbol name="leaf" size={16} color={colors.primary} />
+                <IconSymbol name="leaf" size={18} color={colors.primary} />
                 <ThemedText style={styles.sectionTitleText}>Nährwerte</ThemedText>
               </View>
               <View style={styles.infoGrid}>
@@ -2294,6 +2556,12 @@ export default function ProductComparisonScreen() {
               </TouchableOpacity>
               <View style={styles.titleSection}>
                 <ThemedText style={styles.modalTitle}>Produktvergleich</ThemedText>
+                <ThemedText style={[styles.modalSubtitle, { color: colors.primary }]}>
+                  {comparisonData?.mainProduct?.marke?.markenname || 'Marke'} vs. {Array.from(selectedProducts).map(id => {
+                    const product = comparisonData?.relatedNoNameProducts?.find((p: any) => p.id === id);
+                    return product?.handelsmarke?.bezeichnung || product?.discounter?.name || 'NoName';
+                  }).join(' vs. ')}
+                </ThemedText>
               </View>
             </View>
           </View>
@@ -2305,6 +2573,7 @@ export default function ProductComparisonScreen() {
                 selectedProducts={comparisonData.relatedNoNameProducts.filter(p => selectedProducts.has(p.id))}
                 openFoodData={openFoodData}
                 colors={colors}
+                comparisonData={comparisonData}
               />
             )}
           </ScrollView>
@@ -2409,6 +2678,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 24,
+    paddingHorizontal: 16,
   },
 
   // Product Card (shared by main and alternatives)
@@ -2457,7 +2727,7 @@ const styles = StyleSheet.create({
   },
   chipText: {
     color: 'white',
-    fontSize: 11,
+    fontSize: 10, // Tiny // Tiny - sehr kleine Details
     fontWeight: '600',
   },
   categoryMiniCard: {
@@ -2595,7 +2865,7 @@ const styles = StyleSheet.create({
     minWidth: 80,
   },
   mainPrice: {
-    fontSize: 20,
+    fontSize: 16, // Large - reduziert von 20
     fontFamily: 'Nunito_700Bold',
     marginBottom: 2,
   },
@@ -2705,7 +2975,7 @@ const styles = StyleSheet.create({
   },
   stufeText: {
     color: 'white',
-    fontSize: 10,
+    fontSize: 10, // Tiny
     fontWeight: '600',
   },
   weitereTitle: {
@@ -2765,7 +3035,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bottomSheetTitle: {
-    fontSize: 18,
+    fontSize: 16, // Large - wichtige Überschriften
     fontFamily: 'Nunito_700Bold',
   },
   bottomSheetSubtitle: {
@@ -2798,9 +3068,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     right: 0,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -2961,7 +3231,7 @@ const styles = StyleSheet.create({
     minHeight: 24,
   },
   starIconLarge: {
-    fontSize: 28,     // Reduziert von 32
+    fontSize: 16,     // Large - stark reduziert von 28
     lineHeight: 28,   // Explizite Zeilenhöhe gegen Clipping
   },
   criterionRating: {
@@ -3023,7 +3293,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   ratingCircleNumber: {
-    fontSize: 24,
+    fontSize: 16, // Large - reduziert von 24
     fontFamily: 'Nunito_700Bold',
     color: 'white',
   },
@@ -3202,7 +3472,7 @@ const styles = StyleSheet.create({
   },
   stageInfoNumber: {
     color: 'white',
-    fontSize: 18,
+    fontSize: 16, // Large - wichtige Überschriften
     fontFamily: 'Nunito_700Bold',
   },
   stageInfoTextContainer: {
@@ -3222,6 +3492,69 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
 
+  // Info Card Styles - neue schöne Cards
+  infoCard: {
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.09,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  infoCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  infoCardIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: 'rgba(66, 169, 104, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  infoCardTitle: {
+    fontSize: 16, // Large
+    fontFamily: 'Nunito_600SemiBold',
+    lineHeight: 18,
+    flex: 1,
+  },
+  infoCardContent: {
+    gap: 12,
+  },
+  infoCardDescription: {
+    fontSize: 12, // Small
+    fontFamily: 'Nunito_400Regular',
+    lineHeight: 16,
+  },
+  infoCardDivider: {
+    height: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.08)',
+    marginVertical: 4,
+  },
+  infoCardSubSection: {
+    gap: 6,
+  },
+  infoCardSubHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  infoCardSubTitle: {
+    fontSize: 14, // Medium
+    fontFamily: 'Nunito_600SemiBold',
+    lineHeight: 16,
+  },
+  infoCardSubDescription: {
+    fontSize: 12, // Small
+    fontFamily: 'Nunito_400Regular',
+    lineHeight: 16,
+  },
+
   // Comparison Bottom Sheet Styles
   emptyComparisonContainer: {
     padding: 40,
@@ -3231,7 +3564,7 @@ const styles = StyleSheet.create({
     margin: 16,
   },
   emptyComparisonTitle: {
-    fontSize: 18,
+    fontSize: 16, // Large - wichtige Überschriften
     fontFamily: 'Nunito_600SemiBold',
     marginTop: 16,
     marginBottom: 8,
@@ -3277,7 +3610,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 10,
   },
-  comparisonProductImage: {
+  comparisonProductImageOld: {
     width: 50,
     height: 50,
     borderRadius: 6,
@@ -3292,7 +3625,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   comparisonProductBrand: {
-    fontSize: 11,
+    fontSize: 10, // Tiny // Tiny - sehr kleine Details
     fontFamily: 'Nunito_400Regular',
   },
   comparisonProductDetails: {
@@ -3300,7 +3633,7 @@ const styles = StyleSheet.create({
     gap: 1,
   },
   comparisonProductDetail: {
-    fontSize: 10,
+    fontSize: 10, // Tiny
     fontFamily: 'Nunito_400Regular',
   },
   comparisonDetails: {
@@ -3310,7 +3643,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   comparisonMetricLabel: {
-    fontSize: 11,
+    fontSize: 10, // Tiny // Tiny - sehr kleine Details
     fontFamily: 'Nunito_500Medium',
     marginBottom: 4,
   },
@@ -3326,7 +3659,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   comparisonMetricValue: {
-    fontSize: 10,
+    fontSize: 10, // Tiny
     fontFamily: 'Nunito_600SemiBold',
     textAlign: 'right',
   },
@@ -3353,8 +3686,8 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_600SemiBold',
     marginBottom: 6,
   },
-  ingredientsText: {
-    fontSize: 11,
+  ingredientsTextOld: {
+    fontSize: 10, // Tiny // Tiny - sehr kleine Details
     lineHeight: 16,
     fontFamily: 'Nunito_400Regular',
   },
@@ -3394,7 +3727,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   nutrientVs: {
-    fontSize: 10,
+    fontSize: 10, // Tiny
     fontFamily: 'Nunito_400Regular',
     color: '#999',
   },
@@ -3430,37 +3763,78 @@ const styles = StyleSheet.create({
   // Neue Details Sheet Styles
   detailCard: {
     borderRadius: 12,
-    marginVertical: 8,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
+    marginVertical: 2,
+    paddingVertical: 12, // Mehr vertikaler Raum
+    paddingHorizontal: 20, // Noch mehr horizontaler Content-Raum
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  cardHeader: {
-    marginBottom: 12,
+  comparisonHeader: {
+    borderRadius: 12,
+    marginVertical: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  comparisonHeaderTitle: {
+    fontSize: 16,
+    fontFamily: 'Nunito_600SemiBold',
+    lineHeight: 18,
+    marginBottom: 2,
+  },
+  comparisonHeaderSubtitle: {
+    fontSize: 14,
+    fontFamily: 'Nunito_400Regular',
+    lineHeight: 16,
+  },
+  productHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
     position: 'relative',
+    paddingHorizontal: 0, // Kein Padding - bündig mit Content darunter
+  },
+  productHeaderInfo: {
+    flex: 1,
+    marginLeft: 16, // Mehr Abstand zum größeren Bild
+  },
+  comparisonProductImage: {
+    width: 60, // Größer für bessere Platzausnutzung
+    height: 60,
+    borderRadius: 8,
   },
   cardTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 4,
+    lineHeight: 18,
+    marginBottom: 2,
   },
   cardSubtitle: {
-    fontSize: 16,
+    fontSize: 12, // Small - sekundäre Info
     fontFamily: 'Nunito_400Regular',
-    marginBottom: 8,
+    lineHeight: 14,
+    marginBottom: 0,
   },
 
+  similaritySection: {
+    marginTop: 8, // Mehr Abstand zur Sektion darüber
+    gap: 4,       // Weniger Abstand zwischen similarity rows
+    paddingHorizontal: 0, // Kein Padding - bündig mit anderen Elementen
+  },
   similarityRow: {
-    marginBottom: 8,
+    marginBottom: 1, // Bars näher an Text
   },
   progressBarContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: 1, // Näher an den Text
     gap: 8,
   },
   progressBarBackground: {
@@ -3475,9 +3849,125 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   progressBarText: {
-    fontSize: 12,
+    fontSize: 12, // Small - Progress Werte
     fontFamily: 'Nunito_600SemiBold',
     minWidth: 35,
     textAlign: 'right',
+  },
+  
+  // Nutrition Section Styles (kompakt wie im Screenshot)
+  nutritionSection: {
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  sectionHeaderWithIcon: {
+    fontSize: 14, // Medium - Standard Labels
+    fontFamily: 'Nunito_600SemiBold',
+    marginBottom: 0, // Kein marginBottom für perfekte Zentrierung
+    lineHeight: 16,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+    minHeight: 16, // Mindesthöhe für konsistente Ausrichtung
+  },
+  sectionHeaderWithIconContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6, // Weniger Gap für bessere Optik
+    height: 16, // Feste Höhe für perfekte Ausrichtung
+  },
+  nutritionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  nutritionLabel: {
+    fontSize: 12, // Small - Nährwerte Labels
+    fontFamily: 'Nunito_500Medium',
+    lineHeight: 14,
+    flex: 1,
+  },
+  nutritionValue: {
+    fontSize: 12, // Small - Nährwerte Werte
+    fontFamily: 'Nunito_400Regular',
+    lineHeight: 14,
+    textAlign: 'right',
+    flex: 1,
+  },
+  ingredientsText: {
+    fontSize: 12, // Small - Zutaten Text
+    fontFamily: 'Nunito_400Regular',
+    lineHeight: 14,
+    marginTop: 2,
+  },
+  
+  // Wanderapp Styles - Horizontal Icons ohne Textlabels
+  wanderappDataRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between', // Gleichmäßige Verteilung über volle Breite
+    paddingVertical: 10,
+    paddingHorizontal: 0,
+    width: '100%',
+  },
+  wanderappDataItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 1, // Kann schrumpfen wenn nötig
+    flexGrow: 0,   // Wächst nicht über natürliche Größe
+  },
+  wanderappDataValue: {
+    fontSize: 12, // Small - Daten Werte
+    fontFamily: 'Nunito_500Medium',
+    lineHeight: 14,
+  },
+  
+  // Spezielle Styles für Markenprodukt
+  wanderappDataRowBrand: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between', // Gleichmäßige Verteilung über volle Breite
+    paddingVertical: 10,
+    paddingHorizontal: 0,
+    width: '100%',
+  },
+  wanderappDataItemBrand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 1, // Kann schrumpfen wenn nötig
+    flexGrow: 0,   // Wächst nicht über natürliche Größe
+  },
+  wanderappDataItemBrandCategory: {
+    flexDirection: 'row',
+    alignItems: 'flex-start', // Icon oben ausrichten
+    gap: 6,
+    flexShrink: 1, // Kann schrumpfen wenn nötig
+    flexGrow: 0,   // Wächst NICHT - gleich wie andere Items
+  },
+  
+  // Modal Subtitle Style
+  modalSubtitle: {
+    fontSize: 14,
+    fontFamily: 'Nunito_400Regular',
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  
+  // Similarity Info Styles
+  similarityRowHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  similarityInfoIcon: {
+    padding: 4,
+    marginLeft: 8,
   },
 });

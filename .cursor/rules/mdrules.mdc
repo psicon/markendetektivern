@@ -86,6 +86,12 @@ Die Gestaltung soll sich an gängigen Food-Einkaufs-Apps orientieren, damit sich
 - PRIMARY FONT: Nunito (Hauptschrift für Überschriften, Buttons, wichtige Texte)
 - SECONDARY FONT: Lato (Sekundärschrift für Fließtext, Labels, Untertitel)
 - Keine anderen Fonts erlaubt! Nur Nunito und Lato verwenden.
+
+*Schriftgrößen-Hierarchie (maximal 4 Größen verwenden):
+- 16px (Large): Nur für wichtigste Elemente - Produkttitel, Modal-Überschriften, Wichtige Header
+- 14px (Medium): Standard Labels - Sektions-Header ("Nährwerte", "Zutaten"), Modal-Untertitel  
+- 12px (Small): Hauptcontent - Alle Daten-Werte, Info-Labels und -Values, Produktinfos, Nährwerte und Zutaten, Progress-Bar Zahlen
+- 10px (Tiny): Nur Details - Badges, sehr kleine Zusatzinfos
 Kernfeatures, für die ein UI benötigt wird:
 *Startseite mit prominenter Suche
 *Suchergebnisseite (vergleichend)

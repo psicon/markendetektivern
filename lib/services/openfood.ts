@@ -143,13 +143,22 @@ class OpenFoodService {
 
     const nutrition = [];
 
+    // 1. Energie - bevorzuge kcal, fallback auf kJ
     if (nutriments['energy-kcal_100g']) {
       nutrition.push({
         label: 'Energie',
         value: `${Math.round(nutriments['energy-kcal_100g'])} kcal`
       });
+    } else if (nutriments.energy_100g) {
+      // Konvertiere kJ zu kcal (1 kcal = 4.184 kJ)
+      const kcal = Math.round(nutriments.energy_100g / 4.184);
+      nutrition.push({
+        label: 'Energie',
+        value: `${kcal} kcal`
+      });
     }
 
+    // 2. Fett
     if (nutriments.fat_100g !== undefined) {
       nutrition.push({
         label: 'Fett',
@@ -157,13 +166,7 @@ class OpenFoodService {
       });
     }
 
-    if (nutriments['saturated-fat_100g'] !== undefined) {
-      nutrition.push({
-        label: 'davon gesättigte Fettsäuren',
-        value: `${nutriments['saturated-fat_100g'].toFixed(1)} g`
-      });
-    }
-
+    // 3. Kohlenhydrate
     if (nutriments.carbohydrates_100g !== undefined) {
       nutrition.push({
         label: 'Kohlenhydrate',
@@ -171,31 +174,11 @@ class OpenFoodService {
       });
     }
 
+    // 4. Zucker
     if (nutriments.sugars_100g !== undefined) {
       nutrition.push({
-        label: 'davon Zucker',
+        label: 'Zucker',
         value: `${nutriments.sugars_100g.toFixed(1)} g`
-      });
-    }
-
-    if (nutriments.fiber_100g !== undefined) {
-      nutrition.push({
-        label: 'Ballaststoffe',
-        value: `${nutriments.fiber_100g.toFixed(1)} g`
-      });
-    }
-
-    if (nutriments.proteins_100g !== undefined) {
-      nutrition.push({
-        label: 'Eiweiß',
-        value: `${nutriments.proteins_100g.toFixed(1)} g`
-      });
-    }
-
-    if (nutriments.salt_100g !== undefined) {
-      nutrition.push({
-        label: 'Salz',
-        value: `${nutriments.salt_100g.toFixed(1)} g`
       });
     }
 
