@@ -555,7 +555,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Nunito_600SemiBold',
     color: 'white',
-    marginBottom: 1,
+    marginBottom: 0,
     lineHeight: 18,
   },
   levelSubtitle: {

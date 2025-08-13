@@ -5,6 +5,7 @@ import { getStufenColor, getStufenDescription, getStufenTitle } from '@/constant
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { ingredientSynonyms } from '@/lib/data/ingredientSynonyms';
 import { FirestoreService } from '@/lib/services/firestore';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
 import { MarkenProduktWithDetails, ProductWithDetails } from '@/lib/types/firestore';
@@ -235,9 +236,11 @@ const ProductComparisonContent = ({
 }) => {
   // Similarity Info Modal State
   const [showSimilarityInfo, setShowSimilarityInfo] = useState(false);
+  const [similarityInfoType, setSimilarityInfoType] = useState<'ingredients' | 'nutrition' | 'overall'>('ingredients');
   
   // Handler for showing similarity info
-  const handleShowSimilarityInfo = () => {
+  const handleShowSimilarityInfo = (type: 'ingredients' | 'nutrition' | 'overall' = 'ingredients') => {
+    setSimilarityInfoType(type);
     setShowSimilarityInfo(true);
   };
 
@@ -252,72 +255,179 @@ const ProductComparisonContent = ({
       return 0;
     }
     
-    // Erweiterte Normalisierungsfunktion für Schokoladen-Zutaten
-    const normalizeIngredient = (ingredient: string): string => {
+    // Verwende die umfassende Synonym-Map (500+ Zutaten)
+    console.log('🔍 Synonym-Map geladen:', ingredientSynonyms.size, 'Einträge');
+
+    // Universelle Pattern für automatische Synonym-Erkennung
+    const ingredientPatterns = [
+      // Pulver-Varianten
+      { pattern: /(.+)pulver$/, base: '$1', variants: ['$1pulver', 'getrocknetes $1', '$1extrakt'] },
+      
+      // Öl-Varianten  
+      { pattern: /(.+)öl$/, base: '$1öl', variants: ['$1kernöl', '$1samenöl', 'kaltgepresstes $1öl'] },
+      
+      // Mehl-Varianten
+      { pattern: /(.+)mehl$/, base: '$1mehl', variants: ['$1vollkornmehl', 'type \\d+ $1mehl'] },
+      
+      // Saft-Varianten
+      { pattern: /(.+)saft$/, base: '$1saft', variants: ['$1direktsaft', '$1konzentrat', 'natürlicher $1saft'] },
+      
+      // Essig-Varianten
+      { pattern: /(.+)essig$/, base: '$1essig', variants: ['$1balsamico', '$1weinessig'] },
+      
+      // Nuss-Varianten (automatisch)
+      { pattern: /(.+)nüsse?$/, base: '$1nüsse', variants: ['gemahlene $1nüsse', 'gehackte $1nüsse', '$1kerne'] },
+      
+      // Frucht-Varianten
+      { pattern: /(.+)beeren?$/, base: '$1beeren', variants: ['getrocknete $1beeren', 'tiefgefrorene $1beeren'] },
+    ];
+
+    // MINIMALE Normalisierung - nur technische Bereinigung
+    const cleanIngredient = (ingredient: string): string => {
       return ingredient
         .toLowerCase()
         .trim()
-        // Entferne Prozentangaben und Klammern komplett
-        .replace(/\([^)]*\)/g, '')
-        .replace(/\[[^\]]*\]/g, '')
-        .replace(/\d+[,%\s]*%?/g, '')
-        // Entferne Präfixe wie "Emulgator:", "davon gesättigte" etc.
-        .replace(/^(emulgator:?\s*|natürliches?\s*|künstliches?\s*)/g, '')
-        .replace(/^(davon\s+)/g, '')
-        // Normalisiere Milchprodukte (sehr wichtig für Schokolade!)
-        .replace(/vollmilchpulver/g, 'milchpulver')
-        .replace(/magermilchpulver/g, 'milchpulver')
-        .replace(/süßmolkenpulver/g, 'molkenpulver')
-        .replace(/molkenpulver/g, 'milchpulver') // Molke = auch Milch
-        // Normalisiere Kakao-Varianten
-        .replace(/kakaobutter/g, 'kakao')
-        .replace(/kakaomasse/g, 'kakao')
-        // Normalisiere Fett-Varianten
-        .replace(/butterreinfett(\s*\([^)]*\))?/g, 'butter')
-        // Normalisiere Lecithin-Varianten
-        .replace(/lecithine?\s*(\([^)]*\))?/g, 'lecithin')
-        .replace(/emulgator\s*lecithin/g, 'lecithin')
-        // Normalisiere Nuss-Varianten
-        .replace(/gemahlene\s+haselnüsse/g, 'haselnüsse')
-        .replace(/gehackte\s+haselnüsse/g, 'haselnüsse')
-        .replace(/haselnuss/g, 'haselnüsse')
-        // Normalisiere Vanille-Varianten
-        .replace(/bourbon-?vanilleextrakt/g, 'vanille')
-        .replace(/vanilleextrakt/g, 'vanille')
-        .replace(/vanillearoma/g, 'vanille')
-        .replace(/vanilleschoten/g, 'vanille')
-        // Entferne E-Nummern komplett
-        .replace(/\be\d+[a-z]?\b/g, '')
-        // Entferne weitere Füllwörter
-        .replace(/\b(gemahlene?|gehackte?|getrocknete?|natürliches?|künstliches?|fein|grob)\b/g, '')
-        .replace(/\s+/g, ' ')
+        // Nur technische Bereinigung - KEINE inhaltlichen Änderungen!
+        .replace(/\([^)]*\)/g, '') // Entferne Klammern (Allergene, etc.)
+        .replace(/\[[^\]]*\]/g, '') // Entferne eckige Klammern
+        .replace(/\d+[,%\s]*%?/g, '') // Entferne Prozentangaben
+        .replace(/\s*\*+\s*/g, ' ') // Entferne Sterne
+        .replace(/^(emulgator:?\s*)/g, '') // Entferne "Emulgator:" Präfix
+        .replace(/\be\d+[a-z]?\b/g, '') // Entferne E-Nummern
+        .replace(/\s*-\s*/g, '') // 🔥 KRITISCH: Entferne Bindestriche mit Leerzeichen
+        .replace(/\s+/g, ' ') // Normalisiere Leerzeichen
         .trim();
     };
+
+    // INTELLIGENTE Ähnlichkeits-Erkennung ohne Qualitätsverlust
+    const calculateIngredientSimilarity = (ing1: string, ing2: string): number => {
+      const clean1 = cleanIngredient(ing1);
+      const clean2 = cleanIngredient(ing2);
+      
+
+      
+      // 1. Exakte Übereinstimmung = 100%
+      if (clean1 === clean2) return 100;
+      
+      // 2. Synonym-Check (aus unserer Map) = 95%
+      for (const [baseIngredient, synonyms] of ingredientSynonyms) {
+        const allVariants = [baseIngredient, ...synonyms];
+        if (allVariants.includes(clean1) && allVariants.includes(clean2)) {
+          return 95;
+        }
+      }
+      
+      // 3. ADAPTIVE Pattern-Erkennung für unbekannte Zutaten
+      const adaptivePatterns = [
+        // Öl-Varianten (automatisch)
+        { regex: /(.+)(öl|oil)$/, score: 90 },
+        // Mehl-Varianten
+        { regex: /(.+)(mehl|flour)$/, score: 90 },
+        // Pulver-Varianten  
+        { regex: /(.+)(pulver|powder)$/, score: 90 },
+        // Extrakt-Varianten
+        { regex: /(.+)(extrakt|extract)$/, score: 85 },
+        // Saft-Varianten
+        { regex: /(.+)(saft|juice)$/, score: 85 },
+        // Sauce-Varianten
+        { regex: /(.+)(sauce|soße)$/, score: 85 },
+        // Paste-Varianten
+        { regex: /(.+)(paste|mark)$/, score: 85 },
+      ];
+      
+      for (const pattern of adaptivePatterns) {
+        const match1 = clean1.match(pattern.regex);
+        const match2 = clean2.match(pattern.regex);
+        
+        if (match1 && match2 && match1[1] === match2[1]) {
+          return pattern.score; // Gleiche Basis, verschiedene Form
+        }
+      }
+      
+      // 4. Intelligente Wort-Ähnlichkeit
+      const words1 = clean1.split(/\s+/).filter(w => w.length >= 3);
+      const words2 = clean2.split(/\s+/).filter(w => w.length >= 3);
+      
+      if (words1.length === 0 || words2.length === 0) return 0;
+      
+      // Finde gemeinsame Hauptwörter
+      let commonWords = 0;
+      let totalWords = Math.max(words1.length, words2.length);
+      
+      words1.forEach(word1 => {
+        let bestWordMatch = 0;
+        words2.forEach(word2 => {
+          // Exakte Wort-Übereinstimmung
+          if (word1 === word2) {
+            bestWordMatch = Math.max(bestWordMatch, 1);
+          }
+          // Wort-Ähnlichkeit (für Tippfehler)
+          else if (word1.length >= 4 && word2.length >= 4) {
+            const similarity = calculateWordSimilarity(word1, word2);
+            if (similarity >= 0.8) {
+              bestWordMatch = Math.max(bestWordMatch, similarity);
+            }
+          }
+          // Ein Wort enthält das andere (z.B. "milch" in "vollmilch")
+          else if (word1.length >= 4 && word2.includes(word1)) {
+            bestWordMatch = Math.max(bestWordMatch, 0.8);
+          }
+          else if (word2.length >= 4 && word1.includes(word2)) {
+            bestWordMatch = Math.max(bestWordMatch, 0.8);
+          }
+        });
+        commonWords += bestWordMatch;
+      });
+      
+      return Math.min(90, Math.round((commonWords / totalWords) * 100));
+    };
     
-    // Splitte und normalisiere die Zutaten
+    // Splitte die Zutaten (OHNE aggressive Normalisierung!)
     const main = mainIngredients
       .split(/[,;.]/)
-      .map(normalizeIngredient)
-      .filter(i => i.length > 2)
-      .map(i => i.replace(/^\s+|\s+$/g, '')) // Trim nochmal
-      .filter(i => i.length > 0);
+      .map(i => i.trim())
+      .filter(i => i.length > 2);
       
     const compare = compareIngredients
       .split(/[,;.]/)
-      .map(normalizeIngredient)
-      .filter(i => i.length > 2)
-      .map(i => i.replace(/^\s+|\s+$/g, '')) // Trim nochmal
-      .filter(i => i.length > 0);
+      .map(i => i.trim())
+      .filter(i => i.length > 2);
     
     console.log('Main ingredients normalized:', main);
     console.log('Compare ingredients normalized:', compare);
+    
+    // Spezial-Debug für Joghurt-Fall
+    if (mainIngredients.includes('Magermilch') || compareIngredients.includes('Magermilch')) {
+      console.log('🥛 JOGHURT-DEBUG:');
+      console.log('  Original Main:', mainIngredients);
+      console.log('  Original Compare:', compareIngredients);
+      console.log('  Normalized Main:', main);
+      console.log('  Normalized Compare:', compare);
+    }
     
     if (main.length === 0 || compare.length === 0) {
       console.log('❌ No valid ingredients found');
       return 0;
     }
     
-    // Erweiterte Matching-Logik
+
+
+    // Hilfsfunktion: Berechnet Wort-Ähnlichkeit (vereinfachte Levenshtein)
+    const calculateWordSimilarity = (word1: string, word2: string): number => {
+      const maxLength = Math.max(word1.length, word2.length);
+      if (maxLength === 0) return 1;
+      
+      let matches = 0;
+      const minLength = Math.min(word1.length, word2.length);
+      
+      for (let i = 0; i < minLength; i++) {
+        if (word1[i] === word2[i]) matches++;
+      }
+      
+      return matches / maxLength;
+    };
+
+    // NEUE intelligente Matching-Logik
     const matches = new Set();
     const usedCompareIndices = new Set();
     
@@ -329,36 +439,10 @@ const ProductComparisonContent = ({
       compare.forEach((compareIngredient, compareIndex) => {
         if (usedCompareIndices.has(compareIndex)) return;
         
-        let score = 0;
+        // Verwende die neue intelligente Ähnlichkeits-Funktion
+        const score = calculateIngredientSimilarity(mainIngredient, compareIngredient);
         
-        // 1. Exact match = 100 Punkte
-        if (mainIngredient === compareIngredient) {
-          score = 100;
-        }
-        // 2. Einer enthält den anderen komplett = 90 Punkte
-        else if (mainIngredient.includes(compareIngredient) || compareIngredient.includes(mainIngredient)) {
-          score = 90;
-        }
-        // 3. Ähnliche Hauptwörter (mindestens 4 Zeichen) = 80 Punkte
-        else {
-          const mainWords = mainIngredient.split(/\s+/).filter(w => w.length >= 4);
-          const compareWords = compareIngredient.split(/\s+/).filter(w => w.length >= 4);
-          
-          let wordMatches = 0;
-          mainWords.forEach(mainWord => {
-            compareWords.forEach(compareWord => {
-              if (mainWord === compareWord || mainWord.includes(compareWord) || compareWord.includes(mainWord)) {
-                wordMatches++;
-              }
-            });
-          });
-          
-          if (wordMatches > 0) {
-            score = Math.min(80, (wordMatches / Math.max(mainWords.length, compareWords.length)) * 80);
-          }
-        }
-        
-        if (score > bestScore && score >= 80) { // Mindestens 80% Übereinstimmung
+        if (score > bestScore && score >= 70) { // Mindestens 70% Ähnlichkeit
           bestScore = score;
           bestMatch = compareIngredient;
           bestCompareIndex = compareIndex;
@@ -368,7 +452,15 @@ const ProductComparisonContent = ({
       if (bestMatch) {
         matches.add(mainIngredient);
         usedCompareIndices.add(bestCompareIndex);
-        console.log(`✅ Match: "${mainIngredient}" → "${bestMatch}" (${bestScore}%)`);
+        
+        // Detailliertes Logging
+        let matchType = '';
+        if (bestScore === 100) matchType = 'EXACT';
+        else if (bestScore === 95) matchType = 'SYNONYM';
+        else if (bestScore >= 80) matchType = 'SIMILAR';
+        else matchType = 'PARTIAL';
+        
+        console.log(`✅ ${matchType}: "${mainIngredient}" → "${bestMatch}" (${bestScore}%)`);
       } else {
         console.log(`❌ No match for: "${mainIngredient}"`);
       }
@@ -384,16 +476,17 @@ const ProductComparisonContent = ({
     return similarity;
   };
 
-  // Nährwert-Ähnlichkeitsberechnung (nur die 4 wichtigsten Werte)
+  // Nährwert-Ähnlichkeitsberechnung (die 5 wichtigsten Werte)
   const calculateNutritionSimilarity = (mainNutrition: any, compareNutrition: any): number => {
     if (!mainNutrition || !compareNutrition) return 0;
     
-    // Nur die 4 wichtigsten Nährwerte für Vergleich
+    // Die 5 wichtigsten Nährwerte für Vergleich
     const nutrients = [
-      { key: 'energy-kcal_100g', fallback: 'energy_100g', factor: 4.184 }, // Energie (kcal oder kJ->kcal)
-      { key: 'fat_100g' },                    // Fett
-      { key: 'carbohydrates_100g' },          // Kohlenhydrate  
-      { key: 'sugars_100g' }                  // Zucker
+      { key: 'energy-kcal_100g', fallback: 'energy_100g', factor: 4.184, name: 'Energie' }, // Energie (kcal oder kJ->kcal)
+      { key: 'fat_100g', name: 'Fett' },                    // Fett
+      { key: 'carbohydrates_100g', name: 'Kohlenhydrate' },          // Kohlenhydrate  
+      { key: 'sugars_100g', name: 'Zucker' },                  // Zucker
+      { key: 'proteins_100g', name: 'Eiweiß' }               // Eiweiß
     ];
     
     let totalDifference = 0;
@@ -412,7 +505,16 @@ const ProductComparisonContent = ({
       }
       
       if (mainValue !== undefined && compareValue !== undefined && mainValue > 0) {
-        const difference = Math.abs(mainValue - compareValue) / mainValue;
+        // 🔥 INTELLIGENTE BERECHNUNG: Bei sehr kleinen Werten (< 1) verwende absolute Differenz statt relative
+        let difference;
+        if (mainValue < 1 && compareValue < 1) {
+          // Bei Werten < 1g: Absolute Differenz, max 1.0 (100%)
+          difference = Math.min(1.0, Math.abs(mainValue - compareValue));
+        } else {
+          // Bei größeren Werten: Relative Differenz wie bisher
+          difference = Math.abs(mainValue - compareValue) / mainValue;
+        }
+        
         totalDifference += difference;
         validComparisons++;
       }
@@ -462,10 +564,10 @@ const ProductComparisonContent = ({
       productOpenFood?.nutriments
     );
     
-    // Gewichteter Durchschnitt: Zutaten 60%, Nährwerte 40% (ohne Qualität)
+    // Gewichteter Durchschnitt: Nährwerte 60%, Zutaten 40% (Nährwerte objektiver)
     const overall = Math.round(
-      (ingredientSimilarity * 0.6) + 
-      (nutritionSimilarity * 0.4)
+      (ingredientSimilarity * 0.4) + 
+      (nutritionSimilarity * 0.6)
     );
     
     console.log(`📊 Final similarity scores - Ingredients: ${ingredientSimilarity}%, Nutrition: ${nutritionSimilarity}%, Overall: ${overall}%`);
@@ -545,7 +647,6 @@ const ProductComparisonContent = ({
                 Nährwerte
               </ThemedText>
             </View>
-            <IconSymbol name="info.circle" size={14} color={colors.icon} />
           </View>
           {(() => {
             const mainEAN = mainProduct.EANs?.[0] || mainProduct.gtin;
@@ -605,14 +706,25 @@ const ProductComparisonContent = ({
                 </ThemedText>
               </View>
               
-              {/* Ähnlichkeits-Badge */}
-              <View style={[
-                styles.similarityBadge, 
-                { backgroundColor: similarity.overall >= 70 ? colors.success : similarity.overall >= 50 ? colors.warning : colors.error }
-              ]}>
-                <ThemedText style={styles.similarityNumber}>
+              {/* Ähnlichkeits-Anzeige */}
+              <View style={styles.similarityIndicator}>
+                <IconSymbol 
+                  name="arrow.left.arrow.right" 
+                  size={14} 
+                  color={similarity.overall >= 70 ? colors.success : similarity.overall >= 50 ? colors.warning : colors.error} 
+                />
+                <ThemedText style={[
+                  styles.similarityText,
+                  { color: similarity.overall >= 70 ? colors.success : similarity.overall >= 50 ? colors.warning : colors.error }
+                ]}>
                   {similarity.overall}%
                 </ThemedText>
+                <TouchableOpacity 
+                  onPress={() => handleShowSimilarityInfo('overall')}
+                  style={styles.infoIconButton}
+                >
+                  <IconSymbol name="info.circle" size={14} color={colors.icon} />
+                </TouchableOpacity>
               </View>
             </View>
             
@@ -659,7 +771,7 @@ const ProductComparisonContent = ({
                 <View style={styles.similarityRowHeader}>
                   <ThemedText style={styles.infoLabel}>Zutaten-Ähnlichkeit</ThemedText>
                   <TouchableOpacity 
-                    onPress={() => handleShowSimilarityInfo()}
+                    onPress={() => handleShowSimilarityInfo('ingredients')}
                     style={styles.similarityInfoIcon}
                   >
                     <IconSymbol name="info.circle" size={14} color={colors.icon} />
@@ -687,7 +799,7 @@ const ProductComparisonContent = ({
                 <View style={styles.similarityRowHeader}>
                   <ThemedText style={styles.infoLabel}>Nährwert-Ähnlichkeit</ThemedText>
                   <TouchableOpacity 
-                    onPress={() => handleShowSimilarityInfo()}
+                    onPress={() => handleShowSimilarityInfo('nutrition')}
                     style={styles.similarityInfoIcon}
                   >
                     <IconSymbol name="info.circle" size={14} color={colors.icon} />
@@ -723,7 +835,6 @@ const ProductComparisonContent = ({
                     Nährwerte
                   </ThemedText>
                 </View>
-                <IconSymbol name="info.circle" size={14} color={colors.icon} />
               </View>
               {(() => {
                 const nutrition = OpenFoodService.formatNutrition(productOpenFood?.nutriments);
@@ -783,11 +894,9 @@ const ProductComparisonContent = ({
               </TouchableOpacity>
               <View style={styles.titleSection}>
                 <ThemedText style={styles.bottomSheetTitle}>
-                  Info
+                  Berechnung
                 </ThemedText>
-                <ThemedText style={[styles.bottomSheetSubtitle, { color: colors.primary }]}>
-                  Wie wird die Ähnlichkeit berechnet?
-                </ThemedText>
+           
               </View>
               <View style={styles.spacer} />
             </View>
@@ -795,7 +904,38 @@ const ProductComparisonContent = ({
 
           {/* Content */}
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-            {/* Zutaten-Ähnlichkeit Card */}
+            {/* Gesamt-Ähnlichkeit Card - immer anzeigen */}
+              <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
+                <View style={styles.infoCardHeader}>
+                  <View style={styles.infoCardIconContainer}>
+                    <IconSymbol name="arrow.left.arrow.right" size={24} color={colors.primary} />
+                  </View>
+                  <ThemedText style={styles.infoCardTitle}>Gesamt-Ähnlichkeit</ThemedText>
+                </View>
+                
+                <View style={styles.infoCardContent}>
+                  <ThemedText style={[styles.infoCardDescription, { color: colors.icon }]}>
+                    Die Gesamt-Ähnlichkeit kombiniert Zutaten und Nährwerte zu einer einzigen Bewertung. So siehst du auf einen Blick, wie ähnlich zwei Produkte wirklich sind.
+                  </ThemedText>
+                  
+                  <View style={styles.infoCardDivider} />
+                  
+                  <View style={styles.infoCardSubSection}>
+                    <View style={styles.infoCardSubHeader}>
+                      <IconSymbol name="percent" size={16} color={colors.primary} />
+                      <ThemedText style={styles.infoCardSubTitle}>So berechnen wir</ThemedText>
+                    </View>
+                    <ThemedText style={[styles.infoCardSubDescription, { color: colors.icon }]}>
+                      • Nährwert-Ähnlichkeit: 60% Gewichtung (objektiver){'\n'}
+                      • Zutaten-Ähnlichkeit: 40% Gewichtung{'\n'}
+                      • Ergebnis: Ein Wert zwischen 0% und 100%{'\n'}
+                      • Je höher, desto ähnlicher sind die Produkte
+                    </ThemedText>
+                  </View>
+                </View>
+              </View>
+
+            {/* Zutaten-Ähnlichkeit Card - immer anzeigen */}
             <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
               <View style={styles.infoCardHeader}>
                 <View style={styles.infoCardIconContainer}>
@@ -806,7 +946,7 @@ const ProductComparisonContent = ({
               
               <View style={styles.infoCardContent}>
                 <ThemedText style={[styles.infoCardDescription, { color: colors.icon }]}>
-                  Die Zutaten werden normalisiert und verglichen. Dabei werden ähnliche Zutaten zusammengefasst und die Übereinstimmung in Prozent berechnet.
+                  Wir vergleichen die Zutatenlisten und schauen, wie ähnlich sie sind. Dabei erkennt unser System auch Synonyme und verschiedene Schreibweisen.
                 </ThemedText>
                 
                 <View style={styles.infoCardDivider} />
@@ -814,16 +954,21 @@ const ProductComparisonContent = ({
                 <View style={styles.infoCardSubSection}>
                   <View style={styles.infoCardSubHeader}>
                     <IconSymbol name="gear" size={16} color={colors.primary} />
-                    <ThemedText style={styles.infoCardSubTitle}>Normalisierung</ThemedText>
+                    <ThemedText style={styles.infoCardSubTitle}>So funktioniert's</ThemedText>
                   </View>
                   <ThemedText style={[styles.infoCardSubDescription, { color: colors.icon }]}>
-                    Intelligente Normalisierung: &quot;Vollmilchpulver&quot; → &quot;Milchpulver&quot;, &quot;Kakaobutter&quot; → &quot;Kakao&quot;, etc.
+                    • Identische Zutaten = 100% (z.B. &quot;Zucker&quot; = &quot;Zucker&quot;){'\n'}
+                    • Gleicher Inhalt, andere Namen (z.B. &quot;Zucker&quot; = &quot;Saccharose&quot;) = 100%{'\n'}
+                    • Verwandte Zutaten = 85-95% (z.B. &quot;Sonnenblumenöl&quot; ≈ &quot;Rapsöl&quot;){'\n'}
+                    • Ähnliche Begriffe = 70-90%{'\n'}
+                    • Qualität wird respektiert: &quot;Vanilleschoten&quot; ≠ &quot;Vanillearoma&quot;
                   </ThemedText>
                 </View>
               </View>
             </View>
 
-            {/* Nährwert-Ähnlichkeit Card */}
+
+            {/* Nährwert-Ähnlichkeit Card - immer anzeigen */}
             <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
               <View style={styles.infoCardHeader}>
                 <View style={styles.infoCardIconContainer}>
@@ -834,7 +979,7 @@ const ProductComparisonContent = ({
               
               <View style={styles.infoCardContent}>
                 <ThemedText style={[styles.infoCardDescription, { color: colors.icon }]}>
-                  Verglichen werden die 4 wichtigsten Nährwerte: Energie (kcal), Fett, Kohlenhydrate und Zucker. Die Ähnlichkeit ergibt sich aus den prozentualen Abweichungen.
+                  Wir vergleichen die 5 wichtigsten Nährwerte: Kalorien, Fett, Kohlenhydrate, Zucker und Eiweiß. Je ähnlicher die Werte, desto höher die Prozentangabe.
                 </ThemedText>
                 
                 <View style={styles.infoCardDivider} />
@@ -842,16 +987,18 @@ const ProductComparisonContent = ({
                 <View style={styles.infoCardSubSection}>
                   <View style={styles.infoCardSubHeader}>
                     <IconSymbol name="info.circle" size={16} color={colors.primary} />
-                    <ThemedText style={styles.infoCardSubTitle}>Bewertungskriterien</ThemedText>
+                    <ThemedText style={styles.infoCardSubTitle}>So rechnen wir</ThemedText>
                   </View>
                   <ThemedText style={[styles.infoCardSubDescription, { color: colors.icon }]}>
-                    • Energie bevorzugt in kcal (kJ automatisch umgerechnet){'\n'}
-                    • Alle Werte pro 100g normalisiert{'\n'}
-                    • Kleinere Abweichungen = höhere Ähnlichkeit
+                    • Alle Werte werden auf 100g umgerechnet{'\n'}
+                    • Bei kleinen Werten (&lt;1g) schauen wir auf den absoluten Unterschied{'\n'}
+                    • Bei großen Werten schauen wir auf den prozentualen Unterschied{'\n'}
+                    • So werden kleine Unterschiede nicht überbewertet
                   </ThemedText>
                 </View>
               </View>
             </View>
+            )}
           </ScrollView>
         </View>
       </Modal>
@@ -1034,16 +1181,8 @@ export default function ProductComparisonScreen() {
 
   // Header-Optionen sofort setzen mit useLayoutEffect
   useLayoutEffect(() => {
-    // Produktnamen für Header sammeln - nur wenn Daten verfügbar sind
-    const headerTitle = selectedProducts.size > 0 && comparisonData?.mainProduct && comparisonData?.relatedNoNameProducts?.length > 0
-      ? `${comparisonData.mainProduct.name || 'Markenprodukt'} vs. ${Array.from(selectedProducts).map(id => {
-          const product = comparisonData.relatedNoNameProducts.find((p: any) => p.id === id);
-          return product?.name || 'NoName';
-        }).join(' & ')}`
-      : 'Produktvergleich';
-      
     navigation.setOptions({
-      title: headerTitle.length > 30 ? 'Produktvergleich' : headerTitle,
+      title: 'Produktvergleich',
       headerStyle: { 
         backgroundColor: colors.primary,
         borderBottomWidth: 0,
@@ -1114,7 +1253,7 @@ export default function ProductComparisonScreen() {
         </TouchableOpacity>
       ) : undefined,
     });
-  }, [navigation, router, colors.primary, colors.warning, selectedProducts, comparisonData]);
+  }, [navigation, router, colors.primary, colors.warning, selectedProducts]);
 
 
   // Load product comparison data from Firestore
@@ -2683,8 +2822,7 @@ const styles = StyleSheet.create({
 
   // Product Card (shared by main and alternatives)
   productCard: {
-    margin: 16,
-    marginBottom: 8,
+    marginVertical: 8,
     borderRadius: 16,
     padding: 12,
     shadowColor: '#000',
@@ -2915,7 +3053,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_700Bold',
     marginBottom: 0, // Reduziert von 6 auf 3px
     marginTop: 12,   // Reduziert von 32 auf 16px für weniger Abstand
-    marginLeft: 16,
+    marginLeft: 0,
   },
 
   // Regional Info Card
@@ -3064,15 +3202,17 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 16,
   },
-  similarityBadge: {
+  similarityIndicator: {
     position: 'absolute',
     top: 0,
     right: 0,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 10,
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
+  },
+  similarityText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_600SemiBold',
   },
   similarityNumber: {
     color: 'white',
@@ -3825,7 +3965,7 @@ const styles = StyleSheet.create({
 
   similaritySection: {
     marginTop: 8, // Mehr Abstand zur Sektion darüber
-    gap: 4,       // Weniger Abstand zwischen similarity rows
+    gap: 2,       // Weniger Abstand zwischen similarity rows
     paddingHorizontal: 0, // Kein Padding - bündig mit anderen Elementen
   },
   similarityRow: {
@@ -3834,8 +3974,8 @@ const styles = StyleSheet.create({
   progressBarContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 1, // Näher an den Text
-    gap: 8,
+    marginTop: 0, // Noch näher an den Text
+    gap: 2,
   },
   progressBarBackground: {
     flex: 1,
@@ -3964,10 +4104,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    marginBottom: 1,
   },
   similarityInfoIcon: {
-    padding: 4,
-    marginLeft: 8,
+    padding: 2,
+    marginLeft: 0,
+    marginRight: -2,
+  },
+  infoIconButton: {
+    padding: 2,
+    marginLeft: 4,
   },
 });
