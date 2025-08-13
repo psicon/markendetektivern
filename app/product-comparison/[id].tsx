@@ -998,7 +998,6 @@ const ProductComparisonContent = ({
                 </View>
               </View>
             </View>
-            )}
           </ScrollView>
         </View>
       </Modal>
