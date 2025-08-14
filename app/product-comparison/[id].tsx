@@ -61,7 +61,7 @@ const getSavingsDisplay = (brandProduct: any, noNameProduct: any, colors: any) =
     return {
       text: `-${savings}%`,
       color: colors.success,
-      icon: "star.fill"
+      icon: "tag.fill"
     };
   } else if (savings < 0) {
     // Mehrkosten: rot mit Plus-Zeichen
@@ -221,7 +221,8 @@ const ProductComparisonContent = ({
   selectedProducts, 
   openFoodData, 
   colors,
-  comparisonData
+  comparisonData,
+  productAnimations
 }: { 
   mainProduct: MarkenProduktWithDetails;
   selectedProducts: ProductWithDetails[];
@@ -233,6 +234,7 @@ const ProductComparisonContent = ({
     clickedProductId: string;
     clickedWasNoName: boolean;
   } | null;
+  productAnimations: {[key: string]: Animated.Value};
 }) => {
   // Similarity Info Modal State
   const [showSimilarityInfo, setShowSimilarityInfo] = useState(false);
@@ -594,7 +596,15 @@ const ProductComparisonContent = ({
   return (
     <ScrollView style={{ flex: 1, paddingHorizontal: 2 }}>
       {/* Markenprodukt - Details Sheet Stil */}
-      <View style={[styles.detailCard, { backgroundColor: colors.cardBackground }]}>
+      <Animated.View 
+        style={[
+          styles.detailCard, 
+          { 
+            backgroundColor: colors.cardBackground,
+            opacity: productAnimations[mainProduct.id] || 0 // ✨ Animation für Brand-Produkt
+          }
+        ]}
+      >
         {/* Header mit Produktbild */}
         <View style={styles.productHeader}>
           <Image 
@@ -681,7 +691,7 @@ const ProductComparisonContent = ({
             })()}
           </ThemedText>
         </View>
-      </View>
+      </Animated.View>
 
       {/* Vergleichsprodukte - Details Sheet Stil */}
       {selectedProducts.map((product, index) => {
@@ -690,7 +700,17 @@ const ProductComparisonContent = ({
         const productOpenFood = openFoodData.get(productEAN || '');
         
         return (
-          <View key={product.id} style={[styles.detailCard, { backgroundColor: colors.cardBackground, marginTop: 12 }]}>
+          <Animated.View 
+            key={product.id} 
+            style={[
+              styles.detailCard, 
+              { 
+                backgroundColor: colors.cardBackground, 
+                marginTop: 12,
+                opacity: productAnimations[product.id] || 0 // ✨ Animation
+              }
+            ]}
+          >
             {/* Header mit Produktbild */}
             <View style={styles.productHeader}>
               <Image 
@@ -865,7 +885,7 @@ const ProductComparisonContent = ({
                 })()}
               </ThemedText>
             </View>
-          </View>
+          </Animated.View>
         );
       })}
       
@@ -1030,7 +1050,7 @@ export default function ProductComparisonScreen() {
   const [showProductDetails, setShowProductDetails] = useState(false);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [showRatingsView, setShowRatingsView] = useState(false);
-  const [showRegionalInfo, setShowRegionalInfo] = useState(false);
+
 
   // Rating form states
   const [overallRating, setOverallRating] = useState(0);
@@ -1040,7 +1060,24 @@ export default function ProductComparisonScreen() {
   const [comment, setComment] = useState('');
   const [isSubmittingRating, setIsSubmittingRating] = useState(false);
   
+  // Animation States für sanftes Einblenden der Produktkarten
+  const [productAnimations, setProductAnimations] = useState<{[key: string]: Animated.Value}>({});
 
+  // Sanfte Animation für Produktkarten
+  const animateProductCard = (productId: string, delay: number = 0) => {
+    if (!productAnimations[productId]) {
+      const newOpacity = new Animated.Value(0);
+      setProductAnimations(prev => ({ ...prev, [productId]: newOpacity }));
+      
+      setTimeout(() => {
+        Animated.timing(newOpacity, {
+          toValue: 1,
+          duration: 400, // Etwas länger als bei Märkten für eleganten Effekt
+          useNativeDriver: true,
+        }).start();
+      }, delay);
+    }
+  };
 
   // Submit rating function for productRatings table
   const submitRating = async () => {
@@ -1164,6 +1201,20 @@ export default function ProductComparisonScreen() {
   // Product Selection States für Vergleichsfunktion
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const [showComparisonSheet, setShowComparisonSheet] = useState(false);
+
+  // Alle NoName-Produkte standardmäßig auswählen wenn Daten geladen sind
+  useEffect(() => {
+    console.log('🔍 Auto-selection useEffect triggered, comparisonData:', !!comparisonData);
+    if (comparisonData?.relatedNoNameProducts) {
+      console.log('📦 Related NoName products found:', comparisonData.relatedNoNameProducts.length);
+      const allNoNameIds = new Set(comparisonData.relatedNoNameProducts.map(product => product.id));
+      console.log('🎯 Setting selected products:', Array.from(allNoNameIds));
+      setSelectedProducts(allNoNameIds);
+      console.log('✅ Auto-selected all NoName products:', allNoNameIds.size);
+    } else {
+      console.log('❌ No comparisonData or relatedNoNameProducts found');
+    }
+  }, [comparisonData]);
   
   // Toggle product selection
   const toggleProductSelection = (productId: string) => {
@@ -1225,7 +1276,7 @@ export default function ProductComparisonScreen() {
             position: 'relative'
           }}
         >
-          <IconSymbol name="scale.3d" size={24} color="white" />
+          <IconSymbol name="arrow.left.arrow.right" size={24} color="white" />
           {selectedProducts.size > 0 && (
             <View style={{
               position: 'absolute',
@@ -1283,6 +1334,15 @@ export default function ProductComparisonScreen() {
             mainProduct: data.mainProduct.name,
             relatedCount: data.relatedNoNameProducts.length,
             clickedWasNoName: data.clickedWasNoName
+          });
+          
+          // ✨ Triggere sanfte Animationen für Produktkarten
+          // Brand-Produkt sofort animieren
+          animateProductCard(data.mainProduct.id, 100);
+          
+          // NoName-Produkte gestaffelt animieren
+          data.relatedNoNameProducts.forEach((product, index) => {
+            animateProductCard(product.id, 200 + (index * 150));
           });
           
           // Nach dem Laden der Firestore-Daten: OpenFood API aufrufen
@@ -1667,7 +1727,15 @@ export default function ProductComparisonScreen() {
         scrollEventThrottle={16}
       >
         {/* Main Brand Product Section */}
-        <View style={[styles.productCard, { backgroundColor: colors.cardBackground }]}>
+        <Animated.View 
+          style={[
+            styles.productCard, 
+            { 
+              backgroundColor: colors.cardBackground,
+              opacity: productAnimations[comparisonData.mainProduct.id] || 0 // ✨ Animation für Hauptprodukt
+            }
+          ]}
+        >
           {/* Top Chips Row */}
           <View style={styles.chipsRow}>
             <View style={[styles.brandChip, { backgroundColor: colors.primary }]}>
@@ -1791,10 +1859,10 @@ export default function ProductComparisonScreen() {
             </ThemedText>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.cartButton, { backgroundColor: colors.primary }]}>
-              <IconSymbol name="cart" size={20} color="white" />
+              <IconSymbol name="cart.badge.plus" size={20} color="white" />
           </TouchableOpacity>
-          </View>
         </View>
+        </Animated.View>
 
         {/* Alternatives Section */}
         <View style={styles.alternativesContainer}>
@@ -1805,21 +1873,28 @@ export default function ProductComparisonScreen() {
                       {comparisonData.relatedNoNameProducts.map((noNameProduct, index) => {
                 const isSelected = selectedProducts.has(noNameProduct.id);
                 return (
-              <TouchableOpacity
-                key={noNameProduct.id} 
+              <Animated.View
+                key={noNameProduct.id}
                 style={[
-                  styles.productCard, 
-                  { 
-                    backgroundColor: colors.cardBackground,
-                    shadowColor: isSelected ? colors.primary : '#000',
-                    shadowOffset: { width: 0, height: isSelected ? 4 : 2 },
-                    shadowOpacity: isSelected ? 0.3 : 0.1,
-                    shadowRadius: isSelected ? 8 : 4,
-                    elevation: isSelected ? 8 : 3,
+                  {
+                    opacity: productAnimations[noNameProduct.id] || 0 // ✨ Animation
                   }
                 ]}
-                onPress={() => toggleProductSelection(noNameProduct.id)}
-                activeOpacity={0.7}
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.productCard, 
+                    { 
+                      backgroundColor: colors.cardBackground,
+                      shadowColor: isSelected ? colors.primary : '#000',
+                      shadowOffset: { width: 0, height: isSelected ? 4 : 2 },
+                      shadowOpacity: isSelected ? 0.3 : 0.1,
+                      shadowRadius: isSelected ? 8 : 4,
+                      elevation: isSelected ? 8 : 3,
+                    }
+                  ]}
+                  onPress={() => toggleProductSelection(noNameProduct.id)}
+                  activeOpacity={0.7}
               >
                 {/* Alternative Chips Row */}
                 <View style={styles.chipsRow}>
@@ -1922,13 +1997,19 @@ export default function ProductComparisonScreen() {
                   </View>
                       <ThemedText style={[styles.reviewsText, { color: colors.icon }]}>
                         ({noNameProduct.ratingCount || 0})
-                      </ThemedText>
+                    </ThemedText>
                     </TouchableOpacity>
 
-                    </View>
+                  </View>
 
                   {/* Price Section */}
                   <View style={styles.priceSection}>
+                                        <ThemedText style={[styles.mainPrice, { color: colors.icon }]}>
+                      {formatPrice(noNameProduct.preis)}
+                  </ThemedText>
+                    <ThemedText style={[styles.mainWeight, { color: colors.icon }]}>
+                      {getPackageInfo(noNameProduct.packSize, noNameProduct.packTypInfo)}
+                  </ThemedText>
                     <View style={styles.discountRow}>
                       {(() => {
                         const savingsDisplay = getSavingsDisplay(comparisonData.mainProduct, noNameProduct, colors);
@@ -1941,88 +2022,11 @@ export default function ProductComparisonScreen() {
                           </>
                         );
                       })()}
-                    </View>
-                    <ThemedText style={[styles.mainPrice, { color: colors.icon }]}>
-                      {formatPrice(noNameProduct.preis)}
-                  </ThemedText>
-                    <ThemedText style={[styles.mainWeight, { color: colors.icon }]}>
-                      {getPackageInfo(noNameProduct.packSize, noNameProduct.packTypInfo)}
-                  </ThemedText>
-                    </View>
                   </View>
+                  </View>
+                </View>
 
-              {/* Regional Info for first item */}
-              {index === 0 && (
-                <View style={[styles.regionalCard, { backgroundColor: colors.background }]}>
-                  <TouchableOpacity 
-                    style={styles.regionalHeader}
-                    onPress={() => setShowRegionalInfo(!showRegionalInfo)}
-                  >
-                    <IconSymbol name="location" size={18} color={colors.primary} />
-                    <ThemedText style={styles.regionalTitle}>
-                      Regionale Produktinformation
-                    </ThemedText>
-                    <IconSymbol 
-                      name={showRegionalInfo ? "chevron.up" : "chevron.down"} 
-                      size={18} 
-                      color={colors.icon} 
-                    />
-                  </TouchableOpacity>
-                  
-                  {showRegionalInfo && (
-                    <View style={styles.regionalContent}>
-                      {/* Aktuelle Region */}
-                      <View style={styles.regionalRow}>
-                        <View style={styles.regionColumn}>
-                          <IconSymbol name="checkmark" size={12} color={colors.success} />
-                          <ThemedText style={[styles.regionText, { color: colors.text }]}>
-                            Bayern
-                          </ThemedText>
-                </View>
-                        <ThemedText style={[styles.herstellerLabel, { color: colors.icon }]}>
-                          Hersteller:
-                    </ThemedText>
-                        <View style={[styles.stufeChip, { backgroundColor: colors.success }]}>
-                          <IconSymbol name="chart.bar" size={10} color="white" />
-                          <ThemedText style={styles.stufeText}>Stufe4</ThemedText>
-                  </View>
-                      </View>
-                      
-                      <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                      
-                      <ThemedText style={[styles.weitereTitle, { color: colors.text }]}>
-                        Weitere Regionen
-                  </ThemedText>
-                      
-                      {regionalData.slice(1).map((data, regionIndex) => (
-                        <View key={regionIndex} style={styles.regionalRow}>
-                          <View style={styles.regionColumn}>
-                            <ThemedText style={[styles.regionText, { color: colors.text }]}>
-                              {data.region}
-                  </ThemedText>
-                </View>
-                          <ThemedText style={[styles.herstellerLabel, { color: colors.icon }]}>
-                            Hersteller:
-                          </ThemedText>
-                          <View style={[styles.stufeChip, { backgroundColor: colors.success }]}>
-                            <IconSymbol name="chart.bar" size={10} color="white" />
-                            <ThemedText style={styles.stufeText}>Stufe4</ThemedText>
-              </View>
-                        </View>
-                      ))}
-                      
-                      <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                      
-                      {/* Settings Button */}
-                      <View style={styles.settingsContainer}>
-                        <TouchableOpacity style={[styles.settingsButton, { borderColor: colors.border }]}>
-                          <IconSymbol name="gearshape" size={18} color={colors.icon} />
-                        </TouchableOpacity>
-                  </View>
-                  </View>
-                  )}
-                </View>
-              )}
+
 
               {/* Details and Cart Button Row */}
               <View style={styles.actionButtonsRow}>
@@ -2039,10 +2043,11 @@ export default function ProductComparisonScreen() {
                 </ThemedText>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.cartButton, { backgroundColor: colors.primary }]}>
-                  <IconSymbol name="cart" size={20} color="white" />
+                  <IconSymbol name="cart.badge.plus" size={20} color="white" />
                 </TouchableOpacity>
               </View>
               </TouchableOpacity>
+              </Animated.View>
           )
         })}
         </View>
@@ -2092,15 +2097,15 @@ export default function ProductComparisonScreen() {
                          {/* Similarity Section - nur bei NoName-Produkten anzeigen */}
              {(selectedProductForDetails as ProductWithDetails)?.stufe && (
                <View style={[styles.similarityCard, { backgroundColor: colors.cardBackground }]}>
-                 <View style={styles.similarityHeader}>
-                   <View style={[styles.similarityBadge, { backgroundColor: getStufenColor((selectedProductForDetails as ProductWithDetails).stufe!) }]}>
-                     <ThemedText style={styles.similarityNumber}>{(selectedProductForDetails as ProductWithDetails).stufe}</ThemedText>
+                 <View style={styles.similarityHeaderNew}>
+                   <View style={[styles.similarityBadgeRound, { backgroundColor: getStufenColor((selectedProductForDetails as ProductWithDetails).stufe!) }]}>
+                     <ThemedText style={styles.similarityNumberRound}>{(selectedProductForDetails as ProductWithDetails).stufe}</ThemedText>
               </View>
-                   <View style={styles.similarityTextContainer}>
-                     <ThemedText style={styles.similarityTitle}>
+                   <View style={styles.similarityTextContainerNew}>
+                     <ThemedText style={styles.similarityTitleNew}>
                        {getStufenTitle((selectedProductForDetails as ProductWithDetails).stufe!)}
                      </ThemedText>
-                     <ThemedText style={[styles.similarityDescription, { color: colors.icon }]}>
+                     <ThemedText style={[styles.similarityDescriptionNew, { color: colors.icon }]}>
                        {getStufenDescription((selectedProductForDetails as ProductWithDetails).stufe!)}
               </ThemedText>
             </View>
@@ -2712,6 +2717,7 @@ export default function ProductComparisonScreen() {
                 openFoodData={openFoodData}
                 colors={colors}
                 comparisonData={comparisonData}
+                productAnimations={productAnimations}
               />
             )}
           </ScrollView>
@@ -2961,7 +2967,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   discountValue: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
   },
   ratingRow: {
@@ -3016,7 +3022,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginTop: 12,
+    marginTop: 3, // Reduziert von 12 auf 5px (60% weniger)
   },
   detailsButton: {
     flex: 1,
@@ -3055,49 +3061,7 @@ const styles = StyleSheet.create({
     marginLeft: 0,
   },
 
-  // Regional Info Card
-  regionalCard: {
-    marginTop: 8,
-    marginBottom: 8,
-    borderRadius: 12,
-    padding: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  regionalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 4,
-  },
-  regionalTitle: {
-    fontSize: 13,
-    fontFamily: 'Nunito_700Bold',
-    flex: 1,
-  },
-  regionalContent: {
-    marginTop: 8,
-    gap: 6,
-  },
-  regionalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 4,
-    gap: 8,
-  },
-  regionColumn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    minWidth: 70,
-  },
-  regionText: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
+
   herstellerLabel: {
     fontSize: 12,
     flex: 1,
@@ -3200,6 +3164,41 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 16,
+  },
+  // Neue runde Similarity Styles wie Referenz
+  similarityHeaderNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  similarityBadgeRound: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  similarityNumberRound: {
+    color: 'white',
+    fontSize: 18,
+    fontFamily: 'Nunito_700Bold',
+  },
+  similarityTextContainerNew: {
+    flex: 1,
+  },
+  similarityTitleNew: {
+    fontSize: 16,
+    fontFamily: 'Nunito_600SemiBold',
+    marginBottom: 4,
+  },
+  similarityDescriptionNew: {
+    fontSize: 14,
+    lineHeight: 20,
   },
   similarityIndicator: {
     position: 'absolute',

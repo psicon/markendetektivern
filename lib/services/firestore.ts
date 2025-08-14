@@ -3,11 +3,13 @@ import {
     collection,
     doc,
     DocumentReference,
+    getCountFromServer,
     getDoc,
     getDocs,
     limit,
     orderBy,
     query,
+    startAfter,
     where
 } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -51,6 +53,157 @@ export class FirestoreService {
       return produkte;
     } catch (error) {
       console.error('Error fetching latest enttarnte produkte:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Holt NoName-Produkte mit Pagination für lazy loading
+   */
+  static async getNoNameProductsPaginated(
+    pageSize: number = 20,
+    lastDoc?: any,
+    filters?: {
+      categoryFilters?: string[];
+      discounterFilters?: string[];
+      stufeFilters?: number[];
+      priceMin?: number;
+      priceMax?: number;
+      markeFilter?: string; // hersteller_new ID
+    }
+  ): Promise<{
+    products: (FirestoreDocument<Produkte> & {
+      discounter?: Discounter;
+      handelsmarke?: Handelsmarken;
+    })[];
+    lastDoc: any;
+    hasMore: boolean;
+  }> {
+    try {
+      console.log(`🔍 Loading ${pageSize} NoName products...`);
+      const startTime = Date.now();
+      
+      const produkteRef = collection(db, 'produkte');
+      
+      // Check if we have any filters that would require composite indexes
+      const hasFilters = (filters?.categoryFilters && filters.categoryFilters.length > 0) || 
+                        (filters?.discounterFilters && filters.discounterFilters.length > 0) || 
+                        (filters?.stufeFilters && filters.stufeFilters.length > 0) || 
+                        filters?.priceMin !== undefined || 
+                        filters?.priceMax !== undefined;
+      
+      // Start with base query - only add orderBy if no complex filters
+      let q = hasFilters ? 
+        query(produkteRef) : 
+        query(produkteRef, orderBy('name', 'asc'));
+
+      // Add filters if provided
+      if (filters?.categoryFilters && filters.categoryFilters.length > 0) {
+        if (filters.categoryFilters.length === 1) {
+          const categoryRef = doc(db, 'kategorien', filters.categoryFilters[0]);
+          q = query(q, where('kategorie', '==', categoryRef));
+        } else {
+          // Multiple categories - use 'in' query (max 10)
+          const categoryRefs = filters.categoryFilters.slice(0, 10).map(id => doc(db, 'kategorien', id));
+          q = query(q, where('kategorie', 'in', categoryRefs));
+        }
+      }
+      
+      if (filters?.discounterFilters && filters.discounterFilters.length > 0) {
+        if (filters.discounterFilters.length === 1) {
+          const discounterRef = doc(db, 'discounter', filters.discounterFilters[0]);
+          q = query(q, where('discounter', '==', discounterRef));
+        } else {
+          // Multiple discounters - use 'in' query (max 10)
+          const discounterRefs = filters.discounterFilters.slice(0, 10).map(id => doc(db, 'discounter', id));
+          q = query(q, where('discounter', 'in', discounterRefs));
+        }
+      }
+
+      if (filters?.stufeFilters && filters.stufeFilters.length > 0) {
+        if (filters.stufeFilters.length === 1) {
+          q = query(q, where('stufe', '==', filters.stufeFilters[0].toString()));
+        } else {
+          // Multiple stufen - use 'in' query (max 10)
+          const stufeStrings = filters.stufeFilters.slice(0, 10).map(s => s.toString());
+          q = query(q, where('stufe', 'in', stufeStrings));
+        }
+      }
+
+      if (filters?.priceMin !== undefined) {
+        q = query(q, where('preis', '>=', filters.priceMin));
+      }
+
+      if (filters?.priceMax !== undefined) {
+        q = query(q, where('preis', '<=', filters.priceMax));
+      }
+
+      // TODO: Marke-Filter ist komplexer - erstmal deaktiviert wegen Firestore 'in' Limits
+      // if (filters?.markeFilter) {
+      //   const markeRef = doc(db, 'hersteller_new', filters.markeFilter);
+      //   // Erst alle hersteller finden die auf diese marke zeigen
+      //   const herstellerQuery = query(
+      //     collection(db, 'hersteller'),
+      //     where('herstellerref', '==', markeRef)
+      //   );
+      //   const herstellerSnapshot = await getDocs(herstellerQuery);
+      //   
+      //   if (herstellerSnapshot.docs.length > 0) {
+      //     // Dann nach diesen hersteller-IDs filtern
+      //     const herstellerRefs = herstellerSnapshot.docs.map(doc => doc.ref);
+      //     q = query(q, where('hersteller', 'in', herstellerRefs));
+      //   } else {
+      //     // Keine Hersteller gefunden für diese Marke - leeres Ergebnis
+      //     return { products: [], lastDoc: null, hasMore: false };
+      //   }
+      // }
+
+      // Add pagination
+      if (lastDoc) {
+        q = query(q, startAfter(lastDoc));
+      }
+      
+      q = query(q, limit(pageSize));
+
+      const querySnapshot = await getDocs(q);
+      
+      // ✅ Parallel processing für bessere Performance
+      const productPromises = querySnapshot.docs.map(async (docSnap) => {
+        const productData = docSnap.data() as Produkte;
+        const productWithDetails: FirestoreDocument<Produkte> & {
+          discounter?: Discounter;
+          handelsmarke?: Handelsmarken;
+        } = {
+          id: docSnap.id,
+          ...productData
+        };
+
+        // Populate references parallel für UI-Daten
+        const [discounter, handelsmarke] = await Promise.all([
+          this.getDocumentByReference<Discounter>(productData.discounter),
+          this.getDocumentByReference<Handelsmarken>(productData.handelsmarke)
+        ]);
+
+        if (discounter) productWithDetails.discounter = discounter;
+        if (handelsmarke) productWithDetails.handelsmarke = handelsmarke;
+
+        return productWithDetails;
+      });
+      
+      const products = await Promise.all(productPromises);
+      const newLastDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
+      const hasMore = querySnapshot.docs.length === pageSize;
+
+      const endTime = Date.now();
+      console.log(`✅ Loaded ${products.length} NoName products in ${endTime - startTime}ms (with populated refs)`);
+
+      return {
+        products,
+        lastDoc: newLastDoc,
+        hasMore
+      };
+    } catch (error) {
+      console.error('Error fetching paginated NoName products:', error);
       throw error;
     }
   }
@@ -140,6 +293,96 @@ export class FirestoreService {
   }
 
   /**
+   * Holt alle Kategorien für Filter
+   */
+  static async getKategorien(): Promise<FirestoreDocument<Kategorien>[]> {
+    try {
+      const kategorienRef = collection(db, 'kategorien');
+      const q = query(kategorienRef, orderBy('bezeichnung', 'asc'));
+      const querySnapshot = await getDocs(q);
+      
+      const kategorien: FirestoreDocument<Kategorien>[] = [];
+      querySnapshot.forEach((doc) => {
+        kategorien.push({
+          id: doc.id,
+          ...doc.data() as Kategorien
+        });
+      });
+      
+      return kategorien;
+    } catch (error) {
+      console.error('Error fetching kategorien:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Holt alle Marken (hersteller_new) für Filter
+   */
+  static async getMarken(): Promise<FirestoreDocument<HerstellerNew>[]> {
+    try {
+      const markenRef = collection(db, 'hersteller_new');
+      const q = query(markenRef, orderBy('name', 'asc'));
+      const querySnapshot = await getDocs(q);
+      
+      const marken: FirestoreDocument<HerstellerNew>[] = [];
+      querySnapshot.forEach((doc) => {
+        marken.push({
+          id: doc.id,
+          ...doc.data() as HerstellerNew
+        });
+      });
+      
+      return marken;
+    } catch (error) {
+      console.error('Error fetching marken:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Holt alle Discounter/Märkte
+   */
+  static async getDiscounter(): Promise<FirestoreDocument<Discounter>[]> {
+    try {
+      const discounterRef = collection(db, 'discounter');
+      const querySnapshot = await getDocs(discounterRef);
+      const discounter: FirestoreDocument<Discounter>[] = [];
+      
+      querySnapshot.forEach((doc) => {
+        discounter.push({
+          id: doc.id,
+          ...doc.data() as Discounter
+        });
+      });
+      
+      return discounter;
+    } catch (error) {
+      console.error('Error fetching discounter:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Zählt Produkte pro Discounter - OPTIMIERT mit getCountFromServer
+   */
+  static async getProductCountByDiscounter(discounterId: string): Promise<number> {
+    try {
+      const produkteRef = collection(db, 'produkte');
+      const discounterDocRef = doc(db, 'discounter', discounterId);
+      const q = query(produkteRef, where('discounter', '==', discounterDocRef));
+      
+      // ✅ OPTIMIERT: Nutze getCountFromServer statt getDocs
+      // Das lädt KEINE Dokumente, sondern zählt nur serverseitig!
+      const countSnapshot = await getCountFromServer(q);
+      return countSnapshot.data().count;
+    } catch (error) {
+      console.error('Error counting products for discounter:', error);
+      return 0;
+    }
+  }
+
+  /**
    * Holt Produkt mit allen Details (populated references)
    */
   static async getProductWithDetails(productId: string): Promise<ProductWithDetails | null> {
@@ -159,6 +402,9 @@ export class FirestoreService {
       };
 
       // Populate references parallel
+      console.log(`🚀 Loading references for product ${productId}...`);
+      const refStartTime = Date.now();
+      
       const [kategorie, discounter, handelsmarke, hersteller, markenProdukt] = await Promise.all([
         this.getDocumentByReference<Kategorien>(productData.kategorie),
         this.getDocumentByReference<Discounter>(productData.discounter),
@@ -166,6 +412,9 @@ export class FirestoreService {
         this.getDocumentByReference<HerstellerNew>(productData.hersteller),
         this.getDocumentByReference<MarkenProdukte>(productData.markenProdukt)
       ]);
+      
+      const refEndTime = Date.now();
+      console.log(`✅ References loaded in ${refEndTime - refStartTime}ms`);
 
       if (kategorie) productWithDetails.kategorie = kategorie;
       if (discounter) productWithDetails.discounter = discounter;
@@ -298,14 +547,21 @@ export class FirestoreService {
   } | null> {
     try {
       console.log(`🎯 Getting comparison data for ${productId} (${isMarkenProdukt ? 'Brand' : 'NoName'} product)`);
+      const totalStartTime = Date.now();
       
+      let result;
       if (isMarkenProdukt) {
         // CASE 1: Brand product clicked
-        return await this.getBrandProductComparison(productId);
+        result = await this.getBrandProductComparison(productId);
       } else {
         // CASE 2: NoName product clicked  
-        return await this.getNoNameProductComparison(productId);
+        result = await this.getNoNameProductComparison(productId);
       }
+      
+      const totalEndTime = Date.now();
+      console.log(`🏁 Total comparison data loaded in ${totalEndTime - totalStartTime}ms`);
+      
+      return result;
     } catch (error) {
       console.error('Error in getProductComparisonData:', error);
       return null;
@@ -577,17 +833,19 @@ export class FirestoreService {
       const q = query(produkteRef, where('markenProdukt', '==', brandProductRef));
       
       const querySnapshot = await getDocs(q);
-      const relatedProducts: ProductWithDetails[] = [];
       
-      // Process each found NoName product
-      for (const docSnap of querySnapshot.docs) {
+      // ✅ OPTIMIERT: Alle Produkte parallel verarbeiten statt sequenziell
+      console.log(`🚀 Processing ${querySnapshot.docs.length} NoName products in parallel...`);
+      const startTime = Date.now();
+      
+      const productPromises = querySnapshot.docs.map(async (docSnap) => {
         const productData = docSnap.data() as Produkte;
         const productWithDetails: ProductWithDetails = {
           id: docSnap.id,
           ...productData
         };
 
-        // Populate references (same as existing logic)
+        // Populate references parallel für DIESES Produkt
         const [kategorie, discounter, handelsmarke, hersteller, packTypInfo] = await Promise.all([
           this.getDocumentByReference<Kategorien>(productData.kategorie),
           this.getDocumentByReference<Discounter>(productData.discounter),
@@ -602,8 +860,14 @@ export class FirestoreService {
         if (hersteller) productWithDetails.hersteller = hersteller;
         if (packTypInfo) productWithDetails.packTypInfo = packTypInfo;
 
-        relatedProducts.push(productWithDetails);
-      }
+        return productWithDetails;
+      });
+      
+      // Warte auf ALLE Produkte parallel
+      const relatedProducts = await Promise.all(productPromises);
+      
+      const endTime = Date.now();
+      console.log(`✅ Processed ${relatedProducts.length} products in ${endTime - startTime}ms (parallel)`);
       
       console.log(`✅ Found ${relatedProducts.length} NoName products linked to brand ${brandProductId}`);
       return relatedProducts;

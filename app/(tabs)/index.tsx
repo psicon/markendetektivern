@@ -52,7 +52,7 @@ export default function HomeScreen() {
       'obst': 'leaf.fill',
       'gemüse': 'leaf.fill',
       'brot': 'birthday.cake',
-      'getreide': 'grains',
+      'getreide': 'leaf.fill',
       'süßwaren': 'heart.fill',
       'schokolade': 'heart.fill',
       'snacks': 'bag',
@@ -65,7 +65,7 @@ export default function HomeScreen() {
       'baby': 'heart.circle',
       'haushalt': 'house.fill',
       'reinigung': 'sparkles',
-      'hygiene': 'hand.wash',
+      'hygiene': 'sparkles',
       'kosmetik': 'sparkles',
       'tiernahrung': 'pawprint.fill',
       'drogerie': 'cross.case',
@@ -261,17 +261,8 @@ export default function HomeScreen() {
               <ThemedText style={styles.levelTitle}>Level 1 Sparanfänger</ThemedText>
               <ThemedText style={styles.levelSubtitle}>25,00 € Ersparnis & 5 Punkte zum Aufstieg</ThemedText>
             </View>
-            <View style={styles.levelInfoIcon}>
-              <ThemedText style={{ 
-                color: 'white', 
-                fontSize: 10, 
-                fontWeight: 'bold',
-                fontFamily: 'Nunito_700Bold',
-                textAlign: 'center',
-                lineHeight: 8
-              }}>i</ThemedText>
-            </View>
-          </TouchableOpacity>
+              <IconSymbol name="info.circle" size={18} color="white" />
+            </TouchableOpacity>
         </LinearGradient>
 
         {/* Neu für dich enttarnt */}
@@ -307,7 +298,7 @@ export default function HomeScreen() {
                         <IconSymbol name="photo" size={24} color={colors.icon} />
                       </View>
                     )}
-                    <View style={[styles.levelBadge, { backgroundColor: getStufenColor(product.stufe) }]}>
+                    <View style={[styles.levelBadge, { backgroundColor: getStufenColor(parseInt(product.stufe) || 1) }]}>
                       <IconSymbol name="chart.bar" size={10} color="white" />
                       <ThemedText style={styles.levelBadgeText}>Stufe {product.stufe}</ThemedText>
                     </View>
@@ -361,7 +352,7 @@ export default function HomeScreen() {
         style={[styles.fab, { backgroundColor: colors.primary }]}
         onPress={() => router.push('/shopping-list')}
       >
-        <IconSymbol name="cart" size={20} color="white" />
+        <IconSymbol name="cart.fill" size={20} color="white" />
       </TouchableOpacity>
       </ThemedView>
   );
