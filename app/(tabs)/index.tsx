@@ -189,6 +189,13 @@ export default function HomeScreen() {
               style={[styles.searchInput, { color: colors.text }]}
               placeholder="Produkte suchen ..."
               placeholderTextColor={colors.icon}
+              onSubmitEditing={(event) => {
+                const query = event.nativeEvent.text.trim();
+                if (query) {
+                  router.push(`/search-results?query=${encodeURIComponent(query)}` as any);
+                }
+              }}
+              returnKeyType="search"
             />
           </View>
           <TouchableOpacity 
@@ -223,7 +230,21 @@ export default function HomeScreen() {
               </View>
             ) : (
               kategorien.map((kategorie, index) => (
-                <TouchableOpacity key={kategorie.id} style={[styles.categoryChip, { backgroundColor: colors.cardBackground }]}>
+                <TouchableOpacity 
+                  key={kategorie.id} 
+                  style={[styles.categoryChip, { backgroundColor: colors.cardBackground }]}
+                  onPress={() => {
+                    // Navigate to explore tab with NoName products and category filter
+                    router.push({
+                      pathname: '/(tabs)/explore',
+                      params: {
+                        tab: 'nonames',
+                        categoryFilter: kategorie.id,
+                        categoryName: kategorie.bezeichnung
+                      }
+                    });
+                  }}
+                >
                   {kategorie.bild && kategorie.bild.trim() !== '' && !failedImages.has(kategorie.id) ? (
                     <Image 
                       source={{ uri: kategorie.bild }} 
@@ -288,7 +309,16 @@ export default function HomeScreen() {
                 <TouchableOpacity 
                   key={product.id} 
                   style={[styles.productCard, { backgroundColor: colors.cardBackground }]}
-                  onPress={() => router.push(`/product-comparison/${product.id}?type=noname`)}
+                  onPress={() => {
+                    const stufe = parseInt(product.stufe) || 1;
+                    if (stufe <= 2) {
+                      // Stufe 1 und 2: Zur speziellen NoName-Detailseite
+                      router.push(`/noname-detail/${product.id}` as any);
+                    } else {
+                      // Stufe 3+: Zum normalen Produktvergleich
+                      router.push(`/product-comparison/${product.id}?type=noname` as any);
+                    }
+                  }}
                 >
                   <View style={styles.productImageWrapper}>
                     {product.bild ? (

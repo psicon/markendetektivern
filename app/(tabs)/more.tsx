@@ -4,154 +4,355 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { router } from 'expo-router';
-import { Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
+import * as Application from 'expo-application';
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { useEffect, useState } from 'react';
+import {
+    Alert,
+    Linking,
+    ScrollView,
+    Share,
+    StatusBar,
+    StyleSheet,
+    Switch,
+    Text,
+    TouchableOpacity,
+    View
+} from 'react-native';
 
 export default function MoreScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { user, logout } = useAuth();
+  const [isDarkMode, setIsDarkMode] = useState(colorScheme === 'dark');
+  const [appVersion, setAppVersion] = useState('1.0');
 
-  const handleLogout = () => {
+  useEffect(() => {
+    // Get app version
+    const version = Application.nativeApplicationVersion || '1.0';
+    setAppVersion(version);
+  }, []);
+
+  useEffect(() => {
+    setIsDarkMode(colorScheme === 'dark');
+  }, [colorScheme]);
+
+  const handleDarkModeToggle = (value: boolean) => {
+    setIsDarkMode(value);
+    // TODO: Implement actual dark mode toggle
+    console.log('Dark mode toggle:', value);
+  };
+
+  const handleTotalSavingsInfo = () => {
     Alert.alert(
-      'Abmelden',
-      'Möchtest du dich wirklich abmelden?',
+      'Gesamtersparnis Info',
+      'Hier siehst du deine gesamte Ersparnis durch die Nutzung von NoName-Produkten.',
+      [{ text: 'OK', style: 'default' }]
+    );
+  };
+
+  const handleMoreTips = () => {
+    Linking.openURL('https://www.markendetektive.de/blog/');
+  };
+
+  const handlePremiumUpgrade = () => {
+    // TODO: Navigate to premium upgrade page
+    console.log('Navigate to premium upgrade');
+  };
+
+  const handleShoppingCart = () => {
+    // TODO: Navigate to shopping cart
+    console.log('Navigate to shopping cart');
+  };
+
+  const handleFavoriteProducts = () => {
+    // TODO: Navigate to favorite products
+    console.log('Navigate to favorite products');
+  };
+
+  const handleIdentityDatabase = () => {
+    // TODO: Navigate to identity database
+    console.log('Navigate to identity database');
+  };
+
+  const handleTieredSystemInfo = () => {
+    Alert.alert(
+      'Stufensystem erklärt',
+      'Stufe 1-2: Eigenmarken\nStufe 3: Verdächtig ähnlich\nStufe 4: Sehr wahrscheinlich identisch\nStufe 5: Bestätigt identisch',
+      [{ text: 'OK', style: 'default' }]
+    );
+  };
+
+  const handleTipsAndTricks = () => {
+    // TODO: Navigate to tips and tricks page
+    console.log('Navigate to tips and tricks');
+  };
+
+  const handleNews = () => {
+    Linking.openURL('https://www.markendetektive.de/blog/');
+  };
+
+  const handleSocialMedia = () => {
+    Alert.alert(
+      'Social Media',
+      'Folge uns auf unseren Social Media Kanälen!',
       [
-        { text: 'Abbrechen', style: 'cancel' },
-        { 
-          text: 'Abmelden', 
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await logout();
-              router.replace('/auth/welcome');
-            } catch (error) {
-              console.error('Logout error:', error);
-              Alert.alert('Fehler', 'Abmeldung fehlgeschlagen.');
-            }
-          }
-        }
+        { text: 'Instagram', onPress: () => Linking.openURL('https://instagram.com/markendetektive') },
+        { text: 'Facebook', onPress: () => Linking.openURL('https://facebook.com/markendetektive') },
+        { text: 'Abbrechen', style: 'cancel' }
       ]
     );
   };
 
-  const handleMenuItemPress = (item: any) => {
-    // If user is not logged in and tries to access profile, redirect to login
-    if (!user && item.title === 'Profil') {
-      router.push('/auth/welcome');
-      return;
-    }
-
-    // Handle other menu items
-    if (item.title === 'Level & Errungenschaften') {
-      router.push('/achievements');
-    } else if (item.title === 'Einkaufszettel') {
-      router.push('/shopping-list');
-    }
-    // Add more navigation cases as needed
+  const handleRateApp = () => {
+    // TODO: Open app store rating
+    Alert.alert('App bewerten', 'Vielen Dank für dein Feedback!');
   };
 
-  const menuItems = [
-    { icon: 'person.circle', title: 'Profil', subtitle: user ? 'Dein Profil verwalten' : 'Anmelden erforderlich' },
-    { icon: 'shopping.cart', title: 'Einkaufszettel', subtitle: 'Deine Listen verwalten' },
-    { icon: 'heart.fill', title: 'Gespeicherte Produkte', subtitle: 'Deine Favoriten' },
-    { icon: 'star.fill', title: 'Level & Errungenschaften', subtitle: 'Dein Fortschritt' },
-    { icon: 'barcode', title: 'Such- & Scanverlauf', subtitle: 'Letzte Suchen' },
-  ];
+  const handleShareApp = () => {
+    Share.share({
+      message: 'Schau dir die Markendetektive App an! Spare Geld mit NoName-Produkten.',
+      url: 'https://markendetektive.de'
+    });
+  };
+
+  const handlePrivacyPolicy = () => {
+    Linking.openURL('https://www.markendetektive.de/datenschutzerklaerung-haftungsausschluss/');
+  };
+
+  const handleTermsOfService = () => {
+    Linking.openURL('https://www.markendetektive.de/agb/');
+  };
+
+  const handleContact = () => {
+    Linking.openURL('https://www.markendetektive.de/kontakt/');
+  };
+
+  // Mock data - replace with real data
+  const totalSavings = 238.78;
+  const productCount = 23;
+  const isPremium = false; // TODO: Get from user data
 
   return (
     <ThemedView style={styles.container}>
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.primary }]}>
-        <ThemedText style={styles.headerTitle}>Mehr</ThemedText>
-      </View>
-
-      {/* Profile Card */}
-      <View style={[styles.profileCard, { backgroundColor: colors.cardBackground }]}>
-        <View style={styles.profileInfo}>
-          <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-            <ThemedText style={styles.avatarText}>
-              {user?.displayName ? user.displayName.charAt(0).toUpperCase() : '?'}
-            </ThemedText>
-          </View>
-          <View style={styles.profileText}>
-            <ThemedText style={styles.profileName}>
-              {user?.displayName || 'Nicht angemeldet'}
-            </ThemedText>
-            <ThemedText style={styles.profileEmail}>
-              {user?.email || 'Melde dich an, um alle Features zu nutzen'}
-            </ThemedText>
-          </View>
+      <StatusBar barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'} />
+      
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.headerSection}>
+          <ThemedText style={styles.headerTitle}>
+            {user?.displayName || 'Weitere Inhalte'}
+          </ThemedText>
         </View>
 
-        {/* Level Info */}
-        <View style={[styles.levelCard, { backgroundColor: colors.warning + '20' }]}>
-          <View style={styles.levelInfo}>
-            <View style={[styles.levelIcon, { backgroundColor: colors.warning }]}>
-              <IconSymbol name="star.fill" size={20} color="white" />
-            </View>
-            <View>
-              <ThemedText style={styles.levelTitle}>Level 1 Sparanfänger</ThemedText>
-              <ThemedText style={styles.levelSubtitle}>Der erste Schritt zu mehr Ersparnis</ThemedText>
-            </View>
-          </View>
-        </View>
-
-        {/* Savings Summary */}
-        <View style={[styles.savingsCard, { backgroundColor: colors.warning }]}>
-          <ThemedText style={styles.savingsTitle}>Deine Gesamtersparnis</ThemedText>
-          <ThemedText style={styles.savingsAmount}>238,78 €</ThemedText>
-          <View style={styles.savingsTag}>
-            <ThemedText style={styles.savingsTagText}># 23 gekaufte Produkte</ThemedText>
-          </View>
-        </View>
-      </View>
-
-      {/* Menu Items */}
-      <View style={styles.menuSection}>
-        {menuItems.map((item, index) => (
-                      <TouchableOpacity
-            key={index}
-            style={[styles.menuItem, { borderBottomColor: colors.border }]}
-            onPress={() => handleMenuItemPress(item)}
+        {/* Gesamtersparnis Card */}
+        <View style={styles.cardContainer}>
+          <LinearGradient
+            colors={['#F59E0B', '#D97706']}
+            start={{ x: 1, y: 0 }}
+            end={{ x: 0, y: 0 }}
+            style={styles.savingsCard}
           >
-            <IconSymbol name={item.icon} size={24} color={colors.primary} />
-            <View style={styles.menuItemText}>
-              <ThemedText style={styles.menuItemTitle}>{item.title}</ThemedText>
-              <ThemedText style={styles.menuItemSubtitle}>{item.subtitle}</ThemedText>
+            <View style={styles.savingsContent}>
+              <View style={styles.savingsLeft}>
+                <ThemedText style={styles.savingsTitle}>Deine Gesamtersparnis</ThemedText>
+                <ThemedText style={styles.savingsAmount}>{totalSavings.toFixed(2)} €</ThemedText>
+              </View>
+              <View style={styles.savingsRight}>
+                <View style={styles.productCountBadge}>
+                  <IconSymbol name="number" size={16} color="#D97706" />
+                  <ThemedText style={styles.productCountText}>{productCount} Produkte</ThemedText>
+                  <TouchableOpacity onPress={handleTotalSavingsInfo}>
+                    <IconSymbol name="info.circle" size={24} color="#D97706" />
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
-            <IconSymbol name="chevron.right" size={20} color={colors.icon} />
-          </TouchableOpacity>
-        ))}
-      </View>
+          </LinearGradient>
+        </View>
 
-      {/* Dark Mode Toggle */}
-      <View style={[styles.darkModeSection, { borderTopColor: colors.border }]}>
-        <View style={styles.darkModeItem}>
-          <IconSymbol name="star.fill" size={24} color={colors.primary} />
-          <ThemedText style={styles.darkModeText}>Light- / Dark-Mode</ThemedText>
-          <View style={[styles.toggle, { backgroundColor: colors.primary }]}>
-            <View style={styles.toggleButton} />
+        {/* Tipp des Tages Card */}
+        <View style={styles.cardContainer}>
+          <LinearGradient
+            colors={[colors.primary, colors.secondary]}
+            start={{ x: 1, y: 0 }}
+            end={{ x: 0, y: 0 }}
+            style={styles.tipCard}
+          >
+            <View style={styles.tipContent}>
+              <View style={styles.tipHeader}>
+                <IconSymbol name="lightbulb" size={18} color="white" />
+                <ThemedText style={styles.tipTitle}>Tipp des Tages</ThemedText>
+              </View>
+              <ThemedText style={styles.tipText}>
+                Vergleiche immer die Zutaten: Oft sind No-Name Produkte vom selben Hersteller mit identischen Zutaten!
+              </ThemedText>
+              <TouchableOpacity style={styles.moreTipsButton} onPress={handleMoreTips}>
+                <IconSymbol name="arrow.right" size={16} color={colors.secondary} />
+                <ThemedText style={styles.moreTipsText}>Mehr Tipps</ThemedText>
+              </TouchableOpacity>
+            </View>
+          </LinearGradient>
+        </View>
+
+        {/* Premium Card - nur anzeigen wenn nicht Premium */}
+        {!isPremium && (
+          <TouchableOpacity style={styles.cardContainer} onPress={handlePremiumUpgrade}>
+            <View style={[styles.premiumCard, { borderColor: colors.secondary }]}>
+              <View style={styles.premiumContent}>
+                <IconSymbol name="crown" size={24} color={colors.secondary} />
+                <ThemedText style={[styles.premiumText, { color: colors.text }]}>
+                  Jetzt Premium Mitglied werden
+                </ThemedText>
+                <IconSymbol name="star" size={24} color="#F59E0B" />
+              </View>
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* Nützliches Section */}
+        <View style={styles.sectionContainer}>
+          <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>Nützliches</ThemedText>
+          
+          <View style={[styles.menuGroup, { backgroundColor: colors.cardBackground }]}>
+            <TouchableOpacity style={styles.menuItem} onPress={handleShoppingCart}>
+              <IconSymbol name="cart" size={24} color={colors.secondary} />
+              <ThemedText style={[styles.menuItemText, { color: colors.text }]}>Einkaufszettel</ThemedText>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
+            
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            
+            <TouchableOpacity style={styles.menuItem} onPress={handleFavoriteProducts}>
+              <IconSymbol name="heart" size={24} color={colors.secondary} />
+              <ThemedText style={[styles.menuItemText, { color: colors.text }]}>Deine Lieblingsprodukte</ThemedText>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
+            
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            
+            <TouchableOpacity style={styles.menuItem} onPress={handleIdentityDatabase}>
+              <IconSymbol name="doc.text" size={24} color={colors.secondary} />
+              <ThemedText style={[styles.menuItemText, { color: colors.text }]}>Identitätskennzeichen-Datenbank</ThemedText>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
+            
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            
+            <TouchableOpacity style={styles.menuItem} onPress={handleTieredSystemInfo}>
+              <IconSymbol name="chart.bar" size={24} color={colors.secondary} />
+              <ThemedText style={[styles.menuItemText, { color: colors.text }]}>Stufensystem erklärt</ThemedText>
+              <View style={styles.stufenIcons}>
+                <IconSymbol name="cube" size={18} color="#F59E0B" />
+                <IconSymbol name="cube" size={18} color="#10B981" />
+                <IconSymbol name="cube" size={18} color={colors.secondary} />
+              </View>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
+            
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            
+            <TouchableOpacity style={styles.menuItem} onPress={handleTipsAndTricks}>
+              <IconSymbol name="lightbulb" size={24} color={colors.secondary} />
+              <ThemedText style={[styles.menuItemText, { color: colors.text }]}>Tipps & Tricks</ThemedText>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
+            
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            
+            <TouchableOpacity style={styles.menuItemLast} onPress={handleNews}>
+              <IconSymbol name="newspaper" size={24} color={colors.secondary} />
+              <ThemedText style={[styles.menuItemText, { color: colors.text }]}>Neuigkeiten</ThemedText>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
           </View>
         </View>
-      </View>
 
-      {/* Sign Out - only show if user is logged in */}
-      {user && (
-        <TouchableOpacity style={styles.signOutButton} onPress={handleLogout}>
-          <ThemedText style={[styles.signOutText, { color: colors.error }]}>Abmelden</ThemedText>
-        </TouchableOpacity>
-      )}
+        {/* Mehr Section */}
+        <View style={styles.sectionContainer}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Mehr</Text>
+          
+          <View style={[styles.menuGroup, { backgroundColor: colors.cardBackground }]}>
+            <TouchableOpacity style={styles.menuItem} onPress={handleSocialMedia}>
+              <IconSymbol name="person.2" size={24} color={colors.secondary} />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>Find us on social media</Text>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
+            
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            
+            <TouchableOpacity style={styles.menuItem} onPress={handleRateApp}>
+              <IconSymbol name="star" size={24} color={colors.secondary} />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>App bewerten</Text>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
+            
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            
+            <TouchableOpacity style={styles.menuItemLast} onPress={handleShareApp}>
+              <IconSymbol name="square.and.arrow.up" size={24} color={colors.secondary} />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>App teilen</Text>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
+          </View>
+        </View>
 
-      {/* Sign In - only show if user is not logged in */}
-      {!user && (
-        <TouchableOpacity 
-          style={[styles.signOutButton, { backgroundColor: colors.primary }]} 
-          onPress={() => router.push('/auth/welcome')}
-        >
-          <ThemedText style={[styles.signOutText, { color: 'white' }]}>Anmelden</ThemedText>
-        </TouchableOpacity>
-      )}
+        {/* Kontakt & Rechtliches Section */}
+        <View style={styles.sectionContainer}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Kontakt & Rechtliches</Text>
+          
+          <View style={[styles.menuGroup, { backgroundColor: colors.cardBackground }]}>
+            <TouchableOpacity style={styles.menuItem} onPress={handlePrivacyPolicy}>
+              <IconSymbol name="shield" size={24} color={colors.secondary} />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>Datenschutz & Haftungsausschluss</Text>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
+            
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            
+            <TouchableOpacity style={styles.menuItem} onPress={handleTermsOfService}>
+              <IconSymbol name="doc" size={24} color={colors.secondary} />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>AGB</Text>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
+            
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            
+            <TouchableOpacity style={styles.menuItemLast} onPress={handleContact}>
+              <IconSymbol name="envelope" size={24} color={colors.secondary} />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>Kontakt</Text>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Dark Mode Toggle */}
+        <View style={styles.sectionContainer}>
+          <View style={[styles.darkModeCard, { backgroundColor: colors.cardBackground }]}>
+            <View style={styles.darkModeContent}>
+              <IconSymbol name="moon" size={24} color={colors.secondary} />
+              <Text style={[styles.darkModeText, { color: colors.text }]}>Light- / Dark-Mode</Text>
+              <Switch
+                value={isDarkMode}
+                onValueChange={handleDarkModeToggle}
+                trackColor={{ false: colors.border, true: colors.secondary }}
+                thumbColor={isDarkMode ? colors.cardBackground : colors.secondary}
+              />
+            </View>
+          </View>
+        </View>
+
+        {/* Version */}
+        <View style={styles.versionContainer}>
+          <Text style={[styles.versionText, { color: colors.icon }]}>
+            Version [{appVersion}]
+          </Text>
+        </View>
+      </ScrollView>
     </ThemedView>
   );
 }
@@ -160,160 +361,208 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    paddingTop: 60,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  profileCard: {
-    margin: 20,
-    padding: 20,
-    borderRadius: 16,
-    gap: 16,
-  },
-  profileInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  avatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  profileText: {
+  scrollView: {
     flex: 1,
   },
-  profileName: {
-    fontSize: 20,
-    fontWeight: 'bold',
+  scrollContent: {
+    paddingTop: 65,
+    paddingBottom: 100,
   },
-  profileEmail: {
-    fontSize: 14,
-    opacity: 0.7,
-  },
-  levelCard: {
-    padding: 16,
-    borderRadius: 12,
-  },
-  levelInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  levelIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  levelTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  levelSubtitle: {
-    fontSize: 14,
-    opacity: 0.7,
-  },
-  savingsCard: {
-    padding: 20,
-    borderRadius: 16,
-    alignItems: 'center',
-  },
-  savingsTitle: {
-    fontSize: 16,
-    color: 'white',
-    marginBottom: 8,
-  },
-  savingsAmount: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: 'white',
+  headerSection: {
+    paddingHorizontal: 24,
     marginBottom: 12,
   },
-  savingsTag: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    fontFamily: 'Nunito_700Bold',
+  },
+  cardContainer: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  savingsCard: {
     borderRadius: 16,
+    padding: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  savingsTagText: {
-    fontSize: 14,
+  savingsContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  savingsLeft: {
+    flex: 1,
+  },
+  savingsTitle: {
     color: 'white',
-    fontWeight: '500',
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: 'Nunito_600SemiBold',
+    marginBottom: 4,
   },
-  menuSection: {
-    margin: 20,
-    marginTop: 0,
+  savingsAmount: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: 'bold',
+    fontFamily: 'Nunito_700Bold',
+  },
+  savingsRight: {
+    alignItems: 'flex-end',
+  },
+  productCountBadge: {
+    backgroundColor: 'white',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  productCountText: {
+    color: '#D97706',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: 'Nunito_600SemiBold',
+    marginHorizontal: 4,
+  },
+  tipCard: {
+    borderRadius: 16,
+    padding: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  tipContent: {
+    flex: 1,
+  },
+  tipHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  tipTitle: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: 'Nunito_600SemiBold',
+  },
+  tipText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '300',
+    fontFamily: 'Nunito_300Light',
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  moreTipsButton: {
+    backgroundColor: 'white',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    alignSelf: 'flex-end',
+  },
+  moreTipsText: {
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: 'Nunito_600SemiBold',
+  },
+  premiumCard: {
+    borderRadius: 16,
+    borderWidth: 2,
+    height: 50,
+    justifyContent: 'center',
+  },
+  premiumContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  premiumText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '500',
+    fontFamily: 'Nunito_500Medium',
+  },
+  sectionContainer: {
+    marginTop: 25,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    fontFamily: 'Nunito_500Medium',
+    marginLeft: 24,
+    marginBottom: 12,
+  },
+  menuGroup: {
+    marginHorizontal: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 16,
     paddingVertical: 16,
-    borderBottomWidth: 1,
-    gap: 16,
+    gap: 12,
+  },
+  menuItemLast: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 12,
   },
   menuItemText: {
     flex: 1,
-  },
-  menuItemTitle: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '400',
+    fontFamily: 'Nunito_400Regular',
   },
-  menuItemSubtitle: {
-    fontSize: 14,
-    opacity: 0.7,
+  menuDivider: {
+    height: 1,
+    marginLeft: 52,
   },
-  darkModeSection: {
-    marginHorizontal: 20,
-    paddingTop: 20,
-    borderTopWidth: 1,
+  stufenIcons: {
+    flexDirection: 'row',
+    gap: 4,
+    marginRight: 8,
   },
-  darkModeItem: {
+  darkModeCard: {
+    marginHorizontal: 16,
+    borderRadius: 16,
+    padding: 16,
+  },
+  darkModeContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 12,
   },
   darkModeText: {
     flex: 1,
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '400',
+    fontFamily: 'Nunito_400Regular',
   },
-  toggle: {
-    width: 60,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    paddingHorizontal: 2,
-  },
-  toggleButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'white',
-  },
-  signOutButton: {
-    marginHorizontal: 20,
-    marginTop: 30,
+  versionContainer: {
     alignItems: 'center',
-    paddingVertical: 16,
+    marginTop: 25,
+    marginBottom: 25,
   },
-  signOutText: {
+  versionText: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '400',
+    fontFamily: 'Nunito_400Regular',
   },
 });

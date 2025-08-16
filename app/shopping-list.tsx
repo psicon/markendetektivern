@@ -3,15 +3,56 @@ import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { Stack, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useNavigation, useRouter } from 'expo-router';
+import React, { useLayoutEffect, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 export default function ShoppingListScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
+  const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState<'marken' | 'nonames'>('nonames');
+
+  // Header konfigurieren
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: 'Einkaufszettel',
+      headerStyle: { 
+        backgroundColor: colors.primary,
+        borderBottomWidth: 0,
+        elevation: 0,
+        shadowOpacity: 0,
+      },
+      headerTintColor: 'white',
+      headerTitleStyle: { 
+        color: 'white',
+        fontFamily: 'Nunito_600SemiBold',
+        fontSize: 16
+      },
+      headerShadowVisible: false,
+      headerBackVisible: false,
+      headerTransparent: false,
+      headerBlurEffect: 'none',
+      headerLargeTitle: false,
+      headerSearchBarOptions: undefined,
+      headerBackTitleVisible: false,
+      gestureEnabled: true,
+      animation: 'slide_from_right',
+      headerLeft: () => (
+        <TouchableOpacity 
+          onPress={() => router.back()}
+          style={{ 
+            paddingLeft: 0, 
+            paddingRight: 8, 
+            paddingVertical: 8 
+          }}
+        >
+          <IconSymbol name="chevron.left" size={24} color="white" />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, colors.primary]);
   const [showConversionModal, setShowConversionModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
@@ -171,35 +212,7 @@ export default function ShoppingListScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen 
-        options={{
-          title: 'Einkaufszettel',
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: 'white',
-          headerTitleStyle: { color: 'white', fontFamily: 'Nunito_600SemiBold' },
-          headerBackVisible: false,
-          gestureEnabled: true,
-          animation: 'slide_from_right',
-          headerLeft: () => (
-            <TouchableOpacity 
-              onPress={() => router.back()}
-              style={{ paddingLeft: 16, paddingRight: 8, paddingVertical: 8 }}
-            >
-              <IconSymbol name="chevron.left" size={24} color="white" />
-            </TouchableOpacity>
-          ),
-          headerRight: () => (
-            <View style={styles.headerButtons}>
-              <TouchableOpacity style={styles.headerButton}>
-                <IconSymbol name="star.fill" size={24} color="white" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.headerButton}>
-                <IconSymbol name="star.fill" size={24} color="white" />
-              </TouchableOpacity>
-            </View>
-          )
-        }} 
-      />
+
 
       {/* Tab Navigation */}
       <View style={[styles.tabContainer, { backgroundColor: colors.cardBackground }]}>

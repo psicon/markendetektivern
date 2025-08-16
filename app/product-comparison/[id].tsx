@@ -9,7 +9,7 @@ import { ingredientSynonyms } from '@/lib/data/ingredientSynonyms';
 import { FirestoreService } from '@/lib/services/firestore';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
 import { MarkenProduktWithDetails, ProductWithDetails } from '@/lib/types/firestore';
-import { Stack, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useEffect, useLayoutEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -616,7 +616,7 @@ const ProductComparisonContent = ({
               Markenprodukt
             </ThemedText>
             <ThemedText style={styles.cardSubtitle}>
-{comparisonData?.mainProduct?.marke?.name || comparisonData?.mainProduct?.hersteller?.name || 'Unbekannte Marke'} - {comparisonData?.mainProduct?.name || 'Unbekanntes Produkt'}
+{comparisonData?.mainProduct?.marke?.name || comparisonData?.mainProduct?.hersteller?.herstellername || comparisonData?.mainProduct?.hersteller?.name || 'Unbekannte Marke'} - {comparisonData?.mainProduct?.name || 'Unbekanntes Produkt'}
             </ThemedText>
           </View>
         </View>
@@ -1050,6 +1050,10 @@ export default function ProductComparisonScreen() {
   const [showProductDetails, setShowProductDetails] = useState(false);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [showRatingsView, setShowRatingsView] = useState(false);
+  
+  // Ähnliche Produkte für Markenprodukte ohne NoName-Alternativen
+  const [similarProducts, setSimilarProducts] = useState<ProductWithDetails[]>([]);
+  const [similarProductsLoading, setSimilarProductsLoading] = useState(false);
 
 
   // Rating form states
@@ -1140,6 +1144,23 @@ export default function ProductComparisonScreen() {
     setContentRating(0);
     setComment('');
     setShowRatingModal(true);
+  };
+  
+  // Ähnliche Produkte laden (für Markenprodukte ohne NoName-Alternativen)
+  const loadSimilarProducts = async (categoryName: string, excludeProductId: string) => {
+    try {
+      setSimilarProductsLoading(true);
+      console.log('🔍 Loading similar products for category:', categoryName);
+      console.log('🔍 Excluding product ID:', excludeProductId);
+      
+      const products = await FirestoreService.getSimilarProducts(categoryName, excludeProductId, 7);
+      setSimilarProducts(products);
+      console.log(`✅ Loaded ${products.length} similar products:`, products.map(p => `${p.name} (Stufe ${p.stufe})`));
+    } catch (error) {
+      console.error('❌ Error loading similar products:', error);
+    } finally {
+      setSimilarProductsLoading(false);
+    }
   };
 
   // Reload comparison data function
@@ -1253,7 +1274,7 @@ export default function ProductComparisonScreen() {
       headerSearchBarOptions: undefined,
       headerBackTitleVisible: false,
       gestureEnabled: true,
-      animation: 'none',
+      animation: 'slide_from_right', // Native Animation statt 'none'
       headerLeft: () => (
         <TouchableOpacity 
           onPress={() => router.back()}
@@ -1335,6 +1356,12 @@ export default function ProductComparisonScreen() {
             relatedCount: data.relatedNoNameProducts.length,
             clickedWasNoName: data.clickedWasNoName
           });
+          
+          // Wenn es ein Markenprodukt ist und keine NoName-Alternativen hat, lade ähnliche Produkte
+          if (isMarkenProdukt && data.relatedNoNameProducts.length === 0 && data.mainProduct.kategorie?.bezeichnung) {
+            console.log('🔍 No NoName alternatives found for brand product, loading similar products...');
+            loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id);
+          }
           
           // ✨ Triggere sanfte Animationen für Produktkarten
           // Brand-Produkt sofort animieren
@@ -1503,7 +1530,7 @@ export default function ProductComparisonScreen() {
   };
 
   const ScoreImage = ({ type, value }: { type: 'nutri' | 'eco' | 'nova'; value: string | number }) => {
-    return (
+  return (
       <View style={styles.scoreContainer}>
         <Image 
           source={{
@@ -1520,36 +1547,6 @@ export default function ProductComparisonScreen() {
   if (loading || !comparisonData) {
   return (
       <ThemedView style={[styles.container]}>
-      <Stack.Screen 
-        options={{
-          title: 'Marke vs. NoNames',
-            headerStyle: { 
-              backgroundColor: colors.primary,
-            },
-          headerTintColor: 'white',
-            headerTitleStyle: { 
-              color: 'white',
-              fontWeight: '600',
-              fontSize: 16
-            },
-            headerShadowVisible: false,
-            headerBackVisible: false,
-            gestureEnabled: true,
-            animation: 'slide_from_right',
-            headerLeft: () => (
-              <TouchableOpacity 
-                onPress={() => router.back()}
-                style={{ 
-                  paddingLeft: 2, 
-                  paddingRight: 8, 
-                  paddingVertical: 8 
-                }}
-              >
-                <IconSymbol name="chevron.left" size={24} color="white" />
-              </TouchableOpacity>
-            ),
-          }} 
-        />
 
         <ScrollView 
           style={styles.scrollView} 
@@ -1635,36 +1632,7 @@ export default function ProductComparisonScreen() {
   if (error) {
     return (
       <ThemedView style={[styles.container, styles.centerContent]}>
-        <Stack.Screen 
-          options={{
-            title: 'Fehler',
-            headerStyle: { 
-              backgroundColor: colors.primary,
-            },
-            headerTintColor: 'white',
-            headerTitleStyle: { 
-              color: 'white',
-              fontWeight: '600',
-              fontSize: 16
-            },
-            headerShadowVisible: false,
-            headerBackVisible: false,
-            gestureEnabled: true,
-            animation: 'slide_from_right',
-            headerLeft: () => (
-              <TouchableOpacity 
-                onPress={() => router.back()}
-                style={{ 
-                  paddingLeft: 0, 
-                  paddingRight: 8, 
-                  paddingVertical: 8 
-                }}
-              >
-                <IconSymbol name="chevron.left" size={24} color="white" />
-              </TouchableOpacity>
-            ),
-          }} 
-        />
+
         <IconSymbol name="exclamationmark.triangle" size={48} color={colors.error || '#FF3B30'} />
         <ThemedText style={[styles.errorText, { color: colors.error || '#FF3B30' }]}>
           {error}
@@ -1677,36 +1645,7 @@ export default function ProductComparisonScreen() {
   if (!comparisonData) {
     return (
       <ThemedView style={[styles.container, styles.centerContent]}>
-        <Stack.Screen 
-          options={{
-            title: 'Nicht gefunden',
-            headerStyle: { 
-              backgroundColor: colors.primary,
-            },
-            headerTintColor: 'white',
-            headerTitleStyle: { 
-              color: 'white',
-              fontWeight: '600',
-              fontSize: 16
-            },
-            headerShadowVisible: false,
-            headerBackVisible: false,
-            gestureEnabled: true,
-            animation: 'slide_from_right',
-            headerLeft: () => (
-              <TouchableOpacity 
-                onPress={() => router.back()}
-                style={{ 
-                  paddingLeft: 0, 
-                  paddingRight: 8, 
-                  paddingVertical: 8 
-                }}
-              >
-                <IconSymbol name="chevron.left" size={24} color="white" />
-              </TouchableOpacity>
-            ),
-          }} 
-        />
+
         <IconSymbol name="questionmark.circle" size={48} color={colors.icon} />
         <ThemedText style={[styles.notFoundText, { color: colors.icon }]}>
           Produkt nicht gefunden
@@ -1796,9 +1735,10 @@ export default function ProductComparisonScreen() {
                       )}
                       <ThemedText style={[styles.brandText, { color: colors.primary }]}>
                         {marke?.name || 
+                         comparisonData.mainProduct.marke?.name ||
                          comparisonData.mainProduct.brands?.[0]?.name || 
-                         comparisonData.mainProduct.hersteller?.name ||
-                         comparisonData.mainProduct.hersteller?.herstellername || 
+                         comparisonData.mainProduct.hersteller?.herstellername ||
+                         comparisonData.mainProduct.hersteller?.name || 
                          'Markenprodukt'}
                       </ThemedText>
                     </>
@@ -1867,10 +1807,21 @@ export default function ProductComparisonScreen() {
         {/* Alternatives Section */}
         <View style={styles.alternativesContainer}>
           <ThemedText style={styles.alternativesTitle}>
-            No-Name Alternativen vom gleichen Hersteller
+            {comparisonData.relatedNoNameProducts.length > 0 
+              ? 'No-Name Alternativen vom gleichen Hersteller'
+              : 'Enttarnte Produkte'
+            }
           </ThemedText>
+          {comparisonData.relatedNoNameProducts.length === 0 && (
+            <ThemedText style={[styles.alternativesSubtitle, { color: colors.icon }]}>
+              Entdecke andere Produkte mit Stufe 3, 4 oder 5
+            </ThemedText>
+          )}
 
-                      {comparisonData.relatedNoNameProducts.map((noNameProduct, index) => {
+          {/* NoName-Alternativen oder ähnliche Produkte */}
+          {comparisonData.relatedNoNameProducts.length > 0 ? (
+            // NoName-Alternativen anzeigen
+            comparisonData.relatedNoNameProducts.map((noNameProduct, index) => {
                 const isSelected = selectedProducts.has(noNameProduct.id);
                 return (
               <Animated.View
@@ -2048,8 +1999,68 @@ export default function ProductComparisonScreen() {
               </View>
               </TouchableOpacity>
               </Animated.View>
-          )
-        })}
+          );
+        })
+          ) : null}
+        
+        {/* Ähnliche Produkte für Markenprodukte ohne NoName-Alternativen */}
+        {comparisonData.relatedNoNameProducts.length === 0 && (
+          <View style={{ marginTop: 16 }}>
+            {similarProductsLoading ? (
+              [...Array(3)].map((_, index) => (
+                <View key={index} style={[styles.similarProductItem, { backgroundColor: colors.cardBackground }]}>
+                  <View style={[styles.similarProductImagePlaceholder, { backgroundColor: colors.border }]} />
+                  <View style={styles.similarProductContent}>
+                    <View style={[styles.skeletonLine, { backgroundColor: colors.border, width: '80%', height: 14 }]} />
+                    <View style={[styles.skeletonLine, { backgroundColor: colors.border, width: '60%', height: 12, marginTop: 4 }]} />
+            </View>
+                </View>
+              ))
+            ) : similarProducts.length > 0 ? (
+              similarProducts.map((product) => (
+                <TouchableOpacity 
+                  key={product.id}
+                  style={[styles.similarProductItem, { backgroundColor: colors.cardBackground }]}
+                  onPress={() => router.push(`/product-comparison/${product.id}?type=noname` as any)}
+                >
+                  <View style={styles.similarProductImageContainer}>
+                    {product.bild ? (
+                      <Image source={{ uri: product.bild }} style={styles.similarProductImage} />
+                    ) : (
+                      <View style={[styles.similarProductImagePlaceholder, { backgroundColor: colors.border }]}>
+                        <IconSymbol name="cube.box" size={20} color={colors.icon} />
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.similarProductContent}>
+                    <ThemedText style={[styles.similarProductName, { color: colors.text }]} numberOfLines={2}>
+                      {product.name}
+                    </ThemedText>
+                    <ThemedText style={[styles.similarProductBrand, { color: colors.icon }]} numberOfLines={1}>
+                      {product.handelsmarke?.bezeichnung || 'NoName'}
+                    </ThemedText>
+                    <ThemedText style={[styles.similarProductPrice, { color: colors.primary }]}>
+                      {product.preis ? `${product.preis.toFixed(2)} €` : 'Preis n.v.'}
+                    </ThemedText>
+                  </View>
+                  <View style={styles.similarProductRight}>
+                    <View style={[styles.stufeBadgeSmall, { backgroundColor: getStufenColor(parseInt(product.stufe || '3')) }]}>
+                      <IconSymbol name="chart.bar" size={8} color="white" />
+                      <ThemedText style={styles.stufeBadgeTextSmall}>{product.stufe}</ThemedText>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))
+            ) : (
+              <View style={styles.emptyState}>
+                <IconSymbol name="magnifyingglass" size={32} color={colors.icon} />
+                <ThemedText style={[styles.emptyText, { color: colors.icon }]}>
+                  Keine ähnlichen Produkte gefunden
+                </ThemedText>
+              </View>
+            )}
+          </View>
+        )}
         </View>
       </ScrollView>
 
@@ -2083,7 +2094,7 @@ export default function ProductComparisonScreen() {
                       return (selectedProductForDetails as ProductWithDetails).handelsmarke?.bezeichnung || 'NoName-Produkt';
                     }
                     // Bei Markenprodukten: Marke anzeigen  
-                    return selectedProductForDetails?.hersteller?.name || 'Markenprodukt';
+                    return selectedProductForDetails?.marke?.name || selectedProductForDetails?.hersteller?.herstellername || selectedProductForDetails?.hersteller?.name || 'Markenprodukt';
                   })()}
                 </ThemedText>
                 <ThemedText style={[styles.bottomSheetSubtitle, { color: colors.primary }]}>
@@ -2138,8 +2149,8 @@ export default function ProductComparisonScreen() {
                         </ThemedText>
                       );
                     } else {
-                      // Bei Markenprodukten ist "hersteller" die DIREKTE MARKE
-                      const direkteMarke = selectedProductForDetails?.hersteller;
+                      // Bei Markenprodukten: Zeige die Marke (nicht den Hersteller)
+                      const direkteMarke = selectedProductForDetails?.marke || selectedProductForDetails?.hersteller;
                       
                       return (
                         <>
@@ -2151,14 +2162,32 @@ export default function ProductComparisonScreen() {
                             />
                           )}
                           <ThemedText style={[styles.infoValue, { color: colors.icon, flex: 1 }]}>
-                            {direkteMarke?.name || 'Keine Marke gefunden'}
+                            {direkteMarke?.name || direkteMarke?.herstellername || 'Keine Marke gefunden'}
                           </ThemedText>
                         </>
                       );
                     }
                   })()}
-                </View>
               </View>
+              </View>
+              {/* Markt Info - NEU hinzugefügt */}
+              {selectedProductForDetails?.stufe && selectedProductForDetails?.discounter && (
+                <View style={styles.infoRow}>
+                  <ThemedText style={styles.infoLabel}>Markt:</ThemedText>
+                  <View style={styles.markeRow}>
+                    {selectedProductForDetails.discounter.bild && (
+                      <Image 
+                        source={{ uri: selectedProductForDetails.discounter.bild }}
+                        style={styles.markeImage}
+                        resizeMode="contain"
+                      />
+                    )}
+                    <ThemedText style={[styles.infoValue, { color: colors.icon, flex: 1 }]}>
+                      {selectedProductForDetails.discounter.name || 'Keine Markt-Daten verfügbar'}
+                    </ThemedText>
+                  </View>
+                </View>
+              )}
               <View style={styles.infoRow}>
                 <ThemedText style={styles.infoLabel}>Ort:</ThemedText>
                   <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
@@ -2224,7 +2253,8 @@ export default function ProductComparisonScreen() {
                       <ThemedText style={styles.infoLabel}>Hersteller:</ThemedText>
                       <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
                         {selectedProductForDetails?.hersteller?.herstellername || 
-                         selectedProductForDetails?.hersteller?.name || 
+                         selectedProductForDetails?.hersteller?.name ||
+                         selectedProductForDetails?.marke?.herstellername ||
                          'Keine Hersteller-Daten verfügbar'}
                       </ThemedText>
                     </View>
@@ -2241,6 +2271,13 @@ export default function ProductComparisonScreen() {
                 <ThemedText style={styles.sectionTitleText}>Produktinformationen</ThemedText>
               </View>
               <View style={styles.infoGrid}>
+              {/* Kategorie Info - NEU hinzugefügt */}
+              <View style={styles.infoRow}>
+                <ThemedText style={styles.infoLabel}>Kategorie:</ThemedText>
+                <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+                  {selectedProductForDetails?.kategorie?.bezeichnung || 'Keine Kategorie verfügbar'}
+                </ThemedText>
+              </View>
               <View style={styles.infoRow}>
                 <ThemedText style={styles.infoLabel}>Packung:</ThemedText>
                   <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
@@ -2700,7 +2737,7 @@ export default function ProductComparisonScreen() {
               <View style={styles.titleSection}>
                 <ThemedText style={styles.modalTitle}>Produktvergleich</ThemedText>
                 <ThemedText style={[styles.modalSubtitle, { color: colors.primary }]}>
-                  {comparisonData?.mainProduct?.marke?.markenname || 'Marke'} vs. {Array.from(selectedProducts).map(id => {
+                  {comparisonData?.mainProduct?.marke?.name || comparisonData?.mainProduct?.hersteller?.herstellername || comparisonData?.mainProduct?.hersteller?.name || 'Marke'} vs. {Array.from(selectedProducts).map(id => {
                     const product = comparisonData?.relatedNoNameProducts?.find((p: any) => p.id === id);
                     return product?.handelsmarke?.bezeichnung || product?.discounter?.name || 'NoName';
                   }).join(' vs. ')}
@@ -4112,5 +4149,94 @@ const styles = StyleSheet.create({
   infoIconButton: {
     padding: 2,
     marginLeft: 4,
+  },
+  
+  // Ähnliche Produkte Styles (kopiert von noname-detail)
+  alternativesSubtitle: {
+    fontSize: 12,
+    fontFamily: 'Nunito_400Regular',
+    lineHeight: 14,
+    marginTop: 2,
+  },
+  similarProductItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+    marginBottom: 6,
+  },
+  similarProductImageContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginRight: 12,
+  },
+  similarProductImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  similarProductImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  similarProductContent: {
+    flex: 1,
+    marginRight: 8,
+  },
+  similarProductName: {
+    fontSize: 14,
+    fontFamily: 'Nunito_600SemiBold',
+    lineHeight: 16,
+    marginBottom: 2,
+  },
+  similarProductBrand: {
+    fontSize: 12,
+    fontFamily: 'Nunito_400Regular',
+    lineHeight: 14,
+    marginBottom: 2,
+  },
+  similarProductPrice: {
+    fontSize: 12,
+    fontFamily: 'Nunito_600SemiBold',
+    lineHeight: 14,
+  },
+  similarProductRight: {
+    alignItems: 'flex-end',
+  },
+  stufeBadgeSmall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    gap: 2,
+  },
+  stufeBadgeTextSmall: {
+    fontSize: 10,
+    fontFamily: 'Nunito_600SemiBold',
+    color: 'white',
+  },
+  skeletonLine: {
+    borderRadius: 4,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    gap: 8,
+  },
+  emptyText: {
+    fontSize: 14,
+    fontFamily: 'Nunito_400Regular',
+    textAlign: 'center',
   },
 });

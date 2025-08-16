@@ -5,21 +5,41 @@ import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { FirestoreService } from '@/lib/services/firestore';
-import { Discounter, FirestoreDocument, Handelsmarken, HerstellerNew, Kategorien, Produkte } from '@/lib/types/firestore';
-import { router } from 'expo-router';
+import { Discounter, FirestoreDocument, Handelsmarken, Kategorien, Produkte } from '@/lib/types/firestore';
+import { router, useLocalSearchParams } from 'expo-router';
 import type { SymbolViewProps } from 'expo-symbols';
-import React, { useEffect, useState } from 'react';
-import { Animated, FlatList, Image, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Dimensions, FlatList, Image, Modal, PanResponder, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+
+const { width: screenWidth } = Dimensions.get('window');
 
 export default function ExploreScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const params = useLocalSearchParams();
   const [activeTab, setActiveTab] = useState('märkte');
+  
+  // Animation für Swipe-Navigation
+  const translateX = useRef(new Animated.Value(0)).current;
+  const isAnimating = useRef(false);
   
   // Firestore State
   const [discounter, setDiscounter] = useState<FirestoreDocument<Discounter>[]>([]);
   const [productCounts, setProductCounts] = useState<{[key: string]: number}>({});
   const [marketsLoading, setMarketsLoading] = useState(true);
+  
+  // Categories State
+  const [categoriesData, setCategoriesData] = useState<FirestoreDocument<Kategorien>[]>([]);
+  const [categoryProductCounts, setCategoryProductCounts] = useState<{[key: string]: number}>({});
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  
+  // Marken State (mit Pagination)
+  const [markenTabData, setMarkenTabData] = useState<FirestoreDocument<any>[]>([]);
+  const [markenProductCounts, setMarkenProductCounts] = useState<{[key: string]: number}>({});
+  const [markenLoading, setMarkenLoading] = useState(false);
+  const [markenLastDoc, setMarkenLastDoc] = useState<any>(null);
+  const [markenHasMore, setMarkenHasMore] = useState(true);
+  const [markenError, setMarkenError] = useState<string | null>(null);
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
   
   // Animation für sanftes Einblenden der Produktzahlen
@@ -56,7 +76,31 @@ export default function ExploreScreen() {
   
   // Filter Options Data
   const [kategorien, setKategorien] = useState<FirestoreDocument<Kategorien>[]>([]);
-  const [markenData, setMarkenData] = useState<FirestoreDocument<HerstellerNew>[]>([]);
+  const [markenData, setMarkenData] = useState<FirestoreDocument<any>[]>([]);
+
+  // Markenprodukte States
+  const [markenprodukte, setMarkenprodukte] = useState<(FirestoreDocument<any> & {
+    hersteller?: any; // Kann sowohl hersteller als auch hersteller_new sein
+  })[]>([]);
+  const [markenproduktLoading, setMarkenproduktLoading] = useState(false);
+  const [markenproduktLastDoc, setMarkenproduktLastDoc] = useState<any>(null);
+  const [markenproduktHasMore, setMarkenproduktHasMore] = useState(true);
+  const [markenproduktError, setMarkenproduktError] = useState<string | null>(null);
+
+  // Markenprodukte Filter States
+  const [showMarkenproduktFilterModal, setShowMarkenproduktFilterModal] = useState(false);
+  const [markenproduktFilters, setMarkenproduktFilters] = useState<{
+    categoryFilters: string[];
+    herstellerFilters: string[];
+    priceMin?: number;
+    priceMax?: number;
+  }>({
+    categoryFilters: [],
+    herstellerFilters: []
+  });
+
+  // Marken-Suche States
+  const [markenSearchQuery, setMarkenSearchQuery] = useState('');
 
   // Skeleton placeholder with pulsing animation
   const SkeletonPlaceholder = ({ width, height, style }: { width?: number | string, height?: number, style?: any }) => {
@@ -240,6 +284,158 @@ export default function ExploreScreen() {
     });
   };
 
+  // Helper functions for Markenprodukte filters
+  const toggleMarkenproduktCategoryFilter = (categoryId: string) => {
+    setMarkenproduktFilters(prev => ({
+      ...prev,
+      categoryFilters: prev.categoryFilters.includes(categoryId)
+        ? prev.categoryFilters.filter(id => id !== categoryId)
+        : [...prev.categoryFilters, categoryId]
+    }));
+  };
+
+
+
+  const toggleMarkenproduktHerstellerFilter = (herstellerId: string) => {
+    setMarkenproduktFilters(prev => ({
+      ...prev,
+      herstellerFilters: prev.herstellerFilters.includes(herstellerId)
+        ? prev.herstellerFilters.filter(id => id !== herstellerId)
+        : [...prev.herstellerFilters, herstellerId]
+    }));
+  };
+
+  const clearAllMarkenproduktFilters = () => {
+    setMarkenproduktFilters({
+      categoryFilters: [],
+      herstellerFilters: []
+    });
+  };
+
+  // Filtered and sorted Marken for search
+  const filteredAndSortedMarken = useMemo(() => {
+    let filtered = markenData;
+    
+    // Filter by search query
+    if (markenSearchQuery.trim()) {
+      filtered = markenData.filter(marke => 
+        marke.name.toLowerCase().includes(markenSearchQuery.toLowerCase())
+      );
+    }
+    
+    // Sort: selected first, then alphabetically
+    return filtered.sort((a, b) => {
+      const aSelected = markenproduktFilters.herstellerFilters.includes(a.id);
+      const bSelected = markenproduktFilters.herstellerFilters.includes(b.id);
+      
+      if (aSelected && !bSelected) return -1;
+      if (!aSelected && bSelected) return 1;
+      
+      return a.name.localeCompare(b.name);
+    });
+  }, [markenData, markenSearchQuery, markenproduktFilters.herstellerFilters]);
+
+  // Helper Functions für Filter-Zählung
+  const getActiveFiltersCount = (filters: any) => {
+    let count = 0;
+    if (filters.categoryFilters?.length > 0) count += filters.categoryFilters.length;
+    if (filters.discounterFilters?.length > 0) count += filters.discounterFilters.length;
+    if (filters.stufeFilters?.length > 0) count += filters.stufeFilters.length;
+    if (filters.herstellerFilters?.length > 0) count += filters.herstellerFilters.length;
+    if (filters.priceMin !== undefined || filters.priceMax !== undefined) count += 1;
+    return count;
+  };
+
+  const getMarketFiltersCount = () => {
+    // Badge zeigen wenn ein spezifisches Land gewählt ist (inkl. Deutschland als Standard)
+    // Nur bei "Alle Länder" ist kein Filter aktiv
+    return selectedCountry !== 'Alle Länder' ? 1 : 0;
+  };
+
+  // Swipe Navigation Logic - KORREKTE Reihenfolge wie in UI
+  const tabOrder = ['märkte', 'kategorien', 'markenprodukte', 'nonames', 'marken'];
+  
+  const switchToTab = (newTab: string) => {
+    if (isAnimating.current || newTab === activeTab) return;
+    
+    const currentIndex = tabOrder.indexOf(activeTab);
+    const newIndex = tabOrder.indexOf(newTab);
+    const direction = newIndex > currentIndex ? -1 : 1;
+    
+    isAnimating.current = true;
+    
+    // Slide-out Animation
+    Animated.timing(translateX, {
+      toValue: direction * screenWidth,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      // Tab wechseln
+      setActiveTab(newTab);
+      
+      // Von der anderen Seite einsliden
+      translateX.setValue(-direction * screenWidth);
+      
+      // Slide-in Animation
+      Animated.timing(translateX, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start(() => {
+        isAnimating.current = false;
+      });
+    });
+  };
+  
+  const panResponder = PanResponder.create({
+    onMoveShouldSetPanResponder: (evt, gestureState) => {
+      return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > 10;
+    },
+    
+    onPanResponderGrant: () => {
+      if (isAnimating.current) return;
+    },
+    
+    onPanResponderMove: (evt, gestureState) => {
+      if (isAnimating.current) return;
+      
+      // Live-Feedback während des Swipes
+      const maxTranslation = screenWidth * 0.3; // Maximal 30% der Bildschirmbreite
+      let translation = Math.max(-maxTranslation, Math.min(maxTranslation, gestureState.dx));
+      
+      translateX.setValue(translation);
+    },
+    
+    onPanResponderRelease: (evt, gestureState) => {
+      if (isAnimating.current) return;
+      
+      const currentIndex = tabOrder.indexOf(activeTab);
+      const threshold = screenWidth * 0.25; // 25% der Bildschirmbreite
+      
+      if (Math.abs(gestureState.dx) > threshold) {
+        let nextIndex;
+        
+        if (gestureState.dx < 0) {
+          // Swipe nach LINKS = NÄCHSTER Tab (Index +1)
+          nextIndex = (currentIndex + 1) % tabOrder.length; // Zirkulär: nach letztem kommt erster
+        } else {
+          // Swipe nach RECHTS = VORHERIGER Tab (Index -1)  
+          nextIndex = (currentIndex - 1 + tabOrder.length) % tabOrder.length; // Zirkulär: vor erstem kommt letzter
+        }
+        
+        console.log(`🔄 Swipe: ${activeTab} (${currentIndex}) → ${tabOrder[nextIndex]} (${nextIndex})`);
+        switchToTab(tabOrder[nextIndex]);
+        return;
+      }
+      
+      // Zurück zur ursprünglichen Position
+      Animated.spring(translateX, {
+        toValue: 0,
+        useNativeDriver: true,
+      }).start();
+    },
+  });
+
   // Load NoName Products with pagination
   const loadNoNameProducts = async (reset: boolean = false) => {
     if (noNameLoading || (!noNameHasMore && !reset)) return;
@@ -275,6 +471,44 @@ export default function ExploreScreen() {
       setNoNameError('Fehler beim Laden der Produkte');
     } finally {
       setNoNameLoading(false);
+    }
+  };
+
+  // Load Markenprodukte with pagination
+  const loadMarkenprodukte = async (reset: boolean = false) => {
+    if (markenproduktLoading || (!markenproduktHasMore && !reset)) return;
+    
+    console.log(`🔄 Loading Markenprodukte - Reset: ${reset}, HasMore: ${markenproduktHasMore}`);
+
+    try {
+      setMarkenproduktLoading(true);
+      setMarkenproduktError(null);
+
+      const result = await FirestoreService.getMarkenproduktePaginated(
+        20, // Page size
+        reset ? null : markenproduktLastDoc,
+        markenproduktFilters // Filter anwenden
+      );
+
+      if (reset) {
+        setMarkenprodukte(result.products);
+      } else {
+        // ✅ Verhindere Duplikate beim Hinzufügen neuer Produkte
+        setMarkenprodukte(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          const newProducts = result.products.filter(p => !existingIds.has(p.id));
+          return [...prev, ...newProducts];
+        });
+      }
+
+      setMarkenproduktLastDoc(result.lastDoc);
+      setMarkenproduktHasMore(result.hasMore);
+
+    } catch (error) {
+      console.error('Error loading Markenprodukte:', error);
+      setMarkenproduktError('Fehler beim Laden der Produkte');
+    } finally {
+      setMarkenproduktLoading(false);
     }
   };
 
@@ -353,8 +587,216 @@ export default function ExploreScreen() {
       }
     };
 
+    // Load categories data - ähnlich wie loadMarkets
+    const loadCategories = async () => {
+      try {
+        setCategoriesLoading(true);
+        
+        // Lade Kategorien SOFORT - ohne Produktzählung
+        const categoriesData = await FirestoreService.getKategorien();
+        console.log('Loaded categories:', categoriesData);
+        
+        // Sortiere Kategorien alphabetisch nach Bezeichnung
+        const sortedCategories = categoriesData.sort((a, b) => 
+          a.bezeichnung.localeCompare(b.bezeichnung, 'de')
+        );
+        setCategoriesData(sortedCategories);
+        setCategoriesLoading(false); // ✅ Kategorien sofort anzeigen!
+        
+        // Lade Produktanzahl im Hintergrund (nicht blockierend)
+        console.log('🚀 Loading category product counts in background...');
+        const startTime = Date.now();
+        
+        const categoryCountPromises = sortedCategories.map(async (category) => {
+          try {
+            const count = await FirestoreService.getProductCountByCategory(category.id);
+            console.log(`✅ Count for ${category.bezeichnung}: ${count}`);
+            return { categoryId: category.id, count };
+          } catch (error) {
+            console.error(`❌ Error counting products for ${category.bezeichnung}:`, error);
+            return { categoryId: category.id, count: 0 };
+          }
+        });
+        
+        const categoryCountResults = await Promise.all(categoryCountPromises);
+        const categoryCountsMap: {[key: string]: number} = {};
+        categoryCountResults.forEach(({ categoryId, count }) => {
+          categoryCountsMap[categoryId] = count;
+        });
+        setCategoryProductCounts(categoryCountsMap);
+        
+        // Triggere sanfte Animation für jede Produktzahl
+        categoryCountResults.forEach(({ categoryId }) => {
+          setTimeout(() => animateProductCount(categoryId), Math.random() * 200);
+        });
+        
+        const endTime = Date.now();
+        console.log(`✅ Category product counts loaded in ${endTime - startTime}ms:`, categoryCountsMap);
+        
+      } catch (error) {
+        console.error('Error loading categories:', error);
+        setCategoriesLoading(false);
+      }
+    };
+
     loadMarkets();
+    loadCategories();
   }, []);
+
+  // Load marken data with pagination - ähnlich wie loadNoNameProducts
+  const loadMarken = async (reset: boolean = false) => {
+    if (markenLoading || (!markenHasMore && !reset)) return;
+    
+    console.log(`🔄 Loading Marken - Reset: ${reset}, HasMore: ${markenHasMore}`);
+    
+    try {
+      setMarkenLoading(true);
+      setMarkenError(null);
+      
+      const result = await FirestoreService.getMarkenPaginated(
+        20, // Nur 20 Marken pro Seite
+        reset ? null : markenLastDoc
+      );
+      
+      if (reset) {
+        setMarkenTabData(result.marken);
+      } else {
+        setMarkenTabData(prev => [...prev, ...result.marken]);
+      }
+      
+      setMarkenLastDoc(result.lastDoc);
+      setMarkenHasMore(result.hasMore);
+      
+      // Lade Produktanzahl im Hintergrund für neue Marken
+      console.log('🚀 Loading product counts for new marken...');
+      const newMarkenCountPromises = result.marken.map(async (marke) => {
+        try {
+          const count = await FirestoreService.getProductCountByMarke(marke.id);
+          return { markeId: marke.id, count };
+        } catch (error) {
+          console.error(`❌ Error counting products for ${marke.name}:`, error);
+          return { markeId: marke.id, count: 0 };
+        }
+      });
+      
+      const newMarkenCountResults = await Promise.all(newMarkenCountPromises);
+      const newMarkenCountsMap: {[key: string]: number} = {};
+      newMarkenCountResults.forEach(({ markeId, count }) => {
+        newMarkenCountsMap[markeId] = count;
+      });
+      
+      setMarkenProductCounts(prev => ({ ...prev, ...newMarkenCountsMap }));
+      
+      // Triggere sanfte Animation für neue Produktzahlen
+      newMarkenCountResults.forEach(({ markeId }) => {
+        setTimeout(() => animateProductCount(markeId), Math.random() * 200);
+      });
+      
+      console.log(`✅ Loaded ${result.marken.length} marken, hasMore: ${result.hasMore}`);
+      
+    } catch (error) {
+      console.error('Error loading marken:', error);
+      setMarkenError('Fehler beim Laden der Marken');
+    } finally {
+      setMarkenLoading(false);
+    }
+  };
+
+  // Initial load für Marken
+  useEffect(() => {
+    loadMarken(true);
+  }, []);
+
+  // Handle URL parameters for navigation from other screens
+  useEffect(() => {
+    if (params.tab) {
+      setActiveTab(params.tab as string);
+    }
+    
+    if (params.categoryFilter && params.categoryName) {
+      console.log(`🔗 Processing URL params - Category: ${params.categoryName}, Filter: ${params.categoryFilter}`);
+      
+      // Set category filter for NoName products
+      const newFilters = {
+        discounterFilters: [],
+        categoryFilters: [params.categoryFilter as string],
+        stufeFilters: [],
+        priceRange: [0, 100]
+      };
+      setNoNameFilters(newFilters);
+      
+      // Reset and load NoName products with category filter
+      setNoNameProducts([]);
+      setNoNameLastDoc(null);
+      setNoNameHasMore(true);
+      setNoNameError(null);
+      
+      // Load products immediately without setTimeout
+      const loadFilteredProducts = async () => {
+        try {
+          setNoNameLoading(true);
+          console.log(`🔍 Loading NoName products for category: ${params.categoryName}`);
+          const result = await FirestoreService.getNoNameProductsPaginated(
+            20,
+            null,
+            newFilters
+          );
+          setNoNameProducts(result.products);
+          setNoNameLastDoc(result.lastDoc);
+          setNoNameHasMore(result.hasMore);
+          console.log(`✅ Loaded ${result.products.length} NoName products for category: ${params.categoryName}`);
+        } catch (error) {
+          console.error('Error loading filtered products:', error);
+          setNoNameError('Fehler beim Laden der Produkte');
+        } finally {
+          setNoNameLoading(false);
+        }
+      };
+      
+      loadFilteredProducts();
+    }
+    
+    if (params.markeFilter && params.markeName) {
+      console.log(`🔗 Processing URL params - Marke: ${params.markeName}, Filter: ${params.markeFilter}`);
+      
+      // Set marke filter for Markenprodukte
+      const newFilters = {
+        categoryFilters: [],
+        herstellerFilters: [params.markeFilter as string]
+      };
+      setMarkenproduktFilters(newFilters);
+      
+      // Reset and load Markenprodukte with marke filter
+      setMarkenprodukte([]);
+      setMarkenproduktLastDoc(null);
+      setMarkenproduktHasMore(true);
+      setMarkenproduktError(null);
+      
+      // Load products immediately
+      const loadFilteredMarkenprodukte = async () => {
+        try {
+          setMarkenproduktLoading(true);
+          console.log(`🔍 Loading Markenprodukte for marke: ${params.markeName}`);
+          const result = await FirestoreService.getMarkenproduktePaginated(
+            20,
+            null,
+            newFilters
+          );
+          setMarkenprodukte(result.products);
+          setMarkenproduktLastDoc(result.lastDoc);
+          setMarkenproduktHasMore(result.hasMore);
+          console.log(`✅ Loaded ${result.products.length} Markenprodukte for marke: ${params.markeName}`);
+        } catch (error) {
+          console.error('Error loading filtered markenprodukte:', error);
+          setMarkenproduktError('Fehler beim Laden der Markenprodukte');
+        } finally {
+          setMarkenproduktLoading(false);
+        }
+      };
+      
+      loadFilteredMarkenprodukte();
+    }
+  }, [params.tab, params.categoryFilter, params.categoryName, params.markeFilter, params.markeName]); // Spezifische Dependencies
 
   // Load filter options when component mounts
   useEffect(() => {
@@ -366,6 +808,7 @@ export default function ExploreScreen() {
         ]);
         setKategorien(kategorienData);
         setMarkenData(markenData);
+        console.log('🏷️ Loaded Marken:', markenData.length, markenData.slice(0, 3));
       } catch (error) {
         console.error('Error loading filter options:', error);
       }
@@ -380,6 +823,31 @@ export default function ExploreScreen() {
       loadNoNameProducts(true);
     }
   }, [activeTab, noNameFilters]);
+
+  // Load Markenprodukte when tab becomes active or filters change
+  useEffect(() => {
+    if (activeTab === 'markenprodukte') {
+      loadMarkenprodukte(true);
+    }
+  }, [activeTab, markenproduktFilters]);
+
+  // Static tab titles without counts
+  const getTabTitle = (tabId: string) => {
+    switch (tabId) {
+      case 'märkte':
+        return 'Märkte';
+      case 'kategorien':
+        return 'Kategorien';
+      case 'markenprodukte':
+        return 'Marken-\nProdukte';
+      case 'nonames':
+        return 'NoName-\nProdukte';
+      case 'marken':
+        return 'Marken';
+      default:
+        return tabId;
+    }
+  };
 
   const tabs = [
     { id: 'märkte', title: 'Märkte', icon: 'house.fill' },
@@ -424,18 +892,107 @@ export default function ExploreScreen() {
       case 'kategorien':
         return (
           <View style={styles.contentSection}>
-            {categories.map((category, index) => (
-              <TouchableOpacity key={index} style={[styles.listItem, { borderBottomColor: colors.border }]}>
-                <View style={[styles.itemIcon, { backgroundColor: colors.primary + '20' }]}>
-                  <ThemedText style={styles.itemEmoji}>{category.icon}</ThemedText>
+            {categoriesLoading ? (
+              <View style={[styles.marketListContainer, { backgroundColor: colors.cardBackground }]}>
+                {[1, 2, 3, 4, 5].map((index) => (
+                  <View 
+                    key={index} 
+                    style={[
+                      styles.marketListItem,
+                      index === 1 && styles.firstMarketItem,
+                      index === 5 && styles.lastMarketItem,
+                      { borderBottomColor: colors.border }
+                    ]}
+                  >
+                    <SkeletonPlaceholder />
                 </View>
-                <View style={styles.itemContent}>
-                  <ThemedText style={styles.itemTitle}>{category.title}</ThemedText>
-                  <ThemedText style={styles.itemSubtitle}>{category.count}</ThemedText>
+                ))}
                 </View>
-                <IconSymbol name="chevron.right" size={20} color={colors.icon} />
+            ) : (
+              <View style={[styles.marketListContainer, { backgroundColor: colors.cardBackground }]}>
+                {categoriesData.map((category, index) => (
+                  <TouchableOpacity 
+                    key={category.id} 
+                    style={[
+                      styles.marketListItem,
+                      index === 0 && styles.firstMarketItem,
+                      index === categoriesData.length - 1 && styles.lastMarketItem,
+                      { borderBottomColor: colors.border }
+                    ]}
+                    onPress={() => {
+                      // Switch to NoName tab with category filter
+                      setActiveTab('nonames');
+                      
+                      const newFilters = {
+                        ...noNameFilters,
+                        categoryFilters: [category.id]
+                      };
+                      setNoNameFilters(newFilters);
+                      
+                      // Reset and load NoName products with category filter
+                      setNoNameProducts([]);
+                      setNoNameLastDoc(null);
+                      setNoNameHasMore(true);
+                      
+                      setTimeout(async () => {
+                        try {
+                          setNoNameLoading(true);
+                          const result = await FirestoreService.getNoNameProductsPaginated(
+                            20,
+                            null,
+                            newFilters
+                          );
+                          setNoNameProducts(result.products);
+                          setNoNameLastDoc(result.lastDoc);
+                          setNoNameHasMore(result.hasMore);
+                          console.log(`✅ Loaded NoName products for category: ${category.bezeichnung} (${result.products.length} products)`);
+                        } catch (error) {
+                          console.error('Error loading filtered products:', error);
+                          setNoNameError('Fehler beim Laden der Produkte');
+                        } finally {
+                          setNoNameLoading(false);
+                        }
+                      }, 100);
+                    }}
+                  >
+                    <View style={styles.marketLogo}>
+                      {category.bild && category.bild.trim() !== '' && !failedImages.has(category.id) ? (
+                        <Image 
+                          source={{ uri: category.bild }} 
+                          style={styles.marketImage}
+                          onError={() => {
+                            console.log(`Failed to load image for category: ${category.bezeichnung}`);
+                            setFailedImages(prev => new Set([...prev, category.id]));
+                          }}
+                        />
+                      ) : (
+                        <IconSymbol 
+                          name={getCategoryIcon(category.bezeichnung.toLowerCase())} 
+                          size={24} 
+                          color={colors.primary} 
+                        />
+                      )}
+                    </View>
+                    <View style={styles.marketContent}>
+                      <ThemedText style={[styles.marketTitle, { color: colors.text }]}>
+                        {category.bezeichnung}
+                      </ThemedText>
+                      <Animated.View style={{ opacity: countOpacities[category.id] || 1 }}>
+                        <ThemedText style={[styles.marketCount, { color: colors.text }]}>
+                          {categoryProductCounts[category.id] !== undefined 
+                            ? `${categoryProductCounts[category.id]} Produkte`
+                            : '... Produkte'
+                          }
+                        </ThemedText>
+                      </Animated.View>
+                    </View>
+                                        <View style={styles.productChevron}>
+                      <IconSymbol name="chevron.right" size={16} color={colors.icon} />
+                    </View>
               </TouchableOpacity>
             ))}
+              </View>
+            )}
           </View>
         );
       case 'märkte':
@@ -464,7 +1021,7 @@ export default function ExploreScreen() {
                     </View>
                     
                     {/* Skeleton Chevron */}
-                    <View style={styles.marketChevron}>
+                    <View style={styles.productChevron}>
                       <SkeletonPlaceholder width={16} height={16} style={{ borderRadius: 8 }} />
                     </View>
                   </View>
@@ -481,7 +1038,42 @@ export default function ExploreScreen() {
                       index === filteredMarkets.length - 1 && styles.lastMarketItem,
                       index < filteredMarkets.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 0.5 }
                     ]}
-                    onPress={() => router.push(`/markets/${market.id}` as any)}
+                    onPress={() => {
+                      // Wechsle zum NoName Tab und setze Markt-Filter
+                      setActiveTab('nonames');
+                      
+                      const newFilters = {
+                        ...noNameFilters,
+                        discounterFilters: [market.id] // Setze diesen Markt als Filter
+                      };
+                      
+                      setNoNameFilters(newFilters);
+                      
+                      // Lade NoName Produkte mit dem neuen Filter
+                      setNoNameProducts([]);
+                      setNoNameLastDoc(null);
+                      setNoNameHasMore(true);
+                      
+                      // Lade mit den neuen Filtern direkt
+                      setTimeout(async () => {
+                        try {
+                          setNoNameLoading(true);
+                          const result = await FirestoreService.getNoNameProductsPaginated(
+                            20,
+                            null,
+                            newFilters // Verwende die neuen Filter direkt
+                          );
+                          setNoNameProducts(result.products);
+                          setNoNameLastDoc(result.lastDoc);
+                          setNoNameHasMore(result.hasMore);
+                        } catch (error) {
+                          console.error('Error loading filtered products:', error);
+                          setNoNameError('Fehler beim Laden der Produkte');
+                        } finally {
+                          setNoNameLoading(false);
+                        }
+                      }, 100);
+                    }}
                   >
                     <View style={[styles.marketLogo, { backgroundColor: colors.background }]}>
                       {market.bild && market.bild.trim() !== '' && !failedImages.has(`market-${market.id}`) ? (
@@ -505,7 +1097,7 @@ export default function ExploreScreen() {
                         <ThemedText style={styles.marketFlag}>
                           {getCountryFlag(market.land)}
                         </ThemedText>
-                      </View>
+                  </View>
                       {productCounts[market.id] !== undefined ? (
                         <Animated.View style={{ opacity: countOpacities[market.id] || 0 }}>
                           <ThemedText style={styles.marketCount}>
@@ -522,15 +1114,15 @@ export default function ExploreScreen() {
                           {market.infos}
                         </ThemedText>
                       )}
-                    </View>
-                    <View style={styles.marketChevron}>
+                </View>
+                    <View style={styles.productChevron}>
                       <IconSymbol name="chevron.right" size={16} color={colors.icon} />
                     </View>
-                  </TouchableOpacity>
-                ))}
+              </TouchableOpacity>
+            ))}
                   </View>
             )}
-                </View>
+          </View>
         );
       case 'nonames':
         console.log('🔍 Rendering NoName products:', noNameProducts.length, 'Error:', noNameError);
@@ -547,8 +1139,8 @@ export default function ExploreScreen() {
               >
                 <ThemedText style={styles.retryButtonText}>Erneut versuchen</ThemedText>
               </TouchableOpacity>
-            </View>
-          </View>
+                </View>
+                </View>
         ) : (
           <FlatList
             data={noNameProducts}
@@ -562,13 +1154,22 @@ export default function ExploreScreen() {
                       index === noNameProducts.length - 1 && styles.lastProductItem,
                     ]}
                   >
-                    <TouchableOpacity 
-                      style={[
-                        styles.productListItem,
-                        index < noNameProducts.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 0.5 }
-                      ]}
-                      onPress={() => router.push(`/product-comparison/${product.id}?type=noname` as any)}
-                    >
+                                      <TouchableOpacity 
+                    style={[
+                      styles.productListItem,
+                      index < noNameProducts.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 0.5 }
+                    ]}
+                    onPress={() => {
+                      const stufe = parseInt(product.stufe) || 1;
+                      if (stufe <= 2) {
+                        // Stufe 1 und 2: Zur speziellen NoName-Detailseite
+                        router.push(`/noname-detail/${product.id}` as any);
+                      } else {
+                        // Stufe 3+: Zum normalen Produktvergleich
+                        router.push(`/product-comparison/${product.id}?type=noname` as any);
+                      }
+                    }}
+                  >
                     <View style={styles.productLogo}>
                       {product.bild && product.bild.trim() !== '' && !failedImages.has(`product-${product.id}`) ? (
                         <Image
@@ -631,8 +1232,8 @@ export default function ExploreScreen() {
                         <IconSymbol name="chevron.right" size={16} color={colors.icon} />
                       </View>
                     </View>
-                    </TouchableOpacity>
-                  </View>
+              </TouchableOpacity>
+          </View>
                 )}
                 onEndReached={() => {
                   console.log('🔄 onEndReached triggered - HasMore:', noNameHasMore, 'Loading:', noNameLoading);
@@ -656,22 +1257,225 @@ export default function ExploreScreen() {
             showsVerticalScrollIndicator={false}
           />
         );
+      case 'markenprodukte':
+        console.log('🔍 Rendering Markenprodukte:', markenprodukte.length, 'Error:', markenproduktError);
+        return markenproduktError ? (
+          <View style={styles.contentSection}>
+            <View style={styles.errorState}>
+              <IconSymbol name="exclamationmark.triangle" size={48} color={colors.error} />
+              <ThemedText style={[styles.errorText, { color: colors.error }]}>
+                {markenproduktError}
+              </ThemedText>
+              <TouchableOpacity 
+                style={[styles.retryButton, { backgroundColor: colors.primary }]}
+                onPress={() => loadMarkenprodukte(true)}
+              >
+                <ThemedText style={styles.retryButtonText}>Erneut versuchen</ThemedText>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <FlatList
+            data={markenprodukte}
+            keyExtractor={(item, index) => `${item.id}-${index}`}
+            renderItem={({ item: product, index }) => (
+              <View 
+                style={[
+                  styles.productItemContainer,
+                  { backgroundColor: colors.cardBackground },
+                  index === 0 && styles.firstProductItem,
+                  index === markenprodukte.length - 1 && styles.lastProductItem,
+                ]}
+              >
+                <TouchableOpacity 
+                  style={[
+                    styles.productListItem,
+                    index < markenprodukte.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 0.5 }
+                  ]}
+                  onPress={() => router.push(`/product-comparison/${product.id}?type=brand` as any)}
+                >
+                  <View style={styles.productLogo}>
+                    {product.bild && product.bild.trim() !== '' && !failedImages.has(`markenprodukt-${product.id}`) ? (
+                      <Image
+                        source={{ uri: product.bild }}
+                        style={styles.productImage}
+                        onError={() => {
+                          console.log(`Failed to load image for markenprodukt: ${product.name}`);
+                          setFailedImages(prev => new Set([...prev, `markenprodukt-${product.id}`]));
+                        }}
+                      />
+                    ) : (
+                      <View style={[styles.productImagePlaceholder, { backgroundColor: colors.background }]}>
+                        <IconSymbol name="cube.box" size={32} color={colors.primary} />
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.productContent}>
+                    <ThemedText style={styles.productTitle}>
+                      {product.name}
+                    </ThemedText>
+                    <ThemedText style={styles.productSubtitle}>
+                      {product.hersteller?.name || 'Unbekannte Marke'}
+                    </ThemedText>
+                  </View>
+
+                  {/* Rechte Seite: Nur Preis und Chevron */}
+                  <View style={styles.productRightSection}>
+                    <View style={styles.productInfoColumn}>
+                      <ThemedText style={styles.productPrice}>
+                        {formatPrice(product.preis)}
+                      </ThemedText>
+                    </View>
+                    <View style={styles.productChevron}>
+                      <IconSymbol name="chevron.right" size={16} color={colors.icon} />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              </View>
+            )}
+            onEndReached={() => {
+              console.log('🔄 onEndReached triggered - HasMore:', markenproduktHasMore, 'Loading:', markenproduktLoading);
+              if (markenproduktHasMore && !markenproduktLoading) {
+                loadMarkenprodukte(false);
+              }
+            }}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={() => 
+              markenproduktLoading ? (
+                <View style={styles.loadingFooter}>
+                  <SkeletonPlaceholder width={40} height={40} style={{ borderRadius: 20 }} />
+                  <ThemedText style={[styles.loadingText, { color: colors.icon }]}>
+                    Lädt weitere Produkte...
+                  </ThemedText>
+                </View>
+              ) : null
+            }
+            style={[styles.productListContainer, { backgroundColor: colors.cardBackground }]}
+            contentContainerStyle={styles.productListContent}
+            showsVerticalScrollIndicator={false}
+          />
+        );
       case 'marken':
         return (
-          <View style={styles.contentSection}>
-            {staticMarken.map((marke, index) => (
-              <TouchableOpacity key={index} style={[styles.brandItem, { borderBottomColor: colors.border }]}>
-                <View style={[styles.brandLogo, { backgroundColor: colors.cardBackground }]}>
-                  <ThemedText style={styles.brandEmoji}>{marke.logo}</ThemedText>
+          <FlatList
+            data={markenTabData}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item: marke, index }) => (
+              <TouchableOpacity 
+                style={[
+                  styles.marketListItem,
+                  index === 0 && styles.firstMarketItem,
+                  index === markenTabData.length - 1 && !markenHasMore && styles.lastMarketItem,
+                  { borderBottomColor: colors.border }
+                ]}
+                onPress={() => {
+                  // Switch to Markenprodukte tab with marke filter
+                  setActiveTab('markenprodukte');
+                  
+                  const newFilters = {
+                    categoryFilters: [],
+                    herstellerFilters: [marke.id]
+                  };
+                  setMarkenproduktFilters(newFilters);
+                  
+                  // Reset and load Markenprodukte with marke filter
+                  setMarkenprodukte([]);
+                  setMarkenproduktLastDoc(null);
+                  setMarkenproduktHasMore(true);
+                  setMarkenproduktError(null);
+                  
+                  setTimeout(async () => {
+                    try {
+                      setMarkenproduktLoading(true);
+                      const result = await FirestoreService.getMarkenproduktePaginated(
+                        20,
+                        null,
+                        newFilters
+                      );
+                      setMarkenprodukte(result.products);
+                      setMarkenproduktLastDoc(result.lastDoc);
+                      setMarkenproduktHasMore(result.hasMore);
+                      console.log(`✅ Loaded Markenprodukte for marke: ${marke.name} (${result.products.length} products)`);
+                    } catch (error) {
+                      console.error('Error loading filtered markenprodukte:', error);
+                      setMarkenproduktError('Fehler beim Laden der Markenprodukte');
+                    } finally {
+                      setMarkenproduktLoading(false);
+                    }
+                  }, 100);
+                }}
+              >
+                <View style={styles.marketLogo}>
+                  {marke.bild && marke.bild.trim() !== '' && !failedImages.has(marke.id) ? (
+                    <Image 
+                      source={{ uri: marke.bild }} 
+                      style={styles.marketImage}
+                      onError={() => {
+                        console.log(`❌ Failed to load bild for marke: ${marke.name} - ${marke.bild}`);
+                        setFailedImages(prev => new Set([...prev, marke.id]));
+                      }}
+                    />
+                  ) : (
+                    <IconSymbol 
+                      name="tag" 
+                      size={24} 
+                      color={colors.primary} 
+                    />
+                  )}
                 </View>
-                <View style={styles.brandContent}>
-                  <ThemedText style={styles.brandTitle}>{marke.title}</ThemedText>
-                  <ThemedText style={styles.brandDescription}>{marke.description}</ThemedText>
+                <View style={styles.marketContent}>
+                  <ThemedText style={[styles.marketTitle, { color: colors.text }]}>
+                    {marke.name}
+                  </ThemedText>
+                  <Animated.View style={{ opacity: countOpacities[marke.id] || 1 }}>
+                    <ThemedText style={[styles.marketCount, { color: colors.text }]}>
+                      {markenProductCounts[marke.id] !== undefined 
+                        ? `${markenProductCounts[marke.id]} Produkte`
+                        : '... Produkte'
+                      }
+                    </ThemedText>
+                  </Animated.View>
                 </View>
-                <IconSymbol name="chevron.right" size={20} color={colors.icon} />
+                                    <View style={styles.productChevron}>
+                      <IconSymbol name="chevron.right" size={16} color={colors.icon} />
+                    </View>
               </TouchableOpacity>
-            ))}
+            )}
+            onEndReached={() => {
+              if (markenHasMore && !markenLoading) {
+                loadMarken(false);
+              }
+            }}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={() => 
+              markenLoading ? (
+                <View style={styles.loadingFooter}>
+                  <ThemedText style={[styles.loadingText, { color: colors.text }]}>
+                    Lade weitere Marken...
+                  </ThemedText>
           </View>
+              ) : null
+            }
+            ListEmptyComponent={() => 
+              markenError ? (
+                <View style={styles.emptyState}>
+                  <ThemedText style={[styles.emptyText, { color: colors.text }]}>
+                    {markenError}
+                  </ThemedText>
+                  <TouchableOpacity 
+                    style={[styles.retryButton, { backgroundColor: colors.primary }]}
+                    onPress={() => loadMarken(true)}
+                  >
+                    <ThemedText style={styles.retryButtonText}>Erneut versuchen</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              ) : null
+            }
+            style={[styles.marketListContainer, { backgroundColor: colors.cardBackground }]}
+            contentContainerStyle={styles.productListContent}
+            showsVerticalScrollIndicator={false}
+          />
         );
       default:
         return (
@@ -686,7 +1490,7 @@ export default function ExploreScreen() {
     <ThemedView style={styles.container}>
       {/* Tab Navigation */}
       <View style={[styles.tabContainer, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScroll}>
+        <View style={[styles.tabScroll, { flexDirection: 'row' }]}>
           {tabs.map((tab) => (
             <TouchableOpacity
               key={tab.id}
@@ -694,11 +1498,11 @@ export default function ExploreScreen() {
                 styles.tab,
                 activeTab === tab.id && { borderBottomColor: colors.primary }
               ]}
-              onPress={() => setActiveTab(tab.id)}
+              onPress={() => switchToTab(tab.id)}
             >
               <IconSymbol 
                 name={tab.icon as any} 
-                size={20} 
+                size={18} 
                 color={activeTab === tab.id ? colors.primary : colors.icon} 
               />
               <ThemedText 
@@ -707,31 +1511,48 @@ export default function ExploreScreen() {
                   { color: activeTab === tab.id ? colors.primary : colors.icon }
                 ]}
               >
-                {tab.title}
+                {getTabTitle(tab.id)}
               </ThemedText>
             </TouchableOpacity>
           ))}
-        </ScrollView>
+        </View>
       </View>
 
-      {/* Content */}
-      {activeTab === 'nonames' ? (
-        // ✅ FlatList direkt ohne ScrollView für NoName Produkte - volle Höhe
-        renderContent()
-      ) : (
-        // ScrollView für alle anderen Tabs
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {renderContent()}
-      </ScrollView>
-      )}
+            {/* Content mit Swipe-Gesten */}
+      <Animated.View 
+        style={[
+          { flex: 1, transform: [{ translateX }] }
+        ]}
+        {...panResponder.panHandlers}
+      >
+                                {activeTab === 'nonames' || activeTab === 'markenprodukte' || activeTab === 'marken' ? (
+          // ✅ FlatList direkt ohne ScrollView für Produkt-Listen und Marken - volle Höhe
+          renderContent()
+        ) : (
+          // ScrollView für andere Tabs (märkte, kategorien)
+          <ScrollView 
+            style={styles.scrollView} 
+            showsVerticalScrollIndicator={false}
+          >
+            {renderContent()}
+        </ScrollView>
+        )}
+      </Animated.View>
 
-      {/* Floating Filter Button - bei Märkte und NoName Tab */}
+      {/* Floating Filter Button - nur bei Märkte Tab */}
       {activeTab === 'märkte' && (
         <TouchableOpacity 
           style={[styles.filterFab, { backgroundColor: colors.primary }]}
           onPress={() => setShowFilterModal(true)}
         >
           <IconSymbol name="line.3.horizontal.decrease" size={20} color="white" />
+          {getMarketFiltersCount() > 0 && (
+            <View style={[styles.filterBadge, { backgroundColor: colors.error }]}>
+              <ThemedText style={styles.filterBadgeText}>
+                {getMarketFiltersCount()}
+              </ThemedText>
+      </View>
+          )}
         </TouchableOpacity>
       )}
       
@@ -741,6 +1562,29 @@ export default function ExploreScreen() {
           onPress={() => setShowNoNameFilterModal(true)}
         >
           <IconSymbol name="line.3.horizontal.decrease" size={20} color="white" />
+          {getActiveFiltersCount(noNameFilters) > 0 && (
+            <View style={[styles.filterBadge, { backgroundColor: colors.error }]}>
+              <ThemedText style={styles.filterBadgeText}>
+                {getActiveFiltersCount(noNameFilters)}
+              </ThemedText>
+            </View>
+          )}
+        </TouchableOpacity>
+      )}
+      
+      {activeTab === 'markenprodukte' && (
+        <TouchableOpacity 
+          style={[styles.filterFab, { backgroundColor: colors.primary }]}
+          onPress={() => setShowMarkenproduktFilterModal(true)}
+        >
+          <IconSymbol name="line.3.horizontal.decrease" size={20} color="white" />
+          {getActiveFiltersCount(markenproduktFilters) > 0 && (
+            <View style={[styles.filterBadge, { backgroundColor: colors.error }]}>
+              <ThemedText style={styles.filterBadgeText}>
+                {getActiveFiltersCount(markenproduktFilters)}
+              </ThemedText>
+            </View>
+          )}
         </TouchableOpacity>
       )}
 
@@ -757,8 +1601,8 @@ export default function ExploreScreen() {
             <TouchableOpacity onPress={() => setShowFilterModal(false)}>
               <IconSymbol name="xmark" size={24} color={colors.icon} />
             </TouchableOpacity>
-          </View>
-          
+      </View>
+
           <ScrollView style={styles.filterOptions}>
             {availableCountries.map((country) => (
               <TouchableOpacity 
@@ -848,8 +1692,8 @@ export default function ExploreScreen() {
                     </ThemedText>
                   </TouchableOpacity>
                 ))}
-              </View>
-            </View>
+        </View>
+      </View>
 
             {/* Kategorie Filter - Chips */}
             <View style={styles.filterSection}>
@@ -952,6 +1796,159 @@ export default function ExploreScreen() {
       </TouchableOpacity>
               ))}
             </View> */}
+      </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Markenprodukte Filter Modal */}
+      <Modal
+        visible={showMarkenproduktFilterModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowMarkenproduktFilterModal(false)}
+      >
+        <View style={[styles.filterModalContainer, { backgroundColor: colors.background }]}>
+          <View style={[styles.filterModalHeader, { borderBottomColor: colors.border }]}>
+            <ThemedText style={styles.filterModalTitle}>Markenprodukte filtern</ThemedText>
+            <TouchableOpacity onPress={() => setShowMarkenproduktFilterModal(false)}>
+              <IconSymbol name="xmark" size={24} color={colors.icon} />
+      </TouchableOpacity>
+          </View>
+          
+          <ScrollView style={styles.filterOptions}>
+            {/* Clear All Button */}
+            <View style={styles.filterSection}>
+              <TouchableOpacity 
+                style={[styles.clearAllButton, { backgroundColor: colors.primary }]}
+                onPress={clearAllMarkenproduktFilters}
+              >
+                <IconSymbol name="xmark.circle.fill" size={16} color="white" />
+                <ThemedText style={styles.clearAllText}>Alle Filter löschen</ThemedText>
+              </TouchableOpacity>
+            </View>
+
+            {/* Hersteller/Marke Filter - Suchfeld + Chips */}
+            <View style={styles.filterSection}>
+              <ThemedText style={[styles.filterSectionTitle, { color: colors.text }]}>
+                Marken ({markenproduktFilters.herstellerFilters.length} ausgewählt)
+              </ThemedText>
+              
+                            {/* Suchfeld im Stil der Startseite */}
+              <View style={styles.markenSearchSection}>
+                <View style={[styles.markenSearchContainer, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+          <IconSymbol name="magnifyingglass" size={20} color={colors.icon} />
+          <TextInput
+                    style={[styles.markenSearchInput, { color: colors.text }]}
+                    placeholder="Marke suchen..."
+            placeholderTextColor={colors.icon}
+                    value={markenSearchQuery}
+                    onChangeText={setMarkenSearchQuery}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+          />
+                  {markenSearchQuery.length > 0 && (
+                    <TouchableOpacity onPress={() => setMarkenSearchQuery('')}>
+                      <IconSymbol name="xmark.circle.fill" size={18} color={colors.icon} />
+                    </TouchableOpacity>
+                  )}
+        </View>
+      </View>
+
+              {/* Dynamische Chips basierend auf Suche */}
+              <View style={styles.chipsContainer}>
+                {filteredAndSortedMarken.slice(0, markenSearchQuery.trim() ? 50 : 7).map((marke) => {
+                  const isSelected = markenproduktFilters.herstellerFilters.includes(marke.id);
+                  return (
+                    <TouchableOpacity 
+                      key={marke.id}
+                      style={[
+                        styles.filterChip,
+                        { 
+                          backgroundColor: isSelected 
+                            ? colors.primary 
+                            : colors.cardBackground,
+                          borderColor: isSelected ? colors.primary : colors.border,
+                          borderWidth: 1
+                        }
+                      ]}
+                      onPress={() => toggleMarkenproduktHerstellerFilter(marke.id)}
+                    >
+                      <IconSymbol 
+                        name={isSelected ? "checkmark" : "tag"} 
+                        size={14} 
+                        color={isSelected ? 'white' : colors.primary}
+                      />
+                      <ThemedText style={[
+                        styles.chipText, 
+                        { 
+                          color: isSelected ? 'white' : colors.text 
+                        }
+                      ]}>
+                        {marke.name}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  );
+                })}
+                
+                {filteredAndSortedMarken.length === 0 && markenSearchQuery.trim() && (
+                  <ThemedText style={[styles.noResultsText, { color: colors.icon }]}>
+                    Keine Marken gefunden für "{markenSearchQuery}"
+                  </ThemedText>
+                )}
+              </View>
+
+              {/* Kompakter Hinweis für weitere Marken */}
+              {!markenSearchQuery.trim() && filteredAndSortedMarken.length > 7 && (
+                <View style={[styles.moreMarkenHintCompact, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                  <IconSymbol name="magnifyingglass" size={12} color={colors.icon} />
+                  <ThemedText style={[styles.moreMarkenTextCompact, { color: colors.icon }]}>
+                    +{filteredAndSortedMarken.length - 7} weitere • Suchen
+                  </ThemedText>
+                </View>
+              )}
+      </View>
+
+
+
+            {/* Kategorie Filter - Chips */}
+            <View style={styles.filterSection}>
+              <ThemedText style={[styles.filterSectionTitle, { color: colors.text }]}>Kategorien</ThemedText>
+              <View style={styles.chipsContainer}>
+                {kategorien.map((kategorie) => (
+                  <TouchableOpacity 
+                    key={kategorie.id}
+                    style={[
+                      styles.filterChip,
+                      { 
+                        backgroundColor: markenproduktFilters.categoryFilters.includes(kategorie.id) 
+                          ? colors.primary 
+                          : colors.cardBackground,
+                        borderColor: colors.border
+                      }
+                    ]}
+                    onPress={() => toggleMarkenproduktCategoryFilter(kategorie.id)}
+                  >
+                    <IconSymbol 
+                      name={getCategoryIcon(kategorie.bezeichnung)} 
+                      size={16} 
+                      color={markenproduktFilters.categoryFilters.includes(kategorie.id) ? 'white' : colors.primary}
+                    />
+                    <ThemedText style={[
+                      styles.chipText, 
+                      { 
+                        color: markenproduktFilters.categoryFilters.includes(kategorie.id) 
+                          ? 'white' 
+                          : colors.text 
+                      }
+                    ]}>
+                      {kategorie.bezeichnung}
+                    </ThemedText>
+      </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+
           </ScrollView>
         </View>
       </Modal>
@@ -969,23 +1966,24 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   tabScroll: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 8, // Weniger Padding
   },
   tab: {
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginRight: 8,
+    paddingVertical: 10, // Weniger Padding
+    paddingHorizontal: 8, // Viel weniger Padding
+    marginRight: 4, // Weniger Margin
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
-    minWidth: 80,
+    minWidth: 60, // Kleinere Mindestbreite
+    flex: 1, // Gleichmäßige Verteilung
   },
   tabText: {
-    fontSize: 12,
+    fontSize: 10, // Kleinere Schrift
     fontFamily: 'Nunito_500Medium',
-    marginTop: 4,
+    marginTop: 2, // Weniger Margin
     textAlign: 'center',
-    lineHeight: 12,
+    lineHeight: 11,
   },
 
   scrollView: {
@@ -1041,10 +2039,10 @@ const styles = StyleSheet.create({
   },
   marketListItem: {
     flexDirection: 'row',
-    paddingVertical: 16,
+    paddingVertical: 10, // 40% weniger (16 → 10)
     paddingHorizontal: 16,
     gap: 12,
-    alignItems: 'flex-start',
+    alignItems: 'center', // ✅ Vertikal zentriert
   },
   firstMarketItem: {
     borderTopLeftRadius: 16,
@@ -1058,7 +2056,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: 20,
-    height: 60, // Gleiche Höhe wie Logo für perfekte Zentrierung
+    height: 36, // 40% weniger (60 → 36) für kompaktere Zeilen
   },
   // Legacy market item (kept for other tabs)
   marketItem: {
@@ -1154,6 +2152,23 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 }, // Gleiche Shadow wie auf Startseite
     shadowOpacity: 0.25,                   // Gleiche Shadow wie auf Startseite
     shadowRadius: 4,                       // Gleiche Shadow wie auf Startseite
+  },
+  filterBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    fontSize: 10,
+    fontFamily: 'Nunito_600SemiBold',
+    color: 'white',
+    lineHeight: 12,
   },
 
   // Filter Modal
@@ -1406,6 +2421,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Nunito_400Regular',
   },
+  errorFooter: {
+    paddingVertical: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   // Error State
   errorState: {
@@ -1460,5 +2480,108 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_400Regular',
     opacity: 0.8,
     lineHeight: 14,
+  },
+  // Alte Styles für andere Verwendung beibehalten
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 16,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    paddingVertical: 2,
+    fontFamily: 'Nunito_400Regular',
+  },
+  
+  // Neue Marken-Suchfeld Styles im Startseiten-Stil
+  markenSearchSection: {
+    paddingHorizontal: 20, // Bündig mit chipsContainer
+    marginBottom: 16,
+  },
+  markenSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#00000010',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+    gap: 12,
+    height: 48,
+  },
+  markenSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: 'Nunito_400Regular',
+  },
+  // Alte Styles beibehalten für Kompatibilität
+  moreMarkenHint: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    marginTop: 8,
+    marginHorizontal: 20,
+    gap: 4,
+  },
+  moreMarkenText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+    textAlign: 'center',
+  },
+  moreMarkenSubtext: {
+    fontSize: 10,
+    fontFamily: 'Nunito_400Regular',
+    textAlign: 'center',
+    opacity: 0.8,
+  },
+  
+  // Neue kompakte Styles
+  moreMarkenHintCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    marginTop: 6,
+    marginHorizontal: 20,
+    gap: 6,
+    alignSelf: 'center',
+    maxWidth: 200,
+  },
+  moreMarkenTextCompact: {
+    fontSize: 11,
+    fontFamily: 'Nunito_400Regular',
+    textAlign: 'center',
+    opacity: 0.7,
+  },
+  noResultsText: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 12,
   },
 });
