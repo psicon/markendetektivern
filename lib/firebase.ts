@@ -3,14 +3,15 @@ import { initializeApp } from 'firebase/app';
 import { getReactNativePersistence, initializeAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
-// Firebase configuration
+// Firebase configuration - PRODUCTION
 const firebaseConfig = {
-  apiKey: "AIzaSyDXqHTFTgHnr2vHX9-QJhPBQvOhxX8_kZs",
-  authDomain: "markendetektive-895f7.firebaseapp.com", 
+  apiKey: "AIzaSyCVQ-Y71TNexRKSWrVtu1HTP9uk_dSfUP0",
+  authDomain: "markendetektive-895f7.firebaseapp.com",
   projectId: "markendetektive-895f7",
-  storageBucket: "markendetektive-895f7.firebasestorage.app",
-  messagingSenderId: "1754828123",
-  appId: "1:1754828123:web:c8f8f8f8f8f8f8f8f8f8f8"
+  storageBucket: "markendetektive-895f7.appspot.com",
+  messagingSenderId: "139509881339",
+  appId: "1:139509881339:web:d5d1f2b75d2b0258d6135e",
+  measurementId: "G-BMRCTZPJJZ"
 };
 
 // Initialize Firebase

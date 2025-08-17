@@ -1078,7 +1078,7 @@ export default function ProductComparisonScreen() {
       const productRatingData = {
         productID: isNoNameProduct ? productId : null,           // NoName product reference
         brandProductID: isNoNameProduct ? null : productId,      // Brand product reference
-        userID: user?.uid || 'anonymous-user-' + Date.now(),     // Use authenticated user ID or fallback
+        userID: user?.uid || 'anonymous-user-' + Date.now(),     // Use authenticated user ID from Firebase Auth
         ratingOverall: overallRating,
         ratingPriceValue: priceValueRating || null,
         ratingTasteFunction: tasteRating || null,

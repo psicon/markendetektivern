@@ -1,5 +1,5 @@
 import { Tabs, useRouter, useSegments } from 'expo-router';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { ActivityIndicator, Platform, Text, TouchableOpacity, View } from 'react-native';
 
 import { HapticTab } from '@/components/HapticTab';
@@ -63,12 +63,12 @@ export default function TabLayout() {
   const { user, loading } = useAuth();
   const router = useRouter();
 
-  // Temporarily disabled for testing - uncomment to enable auth guard
-  // useEffect(() => {
-  //   if (!loading && !user) {
-  //     router.replace('/auth/welcome');
-  //   }
-  // }, [user, loading, router]);
+  // Auth Guard - Redirect to welcome if not logged in
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace('/auth/welcome');
+    }
+  }, [user, loading, router]);
 
   if (loading) {
     return (
@@ -78,10 +78,10 @@ export default function TabLayout() {
     );
   }
 
-  // Temporarily allow access without authentication for testing
-  // if (!user) {
-  //   return null; // Will redirect to welcome screen
-  // }
+  // Require authentication to access tabs
+  if (!user) {
+    return null; // Will redirect to welcome screen
+  }
 
   return (
     <Tabs

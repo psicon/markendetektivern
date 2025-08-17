@@ -1,0 +1,166 @@
+import { User } from 'firebase/auth';
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  display_name?: string;
+  photo_url?: string;
+  created_time?: any;
+  totalSavings?: number;
+  level?: number;
+  xp?: number;
+  productsSaved?: number;
+  ratingsGiven?: number;
+  streakDays?: number;
+  isPremium?: boolean;
+  premiumUntil?: Date;
+  lastLoginAt?: Date;
+  lastActivityAt?: Date;
+}
+
+/**
+ * Lädt das bestehende User-Profil aus Firestore
+ * Die users Collection existiert bereits mit allen Daten!
+ */
+export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
+  try {
+    const userDoc = await getDoc(doc(db, 'users', uid));
+    
+    if (userDoc.exists()) {
+      console.log('✅ User-Profil gefunden:', userDoc.data());
+      return userDoc.data() as UserProfile;
+    }
+    
+    console.log('❌ Kein User-Profil gefunden für UID:', uid);
+    return null;
+  } catch (error) {
+    console.error('Fehler beim Laden des User-Profils:', error);
+    return null;
+  }
+};
+
+/**
+ * Erstellt oder aktualisiert das User-Profil
+ * Wird nur beim ersten Login oder bei Updates benötigt
+ */
+export const updateUserProfile = async (user: User, additionalData?: Partial<UserProfile>) => {
+  try {
+    const userRef = doc(db, 'users', user.uid);
+    
+    // Prüfe ob User bereits existiert
+    const userDoc = await getDoc(userRef);
+    
+    if (userDoc.exists()) {
+      // User existiert - nur updaten
+      await updateDoc(userRef, {
+        lastLoginAt: serverTimestamp(),
+        ...additionalData
+      });
+      console.log('✅ User-Profil aktualisiert');
+    } else {
+      // Neuer User - erstellen (sollte selten sein, da DB bereits voll ist)
+      const newUserData: UserProfile = {
+        uid: user.uid,
+        email: user.email || '',
+        display_name: user.displayName || '',
+        photo_url: user.photoURL || '',
+        created_time: serverTimestamp(),
+        totalSavings: 0,
+        level: 1,
+        xp: 0,
+        productsSaved: 0,
+        ratingsGiven: 0,
+        streakDays: 0,
+        isPremium: false,
+        lastLoginAt: serverTimestamp(),
+        ...additionalData
+      };
+      
+      await setDoc(userRef, newUserData);
+      console.log('✅ Neues User-Profil erstellt');
+    }
+  } catch (error) {
+    console.error('Fehler beim Update des User-Profils:', error);
+    throw error;
+  }
+};
+
+/**
+ * Aktualisiert Gamification-Statistiken
+ */
+export const updateUserStats = async (uid: string, stats: {
+  xpToAdd?: number;
+  savingsToAdd?: number;
+  productsToAdd?: number;
+  ratingsToAdd?: number;
+}) => {
+  try {
+    const userRef = doc(db, 'users', uid);
+    const userDoc = await getDoc(userRef);
+    
+    if (!userDoc.exists()) {
+      console.error('User nicht gefunden:', uid);
+      return;
+    }
+    
+    const currentData = userDoc.data() as UserProfile;
+    
+    const updates: any = {
+      lastActivityAt: serverTimestamp()
+    };
+    
+    if (stats.xpToAdd) {
+      updates.xp = (currentData.xp || 0) + stats.xpToAdd;
+      // Level berechnen (alle 100 XP = 1 Level)
+      updates.level = Math.floor(updates.xp / 100) + 1;
+    }
+    
+    if (stats.savingsToAdd) {
+      updates.totalSavings = (currentData.totalSavings || 0) + stats.savingsToAdd;
+    }
+    
+    if (stats.productsToAdd) {
+      updates.productsSaved = (currentData.productsSaved || 0) + stats.productsToAdd;
+    }
+    
+    if (stats.ratingsToAdd) {
+      updates.ratingsGiven = (currentData.ratingsGiven || 0) + stats.ratingsToAdd;
+    }
+    
+    await updateDoc(userRef, updates);
+    console.log('✅ User-Statistiken aktualisiert:', updates);
+    
+  } catch (error) {
+    console.error('Fehler beim Update der User-Statistiken:', error);
+    throw error;
+  }
+};
+
+/**
+ * Prüft Premium-Status
+ */
+export const checkPremiumStatus = async (uid: string): Promise<boolean> => {
+  try {
+    const profile = await getUserProfile(uid);
+    
+    if (!profile) return false;
+    
+    if (profile.isPremium && profile.premiumUntil) {
+      // Prüfe ob Premium noch gültig ist
+      const now = new Date();
+      const premiumUntil = profile.premiumUntil instanceof Date 
+        ? profile.premiumUntil 
+        : profile.premiumUntil.toDate();
+      
+      return premiumUntil > now;
+    }
+    
+    return profile.isPremium || false;
+    
+  } catch (error) {
+    console.error('Fehler beim Prüfen des Premium-Status:', error);
+    return false;
+  }
+};

@@ -25,7 +25,7 @@ export default function LoginScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const { signIn } = useAuth();
+  const { signIn, signInWithGoogle, signInWithApple, isAppleAuthAvailable } = useAuth();
   const insets = useSafeAreaInsets();
   const screenHeight = Dimensions.get('window').height;
 
@@ -80,14 +80,37 @@ export default function LoginScreen() {
     }).start();
   };
 
-  const handleGoogleSignIn = () => {
-    console.log('Google Sign In pressed');
-    // TODO: Implement Google Sign In
+  const handleGoogleSignIn = async () => {
+    try {
+      setLoading(true);
+      await signInWithGoogle();
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      console.error('Google Sign-In error:', error);
+      Alert.alert('Google Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleAppleSignIn = () => {
-    console.log('Apple Sign In pressed');
-    // TODO: Implement Apple Sign In
+  const handleAppleSignIn = async () => {
+    try {
+      // Check if Apple Sign-In is available
+      const isAvailable = await isAppleAuthAvailable();
+      if (!isAvailable) {
+        Alert.alert('Nicht verfügbar', 'Apple Sign-In ist auf diesem Gerät nicht verfügbar');
+        return;
+      }
+      
+      setLoading(true);
+      await signInWithApple();
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      console.error('Apple Sign-In error:', error);
+      Alert.alert('Apple Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
