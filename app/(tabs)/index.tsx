@@ -1,29 +1,36 @@
+import NewsCard from '@/components/NewsCard';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
+import { CategorySkeleton, NewsCardSkeleton, ProductCardSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { FirestoreService } from '@/lib/services/firestore';
+import WordPressService, { WordPressPost } from '@/lib/services/wordpress';
 import { FirestoreDocument, Handelsmarken, Kategorien, Produkte } from '@/lib/types/firestore';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { SymbolViewProps } from 'expo-symbols';
+import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { top: insetTop } = useSafeAreaInsets();
-  const headerPaddingTop = insetTop + 56;
+  // Reduziere den oberen Safe Area Abstand um 35%
+  const reducedTopInset = insetTop * 0.65;
+  const headerPaddingTop = reducedTopInset + 56;
 
   // Dynamische Höhenmessung für sauberen Scroll-Übergang unter der Mitte der Suchleiste
   const [headerHeight, setHeaderHeight] = useState(0);
   const [searchHeight, setSearchHeight] = useState(0);
-  
+
   // Firestore State
   const [enttarnteProdukte, setEnttarnteProdukte] = useState<FirestoreDocument<Produkte>[]>([]);
   const [handelsmarken, setHandelsmarken] = useState<{[key: string]: string}>({});
@@ -32,6 +39,14 @@ export default function HomeScreen() {
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
+  
+  // WordPress News State
+  const [newsLoading, setNewsLoading] = useState(true);
+  const [newsPosts, setNewsPosts] = useState<WordPressPost[]>([]);
+  const [newsError, setNewsError] = useState<string | null>(null);
+  const [newsLoadingMore, setNewsLoadingMore] = useState(false);
+  const [newsHasMore, setNewsHasMore] = useState(true);
+  const [newsPage, setNewsPage] = useState(1);
 
   // Icon-Mapping für Kategorien
   const getCategoryIcon = (bezeichnung: string): SymbolViewProps['name'] => {
@@ -147,6 +162,84 @@ export default function HomeScreen() {
     return stufe ? `Stufe ${stufe}` : 'Unbekannt';
   };
 
+  // WordPress News laden (initial)
+  const loadNews = async (reset: boolean = true) => {
+    try {
+      if (reset) {
+        setNewsLoading(true);
+        setNewsError(null);
+        setNewsPage(1);
+        setNewsHasMore(true);
+      }
+      
+      const wordpressService = new WordPressService();
+      const response = await wordpressService.getLatestPosts(3); // Lade 3 neueste Posts
+      
+      if (reset) {
+        setNewsPosts(response.posts);
+      } else {
+        setNewsPosts(prev => [...prev, ...response.posts]);
+      }
+      
+      // Prüfe ob mehr Posts verfügbar sind
+      setNewsHasMore(response.posts.length === 3 && response.totalPages > 1);
+      
+      console.log(`✅ Loaded ${response.posts.length} news posts (Page 1)`);
+    } catch (error) {
+      console.error('❌ Error loading news:', error);
+      setNewsError('Neuigkeiten konnten nicht geladen werden');
+    } finally {
+      setNewsLoading(false);
+    }
+  };
+
+  // Weitere News laden (pagination)
+  const loadMoreNews = async () => {
+    if (newsLoadingMore || !newsHasMore) return;
+    
+    try {
+      setNewsLoadingMore(true);
+      const nextPage = newsPage + 1;
+      
+      const wordpressService = new WordPressService();
+      const response = await wordpressService.getLatestPostsPaginated(3, nextPage);
+      
+      if (response.posts.length > 0) {
+        setNewsPosts(prev => [...prev, ...response.posts]);
+        setNewsPage(nextPage);
+        
+        // Prüfe ob noch mehr Posts verfügbar sind
+        setNewsHasMore(nextPage < response.totalPages);
+        
+        console.log(`✅ Loaded ${response.posts.length} more news posts (Page ${nextPage})`);
+      } else {
+        setNewsHasMore(false);
+        console.log('✅ No more news posts available');
+      }
+    } catch (error) {
+      console.error('❌ Error loading more news:', error);
+    } finally {
+      setNewsLoadingMore(false);
+    }
+  };
+
+  // InApp Browser für News öffnen
+  const openNewsArticle = async (url: string) => {
+    try {
+      await WebBrowser.openBrowserAsync(url, {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.FORM_SHEET,
+        controlsColor: colors.primary,
+      });
+    } catch (error) {
+      console.error('❌ Error opening article:', error);
+    }
+  };
+
+  // News laden beim Component Mount
+  useEffect(() => {
+    loadNews();
+  }, []);
+
   return (
     <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Fixed Header */}
@@ -171,7 +264,7 @@ export default function HomeScreen() {
                   minimumFontScale={0.8}
                 >
                   MarkenDetektive
-                </ThemedText>
+        </ThemedText>
               </View>
               <ThemedText style={[styles.subtitle]}>NoNames enttarnen,{"\n"}clever sparen!</ThemedText>
             </View>
@@ -210,7 +303,7 @@ export default function HomeScreen() {
       </View>
 
       {/* Scrollable Content */}
-          <ScrollView 
+      <ScrollView 
         style={[styles.scrollView, { marginTop: Math.max(0, headerHeight + searchHeight * 0.5) }]} 
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -224,10 +317,11 @@ export default function HomeScreen() {
             contentContainerStyle={{ paddingBottom: 6, paddingRight: 12 }}
           >
             {categoriesLoading ? (
-              <View style={styles.categoriesLoadingContainer}>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <ThemedText style={[styles.categoriesLoadingText, { color: colors.icon }]}>Lade Kategorien...</ThemedText>
-              </View>
+              <>
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <CategorySkeleton key={`category-skeleton-${index}`} />
+                ))}
+              </>
             ) : (
               kategorien.map((kategorie, index) => (
                 <TouchableOpacity 
@@ -246,9 +340,12 @@ export default function HomeScreen() {
                   }}
                 >
                   {kategorie.bild && kategorie.bild.trim() !== '' && !failedImages.has(kategorie.id) ? (
-                    <Image 
-                      source={{ uri: kategorie.bild }} 
+                    <ImageWithShimmer
+                      source={{ uri: kategorie.bild }}
                       style={styles.categoryImage}
+                      fallbackIcon="square.grid.2x2"
+                      fallbackIconSize={24}
+                      resizeMode="cover"
                       onError={() => {
                         console.log(`Failed to load image for category: ${kategorie.bezeichnung}`);
                         setFailedImages(prev => new Set([...prev, kategorie.id]));
@@ -258,7 +355,7 @@ export default function HomeScreen() {
                     <IconSymbol name={getCategoryIcon(kategorie.bezeichnung)} size={20} color={colors.primary} />
                   )}
                   <ThemedText style={styles.categoryText}>{kategorie.bezeichnung}</ThemedText>
-                </TouchableOpacity>
+              </TouchableOpacity>
               ))
             )}
           </ScrollView>
@@ -283,7 +380,7 @@ export default function HomeScreen() {
               <ThemedText style={styles.levelSubtitle}>25,00 € Ersparnis & 5 Punkte zum Aufstieg</ThemedText>
             </View>
               <IconSymbol name="info.circle" size={18} color="white" />
-            </TouchableOpacity>
+          </TouchableOpacity>
         </LinearGradient>
 
         {/* Neu für dich enttarnt */}
@@ -291,10 +388,15 @@ export default function HomeScreen() {
           <ThemedText style={styles.sectionTitle}>Neu für dich enttarnt</ThemedText>
           
           {loading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={colors.primary} />
-              <ThemedText style={[styles.loadingText, { color: colors.icon }]}>Lade Produkte...</ThemedText>
-            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 10, paddingRight: 12 }}
+            >
+              {Array.from({ length: 4 }).map((_, index) => (
+                <ProductCardSkeleton key={`product-skeleton-${index}`} />
+              ))}
+            </ScrollView>
           ) : error ? (
             <View style={styles.errorContainer}>
               <ThemedText style={[styles.errorText, { color: colors.error || '#FF3B30' }]}>{error}</ThemedText>
@@ -306,9 +408,9 @@ export default function HomeScreen() {
               contentContainerStyle={{ paddingBottom: 10, paddingRight: 12 }}
             >
               {enttarnteProdukte.map((product, index) => (
-                <TouchableOpacity 
+              <TouchableOpacity 
                   key={product.id} 
-                  style={[styles.productCard, { backgroundColor: colors.cardBackground }]}
+                style={[styles.productCard, { backgroundColor: colors.cardBackground }]}
                   onPress={() => {
                     const stufe = parseInt(product.stufe) || 1;
                     if (stufe <= 2) {
@@ -322,7 +424,13 @@ export default function HomeScreen() {
                 >
                   <View style={styles.productImageWrapper}>
                     {product.bild ? (
-                      <Image source={{ uri: product.bild }} style={styles.productImageFile} />
+                      <ImageWithShimmer
+                        source={{ uri: product.bild }}
+                        style={styles.productImageFile}
+                        fallbackIcon="photo"
+                        fallbackIconSize={24}
+                        resizeMode="cover"
+                      />
                     ) : (
                       <View style={[styles.productImagePlaceholder, { backgroundColor: colors.border }]}>
                         <IconSymbol name="photo" size={24} color={colors.icon} />
@@ -342,35 +450,75 @@ export default function HomeScreen() {
                         {handelsmarken[product.id] || 'NoName-Produkt'}
                       </ThemedText>
                       <ThemedText style={[styles.productPrice, { color: colors.primary }]}>{formatPrice(product.preis)}</ThemedText>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+                </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
           )}
         </View>
 
         {/* Neuigkeiten */}
         <View style={styles.section}>
           <ThemedText style={styles.sectionTitle}>Neuigkeiten</ThemedText>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 10, paddingRight: 12 }}
-          >
-            <TouchableOpacity style={[styles.newsCard, { backgroundColor: colors.cardBackground }]}>
-              <Image source={require('@/assets/images/react-logo.png')} style={styles.newsImageFile} />
-              <ThemedText style={styles.newsTitle}>Marmeladungen</ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.newsCard, { backgroundColor: colors.cardBackground }]}>
-              <Image source={require('@/assets/images/react-logo.png')} style={styles.newsImageFile} />
-              <ThemedText style={styles.newsTitle}>Ist die Schokolade echt?</ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.newsCard, { backgroundColor: colors.cardBackground }]}>
-              <Image source={require('@/assets/images/react-logo.png')} style={styles.newsImageFile} />
-              <ThemedText style={styles.newsTitle}>Neue Deals</ThemedText>
-            </TouchableOpacity>
+          
+          {newsLoading ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 10, paddingRight: 12 }}
+            >
+              {Array.from({ length: 3 }).map((_, index) => (
+                <NewsCardSkeleton key={`news-skeleton-${index}`} />
+              ))}
+            </ScrollView>
+          ) : newsError ? (
+            <View style={styles.errorContainer}>
+              <ThemedText style={[styles.errorText, { color: colors.error }]}>
+                {newsError}
+              </ThemedText>
+            </View>
+          ) : newsPosts.length > 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 10, paddingRight: 12 }}
+              onScroll={({ nativeEvent }) => {
+                const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+                const isCloseToEnd = layoutMeasurement.width + contentOffset.x >= contentSize.width - 100;
+                
+                if (isCloseToEnd && newsHasMore && !newsLoadingMore) {
+                  loadMoreNews();
+                }
+              }}
+              scrollEventThrottle={400}
+            >
+                            {newsPosts.map((post) => (
+                <NewsCard
+                  key={post.id}
+                  post={post}
+                  onPress={openNewsArticle}
+                  style={{ marginLeft: 12, marginRight: 3, width: 280 }}
+                />
+              ))}
+              
+              {/* Loading More Indicator */}
+              {newsLoadingMore && (
+                <View style={[styles.newsLoadingMore, { backgroundColor: colors.cardBackground }]}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <ThemedText style={[styles.newsLoadingText, { color: colors.icon }]}>
+                    Lade weitere...
+                  </ThemedText>
+                </View>
+              )}
           </ScrollView>
+          ) : (
+            <View style={styles.errorContainer}>
+              <ThemedText style={[styles.errorText, { color: colors.icon }]}>
+                Keine Neuigkeiten verfügbar
+              </ThemedText>
+            </View>
+          )}
         </View>
         
         {/* Extra Spacing for Tab Bar */}
@@ -459,7 +607,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingTop: 16, // Etwas Abstand, damit Kategorien initial nicht vom Schatten überlagert werden
-    paddingBottom: 24,
   },
   searchSection: {
     flexDirection: 'row',
@@ -585,7 +732,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.8)',
     flexShrink: 1,
     lineHeight: 12,
-   },
+  },
   levelInfoIcon: {
     width: 20,
     height: 20,
@@ -598,7 +745,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   section: {
-    marginBottom: 20,
+    marginBottom: 11, // Reduziert von 20 auf 19 (5% weniger)
   },
   sectionTitle: {
     fontSize: 18,
@@ -711,7 +858,7 @@ const styles = StyleSheet.create({
     },
     shadowOpacity: 0.09,           // 9% Transparenz (sehr subtil!)
     shadowRadius: 2,               // Blur: 2.0
-    elevation: 2, 
+    elevation: 2,
   },
   newsImageFile: {
     width: 130,
@@ -760,7 +907,26 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 14,
-
+    textAlign: 'center',
+  },
+  newsLoadingMore: {
+    width: 120,
+    padding: 16,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+    marginRight: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.09,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  newsLoadingText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_400Regular',
+    marginTop: 8,
     textAlign: 'center',
   },
 });

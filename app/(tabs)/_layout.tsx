@@ -1,27 +1,29 @@
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs, useRouter, useSegments } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, Platform, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, Text, TouchableOpacity, View } from 'react-native';
 
 import { HapticTab } from '@/components/HapticTab';
+import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
-import TabBarBackground from '@/components/ui/TabBarBackground';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 
-function CustomTabBarButton({ children, onPress }: any) {
+function CustomTabBarButton({ children, onPress, accessibilityState }: any) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const segments = useSegments();
+  const selected = segments[1] === 'explore';
   
   return (
     <View style={{
       flex: 1,
       alignItems: 'center',
-      justifyContent: 'center',
+      justifyContent: 'flex-start',
     }}>
       <TouchableOpacity
         style={{
-          top: -25,
+          top: -36,
           justifyContent: 'center',
           alignItems: 'center',
           width: 70,
@@ -34,12 +36,24 @@ function CustomTabBarButton({ children, onPress }: any) {
           shadowOpacity: colorScheme === 'dark' ? 0.4 : 0.25,
           shadowRadius: 6,
           borderWidth: 3,
-          borderColor: Colors[colorScheme ?? 'light'].background,
+          borderColor: selected ? colors.secondary : Colors[colorScheme ?? 'light'].background,
         }}
         onPress={onPress}
       >
-        {children}
+        <CustomIcon 
+          name="iconBlack" 
+          size={42} 
+          color="white"
+        />
       </TouchableOpacity>
+      <Text style={{
+        marginTop: -33,
+        fontSize: 11,
+        fontFamily: 'Nunito_500Medium',
+        color: selected ? colors.primary : colors.tabIconDefault,
+      }}>
+        Stöbern
+      </Text>
     </View>
   );
 }
@@ -72,13 +86,13 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tabIconSelected,
+        tabBarInactiveTintColor: Colors[colorScheme ?? 'light'].tabIconDefault,
         headerShown: false,
         headerTitleStyle: {
           fontFamily: 'Nunito_600SemiBold',
         },
         tabBarButton: HapticTab,
-        tabBarBackground: TabBarBackground,
         tabBarStyle: {
           position: 'absolute',
           bottom: 0,
@@ -97,32 +111,24 @@ export default function TabLayout() {
           shadowRadius: 12,
           elevation: 20,
         },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontFamily: 'Nunito_500Medium',
+          marginTop: 2,
+        },
       }}>
       <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="house.fill" color={color} />,
-          tabBarLabelStyle: { 
-            fontSize: 11,
-
-            marginTop: 2,
-          },
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
           title: 'Stöbern',
-          tabBarIcon: ({ color, focused }) => (
-            <IconSymbol 
-              size={28} 
-              name="magnifyingglass" 
-              color={focused ? 'white' : 'white'}
-            />
-          ),
           tabBarButton: (props) => <CustomTabBarButton {...props} />,
-          tabBarLabelStyle: { display: 'none' },
         }}
       />
       <Tabs.Screen
@@ -130,11 +136,6 @@ export default function TabLayout() {
         options={{
           title: 'Mehr',
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="line.3.horizontal" color={color} />,
-          tabBarLabelStyle: { 
-            fontSize: 11,
-
-            marginTop: 2,
-          },
         }}
       />
     </Tabs>

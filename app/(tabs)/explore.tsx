@@ -1,6 +1,8 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
+import { ListItemSkeleton, LoadingFooterSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -9,7 +11,7 @@ import { Discounter, FirestoreDocument, Handelsmarken, Kategorien, Produkte } fr
 import { router, useLocalSearchParams } from 'expo-router';
 import type { SymbolViewProps } from 'expo-symbols';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Dimensions, FlatList, Image, Modal, PanResponder, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { Animated, Dimensions, FlatList, Modal, PanResponder, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -33,13 +35,7 @@ export default function ExploreScreen() {
   const [categoryProductCounts, setCategoryProductCounts] = useState<{[key: string]: number}>({});
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   
-  // Marken State (mit Pagination)
-  const [markenTabData, setMarkenTabData] = useState<FirestoreDocument<any>[]>([]);
-  const [markenProductCounts, setMarkenProductCounts] = useState<{[key: string]: number}>({});
-  const [markenLoading, setMarkenLoading] = useState(false);
-  const [markenLastDoc, setMarkenLastDoc] = useState<any>(null);
-  const [markenHasMore, setMarkenHasMore] = useState(true);
-  const [markenError, setMarkenError] = useState<string | null>(null);
+  // Failed images state (für alle Tabs)
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
   
   // Animation für sanftes Einblenden der Produktzahlen
@@ -102,35 +98,7 @@ export default function ExploreScreen() {
   // Marken-Suche States
   const [markenSearchQuery, setMarkenSearchQuery] = useState('');
 
-  // Skeleton placeholder with pulsing animation
-  const SkeletonPlaceholder = ({ width, height, style }: { width?: number | string, height?: number, style?: any }) => {
-    const opacity = useState(new Animated.Value(0.3))[0];
 
-    useEffect(() => {
-      const pulse = () => {
-        Animated.sequence([
-          Animated.timing(opacity, { toValue: 0.7, duration: 800, useNativeDriver: true }),
-          Animated.timing(opacity, { toValue: 0.3, duration: 800, useNativeDriver: true }),
-        ]).start(() => pulse());
-      };
-      pulse();
-    }, []);
-
-    return (
-      <Animated.View
-        style={[
-          {
-            backgroundColor: colors.border,
-            borderRadius: 6,
-            width: width || '100%',
-            height: height || 12,
-            opacity,
-          },
-          style,
-        ]}
-      />
-    );
-  };
 
   // Helper function to get country flag emoji
   const getCountryFlag = (country: string): string => {
@@ -353,7 +321,7 @@ export default function ExploreScreen() {
   };
 
   // Swipe Navigation Logic - KORREKTE Reihenfolge wie in UI
-  const tabOrder = ['märkte', 'kategorien', 'markenprodukte', 'nonames', 'marken'];
+  const tabOrder = ['märkte', 'kategorien', 'markenprodukte', 'nonames'];
   
   const switchToTab = (newTab: string) => {
     if (isAnimating.current || newTab === activeTab) return;
@@ -551,35 +519,44 @@ export default function ExploreScreen() {
         setDiscounter(sortedDiscounter);
         setMarketsLoading(false); // ✅ Märkte sofort anzeigen!
         
-        // Lade Produktanzahl im Hintergrund (nicht blockierend)
-        console.log('🚀 Loading product counts in background...');
+        // Lade Produktanzahl im Hintergrund (nicht blockierend, individuell)
+        console.log('🚀 Loading product counts in background (non-blocking)...');
         const startTime = Date.now();
         
-        const productCountPromises = sortedDiscounter.map(async (market) => {
+        // Lade jeden Count individuell und update sofort (nicht blockierend)
+        sortedDiscounter.forEach(async (market, index) => {
           try {
-            const count = await FirestoreService.getProductCountByDiscounter(market.id);
-            console.log(`✅ Count for ${market.name}: ${count}`);
-            return { marketId: market.id, count };
+            // Kleine Verzögerung zwischen Requests für bessere Performance
+            setTimeout(async () => {
+              try {
+                const count = await FirestoreService.getProductCountByDiscounter(market.id);
+                console.log(`✅ Count for ${market.name}: ${count}`);
+                
+                // Update State sofort für diesen Market
+                setProductCounts(prevCounts => ({
+                  ...prevCounts,
+                  [market.id]: count
+                }));
+                
+                // Triggere Animation für diesen Count
+                setTimeout(() => animateProductCount(market.id), 100);
+                
+              } catch (error) {
+                console.error(`❌ Error counting products for ${market.name}:`, error);
+                // Setze 0 als Fallback
+                setProductCounts(prevCounts => ({
+                  ...prevCounts,
+                  [market.id]: 0
+                }));
+              }
+            }, index * 100); // Gestaffelte Requests (100ms Abstand)
+            
           } catch (error) {
-            console.error(`❌ Error counting products for ${market.name}:`, error);
-            return { marketId: market.id, count: 0 };
+            console.error(`❌ Error setting up count loading for ${market.name}:`, error);
           }
         });
         
-        const productCountResults = await Promise.all(productCountPromises);
-        const productCountsMap: {[key: string]: number} = {};
-        productCountResults.forEach(({ marketId, count }) => {
-          productCountsMap[marketId] = count;
-        });
-        setProductCounts(productCountsMap);
-        
-        // Triggere sanfte Animation für jede Produktzahl
-        productCountResults.forEach(({ marketId }) => {
-          setTimeout(() => animateProductCount(marketId), Math.random() * 200);
-        });
-        
-        const endTime = Date.now();
-        console.log(`✅ Product counts loaded in ${endTime - startTime}ms:`, productCountsMap);
+        console.log(`✅ Product count loading initiated (non-blocking)`);
         
       } catch (error) {
         console.error('Error loading markets:', error);
@@ -604,34 +581,42 @@ export default function ExploreScreen() {
         setCategoriesLoading(false); // ✅ Kategorien sofort anzeigen!
         
         // Lade Produktanzahl im Hintergrund (nicht blockierend)
-        console.log('🚀 Loading category product counts in background...');
-        const startTime = Date.now();
+        console.log('🚀 Loading category product counts in background (non-blocking)...');
         
-        const categoryCountPromises = sortedCategories.map(async (category) => {
+        // Lade jeden Count individuell und update sofort (nicht blockierend)
+        sortedCategories.forEach(async (category, index) => {
           try {
-            const count = await FirestoreService.getProductCountByCategory(category.id);
-            console.log(`✅ Count for ${category.bezeichnung}: ${count}`);
-            return { categoryId: category.id, count };
+            // Kleine Verzögerung zwischen Requests für bessere Performance
+            setTimeout(async () => {
+              try {
+                const count = await FirestoreService.getProductCountByCategory(category.id);
+                console.log(`✅ Count for ${category.bezeichnung}: ${count}`);
+                
+                // Update State sofort für diese Category
+                setCategoryProductCounts(prevCounts => ({
+                  ...prevCounts,
+                  [category.id]: count
+                }));
+                
+                // Triggere Animation für diesen Count
+                setTimeout(() => animateProductCount(category.id), 100);
+                
+              } catch (error) {
+                console.error(`❌ Error counting products for ${category.bezeichnung}:`, error);
+                // Setze 0 als Fallback
+                setCategoryProductCounts(prevCounts => ({
+                  ...prevCounts,
+                  [category.id]: 0
+                }));
+              }
+            }, index * 100); // Gestaffelte Requests (100ms Abstand)
+            
           } catch (error) {
-            console.error(`❌ Error counting products for ${category.bezeichnung}:`, error);
-            return { categoryId: category.id, count: 0 };
+            console.error(`❌ Error setting up count loading for ${category.bezeichnung}:`, error);
           }
         });
         
-        const categoryCountResults = await Promise.all(categoryCountPromises);
-        const categoryCountsMap: {[key: string]: number} = {};
-        categoryCountResults.forEach(({ categoryId, count }) => {
-          categoryCountsMap[categoryId] = count;
-        });
-        setCategoryProductCounts(categoryCountsMap);
-        
-        // Triggere sanfte Animation für jede Produktzahl
-        categoryCountResults.forEach(({ categoryId }) => {
-          setTimeout(() => animateProductCount(categoryId), Math.random() * 200);
-        });
-        
-        const endTime = Date.now();
-        console.log(`✅ Category product counts loaded in ${endTime - startTime}ms:`, categoryCountsMap);
+        console.log(`✅ Category product count loading initiated (non-blocking)`);
         
       } catch (error) {
         console.error('Error loading categories:', error);
@@ -643,69 +628,7 @@ export default function ExploreScreen() {
     loadCategories();
   }, []);
 
-  // Load marken data with pagination - ähnlich wie loadNoNameProducts
-  const loadMarken = async (reset: boolean = false) => {
-    if (markenLoading || (!markenHasMore && !reset)) return;
-    
-    console.log(`🔄 Loading Marken - Reset: ${reset}, HasMore: ${markenHasMore}`);
-    
-    try {
-      setMarkenLoading(true);
-      setMarkenError(null);
-      
-      const result = await FirestoreService.getMarkenPaginated(
-        20, // Nur 20 Marken pro Seite
-        reset ? null : markenLastDoc
-      );
-      
-      if (reset) {
-        setMarkenTabData(result.marken);
-      } else {
-        setMarkenTabData(prev => [...prev, ...result.marken]);
-      }
-      
-      setMarkenLastDoc(result.lastDoc);
-      setMarkenHasMore(result.hasMore);
-      
-      // Lade Produktanzahl im Hintergrund für neue Marken
-      console.log('🚀 Loading product counts for new marken...');
-      const newMarkenCountPromises = result.marken.map(async (marke) => {
-        try {
-          const count = await FirestoreService.getProductCountByMarke(marke.id);
-          return { markeId: marke.id, count };
-        } catch (error) {
-          console.error(`❌ Error counting products for ${marke.name}:`, error);
-          return { markeId: marke.id, count: 0 };
-        }
-      });
-      
-      const newMarkenCountResults = await Promise.all(newMarkenCountPromises);
-      const newMarkenCountsMap: {[key: string]: number} = {};
-      newMarkenCountResults.forEach(({ markeId, count }) => {
-        newMarkenCountsMap[markeId] = count;
-      });
-      
-      setMarkenProductCounts(prev => ({ ...prev, ...newMarkenCountsMap }));
-      
-      // Triggere sanfte Animation für neue Produktzahlen
-      newMarkenCountResults.forEach(({ markeId }) => {
-        setTimeout(() => animateProductCount(markeId), Math.random() * 200);
-      });
-      
-      console.log(`✅ Loaded ${result.marken.length} marken, hasMore: ${result.hasMore}`);
-      
-    } catch (error) {
-      console.error('Error loading marken:', error);
-      setMarkenError('Fehler beim Laden der Marken');
-    } finally {
-      setMarkenLoading(false);
-    }
-  };
 
-  // Initial load für Marken
-  useEffect(() => {
-    loadMarken(true);
-  }, []);
 
   // Handle URL parameters for navigation from other screens
   useEffect(() => {
@@ -840,12 +763,10 @@ export default function ExploreScreen() {
         return 'Kategorien';
       case 'markenprodukte':
         return 'Marken-\nProdukte';
-      case 'nonames':
-        return 'NoName-\nProdukte';
-      case 'marken':
-        return 'Marken';
-      default:
-        return tabId;
+              case 'nonames':
+          return 'NoName-\nProdukte';
+        default:
+          return tabId;
     }
   };
 
@@ -854,7 +775,6 @@ export default function ExploreScreen() {
     { id: 'kategorien', title: 'Kategorien', icon: 'square.grid.2x2' },
     { id: 'markenprodukte', title: 'Marken-\nProdukte', icon: 'heart.fill' },
     { id: 'nonames', title: 'NoName-\nProdukte', icon: 'star.fill' },
-    { id: 'marken', title: 'Marken', icon: 'tag' },
   ];
 
   const categories = [
@@ -904,7 +824,7 @@ export default function ExploreScreen() {
                       { borderBottomColor: colors.border }
                     ]}
                   >
-                    <SkeletonPlaceholder />
+                    <ListItemSkeleton />
                 </View>
                 ))}
                 </View>
@@ -957,9 +877,12 @@ export default function ExploreScreen() {
                   >
                     <View style={styles.marketLogo}>
                       {category.bild && category.bild.trim() !== '' && !failedImages.has(category.id) ? (
-                        <Image 
-                          source={{ uri: category.bild }} 
+                        <ImageWithShimmer
+                          source={{ uri: category.bild }}
                           style={styles.marketImage}
+                          fallbackIcon={getCategoryIcon(category.bezeichnung.toLowerCase())}
+                          fallbackIconSize={24}
+                          resizeMode="contain"
                           onError={() => {
                             console.log(`Failed to load image for category: ${category.bezeichnung}`);
                             setFailedImages(prev => new Set([...prev, category.id]));
@@ -1010,20 +933,7 @@ export default function ExploreScreen() {
                       index < 5 && { borderBottomColor: colors.border, borderBottomWidth: 0.5 }
                     ]}
                   >
-                    {/* Skeleton Logo */}
-                    <SkeletonPlaceholder width={60} height={60} style={{ borderRadius: 12 }} />
-                    
-                    {/* Skeleton Content */}
-                    <View style={[styles.marketContent, { paddingTop: 4 }]}>
-                      <SkeletonPlaceholder width="80%" height={16} style={{ marginBottom: 4 }} />
-                      <SkeletonPlaceholder width="60%" height={12} style={{ marginBottom: 8 }} />
-                      <SkeletonPlaceholder width="90%" height={12} />
-                    </View>
-                    
-                    {/* Skeleton Chevron */}
-                    <View style={styles.productChevron}>
-                      <SkeletonPlaceholder width={16} height={16} style={{ borderRadius: 8 }} />
-                    </View>
+                    <ListItemSkeleton />
                   </View>
                 ))}
               </View>
@@ -1077,9 +987,12 @@ export default function ExploreScreen() {
                   >
                     <View style={[styles.marketLogo, { backgroundColor: colors.background }]}>
                       {market.bild && market.bild.trim() !== '' && !failedImages.has(`market-${market.id}`) ? (
-                        <Image 
-                          source={{ uri: market.bild }} 
+                        <ImageWithShimmer
+                          source={{ uri: market.bild }}
                           style={styles.marketImage}
+                          fallbackIcon="storefront"
+                          fallbackIconSize={20}
+                          resizeMode="contain"
                           onError={() => {
                             console.log(`Failed to load image for market: ${market.name}`);
                             setFailedImages(prev => new Set([...prev, `market-${market.id}`]));
@@ -1172,9 +1085,12 @@ export default function ExploreScreen() {
                   >
                     <View style={styles.productLogo}>
                       {product.bild && product.bild.trim() !== '' && !failedImages.has(`product-${product.id}`) ? (
-                        <Image
+                        <ImageWithShimmer
                           source={{ uri: product.bild }}
                           style={styles.productImage}
+                          fallbackIcon="photo"
+                          fallbackIconSize={24}
+                          resizeMode="contain"
                           onError={() => {
                             console.log(`Failed to load image for product: ${product.name}`);
                             setFailedImages(prev => new Set([...prev, `product-${product.id}`]));
@@ -1196,9 +1112,12 @@ export default function ExploreScreen() {
                       </ThemedText>
                       <View style={styles.productMarketRow}>
                         {product.discounter?.bild && product.discounter.bild.trim() !== '' && !failedImages.has(`market-${product.discounter.id}`) ? (
-                          <Image 
-                            source={{ uri: product.discounter.bild }} 
+                          <ImageWithShimmer
+                            source={{ uri: product.discounter.bild }}
                             style={styles.productMarketImage}
+                            fallbackIcon="storefront"
+                            fallbackIconSize={12}
+                            resizeMode="contain"
                             onError={() => {
                               console.log(`Failed to load market image: ${product.discounter?.name}`);
                               setFailedImages(prev => new Set([...prev, `market-${product.discounter?.id}`]));
@@ -1244,12 +1163,7 @@ export default function ExploreScreen() {
                 onEndReachedThreshold={0.5}
                 ListFooterComponent={() => 
                   noNameLoading ? (
-                    <View style={styles.loadingFooter}>
-                      <SkeletonPlaceholder width={40} height={40} style={{ borderRadius: 20 }} />
-                      <ThemedText style={[styles.loadingText, { color: colors.icon }]}>
-                        Lädt weitere Produkte...
-                      </ThemedText>
-                    </View>
+                    <LoadingFooterSkeleton />
                   ) : null
                 }
             style={[styles.productListContainer, { backgroundColor: colors.cardBackground }]}
@@ -1296,9 +1210,12 @@ export default function ExploreScreen() {
                 >
                   <View style={styles.productLogo}>
                     {product.bild && product.bild.trim() !== '' && !failedImages.has(`markenprodukt-${product.id}`) ? (
-                      <Image
+                      <ImageWithShimmer
                         source={{ uri: product.bild }}
                         style={styles.productImage}
+                        fallbackIcon="cube.box"
+                        fallbackIconSize={32}
+                        resizeMode="contain"
                         onError={() => {
                           console.log(`Failed to load image for markenprodukt: ${product.name}`);
                           setFailedImages(prev => new Set([...prev, `markenprodukt-${product.id}`]));
@@ -1343,12 +1260,7 @@ export default function ExploreScreen() {
             onEndReachedThreshold={0.5}
             ListFooterComponent={() => 
               markenproduktLoading ? (
-                <View style={styles.loadingFooter}>
-                  <SkeletonPlaceholder width={40} height={40} style={{ borderRadius: 20 }} />
-                  <ThemedText style={[styles.loadingText, { color: colors.icon }]}>
-                    Lädt weitere Produkte...
-                  </ThemedText>
-                </View>
+                <LoadingFooterSkeleton />
               ) : null
             }
             style={[styles.productListContainer, { backgroundColor: colors.cardBackground }]}
@@ -1356,127 +1268,7 @@ export default function ExploreScreen() {
             showsVerticalScrollIndicator={false}
           />
         );
-      case 'marken':
-        return (
-          <FlatList
-            data={markenTabData}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item: marke, index }) => (
-              <TouchableOpacity 
-                style={[
-                  styles.marketListItem,
-                  index === 0 && styles.firstMarketItem,
-                  index === markenTabData.length - 1 && !markenHasMore && styles.lastMarketItem,
-                  { borderBottomColor: colors.border }
-                ]}
-                onPress={() => {
-                  // Switch to Markenprodukte tab with marke filter
-                  setActiveTab('markenprodukte');
-                  
-                  const newFilters = {
-                    categoryFilters: [],
-                    herstellerFilters: [marke.id]
-                  };
-                  setMarkenproduktFilters(newFilters);
-                  
-                  // Reset and load Markenprodukte with marke filter
-                  setMarkenprodukte([]);
-                  setMarkenproduktLastDoc(null);
-                  setMarkenproduktHasMore(true);
-                  setMarkenproduktError(null);
-                  
-                  setTimeout(async () => {
-                    try {
-                      setMarkenproduktLoading(true);
-                      const result = await FirestoreService.getMarkenproduktePaginated(
-                        20,
-                        null,
-                        newFilters
-                      );
-                      setMarkenprodukte(result.products);
-                      setMarkenproduktLastDoc(result.lastDoc);
-                      setMarkenproduktHasMore(result.hasMore);
-                      console.log(`✅ Loaded Markenprodukte for marke: ${marke.name} (${result.products.length} products)`);
-                    } catch (error) {
-                      console.error('Error loading filtered markenprodukte:', error);
-                      setMarkenproduktError('Fehler beim Laden der Markenprodukte');
-                    } finally {
-                      setMarkenproduktLoading(false);
-                    }
-                  }, 100);
-                }}
-              >
-                <View style={styles.marketLogo}>
-                  {marke.bild && marke.bild.trim() !== '' && !failedImages.has(marke.id) ? (
-                    <Image 
-                      source={{ uri: marke.bild }} 
-                      style={styles.marketImage}
-                      onError={() => {
-                        console.log(`❌ Failed to load bild for marke: ${marke.name} - ${marke.bild}`);
-                        setFailedImages(prev => new Set([...prev, marke.id]));
-                      }}
-                    />
-                  ) : (
-                    <IconSymbol 
-                      name="tag" 
-                      size={24} 
-                      color={colors.primary} 
-                    />
-                  )}
-                </View>
-                <View style={styles.marketContent}>
-                  <ThemedText style={[styles.marketTitle, { color: colors.text }]}>
-                    {marke.name}
-                  </ThemedText>
-                  <Animated.View style={{ opacity: countOpacities[marke.id] || 1 }}>
-                    <ThemedText style={[styles.marketCount, { color: colors.text }]}>
-                      {markenProductCounts[marke.id] !== undefined 
-                        ? `${markenProductCounts[marke.id]} Produkte`
-                        : '... Produkte'
-                      }
-                    </ThemedText>
-                  </Animated.View>
-                </View>
-                                    <View style={styles.productChevron}>
-                      <IconSymbol name="chevron.right" size={16} color={colors.icon} />
-                    </View>
-              </TouchableOpacity>
-            )}
-            onEndReached={() => {
-              if (markenHasMore && !markenLoading) {
-                loadMarken(false);
-              }
-            }}
-            onEndReachedThreshold={0.5}
-            ListFooterComponent={() => 
-              markenLoading ? (
-                <View style={styles.loadingFooter}>
-                  <ThemedText style={[styles.loadingText, { color: colors.text }]}>
-                    Lade weitere Marken...
-                  </ThemedText>
-          </View>
-              ) : null
-            }
-            ListEmptyComponent={() => 
-              markenError ? (
-                <View style={styles.emptyState}>
-                  <ThemedText style={[styles.emptyText, { color: colors.text }]}>
-                    {markenError}
-                  </ThemedText>
-                  <TouchableOpacity 
-                    style={[styles.retryButton, { backgroundColor: colors.primary }]}
-                    onPress={() => loadMarken(true)}
-                  >
-                    <ThemedText style={styles.retryButtonText}>Erneut versuchen</ThemedText>
-                  </TouchableOpacity>
-                </View>
-              ) : null
-            }
-            style={[styles.marketListContainer, { backgroundColor: colors.cardBackground }]}
-            contentContainerStyle={styles.productListContent}
-            showsVerticalScrollIndicator={false}
-          />
-        );
+
       default:
         return (
           <View style={styles.emptyState}>
@@ -1669,9 +1461,12 @@ export default function ExploreScreen() {
                   >
                     <View style={[styles.chipLogo, { backgroundColor: colors.background }]}>
                       {market.bild && market.bild.trim() !== '' && !failedImages.has(`chip-market-${market.id}`) ? (
-                        <Image 
-                          source={{ uri: market.bild }} 
+                        <ImageWithShimmer
+                          source={{ uri: market.bild }}
                           style={styles.chipImage}
+                          fallbackIcon="storefront"
+                          fallbackIconSize={12}
+                          resizeMode="contain"
                           onError={() => {
                             setFailedImages(prev => new Set([...prev, `chip-market-${market.id}`]));
                           }}

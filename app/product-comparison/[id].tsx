@@ -1,8 +1,11 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
+import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor, getStufenDescription, getStufenTitle } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
+import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { ingredientSynonyms } from '@/lib/data/ingredientSynonyms';
@@ -134,9 +137,11 @@ const ScoreImage = ({ type, openFoodProduct, firestoreValue }: {
   }
 
   return (
-    <Image 
+    <ImageWithShimmer
       source={{ uri: imageUrl }}
       style={styles.scoreImage}
+      fallbackIcon="photo"
+      fallbackIconSize={16}
       resizeMode="contain"
     />
   );
@@ -183,35 +188,7 @@ const StarRating = ({
   );
 };
 
-// Skeleton placeholder with pulsing animation
-const SkeletonPlaceholder = ({ width, height, style }: { width?: number | string, height?: number, style?: any }) => {
-  const opacity = useState(new Animated.Value(0.3))[0];
 
-  useEffect(() => {
-    const pulse = () => {
-      Animated.sequence([
-        Animated.timing(opacity, { toValue: 0.7, duration: 800, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0.3, duration: 800, useNativeDriver: true }),
-      ]).start(() => pulse());
-    };
-    pulse();
-  }, []);
-
-  return (
-    <Animated.View
-      style={[
-        {
-          backgroundColor: '#E0E0E0',
-          borderRadius: 6,
-          width: width || '100%',
-          height: height || 12,
-          opacity,
-        },
-        style,
-      ]}
-    />
-  );
-};
 
 
 
@@ -1253,40 +1230,7 @@ export default function ProductComparisonScreen() {
   // Header-Optionen sofort setzen mit useLayoutEffect
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: 'Produktvergleich',
-      headerStyle: { 
-        backgroundColor: colors.primary,
-        borderBottomWidth: 0,
-        elevation: 0,
-        shadowOpacity: 0,
-      },
-      headerTintColor: 'white',
-      headerTitleStyle: { 
-        color: 'white',
-        fontFamily: 'Nunito_600SemiBold',
-        fontSize: 16
-      },
-      headerShadowVisible: false,
-      headerBackVisible: false,
-      headerTransparent: false,
-      headerBlurEffect: 'none',
-      headerLargeTitle: false,
-      headerSearchBarOptions: undefined,
-      headerBackTitleVisible: false,
-      gestureEnabled: true,
-      animation: 'slide_from_right', // Native Animation statt 'none'
-      headerLeft: () => (
-        <TouchableOpacity 
-          onPress={() => router.back()}
-          style={{ 
-            paddingLeft: 0, 
-            paddingRight: 8, 
-            paddingVertical: 8 
-          }}
-        >
-          <IconSymbol name="chevron.left" size={24} color="white" />
-        </TouchableOpacity>
-      ),
+      ...getNavigationHeaderOptions(colorScheme, 'Produktvergleich'),
       headerRight: selectedProducts.size > 0 ? () => (
         <TouchableOpacity 
           onPress={() => setShowComparisonSheet(true)}
@@ -1557,33 +1501,33 @@ export default function ProductComparisonScreen() {
           <View style={[styles.productCard, { backgroundColor: colors.cardBackground }]}>
             {/* Skeleton Chips Row */}
             <View style={styles.chipsRow}>
-              <SkeletonPlaceholder width={100} height={28} style={{ borderRadius: 14 }} />
-              <SkeletonPlaceholder width={80} height={28} style={{ borderRadius: 14 }} />
+              <ShimmerSkeleton width={100} height={28} style={{ borderRadius: 14 }} />
+              <ShimmerSkeleton width={80} height={28} style={{ borderRadius: 14 }} />
           </View>
 
             {/* Skeleton Product Row */}
             <View style={styles.productRow}>
-              <SkeletonPlaceholder width={80} height={80} style={{ borderRadius: 12 }} />
+              <ShimmerSkeleton width={80} height={80} style={{ borderRadius: 12 }} />
           <View style={styles.productInfo}>
-                <SkeletonPlaceholder width="70%" height={16} style={{ marginBottom: 8 }} />
-                <SkeletonPlaceholder width="90%" height={20} style={{ marginBottom: 12 }} />
+                <ShimmerSkeleton width="70%" height={16} style={{ marginBottom: 8 }} />
+                <ShimmerSkeleton width="90%" height={20} style={{ marginBottom: 12 }} />
                 <View style={styles.ratingRow}>
-                  <SkeletonPlaceholder width={40} height={16} />
-                  <SkeletonPlaceholder width={100} height={16} />
-                  <SkeletonPlaceholder width={50} height={16} />
+                  <ShimmerSkeleton width={40} height={16} />
+                  <ShimmerSkeleton width={100} height={16} />
+                  <ShimmerSkeleton width={50} height={16} />
             </View>
 
               </View>
               <View style={styles.priceSection}>
-                <SkeletonPlaceholder width="100%" height={24} style={{ marginBottom: 4 }} />
-                <SkeletonPlaceholder width="80%" height={16} />
+                <ShimmerSkeleton width="100%" height={24} style={{ marginBottom: 4 }} />
+                <ShimmerSkeleton width="80%" height={16} />
               </View>
             </View>
 
             {/* Skeleton Action Buttons */}
             <View style={styles.actionButtonsRow}>
-              <SkeletonPlaceholder width="75%" height={44} style={{ borderRadius: 12 }} />
-              <SkeletonPlaceholder width={44} height={44} style={{ borderRadius: 12 }} />
+              <ShimmerSkeleton width="75%" height={44} style={{ borderRadius: 12 }} />
+              <ShimmerSkeleton width={44} height={44} style={{ borderRadius: 12 }} />
             </View>
           </View>
 
@@ -1593,32 +1537,32 @@ export default function ProductComparisonScreen() {
             {[1, 2].map((index) => (
               <View key={index} style={[styles.productCard, { backgroundColor: colors.cardBackground }]}>
                 <View style={styles.chipsRow}>
-                  <SkeletonPlaceholder width={90} height={28} style={{ borderRadius: 14 }} />
-                  <SkeletonPlaceholder width={70} height={28} style={{ borderRadius: 14 }} />
-                  <SkeletonPlaceholder width={60} height={28} style={{ borderRadius: 14 }} />
+                  <ShimmerSkeleton width={90} height={28} style={{ borderRadius: 14 }} />
+                  <ShimmerSkeleton width={70} height={28} style={{ borderRadius: 14 }} />
+                  <ShimmerSkeleton width={60} height={28} style={{ borderRadius: 14 }} />
                 </View>
                 <View style={styles.productRow}>
-                  <SkeletonPlaceholder width={80} height={80} style={{ borderRadius: 12 }} />
+                  <ShimmerSkeleton width={80} height={80} style={{ borderRadius: 12 }} />
                   <View style={styles.productInfo}>
-                    <SkeletonPlaceholder width="60%" height={16} style={{ marginBottom: 8 }} />
-                    <SkeletonPlaceholder width="85%" height={20} style={{ marginBottom: 12 }} />
+                    <ShimmerSkeleton width="60%" height={16} style={{ marginBottom: 8 }} />
+                    <ShimmerSkeleton width="85%" height={20} style={{ marginBottom: 12 }} />
                     <View style={styles.ratingRow}>
-                      <SkeletonPlaceholder width={40} height={16} />
-                      <SkeletonPlaceholder width={100} height={16} />
-                      <SkeletonPlaceholder width={50} height={16} />
+                      <ShimmerSkeleton width={40} height={16} />
+                      <ShimmerSkeleton width={100} height={16} />
+                      <ShimmerSkeleton width={50} height={16} />
                     </View>
                   </View>
                   <View style={styles.priceSection}>
                     <View style={styles.discountRow}>
-                      <SkeletonPlaceholder width={50} height={16} />
+                      <ShimmerSkeleton width={50} height={16} />
                     </View>
-                    <SkeletonPlaceholder width="100%" height={24} style={{ marginBottom: 4 }} />
-                    <SkeletonPlaceholder width="70%" height={16} />
+                    <ShimmerSkeleton width="100%" height={24} style={{ marginBottom: 4 }} />
+                    <ShimmerSkeleton width="70%" height={16} />
                   </View>
                 </View>
                 <View style={styles.actionButtonsRow}>
-                  <SkeletonPlaceholder width="75%" height={44} style={{ borderRadius: 12 }} />
-                  <SkeletonPlaceholder width={44} height={44} style={{ borderRadius: 12 }} />
+                  <ShimmerSkeleton width="75%" height={44} style={{ borderRadius: 12 }} />
+                  <ShimmerSkeleton width={44} height={44} style={{ borderRadius: 12 }} />
                 </View>
               </View>
             ))}
@@ -2025,7 +1969,13 @@ export default function ProductComparisonScreen() {
                 >
                   <View style={styles.similarProductImageContainer}>
                     {product.bild ? (
-                      <Image source={{ uri: product.bild }} style={styles.similarProductImage} />
+                      <ImageWithShimmer
+                        source={{ uri: product.bild }}
+                        style={styles.similarProductImage}
+                        fallbackIcon="cube.box"
+                        fallbackIconSize={20}
+                        resizeMode="cover"
+                      />
                     ) : (
                       <View style={[styles.similarProductImagePlaceholder, { backgroundColor: colors.border }]}>
                         <IconSymbol name="cube.box" size={20} color={colors.icon} />

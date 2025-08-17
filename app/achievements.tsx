@@ -2,6 +2,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
+import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
@@ -11,7 +12,6 @@ import {
     Dimensions,
     ScrollView,
     StyleSheet,
-    TouchableOpacity,
     View
 } from 'react-native';
 
@@ -25,32 +25,8 @@ export default function AchievementsScreen() {
 
   // Header-Optionen sofort setzen mit useLayoutEffect
   useLayoutEffect(() => {
-    navigation.setOptions({
-      title: 'Level & Errungenschaften',
-      headerStyle: { 
-        backgroundColor: colors.primary,
-      },
-      headerTintColor: 'white',
-      headerTitleStyle: { 
-        color: 'white',
-        fontFamily: 'Nunito_600SemiBold',
-      },
-      headerShadowVisible: false,
-      headerBackVisible: false,
-      headerLeft: () => (
-        <TouchableOpacity 
-          onPress={() => router.back()}
-          style={{ 
-            paddingLeft: 0, 
-            paddingRight: 8, 
-            paddingVertical: 8 
-          }}
-        >
-          <IconSymbol name="chevron.left" size={24} color="white" />
-        </TouchableOpacity>
-      ),
-    });
-  }, [navigation, router, colors.primary]);
+    navigation.setOptions(getNavigationHeaderOptions(colorScheme, 'Level & Errungenschaften'));
+  }, [navigation, colorScheme]);
 
   // Animation values
   const [shimmerAnim] = useState(new Animated.Value(0));

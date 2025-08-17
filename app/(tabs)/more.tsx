@@ -1,15 +1,17 @@
 import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import * as Application from 'expo-application';
+import { useTheme } from '@/lib/contexts/ThemeContext';
+// @ts-ignore
 import { LinearGradient } from 'expo-linear-gradient';
+// @ts-ignore
 import React, { useEffect, useState } from 'react';
 import {
     Alert,
     Linking,
+    SafeAreaView,
     ScrollView,
     Share,
     StatusBar,
@@ -19,28 +21,23 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { version as packageVersion } from '../../package.json';
 
 export default function MoreScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { user, logout } = useAuth();
-  const [isDarkMode, setIsDarkMode] = useState(colorScheme === 'dark');
-  const [appVersion, setAppVersion] = useState('1.0');
+  const { isDarkMode, toggleDarkMode, themeMode, setThemeMode } = useTheme();
+  const [appVersion, setAppVersion] = useState('1.0.0');
 
   useEffect(() => {
-    // Get app version
-    const version = Application.nativeApplicationVersion || '1.0';
-    setAppVersion(version);
+    // Get app version from package.json
+    setAppVersion(packageVersion || '1.0.0');
   }, []);
 
-  useEffect(() => {
-    setIsDarkMode(colorScheme === 'dark');
-  }, [colorScheme]);
-
   const handleDarkModeToggle = (value: boolean) => {
-    setIsDarkMode(value);
-    // TODO: Implement actual dark mode toggle
-    console.log('Dark mode toggle:', value);
+    toggleDarkMode();
+    console.log(`✅ Theme toggled to: ${value ? 'dark' : 'light'} mode`);
   };
 
   const handleTotalSavingsInfo = () => {
@@ -134,20 +131,21 @@ export default function MoreScreen() {
   const isPremium = false; // TODO: Get from user data
 
   return (
-    <ThemedView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'} />
       
+      {/* Fixed Header */}
+      <View style={[styles.header, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+        <ThemedText style={styles.headerTitle}>
+          {user?.displayName || 'Weitere Inhalte'}
+        </ThemedText>
+      </View>
+      
       <ScrollView 
-        style={styles.scrollView}
+        style={[styles.scrollView, { backgroundColor: colors.background }]}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <View style={styles.headerSection}>
-          <ThemedText style={styles.headerTitle}>
-            {user?.displayName || 'Weitere Inhalte'}
-          </ThemedText>
-        </View>
 
         {/* Gesamtersparnis Card */}
         <View style={styles.cardContainer}>
@@ -330,30 +328,44 @@ export default function MoreScreen() {
           </View>
         </View>
 
-        {/* Dark Mode Toggle */}
+        {/* Dark Mode Toggle als separate Menu-Gruppe */}
         <View style={styles.sectionContainer}>
-          <View style={[styles.darkModeCard, { backgroundColor: colors.cardBackground }]}>
-            <View style={styles.darkModeContent}>
-              <IconSymbol name="moon" size={24} color={colors.secondary} />
-              <Text style={[styles.darkModeText, { color: colors.text }]}>Light- / Dark-Mode</Text>
+          <View style={[styles.menuGroup, { backgroundColor: colors.cardBackground }]}>
+            <TouchableOpacity 
+              style={styles.menuItemLast} 
+              onPress={toggleDarkMode}
+              activeOpacity={0.7}
+            >
+              <IconSymbol 
+                name={isDarkMode ? "moon" : "sun.max"} 
+                size={24} 
+                color={colors.secondary} 
+              />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>
+                Dunkler Modus
+              </Text>
               <Switch
                 value={isDarkMode}
-                onValueChange={handleDarkModeToggle}
-                trackColor={{ false: colors.border, true: colors.secondary }}
+                onValueChange={toggleDarkMode}
+                trackColor={{ 
+                  false: colors.border, 
+                  true: colors.secondary 
+                }}
                 thumbColor={isDarkMode ? colors.cardBackground : colors.secondary}
+                ios_backgroundColor={colors.border}
               />
-            </View>
+            </TouchableOpacity>
           </View>
         </View>
 
         {/* Version */}
         <View style={styles.versionContainer}>
-          <Text style={[styles.versionText, { color: colors.icon }]}>
+          <ThemedText style={[styles.versionText, { color: colors.icon }]}>
             Version [{appVersion}]
-          </Text>
+          </ThemedText>
         </View>
       </ScrollView>
-    </ThemedView>
+    </SafeAreaView>
   );
 }
 
@@ -361,21 +373,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingTop: 65,
-    paddingBottom: 100,
-  },
-  headerSection: {
+  header: {
     paddingHorizontal: 24,
-    marginBottom: 12,
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     fontFamily: 'Nunito_700Bold',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingTop: 12,
+    paddingBottom: 100,
   },
   cardContainer: {
     marginHorizontal: 16,
@@ -539,22 +552,7 @@ const styles = StyleSheet.create({
     gap: 4,
     marginRight: 8,
   },
-  darkModeCard: {
-    marginHorizontal: 16,
-    borderRadius: 16,
-    padding: 16,
-  },
-  darkModeContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  darkModeText: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '400',
-    fontFamily: 'Nunito_400Regular',
-  },
+
   versionContainer: {
     alignItems: 'center',
     marginTop: 25,

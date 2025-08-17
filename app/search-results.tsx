@@ -1,8 +1,10 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
+import { getStackScreenHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { AlgoliaSearchResult, AlgoliaService } from '@/lib/services/algolia';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
@@ -253,9 +255,12 @@ export default function SearchResultsScreen() {
         >
           <View style={styles.productLogo}>
             {item.bild && item.bild.trim() !== '' && !failedImages.has(`product-${item.objectID}`) ? (
-              <Image
+              <ImageWithShimmer
                 source={{ uri: item.bild }}
                 style={styles.productImage}
+                fallbackIcon="cube.box"
+                fallbackIconSize={32}
+                resizeMode="contain"
                 onError={() => {
                   console.log(`Failed to load image for product: ${item.name}`);
                   setFailedImages(prev => new Set([...prev, `product-${item.objectID}`]));
@@ -332,22 +337,7 @@ export default function SearchResultsScreen() {
   return (
     <>
       <Stack.Screen
-        options={{
-          title: 'Suchergebnisse',
-          headerStyle: {
-            backgroundColor: colors.primary,
-          },
-          headerTintColor: 'white',
-          headerTitleStyle: {
-            fontFamily: 'Nunito_600SemiBold',
-            fontSize: 18,
-          },
-          headerBackTitle: 'Zurück',
-          headerBackTitleStyle: {
-            fontFamily: 'Nunito_400Regular',
-          },
-          animation: 'slide_from_right',
-        }}
+        options={getStackScreenHeaderOptions(colorScheme, 'Suchergebnisse')}
       />
       
       <ThemedView style={styles.container} {...panResponder.panHandlers}>

@@ -2,6 +2,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
+import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useLayoutEffect, useState } from 'react';
@@ -16,43 +17,8 @@ export default function ShoppingListScreen() {
 
   // Header konfigurieren
   useLayoutEffect(() => {
-    navigation.setOptions({
-      title: 'Einkaufszettel',
-      headerStyle: { 
-        backgroundColor: colors.primary,
-        borderBottomWidth: 0,
-        elevation: 0,
-        shadowOpacity: 0,
-      },
-      headerTintColor: 'white',
-      headerTitleStyle: { 
-        color: 'white',
-        fontFamily: 'Nunito_600SemiBold',
-        fontSize: 16
-      },
-      headerShadowVisible: false,
-      headerBackVisible: false,
-      headerTransparent: false,
-      headerBlurEffect: 'none',
-      headerLargeTitle: false,
-      headerSearchBarOptions: undefined,
-      headerBackTitleVisible: false,
-      gestureEnabled: true,
-      animation: 'slide_from_right',
-      headerLeft: () => (
-        <TouchableOpacity 
-          onPress={() => router.back()}
-          style={{ 
-            paddingLeft: 0, 
-            paddingRight: 8, 
-            paddingVertical: 8 
-          }}
-        >
-          <IconSymbol name="chevron.left" size={24} color="white" />
-        </TouchableOpacity>
-      ),
-    });
-  }, [navigation, colors.primary]);
+    navigation.setOptions(getNavigationHeaderOptions(colorScheme, 'Einkaufszettel'));
+  }, [navigation, colorScheme]);
   const [showConversionModal, setShowConversionModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 

@@ -1,6 +1,8 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
+import { ListItemSkeleton, ProductComparisonSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor, getStufenDescription, getStufenTitle } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -9,7 +11,7 @@ import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
 import { ProductWithDetails } from '@/lib/types/firestore';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import React, { useEffect, useLayoutEffect, useState } from 'react';
-import { ActivityIndicator, Animated, Image, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Animated, Image, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 // ScoreImage Komponente - 1:1 wie im Produktvergleich
 const ScoreImage = ({ type, value }: { type: 'nutri' | 'eco' | 'nova'; value: string | number }) => {
@@ -56,12 +58,37 @@ export default function NoNameDetailScreen() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showStagesInfo, setShowStagesInfo] = useState(false);
 
-  // Animation für smooth loading
-  const [productAnimation] = useState(new Animated.Value(0));
-  
   // Ähnliche Produkte States
   const [similarProducts, setSimilarProducts] = useState<ProductWithDetails[]>([]);
   const [similarProductsLoading, setSimilarProductsLoading] = useState(false);
+  
+  // Animation States für sanftes Einblenden
+  const [productAnimation] = useState(new Animated.Value(0));
+  const [similarProductAnimations, setSimilarProductAnimations] = useState<{[key: string]: Animated.Value}>({});
+
+  // Animation Funktionen
+  const animateProductCard = () => {
+    Animated.timing(productAnimation, {
+      toValue: 1,
+      duration: 400,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const animateSimilarProduct = (productId: string, delay: number = 0) => {
+    if (!similarProductAnimations[productId]) {
+      const newOpacity = new Animated.Value(0);
+      setSimilarProductAnimations(prev => ({ ...prev, [productId]: newOpacity }));
+      
+      setTimeout(() => {
+        Animated.timing(newOpacity, {
+          toValue: 1,
+          duration: 400,
+          useNativeDriver: true,
+        }).start();
+      }, delay);
+    }
+  };
 
   // Header konfigurieren
   useLayoutEffect(() => {
@@ -157,6 +184,8 @@ export default function NoNameDetailScreen() {
         setError('Fehler beim Laden des Produkts');
       } finally {
         setLoading(false);
+        // Starte Animation nach dem Laden
+        setTimeout(() => animateProductCard(), 50);
       }
     };
 
@@ -182,6 +211,11 @@ export default function NoNameDetailScreen() {
       const products = await FirestoreService.getSimilarProducts(categoryRef, excludeProductId, 7);
       setSimilarProducts(products);
       console.log(`✅ Loaded ${products.length} similar products:`, products.map(p => `${p.name} (Stufe ${p.stufe})`));
+      
+      // Starte Animation für ähnliche Produkte
+      products.forEach((product, index) => {
+        animateSimilarProduct(product.id, index * 40);
+      });
     } catch (error) {
       console.error('❌ Error loading similar products:', error);
     } finally {
@@ -209,12 +243,7 @@ export default function NoNameDetailScreen() {
   if (loading) {
     return (
       <ThemedView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <ThemedText style={[styles.loadingText, { color: colors.text }]}>
-            Lade Produktdetails...
-          </ThemedText>
-        </View>
+        <ProductComparisonSkeleton />
       </ThemedView>
     );
   }
@@ -308,9 +337,12 @@ export default function NoNameDetailScreen() {
               disabled={!product.bild}
             >
               {product.bild && !failedImages.has(`product-${product.id}`) ? (
-                <Image 
+                <ImageWithShimmer
                   source={{ uri: product.bild }}
                   style={styles.productImage}
+                  fallbackIcon="cube.box"
+                  fallbackIconSize={40}
+                  resizeMode="contain"
                   onError={() => {
                     console.log(`Failed to load image for product: ${product.name}`);
                     setFailedImages(prev => new Set([...prev, `product-${product.id}`]));
@@ -390,7 +422,7 @@ export default function NoNameDetailScreen() {
           <View style={[styles.similarProductsSection, { backgroundColor: colors.background }]}>
             <View style={styles.similarProductsHeader}>
               <ThemedText style={[styles.similarProductsTitle, { color: colors.text }]}>
-                Enttarnte Produkte
+                Weitere enttarnte Produkte
               </ThemedText>
               <ThemedText style={[styles.similarProductsSubtitle, { color: colors.icon }]}>
                 Entdecke andere Produkte mit Stufe 3, 4 oder 5
@@ -398,40 +430,37 @@ export default function NoNameDetailScreen() {
             </View>
 
             {similarProductsLoading ? (
-              // Loading Skeleton
+              // Shimmer Skeleton Loading
               <View style={styles.similarProductsList}>
                 {[...Array(3)].map((_, index) => (
-                  <View key={index} style={[styles.similarProductItem, { backgroundColor: colors.cardBackground }]}>
-                    <View style={[styles.similarProductImagePlaceholder, { backgroundColor: colors.border }]} />
-                    <View style={styles.similarProductContent}>
-                      <View style={[styles.skeletonLine, { backgroundColor: colors.border, width: '80%', height: 14 }]} />
-                      <View style={[styles.skeletonLine, { backgroundColor: colors.border, width: '60%', height: 12, marginTop: 4 }]} />
-                      <View style={[styles.skeletonLine, { backgroundColor: colors.border, width: '40%', height: 12, marginTop: 4 }]} />
-                    </View>
-                    <View style={styles.similarProductRight}>
-                      <View style={[styles.skeletonLine, { backgroundColor: colors.border, width: 40, height: 12 }]} />
-                    </View>
-                  </View>
+                  <ListItemSkeleton key={`similar-skeleton-${index}`} />
                 ))}
               </View>
             ) : similarProducts.length > 0 ? (
               // Produkte Liste
               <View style={styles.similarProductsList}>
                 {similarProducts.map((product, index) => (
-                  <TouchableOpacity 
+                  <Animated.View 
                     key={product.id}
-                    style={[styles.similarProductItem, { backgroundColor: colors.cardBackground }]}
-                    onPress={() => {
-                      // Navigation zu Produktvergleich (Stufe 3,4,5)
-                      router.push(`/product-comparison/${product.id}?type=noname` as any);
+                    style={{
+                      opacity: similarProductAnimations[product.id] || 0
                     }}
                   >
+                    <TouchableOpacity 
+                      style={[styles.similarProductItem, { backgroundColor: colors.cardBackground }]}
+                      onPress={() => {
+                        // Navigation zu Produktvergleich (Stufe 3,4,5)
+                        router.push(`/product-comparison/${product.id}?type=noname` as any);
+                      }}
+                    >
                     {/* Produktbild */}
                     <View style={styles.similarProductImageContainer}>
                       {product.bild && !failedImages.has(product.bild) ? (
-                        <Image 
+                        <ImageWithShimmer
                           source={{ uri: product.bild }}
                           style={styles.similarProductImage}
+                          fallbackIcon="cube.box"
+                          fallbackIconSize={20}
                           resizeMode="contain"
                           onError={() => setFailedImages(prev => new Set([...prev, product.bild!]))}
                         />
@@ -454,9 +483,11 @@ export default function NoNameDetailScreen() {
                       {/* Markt Row */}
                       <View style={styles.similarProductMarketRow}>
                         {product.discounter?.bild && (
-                          <Image 
+                          <ImageWithShimmer
                             source={{ uri: product.discounter.bild }}
                             style={styles.similarProductMarketImage}
+                            fallbackIcon="storefront"
+                            fallbackIconSize={10}
                             resizeMode="contain"
                           />
                         )}
@@ -489,6 +520,7 @@ export default function NoNameDetailScreen() {
                       </View>
                     </View>
                   </TouchableOpacity>
+                  </Animated.View>
                 ))}
               </View>
             ) : (
@@ -580,9 +612,11 @@ export default function NoNameDetailScreen() {
                   <ThemedText style={styles.infoLabel}>Markt:</ThemedText>
                   <View style={styles.markeRow}>
                     {product.discounter?.bild && (
-                      <Image 
+                      <ImageWithShimmer
                         source={{ uri: product.discounter.bild }}
                         style={styles.markeImage}
+                        fallbackIcon="storefront"
+                        fallbackIconSize={16}
                         resizeMode="contain"
                       />
                     )}
@@ -622,9 +656,11 @@ export default function NoNameDetailScreen() {
                         return brands.map((brand, index) => (
                           <View key={index} style={styles.markenItem}>
                             {brand.bild && (
-                              <Image 
+                              <ImageWithShimmer
                                 source={{ uri: brand.bild }}
                                 style={styles.markenItemImage}
+                                fallbackIcon="tag"
+                                fallbackIconSize={16}
                                 resizeMode="contain"
                               />
                             )}
@@ -993,16 +1029,7 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 16,
-  },
-  loadingText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_400Regular',
-  },
+
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -1706,9 +1733,7 @@ const styles = StyleSheet.create({
     width: 20,
     height: 50,
   },
-  skeletonLine: {
-    borderRadius: 4,
-  },
+
   noSimilarProductsContainer: {
     alignItems: 'center',
     paddingVertical: 32,

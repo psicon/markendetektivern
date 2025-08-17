@@ -46,7 +46,7 @@ export default function WelcomeScreen() {
   return (
     <View style={styles.container}>
       {/* Static background while image loads */}
-      <View style={[styles.background, { backgroundColor: colorScheme === 'dark' ? '#1a1a1a' : '#f5f5f5' }]} />
+      <View style={[styles.background, { backgroundColor: colorScheme === 'dark' ? '#000000' : '#f5f5f5' }]} />
       
       {/* Animated ImageBackground */}
       <Animated.View style={[styles.imageContainer, { opacity: fadeAnim }]}>
