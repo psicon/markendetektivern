@@ -8,6 +8,7 @@ import { CategorySkeleton, NewsCardSkeleton, ProductCardSkeleton } from '@/compo
 import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAuth } from '@/lib/contexts/AuthContext';
 import { FirestoreService } from '@/lib/services/firestore';
 import WordPressService, { WordPressPost } from '@/lib/services/wordpress';
 import { FirestoreDocument, Handelsmarken, Kategorien, Produkte } from '@/lib/types/firestore';
@@ -16,13 +17,14 @@ import { router } from 'expo-router';
 import { SymbolViewProps } from 'expo-symbols';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { top: insetTop } = useSafeAreaInsets();
+  const { user } = useAuth();
   // Reduziere den oberen Safe Area Abstand um 35%
   const reducedTopInset = insetTop * 0.65;
   const headerPaddingTop = reducedTopInset + 56;
@@ -268,7 +270,17 @@ export default function HomeScreen() {
               </View>
               <ThemedText style={[styles.subtitle]}>NoNames enttarnen,{"\n"}clever sparen!</ThemedText>
             </View>
-            <TouchableOpacity style={[styles.profileButton, { backgroundColor: colors.primary }]}>
+            <TouchableOpacity 
+              style={[styles.profileButton, { backgroundColor: colors.primary }]}
+              onPress={() => {
+                // Navigation basierend auf Login-Status
+                if (user) {
+                  router.push('/profile');
+                } else {
+                  router.push('/auth/welcome');
+                }
+              }}
+            >
               <IconSymbol name="person.circle" size={24} color="white" />
             </TouchableOpacity>
           </View>
@@ -607,6 +619,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingTop: 16, // Etwas Abstand, damit Kategorien initial nicht vom Schatten überlagert werden
+    paddingBottom: Platform.OS === 'ios' ? 120 : 20, // Platz für TabBar
   },
   searchSection: {
     flexDirection: 'row',

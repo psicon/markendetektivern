@@ -104,3 +104,37 @@ export interface ProductWithDetails extends Omit<Produkte, 'kategorie' | 'discou
   hersteller?: HerstellerNew;
   markenProdukt?: MarkenProdukte;
 }
+
+// MarkenProdukt with populated references for display
+export interface MarkenProduktWithDetails extends Omit<MarkenProdukte, 'kategorie' | 'hersteller'> {
+  id: string;
+  kategorie?: Kategorien;
+  hersteller?: HerstellerNew;
+}
+
+// Shopping Cart / Einkaufszettel types
+export interface Einkaufswagen {
+  handelsmarkenProdukt?: DocumentReference; // Referenz zum NoName Produkt
+  markenProdukt?: DocumentReference; // Referenz zum Markenprodukt
+  gekauft: boolean; // Ob das Produkt bereits gekauft wurde
+  timestamp: Timestamp;
+  name: string; // Name des Produkts für schnelle Anzeige
+}
+
+export interface CartMarkenProduktData {
+  markenProdukt: FirestoreDocument<MarkenProdukte>;
+  produkte: FirestoreDocument<Produkte>[]; // NoName Alternativen
+  einkaufswagenRef: string; // Referenz zum Einkaufswagen-Eintrag
+}
+
+export interface CartNoNameProduktData {
+  produkt: FirestoreDocument<Produkte>;
+  einkaufswagenRef: string;
+  savings?: number; // Ersparnis gegenüber Markenprodukt
+}
+
+export interface ProductToConvert {
+  produktRef: string; // Ausgewähltes NoName Produkt
+  einkaufswagenRef: string; // Einkaufswagen-Eintrag
+  markenProduktRef: string; // Original Markenprodukt
+}

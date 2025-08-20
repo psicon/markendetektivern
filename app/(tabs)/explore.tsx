@@ -11,7 +11,7 @@ import { Discounter, FirestoreDocument, Handelsmarken, Kategorien, Produkte } fr
 import { router, useLocalSearchParams } from 'expo-router';
 import type { SymbolViewProps } from 'expo-symbols';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Dimensions, FlatList, Modal, PanResponder, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { Animated, Dimensions, FlatList, Modal, PanResponder, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -1787,7 +1787,7 @@ const styles = StyleSheet.create({
   contentSection: {
     paddingHorizontal: 12,
     paddingTop: 16,
-    paddingBottom: 100, // Platz für Tab Bar + extra Abstand
+    paddingBottom: Platform.OS === 'ios' ? 100 : 20, // Platz für Tab Bar + extra Abstand
   },
   listItem: {
     flexDirection: 'row',
@@ -2080,7 +2080,7 @@ const styles = StyleSheet.create({
   productListContent: {
     paddingHorizontal: 12,
     paddingTop: 16,
-    paddingBottom: 100,
+    paddingBottom: Platform.OS === 'ios' ? 100 : 20,
   },
   productItemContainer: {
     borderRadius: 16,

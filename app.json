@@ -13,19 +13,30 @@
     ],
     "fonts": [
       "node_modules/@expo-google-fonts/nunito/Nunito_400Regular.ttf",
-      "node_modules/@expo-google-fonts/nunito/Nunito_500Medium.ttf", 
+      "node_modules/@expo-google-fonts/nunito/Nunito_500Medium.ttf",
       "node_modules/@expo-google-fonts/nunito/Nunito_600SemiBold.ttf",
       "node_modules/@expo-google-fonts/nunito/Nunito_700Bold.ttf"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.patze1411.markendetektivern"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyCq7kOMAf65qjkZbG-futbMAL9N8NOFNi4"
+        }
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "package": "com.patze1411.markendetektivern"
     },
     "web": {
       "bundler": "metro",
@@ -41,6 +52,12 @@
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Diese App benötigt Zugriff auf deinen Standort, um dir lokale Angebote zu zeigen."
         }
       ]
     ],

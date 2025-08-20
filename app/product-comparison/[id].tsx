@@ -1,5 +1,6 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { CartToast } from '@/components/ui/CartToast';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
@@ -12,8 +13,8 @@ import { ingredientSynonyms } from '@/lib/data/ingredientSynonyms';
 import { FirestoreService } from '@/lib/services/firestore';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
 import { MarkenProduktWithDetails, ProductWithDetails } from '@/lib/types/firestore';
-import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -191,6 +192,105 @@ const StarRating = ({
 
 
 
+
+// NoName Cart Button Component  
+const NoNameCartButton = ({ productId, productName, user, colors }: any) => {
+  const [isInCart, setIsInCart] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
+  
+  useEffect(() => {
+    checkStatus();
+  }, []);
+
+  // Refresh cart status when screen comes back into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('🔄 NoNameCartButton - Screen focused - refreshing cart status');
+      checkStatus();
+    }, [user?.uid, productId])
+  );
+  
+  const checkStatus = async () => {
+    if (!user?.uid) return;
+    try {
+      const inCart = await FirestoreService.isInShoppingCart(user.uid, productId, false);
+      setIsInCart(inCart);
+    } catch (error) {
+      console.error('Error checking cart status:', error);
+    }
+  };
+  
+  const handlePress = async () => {
+    if (!user?.uid) {
+      setToastMessage('Bitte melde dich an, um Produkte hinzuzufügen');
+      setToastType('info');
+      setShowToast(true);
+      return;
+    }
+    
+    if (isInCart) {
+      setToastMessage('Produkt ist bereits im Einkaufszettel');
+      setToastType('info');
+      setShowToast(true);
+      return;
+    }
+    
+    setIsLoading(true);
+    
+    try {
+      await FirestoreService.addToShoppingCart(
+        user.uid,
+        productId,
+        productName,
+        false // NoName product
+      );
+      setIsInCart(true);
+      setToastMessage('Produkt wurde zum Einkaufszettel hinzugefügt');
+      setToastType('success');
+      setShowToast(true);
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+      setToastMessage('Produkt konnte nicht hinzugefügt werden');
+      setToastType('error');
+      setShowToast(true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  return (
+    <>
+      <TouchableOpacity 
+        style={[styles.cartButton, { 
+          backgroundColor: isInCart ? colors.success : colors.primary 
+        }]}
+        onPress={handlePress}
+        disabled={isLoading}
+      >
+        {isLoading ? (
+          <ActivityIndicator size="small" color="white" />
+        ) : (
+          <IconSymbol 
+            name={isInCart ? "checkmark.circle.fill" : "cart.badge.plus"} 
+            size={20} 
+            color="white" 
+          />
+        )}
+      </TouchableOpacity>
+      {showToast && (
+        <CartToast
+          visible={showToast}
+          message={toastMessage}
+          type={toastType}
+          onHide={() => setShowToast(false)}
+        />
+      )}
+    </>
+  );
+};
 
 // Vergleichslogik Komponente
 const ProductComparisonContent = ({ 
@@ -1010,6 +1110,11 @@ export default function ProductComparisonScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const { user } = useAuth();
+  
+  // Toast states
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
 
   // Function to open image viewer
   const openImageViewer = (imageUrl: string) => {
@@ -1041,6 +1146,10 @@ export default function ProductComparisonScreen() {
   const [comment, setComment] = useState('');
   const [isSubmittingRating, setIsSubmittingRating] = useState(false);
   
+  // Shopping Cart States
+  const [isInCart, setIsInCart] = useState(false);
+  const [isAddingToCart, setIsAddingToCart] = useState(false);
+  
   // Animation States für sanftes Einblenden der Produktkarten
   const [productAnimations, setProductAnimations] = useState<{[key: string]: Animated.Value}>({});
 
@@ -1057,6 +1166,80 @@ export default function ProductComparisonScreen() {
           useNativeDriver: true,
         }).start();
       }, delay);
+    }
+  };
+  
+  // Check if product is in shopping cart
+  const checkIfInCart = async () => {
+    if (!user?.uid || !comparisonData?.mainProduct?.id) return;
+    
+    try {
+      // Check if mainProduct is a brand product (has 'preis' field) or noname (has 'produktName')
+      const isMarke = 'preis' in comparisonData.mainProduct && !('produktName' in comparisonData.mainProduct);
+      const inCart = await FirestoreService.isInShoppingCart(
+        user.uid,
+        comparisonData.mainProduct.id,
+        isMarke
+      );
+      setIsInCart(inCart);
+    } catch (error) {
+      console.error('Error checking cart status:', error);
+    }
+  };
+  
+  // Add to shopping cart
+  const handleAddToCart = async () => {
+    if (!user?.uid) {
+      setToastMessage('Bitte melde dich an, um Produkte hinzuzufügen');
+      setToastType('info');
+      setShowToast(true);
+      return;
+    }
+    
+    if (!comparisonData?.mainProduct) return;
+    
+    if (isInCart) {
+      setToastMessage('Produkt ist bereits im Einkaufszettel');
+      setToastType('info');
+      setShowToast(true);
+      return;
+    }
+    
+    // Execute the add to cart logic
+    executeMainAddToCart();
+  };
+  
+  const executeMainAddToCart = async () => {
+    if (!comparisonData?.mainProduct) return;
+    
+    setIsAddingToCart(true);
+    
+    try {
+      // Check if mainProduct is a brand product (has 'preis' field) or noname (has 'produktName')
+      const isMarke = 'preis' in comparisonData.mainProduct && !('produktName' in comparisonData.mainProduct);
+      const productName = comparisonData.mainProduct.name || comparisonData.mainProduct.produktName || 'Unbekanntes Produkt';
+      const productId = comparisonData.mainProduct.id;
+      
+      console.log('Adding to cart:', { productId, productName, isMarke });
+      
+      // Add to cart
+      await FirestoreService.addToShoppingCart(
+        user.uid,
+        productId,
+        productName,
+        isMarke
+      );
+      setIsInCart(true);
+      setToastMessage('Produkt wurde zum Einkaufszettel hinzugefügt');
+      setToastType('success');
+      setShowToast(true);
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+      setToastMessage('Produkt konnte nicht hinzugefügt werden');
+      setToastType('error');
+      setShowToast(true);
+    } finally {
+      setIsAddingToCart(false);
     }
   };
 
@@ -1200,6 +1383,23 @@ export default function ProductComparisonScreen() {
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const [showComparisonSheet, setShowComparisonSheet] = useState(false);
 
+  // Check if product is in cart when data loads
+  useEffect(() => {
+    if (comparisonData?.mainProduct) {
+      checkIfInCart();
+    }
+  }, [comparisonData, user]);
+
+  // Refresh cart status when screen comes back into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (comparisonData?.mainProduct) {
+        console.log('🔄 Screen focused - refreshing cart status');
+        checkIfInCart();
+      }
+    }, [comparisonData?.mainProduct, user?.uid])
+  );
+  
   // Alle NoName-Produkte standardmäßig auswählen wenn Daten geladen sind
   useEffect(() => {
     console.log('🔍 Auto-selection useEffect triggered, comparisonData:', !!comparisonData);
@@ -1599,6 +1799,7 @@ export default function ProductComparisonScreen() {
   }
 
   return (
+    <>
     <ThemedView style={styles.container}>
 
       <ScrollView 
@@ -1663,31 +1864,17 @@ export default function ProductComparisonScreen() {
             {/* Product Info */}
           <View style={styles.productInfo}>
               <View style={styles.brandRow}>
-                {(() => {
-  
-                  
-                  const marke = comparisonData.mainProduct.marke;
-                  
-                  return (
-                    <>
-                      {(marke?.bild || comparisonData.mainProduct.brands?.[0]?.bild) && (
-                        <Image 
-                          source={{ uri: marke?.bild || comparisonData.mainProduct.brands?.[0]?.bild }}
-                          style={styles.brandImage}
-                          resizeMode="contain"
-                        />
-                      )}
-                      <ThemedText style={[styles.brandText, { color: colors.primary }]}>
-                        {marke?.name || 
-                         comparisonData.mainProduct.marke?.name ||
-                         comparisonData.mainProduct.brands?.[0]?.name || 
-                         comparisonData.mainProduct.hersteller?.herstellername ||
-                         comparisonData.mainProduct.hersteller?.name || 
-                         'Markenprodukt'}
-                      </ThemedText>
-                    </>
-                  );
-                })()}
+                {/* Marke ist in hersteller gespeichert */}
+                {comparisonData.mainProduct.hersteller?.bild && (
+                  <Image 
+                    source={{ uri: comparisonData.mainProduct.hersteller.bild }}
+                    style={styles.brandImage}
+                    resizeMode="contain"
+                  />
+                )}
+                <ThemedText style={[styles.brandText, { color: colors.primary }]}>
+                  {comparisonData.mainProduct.hersteller?.name || 'Markenprodukt'}
+                </ThemedText>
                 </View>
               <ThemedText style={styles.productTitle}>
                 {comparisonData.mainProduct.name}
@@ -1742,17 +1929,42 @@ export default function ProductComparisonScreen() {
               Details
             </ThemedText>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.cartButton, { backgroundColor: colors.primary }]}>
-              <IconSymbol name="cart.badge.plus" size={20} color="white" />
-          </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.cartButton, { 
+                backgroundColor: isInCart ? colors.success : colors.primary 
+              }]}
+              onPress={handleAddToCart}
+              disabled={isAddingToCart}
+            >
+              {isAddingToCart ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <IconSymbol 
+                  name={isInCart ? "checkmark.circle.fill" : "cart.badge.plus"} 
+                  size={20} 
+                  color="white" 
+                />
+              )}
+            </TouchableOpacity>
         </View>
+        
+        {/* Toast in Main Product Card */}
+        {showToast && (
+          <CartToast
+            visible={showToast}
+            message={toastMessage}
+            type={toastType}
+            position="top"
+            onHide={() => setShowToast(false)}
+          />
+        )}
         </Animated.View>
 
         {/* Alternatives Section */}
         <View style={styles.alternativesContainer}>
           <ThemedText style={styles.alternativesTitle}>
             {comparisonData.relatedNoNameProducts.length > 0 
-              ? 'No-Name Alternativen vom gleichen Hersteller'
+              ? 'NoName Alternativen vom gleichen Hersteller'
               : 'Enttarnte Produkte'
             }
           </ThemedText>
@@ -1783,9 +1995,9 @@ export default function ProductComparisonScreen() {
                       backgroundColor: colors.cardBackground,
                       shadowColor: isSelected ? colors.primary : '#000',
                       shadowOffset: { width: 0, height: isSelected ? 4 : 2 },
-                      shadowOpacity: isSelected ? 0.3 : 0.1,
+                      shadowOpacity: isSelected ? 0.4 : 0.1,
                       shadowRadius: isSelected ? 8 : 4,
-                      elevation: isSelected ? 8 : 3,
+                      elevation: isSelected ? 6 : 3,
                     }
                   ]}
                   onPress={() => toggleProductSelection(noNameProduct.id)}
@@ -1937,9 +2149,12 @@ export default function ProductComparisonScreen() {
                   Details
                 </ThemedText>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.cartButton, { backgroundColor: colors.primary }]}>
-                  <IconSymbol name="cart.badge.plus" size={20} color="white" />
-                </TouchableOpacity>
+                <NoNameCartButton 
+                  productId={noNameProduct.id}
+                  productName={noNameProduct.produktName || noNameProduct.name || 'NoName Produkt'}
+                  user={user}
+                  colors={colors}
+                />
               </View>
               </TouchableOpacity>
               </Animated.View>
@@ -2764,7 +2979,16 @@ export default function ProductComparisonScreen() {
           </ScrollView>
         </View>
       </Modal>
+      
+      {/* Shopping List FAB */}
+      <TouchableOpacity 
+        style={[styles.shoppingListFab, { backgroundColor: colors.primary }]}
+        onPress={() => router.push('/shopping-list')}
+      >
+        <IconSymbol name="cart.fill" size={20} color="white" />
+      </TouchableOpacity>
     </ThemedView>
+    </>
   );
 }
 
@@ -4188,5 +4412,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Nunito_400Regular',
     textAlign: 'center',
+  },
+  
+  // Shopping List FAB mit mehr Schatten für bessere Sichtbarkeit
+  shoppingListFab: {
+    position: 'absolute',
+    bottom: 120,
+    right: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
   },
 });

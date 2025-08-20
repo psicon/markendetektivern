@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { FontLoader } from '@/components/ui/FontLoader';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { AuthProvider } from '@/lib/contexts/AuthContext';
@@ -34,9 +35,11 @@ function ThemedApp() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider>
-        <ThemedApp />
-      </ThemeProvider>
+      <ErrorBoundary>
+        <ThemeProvider>
+          <ThemedApp />
+        </ThemeProvider>
+      </ErrorBoundary>
     </GestureHandlerRootView>
   );
 }

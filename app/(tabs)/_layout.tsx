@@ -1,6 +1,7 @@
 import { Tabs, useRouter, useSegments } from 'expo-router';
 import React, { useEffect } from 'react';
 import { ActivityIndicator, Platform, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/HapticTab';
 import { CustomIcon } from '@/components/ui/CustomIcon';
@@ -23,12 +24,12 @@ function CustomTabBarButton({ children, onPress, accessibilityState }: any) {
     }}>
       <TouchableOpacity
         style={{
-          top: -36,
+          top: Platform.OS === 'ios' ? -36 : -28,
           justifyContent: 'center',
           alignItems: 'center',
-          width: 70,
-          height: 70,
-          borderRadius: 35,
+          width: Platform.OS === 'ios' ? 70 : 60,
+          height: Platform.OS === 'ios' ? 70 : 60,
+          borderRadius: Platform.OS === 'ios' ? 35 : 30,
           backgroundColor: colors.primary,
           elevation: 10,
           shadowColor: colorScheme === 'dark' ? colors.primary : '#000',
@@ -42,12 +43,12 @@ function CustomTabBarButton({ children, onPress, accessibilityState }: any) {
       >
         <CustomIcon 
           name="iconBlack" 
-          size={42} 
+          size={Platform.OS === 'ios' ? 42 : 36} 
           color="white"
         />
       </TouchableOpacity>
       <Text style={{
-        marginTop: -33,
+        marginTop: Platform.OS === 'ios' ? -33 : -26,
         fontSize: 11,
         fontFamily: 'Nunito_500Medium',
         color: selected ? colors.primary : colors.tabIconDefault,
@@ -62,6 +63,7 @@ export default function TabLayout() {
   const colorScheme = useColorScheme();
   const { user, loading } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   // Auth Guard - Redirect to welcome if not logged in
   useEffect(() => {
@@ -94,17 +96,18 @@ export default function TabLayout() {
         },
         tabBarButton: HapticTab,
         tabBarStyle: {
-          position: 'absolute',
+          position: Platform.OS === 'ios' ? 'absolute' : 'relative',
           bottom: 0,
           left: 0,
           right: 0,
-          height: Platform.OS === 'ios' ? 90 : 80,
+          height: Platform.OS === 'ios' ? 90 : 65,
           backgroundColor: Colors[colorScheme ?? 'light'].cardBackground,
           borderTopLeftRadius: 25,
           borderTopRightRadius: 25,
           borderTopWidth: 0,
           paddingHorizontal: 10,
           paddingTop: 10,
+          paddingBottom: Platform.OS === 'android' ? 5 : 0,
           shadowColor: colorScheme === 'dark' ? '#000' : '#000',
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.15,

@@ -51,7 +51,7 @@ export default function WelcomeScreen() {
       {/* Animated ImageBackground */}
       <Animated.View style={[styles.imageContainer, { opacity: fadeAnim }]}>
         <ImageBackground 
-          source={require('@/assets/images/table.jpg')}
+          source={require('@/assets/images/table-optimized.jpg')}
           style={styles.background}
           blurRadius={2}
           onLoad={handleImageLoad}

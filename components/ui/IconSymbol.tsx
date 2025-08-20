@@ -14,26 +14,80 @@ type IconSymbolName = keyof typeof MAPPING;
  * - see SF Symbols in the [SF Symbols](https://developer.apple.com/sf-symbols/) app.
  */
 const MAPPING = {
+  // Navigation
   'house.fill': 'home',
-  'paperplane.fill': 'send',
-  'chevron.left.forwardslash.chevron.right': 'code',
+  'chevron.left': 'chevron-left',
   'chevron.right': 'chevron-right',
-  'info.circle': 'info',
-  'lightbulb': 'lightbulb-outline',
+  'chevron.left.forwardslash.chevron.right': 'code',
   'arrow.right': 'arrow-forward',
-  'crown': 'workspace-premium',
-  'star': 'star',
-  'cart': 'shopping-cart',
-  'heart': 'favorite',
-  'doc.text': 'description',
-  'chart.bar': 'bar-chart',
-  'cube': 'view-in-ar',
-  'newspaper': 'article',
+  'arrow.left.arrow.right': 'swap-horiz',
+  
+  // User/Person
+  'person.circle': 'account-circle',
+  'person.circle.fill': 'account-circle',
+  'person.badge.plus': 'person-add',
   'person.2': 'people',
+  
+  // Common Actions
+  'square.and.pencil': 'edit',
   'square.and.arrow.up': 'share',
+  'magnifyingglass': 'search',
+  'xmark': 'close',
+  'xmark.circle.fill': 'cancel',
+  'checkmark': 'check',
+  'info.circle': 'info',
+  
+  // Objects
+  'envelope': 'email',
+  'calendar': 'event',
+  'location.fill': 'location-on',
+  'mappin.circle.fill': 'place',
+  'cart': 'shopping-cart',
+  'cart.fill': 'shopping-cart',
+  'cart.badge.plus': 'add-shopping-cart',
+  'heart': 'favorite-border',
+  'heart.fill': 'favorite',
+  'star': 'star-outline',
+  'star.fill': 'star',
+  'lightbulb': 'lightbulb-outline',
+  'crown': 'workspace-premium',
   'shield': 'security',
   'doc': 'description',
-  'envelope': 'email',
+  'doc.text': 'description',
+  'newspaper': 'article',
+  'photo': 'image',
+  'sparkles': 'auto-awesome',
+  'barcode': 'qr-code-scanner',
+  
+  // Charts/Data
+  'chart.bar': 'bar-chart',
+  'chart.bar.xaxis': 'analytics',
+  'square.grid.2x2': 'grid-view',
+  'list.bullet': 'format-list-bulleted',
+  'line.3.horizontal': 'menu',
+  
+  // Business/Shop
+  'storefront': 'store',
+  'cube': 'view-in-ar',
+  'cube.box': 'inventory-2',
+  'eurosign': 'euro',
+  'percent': 'percent',
+  'scale.3d': 'balance',
+  
+  // Settings/Tools
+  'gear': 'settings',
+  'paperplane.fill': 'send',
+  'bolt': 'flash-on',
+  'bolt.fill': 'flash-on',
+  'camera.rotate': 'flip-camera-android',
+  'keyboard': 'keyboard',
+  
+  // Alerts
+  'exclamationmark.triangle': 'warning',
+  'questionmark.circle': 'help-outline',
+  
+  // Brand specific
+  'apple.logo': 'phone-iphone',
   'moon': 'dark-mode',
   'number': 'numbers',
 } as IconMapping;

@@ -6,6 +6,7 @@ export interface UserProfile {
   uid: string;
   email: string;
   display_name?: string;
+  real_name?: string;
   photo_url?: string;
   created_time?: any;
   totalSavings?: number;
@@ -18,6 +19,8 @@ export interface UserProfile {
   premiumUntil?: Date;
   lastLoginAt?: Date;
   lastActivityAt?: Date;
+  favoriteMarket?: string; // Discounter ID
+  favoriteMarketName?: string; // Für schnelle Anzeige ohne DB-Lookup
 }
 
 /**

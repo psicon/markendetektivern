@@ -4,6 +4,7 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useTheme } from '@/lib/contexts/ThemeContext';
+import { useRouter } from 'expo-router';
 // @ts-ignore
 import { LinearGradient } from 'expo-linear-gradient';
 // @ts-ignore
@@ -11,6 +12,7 @@ import React, { useEffect, useState } from 'react';
 import {
     Alert,
     Linking,
+    Platform,
     SafeAreaView,
     ScrollView,
     Share,
@@ -28,6 +30,7 @@ export default function MoreScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const { user, logout } = useAuth();
   const { isDarkMode, toggleDarkMode, themeMode, setThemeMode } = useTheme();
+  const router = useRouter();
   const [appVersion, setAppVersion] = useState('1.0.0');
 
   useEffect(() => {
@@ -275,6 +278,30 @@ export default function MoreScreen() {
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Mehr</Text>
           
           <View style={[styles.menuGroup, { backgroundColor: colors.cardBackground }]}>
+            {/* Mein Profil / Login Button */}
+            <TouchableOpacity 
+              style={styles.menuItem} 
+              onPress={() => {
+                if (user) {
+                  router.push('/profile');
+                } else {
+                  router.push('/auth/welcome');
+                }
+              }}
+            >
+              <IconSymbol 
+                name={user ? "person.circle" : "person.badge.plus"} 
+                size={24} 
+                color={colors.secondary} 
+              />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>
+                {user ? "Mein Profil" : "Login / Registrieren"}
+              </Text>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
+            
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            
             <TouchableOpacity style={styles.menuItem} onPress={handleSocialMedia}>
               <IconSymbol name="person.2" size={24} color={colors.secondary} />
               <Text style={[styles.menuItemText, { color: colors.text }]}>Find us on social media</Text>
@@ -388,7 +415,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingTop: 12,
-    paddingBottom: 100,
+    paddingBottom: Platform.OS === 'ios' ? 100 : 20,
   },
   cardContainer: {
     marginHorizontal: 16,

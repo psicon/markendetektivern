@@ -1,9 +1,10 @@
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { initializeFonts } from '@/lib/fontManager';
+import { preloadImages } from '@/lib/utils/imagePreloader';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
-import React, { ReactNode, useEffect } from 'react';
+import React, { ReactNode, useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
 import {
@@ -27,6 +28,7 @@ SplashScreen.preventAutoHideAsync();
 
 export const FontLoader = ({ children }: FontLoaderProps) => {
   const colorScheme = useColorScheme();
+  const [imagesPreloaded, setImagesPreloaded] = useState(false);
   
   const [fontsLoaded, fontError] = useFonts({
     // Primary Font - Nunito (only needed weights)
@@ -46,13 +48,29 @@ export const FontLoader = ({ children }: FontLoaderProps) => {
     MDAppIcons: require('../../assets/fonts/md_app_icons.ttf'),
   });
 
+  // Preload images immediately
+  useEffect(() => {
+    const loadImages = async () => {
+      try {
+        await preloadImages();
+        setImagesPreloaded(true);
+      } catch (error) {
+        console.log('Image preloading failed, continuing anyway:', error);
+        setImagesPreloaded(true); // Continue even if preloading fails
+      }
+    };
+    
+    loadImages();
+  }, []);
+
   useEffect(() => {
     const hideSplash = async () => {
-      if (fontsLoaded || fontError) {
+      // Wait for both fonts and images to be ready
+      if ((fontsLoaded || fontError) && imagesPreloaded) {
         // Initialisiere globale Font-Einstellungen
         initializeFonts();
         
-        // Kleine Verzögerung um sicherzustellen, dass Fonts wirklich ready sind
+        // Kleine Verzögerung um sicherzustellen, dass alles ready ist
         setTimeout(async () => {
           await SplashScreen.hideAsync();
         }, 100);
@@ -60,10 +78,10 @@ export const FontLoader = ({ children }: FontLoaderProps) => {
     };
 
     hideSplash();
-  }, [fontsLoaded, fontError]);
+  }, [fontsLoaded, fontError, imagesPreloaded]);
 
-  if (!fontsLoaded && !fontError) {
-    // Während Fonts laden, zeige einen minimalen Fallback
+  if ((!fontsLoaded && !fontError) || !imagesPreloaded) {
+    // Während Assets laden, zeige einen minimalen Fallback
     return (
       <View style={{ 
         flex: 1, 

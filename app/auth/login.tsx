@@ -52,20 +52,60 @@ export default function LoginScreen() {
       await signIn(formData.email, formData.password);
       router.replace('/(tabs)');
     } catch (error: any) {
-      console.error('Login error:', error);
-      
-      let errorMessage = 'Ein Fehler ist aufgetreten.';
-      if (error.code === 'auth/user-not-found') {
-        errorMessage = 'Kein Account mit dieser E-Mail-Adresse gefunden.';
-      } else if (error.code === 'auth/wrong-password') {
-        errorMessage = 'Falsches Passwort.';
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = 'Die E-Mail-Adresse ist ungültig.';
-      } else if (error.code === 'auth/too-many-requests') {
-        errorMessage = 'Zu viele Anmeldeversuche. Versuche es später erneut.';
+      // Verhindere React Error Logs in Production
+      if (__DEV__) {
+        console.error('Login error:', error);
       }
       
-      Alert.alert('Anmeldung fehlgeschlagen', errorMessage);
+      let errorMessage = 'Ein Fehler ist aufgetreten. Bitte versuche es erneut.';
+      let errorTitle = 'Anmeldung fehlgeschlagen';
+      
+      // Detaillierte Firebase Auth Error Codes
+      switch (error.code) {
+        case 'auth/user-not-found':
+          errorTitle = 'Account nicht gefunden';
+          errorMessage = 'Es wurde kein Account mit dieser E-Mail-Adresse gefunden. Bitte überprüfe deine E-Mail-Adresse oder registriere dich.';
+          break;
+        case 'auth/wrong-password':
+          errorTitle = 'Falsches Passwort';
+          errorMessage = 'Das eingegebene Passwort ist falsch. Bitte versuche es erneut oder setze dein Passwort zurück.';
+          break;
+        case 'auth/invalid-email':
+          errorTitle = 'Ungültige E-Mail';
+          errorMessage = 'Die eingegebene E-Mail-Adresse ist ungültig. Bitte überprüfe das Format.';
+          break;
+        case 'auth/user-disabled':
+          errorTitle = 'Account deaktiviert';
+          errorMessage = 'Dieser Account wurde deaktiviert. Bitte kontaktiere den Support.';
+          break;
+        case 'auth/too-many-requests':
+          errorTitle = 'Zu viele Versuche';
+          errorMessage = 'Zu viele fehlgeschlagene Anmeldeversuche. Bitte warte einige Minuten und versuche es erneut.';
+          break;
+        case 'auth/network-request-failed':
+          errorTitle = 'Netzwerkfehler';
+          errorMessage = 'Keine Internetverbindung. Bitte überprüfe deine Verbindung und versuche es erneut.';
+          break;
+        case 'auth/invalid-credential':
+          errorTitle = 'Anmeldedaten ungültig';
+          errorMessage = 'Die E-Mail-Adresse oder das Passwort ist falsch. Bitte überprüfe deine Eingaben.';
+          break;
+        default:
+          // Unbekannter Fehler - zeige generische Nachricht
+          errorTitle = 'Anmeldung fehlgeschlagen';
+          errorMessage = 'Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.';
+          if (__DEV__) {
+            errorMessage += `\n\nFehlercode: ${error.code}`;
+          }
+          break;
+      }
+      
+      Alert.alert(errorTitle, errorMessage, [
+        {
+          text: 'OK',
+          style: 'default'
+        }
+      ]);
     } finally {
       setLoading(false);
     }
@@ -121,7 +161,7 @@ export default function LoginScreen() {
       {/* Animated ImageBackground */}
       <Animated.View style={[styles.imageContainer, { opacity: fadeAnim }]}>
         <ImageBackground 
-          source={require('@/assets/images/table.jpg')}
+          source={require('@/assets/images/table-optimized.jpg')}
           style={styles.background}
           blurRadius={2}
           onLoad={handleImageLoad}

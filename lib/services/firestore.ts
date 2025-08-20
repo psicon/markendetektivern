@@ -1,20 +1,26 @@
 import {
     addDoc,
     collection,
+    deleteDoc,
     doc,
     DocumentReference,
     getCountFromServer,
     getDoc,
     getDocs,
+    increment,
     limit,
     orderBy,
     query,
+    serverTimestamp,
     startAfter,
-    where
+    updateDoc,
+    where,
+    writeBatch
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
     Discounter,
+    Einkaufswagen,
     FirestoreDocument,
     Handelsmarken,
     HerstellerNew,
@@ -22,6 +28,7 @@ import {
     MarkenProdukte,
     MarkenProduktWithDetails,
     Packungstypen,
+    ProductToConvert,
     ProductWithDetails,
     Produkte
 } from '../types/firestore';
@@ -969,10 +976,27 @@ export class FirestoreService {
       // The markenProdukt field is already populated with the full brand product object!
       console.log('✅ markenProdukt is populated object:', markenProduktField.name);
       
+      // Extract the ID: Get it from the original DocumentReference in rawProductDoc
+      let markenProduktId = 'unknown-brand-id';
+      
+      // Get the original DocumentReference from the raw Firestore data
+      const rawProductDoc = await getDoc(doc(db, 'produkte', noNameProductId));
+      if (rawProductDoc.exists()) {
+        const rawData = rawProductDoc.data();
+        const originalMarkenProduktRef = rawData.markenProdukt;
+        
+        if (originalMarkenProduktRef && originalMarkenProduktRef.id) {
+          markenProduktId = originalMarkenProduktRef.id;
+          console.log('✅ Extracted brand product ID:', markenProduktId);
+        } else {
+          console.log('❌ Could not extract brand product ID from reference');
+        }
+      }
+      
       // Convert the populated markenProdukt to our MarkenProduktWithDetails format
       // and populate its references properly
       const brandProduct: MarkenProduktWithDetails = {
-        id: 'populated-brand-product', // We don't have the real ID, but we have the data
+        id: markenProduktId,
         name: markenProduktField.name,
         bild: markenProduktField.bild,
         beschreibung: markenProduktField.beschreibung,
@@ -996,18 +1020,14 @@ export class FirestoreService {
         packTypInfo: markenProduktField.packTyp ? await this.getDocumentByReference(markenProduktField.packTyp, 'packungstypen') : undefined
       };
       
-      console.log('✅ Converted to brand product format:', brandProduct.name);
+      console.log('✅ Converted to brand product format:', brandProduct.name, 'with ID:', markenProduktId);
       
       // SPEED OPTIMIZATION: Use the original markenProdukt reference directly!
-      // We can extract the DocumentReference from the original NoName product data
       console.log('⚡ Using original markenProdukt reference for super-fast query...');
       
-      // Check if the original noNameProduct still has the DocumentReference
-      // (before it got populated by our service)
       let relatedNoNameProducts: ProductWithDetails[];
       
-      // First, try to get the original DocumentReference from the raw Firestore data
-      const rawProductDoc = await getDoc(doc(db, 'produkte', noNameProductId));
+      // We already have the rawProductDoc and originalMarkenProduktRef from above
       if (rawProductDoc.exists()) {
         const rawData = rawProductDoc.data();
         const originalMarkenProduktRef = rawData.markenProdukt;
@@ -1016,18 +1036,24 @@ export class FirestoreService {
           console.log('✅ Using original DocumentReference for super-fast query');
           relatedNoNameProducts = await this.findNoNameProductsByBrandReference(originalMarkenProduktRef);
         } else {
-          console.log('🔄 Fallback: Creating DocumentReference from brand name...');
-          const markenProdukteRef = collection(db, 'markenProdukte');
-          const brandQuery = query(markenProdukteRef, where('name', '==', brandProduct.name), limit(1));
-          const brandQuerySnapshot = await getDocs(brandQuery);
-          
-          if (brandQuerySnapshot.empty) {
-            console.error('❌ Could not find brand product in markenProdukte collection');
-            relatedNoNameProducts = [noNameProduct];
-          } else {
-            const brandDoc = brandQuerySnapshot.docs[0];
-            const brandDocRef = doc(db, 'markenProdukte', brandDoc.id);
+          console.log('🔄 Fallback: Creating DocumentReference from brand ID...');
+          if (markenProduktId !== 'unknown-brand-id') {
+            const brandDocRef = doc(db, 'markenProdukte', markenProduktId);
             relatedNoNameProducts = await this.findNoNameProductsByBrandReference(brandDocRef);
+          } else {
+            console.log('🔄 Final Fallback: Using brand name query...');
+            const markenProdukteRef = collection(db, 'markenProdukte');
+            const brandQuery = query(markenProdukteRef, where('name', '==', brandProduct.name), limit(1));
+            const brandQuerySnapshot = await getDocs(brandQuery);
+            
+            if (brandQuerySnapshot.empty) {
+              console.error('❌ Could not find brand product in markenProdukte collection');
+              relatedNoNameProducts = [noNameProduct];
+            } else {
+              const brandDoc = brandQuerySnapshot.docs[0];
+              const brandDocRef = doc(db, 'markenProdukte', brandDoc.id);
+              relatedNoNameProducts = await this.findNoNameProductsByBrandReference(brandDocRef);
+            }
           }
         }
       } else {
@@ -1239,6 +1265,88 @@ export class FirestoreService {
   }
 
   /**
+   * Sucht NoName-Produkte anhand EAN/Barcode
+   */
+  static async searchProductsByEAN(ean: string): Promise<FirestoreDocument<ProductWithDetails>[]> {
+    try {
+      console.log(`🔍 Searching NoName products for EAN: ${ean}`);
+      
+      const produkteRef = collection(db, 'produkte');
+      
+      // Suche sowohl in EAN als auch in EANs Array
+      const queries = [
+        query(produkteRef, where('EAN', '==', ean)),
+        query(produkteRef, where('EANs', 'array-contains', ean))
+      ];
+      
+      const results = await Promise.all(queries.map(q => getDocs(q)));
+      const foundProducts = new Map<string, any>();
+      
+      // Sammle alle gefundenen Produkte und entferne Duplikate
+      for (const querySnapshot of results) {
+        querySnapshot.forEach((doc) => {
+          if (!foundProducts.has(doc.id)) {
+            foundProducts.set(doc.id, {
+              id: doc.id,
+              ...doc.data() as Produkte
+            });
+          }
+        });
+      }
+      
+      const products = Array.from(foundProducts.values());
+      console.log(`✅ Found ${products.length} NoName products for EAN: ${ean}`);
+      
+      return products;
+      
+    } catch (error) {
+      console.error('Error searching products by EAN:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Sucht Markenprodukte anhand EAN/Barcode
+   */
+  static async searchBrandProductsByEAN(ean: string): Promise<FirestoreDocument<MarkenProduktWithDetails>[]> {
+    try {
+      console.log(`🔍 Searching brand products for EAN: ${ean}`);
+      
+      const markenProdukteRef = collection(db, 'markenProdukte');
+      
+      // Suche sowohl in EAN als auch in EANs Array
+      const queries = [
+        query(markenProdukteRef, where('EAN', '==', ean)),
+        query(markenProdukteRef, where('EANs', 'array-contains', ean))
+      ];
+      
+      const results = await Promise.all(queries.map(q => getDocs(q)));
+      const foundProducts = new Map<string, any>();
+      
+      // Sammle alle gefundenen Produkte und entferne Duplikate
+      for (const querySnapshot of results) {
+        querySnapshot.forEach((doc) => {
+          if (!foundProducts.has(doc.id)) {
+            foundProducts.set(doc.id, {
+              id: doc.id,
+              ...doc.data() as MarkenProdukte
+            });
+          }
+        });
+      }
+      
+      const products = Array.from(foundProducts.values());
+      console.log(`✅ Found ${products.length} brand products for EAN: ${ean}`);
+      
+      return products;
+      
+    } catch (error) {
+      console.error('Error searching brand products by EAN:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Fügt eine neue Bewertung zur productRatings Collection hinzu
    */
   static async addProductRating(ratingData: {
@@ -1298,6 +1406,321 @@ export class FirestoreService {
     } catch (error) {
       console.error('Error adding product rating:', error);
       throw error;
+    }
+  }
+
+  // ========================================
+  // EINKAUFSZETTEL / SHOPPING CART METHODS
+  // ========================================
+
+  /**
+   * Holt alle Einkaufszettel-Einträge für einen User
+   */
+  static async getShoppingCartItems(userId: string): Promise<FirestoreDocument<Einkaufswagen>[]> {
+    try {
+      const userRef = doc(db, 'users', userId);
+      const q = query(
+        collection(userRef, 'einkaufswagen'),
+        where('gekauft', '==', false),
+        orderBy('timestamp', 'desc')
+      );
+      
+      const snapshot = await getDocs(q);
+      const items = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as FirestoreDocument<Einkaufswagen>[];
+      
+      console.log(`✅ Loaded ${items.length} shopping cart items`);
+      return items;
+    } catch (error) {
+      console.error('Error loading shopping cart:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Fügt ein Produkt zum Einkaufszettel hinzu
+   */
+  static async addToShoppingCart(
+    userId: string,
+    productId: string,
+    productName: string,
+    isMarke: boolean
+  ): Promise<string> {
+    try {
+      const userRef = doc(db, 'users', userId);
+      const data: any = {
+        gekauft: false,
+        timestamp: serverTimestamp(),
+        name: productName
+      };
+
+      if (isMarke) {
+        data.markenProdukt = doc(db, 'markenProdukte', productId);
+      } else {
+        data.handelsmarkenProdukt = doc(db, 'produkte', productId);
+      }
+
+      const docRef = await addDoc(collection(userRef, 'einkaufswagen'), data);
+      console.log('✅ Added to shopping cart:', docRef.id);
+      return docRef.id;
+    } catch (error) {
+      console.error('Error adding to shopping cart:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Prüft ob ein Produkt bereits im Einkaufszettel ist
+   */
+  static async isInShoppingCart(
+    userId: string,
+    productId: string,
+    isMarke: boolean
+  ): Promise<boolean> {
+    try {
+      const userRef = doc(db, 'users', userId);
+      let q;
+      
+      if (isMarke) {
+        const markenRef = doc(db, 'markenProdukte', productId);
+        q = query(
+          collection(userRef, 'einkaufswagen'),
+          where('markenProdukt', '==', markenRef),
+          where('gekauft', '==', false),
+          limit(1)
+        );
+      } else {
+        const produktRef = doc(db, 'produkte', productId);
+        q = query(
+          collection(userRef, 'einkaufswagen'),
+          where('handelsmarkenProdukt', '==', produktRef),
+          where('gekauft', '==', false),
+          limit(1)
+        );
+      }
+      
+      const snapshot = await getDocs(q);
+      return !snapshot.empty;
+    } catch (error) {
+      console.error('Error checking shopping cart:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Entfernt ein Produkt vom Einkaufszettel
+   */
+  static async removeFromShoppingCart(userId: string, itemId: string): Promise<void> {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await deleteDoc(doc(userRef, 'einkaufswagen', itemId));
+      console.log('✅ Removed from shopping cart:', itemId);
+    } catch (error) {
+      console.error('Error removing from shopping cart:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Markiert ein Produkt als gekauft
+   */
+  static async markAsPurchased(userId: string, itemId: string): Promise<void> {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(doc(userRef, 'einkaufswagen', itemId), {
+        gekauft: true
+      });
+      console.log('✅ Marked as purchased:', itemId);
+    } catch (error) {
+      console.error('Error marking as purchased:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Wandelt Markenprodukt in NoName um (Batch Operation)
+   */
+  static async convertToNoName(
+    userId: string,
+    conversions: ProductToConvert[]
+  ): Promise<void> {
+    try {
+      const batch = writeBatch(db);
+      const userRef = doc(db, 'users', userId);
+      
+      for (const conversion of conversions) {
+        // Lösche alten Eintrag
+        batch.delete(doc(userRef, 'einkaufswagen', conversion.einkaufswagenRef));
+        
+        // TODO: Get product name for new entry
+        // Füge neuen NoName Eintrag hinzu
+        const newDoc = doc(collection(userRef, 'einkaufswagen'));
+        batch.set(newDoc, {
+          handelsmarkenProdukt: doc(db, 'produkte', conversion.produktRef),
+          gekauft: false,
+          timestamp: serverTimestamp(),
+          name: 'NoName Produkt' // TODO: Get actual product name
+        });
+      }
+      
+      await batch.commit();
+      console.log(`✅ Converted ${conversions.length} products to NoName`);
+    } catch (error) {
+      console.error('Error converting to NoName:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Berechnet die Ersparnis für ein NoName Produkt
+   */
+  static calculateSavings(
+    noNamePrice: number,
+    noNamePackSize: number,
+    brandPrice: number,
+    brandPackSize: number
+  ): { amount: number; percent: number } {
+    const noNamePricePerUnit = noNamePrice / (noNamePackSize || 1);
+    const brandPricePerUnit = brandPrice / (brandPackSize || 1);
+    const savingsAmount = brandPricePerUnit - noNamePricePerUnit;
+    const savingsPercent = (savingsAmount / brandPricePerUnit) * 100;
+    
+    return {
+      amount: Math.max(0, savingsAmount * (noNamePackSize || 1)),
+      percent: Math.max(0, Math.round(savingsPercent))
+    };
+  }
+
+  /**
+   * Holt NoName Alternativen für ein Markenprodukt
+   * OPTIMIERT: Vermeidet Composite Index durch Code-seitige Filterung
+   */
+  static async getNoNameAlternatives(
+    markenProduktId: string,
+    favoriteMarketId?: string
+  ): Promise<FirestoreDocument<Produkte>[]> {
+    try {
+      console.log(`🔍 Getting NoName alternatives for brand product: ${markenProduktId}`);
+      const markenProduktRef = doc(db, 'markenProdukte', markenProduktId);
+      
+      // Einfache Query: nur markenProdukt filter (vermeidet Composite Index)
+      const q = query(
+        collection(db, 'produkte'),
+        where('markenProdukt', '==', markenProduktRef),
+        limit(50) // Mehr holen für bessere Filterung
+      );
+
+      const snapshot = await getDocs(q);
+      let allProducts = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as FirestoreDocument<Produkte>[];
+
+      console.log(`🔍 Found ${allProducts.length} total alternatives before filtering`);
+
+      // Code-seitige Filterung und Sortierung
+      let favoriteProducts: FirestoreDocument<Produkte>[] = [];
+      let otherProducts: FirestoreDocument<Produkte>[] = [];
+
+      // Separiere nach Lieblingsmarkt
+      if (favoriteMarketId) {
+        allProducts.forEach(product => {
+          // Prüfe ob discounter übereinstimmt (sowohl als ID als auch als Reference)
+          const discounterMatch = 
+            product.discounter === favoriteMarketId ||
+            (product.discounter && typeof product.discounter === 'object' && 
+             'id' in product.discounter && product.discounter.id === favoriteMarketId) ||
+            (product.discounter && typeof product.discounter === 'string' && 
+             product.discounter.includes(favoriteMarketId));
+          
+          if (discounterMatch) {
+            favoriteProducts.push(product);
+          } else {
+            otherProducts.push(product);
+          }
+        });
+      } else {
+        otherProducts = allProducts;
+      }
+
+      // Sortiere beide Arrays nach Preis
+      const sortByPrice = (a: FirestoreDocument<Produkte>, b: FirestoreDocument<Produkte>) => {
+        const priceA = a.preis || 999999;
+        const priceB = b.preis || 999999;
+        return priceA - priceB;
+      };
+
+      favoriteProducts.sort(sortByPrice);
+      otherProducts.sort(sortByPrice);
+
+      // Kombiniere: Lieblingsmarkt zuerst, dann andere
+      let finalProducts = [
+        ...favoriteProducts.slice(0, 5), // Max 5 vom Lieblingsmarkt
+        ...otherProducts.slice(0, 5)     // Max 5 von anderen
+      ].slice(0, 10); // Max 10 insgesamt
+
+      // Populate discounter information for UI display
+      const populatedProducts = await Promise.all(
+        finalProducts.map(async (product) => {
+          if (product.discounter && typeof product.discounter === 'object' && 'id' in product.discounter) {
+            try {
+              const originalId = product.discounter.id;
+              const discounterData = await this.getDocumentByReference(product.discounter, 'discounter');
+              return {
+                ...product,
+                discounter: {
+                  ...discounterData,
+                  id: originalId  // Preserve the original ID for matching
+                }
+              };
+            } catch (error) {
+              console.error('Error populating discounter for product:', product.id, error);
+              return product;
+            }
+          }
+          return product;
+        })
+      );
+
+      console.log(`✅ Found ${populatedProducts.length} NoName alternatives (${favoriteProducts.length} from favorite market)`);
+      return populatedProducts;
+    } catch (error) {
+      console.error('Error getting NoName alternatives:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Aktualisiert die Gesamtersparnis des Users
+   */
+  static async updateUserTotalSavings(userId: string, amount: number): Promise<void> {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        totalSavings: increment(amount)
+      });
+      console.log(`✅ Updated user total savings by €${amount.toFixed(2)}`);
+    } catch (error) {
+      console.error('Error updating user savings:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Holt alle Kategorien für Filter-Optionen
+   */
+  static async getAllKategorien(): Promise<FirestoreDocument<Kategorien>[]> {
+    try {
+      const snapshot = await getDocs(collection(db, 'kategorien'));
+      return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as FirestoreDocument<Kategorien>[];
+    } catch (error) {
+      console.error('Error getting all categories:', error);
+      return [];
     }
   }
 

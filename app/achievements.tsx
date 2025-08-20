@@ -4,6 +4,7 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAuth } from '@/lib/contexts/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import { useEffect, useLayoutEffect, useState } from 'react';
@@ -22,6 +23,7 @@ export default function AchievementsScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const navigation = useNavigation();
   const router = useRouter();
+  const { user, userProfile } = useAuth();
 
   // Header-Optionen sofort setzen mit useLayoutEffect
   useLayoutEffect(() => {
@@ -189,9 +191,10 @@ export default function AchievementsScreen() {
     },
   ];
 
-  const currentSavings = 238.78;
-  const currentPoints = 5;
-  const purchasedProducts = 23;
+  // Real user data from AuthContext
+  const currentSavings = userProfile?.totalSavings || 0;
+  const currentPoints = 5; // TODO: Implement points system
+  const purchasedProducts = userProfile?.productsSaved || 0;
 
   const ProgressBar = ({ progress, maxProgress, color }: { progress: number; maxProgress: number; color: string }) => {
     const [progressAnim] = useState(new Animated.Value(0));

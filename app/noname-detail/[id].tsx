@@ -1,17 +1,19 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { CartToast } from '@/components/ui/CartToast';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { ListItemSkeleton, ProductComparisonSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor, getStufenDescription, getStufenTitle } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAuth } from '@/lib/contexts/AuthContext';
 import { FirestoreService } from '@/lib/services/firestore';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
 import { ProductWithDetails } from '@/lib/types/firestore';
-import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import React, { useEffect, useLayoutEffect, useState } from 'react';
-import { Animated, Image, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { ActivityIndicator, Animated, Image, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 // ScoreImage Komponente - 1:1 wie im Produktvergleich
 const ScoreImage = ({ type, value }: { type: 'nutri' | 'eco' | 'nova'; value: string | number }) => {
@@ -46,13 +48,78 @@ export default function NoNameDetailScreen() {
   const navigation = useNavigation();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const { user } = useAuth();
+  
+  // Toast states
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
   
   const [product, setProduct] = useState<ProductWithDetails | null>(null);
+  const [isInCart, setIsInCart] = useState(false);
+  const [isAddingToCart, setIsAddingToCart] = useState(false);
   const [openFoodData, setOpenFoodData] = useState<OpenFoodProduct | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
   const [showProductDetails, setShowProductDetails] = useState(false);
+  
+  // Check if product is in shopping cart
+  const checkIfInCart = async () => {
+    if (!user?.uid || !product?.id) return;
+    
+    try {
+      const inCart = await FirestoreService.isInShoppingCart(
+        user.uid,
+        product.id,
+        false // NoName product
+      );
+      setIsInCart(inCart);
+    } catch (error) {
+      console.error('Error checking cart status:', error);
+    }
+  };
+  
+  // Add to shopping cart
+  const handleAddToCart = async () => {
+    if (!user?.uid) {
+      setToastMessage('Bitte melde dich an, um Produkte hinzuzufügen');
+      setToastType('info');
+      setShowToast(true);
+      return;
+    }
+    
+    if (!product) return;
+    
+    if (isInCart) {
+      setToastMessage('Produkt ist bereits im Einkaufszettel');
+      setToastType('info');
+      setShowToast(true);
+      return;
+    }
+    
+    setIsAddingToCart(true);
+    
+    try {
+      await FirestoreService.addToShoppingCart(
+        user.uid,
+        product.id,
+        product.produktName || product.name || 'NoName Produkt',
+        false // NoName product
+      );
+      setIsInCart(true);
+      setToastMessage('Produkt wurde zum Einkaufszettel hinzugefügt');
+      setToastType('success');
+      setShowToast(true);
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+      setToastMessage('Produkt konnte nicht hinzugefügt werden');
+      setToastType('error');
+      setShowToast(true);
+    } finally {
+      setIsAddingToCart(false);
+    }
+  };
   const [showRatingsView, setShowRatingsView] = useState(false);
   const [showImageViewer, setShowImageViewer] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -130,6 +197,23 @@ export default function NoNameDetailScreen() {
     });
   }, [navigation, colors.primary, product?.name]);
 
+  // Check if product is in cart when product loads
+  useEffect(() => {
+    if (product) {
+      checkIfInCart();
+    }
+  }, [product, user]);
+
+  // Refresh cart status when screen comes back into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (product) {
+        console.log('🔄 NoName Screen focused - refreshing cart status');
+        checkIfInCart();
+      }
+    }, [product?.id, user?.uid])
+  );
+  
   // Produkt laden
   useEffect(() => {
     if (!id) return;
@@ -269,6 +353,7 @@ export default function NoNameDetailScreen() {
   }
 
   return (
+    <>
     <ThemedView style={styles.container}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         
@@ -411,10 +496,34 @@ export default function NoNameDetailScreen() {
                 Details
               </ThemedText>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.cartButton, { backgroundColor: colors.primary }]}>
-              <IconSymbol name="cart.badge.plus" size={20} color="white" />
+            <TouchableOpacity 
+              style={[styles.cartButton, { 
+                backgroundColor: isInCart ? colors.success : colors.primary 
+              }]}
+              onPress={handleAddToCart}
+              disabled={isAddingToCart}
+            >
+              {isAddingToCart ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <IconSymbol 
+                  name={isInCart ? "checkmark.circle.fill" : "cart.badge.plus"} 
+                  size={20} 
+                  color="white" 
+                />
+              )}
             </TouchableOpacity>
           </View>
+          
+          {/* Toast in Main Product Card */}
+          {showToast && (
+            <CartToast
+              visible={showToast}
+              message={toastMessage}
+              type={toastType}
+              onHide={() => setShowToast(false)}
+            />
+          )}
         </Animated.View>
 
         {/* Ähnliche Produkte Sektion - immer anzeigen wenn Kategorie vorhanden */}
@@ -1018,7 +1127,16 @@ export default function NoNameDetailScreen() {
           )}
         </View>
       </Modal>
+      
+      {/* Shopping List FAB */}
+      <TouchableOpacity 
+        style={[styles.shoppingListFab, { backgroundColor: colors.primary }]}
+        onPress={() => router.push('/shopping-list')}
+      >
+        <IconSymbol name="cart.fill" size={20} color="white" />
+      </TouchableOpacity>
     </ThemedView>
+    </>
   );
 }
 
@@ -1751,5 +1869,22 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: 'center',
     lineHeight: 16,
+  },
+  
+  // Shopping List FAB mit mehr Schatten für bessere Sichtbarkeit
+  shoppingListFab: {
+    position: 'absolute',
+    bottom: 120,
+    right: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
   },
 });
