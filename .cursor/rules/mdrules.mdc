@@ -82,12 +82,13 @@ Die Gestaltung soll sich an gängigen Food-Einkaufs-Apps orientieren, damit sich
 *Sekundär: 42a968
 *Verwende im lite mode helle Hintergründe für gute Lesbarkeit. Es muss ebenfalls einen ansprechenden Dark mode geben.
 *Icons: Erstelle moderne und vor allem eindeutig verständlicher Icons für alle Funktionen
-*Typografie: 
+*Typografie:
+
 - PRIMARY FONT: Nunito (Hauptschrift für Überschriften, Buttons, wichtige Texte)
-- SECONDARY FONT: Lato (Sekundärschrift für Fließtext, Labels, Untertitel)
-- Keine anderen Fonts erlaubt! Nur Nunito und Lato verwenden.
+- Keine anderen Fonts erlaubt! Nur Nunito verwenden.
 
 *Schriftgrößen-Hierarchie (maximal 4 Größen verwenden):
+
 - 16px (Large): Nur für wichtigste Elemente - Produkttitel, Modal-Überschriften, Wichtige Header
 - 14px (Medium): Standard Labels - Sektions-Header ("Nährwerte", "Zutaten"), Modal-Untertitel  
 - 12px (Small): Hauptcontent - Alle Daten-Werte, Info-Labels und -Values, Produktinfos, Nährwerte und Zutaten, Progress-Bar Zahlen

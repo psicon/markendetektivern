@@ -1,4 +1,5 @@
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { LevelBadge } from '@/components/ui/LevelBadge';
 import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -7,14 +8,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useLayoutEffect } from 'react';
 import {
-  Alert,
-  Image,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    Alert,
+    Image,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -68,7 +69,8 @@ export default function ProfileScreen() {
   const photoUrl = userProfile?.photo_url || user?.photoURL || null;
   const totalSavings = userProfile?.totalSavings || 238.78;
   const productsSaved = userProfile?.productsSaved || 23;
-  const level = userProfile?.level || 1;
+  // Level kommt jetzt aus stats.currentLevel (korrekte Berechnung)
+  const level = (userProfile as any)?.stats?.currentLevel || userProfile?.level || 1;
   const favoriteMarket = userProfile?.favoriteMarketName || '';
   const favoriteMarketId = userProfile?.favoriteMarket || '';
   
@@ -91,19 +93,9 @@ export default function ProfileScreen() {
     return `${getCountryFlag(country)} ${marketName}`;
   };
   
-  // Level information
-  const getLevelInfo = (level: number) => {
-    const levels = [
-      { level: 1, name: 'Sparanfänger', description: 'Der erste Schritt zu mehr Ersparnis', icon: 'leaf', color: colors.success },
-      { level: 2, name: 'Preisbewusst', description: 'Du achtest auf gute Angebote', icon: 'cart', color: '#FF9500' },
-      { level: 3, name: 'Schnäppchenjäger', description: 'Kein Deal entgeht dir', icon: 'magnifyingglass', color: '#AF52DE' },
-      { level: 4, name: 'Sparfuchs', description: 'Ein echter Profi im Sparen', icon: 'star', color: '#FF3B30' },
-      { level: 5, name: 'MarkenDetektiv', description: 'Du hast alle Geheimnisse gelüftet', icon: 'crown', color: '#FFD700' },
-    ];
-    return levels[Math.min(level - 1, 4)] || levels[0];
-  };
-  
-  const levelInfo = getLevelInfo(level);
+  // Get stats for level progress
+  const currentPoints = (userProfile as any)?.stats?.totalPoints || 0;
+  const currentSavings = userProfile?.totalSavings || 0;
 
   const handleLogout = () => {
     Alert.alert(
@@ -255,46 +247,35 @@ export default function ProfileScreen() {
       <TouchableOpacity 
         style={styles.levelCard}
         onPress={() => router.push('/achievements')}
+        activeOpacity={0.8}
       >
-        <LinearGradient
-          colors={['#8B7355', '#A1887F']}
-          start={{ x: -1, y: 0.34 }}
-          end={{ x: 1, y: -0.34 }}
-          style={styles.levelGradient}
-        >
-          <View style={styles.levelContent}>
-            <View style={styles.levelIcon}>
-              <IconSymbol name={levelInfo.icon as any} size={30} color="white" />
-            </View>
-            <View style={styles.levelInfo}>
-              <Text style={styles.levelTitle}>Level {level}</Text>
-              <Text style={styles.levelName}>{levelInfo.name}</Text>
-              <Text style={styles.levelDescription}>{levelInfo.description}</Text>
-            </View>
-            <TouchableOpacity style={styles.infoButton}>
-              <IconSymbol name="info.circle" size={24} color="white" />
-            </TouchableOpacity>
-          </View>
-        </LinearGradient>
+        <LevelBadge 
+          level={level}
+          size="large"
+          showDescription={true}
+          showProgress={true}
+          currentSavings={currentSavings}
+          currentPoints={currentPoints}
+        />
       </TouchableOpacity>
 
-      {/* Savings Card */}
+      {/* Savings Card - ACHIEVEMENTS STIL */}
       <View style={styles.savingsCard}>
         <LinearGradient
-          colors={[colors.warning, '#FFA000']}
+          colors={['#FF9800', '#FF5722']}
           start={{ x: 1, y: 0 }}
-          end={{ x: -1, y: 0 }}
+          end={{ x: 0, y: 0 }}
           style={styles.savingsGradient}
         >
           <View style={styles.savingsContent}>
-            <View>
+            <TouchableOpacity onPress={() => router.push('/achievements' as any)}>
               <Text style={styles.savingsLabel}>Deine Gesamtersparnis</Text>
-              <Text style={styles.savingsAmount}>{totalSavings.toFixed(2)} €</Text>
-            </View>
-            <View style={styles.productsBadge}>
-              <IconSymbol name="number" size={16} color={colors.warning} />
+              <Text style={styles.savingsAmount}>€ {totalSavings.toFixed(2)}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.productsBadge} onPress={() => router.push('/purchase-history' as any)}>
+              <IconSymbol name="number" size={14} color={colors.warning} />
               <Text style={styles.productsText}>{productsSaved} gekaufte Produkte</Text>
-            </View>
+            </TouchableOpacity>
           </View>
         </LinearGradient>
       </View>
@@ -324,9 +305,9 @@ export default function ProfileScreen() {
           onPress={() => router.push('/favorites' as any)}
         />
         <MenuItem
-          icon="tag"
-          title="Gutscheine & Belohnungen"
-          onPress={() => router.push('/rewards' as any)}
+          icon="clock.badge.checkmark"
+          title="Kaufhistorie"
+          onPress={() => router.push('/purchase-history' as any)}
         />
         <MenuItem
           icon="clock"
@@ -495,21 +476,17 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 25,
     borderRadius: 16,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.09,
+    shadowRadius: 2,
+    elevation: 2,
+    // KEIN overflow hier - Shadow muss sichtbar bleiben
   },
   savingsGradient: {
-    padding: 12,
+    padding: 10,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
   savingsContent: {
     flexDirection: 'row',
@@ -519,25 +496,33 @@ const styles = StyleSheet.create({
   savingsLabel: {
     color: 'white',
     fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+    lineHeight: 16,
     fontFamily: 'Nunito_600SemiBold',
   },
   savingsAmount: {
     color: 'white',
     fontSize: 23,
+    fontWeight: '600',
+    lineHeight: 26,
     fontFamily: 'Nunito_600SemiBold',
   },
   productsBadge: {
-    backgroundColor: 'white',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: 'white',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 6,
+    gap: 2,
   },
   productsText: {
     fontSize: 12,
+    fontWeight: '600',
+    color: '#FF9800',
+    lineHeight: 14,
     fontFamily: 'Nunito_600SemiBold',
-    marginLeft: 4,
   },
   menuSection: {
     marginHorizontal: 16,

@@ -1,0 +1,17 @@
+// NUR DIESE RULE MUSS HINZUGEFÜGT WERDEN:
+
+// NEU HINZUFÜGEN auf Top-Level (außerhalb von users):
+// Achievements Collection - Alle können lesen, niemand kann schreiben
+match /achievements/{document} {
+  allow read: if true;  // Öffentlich lesbar für alle
+  allow write: if false; // Nur über Admin SDK/Console
+}
+
+// FAVORITEN SIND BEREITS ABGEDECKT:
+// Die bestehenden users/{userId} Rules decken automatisch ab:
+// - users/{userId}/einkaufswagen/{document} (Einkaufszettel)
+// - users/{userId}/favorites/{document} (Favoriten) ← NEU aber schon abgedeckt
+// - users/{userId}/scanHistory/{document} 
+// - users/{userId}/searchHistory/{document}
+
+// Das war's! Nur eine einzige neue Rule für Achievements benötigt.

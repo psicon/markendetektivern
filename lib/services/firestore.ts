@@ -12,6 +12,7 @@ import {
     orderBy,
     query,
     serverTimestamp,
+    setDoc,
     startAfter,
     updateDoc,
     where,
@@ -1524,17 +1525,185 @@ export class FirestoreService {
   }
 
   /**
-   * Markiert ein Produkt als gekauft
+   * Markiert ein Produkt als gekauft UND erstellt Kaufhistorie-Eintrag
    */
   static async markAsPurchased(userId: string, itemId: string): Promise<void> {
     try {
       const userRef = doc(db, 'users', userId);
-      await updateDoc(doc(userRef, 'einkaufswagen', itemId), {
+      const cartItemRef = doc(userRef, 'einkaufswagen', itemId);
+      
+      // 1. Lade die aktuellen Einkaufszettel-Daten
+      const cartItemDoc = await getDoc(cartItemRef);
+      if (!cartItemDoc.exists()) {
+        throw new Error('Einkaufszettel-Item nicht gefunden');
+      }
+      
+      const cartData = cartItemDoc.data();
+      
+      // 2. Erstelle vollständigen Kaufhistorie-Eintrag
+      await this.createPurchaseHistoryEntry(userId, cartData);
+      
+      // 3. Markiere im Einkaufszettel als gekauft
+      await updateDoc(cartItemRef, {
         gekauft: true
       });
-      console.log('✅ Marked as purchased:', itemId);
+      
+      console.log('✅ Marked as purchased and added to history:', itemId);
     } catch (error) {
       console.error('Error marking as purchased:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Erstellt einen Kaufhistorie-Eintrag mit vollständigen Produktdaten
+   */
+  private static async createPurchaseHistoryEntry(userId: string, cartData: any): Promise<void> {
+    try {
+      const userRef = doc(db, 'users', userId);
+      
+      let purchaseData: any = {
+        purchasedAt: serverTimestamp(),
+        originalCartData: cartData
+      };
+      
+      if (cartData.markenProdukt) {
+        // Markenprodukt - lade vollständige Daten
+        const productDoc = await getDoc(cartData.markenProdukt);
+        if (productDoc.exists()) {
+          const rawData = productDoc.data();
+          
+          // Lade Hersteller (MARKE) Daten
+          let hersteller = null;
+          if (rawData.hersteller) {
+            const herstellerDoc = await getDoc(rawData.hersteller);
+            if (herstellerDoc.exists()) {
+              const herstellerData = herstellerDoc.data();
+              hersteller = {
+                name: herstellerData.name,
+                bild: herstellerData.bild
+              };
+            }
+          }
+          
+          // Berechne Ersparnis
+          let savings = 0;
+          if (rawData.relatedProdukteIDs && rawData.relatedProdukteIDs.length > 0) {
+            let cheapestPrice = Infinity;
+            for (const relatedId of rawData.relatedProdukteIDs) {
+              const relatedDoc = await getDoc(doc(db, 'produkte', relatedId));
+              if (relatedDoc.exists()) {
+                const relatedData = relatedDoc.data();
+                if (relatedData.preis && relatedData.preis < cheapestPrice) {
+                  cheapestPrice = relatedData.preis;
+                }
+              }
+            }
+            if (cheapestPrice !== Infinity && rawData.preis) {
+              savings = Math.max(0, rawData.preis - cheapestPrice);
+            }
+          }
+          
+          purchaseData = {
+            ...purchaseData,
+            productId: productDoc.id,
+            productType: 'markenprodukt',
+            name: rawData.name || rawData.produktName || cartData.name,
+            preis: rawData.preis || 0,
+            bild: rawData.bild || '',
+            savings: savings,
+            hersteller: hersteller,
+            // Vollständige Produktdaten für späteren Zugriff
+            productData: {
+              ...rawData,
+              id: productDoc.id,
+              hersteller: hersteller
+            }
+          };
+        }
+        
+      } else if (cartData.handelsmarkenProdukt) {
+        // NoName Produkt - lade vollständige Daten
+        const productDoc = await getDoc(cartData.handelsmarkenProdukt);
+        if (productDoc.exists()) {
+          const rawData = productDoc.data();
+          
+          // Lade Handelsmarke Daten
+          let handelsmarke = null;
+          if (rawData.handelsmarke) {
+            const handelsmarkeDoc = await getDoc(rawData.handelsmarke);
+            if (handelsmarkeDoc.exists()) {
+              const handelsmarkeData = handelsmarkeDoc.data();
+              handelsmarke = {
+                bezeichnung: handelsmarkeData.bezeichnung
+              };
+            }
+          }
+          
+          // Lade Discounter Daten
+          let discounter = null;
+          if (rawData.discounter) {
+            const discounterDoc = await getDoc(rawData.discounter);
+            if (discounterDoc.exists()) {
+              const discounterData = discounterDoc.data();
+              discounter = {
+                id: discounterDoc.id,
+                name: discounterData.name,
+                bild: discounterData.bild,
+                land: discounterData.land
+              };
+            }
+          }
+          
+          purchaseData = {
+            ...purchaseData,
+            productId: productDoc.id,
+            productType: 'noname',
+            name: rawData.name || rawData.produktName || cartData.name,
+            preis: rawData.preis || 0,
+            bild: rawData.bild || '',
+            savings: 0, // NoName hat keine Ersparnis
+            stufe: rawData.stufe || 3, // Wichtig für Navigation
+            handelsmarke: handelsmarke,
+            discounter: discounter,
+            // Vollständige Produktdaten für späteren Zugriff
+            productData: {
+              ...rawData,
+              id: productDoc.id,
+              handelsmarke: handelsmarke,
+              discounter: discounter
+            }
+          };
+        }
+      }
+      
+      // Eindeutige Purchase ID basierend auf Produkttyp und ID + Timestamp für Duplikat-Vermeidung
+      const productId = cartData.markenProdukt?.id || cartData.handelsmarkenProdukt?.id || 'unknown';
+      const timestamp = Date.now();
+      const uniquePurchaseId = `${purchaseData.productType || 'noname'}_${productId}_${timestamp}`;
+      
+      // Speichere in purchases Subcollection - bereinige undefined Werte inline
+      const cleanedData = {
+        ...purchaseData,
+        // Bereinige explizit undefined Werte
+        productId: purchaseData.productId || null,
+        name: purchaseData.name || null,
+        preis: purchaseData.preis || 0,
+        bild: purchaseData.bild || null,
+        savings: purchaseData.savings || 0,
+        stufe: purchaseData.stufe || 3,
+        hersteller: purchaseData.hersteller || null,
+        handelsmarke: purchaseData.handelsmarke || null,
+        discounter: purchaseData.discounter || null,
+        productData: purchaseData.productData || null
+      };
+      
+      // Verwende setDoc mit eindeutiger ID statt addDoc um Duplikate zu vermeiden
+      await setDoc(doc(userRef, 'purchases', uniquePurchaseId), cleanedData);
+      console.log('✅ Created purchase history entry with ID:', uniquePurchaseId, 'for:', purchaseData.name);
+      
+    } catch (error) {
+      console.error('Error creating purchase history entry:', error);
       throw error;
     }
   }
@@ -1545,28 +1714,49 @@ export class FirestoreService {
   static async convertToNoName(
     userId: string,
     conversions: ProductToConvert[]
-  ): Promise<void> {
+  ): Promise<{ newItems: any[], idMapping: { [oldId: string]: string } }> {
     try {
       const batch = writeBatch(db);
       const userRef = doc(db, 'users', userId);
+      const idMapping: { [oldId: string]: string } = {};
+      const newItems: any[] = [];
       
-      for (const conversion of conversions) {
+      // First get product details for names and prices
+      const productPromises = conversions.map(async (conversion) => {
+        const produktDoc = await getDoc(doc(db, 'produkte', conversion.produktRef));
+        return produktDoc.exists() ? { id: conversion.produktRef, ...produktDoc.data() } : null;
+      });
+      const productDetails = await Promise.all(productPromises);
+      
+      conversions.forEach((conversion, index) => {
         // Lösche alten Eintrag
         batch.delete(doc(userRef, 'einkaufswagen', conversion.einkaufswagenRef));
         
-        // TODO: Get product name for new entry
         // Füge neuen NoName Eintrag hinzu
         const newDoc = doc(collection(userRef, 'einkaufswagen'));
-        batch.set(newDoc, {
+        const productData = productDetails[index];
+        
+        const newCartItem = {
           handelsmarkenProdukt: doc(db, 'produkte', conversion.produktRef),
           gekauft: false,
           timestamp: serverTimestamp(),
-          name: 'NoName Produkt' // TODO: Get actual product name
+          name: productData?.name || 'NoName Produkt'
+        };
+        
+        batch.set(newDoc, newCartItem);
+        
+        // Map old ID to new ID and store new item data
+        idMapping[conversion.einkaufswagenRef] = newDoc.id;
+        newItems.push({
+          id: newDoc.id,
+          product: productData,
+          savings: 0 // Will be calculated in frontend
         });
-      }
+      });
       
       await batch.commit();
       console.log(`✅ Converted ${conversions.length} products to NoName`);
+      return { newItems, idMapping };
     } catch (error) {
       console.error('Error converting to NoName:', error);
       throw error;

@@ -1,6 +1,7 @@
 import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut, updateProfile, User } from 'firebase/auth';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { auth } from '../firebase';
+import achievementService, { setProfileRefreshCallback } from '../services/achievementService';
 import { isAppleAuthAvailable, signInWithApple, signOutApple } from '../services/auth/appleAuth';
 import { signInWithGoogle, signOutGoogle } from '../services/auth/googleAuth';
 import { getUserProfile, updateUserProfile, UserProfile } from '../services/userProfile';
@@ -42,7 +43,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const refreshUserProfile = useCallback(async () => {
+    if (user) {
+      const profile = await getUserProfile(user.uid);
+      setUserProfile(profile);
+      console.log('🔄 AuthContext: User profile refreshed');
+    }
+  }, [user]);
+
   useEffect(() => {
+    // Registriere Profile-Refresh-Callback für Achievement-System
+    setProfileRefreshCallback(refreshUserProfile);
+    
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       
@@ -53,6 +65,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         // Update last login
         await updateUserProfile(user);
+        
+        // Check Daily Streak für Achievement-System
+        try {
+          await achievementService.checkDailyStreak(user.uid);
+          console.log('✅ Daily Streak gecheckt beim App-Start');
+          
+          // Check und korrigiere Level beim App-Start
+          await achievementService.checkAndUpdateLevel(user.uid);
+          console.log('✅ Level-Check durchgeführt beim App-Start');
+        } catch (error) {
+          console.error('Fehler beim Daily Streak Check:', error);
+        }
       } else {
         setUserProfile(null);
       }
@@ -61,7 +85,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return unsubscribe;
-  }, []);
+  }, [refreshUserProfile]);
 
   const signIn = async (email: string, password: string) => {
     try {
@@ -156,12 +180,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const refreshUserProfile = useCallback(async () => {
-    if (user) {
-      const profile = await getUserProfile(user.uid);
-      setUserProfile(profile);
-    }
-  }, [user]);
+
 
   const value = {
     user,

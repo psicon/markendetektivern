@@ -10,23 +10,28 @@ import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { ingredientSynonyms } from '@/lib/data/ingredientSynonyms';
+import { db } from '@/lib/firebase';
+import { useFavorites } from '@/lib/hooks/useFavorites';
+import achievementService, { setAchievementUnlockHandler } from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
 import { MarkenProduktWithDetails, ProductWithDetails } from '@/lib/types/firestore';
+import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { doc, getDoc } from 'firebase/firestore';
 import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -195,11 +200,14 @@ const StarRating = ({
 
 // NoName Cart Button Component  
 const NoNameCartButton = ({ productId, productName, user, colors }: any) => {
+  const router = useRouter();
   const [isInCart, setIsInCart] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
+  const [toastActionLabel, setToastActionLabel] = useState<string | undefined>(undefined);
+  const [toastActionPress, setToastActionPress] = useState<(() => void) | undefined>(undefined);
   
   useEffect(() => {
     checkStatus();
@@ -227,6 +235,8 @@ const NoNameCartButton = ({ productId, productName, user, colors }: any) => {
     if (!user?.uid) {
       setToastMessage('Bitte melde dich an, um Produkte hinzuzufügen');
       setToastType('info');
+      setToastActionLabel(undefined);
+      setToastActionPress(undefined);
       setShowToast(true);
       return;
     }
@@ -234,6 +244,8 @@ const NoNameCartButton = ({ productId, productName, user, colors }: any) => {
     if (isInCart) {
       setToastMessage('Produkt ist bereits im Einkaufszettel');
       setToastType('info');
+      setToastActionLabel(undefined);
+      setToastActionPress(undefined);
       setShowToast(true);
       return;
     }
@@ -248,13 +260,19 @@ const NoNameCartButton = ({ productId, productName, user, colors }: any) => {
         false // NoName product
       );
       setIsInCart(true);
-      setToastMessage('Produkt wurde zum Einkaufszettel hinzugefügt');
+      setToastMessage('🛒 Produkt hinzugefügt!');
       setToastType('success');
+      setToastActionLabel('Einkaufszettel');
+      setToastActionPress(() => () => {
+        router.push('/shopping-list' as any);
+      });
       setShowToast(true);
     } catch (error) {
       console.error('Error adding to cart:', error);
       setToastMessage('Produkt konnte nicht hinzugefügt werden');
       setToastType('error');
+      setToastActionLabel(undefined);
+      setToastActionPress(undefined);
       setShowToast(true);
     } finally {
       setIsLoading(false);
@@ -285,7 +303,13 @@ const NoNameCartButton = ({ productId, productName, user, colors }: any) => {
           visible={showToast}
           message={toastMessage}
           type={toastType}
-          onHide={() => setShowToast(false)}
+          actionLabel={toastActionLabel}
+          onActionPress={toastActionPress}
+          onHide={() => {
+            setShowToast(false);
+            setToastActionLabel(undefined);
+            setToastActionPress(undefined);
+          }}
         />
       )}
     </>
@@ -1104,17 +1128,91 @@ const ProductComparisonContent = ({
 
 export default function ProductComparisonScreen() {
   const { id, type } = useLocalSearchParams();
+  
+  // DEBUG: URL Parameter prüfen
+  console.log('🔍 PRODUCT-COMPARISON GELADEN:', {
+    id: id,
+    type: type,
+    isMarkenProdukt: type === 'brand'
+  });
+  
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const navigation = useNavigation();
   const { user } = useAuth();
+  const { toggleFavorite, isLocalFavorite } = useFavorites();
   
-  // Toast states
+  // Toast states ERWEITERT für Action-Toast
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
+  const [toastActionLabel, setToastActionLabel] = useState<string | undefined>(undefined);
+  const [toastActionPress, setToastActionPress] = useState<(() => void) | undefined>(undefined);
+
+  // Toast helper function
+  const showGameToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToastMessage(message);
+    setToastType(type);
+    setToastActionLabel(undefined);
+    setToastActionPress(undefined);
+    setShowToast(true);
+  };
+
+  const showGameToastWithAction = (
+    message: string, 
+    type: 'success' | 'error' | 'info' = 'success'
+  ) => {
+    setToastMessage(message);
+    setToastType(type);
+    setToastActionLabel('Einkaufszettel');
+    setToastActionPress(() => () => {
+      router.push('/shopping-list' as any);
+    });
+    setShowToast(true);
+  };
+
+  // Handle favorite toggle
+  const handleToggleFavorite = async (product: any, productType: 'markenprodukt' | 'noname') => {
+    if (!user?.uid) {
+      showGameToast('Bitte melde dich an, um Favoriten zu speichern', 'info');
+      return;
+    }
+
+    if (!product) return;
+
+    // DEBUG: Typ prüfen
+    console.log('🔍 FAVORIT HINZUFÜGEN:', {
+      productId: product.id,
+      productName: product.name || product.produktName,
+      urlType: type,
+      productType: productType,
+      isMarkenProdukt: type === 'brand'
+    });
+
+    try {
+      const wasAdded = await toggleFavorite(product.id, productType, {
+        id: product.id,
+        name: product.name,
+        preis: product.preis,
+        packSize: product.packSize,
+        bild: product.bild,
+        type: productType,
+        category: product.kategorie?.bezeichnung || product.category,
+        brand: product.marke?.bezeichnung || product.brand
+      });
+
+      const message = wasAdded 
+        ? `💖 ${product.name} zu Favoriten hinzugefügt!`
+        : `💔 ${product.name} aus Favoriten entfernt`;
+      
+      showGameToast(message, 'success');
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+      showGameToast('Fehler beim Speichern des Favoriten', 'error');
+    }
+  };
 
   // Function to open image viewer
   const openImageViewer = (imageUrl: string) => {
@@ -1190,18 +1288,14 @@ export default function ProductComparisonScreen() {
   // Add to shopping cart
   const handleAddToCart = async () => {
     if (!user?.uid) {
-      setToastMessage('Bitte melde dich an, um Produkte hinzuzufügen');
-      setToastType('info');
-      setShowToast(true);
+      showGameToast('Bitte melde dich an, um Produkte hinzuzufügen', 'info');
       return;
     }
     
     if (!comparisonData?.mainProduct) return;
     
     if (isInCart) {
-      setToastMessage('Produkt ist bereits im Einkaufszettel');
-      setToastType('info');
-      setShowToast(true);
+      showGameToast('Produkt ist bereits im Einkaufszettel', 'info');
       return;
     }
     
@@ -1230,14 +1324,10 @@ export default function ProductComparisonScreen() {
         isMarke
       );
       setIsInCart(true);
-      setToastMessage('Produkt wurde zum Einkaufszettel hinzugefügt');
-      setToastType('success');
-      setShowToast(true);
+      showGameToastWithAction('🛒 Produkt zum Einkaufszettel hinzugefügt!', 'success');
     } catch (error) {
       console.error('Error adding to cart:', error);
-      setToastMessage('Produkt konnte nicht hinzugefügt werden');
-      setToastType('error');
-      setShowToast(true);
+      showGameToast('Produkt konnte nicht hinzugefügt werden', 'error');
     } finally {
       setIsAddingToCart(false);
     }
@@ -1472,6 +1562,39 @@ export default function ProductComparisonScreen() {
 
 
   // Load product comparison data from Firestore
+  // Setup Achievement Toast Handler with motivational messages
+  useEffect(() => {
+    setAchievementUnlockHandler((notification: any) => {
+      // Check if it's a level-up notification
+      if (notification && notification.type === 'level_up') {
+        // MEGA Level-Up Animation & Haptics
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 200);
+        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light), 400);
+        
+        showGameToast(
+          `${notification.title}\n${notification.message}`,
+          'success'
+        );
+      } else {
+        // Normal achievement unlock
+        const motivationalMessages = [
+          '🎉 FANTASTISCH!',
+          '🚀 UNGLAUBLICH!',
+          '💪 MEGA STARK!',
+          '⭐ SENSATIONELL!',
+          '🔥 HAMMER!'
+        ];
+        const randomMessage = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
+        
+        showGameToast(
+          `${randomMessage}\n🏆 ${notification.name}\n+${notification.points} Punkte verdient!`,
+          'success'
+        );
+      }
+    });
+  }, []);
+  
   useEffect(() => {
     async function loadProductComparison() {
       if (!id || typeof id !== 'string') {
@@ -1487,7 +1610,23 @@ export default function ProductComparisonScreen() {
         console.log('Loading product comparison for ID:', id, 'Type:', type);
         
         // Determine product type from URL parameter
-        const isMarkenProdukt = type === 'brand';
+        let isMarkenProdukt = type === 'brand';
+        
+        // SICHERHEITSCHECK: Prüfe echten Produkttyp aus Firestore
+        if (!isMarkenProdukt) {
+          // Wenn als "noname" angenommen, prüfe ob es wirklich ein Markenprodukt ist
+          const markenCheck = await getDoc(doc(db, 'markenProdukte', id));
+          if (markenCheck.exists()) {
+            console.log('🔧 KORREKTUR: Produkt ist eigentlich ein Markenprodukt!');
+            isMarkenProdukt = true;
+          }
+        }
+        
+        console.log('📍 FINALER TYP:', {
+          urlType: type,
+          isMarkenProdukt: isMarkenProdukt,
+          correctType: isMarkenProdukt ? 'markenprodukt' : 'noname'
+        });
         
         // Get complete comparison data (brand product + related NoNames)
         const data = await FirestoreService.getProductComparisonData(id, isMarkenProdukt);
@@ -1518,6 +1657,14 @@ export default function ProductComparisonScreen() {
           
           // Nach dem Laden der Firestore-Daten: OpenFood API aufrufen
           loadOpenFoodData(data);
+          
+          // Track Achievement: view_comparison
+          if (user?.uid) {
+            achievementService.trackAction(user.uid, 'view_comparison', {
+              productId: id,
+              productType: type
+            });
+          }
         } else {
           setError('Produkt nicht gefunden');
         }
@@ -1836,8 +1983,34 @@ export default function ProductComparisonScreen() {
               </View>
             )}
             <View style={styles.spacer} />
-            <TouchableOpacity>
-              <IconSymbol name="heart.fill" size={20} color={colors.error} />
+            <TouchableOpacity onPress={async () => {
+              if (comparisonData?.mainProduct) {
+                // Intelligente Typ-Erkennung
+                let correctType: 'markenprodukt' | 'noname' = type === 'brand' ? 'markenprodukt' : 'noname';
+                
+                // SICHERHEITSCHECK: Falls URL-Parameter falsch ist
+                if (correctType === 'noname') {
+                  const markenCheck = await getDoc(doc(db, 'markenProdukte', comparisonData.mainProduct.id));
+                  if (markenCheck.exists()) {
+                    correctType = 'markenprodukt';
+                    console.log('🔧 FAVORIT-KORREKTUR: Typ korrigiert zu markenprodukt');
+                  }
+                }
+                
+                console.log('🔍 HAUPTPRODUKT FAVORIT:', {
+                  urlType: type,
+                  correctType: correctType,
+                  productId: comparisonData.mainProduct.id,
+                  productName: comparisonData.mainProduct.name
+                });
+                handleToggleFavorite(comparisonData.mainProduct, correctType);
+              }
+            }}>
+              <IconSymbol 
+                name={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? "heart.fill" : "heart"} 
+                size={20} 
+                color={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? colors.error : colors.icon} 
+              />
             </TouchableOpacity>
                 </View>
 
@@ -1948,14 +2121,20 @@ export default function ProductComparisonScreen() {
             </TouchableOpacity>
         </View>
         
-        {/* Toast in Main Product Card */}
+        {/* Toast in Main Product Card ERWEITERT mit Action-Button */}
         {showToast && (
           <CartToast
             visible={showToast}
             message={toastMessage}
             type={toastType}
             position="top"
-            onHide={() => setShowToast(false)}
+            actionLabel={toastActionLabel}
+            onActionPress={toastActionPress}
+            onHide={() => {
+              setShowToast(false);
+              setToastActionLabel(undefined);
+              setToastActionPress(undefined);
+            }}
           />
         )}
         </Animated.View>
@@ -2049,9 +2228,16 @@ export default function ProductComparisonScreen() {
                     </TouchableOpacity>
                     <TouchableOpacity 
                       style={styles.actionIconButton}
-                      onPress={(e) => e.stopPropagation()}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleToggleFavorite(noNameProduct, 'noname');
+                      }}
                     >
-                      <IconSymbol name="heart" size={20} color={colors.icon} />
+                      <IconSymbol 
+                        name={isLocalFavorite(noNameProduct.id, 'noname') ? "heart.fill" : "heart"} 
+                        size={20} 
+                        color={isLocalFavorite(noNameProduct.id, 'noname') ? colors.error : colors.icon} 
+                      />
                     </TouchableOpacity>
                 </View>
               </View>

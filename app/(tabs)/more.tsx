@@ -1,5 +1,6 @@
 import { ThemedText } from '@/components/ThemedText';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { LevelBadge } from '@/components/ui/LevelBadge';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -28,7 +29,7 @@ import { version as packageVersion } from '../../package.json';
 export default function MoreScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const { user, logout } = useAuth();
+  const { user, userProfile, logout } = useAuth();
   const { isDarkMode, toggleDarkMode, themeMode, setThemeMode } = useTheme();
   const router = useRouter();
   const [appVersion, setAppVersion] = useState('1.0.0');
@@ -43,13 +44,7 @@ export default function MoreScreen() {
     console.log(`✅ Theme toggled to: ${value ? 'dark' : 'light'} mode`);
   };
 
-  const handleTotalSavingsInfo = () => {
-    Alert.alert(
-      'Gesamtersparnis Info',
-      'Hier siehst du deine gesamte Ersparnis durch die Nutzung von NoName-Produkten.',
-      [{ text: 'OK', style: 'default' }]
-    );
-  };
+
 
   const handleMoreTips = () => {
     Linking.openURL('https://www.markendetektive.de/blog/');
@@ -66,8 +61,7 @@ export default function MoreScreen() {
   };
 
   const handleFavoriteProducts = () => {
-    // TODO: Navigate to favorite products
-    console.log('Navigate to favorite products');
+    router.push('/favorites' as any);
   };
 
   const handleIdentityDatabase = () => {
@@ -128,10 +122,12 @@ export default function MoreScreen() {
     Linking.openURL('https://www.markendetektive.de/kontakt/');
   };
 
-  // Mock data - replace with real data
-  const totalSavings = 238.78;
-  const productCount = 23;
-  const isPremium = false; // TODO: Get from user data
+  // Real data from user profile
+  const totalSavings = userProfile?.totalSavings || 0;
+  const productCount = userProfile?.productsSaved || 0;
+  const isPremium = userProfile?.isPremium || false;
+  const level = (userProfile as any)?.stats?.currentLevel || userProfile?.level || 1;
+  const currentPoints = (userProfile as any)?.stats?.totalPoints || 0;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -150,28 +146,39 @@ export default function MoreScreen() {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* Gesamtersparnis Card */}
-        <View style={styles.cardContainer}>
+        {/* Level Badge */}
+        <TouchableOpacity 
+          style={styles.levelBadgeContainer}
+          onPress={() => router.push('/achievements' as any)}
+          activeOpacity={0.8}
+        >
+          <LevelBadge 
+            level={level}
+            size="medium"
+            showDescription={true}
+            showProgress={false}
+            currentSavings={totalSavings}
+            currentPoints={currentPoints}
+          />
+        </TouchableOpacity>
+
+        {/* Gesamtersparnis Card - ACHIEVEMENTS STIL */}
+        <View style={styles.savingsCardContainer}>
           <LinearGradient
-            colors={['#F59E0B', '#D97706']}
+            colors={['#FF9800', '#FF5722']}
             start={{ x: 1, y: 0 }}
             end={{ x: 0, y: 0 }}
-            style={styles.savingsCard}
+            style={styles.savingsCardGradient}
           >
-            <View style={styles.savingsContent}>
-              <View style={styles.savingsLeft}>
-                <ThemedText style={styles.savingsTitle}>Deine Gesamtersparnis</ThemedText>
-                <ThemedText style={styles.savingsAmount}>{totalSavings.toFixed(2)} €</ThemedText>
-              </View>
-              <View style={styles.savingsRight}>
-                <View style={styles.productCountBadge}>
-                  <IconSymbol name="number" size={16} color="#D97706" />
-                  <ThemedText style={styles.productCountText}>{productCount} Produkte</ThemedText>
-                  <TouchableOpacity onPress={handleTotalSavingsInfo}>
-                    <IconSymbol name="info.circle" size={24} color="#D97706" />
-                  </TouchableOpacity>
-                </View>
-              </View>
+            <View style={styles.savingsCardContent}>
+              <TouchableOpacity onPress={() => router.push('/achievements' as any)}>
+                <ThemedText style={styles.savingsCardLabel}>Deine Gesamtersparnis</ThemedText>
+                <ThemedText style={styles.savingsCardAmount}>€ {totalSavings.toFixed(2)}</ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.productsCardBadge} onPress={() => router.push('/purchase-history' as any)}>
+                <IconSymbol name="number" size={14} color={colors.warning} />
+                <ThemedText style={styles.productsCardText}>{productCount} gekaufte Produkte</ThemedText>
+              </TouchableOpacity>
             </View>
           </LinearGradient>
         </View>
@@ -421,54 +428,62 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 12,
   },
-  savingsCard: {
+  // Neue Savings Card Styles - ACHIEVEMENTS STIL
+  levelBadgeContainer: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+  },
+  savingsCardContainer: {
+    marginHorizontal: 16,
+    marginBottom: 25,
     borderRadius: 16,
-    padding: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOpacity: 0.09,
+    shadowRadius: 2,
+    elevation: 2,
+    // KEIN overflow hier - Shadow muss sichtbar bleiben
   },
-  savingsContent: {
+  savingsCardGradient: {
+    padding: 10,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  savingsCardContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  savingsLeft: {
-    flex: 1,
-  },
-  savingsTitle: {
+  savingsCardLabel: {
     color: 'white',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
+    marginBottom: 2,
+    lineHeight: 16,
     fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 4,
   },
-  savingsAmount: {
+  savingsCardAmount: {
     color: 'white',
-    fontSize: 20,
-    fontWeight: 'bold',
-    fontFamily: 'Nunito_700Bold',
+    fontSize: 23,
+    fontWeight: '600',
+    lineHeight: 26,
+    fontFamily: 'Nunito_600SemiBold',
   },
-  savingsRight: {
-    alignItems: 'flex-end',
-  },
-  productCountBadge: {
-    backgroundColor: 'white',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+  productsCardBadge: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: 'white',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 6,
     gap: 2,
   },
-  productCountText: {
-    color: '#D97706',
+  productsCardText: {
     fontSize: 12,
     fontWeight: '600',
+    color: '#FF9800',
+    lineHeight: 14,
     fontFamily: 'Nunito_600SemiBold',
-    marginHorizontal: 4,
   },
   tipCard: {
     borderRadius: 16,

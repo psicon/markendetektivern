@@ -5,6 +5,7 @@ import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useTheme } from '@/lib/contexts/ThemeContext';
+import achievementService, { setAchievementUnlockHandler } from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import { updateUserStats } from '@/lib/services/userProfile';
 import {
@@ -17,7 +18,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -31,6 +32,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import PagerView from 'react-native-pager-view';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width } = Dimensions.get('window');
@@ -60,7 +62,7 @@ export default function ShoppingListScreen() {
   const navigation = useNavigation();
   const { theme } = useTheme();
   const colors = Colors[theme ?? 'light'];
-  const { user, userProfile, refreshUserProfile } = useAuth();
+  const { user, userProfile } = useAuth();
   const insets = useSafeAreaInsets();
   
   const [activeTab, setActiveTab] = useState<'brand' | 'noname'>('brand');
@@ -92,6 +94,7 @@ export default function ShoppingListScreen() {
   const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
   
   const tabIndicatorPosition = useState(new Animated.Value(0))[0];
+  const pagerRef = useRef<PagerView>(null);
 
   // Gamified toast helper
   const showGameToast = (message: string, type: 'success' | 'error' | 'info' = 'success', enableAudio = true) => {
@@ -148,6 +151,42 @@ export default function ShoppingListScreen() {
       ),
     });
   }, [navigation, colors.primary]);
+  
+  // Setup Achievement Toast Handler with motivational messages
+  useEffect(() => {
+    setAchievementUnlockHandler((notification: any) => {
+      // Check if it's a level-up notification
+      if (notification && notification.type === 'level_up') {
+        // MEGA Level-Up Animation & Haptics
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 200);
+        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light), 400);
+        
+        showGameToast(
+          `${notification.title}\n${notification.message}`,
+          'success'
+        );
+      } else {
+        // Normal achievement unlock
+        const motivationalMessages = [
+          '🎉 FANTASTISCH!',
+          '🚀 UNGLAUBLICH!',
+          '💪 MEGA STARK!',
+          '⭐ SENSATIONELL!',
+          '🔥 HAMMER!'
+        ];
+        const randomMessage = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
+        
+        showGameToast(
+          `${randomMessage}\n🏆 ${notification.name}\n+${notification.points} Punkte verdient!`,
+          'success'
+        );
+        
+        // Extra haptic feedback for achievement
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    });
+  }, []);
   
   // Load shopping cart data
   const loadShoppingCart = useCallback(async () => {
@@ -320,14 +359,36 @@ export default function ShoppingListScreen() {
   }, [brandProducts, noNameProducts]);
   
   const handleTabChange = (tab: 'brand' | 'noname') => {
+    const pageIndex = tab === 'brand' ? 0 : 1;
     setActiveTab(tab);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
+    // Animate tab indicator
     Animated.timing(tabIndicatorPosition, {
       toValue: tab === 'brand' ? 0 : width / 2,
       duration: 200,
       useNativeDriver: true
     }).start();
+    
+    // Switch PagerView page
+    pagerRef.current?.setPage(pageIndex);
+  };
+
+  const handlePageSelected = (e: any) => {
+    const position = e.nativeEvent.position;
+    const newTab = position === 0 ? 'brand' : 'noname';
+    
+    if (newTab !== activeTab) {
+      setActiveTab(newTab);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      
+      // Animate tab indicator
+      Animated.timing(tabIndicatorPosition, {
+        toValue: position === 0 ? 0 : width / 2,
+        duration: 200,
+        useNativeDriver: true
+      }).start();
+    }
   };
   
   // Toggle expand/collapse for brand products
@@ -394,49 +455,49 @@ export default function ShoppingListScreen() {
         produktRef
       }];
       
-      await FirestoreService.convertToNoName(user.uid, conversions);
+      const result = await FirestoreService.convertToNoName(user.uid, conversions);
       
       // Remove from selected conversions
       setSelectedConversions(prev => 
         prev.filter(conv => conv.einkaufswagenRef !== einkaufswagenRef)
       );
       
-      // Optimized: Update local state instead of reloading
-      // Remove from brand products and add to noname products
+      // Optimized: Update local state without reloading
       const brandItem = brandProducts.find(item => item.id === einkaufswagenRef);
-      if (brandItem) {
+      if (brandItem && result.newItems.length > 0) {
+        // Remove from brand products
         setBrandProducts(prev => prev.filter(item => item.id !== einkaufswagenRef));
         
-        // Add converted product to noname list if alternative exists
-        const alternativeProduct = brandItem.alternatives?.find(alt => alt.id === produktRef);
-        if (alternativeProduct) {
-          // Use already calculated potential savings - much more efficient!
-          const savingsAmount = brandItem.potentialSavings || 0;
-          
-          console.log(`💰 Single conversion: ${alternativeProduct.name || 'NoName'} saves €${savingsAmount.toFixed(2)}`);
-          
-          const newNoNameItem = {
-            id: `${Date.now()}`, // Temporary ID for UI
-            product: alternativeProduct,
-            savings: savingsAmount
-          };
-          setNoNameProducts(prev => [...prev, newNoNameItem]);
-          
-          // Success toast with savings amount
-          showGameToast(`🔄 Umgewandelt! Du sparst €${savingsAmount.toFixed(2)} mit dem NoName-Produkt!`, 'success');
-        } else {
-          // If no alternative found, still show success message
-          showGameToast('🔄 Produkt erfolgreich umgewandelt!', 'success');
-        }
+        // Calculate savings locally
+        const newItem = result.newItems[0];
+        const savingsAmount = brandItem.potentialSavings || 0;
+        
+        // Add to NoName products with correct ID
+        const noNameItem = {
+          id: newItem.id,
+          product: newItem.product,
+          savings: savingsAmount
+        };
+        
+        setNoNameProducts(prev => [...prev, noNameItem]);
+        
+        console.log(`💰 Single conversion: ${newItem.product?.name || 'NoName'} saves €${savingsAmount.toFixed(2)}`);
+        
+        // Success toast with savings amount
+        showGameToast(`🔄 Umgewandelt! Du sparst €${savingsAmount.toFixed(2)} mit dem NoName-Produkt!`, 'success');
       } else {
-        // If brand item not found, still show an appropriate message
-        showGameToast('🔄 Umwandlung durchgeführt!', 'success');
+        // Fallback if something went wrong
+        showGameToast('🔄 Produkt erfolgreich umgewandelt!', 'success');
+        loadShoppingCart();
       }
       
+      // Track Achievement: convert_product
+      await achievementService.trackAction(user.uid, 'convert_product');
+      
     } catch (error) {
-      console.error('Error converting single product:', error);
-      showGameToast('Umwandlung fehlgeschlagen. Versuch es nochmal!', 'error');
-    }
+  console.error('Error converting single product:', error);
+  showGameToast('Umwandlung fehlgeschlagen. Versuch es nochmal!', 'error');
+}
   };
   
   // Convert selected brand products to NoName
@@ -458,8 +519,29 @@ export default function ShoppingListScreen() {
           onPress: async () => {
             setIsConverting(true);
             try {
-              await FirestoreService.convertToNoName(user!.uid, selectedConversions);
+              const result = await FirestoreService.convertToNoName(user!.uid, selectedConversions);
               await FirestoreService.updateUserTotalSavings(user!.uid, totalPotentialSavings);
+              
+              // Update local state without reload
+              const convertedIds = selectedConversions.map(conv => conv.einkaufswagenRef);
+              
+              // Get brand items that were converted
+              const convertedBrandItems = brandProducts.filter(item => convertedIds.includes(item.id));
+              
+              // Remove converted brand products
+              setBrandProducts(prev => prev.filter(item => !convertedIds.includes(item.id)));
+              
+              // Add new NoName items
+              const newNoNameItems = result.newItems.map((newItem, index) => {
+                const brandItem = convertedBrandItems[index];
+                return {
+                  id: newItem.id,
+                  product: newItem.product,
+                  savings: brandItem?.potentialSavings || 0
+                };
+              });
+              
+              setNoNameProducts(prev => [...prev, ...newNoNameItems]);
               
               // Gamified success message
               showGameToast(`🎉 Fantastisch! Du sparst €${totalPotentialSavings.toFixed(2)} mit NoName-Produkten!`, 'success');
@@ -467,13 +549,10 @@ export default function ShoppingListScreen() {
               setSelectedConversions([]);
               setExpandedItems([]);
               
-              // Optimized: Update local state instead of reloading
-              // Remove converted brand products and update totals
-              const convertedIds = selectedConversions.map(conv => conv.einkaufswagenRef);
-              setBrandProducts(prev => prev.filter(item => !convertedIds.includes(item.id)));
-              
-              // Update potential savings (reduce by converted amount)
-              setTotalPotentialSavings(prev => Math.max(0, prev - totalPotentialSavings));
+              // Track Achievement: convert_product (einmal pro umgewandeltem Produkt)
+              for (let i = 0; i < selectedConversions.length; i++) {
+                await achievementService.trackAction(user.uid, 'convert_product');
+              }
             } catch (error) {
               console.error('Error converting products:', error);
               showGameToast('Umwandlung fehlgeschlagen. Keine Sorge, versuch es nochmal!', 'error');
@@ -683,14 +762,18 @@ export default function ShoppingListScreen() {
             productsToAdd: productCount
           });
           
-          // Refresh user profile to show updated stats
-          await refreshUserProfile();
-          console.log('✅ User profile refreshed after bulk purchase');
+          // Profile wird automatisch über Achievement-Callback aktualisiert
         }
         
         // Clear NoName products locally
         setNoNameProducts([]);
         setTotalActualSavings(0);
+        
+        // Track Achievement: complete_shopping
+        await achievementService.trackAction(user.uid, 'complete_shopping', {
+          productCount,
+          totalSavings
+        });
         
         // Gamified success toast (after clearing but with saved values)
         showGameToast(`🏆 Wow! Alle ${productCount} Produkte als gekauft markiert! Du hast €${totalSavings.toFixed(2)} gespart!`, 'success');
@@ -714,9 +797,13 @@ export default function ShoppingListScreen() {
         productsToAdd: 1
       });
       
-      // Refresh user profile to show updated stats
-      await refreshUserProfile();
-      console.log('✅ User profile refreshed after single purchase');
+      // Profile wird automatisch über Achievement-Callback aktualisiert
+      
+      // Track Achievement: complete_shopping for single item
+      await achievementService.trackAction(user.uid, 'complete_shopping', {
+        productCount: 1,
+        totalSavings: savings || 0
+      });
       
       // Motivational message based on savings
       if (savings && savings > 0) {
@@ -878,20 +965,28 @@ export default function ShoppingListScreen() {
       )}
     </View>
 
-        <ScrollView 
-          style={styles.productList}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                loadShoppingCart();
-              }}
-              tintColor={colors.primary}
-            />
-          }
+        <PagerView 
+          ref={pagerRef}
+          style={styles.pagerView}
+          initialPage={0}
+          onPageSelected={handlePageSelected}
         >
-                      {activeTab === 'brand' ? (
+          {/* Page 1: Brand Products */}
+          <View key="brand" style={styles.pageContainer}>
+            <ScrollView 
+              style={styles.productList}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={() => {
+                    setRefreshing(true);
+                    loadShoppingCart();
+                  }}
+                  tintColor={colors.primary}
+                />
+              }
+            >
+              {
               applyFiltersAndSorting(brandProducts).length === 0 ? (
               <View style={styles.emptyState}>
                 <IconSymbol name="cart" size={48} color={colors.icon} />
@@ -1024,7 +1119,7 @@ export default function ShoppingListScreen() {
                                       ) : (
                                         <View style={[styles.marketLogo, styles.marketLogoFallback, { backgroundColor: colors.border }]}>
                                           <IconSymbol name="storefront" size={8} color={colors.icon} />
-                                        </View>
+          </View>
                                       )}
                                       {userProfile?.favoriteMarket === alt.discounter?.id && (
                                         <IconSymbol name="heart.fill" size={10} color={colors.primary} style={styles.favoriteMarketIconLeft} />
@@ -1033,7 +1128,7 @@ export default function ShoppingListScreen() {
                                         {alt.discounter?.name || 'Unbekannt'}
                                         {alt.discounter?.land && ` (${alt.discounter.land})`}
                                       </Text>
-                                    </View>
+          </View>
                                     <Text style={[styles.alternativePrice, { color: colors.primary }]}>
                                       €{alt.preis?.toFixed(2)}
                                     </Text>
@@ -1057,8 +1152,8 @@ export default function ShoppingListScreen() {
                                 ) : (
                                   <View style={styles.selectIndicator}>
                                     <IconSymbol name="circle" size={24} color={colors.border} />
-      </View>
-                                )}
+        </View>
+      )}
                               </TouchableOpacity>
                             );
                           })}
@@ -1069,7 +1164,26 @@ export default function ShoppingListScreen() {
                 })}
         </View>
             )
-          ) : (
+          }
+            </ScrollView>
+          </View>
+          
+          {/* Page 2: NoName Products */}
+          <View key="noname" style={styles.pageContainer}>
+            <ScrollView 
+              style={styles.productList}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={() => {
+                    setRefreshing(true);
+                    loadShoppingCart();
+                  }}
+                  tintColor={colors.primary}
+                />
+              }
+            >
+              {
             applyFiltersAndSorting(noNameProducts).length === 0 ? (
               <View style={styles.emptyState}>
                 <IconSymbol name="cart" size={48} color={colors.icon} />
@@ -1112,7 +1226,7 @@ export default function ShoppingListScreen() {
                             <View style={[styles.marketLogo, styles.marketLogoFallback, { backgroundColor: colors.border }]}>
                               <IconSymbol name="storefront" size={8} color={colors.icon} />
           </View>
-                          )}
+        )}
                           {userProfile?.favoriteMarket === item.product.discounter?.id && (
                             <IconSymbol name="heart.fill" size={10} color={colors.primary} style={styles.favoriteMarketIconLeft} />
                           )}
@@ -1151,8 +1265,10 @@ export default function ShoppingListScreen() {
                 ))}
             </View>
             )
-        )}
+              }
       </ScrollView>
+          </View>
+        </PagerView>
 
         {/* Bottom Buttons */}
         {activeTab === 'brand' && brandProducts.length > 0 && selectedConversions.length > 0 && (
@@ -1573,6 +1689,8 @@ const styles = StyleSheet.create({
   tabIndicator: { position: 'absolute', bottom: 0, height: 3, width: width / 2 },
   
   // Product List
+  pagerView: { flex: 1 },
+  pageContainer: { flex: 1 },
   productList: { flex: 1 },
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 80 },
   emptyText: { fontSize: 16, fontFamily: 'Nunito_600SemiBold', marginTop: 16, textAlign: 'center' },

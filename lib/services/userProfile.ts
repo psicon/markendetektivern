@@ -116,8 +116,8 @@ export const updateUserStats = async (uid: string, stats: {
     
     if (stats.xpToAdd) {
       updates.xp = (currentData.xp || 0) + stats.xpToAdd;
-      // Level berechnen (alle 100 XP = 1 Level)
-      updates.level = Math.floor(updates.xp / 100) + 1;
+      // Level wird jetzt über AchievementService berechnet (basierend auf Punkten + Ersparnis)
+      // updates.level = Math.floor(updates.xp / 100) + 1; // ENTFERNT - Level kommt von stats.currentLevel
     }
     
     if (stats.savingsToAdd) {

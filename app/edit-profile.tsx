@@ -1,9 +1,11 @@
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { LocationPicker } from '@/components/ui/LocationPicker';
+import { MarketSelector } from '@/components/ui/MarketSelector';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useTheme } from '@/lib/contexts/ThemeContext';
 import { db, storage } from '@/lib/firebase';
+import { Discounter, FirestoreDocument } from '@/lib/types/firestore';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation, useRouter } from 'expo-router';
@@ -12,18 +14,18 @@ import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 interface FormData {
@@ -34,6 +36,7 @@ interface FormData {
   gender: string;
   location: string;
   photoURL: string;
+  favoriteMarket: FirestoreDocument<Discounter> | null;
 }
 
 export default function EditProfileScreen() {
@@ -43,10 +46,27 @@ export default function EditProfileScreen() {
   const colors = Colors[theme ?? 'light'];
   const { user, refreshUserProfile } = useAuth();
   
+  // Helper function to get country flag emoji (copied from register.tsx)
+  const getCountryFlag = (country: string): string => {
+    const flagMap: {[key: string]: string} = {
+      'Deutschland': '🇩🇪',
+      'DE': '🇩🇪',
+      'Schweiz': '🇨🇭',
+      'CH': '🇨🇭',
+      'Österreich': '🇦🇹',
+      'AT': '🇦🇹',
+      'Austria': '🇦🇹',
+      'Switzerland': '🇨🇭',
+      'Germany': '🇩🇪',
+    };
+    return flagMap[country] || '🏳️';
+  };
+  
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [showMarketSelector, setShowMarketSelector] = useState(false);
   const [formData, setFormData] = useState<FormData>({
     displayName: user?.displayName || '',
     realName: '',
@@ -55,6 +75,7 @@ export default function EditProfileScreen() {
     gender: '',
     location: '',
     photoURL: user?.photoURL || '',
+    favoriteMarket: null,
   });
 
   // Handle save function - defined early to be used in header
@@ -82,6 +103,8 @@ export default function EditProfileScreen() {
         birthDate: formData.birthDate,
         gender: formData.gender,
         location: formData.location,
+        favoriteMarket: formData.favoriteMarket?.id || null,
+        favoriteMarketName: formData.favoriteMarket?.name || null,
         updatedAt: serverTimestamp(),
       });
       
@@ -166,6 +189,19 @@ export default function EditProfileScreen() {
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       if (userDoc.exists()) {
         const data = userDoc.data();
+        
+        // Load favorite market if available
+        let favoriteMarketData = null;
+        if (data.favoriteMarket && data.favoriteMarketName) {
+          // Create market object from stored data
+          favoriteMarketData = {
+            id: data.favoriteMarket,
+            name: data.favoriteMarketName,
+            // We'll assume German market if no country info stored
+            land: 'Deutschland'
+          };
+        }
+        
         setFormData(prev => ({
           ...prev,
           displayName: data.display_name || user?.displayName || '',
@@ -173,6 +209,7 @@ export default function EditProfileScreen() {
           birthDate: data.birthDate?.toDate() || null,
           gender: data.gender || '',
           location: data.location || '',
+          favoriteMarket: favoriteMarketData,
         }));
       }
     } catch (error) {
@@ -441,6 +478,30 @@ export default function EditProfileScreen() {
               Hilft uns, lokale Angebote und Märkte zu finden
             </Text>
           </TouchableOpacity>
+
+          {/* Favorite Market - Sauber in bestehende Struktur integriert */}
+          <TouchableOpacity 
+            style={styles.inputGroup}
+            onPress={() => setShowMarketSelector(true)}
+          >
+            <Text style={[styles.label, { color: safeColors.text }]}>Lieblingsmarkt</Text>
+            <View style={[styles.input, styles.selectInput, { 
+              backgroundColor: theme === 'dark' ? '#2c2c2e' : '#f2f2f7' 
+            }]}>
+              <Text style={[styles.selectText, { 
+                color: formData.favoriteMarket ? safeColors.text : (theme === 'dark' ? '#8e8e93' : '#c7c7cc')
+              }]}>
+                {formData.favoriteMarket ? 
+                  `${getCountryFlag(formData.favoriteMarket.land)} ${formData.favoriteMarket.name}` : 
+                  'Markt auswählen'
+                }
+              </Text>
+              <IconSymbol name="storefront" size={20} color={safeColors.icon} />
+            </View>
+            <Text style={[styles.helperText, { color: theme === 'dark' ? '#8e8e93' : '#6c6c70' }]}>
+              Wo kaufst du am häufigsten ein?
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Save Button */}
@@ -524,6 +585,18 @@ export default function EditProfileScreen() {
           }}
           currentLocation={formData.location}
           placeholder="Einkaufsort oder Stadt suchen..."
+        />
+
+        {/* Market Selector Modal */}
+        <MarketSelector
+          visible={showMarketSelector}
+          onClose={() => setShowMarketSelector(false)}
+          onSelect={(market) => {
+            setFormData(prev => ({ ...prev, favoriteMarket: market }));
+            console.log(`✅ Favorite market selected: ${market.name} (${market.land})`);
+          }}
+          selectedMarketId={formData.favoriteMarket?.id}
+          title="Lieblingsmarkt wählen"
         />
       </ScrollView>
     </KeyboardAvoidingView>

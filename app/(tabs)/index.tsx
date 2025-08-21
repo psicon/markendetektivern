@@ -11,6 +11,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { FirestoreService } from '@/lib/services/firestore';
 import WordPressService, { WordPressPost } from '@/lib/services/wordpress';
+import { LEVELS } from '@/lib/types/achievements';
 import { FirestoreDocument, Handelsmarken, Kategorien, Produkte } from '@/lib/types/firestore';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -24,7 +25,7 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { top: insetTop } = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
   // Reduziere den oberen Safe Area Abstand um 35%
   const reducedTopInset = insetTop * 0.65;
   const headerPaddingTop = reducedTopInset + 56;
@@ -373,27 +374,61 @@ export default function HomeScreen() {
           </ScrollView>
         </View>
 
-        {/* Level Card */}
-        <LinearGradient
-          colors={['#BF8970', '#A1887F']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.levelCard}
-        >
-          <TouchableOpacity 
-            style={styles.levelContent}
-            onPress={() => router.push('/achievements')}
-          >
-            <View style={styles.levelIcon}>
-              <IconSymbol name="star.fill" size={16} color="white" />
-            </View>
-            <View style={styles.levelText}>
-              <ThemedText style={styles.levelTitle}>Level 1 Sparanfänger</ThemedText>
-              <ThemedText style={styles.levelSubtitle}>25,00 € Ersparnis & 5 Punkte zum Aufstieg</ThemedText>
-            </View>
-              <IconSymbol name="info.circle" size={18} color="white" />
-          </TouchableOpacity>
-        </LinearGradient>
+        {/* Level Card - Mit echten Daten */}
+        {(() => {
+          // Get actual level data
+          const level = (userProfile as any)?.stats?.currentLevel || userProfile?.level || 1;
+          const currentPoints = (userProfile as any)?.stats?.totalPoints || 0;
+          const currentSavings = userProfile?.totalSavings || 0;
+          
+          const levelInfo = LEVELS.find(l => l.id === level) || LEVELS[0];
+          const nextLevel = LEVELS.find(l => l.id === level + 1);
+          
+          // Level-spezifische Farben (Gradient mit dunklerer Version)
+          const getLevelGradient = () => {
+            const baseColor = levelInfo.color;
+            switch(level) {
+              case 1: return [baseColor, '#9E6B50']; // Braun
+              case 2: return [baseColor, '#FF9800']; // Orange
+              case 3: return [baseColor, '#4CAF50']; // Grün
+              case 4: return [baseColor, '#FFC107']; // Gold
+              case 5: return [baseColor, '#FF5252']; // Rot
+              default: return [baseColor, '#9E6B50'];
+            }
+          };
+          
+          // Berechne Fortschritt zum nächsten Level
+          const remainingSavings = nextLevel ? Math.max(0, nextLevel.savingsRequired - currentSavings) : 0;
+          const remainingPoints = nextLevel ? Math.max(0, nextLevel.pointsRequired - currentPoints) : 0;
+          
+          return (
+            <LinearGradient
+              colors={getLevelGradient()}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.levelCard}
+            >
+              <TouchableOpacity 
+                style={styles.levelContent}
+                onPress={() => router.push('/achievements')}
+              >
+                <View style={styles.levelIcon}>
+                  <IconSymbol name={levelInfo.icon as any} size={16} color="white" />
+                </View>
+                <View style={styles.levelText}>
+                  <ThemedText style={styles.levelTitle}>Level {level} {levelInfo.name}</ThemedText>
+                  <ThemedText style={styles.levelSubtitle}>
+                    {nextLevel 
+                      ? `${remainingSavings.toFixed(2)} € Ersparnis & ${remainingPoints} Punkte zum Aufstieg`
+                      : 'Maximales Level erreicht!'
+                    }
+                  </ThemedText>
+                </View>
+                <IconSymbol name="info.circle" size={18} color="white" />
+              </TouchableOpacity>
+            </LinearGradient>
+          );
+        })()}
 
         {/* Neu für dich enttarnt */}
         <View style={styles.section}>

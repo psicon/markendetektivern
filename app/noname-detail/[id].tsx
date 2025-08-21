@@ -8,6 +8,7 @@ import { getStufenColor, getStufenDescription, getStufenTitle } from '@/constant
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useFavoriteStatus } from '@/lib/hooks/useFavorites';
 import { FirestoreService } from '@/lib/services/firestore';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
 import { ProductWithDetails } from '@/lib/types/firestore';
@@ -50,6 +51,9 @@ export default function NoNameDetailScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const { user } = useAuth();
   
+  // Favorites Hook
+  const { isFavorite, loading: favoriteLoading, toggleFavorite } = useFavoriteStatus(id || '', 'noname');
+  
   // Toast states
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
@@ -64,6 +68,43 @@ export default function NoNameDetailScreen() {
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
   const [showProductDetails, setShowProductDetails] = useState(false);
   
+  // Handle favorite toggle
+  const handleToggleFavorite = async () => {
+    if (!user?.uid) {
+      setToastMessage('Bitte melde dich an, um Favoriten zu speichern');
+      setToastType('info');
+      setShowToast(true);
+      return;
+    }
+
+    if (!product) return;
+
+    try {
+      const wasAdded = await toggleFavorite({
+        id: product.id,
+        name: product.name,
+        preis: product.preis,
+        packSize: product.packSize,
+        bild: product.bild,
+        type: 'noname',
+        category: product.kategorie?.bezeichnung
+      });
+
+      const message = wasAdded 
+        ? `💖 ${product.name} zu Favoriten hinzugefügt!`
+        : `💔 ${product.name} aus Favoriten entfernt`;
+      
+      setToastMessage(message);
+      setToastType('success');
+      setShowToast(true);
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+      setToastMessage('Fehler beim Speichern des Favoriten');
+      setToastType('error');
+      setShowToast(true);
+    }
+  };
+
   // Check if product is in shopping cart
   const checkIfInCart = async () => {
     if (!user?.uid || !product?.id) return;
@@ -407,8 +448,16 @@ export default function NoNameDetailScreen() {
 
             {/* Action Icons */}
             <View style={styles.topActionIcons}>
-              <TouchableOpacity style={styles.actionIconButton}>
-                <IconSymbol name="heart" size={20} color={colors.icon} />
+              <TouchableOpacity 
+                style={styles.actionIconButton}
+                onPress={handleToggleFavorite}
+                disabled={favoriteLoading}
+              >
+                <IconSymbol 
+                  name={isFavorite ? "heart.fill" : "heart"} 
+                  size={20} 
+                  color={isFavorite ? colors.error : colors.icon} 
+                />
               </TouchableOpacity>
             </View>
           </View>

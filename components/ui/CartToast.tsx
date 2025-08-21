@@ -10,6 +10,7 @@ import {
     SafeAreaView,
     StyleSheet,
     Text,
+    TouchableOpacity,
     View
 } from 'react-native';
 
@@ -20,6 +21,8 @@ interface CartToastProps {
   duration?: number;
   position?: 'top' | 'bottom';
   onHide?: () => void;
+  actionLabel?: string;
+  onActionPress?: () => void;
 }
 
 export const CartToast: React.FC<CartToastProps> = ({
@@ -28,16 +31,27 @@ export const CartToast: React.FC<CartToastProps> = ({
   type = 'success',
   duration = 3000,
   position = 'bottom',
-  onHide
+  onHide,
+  actionLabel,
+  onActionPress
 }) => {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   
-  // Toast animation
-  const toastAnimation = useRef(new Animated.Value(0)).current;
+  // Toast animation - useRef mit stabilen Werten
+  const animationRef = useRef<Animated.Value>(new Animated.Value(0));
+  const toastAnimation = animationRef.current;
+  
+  const isMountedRef = useRef(true);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (visible) {
+      // Clear any existing timer
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+      
       // Trigger haptic feedback
       if (type === 'success') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -56,20 +70,38 @@ export const CartToast: React.FC<CartToastProps> = ({
       }).start();
 
       // Hide toast after duration
-      const timer = setTimeout(() => {
-        Animated.timing(toastAnimation, {
-          toValue: 0,
-          duration: 300,
-          easing: Easing.in(Easing.quad),
-          useNativeDriver: true,
-        }).start(() => {
-          onHide?.();
-        });
+      timerRef.current = setTimeout(() => {
+        if (isMountedRef.current) {
+          Animated.timing(toastAnimation, {
+            toValue: 0,
+            duration: 300,
+            easing: Easing.in(Easing.quad),
+            useNativeDriver: true,
+          }).start(() => {
+            if (isMountedRef.current && onHide) {
+              onHide();
+            }
+          });
+        }
       }, duration);
-
-      return () => clearTimeout(timer);
     }
-  }, [visible, type, onHide, duration]);
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, [visible, type, duration, onHide]); // Added onHide dependency
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
 
   const getBackgroundColor = () => {
     switch (type) {
@@ -112,12 +144,27 @@ export const CartToast: React.FC<CartToastProps> = ({
           opacity: toastAnimation,
         },
       ]}
-      pointerEvents="none"
+      pointerEvents={actionLabel && onActionPress ? "auto" : "none"}
     >
       <SafeAreaView>
         <View style={[styles.toastContainer, { backgroundColor: getBackgroundColor() }]}>
-          <IconSymbol name={getIcon()} size={20} color="white" />
-          <Text style={styles.toastText} numberOfLines={2}>{message}</Text>
+          <View style={styles.toastContent}>
+            <IconSymbol name={getIcon()} size={20} color="white" />
+            <Text style={styles.toastText} numberOfLines={2}>{message}</Text>
+          </View>
+          
+          {actionLabel && onActionPress && (
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => {
+                onActionPress();
+                if (onHide) onHide();
+              }}
+            >
+              <Text style={styles.actionButtonText}>{actionLabel}</Text>
+              <IconSymbol name="chevron.right" size={14} color="white" />
+            </TouchableOpacity>
+          )}
         </View>
       </SafeAreaView>
     </Animated.View>
@@ -139,7 +186,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'space-between',
+    minHeight: 56,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -151,6 +199,27 @@ const styles = StyleSheet.create({
         elevation: 10,
       },
     }),
+  },
+  toastContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginLeft: 12,
+    gap: 4,
+  },
+  actionButtonText: {
+    fontSize: 14,
+    fontFamily: 'Nunito_600SemiBold',
+    color: 'white',
   },
   toastText: {
     color: 'white',
