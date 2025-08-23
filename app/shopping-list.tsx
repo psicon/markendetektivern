@@ -1,8 +1,11 @@
 import { CartToast } from '@/components/ui/CartToast';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
+import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { Colors } from '@/constants/Colors';
+import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useTheme } from '@/lib/contexts/ThemeContext';
 import achievementService, { setAchievementUnlockHandler } from '@/lib/services/achievementService';
@@ -60,8 +63,8 @@ const ShoppingListSkeleton = () => {
 export default function ShoppingListScreen() {
   const router = useRouter();
   const navigation = useNavigation();
-  const { theme } = useTheme();
-  const colors = Colors[theme ?? 'light'];
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme ?? 'light'];
   const { user, userProfile } = useAuth();
   const insets = useSafeAreaInsets();
   
@@ -83,7 +86,7 @@ export default function ShoppingListScreen() {
   const [filters, setFilters] = useState({
     markets: [] as string[],
     categories: [] as string[],
-    sortBy: 'name' as 'name' | 'price' | 'savings'
+    sortBy: 'name' as 'name' | 'price'
   });
   const [availableMarkets, setAvailableMarkets] = useState<any[]>([]);
   const [availableCategories, setAvailableCategories] = useState<any[]>([]);
@@ -92,6 +95,15 @@ export default function ShoppingListScreen() {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
+  const [toastActionLabel, setToastActionLabel] = useState<string | undefined>(undefined);
+  const [toastActionPress, setToastActionPress] = useState<(() => void) | undefined>(undefined);
+  
+  // Level-Up Overlay State (spektakuläre Animation)
+  const [showLevelUpOverlay, setShowLevelUpOverlay] = useState(false);
+  const [levelUpData, setLevelUpData] = useState<{ newLevel: number; oldLevel: number }>({ 
+    newLevel: 1, 
+    oldLevel: 1 
+  });
   
   const tabIndicatorPosition = useState(new Animated.Value(0))[0];
   const pagerRef = useRef<PagerView>(null);
@@ -114,58 +126,22 @@ export default function ShoppingListScreen() {
 
   // Header konfigurieren
   useLayoutEffect(() => {
-    navigation.setOptions({
-      title: 'Einkaufszettel',
-      headerStyle: { 
-        backgroundColor: colors.primary,
-        borderBottomWidth: 0,
-        elevation: 0,
-        shadowOpacity: 0,
-      },
-      headerTintColor: 'white',
-      headerTitleStyle: { 
-        color: 'white',
-        fontFamily: 'Nunito_600SemiBold',
-        fontSize: 16
-      },
-      headerShadowVisible: false,
-      headerBackVisible: false,
-      headerTransparent: false,
-      headerBlurEffect: 'none',
-      headerLargeTitle: false,
-      headerSearchBarOptions: undefined,
-      headerBackTitleVisible: false,
-      gestureEnabled: true,
-      animation: 'slide_from_right',
-      headerLeft: () => (
-        <TouchableOpacity 
-          onPress={() => router.back()}
-          style={{ 
-            paddingLeft: 0, 
-            paddingRight: 8, 
-            paddingVertical: 8 
-          }}
-        >
-          <IconSymbol name="chevron.left" size={24} color="white" />
-        </TouchableOpacity>
-      ),
-    });
-  }, [navigation, colors.primary]);
+    navigation.setOptions(getNavigationHeaderOptions(colorScheme, 'Einkaufszettel'));
+  }, [colorScheme, navigation]);
   
   // Setup Achievement Toast Handler with motivational messages
   useEffect(() => {
     setAchievementUnlockHandler((notification: any) => {
       // Check if it's a level-up notification
       if (notification && notification.type === 'level_up') {
-        // MEGA Level-Up Animation & Haptics
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 200);
-        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light), 400);
+        // Level-Up Overlay mit spektakulärer Animation anzeigen
+        setLevelUpData({ 
+          newLevel: notification.level || 1, 
+          oldLevel: notification.oldLevel || 1 
+        });
+        setShowLevelUpOverlay(true);
         
-        showGameToast(
-          `${notification.title}\n${notification.message}`,
-          'success'
-        );
+        // Haptics werden jetzt im Overlay selbst gehandhabt
       } else {
         // Normal achievement unlock
         const motivationalMessages = [
@@ -299,21 +275,7 @@ export default function ShoppingListScreen() {
               }
             }
 
-            // Calculate actual savings if there's a related brand product
-            let savings = 0;
-            if (productData.markenProdukt) {
-              const markenProdukt = await FirestoreService.getDocumentByReference<MarkenProdukte>(productData.markenProdukt);
-              if (markenProdukt) {
-                const savingsCalc = FirestoreService.calculateSavings(
-                  productData.preis,
-                  productData.packSize,
-                  markenProdukt.preis,
-                  markenProdukt.packSize
-                );
-                savings = savingsCalc.amount;
-                actualSavings += savings;
-              }
-            }
+            // Skip savings calculation for NoName products to improve performance
             
             noNameItems.push({
               ...item,
@@ -321,8 +283,7 @@ export default function ShoppingListScreen() {
                 ...productData,
                 handelsmarke: handelsmarkeData,
                 discounter: discounterData
-              },
-              savings
+              }
             });
           }
         }
@@ -468,23 +429,21 @@ export default function ShoppingListScreen() {
         // Remove from brand products
         setBrandProducts(prev => prev.filter(item => item.id !== einkaufswagenRef));
         
-        // Calculate savings locally
+        // Add converted NoName product without savings calculation
         const newItem = result.newItems[0];
-        const savingsAmount = brandItem.potentialSavings || 0;
         
         // Add to NoName products with correct ID
         const noNameItem = {
           id: newItem.id,
-          product: newItem.product,
-          savings: savingsAmount
+          product: newItem.product
         };
         
         setNoNameProducts(prev => [...prev, noNameItem]);
         
-        console.log(`💰 Single conversion: ${newItem.product?.name || 'NoName'} saves €${savingsAmount.toFixed(2)}`);
+        console.log(`🔄 Single conversion: ${newItem.product?.name || 'NoName'}`);
         
-        // Success toast with savings amount
-        showGameToast(`🔄 Umgewandelt! Du sparst €${savingsAmount.toFixed(2)} mit dem NoName-Produkt!`, 'success');
+        // Simple success toast
+        showGameToast(`🔄 Produkt erfolgreich umgewandelt!`, 'success');
       } else {
         // Fallback if something went wrong
         showGameToast('🔄 Produkt erfolgreich umgewandelt!', 'success');
@@ -511,7 +470,7 @@ export default function ShoppingListScreen() {
     
     Alert.alert(
       'In NoNames umwandeln?',
-      `${selectedConversions.length} Produkt${selectedConversions.length > 1 ? 'e' : ''} umwandeln und €${totalPotentialSavings.toFixed(2)} sparen?`,
+      `${selectedConversions.length} Produkt${selectedConversions.length > 1 ? 'e' : ''} zu NoName-Produkten umwandeln?`,
       [
         { text: 'Abbrechen', style: 'cancel' },
         {
@@ -533,18 +492,16 @@ export default function ShoppingListScreen() {
               
               // Add new NoName items
               const newNoNameItems = result.newItems.map((newItem, index) => {
-                const brandItem = convertedBrandItems[index];
                 return {
                   id: newItem.id,
-                  product: newItem.product,
-                  savings: brandItem?.potentialSavings || 0
+                  product: newItem.product
                 };
               });
               
               setNoNameProducts(prev => [...prev, ...newNoNameItems]);
               
               // Gamified success message
-              showGameToast(`🎉 Fantastisch! Du sparst €${totalPotentialSavings.toFixed(2)} mit NoName-Produkten!`, 'success');
+              showGameToast(`🎉 Fantastisch! ${selectedConversions.length} Produkt${selectedConversions.length > 1 ? 'e' : ''} erfolgreich umgewandelt!`, 'success');
               
               setSelectedConversions([]);
               setExpandedItems([]);
@@ -576,14 +533,12 @@ export default function ShoppingListScreen() {
       { value: 'price', label: 'Preis', icon: 'eurosign' }
     ];
     
-    if (activeTab === 'noname') {
-      baseSorting.push({ value: 'savings', label: 'Ersparnis', icon: 'leaf.fill' });
-    }
+    // Removed savings sorting for better performance
     
     return baseSorting;
   };
   
-  const updateSorting = (sortBy: 'name' | 'price' | 'savings') => {
+  const updateSorting = (sortBy: 'name' | 'price') => {
     setFilters(prev => ({ ...prev, sortBy }));
   };
   
@@ -701,13 +656,7 @@ export default function ShoppingListScreen() {
           const priceA = a.product?.preis || 0;
           const priceB = b.product?.preis || 0;
           return priceA - priceB;
-        case 'savings':
-          if (activeTab === 'noname') {
-            const savingsA = a.savings || 0;
-            const savingsB = b.savings || 0;
-            return savingsB - savingsA; // Höchste Ersparnis zuerst
-          }
-          return 0;
+        // Removed savings sorting for better performance
         default:
           return 0;
       }
@@ -721,12 +670,12 @@ export default function ShoppingListScreen() {
       if (!user || noNameProducts.length === 0) return;
       
       const productCount = noNameProducts.length;
-      const totalSavings = noNameProducts.reduce((sum, item) => sum + (item.savings || 0), 0);
+      const totalSavings = 0; // No savings calculation for performance
       
       // Confirmation dialog before bulk action
       Alert.alert(
         'Alle als gekauft markieren?',
-        `Möchtest du alle ${productCount} NoName-Produkte als gekauft markieren und €${totalSavings.toFixed(2)} zu deiner Ersparnis hinzufügen?`,
+        `Möchtest du alle ${productCount} NoName-Produkte als gekauft markieren?`,
         [
           {
             text: 'Abbrechen',
@@ -784,43 +733,38 @@ export default function ShoppingListScreen() {
       }
     };
 
-    const handleMarkAsPurchased = async (itemId: string, savings?: number) => {
+    const handleMarkAsPurchased = async (itemId: string) => {
       if (!user?.uid) return;
     
     try {
       await FirestoreService.markAsPurchased(user.uid, itemId);
       
-      // Update user savings and product count
-      console.log(`📊 Single update: 1 product, €${(savings || 0).toFixed(2)} savings`);
+      // Update product count only (no savings for NoName products)
+      console.log(`📊 Single update: 1 product purchased`);
       await updateUserStats(user.uid, {
-        savingsToAdd: savings || 0,
+        savingsToAdd: 0,
         productsToAdd: 1
       });
       
       // Profile wird automatisch über Achievement-Callback aktualisiert
       
       // Track Achievement: complete_shopping for single item
-      await achievementService.trackAction(user.uid, 'complete_shopping', {
+      console.log('🎯 Tracking complete_shopping action with:', {
         productCount: 1,
-        totalSavings: savings || 0
+        totalSavings: 0,
+        currentLevel: (userProfile as any)?.stats?.currentLevel || userProfile?.level || 'unknown'
       });
       
-      // Motivational message based on savings
-      if (savings && savings > 0) {
-        showGameToast(`🎯 Gekauft! Du hast €${savings.toFixed(2)} gespart - super gemacht!`, 'success');
-      } else {
-        showGameToast('✅ Produkt als gekauft markiert!', 'success');
-      }
+      await achievementService.trackAction(user.uid, 'complete_shopping', {
+        productCount: 1,
+        totalSavings: 0
+      });
       
-      // Optimized: Remove item from local state instead of reloading
-      if (savings && savings > 0) {
-        // NoName product - remove from noname list and update savings
-        setNoNameProducts(prev => prev.filter(item => item.id !== itemId));
-        setTotalActualSavings(prev => Math.max(0, prev - savings));
-      } else {
-        // Brand product - remove from brand list
-        setBrandProducts(prev => prev.filter(item => item.id !== itemId));
-      }
+      // Simple success message
+      showGameToast('✅ Produkt als gekauft markiert!', 'success');
+      
+      // Remove from NoName products list
+      setNoNameProducts(prev => prev.filter(item => item.id !== itemId));
     } catch (error) {
       console.error('Error marking as purchased:', error);
       showGameToast('Markierung fehlgeschlagen. Probier es nochmal!', 'error');
@@ -1236,20 +1180,15 @@ export default function ShoppingListScreen() {
                           </Text>
                         </View>
 
-                        {/* Preis mit Ersparnis in Klammern */}
+                        {/* Preis ohne Ersparnis-Anzeige */}
                         <Text style={[styles.productPrice, { color: colors.primary }]}>
                           €{item.product.preis?.toFixed(2) || '0.00'}
-                          {item.savings > 0 && (
-                            <Text style={[styles.savingsInline, { color: colors.primary }]}>
-                              {' '}(- €{item.savings.toFixed(2)})
-                            </Text>
-                          )}
                         </Text>
           </View>
                       <View style={styles.productActions}>
         <TouchableOpacity 
                           style={[styles.actionButton, { backgroundColor: colors.primary }]}
-                          onPress={() => handleMarkAsPurchased(item.id, item.savings)}
+                          onPress={() => handleMarkAsPurchased(item.id)}
                         >
                           <IconSymbol name="checkmark" size={20} color="white" />
               </TouchableOpacity>
@@ -1374,10 +1313,10 @@ export default function ShoppingListScreen() {
                           borderColor: colors.border
                         }
                       ]}
-                      onPress={() => updateSorting(option.value)}
+                                              onPress={() => updateSorting(option.value as 'name' | 'price')}
                     >
                       <IconSymbol 
-                        name={option.icon} 
+                        name={option.icon as any} 
                         size={16} 
                         color={filters.sortBy === option.value ? 'white' : colors.primary}
                       />
@@ -1562,15 +1501,31 @@ export default function ShoppingListScreen() {
         </View>
       </Modal>
       
-      {/* Gamified Toast for Shopping List Actions */}
+      {/* LEVEL-UP OVERLAY - Spektakuläre Animation mit Confetti */}
+      <LevelUpOverlay
+        visible={showLevelUpOverlay}
+        newLevel={levelUpData.newLevel}
+        oldLevel={levelUpData.oldLevel}
+        onClose={() => setShowLevelUpOverlay(false)}
+      />
+      
+      {/* ACHIEVEMENT TOAST - Für normale Achievements */}
       {showToast && (
-        <CartToast
-          visible={showToast}
-          message={toastMessage}
-          type={toastType}
-          position="bottom"
-          onHide={() => setShowToast(false)}
-        />
+        <View style={styles.fixedToastContainer}>
+          <CartToast
+            visible={showToast}
+            message={toastMessage}
+            type={toastType}
+            position="top"
+            actionLabel={toastActionLabel}
+            onActionPress={toastActionPress}
+            onHide={() => {
+              setShowToast(false);
+              setToastActionLabel(undefined);
+              setToastActionPress(undefined);
+            }}
+          />
+        </View>
       )}
         </View>
   );
@@ -2078,5 +2033,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     backgroundColor: 'rgba(13, 133, 117, 0.1)',
     borderRadius: 8,
+  },
+  
+  // FIXED TOAST CONTAINER - schwebt über dem gesamten Bildschirm
+  fixedToastContainer: {
+    position: 'absolute',
+    top: 60, // Unter der Status Bar
+    left: 0,
+    right: 0,
+    zIndex: 9999,
+    elevation: 9999,
+    pointerEvents: 'box-none', // Nur der Toast ist klickbar, nicht der Container
   },
 });

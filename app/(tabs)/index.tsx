@@ -4,12 +4,14 @@ import { ThemedView } from '@/components/ThemedView';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
+import { SearchBottomSheet } from '@/components/ui/SearchBottomSheet';
 import { CategorySkeleton, NewsCardSkeleton, ProductCardSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { FirestoreService } from '@/lib/services/firestore';
+import searchHistoryService from '@/lib/services/searchHistoryService';
 import WordPressService, { WordPressPost } from '@/lib/services/wordpress';
 import { LEVELS } from '@/lib/types/achievements';
 import { FirestoreDocument, Handelsmarken, Kategorien, Produkte } from '@/lib/types/firestore';
@@ -18,7 +20,7 @@ import { router } from 'expo-router';
 import { SymbolViewProps } from 'expo-symbols';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function HomeScreen() {
@@ -33,6 +35,10 @@ export default function HomeScreen() {
   // Dynamische Höhenmessung für sauberen Scroll-Übergang unter der Mitte der Suchleiste
   const [headerHeight, setHeaderHeight] = useState(0);
   const [searchHeight, setSearchHeight] = useState(0);
+  
+  // Search Bottom Sheet State
+  const [showSearchSheet, setShowSearchSheet] = useState(false);
+  const [searchBarPosition, setSearchBarPosition] = useState({ y: 0, height: 0 });
 
   // Firestore State
   const [enttarnteProdukte, setEnttarnteProdukte] = useState<FirestoreDocument<Produkte>[]>([]);
@@ -52,6 +58,19 @@ export default function HomeScreen() {
   const [newsPage, setNewsPage] = useState(1);
 
   // Icon-Mapping für Kategorien
+  // Handle Search Function
+  const handleSearch = async (term: string) => {
+    if (!term || term.trim().length === 0) return;
+    
+    // Speichere in History
+    if (user?.uid) {
+      await searchHistoryService.saveSearchTerm(user.uid, term);
+    }
+    
+    // Navigiere zu Suchergebnissen
+    router.push(`/search-results?query=${encodeURIComponent(term)}` as any);
+  };
+
   const getCategoryIcon = (bezeichnung: string): SymbolViewProps['name'] => {
     const iconMap: {[key: string]: SymbolViewProps['name']} = {
       'alkohol': 'wineglass',
@@ -288,22 +307,30 @@ export default function HomeScreen() {
         </View>
         
         {/* Search Bar */}
-        <View style={styles.searchSection} onLayout={(e) => setSearchHeight(e.nativeEvent.layout.height)}>
-          <View style={[styles.searchContainer, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+        <View 
+          style={styles.searchSection} 
+          onLayout={(e) => {
+            const layout = e.nativeEvent.layout;
+            setSearchHeight(layout.height);
+            // Berechne die absolute Position für das Bottom Sheet
+            setSearchBarPosition({ 
+              y: headerPaddingTop + layout.y, 
+              height: layout.height 
+            });
+          }}
+        >
+          <TouchableOpacity 
+            style={[styles.searchContainer, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}
+            activeOpacity={0.7}
+            onPress={() => setShowSearchSheet(true)}
+          >
             <IconSymbol name="magnifyingglass" size={20} color={colors.icon} />
-            <TextInput
-              style={[styles.searchInput, { color: colors.text }]}
-              placeholder="Produkte suchen ..."
-              placeholderTextColor={colors.icon}
-              onSubmitEditing={(event) => {
-                const query = event.nativeEvent.text.trim();
-                if (query) {
-                  router.push(`/search-results?query=${encodeURIComponent(query)}` as any);
-                }
-              }}
-              returnKeyType="search"
-            />
-          </View>
+            <View style={styles.searchInput}>
+              <ThemedText style={[styles.searchPlaceholder, { color: colors.icon }]}>
+                Produkte suchen ...
+              </ThemedText>
+            </View>
+          </TouchableOpacity>
           <TouchableOpacity 
             style={[styles.scanButton, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}
             onPress={() => router.push('/barcode-scanner')}
@@ -579,6 +606,16 @@ export default function HomeScreen() {
       >
         <IconSymbol name="cart.fill" size={20} color="white" />
       </TouchableOpacity>
+      
+      {/* Search Bottom Sheet */}
+      <SearchBottomSheet
+        visible={showSearchSheet}
+        onClose={() => setShowSearchSheet(false)}
+        searchBarY={searchBarPosition.y}
+        searchBarHeight={searchBarPosition.height}
+        colors={colors}
+        onSearch={handleSearch}
+      />
       </ThemedView>
   );
 }
@@ -682,6 +719,10 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
+    fontSize: 14,
+    fontFamily: 'Nunito_400Regular',
+  },
+  searchPlaceholder: {
     fontSize: 14,
     fontFamily: 'Nunito_400Regular',
   },

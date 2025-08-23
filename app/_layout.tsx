@@ -23,6 +23,14 @@ function ThemedApp() {
             <Stack.Screen name="auth/welcome" options={{ headerShown: false }} />
             <Stack.Screen name="auth/login" options={{ headerShown: false }} />
             <Stack.Screen name="auth/register" options={{ headerShown: false }} />
+            <Stack.Screen 
+              name="barcode-scanner" 
+              options={{ 
+                headerShown: false,
+                animation: 'fade_from_bottom',
+                gestureEnabled: true 
+              }} 
+            />
             <Stack.Screen name="+not-found" />
           </Stack>
           <StatusBar style="auto" />

@@ -75,10 +75,37 @@ export default function AchievementsScreen() {
   const currentPoints = userStats?.totalPoints || 0;
   const purchasedProducts = userProfile?.productsSaved || 0;
   // Verwende stats.currentLevel wenn vorhanden, sonst level aus userProfile, sonst berechne es
-  const currentLevel = userStats?.currentLevel || 
-                       (userProfile as any)?.stats?.currentLevel || 
-                       userProfile?.level || 
-                       1;
+  // WICHTIG: Berechne Level basierend auf aktuellen Daten um "Popping" zu vermeiden
+  const currentLevel = (() => {
+    // Verwende userStats (über useAchievements geladen) als primäre Quelle
+    if (userStats?.currentLevel) {
+      return userStats.currentLevel;
+    }
+    
+    // Fallback: stats aus userProfile
+    if ((userProfile as any)?.stats?.currentLevel) {
+      return (userProfile as any).stats.currentLevel;
+    }
+    
+    // Fallback: legacy level
+    if (userProfile?.level) {
+      return userProfile.level;
+    }
+    
+    // Letzte Option: Berechne Level basierend auf verfügbaren Daten
+    const points = userStats?.totalPoints || (userProfile as any)?.stats?.totalPoints || 0;
+    const savings = userProfile?.totalSavings || 0;
+    
+    for (let i = LEVELS.length - 1; i >= 0; i--) {
+      const level = LEVELS[i];
+      if (points >= level.pointsRequired && savings >= level.savingsRequired) {
+        console.log(`🔄 Level berechnet: ${level.id} (${points} Punkte, €${savings} Ersparnis)`);
+        return level.id;
+      }
+    }
+    
+    return 1;
+  })();
   const currentStreak = userStats?.currentStreak || 0;
   
   // Get current level info

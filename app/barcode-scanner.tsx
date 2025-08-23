@@ -1,20 +1,25 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { FirestoreService } from '@/lib/services/firestore';
+import { ScanHistoryItem, scanHistoryService } from '@/lib/services/scanHistoryService';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
-import { router, Stack } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, Modal, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { getDoc } from 'firebase/firestore';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Dimensions, Image, InteractionManager, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function BarcodeScannerScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [facing, setFacing] = useState<CameraType>('back');
@@ -22,13 +27,39 @@ export default function BarcodeScannerScreen() {
   const [isSearching, setIsSearching] = useState(false);
   const [showManualInput, setShowManualInput] = useState(false);
   const [manualBarcode, setManualBarcode] = useState('');
-  const [hasNavigated, setHasNavigated] = useState(false); // Verhindert mehrfache Navigation
+  const [hasNavigated, setHasNavigated] = useState(false);
+  const [scanHistory, setScanHistory] = useState<ScanHistoryItem[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [scanningLoading, setScanningLoading] = useState(false); // 🚀 Sofortiger Loading-State
+  const [cameraReady, setCameraReady] = useState(false); // 🎥 Kamera-Initialisierung State
+  // 🔥 ROBUSTE SCAN-PRÄVENTION (StackOverflow Lösung)
+  const lastScannedTimestampRef = useRef<number>(0);
+  const lastScannedEANRef = useRef<string>('');  
+  const [isSmallDevice, setIsSmallDevice] = useState(false);
 
   const { width, height } = Dimensions.get('window');
-  const scanAreaSize = width * 0.65; // Etwas kleiner für bessere Proportionen
+  const scanAreaWidth = width * 0.75; // Kompakter für mehr Platz
+  const scanAreaHeight = scanAreaWidth * 0.45; // Etwas kleiner
   
-  // Verschiebe alles 80% höher - scanArea beginnt früher
-  const topOffset = height * 0.15; // Nur 15% von oben statt 50% mittig
+  // Responsive Layout für kleine Geräte
+  useEffect(() => {
+    setIsSmallDevice(height < 700); // iPhone SE Detection
+  }, [height]);
+  
+  // 🎥 Kamera-Initialisierung nach Navigation optimieren  
+  useEffect(() => {
+    if (!permission?.granted) return;
+    
+    // Kamera erst nach allen Navigationsinteraktionen initialisieren
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      setCameraReady(true);
+    });
+    
+    return () => interaction.cancel();
+  }, [permission?.granted]);
+  
+  const topOffset = isSmallDevice ? height * 0.08 + 90 : height * 0.12 + 140;
+  const bottomSpaceAvailable = height - topOffset - scanAreaHeight - 100; // Space für Content
 
   useEffect(() => {
     if (!permission?.granted) {
@@ -36,18 +67,72 @@ export default function BarcodeScannerScreen() {
     }
   }, [permission]);
 
-  // Debug State Changes
-  useEffect(() => {
-    console.log(`🔍 Scanner State: scanned(${scanned}) searching(${isSearching}) navigated(${hasNavigated})`);
-  }, [scanned, isSearching, hasNavigated]);
+  // Lade Scanhistorie beim Mount und Focus
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.uid) {
+        loadScanHistory();
+        // Subscribe für Live-Updates
+        const unsubscribe = scanHistoryService.subscribeToScanHistory(
+          user.uid,
+          10,
+          (items) => setScanHistory(items)
+        );
+        return () => {
+          unsubscribe();
+          // Reset Scanner-Status beim Verlassen
+          setScanned(false);
+          setHasNavigated(false);
+          setScanningLoading(false);
+          setCameraReady(false); // 🎥 Kamera-Status zurücksetzen
+          lastScannedTimestampRef.current = 0;
+          lastScannedEANRef.current = '';
+        };
+      }
+    }, [user])
+  );
+
+  const loadScanHistory = async () => {
+    if (!user?.uid) return;
+    setIsLoadingHistory(true);
+    try {
+      const history = await scanHistoryService.getRecentScans(user.uid, 10);
+      setScanHistory(history);
+    } catch (error) {
+      console.error('Fehler beim Laden der Scanhistorie:', error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
 
   const searchProductByEAN = async (ean: string) => {
-    // KRITISCHER GUARD: Verhindere jegliche weitere Ausführung
+    // 🔥 ROBUSTE MEHRFACHSCAN-PRÄVENTION (StackOverflow Lösung)
+    const timestamp = Date.now();
+    
+    // Kritische Guards
     if (isSearching || hasNavigated) {
       console.log(`🚫 BLOCKED: Already searching (${isSearching}) or navigated (${hasNavigated})`);
       return;
     }
     
+    // 🕐 TIMESTAMP-BASIERTER SCHUTZ (2 Sekunden Minimum)
+    if (timestamp - lastScannedTimestampRef.current < 2000) {
+      console.log(`🚫 BLOCKED: Too soon after last scan (${timestamp - lastScannedTimestampRef.current}ms ago)`);
+      return;
+    }
+    
+    // 🔒 ZUSÄTZLICHER EAN-SCHUTZ
+    if (lastScannedEANRef.current === ean && timestamp - lastScannedTimestampRef.current < 5000) {
+      console.log(`🚫 BLOCKED: Same EAN recently scanned: ${ean}`);
+      return;
+    }
+    
+    // ⚡ UPDATE REFS SOFORT (vor async Operationen!)
+    lastScannedTimestampRef.current = timestamp;
+    lastScannedEANRef.current = ean;
+    
+    // 🚀 SOFORTIGER LOADING-STATE
+    setScanningLoading(true);
     setIsSearching(true);
     console.log(`🔍 Searching for product with EAN: ${ean}`);
     
@@ -65,13 +150,62 @@ export default function BarcodeScannerScreen() {
           return;
         }
         
+        // Speichere in Scanhistorie
+        if (user?.uid) {
+          // Für NoName-Produkte: Handelsmarken-Name + Discounter-Logo
+          let brandName = '';
+          let brandImage = '';
+          
+          // 1. Hole Handelsmarken-Name (falls vorhanden)
+          if ((product as any).handelsmarke) {
+            if (typeof (product as any).handelsmarke === 'string') {
+              brandName = (product as any).handelsmarke;
+            }
+          }
+          
+          // 2. Hole IMMER das Discounter-Logo für NoName-Produkte
+          if ((product as any).discounter) {
+            try {
+              const discounterValue = (product as any).discounter;
+              
+              // Ist es eine Referenz?
+              if (discounterValue && typeof discounterValue === 'object' && discounterValue.path) {
+                const discounterDoc = await getDoc(discounterValue);
+                if (discounterDoc.exists()) {
+                  const discounterData = discounterDoc.data() as any;
+                  brandImage = discounterData?.bild || '';
+                  // Falls kein Handelsmarken-Name, nutze Discounter-Name
+                  if (!brandName) {
+                    brandName = discounterData?.name || '';
+                  }
+                  console.log(`✅ Discounter-Logo geladen: ${discounterData?.name}`);
+                }
+              }
+            } catch (err) {
+              console.error('Fehler beim Laden des Discounter-Logos:', err);
+            }
+          }
+          
+          await scanHistoryService.saveScan(user.uid, {
+            ean,
+            productId: product.id,
+            productName: product.name,
+            productImage: product.bild,
+            productType: 'noname',
+            brandName,
+            brandImage,
+            price: product.preis
+          });
+        }
+        
         // 🎉 SUCCESS HAPTIC FEEDBACK
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         
-        setHasNavigated(true); // Sofort setzen BEVOR Navigation
+        setHasNavigated(true);
         setIsSearching(false);
+        setScanningLoading(false);
         
-        // Navigiere zum Produktvergleich (für alle Produkte!)
+        // Navigiere zum Produktvergleich
         console.log(`🚀 NAVIGATING to: /product-comparison/${product.id}?type=noname`);
         router.replace(`/product-comparison/${product.id}?type=noname`);
         return;
@@ -90,11 +224,37 @@ export default function BarcodeScannerScreen() {
           return;
         }
         
+        // Lade Markeninformationen
+        let brandName = 'Unbekannt';
+        let brandImage = '';
+        if ((product as any).hersteller) {
+          const brandInfo = await scanHistoryService.getBrandInfo((product as any).hersteller);
+          if (brandInfo) {
+            brandName = brandInfo.name;
+            brandImage = brandInfo.image;
+          }
+        }
+        
+        // Speichere in Scanhistorie
+        if (user?.uid) {
+          await scanHistoryService.saveScan(user.uid, {
+            ean,
+            productId: product.id,
+            productName: product.name,
+            productImage: product.bild,
+            productType: 'markenprodukt',
+            brandName,
+            brandImage,
+            price: product.preis
+          });
+        }
+        
         // 🎉 SUCCESS HAPTIC FEEDBACK
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         
-        setHasNavigated(true); // Sofort setzen BEVOR Navigation
+        setHasNavigated(true);
         setIsSearching(false);
+        setScanningLoading(false);
         
         // Navigiere zum Produktvergleich
         console.log(`🚀 NAVIGATING to: /product-comparison/${product.id}?type=brand`);
@@ -116,27 +276,33 @@ export default function BarcodeScannerScreen() {
       
       setHasNavigated(true); // Verhindert mehrfache "nicht gefunden" Dialoge
       setIsSearching(false);
-      
-      Alert.alert(
+      setScanningLoading(false);
+
+    Alert.alert(
         'Produkt nicht gefunden',
         `Das Produkt mit dem Barcode ${ean} ist noch nicht in unserer Datenbank.`,
-        [
-          {
-            text: 'Erneut scannen',
+      [
+        {
+          text: 'Erneut scannen',
             onPress: () => {
               setScanned(false);
-              setHasNavigated(false); // Reset für neuen Scan
+              setHasNavigated(false);
+              setScanningLoading(false);
+              lastScannedTimestampRef.current = 0;
+              lastScannedEANRef.current = '';
             },
           },
           {
             text: 'Produkt melden',
-            onPress: () => {
+          onPress: () => {
               Alert.alert(
                 'Produkt melden',
                 'Danke für den Hinweis! Wir werden das Produkt in unsere Datenbank aufnehmen.',
                 [{ text: 'OK', onPress: () => {
                   setScanned(false);
-                  setHasNavigated(false); // Reset für neuen Scan
+                  setHasNavigated(false);
+                  lastScannedTimestampRef.current = 0;
+                  lastScannedEANRef.current = '';
                 }}]
               );
             },
@@ -158,38 +324,77 @@ export default function BarcodeScannerScreen() {
       
       setHasNavigated(true); // Verhindert mehrfache Error-Dialoge
       setIsSearching(false);
+      setScanningLoading(false);
       
       Alert.alert(
         'Fehler',
         'Beim Suchen des Produkts ist ein Fehler aufgetreten. Bitte versuche es erneut.',
         [
           {
-            text: 'Erneut versuchen',
+                        text: 'Erneut versuchen',
             onPress: () => {
               setScanned(false);
-              setHasNavigated(false); // Reset für neuen Scan
-            },
+              setHasNavigated(false);
+              setScanningLoading(false);
+              lastScannedTimestampRef.current = 0;
+              lastScannedEANRef.current = '';
           },
-        ]
-      );
+        },
+      ]
+    );
     }
   };
 
   const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
-    // KRITISCHER GUARD: Mehrfacher Schutz
+    const timestamp = Date.now();
+    
+    // 🔥 ROBUSTE MEHRFACHSCAN-PRÄVENTION
     if (scanned || isSearching || hasNavigated) {
       console.log(`🚫 SCAN BLOCKED: scanned(${scanned}) searching(${isSearching}) navigated(${hasNavigated})`);
       return;
     }
     
+    // 🕐 TIMESTAMP-SCHUTZ DIREKT IM HANDLER (1 Sekunde minimum zwischen Scans)
+    if (timestamp - lastScannedTimestampRef.current < 1000) {
+      console.log(`🚫 SCAN BLOCKED: Too recent (${timestamp - lastScannedTimestampRef.current}ms ago)`);
+      return;
+    }
+    
+    // Filtere nur EAN-Codes (EAN-8, EAN-13, UPC-A)
+    const allowedTypes = ['ean13', 'ean8', 'upc_a', 'org.gs1.EAN-13', 'org.gs1.EAN-8', 'org.gs1.UPC-A'];
+    if (!allowedTypes.includes(type)) {
+      console.log(`🚫 SCAN IGNORED: Non-EAN barcode type: ${type}`);
+      return;
+    }
+    
+    // Validiere EAN-Format
+    if (!isValidEAN(data)) {
+      console.log(`🚫 SCAN IGNORED: Invalid EAN format: ${data}`);
+      return;
+    }
+    
     setScanned(true);
-    console.log(`📱 SINGLE Barcode scan: ${data} (Type: ${type})`);
+    console.log(`📱 SINGLE EAN scan: ${data} (Type: ${type})`);
     
     // 📳 SCAN DETECTED HAPTIC FEEDBACK
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
-    // SOFORTIGE Ausführung - kein Timeout mehr!
+    // SOFORTIGE Ausführung
     searchProductByEAN(data);
+  };
+
+  // Validiere EAN-Format
+  const isValidEAN = (ean: string): boolean => {
+    // Entferne Whitespace
+    ean = ean.trim();
+    
+    // Prüfe ob nur Zahlen
+    if (!/^\d+$/.test(ean)) return false;
+    
+    // Prüfe Länge (EAN-8, EAN-12, EAN-13)
+    if (![8, 12, 13].includes(ean.length)) return false;
+    
+    return true;
   };
 
   const handleManualInput = () => {
@@ -218,25 +423,14 @@ export default function BarcodeScannerScreen() {
   if (!permission.granted) {
     return (
       <ThemedView style={styles.container}>
-        <Stack.Screen 
-          options={{
-            title: 'Barcode Scanner',
-            headerStyle: { backgroundColor: colors.primary },
-            headerTintColor: 'white',
-            headerTitleStyle: { color: 'white', fontFamily: 'Nunito_600SemiBold' },
-            headerBackVisible: false,
-            gestureEnabled: true,
-            animation: 'slide_from_right',
-            headerLeft: () => (
+        {/* Custom Back Button */}
               <TouchableOpacity 
                 onPress={() => router.back()}
-                style={{ paddingLeft: 16, paddingRight: 8, paddingVertical: 8 }}
+          style={[styles.backButton, { top: insets.top + 10 }]}
               >
-                <IconSymbol name="chevron.left" size={24} color="white" />
+          <IconSymbol name="chevron.left" size={28} color="white" />
               </TouchableOpacity>
-            ),
-          }} 
-        />
+        
         <View style={styles.permissionContainer}>
           <IconSymbol name="barcode" size={80} color={colors.icon} />
           <ThemedText style={styles.permissionTitle}>
@@ -260,36 +454,25 @@ export default function BarcodeScannerScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen 
-        options={{
-          title: 'Barcode Scanner',
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: 'white',
-          headerTitleStyle: { color: 'white', fontWeight: '600' },
-          headerBackVisible: false,
-          gestureEnabled: true,
-          animation: 'slide_from_right',
-          headerLeft: () => (
-            <TouchableOpacity 
-              onPress={() => router.back()}
-              style={{ paddingLeft: 16, paddingRight: 8, paddingVertical: 8 }}
-            >
-              <IconSymbol name="chevron.left" size={24} color="white" />
-            </TouchableOpacity>
-          ),
-        }} 
-      />
-
       <View style={styles.cameraContainer}>
+        {cameraReady ? (
         <CameraView
           style={styles.camera}
           facing={facing}
-          enableTorch={flashEnabled}
-          onBarcodeScanned={(scanned || hasNavigated) ? undefined : handleBarCodeScanned}
+            enableTorch={flashEnabled}
+            onBarcodeScanned={(scanned || hasNavigated) ? undefined : handleBarCodeScanned}
           barcodeScannerSettings={{
-            barcodeTypes: ['ean13', 'ean8', 'upc_a', 'code128', 'code39'],
-          }}
-        />
+              barcodeTypes: ['ean13', 'ean8', 'upc_a'], // Nur EAN/UPC Codes
+            }}
+          />
+        ) : (
+          <View style={[styles.camera, { backgroundColor: 'black', alignItems: 'center', justifyContent: 'center' }]}>
+            <ActivityIndicator size="large" color="white" />
+            <Text style={{ color: 'white', marginTop: 10, fontFamily: 'Nunito_400Regular' }}>
+              Kamera wird vorbereitet...
+            </Text>
+          </View>
+        )}
 
         {/* Overlay */}
         <View style={styles.overlay}>
@@ -298,10 +481,10 @@ export default function BarcodeScannerScreen() {
           
           <View style={styles.overlayMiddle}>
             {/* Left overlay */}
-            <View style={[styles.overlaySide, { width: (width - scanAreaSize) / 2 }]} />
+            <View style={[styles.overlaySide, { width: (width - scanAreaWidth) / 2 }]} />
             
-            {/* Scan area */}
-            <View style={[styles.scanArea, { width: scanAreaSize, height: scanAreaSize }]}>
+            {/* Scan area - jetzt rechteckig */}
+            <View style={[styles.scanArea, { width: scanAreaWidth, height: scanAreaHeight }]}>
               <View style={styles.scanCorners}>
                 <View style={[styles.corner, styles.topLeft, { borderColor: colors.primary }]} />
                 <View style={[styles.corner, styles.topRight, { borderColor: colors.primary }]} />
@@ -311,31 +494,44 @@ export default function BarcodeScannerScreen() {
             </View>
             
             {/* Right overlay */}
-            <View style={[styles.overlaySide, { width: (width - scanAreaSize) / 2 }]} />
+            <View style={[styles.overlaySide, { width: (width - scanAreaWidth) / 2 }]} />
           </View>
           
-          {/* Bottom overlay - jetzt viel größer */}
-          <View style={[styles.overlayBottom, { height: height - topOffset - scanAreaSize }]}>
-            <View style={styles.bottomContent}>
-              <View style={styles.instructions}>
-                <ThemedText style={styles.instructionTitle}>
-                  Barcode scannen
+                              {/* Bottom overlay - Einfaches Layout */}
+          <View style={[styles.overlayBottom, { height: height - topOffset - scanAreaHeight }]}>
+            {/* Instructions und Manual Button oben */}
+            <View style={styles.instructionsContent}>
+            <View style={styles.instructions}>
+              <ThemedText style={styles.instructionTitle}>
+                  {scanningLoading ? 'Scanne...' : 'Barcode scannen'}
                 </ThemedText>
+                {!scanningLoading && (
                 <ThemedText style={styles.instructionText}>
-                  Halte den Barcode in den Rahmen, um Produktinformationen zu erhalten
-                </ThemedText>
+                    Halte den Barcode in den Rahmen
+                  </ThemedText>
+                )}
+                {scanningLoading && (
+                  <View style={styles.scanningIndicator}>
+                    <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+                    <ThemedText style={styles.scanningText}>
+                      Produkt wird erkannt...
+                    </ThemedText>
+                  </View>
+                )}
               </View>
-              
-              {/* Manual Input Button - moved into overlay */}
+
+              {/* Manual Input Button - direkt unter Instructions */}
               <TouchableOpacity 
                 style={[styles.manualInputButton, { 
-                  backgroundColor: (isSearching || hasNavigated) ? 'rgba(66, 169, 104, 0.5)' : colors.primary 
+                  backgroundColor: (isSearching || hasNavigated || !cameraReady) ? 'rgba(66, 169, 104, 0.5)' : colors.primary,
+                  opacity: cameraReady ? 1 : 0.5, // Visueller Hinweis für deaktiviert
                 }]}
                 onPress={() => {
+                  if (!cameraReady) return;
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   setShowManualInput(true);
                 }}
-                disabled={isSearching || hasNavigated}
+                disabled={isSearching || hasNavigated || !cameraReady}
               >
                 {isSearching ? (
                   <>
@@ -356,18 +552,139 @@ export default function BarcodeScannerScreen() {
                     <IconSymbol name="keyboard" size={20} color="white" />
                     <ThemedText style={styles.manualInputText}>
                       Manuell eingeben
-                    </ThemedText>
+                </ThemedText>
                   </>
                 )}
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Scanhistorie - ganz unten außerhalb des Overlays */}
+          {!scanningLoading && (scanHistory.length > 0 || isLoadingHistory) && (
+            <View style={styles.historyBottomContainer}>
+              <View style={[styles.historySection, isSmallDevice && styles.historyCompact]}>
+                <View style={styles.historyHeader}>
+                  <ThemedText style={styles.historyTitle}>Zuletzt gescannt</ThemedText>
+                                      <TouchableOpacity
+                      onPress={() => {
+                        if (user?.uid) {
+                          scanHistoryService.markAllAsDeleted(user.uid);
+                        }
+                      }}
+                    >
+                    <ThemedText style={[styles.historyClear, { color: colors.primary }]}>Löschen</ThemedText>
+                  </TouchableOpacity>
+                </View>
+                
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.historyScrollContent}
+                  style={styles.historyScrollView}
+                >
+                  {isLoadingHistory ? (
+                    // Weniger Skeletons auf kleinen Geräten
+                    [...Array(isSmallDevice ? 2 : 3)].map((_, index) => (
+                      <View key={`skeleton-${index}`} style={[styles.historyCard, { backgroundColor: colors.cardBackground }]}>
+                        <ShimmerSkeleton width={50} height={50} borderRadius={8} />
+                        <View style={styles.historyInfo}>
+                          <ShimmerSkeleton width={80} height={12} borderRadius={4} />
+                          <ShimmerSkeleton width={60} height={10} borderRadius={3} style={{ marginTop: 4 }} />
+                        </View>
+                      </View>
+                    ))
+                  ) : (
+                    scanHistory.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={[styles.historyCard, { backgroundColor: colors.cardBackground }]}
+                        onPress={() => {
+                          // Navigiere zum Produkt
+                          const route = item.productType === 'noname' 
+                            ? `/product-comparison/${item.productId}?type=noname`
+                            : `/product-comparison/${item.productId}?type=brand`;
+                          router.push(route as any);
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        {/* Produktbild */}
+                        <View style={styles.historyImageContainer}>
+                          {item.productImage ? (
+                            <Image
+                              source={{ uri: item.productImage }}
+                              style={styles.historyImage}
+                              resizeMode="contain"
+                            />
+                          ) : (
+                            <View style={[styles.historyImagePlaceholder, { backgroundColor: colors.background }]}>
+                              <IconSymbol name="barcode" size={24} color={colors.icon} />
+                            </View>
+                          )}
+                        </View>
+                        
+                        {/* Produktinfo */}
+                        <View style={styles.historyInfo}>
+                          {/* Marke/Handelsmarke */}
+                          {item.brandName && (
+                            <View style={styles.historyBrand}>
+                              {item.brandImage && (
+                                <Image 
+                                  source={{ uri: item.brandImage }} 
+                                  style={styles.historyBrandImage}
+                                  resizeMode="contain"
+                                />
+                              )}
+                              <Text style={[styles.historyBrandName, { color: colors.icon }]} numberOfLines={1}>
+                                {item.brandName}
+                              </Text>
+                            </View>
+                          )}
+                          {/* Produktname */}
+                          <Text style={[styles.historyProductName, { color: colors.text }]} numberOfLines={2}>
+                            {item.productName}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))
+                  )}
+                </ScrollView>
+              </View>
+            </View>
+          )}
         </View>
 
+        {/* 🚀 SCANNING LOADING OVERLAY */}
+        {scanningLoading && (
+          <View style={styles.scanningOverlay}>
+            <View style={[styles.scanningCard, { backgroundColor: colors.cardBackground }]}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <ThemedText style={[styles.scanningCardTitle, { color: colors.text }]}>
+                Produkt erkennen...
+              </ThemedText>
+              <ThemedText style={[styles.scanningCardText, { color: colors.icon }]}>
+                Einen Moment bitte
+              </ThemedText>
+            </View>
+          </View>
+        )}
+
+                {/* Custom Back Button - top left */}
+          <TouchableOpacity 
+          style={[styles.backButton, { top: insets.top + 10 }]}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.back();
+          }}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <IconSymbol name="chevron.left" size={28} color="white" />
+          </TouchableOpacity>
+
         {/* Controls - positioned above scan area */}
-        <View style={[styles.controls, { top: topOffset - 60 }]}>
+        <View style={[styles.controls, { top: topOffset - 80 }]}>
           {/* Flash Toggle */}
           <TouchableOpacity 
+            disabled={!cameraReady}
             style={[styles.controlButton, { 
               backgroundColor: flashEnabled ? 'rgba(255,255,255,0.95)' : 'rgba(0,0,0,0.7)',
               borderWidth: flashEnabled ? 2 : 0,
@@ -377,8 +694,10 @@ export default function BarcodeScannerScreen() {
               shadowOpacity: 0.25,
               shadowRadius: 4,
               elevation: 5,
+              opacity: cameraReady ? 1 : 0.5, // Visueller Hinweis für deaktiviert
             }]}
             onPress={() => {
+              if (!cameraReady) return;
               console.log(`💡 Flash toggled: ${!flashEnabled}`);
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               setFlashEnabled(!flashEnabled);
@@ -393,6 +712,7 @@ export default function BarcodeScannerScreen() {
 
           {/* Camera Flip */}
           <TouchableOpacity 
+            disabled={!cameraReady}
             style={[styles.controlButton, { 
               backgroundColor: 'rgba(0,0,0,0.7)',
               shadowColor: '#000',
@@ -400,34 +720,18 @@ export default function BarcodeScannerScreen() {
               shadowOpacity: 0.25,
               shadowRadius: 4,
               elevation: 5,
+              opacity: cameraReady ? 1 : 0.5, // Visueller Hinweis für deaktiviert
             }]}
             onPress={() => {
+              if (!cameraReady) return;
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               toggleCameraFacing();
             }}
           >
             <IconSymbol name="camera.rotate" size={24} color="white" />
           </TouchableOpacity>
-
-          {/* Shopping List */}
-          <TouchableOpacity 
-            style={[styles.controlButton, { 
-              backgroundColor: 'rgba(0,0,0,0.7)',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.25,
-              shadowRadius: 4,
-              elevation: 5,
-            }]}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push('/shopping-list');
-            }}
-          >
-            <IconSymbol name="cart" size={24} color="white" />
-          </TouchableOpacity>
         </View>
-      </View>
+        </View>
 
       {/* Manual Input Modal */}
       <Modal
@@ -448,8 +752,8 @@ export default function BarcodeScannerScreen() {
               <IconSymbol name="xmark" size={24} color={colors.text} />
             </TouchableOpacity>
             <ThemedText style={styles.modalTitle}>Barcode eingeben</ThemedText>
-            <TouchableOpacity
-              onPress={() => {
+        <TouchableOpacity 
+          onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                 handleManualInput();
               }}
@@ -459,8 +763,8 @@ export default function BarcodeScannerScreen() {
               disabled={!manualBarcode.trim()}
             >
               <ThemedText style={styles.modalDoneText}>Suchen</ThemedText>
-            </TouchableOpacity>
-          </View>
+        </TouchableOpacity>
+      </View>
           
           <View style={styles.modalContent}>
             <ThemedText style={styles.modalDescription}>
@@ -526,6 +830,7 @@ const styles = StyleSheet.create({
   },
   camera: {
     flex: 1,
+    
   },
   overlay: {
     position: 'absolute',
@@ -545,6 +850,7 @@ const styles = StyleSheet.create({
   },
   scanArea: {
     position: 'relative',
+     marginTop: 0,
   },
   scanCorners: {
     position: 'absolute',
@@ -557,7 +863,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 30,
     height: 30,
-    borderWidth: 4,
+    borderWidth: 4
   },
   topLeft: {
     top: 0,
@@ -585,40 +891,57 @@ const styles = StyleSheet.create({
   },
   overlayBottom: {
     backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
-  bottomContent: {
+  instructionsContent: {
     alignItems: 'center',
-    width: '100%',
+    paddingTop: 30, // 20% mehr Abstand zum Scanner
     paddingHorizontal: 20,
-    gap: 24,
+  },
+  historyBottomContainer: {
+    position: 'absolute',
+    bottom: 80, // 20pt Abstand zum Seitenende
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
   },
   instructions: {
     alignItems: 'center',
-    paddingHorizontal: 20,
   },
   instructionTitle: {
     color: 'white',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 12,
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 0,
     textAlign: 'center',
   },
   instructionText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: 12,
     textAlign: 'center',
     opacity: 0.8,
-    lineHeight: 22,
+  },
+  backButton: {
+    position: 'absolute',
+    left: 20,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
   controls: {
     position: 'absolute',
     left: 0,
     right: 0,
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 30,
+    justifyContent: 'center',
+    gap: 40,
   },
   controlButton: {
     width: 50,
@@ -635,7 +958,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     borderRadius: 12,
     gap: 8,
-    marginHorizontal: 20,
+    marginTop: 40, // 20pt Abstand zu Instructions
+    width: '100%',
   },
   manualInputText: {
     color: 'white',
@@ -699,6 +1023,128 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     letterSpacing: 1,
+  },
+  // Scanhistorie Styles
+  historySection: {
+    width: '100%',
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  historyTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
+  },
+  historyClear: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  historyScrollView: {
+    marginHorizontal: -20,
+  },
+  historyScrollContent: {
+    paddingHorizontal: 20,
+    gap: 10,
+  },
+  historyCard: {
+    flexDirection: 'row',
+    padding: 6,
+    borderRadius: 10,
+    width: 146, // +3pt breiter für längere Markennamen
+    gap: 8,
+  },
+  historyImageContainer: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  historyImage: {
+    width: '100%',
+    height: '100%',
+  },
+  historyImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  historyInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  historyBrand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginBottom: 2,
+  },
+  historyBrandImage: {
+    width: 11,
+    height: 11,
+  },
+  historyBrandName: {
+    fontSize: 10,
+    fontFamily: 'Nunito_500Medium',
+  },
+  historyProductName: {
+    fontSize: 11,
+    fontFamily: 'Nunito_600SemiBold',
+    lineHeight: 14,
+  },
+  // Loading & Responsive Styles
+  scanningIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  scanningText: {
+    color: 'white',
+    fontSize: 13,
+    fontFamily: 'Nunito_500Medium',
+  },
+  scanningOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  scanningCard: {
+    padding: 24,
+    borderRadius: 16,
+    alignItems: 'center',
+    minWidth: 200,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  scanningCardTitle: {
+    fontSize: 16,
+    fontFamily: 'Nunito_600SemiBold',
+    marginTop: 16,
+    marginBottom: 4,
+  },
+  scanningCardText: {
+    fontSize: 13,
+    fontFamily: 'Nunito_400Regular',
+    textAlign: 'center',
+  },
+  historyCompact: {
+    marginTop: 8,
   },
 });
 

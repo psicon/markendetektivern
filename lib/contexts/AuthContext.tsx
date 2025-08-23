@@ -45,9 +45,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshUserProfile = useCallback(async () => {
     if (user) {
+      // Lade sowohl Profile als auch Achievement-Stats
       const profile = await getUserProfile(user.uid);
-      setUserProfile(profile);
-      console.log('🔄 AuthContext: User profile refreshed');
+      
+      // Lade auch die Achievement-Stats und füge sie zum Profile hinzu
+      const stats = await achievementService.getUserStats(user.uid);
+      const enrichedProfile = {
+        ...profile,
+        stats: stats
+      };
+      
+      setUserProfile(enrichedProfile);
+      console.log('🔄 AuthContext: User profile + achievement stats refreshed');
     }
   }, [user]);
 
@@ -61,7 +70,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (user) {
         // Lade das bestehende User-Profil aus Firestore
         const profile = await getUserProfile(user.uid);
-        setUserProfile(profile);
+        
+        // Lade auch die Achievement-Stats und füge sie zum Profile hinzu
+        const stats = await achievementService.getUserStats(user.uid);
+        const enrichedProfile = {
+          ...profile,
+          stats: stats
+        };
+        
+        setUserProfile(enrichedProfile);
         
         // Update last login
         await updateUserProfile(user);

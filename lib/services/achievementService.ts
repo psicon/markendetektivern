@@ -77,11 +77,9 @@ class AchievementService {
       this.isInitialized = true;
       console.log('✅ Achievement-System initialisiert mit', this.achievements.length, 'Achievements');
     } catch (error: any) {
-      console.error('❌ Fehler beim Initialisieren des Achievement-Systems:', error);
-      
-      // Bei Permission-Fehler: Verwende Standard-Achievements im Speicher
+      // Bei Permission-Fehler: Stumm behandeln und lokale Defaults verwenden
       if (error?.code === 'permission-denied') {
-        console.warn('⚠️ Keine Berechtigung für achievements Collection, verwende lokale Defaults');
+        console.log('🔄 User noch nicht authentifiziert, verwende lokale Achievement-Defaults');
         this.achievements = DEFAULT_ACHIEVEMENTS.map((achievement, index) => ({
           ...achievement,
           id: `local_${index}`,
@@ -89,6 +87,8 @@ class AchievementService {
         }));
         this.isInitialized = true;
       } else {
+        // Nur bei echten Fehlern (nicht Permission) loggen
+        console.error('❌ Fehler beim Initialisieren des Achievement-Systems:', error);
         this.initializationPromise = null; // Reset on error
         throw error;
       }
@@ -249,18 +249,8 @@ class AchievementService {
         updates.stats.totalPoints = (updatedStats.totalPoints || 0) + pointsEarned;
       }
       
-      // IMMER Level prüfen (auch ohne neue Punkte, da Ersparnis sich ändern kann)
-      const currentTotalPoints = updates.stats.totalPoints || updatedStats.totalPoints || 0;
-      const currentTotalSavings = updates.stats.totalSavings || updatedStats.totalSavings || 0;
-      const newLevel = this.calculateLevel(currentTotalPoints, currentTotalSavings);
-      
-      if (newLevel !== userStats.currentLevel) {
-        updates.stats.currentLevel = newLevel;
-        console.log(`🎉 LEVEL UP! Von Level ${userStats.currentLevel} zu Level ${newLevel}!`);
-        
-        // Level-Up Benachrichtigung
-        await this.notifyLevelUp(newLevel, userStats.currentLevel);
-      }
+      // Level-Update wird jetzt durch checkAndUpdateLevel nach der Action behandelt
+      // (Keine doppelte Level-Up Logik hier!)
 
       batch.update(userRef, updates);
       await batch.commit();
@@ -270,7 +260,11 @@ class AchievementService {
         await this.notifyAchievementUnlock(completedAchievements);
       }
 
-      // Profile-Refresh triggern nach jeder Achievement-Action (nur wenn Stats sich geändert haben)
+      // IMMER Level-Check nach Achievement-Action (auch ohne neue Punkte - Ersparnis kann sich ändern!)
+      console.log('🎯 Triggering level check after achievement action');
+      await this.checkAndUpdateLevel(userId);
+      
+      // Profile-Refresh triggern nach jeder Achievement-Action (nur wenn Stats sich geändert haben)  
       if (pointsEarned > 0 || Object.keys(updates.stats || {}).length > 1) {
         console.log('🔄 Triggering profile refresh after achievement action');
         if (AchievementService.onProfileRefreshNeeded) {
@@ -342,8 +336,17 @@ class AchievementService {
       const userData = userDoc.data();
       const stats = userData.stats || {};
       const totalPoints = stats.totalPoints || 0;
-      const totalSavings = stats.totalSavings || userData.totalSavings || 0;
+      // Priorisiere totalSavings aus userData (wird durch updateUserStats aktualisiert)
+      const totalSavings = userData.totalSavings || stats.totalSavings || 0;
       const currentLevel = stats.currentLevel || userData.level || 1;
+      
+      console.log(`🔍 Level-Check Daten:`, {
+        totalPoints,
+        totalSavings,  
+        currentLevel,
+        userData_totalSavings: userData.totalSavings,
+        stats_totalSavings: stats.totalSavings
+      });
       
       // Berechne korrektes Level
       const correctLevel = this.calculateLevel(totalPoints, totalSavings);
@@ -357,9 +360,12 @@ class AchievementService {
           'level': correctLevel // Auch altes level Feld updaten für Kompatibilität
         });
         
-        // Benachrichtigung nur wenn Aufstieg
+        // Benachrichtigung nur wenn echter Aufstieg (nicht bei Korrekturen)
         if (correctLevel > currentLevel) {
+          console.log(`🎉 ECHTER Level-Aufstieg erkannt: ${currentLevel} → ${correctLevel}`);
           await this.notifyLevelUp(correctLevel, currentLevel);
+        } else {
+          console.log(`🔄 Level-Korrektur ohne Benachrichtigung: ${currentLevel} → ${correctLevel}`);
         }
 
         // Profile-Refresh triggern nach Level-Update
@@ -417,7 +423,7 @@ class AchievementService {
           console.log(`💔 Streak unterbrochen nach ${stats.currentStreak} Tagen`);
         }
         // daysSinceLastOpen === 0 bedeutet gleicher Tag, keine Änderung
-      } else {
+    } else {
         // First time opening
         newStreak = 1;
       }
@@ -487,15 +493,20 @@ class AchievementService {
     const levelData = LEVELS.find(l => l.id === newLevel);
     if (!levelData) return;
     
-    // Trigger UI Notification
-    if (this.onAchievementUnlock) {
-      this.onAchievementUnlock({
+    console.log(`🎉 Level-Up Benachrichtigung: Level ${oldLevel} → ${newLevel}`);
+    
+    // Trigger UI Notification (STATISCHER Callback)
+    if (AchievementService.onAchievementUnlock) {
+      AchievementService.onAchievementUnlock({
         type: 'level_up',
         title: `🎉 Level ${newLevel}: ${levelData.name}!`,
         message: `${levelData.description}\n${levelData.reward}`,
         level: newLevel,
         oldLevel: oldLevel
-      });
+      } as any);
+      console.log('✅ Level-Up Benachrichtigung gesendet');
+    } else {
+      console.log('⚠️ Kein Achievement-Unlock Handler registriert');
     }
   }
   
@@ -640,9 +651,12 @@ class AchievementService {
 // Export Singleton Instance
 const achievementService = AchievementService.getInstance();
 
-// Auto-initialize on import (non-blocking)
+// Auto-initialize on import (non-blocking) - STUMM bei Permission-Errors
 achievementService.initialize().catch(error => {
-  console.warn('⚠️ Achievement-System konnte nicht automatisch initialisiert werden:', error);
+  // Ignoriere Permission-Errors beim App-Start (User noch nicht auth)
+  if (error?.code !== 'permission-denied') {
+    console.warn('⚠️ Achievement-System konnte nicht automatisch initialisiert werden:', error);
+  }
 });
 
 // Named export

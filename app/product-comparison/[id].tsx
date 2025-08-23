@@ -3,6 +3,7 @@ import { ThemedView } from '@/components/ThemedView';
 import { CartToast } from '@/components/ui/CartToast';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
+import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor, getStufenDescription, getStufenTitle } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
@@ -199,15 +200,22 @@ const StarRating = ({
 
 
 // NoName Cart Button Component  
-const NoNameCartButton = ({ productId, productName, user, colors }: any) => {
+const NoNameCartButton = ({ 
+  productId, 
+  productName, 
+  user, 
+  colors, 
+  onShowToast 
+}: {
+  productId: string;
+  productName: string;
+  user: any;
+  colors: any;
+  onShowToast: (message: string, type: 'success' | 'error' | 'info', actionLabel?: string, actionPress?: () => void) => void;
+}) => {
   const router = useRouter();
   const [isInCart, setIsInCart] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [showToast, setShowToast] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
-  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
-  const [toastActionLabel, setToastActionLabel] = useState<string | undefined>(undefined);
-  const [toastActionPress, setToastActionPress] = useState<(() => void) | undefined>(undefined);
   
   useEffect(() => {
     checkStatus();
@@ -233,20 +241,12 @@ const NoNameCartButton = ({ productId, productName, user, colors }: any) => {
   
   const handlePress = async () => {
     if (!user?.uid) {
-      setToastMessage('Bitte melde dich an, um Produkte hinzuzufügen');
-      setToastType('info');
-      setToastActionLabel(undefined);
-      setToastActionPress(undefined);
-      setShowToast(true);
+      onShowToast('Bitte melde dich an, um Produkte hinzuzufügen', 'info');
       return;
     }
     
     if (isInCart) {
-      setToastMessage('Produkt ist bereits im Einkaufszettel');
-      setToastType('info');
-      setToastActionLabel(undefined);
-      setToastActionPress(undefined);
-      setShowToast(true);
+      onShowToast('Produkt ist bereits im Einkaufszettel', 'info');
       return;
     }
     
@@ -260,20 +260,15 @@ const NoNameCartButton = ({ productId, productName, user, colors }: any) => {
         false // NoName product
       );
       setIsInCart(true);
-      setToastMessage('🛒 Produkt hinzugefügt!');
-      setToastType('success');
-      setToastActionLabel('Einkaufszettel');
-      setToastActionPress(() => () => {
-        router.push('/shopping-list' as any);
-      });
-      setShowToast(true);
+      onShowToast(
+        '🛒 Produkt hinzugefügt!', 
+        'success', 
+        'Einkaufszettel',
+        () => router.push('/shopping-list' as any)
+      );
     } catch (error) {
       console.error('Error adding to cart:', error);
-      setToastMessage('Produkt konnte nicht hinzugefügt werden');
-      setToastType('error');
-      setToastActionLabel(undefined);
-      setToastActionPress(undefined);
-      setShowToast(true);
+      onShowToast('Produkt konnte nicht hinzugefügt werden', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -298,20 +293,6 @@ const NoNameCartButton = ({ productId, productName, user, colors }: any) => {
           />
         )}
       </TouchableOpacity>
-      {showToast && (
-        <CartToast
-          visible={showToast}
-          message={toastMessage}
-          type={toastType}
-          actionLabel={toastActionLabel}
-          onActionPress={toastActionPress}
-          onHide={() => {
-            setShowToast(false);
-            setToastActionLabel(undefined);
-            setToastActionPress(undefined);
-          }}
-        />
-      )}
     </>
   );
 };
@@ -1144,14 +1125,31 @@ export default function ProductComparisonScreen() {
   const { user } = useAuth();
   const { toggleFavorite, isLocalFavorite } = useFavorites();
   
-  // Toast states ERWEITERT für Action-Toast
+  // Toast states mit Prioritäten - SEPARATE für verschiedene Aktionen
+  // LEVEL-UP Overlay (ersetzt Toast für spektakuläre Animation)
+  const [showLevelUpOverlay, setShowLevelUpOverlay] = useState(false);
+  const [levelUpData, setLevelUpData] = useState<{ newLevel: number; oldLevel: number }>({ 
+    newLevel: 1, 
+    oldLevel: 1 
+  });
+  
+  // FAVORITEN Toast (lokale Positionierung)
+  const [showFavoriteToast, setShowFavoriteToast] = useState(false);
+  const [favoriteMessage, setFavoriteMessage] = useState('');
+  const [favoriteType, setFavoriteType] = useState<'success' | 'error' | 'info'>('success');
+  
+  // ACHIEVEMENT Toast (mittlere Priorität)
+  const [showAchievementToast, setShowAchievementToast] = useState(false);
+  const [achievementMessage, setAchievementMessage] = useState('');
+  
+  // CART Toast (normale Priorität)
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
   const [toastActionLabel, setToastActionLabel] = useState<string | undefined>(undefined);
   const [toastActionPress, setToastActionPress] = useState<(() => void) | undefined>(undefined);
 
-  // Toast helper function
+  // Toast helper functions - SEPARATE für verschiedene Typen
   const showGameToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToastMessage(message);
     setToastType(type);
@@ -1173,10 +1171,43 @@ export default function ProductComparisonScreen() {
     setShowToast(true);
   };
 
+  // FAVORITEN Toast (lokale Positionierung beim Herz-Icon)
+  const showFavoriteGameToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setFavoriteMessage(message);
+    setFavoriteType(type);
+    setShowFavoriteToast(true);
+  };
+
+  // LEVEL-UP Overlay anzeigen (spektakuläre Animation mit Confetti)
+  const showLevelUpAnimation = (newLevel: number, oldLevel: number) => {
+    setLevelUpData({ newLevel, oldLevel });
+    setShowLevelUpOverlay(true);
+  };
+
+  // ACHIEVEMENT Toast (globale Positionierung)
+  const showAchievementGameToast = (message: string) => {
+    setAchievementMessage(message);
+    setShowAchievementToast(true);
+  };
+
+  // CART Toast (mit Action-Button Support)
+  const showCartGameToastWithAction = (
+    message: string, 
+    type: 'success' | 'error' | 'info' = 'success',
+    actionLabel?: string,
+    actionPress?: () => void
+  ) => {
+    setToastMessage(message);
+    setToastType(type);
+    setToastActionLabel(actionLabel);
+    setToastActionPress(actionPress ? () => actionPress : undefined);
+    setShowToast(true);
+  };
+
   // Handle favorite toggle
   const handleToggleFavorite = async (product: any, productType: 'markenprodukt' | 'noname') => {
     if (!user?.uid) {
-      showGameToast('Bitte melde dich an, um Favoriten zu speichern', 'info');
+      showFavoriteGameToast('Bitte melde dich an, um Favoriten zu speichern', 'info');
       return;
     }
 
@@ -1207,10 +1238,14 @@ export default function ProductComparisonScreen() {
         ? `💖 ${product.name} zu Favoriten hinzugefügt!`
         : `💔 ${product.name} aus Favoriten entfernt`;
       
-      showGameToast(message, 'success');
+      // FAVORITEN Toast (lokale Positionierung beim Herz-Icon)
+      showFavoriteGameToast(message, 'success');
+      
+      // Haptic Feedback
+      Haptics.impactAsync(wasAdded ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Medium);
     } catch (error) {
       console.error('Error toggling favorite:', error);
-      showGameToast('Fehler beim Speichern des Favoriten', 'error');
+      showFavoriteGameToast('Fehler beim Speichern des Favoriten', 'error');
     }
   };
 
@@ -1572,10 +1607,8 @@ export default function ProductComparisonScreen() {
         setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 200);
         setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light), 400);
         
-        showGameToast(
-          `${notification.title}\n${notification.message}`,
-          'success'
-        );
+        // LEVEL-UP Overlay mit spektakulärer Animation
+        showLevelUpAnimation(notification.level || 1, notification.oldLevel || 1);
       } else {
         // Normal achievement unlock
         const motivationalMessages = [
@@ -1587,9 +1620,9 @@ export default function ProductComparisonScreen() {
         ];
         const randomMessage = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
         
-        showGameToast(
-          `${randomMessage}\n🏆 ${notification.name}\n+${notification.points} Punkte verdient!`,
-          'success'
+        // ACHIEVEMENT Toast (mittlere Priorität)
+        showAchievementGameToast(
+          `${randomMessage}\n🏆 ${notification.name}\n+${notification.points} Punkte verdient!`
         );
       }
     });
@@ -2121,22 +2154,7 @@ export default function ProductComparisonScreen() {
             </TouchableOpacity>
         </View>
         
-        {/* Toast in Main Product Card ERWEITERT mit Action-Button */}
-        {showToast && (
-          <CartToast
-            visible={showToast}
-            message={toastMessage}
-            type={toastType}
-            position="top"
-            actionLabel={toastActionLabel}
-            onActionPress={toastActionPress}
-            onHide={() => {
-              setShowToast(false);
-              setToastActionLabel(undefined);
-              setToastActionPress(undefined);
-            }}
-          />
-        )}
+
         </Animated.View>
 
         {/* Alternatives Section */}
@@ -2340,6 +2358,7 @@ export default function ProductComparisonScreen() {
                   productName={noNameProduct.produktName || noNameProduct.name || 'NoName Produkt'}
                   user={user}
                   colors={colors}
+                  onShowToast={showCartGameToastWithAction}
                 />
               </View>
               </TouchableOpacity>
@@ -3173,6 +3192,61 @@ export default function ProductComparisonScreen() {
       >
         <IconSymbol name="cart.fill" size={20} color="white" />
       </TouchableOpacity>
+
+      {/* LEVEL-UP OVERLAY - Spektakuläre Animation mit Confetti */}
+      <LevelUpOverlay
+        visible={showLevelUpOverlay}
+        newLevel={levelUpData.newLevel}
+        oldLevel={levelUpData.oldLevel}
+        onClose={() => setShowLevelUpOverlay(false)}
+      />
+
+      {/* TOASTS - IMMER SICHTBAR über dem gesamten Bildschirm */}
+
+      {/* ACHIEVEMENT Toast (mittlere Priorität) */}
+      {showAchievementToast && (
+        <View style={styles.fixedToastContainer}>
+          <CartToast
+            visible={showAchievementToast}
+            message={achievementMessage}
+            type="success"
+            position="top"
+            onHide={() => setShowAchievementToast(false)}
+          />
+        </View>
+      )}
+
+      {/* FAVORITEN Toast (beim Herz-Icon positioniert) */}
+      {showFavoriteToast && (
+        <View style={[styles.fixedToastContainer, { top: '30%' }]}>
+          <CartToast
+            visible={showFavoriteToast}
+            message={favoriteMessage}
+            type={favoriteType}
+            position="top"
+            onHide={() => setShowFavoriteToast(false)}
+          />
+        </View>
+      )}
+
+      {/* CART Toast (normale Priorität) */}
+      {showToast && (
+        <View style={styles.fixedToastContainer}>
+          <CartToast
+            visible={showToast}
+            message={toastMessage}
+            type={toastType}
+            position="top"
+            actionLabel={toastActionLabel}
+            onActionPress={toastActionPress}
+            onHide={() => {
+              setShowToast(false);
+              setToastActionLabel(undefined);
+              setToastActionPress(undefined);
+            }}
+          />
+        </View>
+      )}
     </ThemedView>
     </>
   );
@@ -4615,5 +4689,16 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 8,
+  },
+  
+  // FIXED TOAST CONTAINER - schwebt über dem gesamten Bildschirm
+  fixedToastContainer: {
+    position: 'absolute',
+    top: 60, // Unter der Status Bar
+    left: 0,
+    right: 0,
+    zIndex: 9999,
+    elevation: 9999,
+    pointerEvents: 'box-none', // Nur der Toast ist klickbar, nicht der Container
   },
 });
