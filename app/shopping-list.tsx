@@ -12,28 +12,28 @@ import achievementService, { setAchievementUnlockHandler } from '@/lib/services/
 import { FirestoreService } from '@/lib/services/firestore';
 import { updateUserStats } from '@/lib/services/userProfile';
 import {
-  Einkaufswagen,
-  FirestoreDocument,
-  MarkenProdukte,
-  ProductToConvert,
-  Produkte
+    Einkaufswagen,
+    FirestoreDocument,
+    MarkenProdukte,
+    ProductToConvert,
+    Produkte
 } from '@/lib/types/firestore';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  Modal,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    Modal,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -86,7 +86,7 @@ export default function ShoppingListScreen() {
   const [filters, setFilters] = useState({
     markets: [] as string[],
     categories: [] as string[],
-    sortBy: 'name' as 'name' | 'price'
+    sortBy: 'name' as 'name' | 'price' | 'savings'
   });
   const [availableMarkets, setAvailableMarkets] = useState<any[]>([]);
   const [availableCategories, setAvailableCategories] = useState<any[]>([]);
@@ -275,7 +275,21 @@ export default function ShoppingListScreen() {
               }
             }
 
-            // Skip savings calculation for NoName products to improve performance
+            // Calculate actual savings if there's a related brand product
+            let savings = 0;
+            if (productData.markenProdukt) {
+              const markenProdukt = await FirestoreService.getDocumentByReference<MarkenProdukte>(productData.markenProdukt);
+              if (markenProdukt) {
+                const savingsCalc = FirestoreService.calculateSavings(
+                  productData.preis,
+                  productData.packSize,
+                  markenProdukt.preis,
+                  markenProdukt.packSize
+                );
+                savings = savingsCalc.amount;
+                actualSavings += savings;
+              }
+            }
             
             noNameItems.push({
               ...item,
@@ -283,7 +297,8 @@ export default function ShoppingListScreen() {
                 ...productData,
                 handelsmarke: handelsmarkeData,
                 discounter: discounterData
-              }
+              },
+              savings
             });
           }
         }
@@ -429,21 +444,23 @@ export default function ShoppingListScreen() {
         // Remove from brand products
         setBrandProducts(prev => prev.filter(item => item.id !== einkaufswagenRef));
         
-        // Add converted NoName product without savings calculation
+        // Calculate savings locally
         const newItem = result.newItems[0];
+        const savingsAmount = brandItem.potentialSavings || 0;
         
         // Add to NoName products with correct ID
         const noNameItem = {
           id: newItem.id,
-          product: newItem.product
+          product: newItem.product,
+          savings: savingsAmount
         };
         
         setNoNameProducts(prev => [...prev, noNameItem]);
         
-        console.log(`🔄 Single conversion: ${newItem.product?.name || 'NoName'}`);
+        console.log(`💰 Single conversion: ${newItem.product?.name || 'NoName'} saves €${savingsAmount.toFixed(2)}`);
         
-        // Simple success toast
-        showGameToast(`🔄 Produkt erfolgreich umgewandelt!`, 'success');
+        // Success toast with savings amount
+        showGameToast(`🔄 Umgewandelt! Du sparst €${savingsAmount.toFixed(2)} mit dem NoName-Produkt!`, 'success');
       } else {
         // Fallback if something went wrong
         showGameToast('🔄 Produkt erfolgreich umgewandelt!', 'success');
@@ -470,7 +487,7 @@ export default function ShoppingListScreen() {
     
     Alert.alert(
       'In NoNames umwandeln?',
-      `${selectedConversions.length} Produkt${selectedConversions.length > 1 ? 'e' : ''} zu NoName-Produkten umwandeln?`,
+      `${selectedConversions.length} Produkt${selectedConversions.length > 1 ? 'e' : ''} umwandeln und €${totalPotentialSavings.toFixed(2)} sparen?`,
       [
         { text: 'Abbrechen', style: 'cancel' },
         {
@@ -492,16 +509,18 @@ export default function ShoppingListScreen() {
               
               // Add new NoName items
               const newNoNameItems = result.newItems.map((newItem, index) => {
+                const brandItem = convertedBrandItems[index];
                 return {
                   id: newItem.id,
-                  product: newItem.product
+                  product: newItem.product,
+                  savings: brandItem?.potentialSavings || 0
                 };
               });
               
               setNoNameProducts(prev => [...prev, ...newNoNameItems]);
               
               // Gamified success message
-              showGameToast(`🎉 Fantastisch! ${selectedConversions.length} Produkt${selectedConversions.length > 1 ? 'e' : ''} erfolgreich umgewandelt!`, 'success');
+              showGameToast(`🎉 Fantastisch! Du sparst €${totalPotentialSavings.toFixed(2)} mit NoName-Produkten!`, 'success');
               
               setSelectedConversions([]);
               setExpandedItems([]);
@@ -533,12 +552,14 @@ export default function ShoppingListScreen() {
       { value: 'price', label: 'Preis', icon: 'eurosign' }
     ];
     
-    // Removed savings sorting for better performance
+    if (activeTab === 'noname') {
+      baseSorting.push({ value: 'savings', label: 'Ersparnis', icon: 'leaf.fill' });
+    }
     
     return baseSorting;
   };
   
-  const updateSorting = (sortBy: 'name' | 'price') => {
+  const updateSorting = (sortBy: 'name' | 'price' | 'savings') => {
     setFilters(prev => ({ ...prev, sortBy }));
   };
   
@@ -656,7 +677,13 @@ export default function ShoppingListScreen() {
           const priceA = a.product?.preis || 0;
           const priceB = b.product?.preis || 0;
           return priceA - priceB;
-        // Removed savings sorting for better performance
+        case 'savings':
+          if (activeTab === 'noname') {
+            const savingsA = a.savings || 0;
+            const savingsB = b.savings || 0;
+            return savingsB - savingsA; // Höchste Ersparnis zuerst
+          }
+          return 0;
         default:
           return 0;
       }
@@ -670,12 +697,12 @@ export default function ShoppingListScreen() {
       if (!user || noNameProducts.length === 0) return;
       
       const productCount = noNameProducts.length;
-      const totalSavings = 0; // No savings calculation for performance
+      const totalSavings = noNameProducts.reduce((sum, item) => sum + (item.savings || 0), 0);
       
       // Confirmation dialog before bulk action
       Alert.alert(
         'Alle als gekauft markieren?',
-        `Möchtest du alle ${productCount} NoName-Produkte als gekauft markieren?`,
+        `Möchtest du alle ${productCount} NoName-Produkte als gekauft markieren und €${totalSavings.toFixed(2)} zu deiner Ersparnis hinzufügen?`,
         [
           {
             text: 'Abbrechen',
@@ -733,16 +760,16 @@ export default function ShoppingListScreen() {
       }
     };
 
-    const handleMarkAsPurchased = async (itemId: string) => {
+    const handleMarkAsPurchased = async (itemId: string, savings?: number) => {
       if (!user?.uid) return;
     
     try {
       await FirestoreService.markAsPurchased(user.uid, itemId);
       
-      // Update product count only (no savings for NoName products)
-      console.log(`📊 Single update: 1 product purchased`);
+      // Update user savings and product count
+      console.log(`📊 Single update: 1 product, €${(savings || 0).toFixed(2)} savings`);
       await updateUserStats(user.uid, {
-        savingsToAdd: 0,
+        savingsToAdd: savings || 0,
         productsToAdd: 1
       });
       
@@ -751,20 +778,31 @@ export default function ShoppingListScreen() {
       // Track Achievement: complete_shopping for single item
       console.log('🎯 Tracking complete_shopping action with:', {
         productCount: 1,
-        totalSavings: 0,
+        totalSavings: savings || 0,
         currentLevel: (userProfile as any)?.stats?.currentLevel || userProfile?.level || 'unknown'
       });
       
       await achievementService.trackAction(user.uid, 'complete_shopping', {
         productCount: 1,
-        totalSavings: 0
+        totalSavings: savings || 0
       });
       
-      // Simple success message
-      showGameToast('✅ Produkt als gekauft markiert!', 'success');
+      // Motivational message based on savings
+      if (savings && savings > 0) {
+        showGameToast(`🎯 Gekauft! Du hast €${savings.toFixed(2)} gespart - super gemacht!`, 'success');
+      } else {
+        showGameToast('✅ Produkt als gekauft markiert!', 'success');
+      }
       
-      // Remove from NoName products list
-      setNoNameProducts(prev => prev.filter(item => item.id !== itemId));
+      // Optimized: Remove item from local state instead of reloading
+      if (savings && savings > 0) {
+        // NoName product - remove from noname list and update savings
+        setNoNameProducts(prev => prev.filter(item => item.id !== itemId));
+        setTotalActualSavings(prev => Math.max(0, prev - savings));
+      } else {
+        // Brand product - remove from brand list
+        setBrandProducts(prev => prev.filter(item => item.id !== itemId));
+      }
     } catch (error) {
       console.error('Error marking as purchased:', error);
       showGameToast('Markierung fehlgeschlagen. Probier es nochmal!', 'error');
@@ -1180,15 +1218,20 @@ export default function ShoppingListScreen() {
                           </Text>
                         </View>
 
-                        {/* Preis ohne Ersparnis-Anzeige */}
+                        {/* Preis mit Ersparnis in Klammern */}
                         <Text style={[styles.productPrice, { color: colors.primary }]}>
                           €{item.product.preis?.toFixed(2) || '0.00'}
+                          {item.savings > 0 && (
+                            <Text style={[styles.savingsInline, { color: colors.primary }]}>
+                              {' '}(- €{item.savings.toFixed(2)})
+                            </Text>
+                          )}
                         </Text>
           </View>
                       <View style={styles.productActions}>
         <TouchableOpacity 
                           style={[styles.actionButton, { backgroundColor: colors.primary }]}
-                          onPress={() => handleMarkAsPurchased(item.id)}
+                          onPress={() => handleMarkAsPurchased(item.id, item.savings)}
                         >
                           <IconSymbol name="checkmark" size={20} color="white" />
               </TouchableOpacity>
@@ -1313,10 +1356,10 @@ export default function ShoppingListScreen() {
                           borderColor: colors.border
                         }
                       ]}
-                                              onPress={() => updateSorting(option.value as 'name' | 'price')}
+                      onPress={() => updateSorting(option.value)}
                     >
                       <IconSymbol 
-                        name={option.icon as any} 
+                        name={option.icon} 
                         size={16} 
                         color={filters.sortBy === option.value ? 'white' : colors.primary}
                       />

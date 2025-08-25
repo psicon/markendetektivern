@@ -16,12 +16,10 @@ export const getStandardHeaderOptions = (colorScheme: 'light' | 'dark' | null, t
     headerTitleStyle: {
       fontFamily: 'Nunito_600SemiBold',
       fontSize: 18,
-      color: 'white',
     },
     headerBackTitle: 'Zurück',
     headerBackTitleStyle: {
       fontFamily: 'Nunito_400Regular',
-      color: 'white',
     },
     animation: 'slide_from_right' as const,
   };
