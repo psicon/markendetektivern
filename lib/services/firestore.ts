@@ -1366,7 +1366,8 @@ export class FirestoreService {
       const userDoc = await getDoc(userRef);
       
       if (!userDoc.exists()) {
-        // Fallback für nicht existierende User
+        // Fallback für nicht existierende User (normal für neue anonyme User)
+        console.log('📝 User-Profil nicht gefunden:', userId, '- verwende Standard-Fallback');
         return {
           displayName: 'Community Mitglied',
           level: 1,

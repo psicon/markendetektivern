@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import achievementService from '../services/achievementService';
-import { favoritesService, FavoriteProduct, ProductForFavorites } from '../services/favoritesService';
+import { FavoriteProduct, favoritesService, ProductForFavorites } from '../services/favoritesService';
 
 /**
  * Hook für Favoriten-Management
@@ -191,7 +191,7 @@ export function useFavoriteStatus(productId: string, productType: 'markenprodukt
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user || !productId) {
+    if (!user?.uid || !productId) {
       setLoading(false);
       return;
     }

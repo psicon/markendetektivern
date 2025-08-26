@@ -1,4 +1,3 @@
-
 import { AuthRequiredModal } from '@/components/ui/AuthRequiredModal';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { LevelBadge } from '@/components/ui/LevelBadge';
@@ -30,7 +29,6 @@ export default function ProfileScreen() {
   const { user, userProfile, logout, refreshUserProfile, isAnonymous } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-
   // Helper function to get country flag emoji (copied from explore.tsx)
   const getCountryFlag = (country: string): string => {
     const flagMap: {[key: string]: string} = {
@@ -54,20 +52,14 @@ export default function ProfileScreen() {
       ...getNavigationHeaderOptions(colorScheme, 'Profil'),
       headerRight: () => (
         <TouchableOpacity
-          onPress={() => {
-            if (isAnonymous) {
-              setShowAuthModal(true);
-            } else {
-              router.push('/edit-profile' as any);
-            }
-          }}
+          onPress={() => router.push('/edit-profile' as any)}
           style={{ paddingRight: 16 }}
         >
           <IconSymbol name="square.and.pencil" size={20} color="white" />
         </TouchableOpacity>
       ),
     });
-  }, [navigation, colorScheme, router, isAnonymous, setShowAuthModal]);
+  }, [navigation, colorScheme, router]);
 
   // Note: Profile refresh happens automatically via AuthContext when data changes
   // Manual refresh is called after profile edits in edit-profile.tsx
@@ -221,97 +213,53 @@ export default function ProfileScreen() {
                   Anonymer Nutzer
                 </Text>
                 <Text style={[styles.userEmail, { color: colors.icon }]}>
-                  Nicht alle Features verfügbar
+                  Eingeschränkter Zugriff
                 </Text>
               </View>
             </View>
           </View>
 
-          {/* Subtle Registration CTA - Focus on data security */}
-          <TouchableOpacity 
-            style={[styles.upgradeCard, { borderColor: colors.primary, backgroundColor: colors.cardBackground }]}
-            onPress={() => router.push('/auth/register?from=app')}
-            activeOpacity={0.8}
+          {/* Registration CTA */}
+          <LinearGradient
+            colors={[colors.primary, colors.primaryDark || colors.primary]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.savingsCard, { marginHorizontal: 16, marginBottom: 20 }]}
           >
-            <View style={styles.upgradeContent}>
-              <IconSymbol name="icloud.and.arrow.up" size={24} color={colors.primary} />
-              <View style={styles.upgradeText}>
-                <Text style={[styles.upgradeTitle, { color: colors.text }]}>
-                  Daten sichern & synchronisieren
-                </Text>
-                <Text style={[styles.upgradeSubtitle, { color: colors.icon }]}>
-                  Account erstellen für Backup & geräteübergreifenden Sync
-                </Text>
+            <View style={styles.registrationCTA}>
+              <IconSymbol name="sparkles" size={32} color="white" />
+              <Text style={styles.registrationTitle}>
+                Schalte alle Features frei!
+              </Text>
+              <Text style={styles.registrationSubtitle}>
+                Erstelle einen kostenlosen Account für:
+              </Text>
+              <View style={styles.featureList}>
+                <Text style={styles.featureItem}>✅ Bewertungen & Kommentare</Text>
+                <Text style={styles.featureItem}>✅ Lieblingsmarkt festlegen</Text>
+                <Text style={styles.featureItem}>✅ Level & Achievements</Text>
+                <Text style={styles.featureItem}>✅ Cloud-Sync deiner Daten</Text>
               </View>
-              <IconSymbol name="chevron.right" size={16} color={colors.icon} />
+              <TouchableOpacity 
+                style={styles.registrationButton}
+                onPress={() => router.push('/auth/register?from=app')}
+              >
+                <Text style={styles.registrationButtonText}>Kostenlos registrieren</Text>
+              </TouchableOpacity>
             </View>
-          </TouchableOpacity>
+          </LinearGradient>
 
-          {/* Level Card - Same as registered users */}
-          <TouchableOpacity 
-            style={styles.levelCard}
-            onPress={() => router.push('/achievements')}
-            activeOpacity={0.8}
-          >
-            <LevelBadge 
-              level={level}
-              size="large"
-              showDescription={true}
-              showProgress={true}
-              currentSavings={currentSavings}
-              currentPoints={currentPoints}
-            />
-          </TouchableOpacity>
-
-          {/* Savings Card - Same as registered users */}
-          <View style={styles.savingsCard}>
-            <LinearGradient
-              colors={['#FF9800', '#FF5722']}
-              start={{ x: 1, y: 0 }}
-              end={{ x: 0, y: 0 }}
-              style={styles.savingsGradient}
-            >
-              <View style={styles.savingsContent}>
-                <TouchableOpacity onPress={() => router.push('/achievements' as any)}>
-                  <Text style={styles.savingsLabel}>Deine Gesamtersparnis</Text>
-                  <Text style={styles.savingsAmount}>€ {totalSavings.toFixed(2)}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.productsBadge} onPress={() => router.push('/purchase-history' as any)}>
-                  <IconSymbol name="number" size={14} color={colors.warning} />
-                  <Text style={styles.productsText}>{productsSaved} gekaufte Produkte</Text>
-                </TouchableOpacity>
-              </View>
-            </LinearGradient>
-          </View>
-
-          {/* Menu Section 1 - Same as registered users */}
-          <View style={styles.menuSection}>
-            <MenuItem
-              icon="trophy"
-              title="Levelübersicht & Fortschritt"
-              onPress={() => router.push('/achievements')}
-              isFirst={true}
-              isLast={true}
-            />
-          </View>
-
-          {/* Menu Section 2 - Almost same but no Lieblingsmarkt */}
-          <View style={styles.menuSection}>
-            <MenuItem
-              icon="cart"
-              title="Einkaufszettel"
-              onPress={() => router.push('/shopping-list')}
-              isFirst={true}
-            />
+          {/* Limited Menu Items */}
+          <View style={[styles.menuSection, { backgroundColor: colors.cardBackground }]}>
             <MenuItem
               icon="heart"
-              title="Deine Lieblingsprodukte"
+              title="Favoriten"
               onPress={() => router.push('/favorites' as any)}
             />
             <MenuItem
-              icon="clock.badge.checkmark"
-              title="Kaufhistorie"
-              onPress={() => router.push('/purchase-history' as any)}
+              icon="cart"
+              title="Einkaufszettel"
+              onPress={() => router.push('/shopping-list' as any)}
             />
             <MenuItem
               icon="clock"
@@ -330,16 +278,14 @@ export default function ProfileScreen() {
               Mit bestehendem Account anmelden
             </Text>
           </TouchableOpacity>
-
-          <View style={{ height: 50 }} />
         </ScrollView>
 
         {/* Auth Required Modal */}
         <AuthRequiredModal
           visible={showAuthModal}
           onClose={() => setShowAuthModal(false)}
-          feature="Profil bearbeiten"
-          message="Erstelle einen Account um dein Profil vollständig zu bearbeiten und alle Features zu nutzen."
+          feature="Vollständiges Profil"
+          message="Erstelle einen Account um alle Profileinstellungen und Features zu nutzen."
         />
       </>
     );
@@ -780,33 +726,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Nunito_600SemiBold',
     color: '#3498db',
-  },
-  
-  // Neue Styles für subtile upgrade CTA
-  upgradeCard: {
-    marginHorizontal: 16,
-    marginBottom: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  upgradeContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-  },
-  upgradeText: {
-    flex: 1,
-    marginLeft: 12,
-    marginRight: 8,
-  },
-  upgradeTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 2,
-  },
-  upgradeSubtitle: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
   },
 });

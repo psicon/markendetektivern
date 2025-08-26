@@ -428,3 +428,183 @@ export function LoadingFooterSkeleton() {
     </View>
   );
 }
+
+// Skeleton für Rating/Comment Sections
+export function RatingOverviewSkeleton() {
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme ?? 'light'];
+  
+  return (
+    <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+      {/* Overall Rating Section */}
+      <View style={{
+        backgroundColor: colors.cardBackground,
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        alignItems: 'center',
+      }}>
+        {/* Big Rating Circle */}
+        <ShimmerSkeleton 
+          width={80} 
+          height={80} 
+          borderRadius={40}
+          style={{ marginBottom: 12 }}
+        />
+        
+        {/* Rating Text */}
+        <ShimmerSkeleton 
+          width={180} 
+          height={16} 
+          borderRadius={8}
+          style={{ marginBottom: 8 }}
+        />
+        
+        {/* Stars */}
+        <View style={{ flexDirection: 'row', gap: 4, marginBottom: 8 }}>
+          {[1,2,3,4,5].map((i) => (
+            <ShimmerSkeleton key={i} width={20} height={20} borderRadius={10} />
+          ))}
+        </View>
+        
+        {/* Count */}
+        <ShimmerSkeleton 
+          width={120} 
+          height={14} 
+          borderRadius={7}
+        />
+      </View>
+
+      {/* Criteria Ratings */}
+      <View style={{
+        backgroundColor: colors.cardBackground,
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+      }}>
+        {/* Header */}
+        <ShimmerSkeleton 
+          width={160} 
+          height={18} 
+          borderRadius={9}
+          style={{ marginBottom: 16 }}
+        />
+        
+        {/* 4 Criteria Rows */}
+        {[1,2,3,4].map((i) => (
+          <View key={i} style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: i === 4 ? 0 : 12,
+          }}>
+            <ShimmerSkeleton 
+              width={120} 
+              height={16} 
+              borderRadius={8}
+            />
+            
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <ShimmerSkeleton width={30} height={14} borderRadius={7} />
+              <View style={{ flexDirection: 'row', gap: 2 }}>
+                {[1,2,3,4,5].map((star) => (
+                  <ShimmerSkeleton key={star} width={14} height={14} borderRadius={7} />
+                ))}
+              </View>
+            </View>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+export function CommentSkeleton() {
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme ?? 'light'];
+  
+  return (
+    <View style={{
+      backgroundColor: colors.cardBackground,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 12,
+    }}>
+      {/* Header with avatar + user info */}
+      <View style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12,
+      }}>
+        {/* Avatar */}
+        <ShimmerSkeleton 
+          width={40} 
+          height={40} 
+          borderRadius={20}
+          style={{ marginRight: 12 }}
+        />
+        
+        {/* User Info */}
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <ShimmerSkeleton width={80} height={16} borderRadius={8} />
+            <ShimmerSkeleton width={60} height={18} borderRadius={9} />
+          </View>
+          <ShimmerSkeleton 
+            width={100} 
+            height={12} 
+            borderRadius={6}
+            style={{ marginTop: 4 }}
+          />
+        </View>
+      </View>
+      
+      {/* Rating Stars */}
+      <View style={{
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        gap: 4,
+        marginBottom: 12,
+      }}>
+        {[1,2,3,4,5].map((i) => (
+          <ShimmerSkeleton key={i} width={16} height={16} borderRadius={8} />
+        ))}
+      </View>
+      
+      {/* Comment Text */}
+      <ShimmerSkeleton 
+        width="100%" 
+        height={14} 
+        borderRadius={7}
+        style={{ marginBottom: 4 }}
+      />
+      <ShimmerSkeleton 
+        width="85%" 
+        height={14} 
+        borderRadius={7}
+        style={{ marginBottom: 4 }}
+      />
+      <ShimmerSkeleton 
+        width="60%" 
+        height={14} 
+        borderRadius={7}
+      />
+    </View>
+  );
+}
+
+export function CommentsHeaderSkeleton() {
+  return (
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      marginBottom: 8,
+    }}>
+      <ShimmerSkeleton width={120} height={18} borderRadius={9} />
+      <ShimmerSkeleton width={24} height={20} borderRadius={10} />
+    </View>
+  );
+}

@@ -1,0 +1,64 @@
+{
+  "rules": {
+    "users": {
+      "$userId": {
+        // WICHTIG: Anonyme User können ihr eigenes Profil erstellen/lesen/schreiben!
+        ".read": "$userId === auth.uid",
+        ".write": "$userId === auth.uid",
+        
+        // Subcollections für anonyme User
+        "favorites": {
+          ".read": "$userId === auth.uid",
+          ".write": "$userId === auth.uid"
+        },
+        "einkaufswagen": {
+          ".read": "$userId === auth.uid",
+          ".write": "$userId === auth.uid"
+        },
+        "ratings": {
+          ".read": "$userId === auth.uid",
+          ".write": "$userId === auth.uid"
+        },
+        "scanHistory": {
+          ".read": "$userId === auth.uid",
+          ".write": "$userId === auth.uid"
+        },
+        "searchHistory": {
+          ".read": "$userId === auth.uid",
+          ".write": "$userId === auth.uid"
+        },
+        "stats": {
+          ".read": "$userId === auth.uid",
+          ".write": "$userId === auth.uid"
+        }
+      }
+    },
+    
+    // Produkte können alle lesen (auch anonyme User)
+    "produkte": {
+      ".read": true,
+      "$productId": {
+        // Bewertungen können alle authentifizierten User (inkl. anonym) schreiben
+        "ratings": {
+          ".write": "auth != null"
+        }
+      }
+    },
+    
+    // Markenprodukte können alle lesen
+    "markenprodukte": {
+      ".read": true,
+      "$productId": {
+        "ratings": {
+          ".write": "auth != null"
+        }
+      }
+    },
+    
+    // Achievements können alle lesen
+    "achievements": {
+      ".read": true,
+      ".write": false
+    }
+  }
+}

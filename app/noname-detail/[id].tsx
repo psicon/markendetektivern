@@ -4,7 +4,7 @@ import { ThemedView } from '@/components/ThemedView';
 import { CartToast } from '@/components/ui/CartToast';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
-import { ListItemSkeleton, ProductComparisonSkeleton } from '@/components/ui/ShimmerSkeleton';
+import { CommentSkeleton, CommentsHeaderSkeleton, ListItemSkeleton, ProductComparisonSkeleton, RatingOverviewSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor, getStufenDescription, getStufenTitle } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -217,19 +217,28 @@ export default function NoNameDetailScreen() {
   };
   
   // Load product ratings with user info
-  const loadProductRatings = async () => {
-    if (!product?.id) return;
+  const loadProductRatings = async (productToLoad: any) => {
+    if (!productToLoad?.id) {
+      console.error('⚠️ loadProductRatings: No product provided!');
+      return;
+    }
+    
+    console.log('🔍 Loading ratings for NoName product:', productToLoad.name, 'ID:', productToLoad.id);
+    
+    // WICHTIG: Reset old ratings BEFORE loading new ones
+    setProductRatings([]);
+    setRatingStats(null);
     
     try {
       setRatingsLoading(true);
-      const ratings = await FirestoreService.getProductRatingsWithUserInfo(product.id, true);
+      const ratings = await FirestoreService.getProductRatingsWithUserInfo(productToLoad.id, true);
       setProductRatings(ratings);
       
       // Calculate rating statistics
       const stats = FirestoreService.calculateRatingStats(ratings);
       setRatingStats(stats);
       
-      console.log(`✅ Loaded ${ratings.length} ratings with user info for product ${product.name}`);
+      console.log(`✅ Loaded ${ratings.length} ratings with user info for product ${productToLoad.name}`);
     } catch (error) {
       console.error('Error loading product ratings:', error);
     } finally {
@@ -240,7 +249,7 @@ export default function NoNameDetailScreen() {
   // Check for existing rating and open appropriate modal - copied from product-comparison
   const openRatingModal = async () => {
     if (!user?.uid) {
-      showRatingGameToast('Bitte melde dich an, um eine Bewertung abzugeben', 'info');
+      showRatingGameToast('Kein Benutzer angemeldet', 'error');
       return;
     }
 
@@ -358,7 +367,7 @@ export default function NoNameDetailScreen() {
           const updatedProduct = await FirestoreService.getProductWithDetails(product.id);
           if (updatedProduct) {
             setProduct(updatedProduct);
-            await loadProductRatings();
+            await loadProductRatings(updatedProduct);
           }
         }
       }, 4000);
@@ -499,7 +508,7 @@ export default function NoNameDetailScreen() {
           setProduct(updatedData);
           
           // Also reload detailed ratings
-          loadProductRatings();
+          loadProductRatings(updatedData);
         }
       }
     }, (error) => {
@@ -767,8 +776,9 @@ export default function NoNameDetailScreen() {
                 style={styles.ratingRow}
                 onPress={async () => {
                   // Show ratings VIEW (not input) when clicking stars
-                  await loadProductRatings();
-                  setShowRatingsView(true);
+                  console.log('🎯 Opening ratings for NoName product:', product.name);
+                  setShowRatingsView(true); // Modal SOFORT öffnen!
+                  loadProductRatings(product); // Parallel laden (ohne await!)
                 }}
                 activeOpacity={0.7}
               >
@@ -1245,9 +1255,10 @@ export default function NoNameDetailScreen() {
               <TouchableOpacity 
                 style={[styles.ratingButton, { backgroundColor: colors.primary }]}
                 onPress={async () => {
+                  console.log('🎯 Opening ratings from product details for NoName product:', product?.name);
                   setShowProductDetails(false);
-                  await loadProductRatings(); // Load ratings before showing
-                  setShowRatingsView(true);
+                  setShowRatingsView(true); // Modal SOFORT öffnen!
+                  loadProductRatings(product); // Parallel laden (ohne await!)
                 }}
               >
                 <ThemedText style={styles.ratingButtonText}>Bewertungen anzeigen</ThemedText>
@@ -1291,12 +1302,13 @@ export default function NoNameDetailScreen() {
           <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
             {/* Loading state or data */}
             {ratingsLoading ? (
-              <View style={[styles.overallRatingCard, { backgroundColor: colors.cardBackground }]}>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <ThemedText style={[styles.loadingText, { color: colors.icon, marginTop: 16 }]}>
-                  Lade Bewertungen...
-                </ThemedText>
-              </View>
+              <>
+                <RatingOverviewSkeleton />
+                <CommentsHeaderSkeleton />
+                <CommentSkeleton />
+                <CommentSkeleton />
+                <CommentSkeleton />
+              </>
             ) : (
               <>
                 {/* Overall Rating Display */}

@@ -3,10 +3,11 @@ import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAuth } from '@/lib/contexts/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { Animated, Dimensions, ImageBackground, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Dimensions, ImageBackground, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function WelcomeScreen() {
@@ -15,9 +16,12 @@ export default function WelcomeScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
   const screenHeight = Dimensions.get('window').height;
+  const isSmallScreen = screenHeight < 700; // iPhone SE, etc.
+  const { signInAnonymously } = useAuth();
   
-  // Image loading state and animation
+  // States
   const [imageLoaded, setImageLoaded] = useState(false);
+  const [isAnonymousLoading, setIsAnonymousLoading] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
 
   const handleGoogleSignIn = () => {
@@ -43,6 +47,21 @@ export default function WelcomeScreen() {
     }).start();
   };
 
+  const handleAnonymousSignIn = async () => {
+    try {
+      setIsAnonymousLoading(true);
+      await signInAnonymously();
+      console.log('🔒 Anonymer Login erfolgreich');
+      router.replace('/(tabs)');
+    } catch (error) {
+      console.error('Fehler beim anonymen Login:', error);
+      // Fallback: Gehe trotzdem zur App
+      router.replace('/(tabs)');
+    } finally {
+      setIsAnonymousLoading(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       {/* Static background while image loads */}
@@ -64,36 +83,48 @@ export default function WelcomeScreen() {
             : ['transparent', 'rgba(0,0,0,0.2)', 'rgba(0,0,0,0.6)', 'rgba(0,0,0,0.85)']
         }
         locations={[0, 0.3, 0.7, 1]}
-        style={[styles.overlay, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}
+        style={[
+          styles.overlay, 
+          { 
+            paddingTop: insets.top + (isSmallScreen ? 10 : 20), 
+            paddingBottom: insets.bottom + (isSmallScreen ? 10 : 20) 
+          }
+        ]}
       >
-        {/* Back Button */}
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <IconSymbol name="chevron.left" size={24} color="white" />
-        </TouchableOpacity>
+        {/* Back Button - nur wenn wir navigiert wurden */}
+        {router.canGoBack() && (
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => router.back()}
+          >
+            <IconSymbol name="chevron.left" size={24} color="white" />
+          </TouchableOpacity>
+        )}
 
         {/* Logo */}
-        <View style={styles.logoContainer}>
+        <View style={[styles.logoContainer, isSmallScreen && styles.logoContainerSmall]}>
           <CustomIcon 
             name="iconBlack" 
-            size={80} 
+            size={isSmallScreen ? 60 : 80} 
             color="white"
             style={styles.logoIcon}
           />
-          <ThemedText style={styles.logoText}>MarkenDetektive</ThemedText>
+          <ThemedText style={[styles.logoText, isSmallScreen && styles.logoTextSmall]}>MarkenDetektive</ThemedText>
         </View>
 
         {/* Content */}
         <View style={styles.content}>
-          <ThemedText style={styles.subTitle}>Wir zeigen dir,{'\n'}wer dahinter steckt!</ThemedText>
+          <ThemedText style={[styles.subTitle, isSmallScreen && styles.subTitleSmall]}>Wir zeigen dir,{'\n'}wer dahinter steckt!</ThemedText>
           
           <View style={styles.authButtons}>
-            <ThemedText style={styles.subtitle}>Jetzt kostenlos registrieren:</ThemedText>
+            <ThemedText style={[styles.subtitle, isSmallScreen && styles.subtitleSmall]}>Jetzt kostenlos registrieren:</ThemedText>
             
             <TouchableOpacity 
-              style={[styles.emailButton, { backgroundColor: colors.primary }]}
+              style={[
+                styles.emailButton, 
+                { backgroundColor: colors.primary },
+                isSmallScreen && styles.emailButtonSmall
+              ]}
               onPress={() => router.push('/auth/register')}
             >
               <IconSymbol name="envelope" size={20} color="white" />
@@ -102,22 +133,50 @@ export default function WelcomeScreen() {
 
             <ThemedText style={styles.orText}>Oder direkt mit:</ThemedText>
 
-            <TouchableOpacity style={styles.socialButton} onPress={handleGoogleSignIn}>
+            <TouchableOpacity 
+              style={[styles.socialButton, isSmallScreen && styles.socialButtonSmall]} 
+              onPress={handleGoogleSignIn}
+            >
               <ThemedText style={styles.googleIcon}>G</ThemedText>
               <ThemedText style={styles.socialButtonText}>Google</ThemedText>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.socialButtonDark} onPress={handleAppleSignIn}>
+            <TouchableOpacity 
+              style={[styles.socialButtonDark, isSmallScreen && styles.socialButtonDarkSmall]} 
+              onPress={handleAppleSignIn}
+            >
               <IconSymbol name="apple.logo" size={20} color="white" />
               <ThemedText style={styles.socialButtonTextDark}>Apple Account</ThemedText>
             </TouchableOpacity>
 
-            <View style={styles.loginSection}>
-              <ThemedText style={styles.loginText}>Du hast schon einen Account?</ThemedText>
-              <TouchableOpacity onPress={() => router.push('/auth/login')}>
-                <ThemedText style={[styles.loginLink, { color: colors.primary }]}>Login!</ThemedText>
-              </TouchableOpacity>
-            </View>
+            {/* Login Button */}
+            <TouchableOpacity 
+              style={[
+                styles.secondaryButton, 
+                { marginTop: -1 },
+                isSmallScreen && styles.secondaryButtonSmall
+              ]}
+              onPress={() => router.push('/auth/login')}
+            >
+              <IconSymbol name="person.circle" size={18} color="rgba(255,255,255,0.9)" />
+              <ThemedText style={styles.secondaryButtonText}>Bereits angemeldet: Login</ThemedText>
+            </TouchableOpacity>
+
+            {/* Anonymous Button */}
+            <TouchableOpacity 
+              style={[styles.secondaryButton, isSmallScreen && styles.secondaryButtonSmall]} 
+              onPress={handleAnonymousSignIn}
+              disabled={isAnonymousLoading}
+            >
+              {isAnonymousLoading ? (
+                <ActivityIndicator size="small" color="rgba(255,255,255,0.9)" />
+              ) : (
+                <>
+                  <IconSymbol name="arrow.right" size={18} color="rgba(255,255,255,0.8)" />
+                  <ThemedText style={styles.secondaryButtonText}>App ohne Account nutzen</ThemedText>
+                </>
+              )}
+            </TouchableOpacity>
 
             <ThemedText style={styles.termsText}>
               Ich akzeptiere: <ThemedText style={[styles.termsLink, { color: colors.primary }]}>AGB + Datenschutz</ThemedText>
@@ -164,6 +223,10 @@ const styles = StyleSheet.create({
     marginTop: 80,
     gap: 10,
   },
+  logoContainerSmall: {
+    marginTop: 40,
+    gap: 6,
+  },
   logoIcon: {
     marginBottom: 4,
   },
@@ -173,6 +236,10 @@ const styles = StyleSheet.create({
     color: 'white',
     textAlign: 'center',
     lineHeight: 36,
+  },
+  logoTextSmall: {
+    fontSize: 26,
+    lineHeight: 30,
   },
   content: {
     flex: 1,
@@ -194,16 +261,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 10,
    },
+  subTitleSmall: {
+    fontSize: 18,
+    marginBottom: 5,
+  },
   authButtons: {
     width: '100%',
     alignItems: 'center',
   },
   subtitle: {
     fontSize: 14,
-
     color: 'rgba(255, 255, 255, 0.7)',
     marginBottom: 16,
     textAlign: 'center',
+  },
+  subtitleSmall: {
+    fontSize: 12,
+    marginBottom: 12,
   },
   emailButton: {
     flexDirection: 'row',
@@ -215,6 +289,11 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     gap: 12,
   },
+  emailButtonSmall: {
+    paddingVertical: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
   emailButtonText: {
     color: 'white',
     fontSize: 16,
@@ -222,9 +301,33 @@ const styles = StyleSheet.create({
   },
   orText: {
     fontSize: 14,
-
     color: 'rgba(255, 255, 255, 0.7)',
-    marginBottom: 16,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    gap: 8,
+  },
+  secondaryButtonSmall: {
+    marginTop: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    gap: 6,
+  },
+  secondaryButtonText: {
+    fontSize: 15,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255,255,255,0.9)',
   },
   socialButton: {
     flexDirection: 'row',
@@ -237,6 +340,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     gap: 12,
   },
+  socialButtonSmall: {
+    paddingVertical: 12,
+    marginBottom: 8,
+    gap: 8,
+  },
   socialButtonDark: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -247,6 +355,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     marginBottom: 32,
     gap: 12,
+  },
+  socialButtonDarkSmall: {
+    paddingVertical: 12,
+    marginBottom: 20,
+    gap: 8,
   },
   googleIcon: {
     fontSize: 20,
@@ -263,28 +376,15 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_600SemiBold',
     color: 'white',
   },
-  loginSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 24,
-    gap: 4,
-  },
-  loginText: {
-    fontSize: 14,
 
-    color: 'rgba(255, 255, 255, 0.7)',
-  },
-  loginLink: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-  },
   termsText: {
     fontSize: 12,
-
+    marginTop: 10,
     color: 'rgba(255, 255, 255, 0.6)',
     textAlign: 'center',
   },
   termsLink: {
     fontFamily: 'Nunito_600SemiBold',
   },
+
 });

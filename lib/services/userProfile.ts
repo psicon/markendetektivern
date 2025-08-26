@@ -1,4 +1,3 @@
-import { User } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -36,10 +35,10 @@ export const getUserProfile = async (uid: string): Promise<UserProfile | null> =
       return userDoc.data() as UserProfile;
     }
     
-    console.log('❌ Kein User-Profil gefunden für UID:', uid);
+    console.log('ℹ️ Kein User-Profil gefunden für UID:', uid, '(eventuell neuer anonymer User)');
     return null;
   } catch (error) {
-    console.error('Fehler beim Laden des User-Profils:', error);
+    console.warn('⚠️ Fehler beim Laden des User-Profils:', error);
     return null;
   }
 };
@@ -48,6 +47,47 @@ export const getUserProfile = async (uid: string): Promise<UserProfile | null> =
  * Erstellt oder aktualisiert das User-Profil
  * Wird nur beim ersten Login oder bei Updates benötigt
  */
+export const createUserProfile = async (user: any, additionalData: Partial<UserProfile> = {}): Promise<void> => {
+  try {
+    const userRef = doc(db, 'users', user.uid);
+    const userDoc = await getDoc(userRef);
+    
+    if (!userDoc.exists()) {
+      const profileData: UserProfile = {
+        uid: user.uid,
+        email: user.email || (user.isAnonymous ? 'anonymous@markendetektive.app' : ''),
+        display_name: user.displayName || (user.isAnonymous ? 'Anonymer Nutzer' : ''),
+        photo_url: user.photoURL || '',
+        created_time: serverTimestamp(),
+        totalSavings: 0,
+        level: 1,
+        xp: 0,
+        productsSaved: 0,
+        ratingsGiven: 0,
+        streakDays: 0,
+        isPremium: false,
+        lastLoginAt: serverTimestamp(),
+        lastActivityAt: serverTimestamp(),
+        ...additionalData
+      };
+      
+      await setDoc(userRef, profileData);
+      console.log('✅ User-Profil erstellt für:', user.uid, '(anonymous:', user.isAnonymous, ')');
+    } else {
+      // Update lastLoginAt
+      await updateDoc(userRef, {
+        lastLoginAt: serverTimestamp(),
+        lastActivityAt: serverTimestamp()
+      });
+      console.log('🔄 Login-Zeit aktualisiert für:', user.uid);
+    }
+  } catch (error) {
+    console.error('❌ Fehler beim Erstellen/Aktualisieren des User-Profils:', error);
+    throw error;
+  }
+};
+
+/**
 export const updateUserProfile = async (user: User, additionalData?: Partial<UserProfile>) => {
   try {
     const userRef = doc(db, 'users', user.uid);
@@ -104,7 +144,7 @@ export const updateUserStats = async (uid: string, stats: {
     const userDoc = await getDoc(userRef);
     
     if (!userDoc.exists()) {
-      console.error('User nicht gefunden:', uid);
+      console.log('📝 User-Dokument existiert noch nicht für:', uid, '- überspringe Update');
       return;
     }
     

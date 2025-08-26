@@ -7,30 +7,34 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { Discounter, FirestoreDocument } from '@/lib/types/firestore';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function RegisterScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { signUp, signInWithGoogle, signInWithApple } = useAuth();
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
+  
+  // Prüfe ob wir von innerhalb der App kommen (z.B. anonymous user upgrade)
+  const canGoBack = params.from === 'app';
 
   // Helper function to get country flag emoji (copied from explore.tsx)
   const getCountryFlag = (country: string): string => {
@@ -219,12 +223,14 @@ export default function RegisterScreen() {
       >
         {/* Header */}
         <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <IconSymbol name="chevron.left" size={24} color={colors.text} />
-          </TouchableOpacity>
+          {canGoBack && (
+            <TouchableOpacity 
+              style={styles.backButton}
+              onPress={() => router.back()}
+            >
+              <IconSymbol name="chevron.left" size={24} color={colors.text} />
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.content}>

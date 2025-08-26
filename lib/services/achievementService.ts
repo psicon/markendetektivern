@@ -77,9 +77,9 @@ class AchievementService {
       this.isInitialized = true;
       console.log('✅ Achievement-System initialisiert mit', this.achievements.length, 'Achievements');
     } catch (error: any) {
-      // Bei Permission-Fehler: Stumm behandeln und lokale Defaults verwenden
+      // Bei Permission-Fehler: Verwende lokale Defaults (normal für anonyme User!)
       if (error?.code === 'permission-denied') {
-        console.log('🔄 User noch nicht authentifiziert, verwende lokale Achievement-Defaults');
+        console.log('📝 Firestore Achievements nicht zugänglich, verwende lokale Defaults');
         this.achievements = DEFAULT_ACHIEVEMENTS.map((achievement, index) => ({
           ...achievement,
           id: `local_${index}`,
@@ -160,7 +160,7 @@ class AchievementService {
       const userDoc = await getDoc(userRef);
 
       if (!userDoc.exists()) {
-        console.error('User nicht gefunden:', userId);
+        console.log('📝 User-Dokument existiert noch nicht für:', userId, '- wird bei nächster Aktion erstellt');
         return;
       }
 
@@ -637,12 +637,17 @@ class AchievementService {
       const userDoc = await getDoc(userRef);
 
       if (!userDoc.exists()) {
+        console.log('📊 Erstelle Default Stats für User:', userId);
         return this.getDefaultUserStats();
       }
 
       return userDoc.data().stats || this.getDefaultUserStats();
-    } catch (error) {
-      console.error('Fehler beim Laden der User Stats:', error);
+    } catch (error: any) {
+      if (error?.code === 'permission-denied') {
+        console.log('📊 Stats nicht zugänglich, verwende Defaults für User:', userId);
+      } else {
+        console.warn('⚠️ Fehler beim Laden der User Stats für', userId, ':', error);
+      }
       return this.getDefaultUserStats();
     }
   }

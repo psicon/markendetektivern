@@ -5,7 +5,7 @@ import { CartToast } from '@/components/ui/CartToast';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
-import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
+import { CommentSkeleton, CommentsHeaderSkeleton, RatingOverviewSkeleton, ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor, getStufenDescription, getStufenTitle } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
@@ -1451,24 +1451,32 @@ export default function ProductComparisonScreen() {
   };
 
   // Load product ratings for the ratings view with user info
-  const loadProductRatings = async () => {
-    const currentProduct = selectedProductForDetails || comparisonData?.mainProduct;
-    if (!currentProduct?.id) return;
+  const loadProductRatings = async (productToLoad: any) => {
+    if (!productToLoad?.id) {
+      console.error('⚠️ loadProductRatings: No product provided!');
+      return;
+    }
+    
+    console.log('🔍 Loading ratings for product:', productToLoad.name, 'ID:', productToLoad.id);
+    
+    // WICHTIG: Reset old ratings BEFORE loading new ones
+    setProductRatings([]);
+    setRatingStats(null);
     
     try {
       setRatingsLoading(true);
       
-      // Determine if it's NoName or Brand product
-      const isNoNameProduct = !!selectedProductForDetails;
+      // Determine if it's NoName or Brand product based on the actual product passed
+      const isNoNameProduct = productToLoad.stufe !== undefined; // NoName products have stufe, Brand products don't
       
-      const ratings = await FirestoreService.getProductRatingsWithUserInfo(currentProduct.id, isNoNameProduct);
+      const ratings = await FirestoreService.getProductRatingsWithUserInfo(productToLoad.id, isNoNameProduct);
       setProductRatings(ratings);
       
       // Calculate rating statistics
       const stats = FirestoreService.calculateRatingStats(ratings);
       setRatingStats(stats);
       
-      console.log(`✅ Loaded ${ratings.length} ratings with user info for product ${currentProduct.name}`);
+      console.log(`✅ Loaded ${ratings.length} ratings with user info for product ${productToLoad.name}`);
     } catch (error) {
       console.error('Error loading product ratings:', error);
     } finally {
@@ -1479,8 +1487,8 @@ export default function ProductComparisonScreen() {
   // Check for existing rating and open appropriate modal
   const openRatingModal = async () => {
     if (!user?.uid) {
-              showFavoriteGameToast('Bitte melde dich an, um eine Bewertung abzugeben', 'info');
-        return;
+      showFavoriteGameToast('Kein Benutzer angemeldet', 'error');
+      return;
     }
 
     const currentProduct = selectedProductForDetails || comparisonData?.mainProduct;
@@ -2191,9 +2199,10 @@ export default function ProductComparisonScreen() {
                   style={styles.ratingRow}
                   onPress={async () => {
                     // Show ratings VIEW when clicking stars for main product
+                    console.log('🎯 Opening ratings for MAIN product:', comparisonData.mainProduct.name);
                     setSelectedProductForDetails(null); // null means main product
-                    await loadProductRatings();
-                    setShowRatingsView(true);
+                    setShowRatingsView(true); // Modal SOFORT öffnen!
+                    loadProductRatings(comparisonData.mainProduct); // Parallel laden (ohne await!)
                   }}
                   activeOpacity={0.7}
                 >
@@ -2394,9 +2403,10 @@ export default function ProductComparisonScreen() {
                         style={styles.ratingRow}
                         onPress={async () => {
                           // Show ratings VIEW when clicking stars for NoName product
+                          console.log('🎯 Opening ratings for NONAME product:', noNameProduct.name);
                           setSelectedProductForDetails(noNameProduct);
-                          await loadProductRatings();
-                          setShowRatingsView(true);
+                          setShowRatingsView(true); // Modal SOFORT öffnen!
+                          loadProductRatings(noNameProduct); // Parallel laden (ohne await!)
                         }}
                         activeOpacity={0.7}
                       >
@@ -2883,9 +2893,11 @@ export default function ProductComparisonScreen() {
               <TouchableOpacity 
                 style={[styles.ratingButton, { backgroundColor: colors.primary }]}
                 onPress={async () => {
+                  const targetProduct = selectedProductForDetails || comparisonData?.mainProduct;
+                  console.log('🎯 Opening ratings from product details for:', targetProduct?.name);
                   setShowProductDetails(false);
-                  await loadProductRatings(); // Load ratings before showing
-                  setShowRatingsView(true);
+                  setShowRatingsView(true); // Modal SOFORT öffnen!
+                  loadProductRatings(targetProduct); // Parallel laden (ohne await!)
                 }}
               >
                 <ThemedText style={styles.ratingButtonText}>Bewertungen anzeigen</ThemedText>
@@ -3105,12 +3117,13 @@ export default function ProductComparisonScreen() {
           <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
             {/* Loading state or data */}
             {ratingsLoading ? (
-              <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <ThemedText style={[{ color: colors.icon, marginTop: 16, textAlign: 'center' }]}>
-                  Lade Bewertungen...
-                </ThemedText>
-              </View>
+              <>
+                <RatingOverviewSkeleton />
+                <CommentsHeaderSkeleton />
+                <CommentSkeleton />
+                <CommentSkeleton />
+                <CommentSkeleton />
+              </>
             ) : (
               <>
                 {/* Overall Rating Card */}
