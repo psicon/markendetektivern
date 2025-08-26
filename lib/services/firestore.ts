@@ -1348,6 +1348,341 @@ export class FirestoreService {
   }
 
   /**
+   * Lädt User-Informationen für Community-Features
+   */
+  static async getUserInfo(userId: string): Promise<{
+    displayName: string;
+    avatarUrl?: string;
+    level: number;
+    currentLevel?: { 
+      name: string; 
+      color: string; 
+      icon: string; 
+    };
+  } | null> {
+    try {
+      // Vereinfachte Abfrage - nur users Collection, keine Subcollections
+      const userRef = doc(db, 'users', userId);
+      const userDoc = await getDoc(userRef);
+      
+      if (!userDoc.exists()) {
+        // Fallback für nicht existierende User
+        return {
+          displayName: 'Community Mitglied',
+          level: 1,
+          currentLevel: {
+            name: 'Neuling',
+            color: '#6B7280',
+            icon: 'person'
+          }
+        };
+      }
+      
+      const userData = userDoc.data();
+      
+      // Versuche Stats zu laden, aber ohne Fehler wenn keine Permissions
+      let userLevel = userData.level || 1;
+      try {
+        const userStatsRef = doc(db, 'users', userId, 'stats', 'achievements');
+        const userStatsDoc = await getDoc(userStatsRef);
+        if (userStatsDoc.exists()) {
+          const stats = userStatsDoc.data();
+          userLevel = stats.level || userLevel;
+        }
+      } catch (statsError) {
+        // Ignoriere Stats-Fehler, verwende userData.level
+        console.log('Stats not accessible, using user level:', userLevel);
+      }
+      
+      // Level-Namen und Farben nach dem Achievement-System
+      const getLevelInfo = (level: number) => {
+        if (level >= 50) return { name: 'Legende', color: '#DC2626', icon: 'crown' };
+        if (level >= 30) return { name: 'Experte', color: '#7C3AED', icon: 'star' };
+        if (level >= 20) return { name: 'Profi', color: '#2563EB', icon: 'trophy' };
+        if (level >= 10) return { name: 'Kenner', color: '#059669', icon: 'shield' };
+        if (level >= 5) return { name: 'Entdecker', color: '#D97706', icon: 'magnifyingglass' };
+        if (level >= 2) return { name: 'Sparprofi', color: '#10B981', icon: 'cart' };
+        return { name: 'Neuling', color: '#6B7280', icon: 'person' };
+      };
+      
+      const levelInfo = getLevelInfo(userLevel);
+      
+      // Bessere Fallbacks für Display Name
+      const displayName = userData.displayName || 
+                         userData.name || 
+                         userData.nickname ||
+                         userData.email?.split('@')[0] || 
+                         'Community Mitglied';
+      
+      return {
+        displayName: displayName,
+        avatarUrl: userData.photo_url || userData.photoURL || userData.profilePicture || userData.avatarUrl || userData.profileImageUrl,
+        level: userLevel,
+        currentLevel: levelInfo
+      };
+    } catch (error) {
+      console.log('Could not load full user info, using defaults');
+      // Besserer Fallback
+      return {
+        displayName: 'Community Mitglied',
+        level: 1,
+        currentLevel: {
+          name: 'Neuling',
+          color: '#6B7280',
+          icon: 'person'
+        }
+      };
+    }
+  }
+
+  /**
+   * Lädt alle Bewertungen für ein Produkt mit User-Informationen
+   */
+  static async getProductRatingsWithUserInfo(productId: string, isNoNameProduct: boolean = true): Promise<any[]> {
+    try {
+      console.log('📊 Loading ratings with user info for product:', productId);
+      
+      // Erst normale Bewertungen laden
+      const ratings = await this.getProductRatings(productId, isNoNameProduct);
+      
+      // Dann User-Infos parallel laden
+      const ratingsWithUserInfo = await Promise.all(
+        ratings.map(async (rating) => {
+          // userID ist der korrekte Feldname in der productRatings Collection
+          const userId = rating.userID;
+          if (userId) {
+            const userInfo = await this.getUserInfo(userId);
+            return {
+              ...rating,
+              userInfo
+            };
+          }
+          // Fallback wenn keine userID vorhanden
+          return {
+            ...rating,
+            userInfo: {
+              displayName: 'Community Mitglied',
+              level: 1,
+              currentLevel: {
+                name: 'Neuling',
+                color: '#6B7280',
+                icon: 'person'
+              }
+            }
+          };
+        })
+      );
+      
+      console.log(`✅ Loaded ${ratingsWithUserInfo.length} ratings with user info`);
+      return ratingsWithUserInfo;
+      
+    } catch (error) {
+      console.error('Error loading ratings with user info:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Lädt alle Bewertungen für ein Produkt aus der productRatings Collection
+   */
+  static async getProductRatings(productId: string, isNoNameProduct: boolean = true): Promise<any[]> {
+    try {
+      console.log('📊 Loading ratings for product:', productId, 'IsNoName:', isNoNameProduct);
+      
+      const ratingsCollection = collection(db, 'productRatings');
+      let ratingsQuery;
+      
+      if (isNoNameProduct) {
+        // Query for NoName product ratings
+        ratingsQuery = query(
+          ratingsCollection,
+          where('productID', '==', doc(db, 'produkte', productId))
+        );
+      } else {
+        // Query for Brand product ratings
+        ratingsQuery = query(
+          ratingsCollection,
+          where('brandProductID', '==', doc(db, 'markenProdukte', productId))
+        );
+      }
+      
+      const ratingsSnapshot = await getDocs(ratingsQuery);
+      const ratings = [];
+      
+      ratingsSnapshot.forEach((doc) => {
+        const data = doc.data();
+        ratings.push({
+          id: doc.id,
+          ...data,
+          ratedate: data.ratedate?.toDate ? data.ratedate.toDate() : data.ratedate,
+          updatedate: data.updatedate?.toDate ? data.updatedate.toDate() : data.updatedate,
+        });
+      });
+      
+      // Sort by date (newest first)
+      ratings.sort((a, b) => {
+        const dateA = a.ratedate || new Date(0);
+        const dateB = b.ratedate || new Date(0);
+        return dateB.getTime() - dateA.getTime();
+      });
+      
+      console.log(`✅ Loaded ${ratings.length} ratings for product ${productId}`);
+      return ratings;
+      
+    } catch (error) {
+      console.error('Error loading product ratings:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Berechnet aggregierte Bewertungsstatistiken für ein Produkt
+   */
+  static calculateRatingStats(ratings: any[]): {
+    averageOverall: number;
+    averagePrice: number;
+    averageTaste: number;
+    averageContent: number;
+    averageSimilarity: number;
+    totalCount: number;
+    commentsCount: number;
+  } {
+    if (ratings.length === 0) {
+      return {
+        averageOverall: 0,
+        averagePrice: 0,
+        averageTaste: 0,
+        averageContent: 0,
+        averageSimilarity: 0,
+        totalCount: 0,
+        commentsCount: 0
+      };
+    }
+
+    const stats = {
+      overall: 0,
+      price: 0,
+      taste: 0,
+      content: 0,
+      similarity: 0,
+      overallCount: 0,
+      priceCount: 0,
+      tasteCount: 0,
+      contentCount: 0,
+      similarityCount: 0,
+      commentsCount: 0
+    };
+
+    ratings.forEach(rating => {
+      if (rating.ratingOverall) {
+        stats.overall += rating.ratingOverall;
+        stats.overallCount++;
+      }
+      if (rating.ratingPriceValue) {
+        stats.price += rating.ratingPriceValue;
+        stats.priceCount++;
+      }
+      if (rating.ratingTasteFunction) {
+        stats.taste += rating.ratingTasteFunction;
+        stats.tasteCount++;
+      }
+      if (rating.ratingContent) {
+        stats.content += rating.ratingContent;
+        stats.contentCount++;
+      }
+      if (rating.ratingSimilarity) {
+        stats.similarity += rating.ratingSimilarity;
+        stats.similarityCount++;
+      }
+      if (rating.comment && rating.comment.trim()) {
+        stats.commentsCount++;
+      }
+    });
+
+    return {
+      averageOverall: stats.overallCount > 0 ? stats.overall / stats.overallCount : 0,
+      averagePrice: stats.priceCount > 0 ? stats.price / stats.priceCount : 0,
+      averageTaste: stats.tasteCount > 0 ? stats.taste / stats.tasteCount : 0,
+      averageContent: stats.contentCount > 0 ? stats.content / stats.contentCount : 0,
+      averageSimilarity: stats.similarityCount > 0 ? stats.similarity / stats.similarityCount : 0,
+      totalCount: ratings.length,
+      commentsCount: stats.commentsCount
+    };
+  }
+
+  /**
+   * Prüft ob ein User bereits eine Bewertung für ein Produkt abgegeben hat
+   */
+  static async getUserRatingForProduct(userId: string, productId: string, isNoNameProduct: boolean = true): Promise<any | null> {
+    try {
+      console.log('🔍 Checking existing rating for user:', userId, 'product:', productId);
+      
+      const ratingsCollection = collection(db, 'productRatings');
+      let ratingsQuery;
+      
+      if (isNoNameProduct) {
+        ratingsQuery = query(
+          ratingsCollection,
+          where('userID', '==', userId),
+          where('productID', '==', doc(db, 'produkte', productId))
+        );
+      } else {
+        ratingsQuery = query(
+          ratingsCollection,
+          where('userID', '==', userId),
+          where('brandProductID', '==', doc(db, 'markenProdukte', productId))
+        );
+      }
+      
+      const ratingsSnapshot = await getDocs(ratingsQuery);
+      
+      if (!ratingsSnapshot.empty) {
+        const rating = ratingsSnapshot.docs[0];
+        const data = rating.data();
+        console.log('✅ Found existing rating:', rating.id);
+        return {
+          id: rating.id,
+          ...data,
+          ratedate: data.ratedate?.toDate ? data.ratedate.toDate() : data.ratedate,
+          updatedate: data.updatedate?.toDate ? data.updatedate.toDate() : data.updatedate,
+        };
+      }
+      
+      console.log('❌ No existing rating found');
+      return null;
+      
+    } catch (error) {
+      console.error('Error checking user rating:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Aktualisiert eine bestehende Bewertung
+   */
+  static async updateProductRating(ratingId: string, updateData: {
+    ratingOverall: number;
+    ratingPriceValue?: number | null;
+    ratingTasteFunction?: number | null;
+    ratingSimilarity?: number | null;
+    ratingContent?: number | null;
+    comment?: string | null;
+    updatedate: Date;
+  }): Promise<void> {
+    try {
+      console.log('🔄 Updating rating:', ratingId);
+      
+      const ratingRef = doc(db, 'productRatings', ratingId);
+      await updateDoc(ratingRef, updateData);
+      
+      console.log('✅ Rating updated successfully');
+    } catch (error) {
+      console.error('Error updating rating:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Fügt eine neue Bewertung zur productRatings Collection hinzu
    */
   static async addProductRating(ratingData: {

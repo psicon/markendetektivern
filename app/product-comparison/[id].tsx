@@ -1,3 +1,4 @@
+import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { CartToast } from '@/components/ui/CartToast';
@@ -23,7 +24,6 @@ import { doc, getDoc } from 'firebase/firestore';
 import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Animated,
     Dimensions,
     Image,
@@ -1265,6 +1265,9 @@ export default function ProductComparisonScreen() {
   const [showProductDetails, setShowProductDetails] = useState(false);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [showRatingsView, setShowRatingsView] = useState(false);
+  const [productRatings, setProductRatings] = useState<any[]>([]);
+  const [ratingStats, setRatingStats] = useState<any>(null);
+  const [ratingsLoading, setRatingsLoading] = useState(false);
   
   // Ähnliche Produkte für Markenprodukte ohne NoName-Alternativen
   const [similarProducts, setSimilarProducts] = useState<ProductWithDetails[]>([]);
@@ -1276,7 +1279,10 @@ export default function ProductComparisonScreen() {
   const [tasteRating, setTasteRating] = useState(0);
   const [priceValueRating, setPriceValueRating] = useState(0);
   const [contentRating, setContentRating] = useState(0);
+  const [similarityRating, setSimilarityRating] = useState(0);
   const [comment, setComment] = useState('');
+  const [existingRating, setExistingRating] = useState<any>(null);
+  const [isEditingRating, setIsEditingRating] = useState(false);
   const [isSubmittingRating, setIsSubmittingRating] = useState(false);
   
   // Shopping Cart States
@@ -1371,64 +1377,160 @@ export default function ProductComparisonScreen() {
   // Submit rating function for productRatings table
   const submitRating = async () => {
     if (overallRating === 0) {
-      Alert.alert('Fehler', 'Bitte gib eine Gesamtbewertung ab.');
-      return;
+              showFavoriteGameToast('Bitte gib eine Gesamtbewertung ab', 'info');
+        return;
     }
 
     setIsSubmittingRating(true);
 
     try {
-      // Get the correct product ID and type
       const productId = selectedProductForDetails?.id || comparisonData?.mainProduct?.id;
       const isNoNameProduct = !!selectedProductForDetails;
-      
-      // Determine correct product references
-      const productRatingData = {
-        productID: isNoNameProduct ? productId : null,           // NoName product reference
-        brandProductID: isNoNameProduct ? null : productId,      // Brand product reference
-        userID: user?.uid || 'anonymous-user-' + Date.now(),     // Use authenticated user ID from Firebase Auth
-        ratingOverall: overallRating,
-        ratingPriceValue: priceValueRating || null,
-        ratingTasteFunction: tasteRating || null,
-        ratingSimilarity: null, // Not used in rating form
-        ratingContent: contentRating || null,
-        comment: comment || null,
-        ratedate: new Date(),
-        updatedate: new Date()
-      };
 
-      // Save to productRatings collection
-      await FirestoreService.addProductRating(productRatingData);
+      if (isEditingRating && existingRating) {
+        // Update existing rating
+        const updateData = {
+          ratingOverall: overallRating,
+          ratingPriceValue: priceValueRating || null,
+          ratingTasteFunction: tasteRating || null,
+          ratingSimilarity: isNoNameProduct ? (similarityRating || null) : null,
+          ratingContent: contentRating || null,
+          comment: comment || null,
+          updatedate: new Date()
+        };
+
+        await FirestoreService.updateProductRating(existingRating.id, updateData);
+        showFavoriteGameToast('⭐ Deine Bewertung wurde aktualisiert!', 'success');
+      } else {
+        // Create new rating
+        const productRatingData = {
+          productID: isNoNameProduct ? productId : null,
+          brandProductID: isNoNameProduct ? null : productId,
+          userID: user?.uid || 'anonymous-user-' + Date.now(),
+          ratingOverall: overallRating,
+          ratingPriceValue: priceValueRating || null,
+          ratingTasteFunction: tasteRating || null,
+          ratingSimilarity: isNoNameProduct ? (similarityRating || null) : null,
+          ratingContent: contentRating || null,
+          comment: comment || null,
+          ratedate: new Date(),
+          updatedate: new Date()
+        };
+
+        await FirestoreService.addProductRating(productRatingData);
+        showFavoriteGameToast('⭐ Deine Bewertung wurde gespeichert!', 'success');
+      }
 
       // Reset form
       setOverallRating(0);
       setTasteRating(0);
       setPriceValueRating(0);
       setContentRating(0);
+      setSimilarityRating(0);
       setComment('');
+      setExistingRating(null);
+      setIsEditingRating(false);
       
-      Alert.alert('Erfolg', 'Deine Bewertung wurde gespeichert!');
       setShowRatingModal(false);
       
       // Reload comparison data to show updated ratings
       await loadComparisonData();
       
+      // Delayed reload for Cloud Function (3-5 seconds backup)
+      setTimeout(async () => {
+        console.log('🔄 Delayed backup reload for Cloud Function updates');
+        await loadComparisonData();
+      }, 4000);
+      
     } catch (error) {
       console.error('Error submitting rating:', error);
-      Alert.alert('Fehler', 'Bewertung konnte nicht gespeichert werden.');
+      showFavoriteGameToast('Bewertung konnte nicht gespeichert werden', 'error');
     } finally {
       setIsSubmittingRating(false);
     }
   };
 
-  // Reset rating form when modal opens
-  const openRatingModal = () => {
-    setOverallRating(0);
-    setTasteRating(0);
-    setPriceValueRating(0);
-    setContentRating(0);
-    setComment('');
-    setShowRatingModal(true);
+  // Load product ratings for the ratings view with user info
+  const loadProductRatings = async () => {
+    const currentProduct = selectedProductForDetails || comparisonData?.mainProduct;
+    if (!currentProduct?.id) return;
+    
+    try {
+      setRatingsLoading(true);
+      
+      // Determine if it's NoName or Brand product
+      const isNoNameProduct = !!selectedProductForDetails;
+      
+      const ratings = await FirestoreService.getProductRatingsWithUserInfo(currentProduct.id, isNoNameProduct);
+      setProductRatings(ratings);
+      
+      // Calculate rating statistics
+      const stats = FirestoreService.calculateRatingStats(ratings);
+      setRatingStats(stats);
+      
+      console.log(`✅ Loaded ${ratings.length} ratings with user info for product ${currentProduct.name}`);
+    } catch (error) {
+      console.error('Error loading product ratings:', error);
+    } finally {
+      setRatingsLoading(false);
+    }
+  };
+
+  // Check for existing rating and open appropriate modal
+  const openRatingModal = async () => {
+    if (!user?.uid) {
+              showFavoriteGameToast('Bitte melde dich an, um eine Bewertung abzugeben', 'info');
+        return;
+    }
+
+    const currentProduct = selectedProductForDetails || comparisonData?.mainProduct;
+    if (!currentProduct?.id) return;
+
+    try {
+      // Check if user has already rated this product
+      const isNoNameProduct = !!selectedProductForDetails;
+      const existing = await FirestoreService.getUserRatingForProduct(
+        user.uid, 
+        currentProduct.id, 
+        isNoNameProduct
+      );
+
+      if (existing) {
+        // Load existing rating for editing
+        setExistingRating(existing);
+        setIsEditingRating(true);
+        setOverallRating(existing.ratingOverall || 0);
+        setTasteRating(existing.ratingTasteFunction || 0);
+        setPriceValueRating(existing.ratingPriceValue || 0);
+        setContentRating(existing.ratingContent || 0);
+        setSimilarityRating(existing.ratingSimilarity || 0);
+        setComment(existing.comment || '');
+      } else {
+        // New rating
+        setExistingRating(null);
+        setIsEditingRating(false);
+        setOverallRating(0);
+        setTasteRating(0);
+        setPriceValueRating(0);
+        setContentRating(0);
+        setSimilarityRating(0);
+        setComment('');
+      }
+
+      setShowRatingModal(true);
+    } catch (error) {
+      console.error('Error checking existing rating:', error);
+      // Fallback to new rating
+      setExistingRating(null);
+      setIsEditingRating(false);
+      setOverallRating(0);
+      setTasteRating(0);
+      setPriceValueRating(0);
+      setContentRating(0);
+      setSimilarityRating(0);
+      setComment('');
+      setShowRatingModal(true);
+    }
   };
   
   // Ähnliche Produkte laden (für Markenprodukte ohne NoName-Alternativen)
@@ -2085,28 +2187,28 @@ export default function ProductComparisonScreen() {
               <ThemedText style={styles.productTitle}>
                 {comparisonData.mainProduct.name}
               </ThemedText>
-              <TouchableOpacity 
-                style={styles.ratingRow}
-                onPress={() => setShowRatingsView(true)}
-                activeOpacity={0.7}
-              >
-                <ThemedText style={[styles.ratingValue, { color: colors.warning }]}>
-                  {(comparisonData.mainProduct.rating || 0).toFixed(1)}
-              </ThemedText>
-                <View style={styles.starsContainer}>
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <ThemedText 
-                      key={star} 
-                      style={[styles.starIcon, { color: star <= (comparisonData.mainProduct.rating || 0) ? colors.warning : colors.border }]}
-                    >
-                      ★
-                </ThemedText>
-                  ))}
-              </View>
-                <ThemedText style={[styles.reviewsText, { color: colors.icon }]}>
-                  ({comparisonData.mainProduct.ratingCount || 0})
-                </ThemedText>
-              </TouchableOpacity>
+                              <TouchableOpacity 
+                  style={styles.ratingRow}
+                  onPress={async () => {
+                    // Show ratings VIEW when clicking stars for main product
+                    setSelectedProductForDetails(null); // null means main product
+                    await loadProductRatings();
+                    setShowRatingsView(true);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.ratingRow}>
+                    <StarRatingDisplay 
+                      rating={comparisonData.mainProduct.averageRatingOverall || 0}
+                      colors={colors}
+                      size={16}
+                      valueStyle={[styles.ratingValue, { color: colors.warning }]}
+                    />
+                    <ThemedText style={[styles.reviewsText, { color: colors.icon, marginLeft: 6, lineHeight: 16, includeFontPadding: false, height: 16 }]}>
+                      ({comparisonData.mainProduct.ratingCount || 0})
+                    </ThemedText>
+                  </View>
+                </TouchableOpacity>
 
             </View>
 
@@ -2288,28 +2390,28 @@ export default function ProductComparisonScreen() {
                     <ThemedText style={styles.productTitle}>
                       {noNameProduct.name}
                   </ThemedText>
-                    <TouchableOpacity 
-                      style={styles.ratingRow}
-                      onPress={() => setShowRatingsView(true)}
-                      activeOpacity={0.7}
-                    >
-                      <ThemedText style={[styles.ratingValue, { color: colors.warning }]}>
-                        {(noNameProduct.rating || 0).toFixed(1)}
-                    </ThemedText>
-                      <View style={styles.starsContainer}>
-                        {[1, 2, 3, 4, 5].map((star) => (
-                          <ThemedText 
-                            key={star} 
-                            style={[styles.starIcon, { color: star <= (noNameProduct.rating || 0) ? colors.warning : colors.border }]}
-                          >
-                            ★
-                    </ThemedText>
-                        ))}
-                  </View>
-                      <ThemedText style={[styles.reviewsText, { color: colors.icon }]}>
-                        ({noNameProduct.ratingCount || 0})
-                    </ThemedText>
-                    </TouchableOpacity>
+                                          <TouchableOpacity 
+                        style={styles.ratingRow}
+                        onPress={async () => {
+                          // Show ratings VIEW when clicking stars for NoName product
+                          setSelectedProductForDetails(noNameProduct);
+                          await loadProductRatings();
+                          setShowRatingsView(true);
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.ratingRow}>
+                          <StarRatingDisplay 
+                            rating={noNameProduct.averageRatingOverall || 0}
+                            colors={colors}
+                            size={16}
+                            valueStyle={[styles.ratingValue, { color: colors.warning }]}
+                          />
+                          <ThemedText style={[styles.reviewsText, { color: colors.icon, marginLeft: 6, lineHeight: 16, includeFontPadding: false, height: 16 }]}>
+                            ({noNameProduct.ratingCount || 0})
+                          </ThemedText>
+                        </View>
+                      </TouchableOpacity>
 
                   </View>
 
@@ -2780,8 +2882,9 @@ export default function ProductComparisonScreen() {
             <View style={styles.buttonSection}>
               <TouchableOpacity 
                 style={[styles.ratingButton, { backgroundColor: colors.primary }]}
-                onPress={() => {
+                onPress={async () => {
                   setShowProductDetails(false);
+                  await loadProductRatings(); // Load ratings before showing
                   setShowRatingsView(true);
                 }}
               >
@@ -2814,7 +2917,7 @@ export default function ProductComparisonScreen() {
             </TouchableOpacity>
               <View style={styles.titleSection}>
                 <ThemedText style={styles.bottomSheetTitle}>
-                  Bewertung abgeben {selectedProductForDetails ? '(NoName-Produkt)' : '(Markenprodukt)'}
+                  {isEditingRating ? 'Bewertung bearbeiten' : 'Bewertung abgeben'}
                 </ThemedText>
                 <ThemedText style={[styles.bottomSheetSubtitle, { color: colors.primary }]}>
                   {selectedProductForDetails?.name || comparisonData?.mainProduct?.name || 'Produkt'}
@@ -2823,7 +2926,7 @@ export default function ProductComparisonScreen() {
             </View>
           </View>
           
-          <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
+                    <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
             <View style={styles.ratingForm}>
               <ThemedText style={styles.ratingFormTitle}>Deine Gesamtbewertung</ThemedText>
               <StarRating 
@@ -2833,7 +2936,7 @@ export default function ProductComparisonScreen() {
               />
 
               <ThemedText style={styles.ratingFormTitle}>Detail-Bewertung nach Kriterien (optional)</ThemedText>
-              
+
               <View style={styles.criterionRating}>
                 <View style={styles.criterionRow}>
                   <ThemedText style={styles.criterionLabelCompact}>Geschmack/Wirkung</ThemedText>
@@ -2870,6 +2973,21 @@ export default function ProductComparisonScreen() {
                 </View>
               </View>
 
+              {/* Ähnlichkeit nur für NoName-Produkte */}
+              {selectedProductForDetails && (
+                <View style={styles.criterionRating}>
+                  <View style={styles.criterionRow}>
+                    <ThemedText style={styles.criterionLabelCompact}>Ähnlichkeit zum Markenprodukt</ThemedText>
+                    <StarRating 
+                      rating={similarityRating} 
+                      onRatingChange={setSimilarityRating}
+                      size={20}
+                      colors={colors}
+                    />
+                  </View>
+                </View>
+              )}
+
               <ThemedText style={styles.ratingFormTitle}>Dein Kommentar (optional)</ThemedText>
               <TextInput
                 style={[styles.commentInput, { 
@@ -2882,7 +3000,7 @@ export default function ProductComparisonScreen() {
                 value={comment}
                 onChangeText={setComment}
                 multiline
-                numberOfLines={3}  // Reduziert von 4
+                numberOfLines={3}
                 textAlignVertical="top"
               />
 
@@ -2901,11 +3019,11 @@ export default function ProductComparisonScreen() {
                   <ActivityIndicator color="white" />
                 ) : (
                   <ThemedText style={styles.submitButtonText}>
-                    Bewertung speichern
+                    {isEditingRating ? 'Bewertung aktualisieren' : 'Bewertung speichern'}
                   </ThemedText>
                 )}
-                  </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
+            </View>
           </ScrollView>
         </View>
       </Modal>
@@ -2985,100 +3103,192 @@ export default function ProductComparisonScreen() {
           </View>
           
           <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
-            {/* Overall Rating Card */}
-            <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
-              <View style={styles.ratingOverallSection}>
-                <View style={styles.ratingCircle}>
-                  <ThemedText style={styles.ratingCircleNumber}>
-                    {selectedProductForDetails?.averageRatingOverall?.toFixed(1) || 
-                     comparisonData?.mainProduct?.averageRatingOverall?.toFixed(1) || '0.0'}
-                  </ThemedText>
-                </View>
-                <View style={styles.ratingDetails}>
-                  <ThemedText style={styles.ratingTitle}>Allgemeine Bewertung</ThemedText>
-                  <View style={styles.starsRow}>
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <ThemedText 
-                        key={star} 
-                        style={[
-                          styles.starIconMedium, 
-                          { color: star <= (selectedProductForDetails?.averageRatingOverall || 
-                                          comparisonData?.mainProduct?.averageRatingOverall || 0) 
-                                  ? colors.warning : colors.border }
-                        ]}
-                      >
-                        ★
-                      </ThemedText>
-                    ))}
-                  </View>
-                  <ThemedText style={[styles.ratingsCount, { color: colors.icon }]}>
-                    Basierend auf {selectedProductForDetails?.ratingCount || 
-                                  comparisonData?.mainProduct?.ratingCount || 0} Bewertungen
-                  </ThemedText>
-                </View>
-              </View>
-            </View>
-
-            {/* Detailed Ratings Card */}
-            <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
-              <ThemedText style={styles.infoLabel}>Bewertung nach Kriterien</ThemedText>
-              
-              <View style={styles.criteriaRatings}>
-                <View style={styles.criteriaRow}>
-                  <ThemedText style={styles.criteriaLabel}>Geschmack/Wirkung/Funktion</ThemedText>
-                  <ThemedText style={[styles.criteriaValue, { color: colors.icon }]}>
-                    {selectedProductForDetails?.averageRatingTasteFunction?.toFixed(1) || 
-                     comparisonData?.mainProduct?.averageRatingTasteFunction?.toFixed(1) || '0'}
+            {/* Loading state or data */}
+            {ratingsLoading ? (
+              <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <ThemedText style={[{ color: colors.icon, marginTop: 16, textAlign: 'center' }]}>
+                  Lade Bewertungen...
                 </ThemedText>
               </View>
+            ) : (
+              <>
+                {/* Overall Rating Card */}
+                <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
+                  <View style={styles.ratingOverallSection}>
+                    <View style={styles.ratingCircle}>
+                      <ThemedText style={styles.ratingCircleNumber}>
+                        {(ratingStats?.averageOverall || 0).toFixed(1)}
+                      </ThemedText>
+                    </View>
+                    <View style={styles.ratingDetails}>
+                      <ThemedText style={styles.ratingTitle}>Allgemeine Bewertung</ThemedText>
+                      <View style={styles.starsRow}>
+                        <StarRatingDisplay 
+                          rating={ratingStats?.averageOverall || 0}
+                          colors={colors}
+                          size={20}
+                          showValue={false}
+                        />
+                      </View>
+                      <ThemedText style={[styles.ratingsCount, { color: colors.icon }]}>
+                        Basierend auf {ratingStats?.totalCount || 0} Bewertungen
+                      </ThemedText>
+                    </View>
+                  </View>
+                </View>
+              </>
+            )}
 
-                <View style={styles.criteriaRow}>
-                  <ThemedText style={styles.criteriaLabel}>Preis-Leistung</ThemedText>
-                  <ThemedText style={[styles.criteriaValue, { color: colors.icon }]}>
-                    {selectedProductForDetails?.averageRatingPriceValue?.toFixed(1) || 
-                     comparisonData?.mainProduct?.averageRatingPriceValue?.toFixed(1) || '0'}
-                  </ThemedText>
-                </View>
+            {/* Detailed Ratings Card */}
+            {!ratingsLoading && ratingStats && (
+              <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
+                <ThemedText style={[styles.infoLabel, { flexShrink: 0 }]}>Kriterien-Bewertungen</ThemedText>
                 
-                <View style={styles.criteriaRow}>
-                  <ThemedText style={styles.criteriaLabel}>Inhaltsstoffe</ThemedText>
-                  <ThemedText style={[styles.criteriaValue, { color: colors.icon }]}>
-                    {selectedProductForDetails?.averageRatingContent?.toFixed(1) || 
-                     comparisonData?.mainProduct?.averageRatingContent?.toFixed(1) || '0'}
-                  </ThemedText>
-                </View>
-                
-                <View style={styles.criteriaRow}>
-                  <ThemedText style={styles.criteriaLabel}>Ähnlichkeit</ThemedText>
-                  <ThemedText style={[styles.criteriaValue, { color: colors.icon }]}>
-                    {selectedProductForDetails?.averageRatingSimilarity?.toFixed(1) || 
-                     comparisonData?.mainProduct?.averageRatingSimilarity?.toFixed(1) || '0'}
-                  </ThemedText>
+                <View style={styles.criteriaRatings}>
+                  <View style={styles.criteriaRow}>
+                    <ThemedText style={styles.criteriaLabel}>Qualität & Geschmack</ThemedText>
+                    <View style={styles.criterionRightSide}>
+                      <StarRatingDisplay 
+                        rating={ratingStats.averageTaste || 0}
+                        colors={colors}
+                        size={14}
+                        valueStyle={[styles.criteriaValue, { color: colors.icon }]}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.criteriaRow}>
+                    <ThemedText style={styles.criteriaLabel}>Preis-Leistung</ThemedText>
+                    <View style={styles.criterionRightSide}>
+                      <StarRatingDisplay 
+                        rating={ratingStats.averagePrice || 0}
+                        colors={colors}
+                        size={14}
+                        valueStyle={[styles.criteriaValue, { color: colors.icon }]}
+                      />
+                    </View>
+                  </View>
+                  
+                  <View style={styles.criteriaRow}>
+                    <ThemedText style={styles.criteriaLabel}>Inhaltsstoffe</ThemedText>
+                    <View style={styles.criterionRightSide}>
+                      <StarRatingDisplay 
+                        rating={ratingStats.averageContent || 0}
+                        colors={colors}
+                        size={14}
+                        valueStyle={[styles.criteriaValue, { color: colors.icon }]}
+                      />
+                    </View>
+                  </View>
+                  
+                  {/* Only show similarity for NoName products */}
+                  {selectedProductForDetails && (
+                    <View style={styles.criteriaRow}>
+                      <ThemedText style={styles.criteriaLabel}>Ähnlichkeit zu Marke</ThemedText>
+                      <View style={styles.criterionRightSide}>
+                        <StarRatingDisplay 
+                          rating={ratingStats.averageSimilarity || 0}
+                          colors={colors}
+                          size={14}
+                          valueStyle={[styles.criteriaValue, { color: colors.icon }]}
+                        />
+                      </View>
+                    </View>
+                  )}
                 </View>
               </View>
-            </View>
+            )}
 
             {/* Rating Button */}
             <View style={styles.buttonSection}>
               <TouchableOpacity 
                 style={[styles.ratingButton, { backgroundColor: colors.primary }]}
-                onPress={() => {
+                onPress={async () => {
                   setShowRatingsView(false);
-                  openRatingModal();
+                  await openRatingModal();
                 }}
               >
                 <ThemedText style={styles.ratingButtonText}>Bewertung abgeben</ThemedText>
               </TouchableOpacity>
             </View>
 
-            {/* Comments Section */}
-            <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
-              <ThemedText style={styles.infoLabel}>Neueste Kommentare</ThemedText>
-              <View style={styles.commentsPlaceholder}>
-                <ThemedText style={[styles.placeholderText, { color: colors.icon }]}>
-                  Oh, hier ist noch nichts!
+            {/* Comments Section - Simpler Style from noname-detail */}
+            <View style={[styles.commentsSection, { backgroundColor: colors.cardBackground, marginBottom: 20, marginTop: 6 }]}>
+              <View style={styles.commentsSectionHeader}>
+                <IconSymbol name="bubble.left.and.bubble.right" size={18} color={colors.primary} />
+                <ThemedText style={styles.commentsSectionTitle}>
+                  Kommentare
                 </ThemedText>
+                <View style={[styles.commentCountBadge, { backgroundColor: colors.primary + '20' }]}>
+                  <ThemedText style={[styles.commentCountText, { color: colors.primary }]}>
+                    {ratingStats?.commentsCount || 0}
+                  </ThemedText>
+                </View>
               </View>
+              
+              {!ratingsLoading && productRatings.length > 0 ? (
+                <>
+                  {productRatings
+                    .filter(rating => rating.comment && rating.comment.trim())
+                    .slice(0, 5) // Show only first 5 comments
+                    .map((rating, index) => (
+                      <View key={rating.id || index} style={styles.commentItem}>
+                        {/* Compact User Header */}
+                        <View style={styles.commentUserHeader}>
+                          <View style={styles.userAvatarContainer}>
+                            {rating.userInfo?.avatarUrl ? (
+                              <Image 
+                                source={{ uri: rating.userInfo.avatarUrl }}
+                                style={styles.userAvatar}
+                              />
+                            ) : (
+                              <View style={[styles.userAvatarPlaceholder, { backgroundColor: colors.border }]}>
+                                <ThemedText style={styles.userAvatarText}>
+                                  {rating.userInfo?.displayName?.charAt(0)?.toUpperCase() || '?'}
+                                </ThemedText>
+                              </View>
+                            )}
+                          </View>
+                          <View style={styles.userInfoContainer}>
+                            <View style={styles.userTopRow}>
+                              <ThemedText style={[styles.userName, { color: colors.text }]}>
+                                {rating.userInfo?.displayName || 'Unbekannter User'}
+                              </ThemedText>
+                              <View style={[styles.userLevelBadge, { backgroundColor: rating.userInfo?.currentLevel?.color || '#6B7280' }]}>
+                                <ThemedText style={styles.userLevelText}>
+                                  {rating.userInfo?.currentLevel?.name || 'Neuling'}
+                                </ThemedText>
+                              </View>
+                            </View>
+                            <View style={styles.userBottomRow}>
+                              <StarRatingDisplay 
+                                rating={rating.ratingOverall || 0}
+                                colors={colors}
+                                size={14}
+                                showValue={false}
+                              />
+                              <ThemedText style={[styles.commentDate, { color: colors.icon }]}>
+                                {rating.ratedate ? new Date(rating.ratedate).toLocaleDateString('de-DE') : 'Datum unbekannt'}
+                              </ThemedText>
+                            </View>
+                          </View>
+                        </View>
+                        
+                        {/* Comment Text */}
+                        <ThemedText style={[styles.commentText, { color: colors.text }]}>
+                          {rating.comment}
+                        </ThemedText>
+                      </View>
+                    ))}
+                </>
+              ) : (
+                <View style={styles.noCommentsContainer}>
+                  <ThemedText style={[styles.noCommentsText, { color: colors.icon }]}>
+                    {ratingsLoading ? 'Lade Kommentare...' : 'Oh, hier ist noch nichts!'}
+                  </ThemedText>
+                </View>
+              )}
             </View>
           </ScrollView>
         </View>
@@ -3790,7 +4000,7 @@ const styles = StyleSheet.create({
   
   // Rating Button
   buttonSection: {
-    paddingVertical: 40,
+    paddingVertical: 12,
   },
   ratingButton: {
     paddingVertical: 16,
@@ -3850,11 +4060,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: 10,
   },
   criterionLabel: {
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 8,
+    flex: 1,
+    flexShrink: 0,
+  },
+  criterionRightSide: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  criterionStars: {
+    flexDirection: 'row',
+    gap: 2,
+  },
+  criterionStarIcon: {
+    fontSize: 14,
+    lineHeight: 16,
+  },
+  criterionValue: {
+    fontSize: 14,
+    fontFamily: 'Nunito_600SemiBold',
+    minWidth: 30,
+    textAlign: 'center',
   },
   criterionLabelCompact: {
     fontSize: 14,
@@ -3945,13 +4177,134 @@ const styles = StyleSheet.create({
     minWidth: 40,
     textAlign: 'right',
   },
-  commentsPlaceholder: {
-    paddingVertical: 40,
+  commentsContainer: {
+    marginTop: 12,
+  },
+  commentItem: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.05)',
+  },
+  commentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  commentRating: {
+    fontSize: 14,
+    color: '#f59e0b', // Warning color for stars
+  },
+  commentDate: {
+    fontSize: 12,
+    opacity: 0.7,
+  },
+  commentText: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontFamily: 'Nunito_400Regular',
+    marginTop: 8,
+  },
+  
+  // Comments Section Styles - Simpler style from noname-detail
+  commentsSection: {
+    padding: 12,
+    marginBottom: 16,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  commentsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 8,
+  },
+  commentsSectionTitle: {
+    fontSize: 15,
+    fontFamily: 'Nunito_600SemiBold',
+    flex: 1,
+  },
+  commentCountBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 8,
+  },
+  commentCountText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_600SemiBold',
+  },
+  noCommentsContainer: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: 20,
+  },
+  noCommentsText: {
+    fontSize: 14,
+    fontFamily: 'Nunito_600SemiBold',
+    textAlign: 'center',
+  },
+  commentUserHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  userAvatarContainer: {
+    marginRight: 10,
+  },
+  userAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f0f0f0',
+  },
+  userAvatarPlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  placeholderText: {
+  userAvatarText: {
     fontSize: 14,
-    textAlign: 'center',
+    fontWeight: '600',
+    color: 'white',
+  },
+  userInfoContainer: {
+    flex: 1,
+  },
+  userTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+    gap: 6,
+  },
+  userBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  userName: {
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: 'Nunito_600SemiBold',
+  },
+  userLevelBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 10,
+  },
+  userLevelText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: 'white',
+  },
+  commentRating: {
+    fontSize: 12,
   },
   
   // Top action icons
