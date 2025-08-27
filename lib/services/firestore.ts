@@ -1142,11 +1142,11 @@ export class FirestoreService {
         
         // Populate references in parallel
         const [handelsmarke, kategorie, hersteller, packTypInfo, discounter] = await Promise.all([
-          productWithDetails.handelsmarke ? this.getDocumentByReference(productWithDetails.handelsmarke, 'handelsmarken') : null,
-          productWithDetails.kategorie ? this.getDocumentByReference(productWithDetails.kategorie, 'kategorien') : null,
-          productWithDetails.hersteller ? this.getDocumentByReference(productWithDetails.hersteller, 'hersteller_new') : null,
-          productWithDetails.packTyp ? this.getDocumentByReference(productWithDetails.packTyp, 'packungstypen') : null,
-          productWithDetails.discounter ? this.getDocumentByReference(productWithDetails.discounter, 'discounter') : null,
+          productWithDetails.handelsmarke ? this.getDocumentByReference(productWithDetails.handelsmarke) : null,
+          productWithDetails.kategorie ? this.getDocumentByReference(productWithDetails.kategorie) : null,
+          productWithDetails.hersteller ? this.getDocumentByReference(productWithDetails.hersteller) : null,
+          productWithDetails.packTyp ? this.getDocumentByReference(productWithDetails.packTyp) : null,
+          productWithDetails.discounter ? this.getDocumentByReference(productWithDetails.discounter) : null,
         ]);
         
         if (handelsmarke) productWithDetails.handelsmarke = handelsmarke;
@@ -1777,7 +1777,37 @@ export class FirestoreService {
   }
 
   /**
-   * Fügt ein Produkt zum Einkaufszettel hinzu
+   * Fügt ein Custom-Item (Freitext) zum Einkaufszettel hinzu
+   */
+  static async addCustomItemToShoppingCart(
+    userId: string,
+    customItem: {
+      name: string;
+      type: 'brand' | 'noname';
+      marketId?: string;
+      marketName?: string;
+    }
+  ): Promise<string> {
+    try {
+      const userRef = doc(db, 'users', userId);
+      const data: Partial<Einkaufswagen> = {
+        customItem: customItem,
+        gekauft: false,
+        name: customItem.name, // Für schnelle Anzeige
+        timestamp: serverTimestamp() as Timestamp
+      };
+
+      const docRef = await addDoc(collection(userRef, 'einkaufswagen'), data);
+      console.log('✅ Added custom item to shopping cart:', docRef.id, customItem);
+      return docRef.id;
+    } catch (error) {
+      console.error('Error adding custom item to shopping cart:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fügt ein Produkt zum Einkaufszettel hinzu (bestehende Funktion)
    */
   static async addToShoppingCart(
     userId: string,
@@ -2193,7 +2223,7 @@ export class FirestoreService {
           if (product.discounter && typeof product.discounter === 'object' && 'id' in product.discounter) {
             try {
               const originalId = product.discounter.id;
-              const discounterData = await this.getDocumentByReference(product.discounter, 'discounter');
+              const discounterData = await this.getDocumentByReference(product.discounter);
               return {
                 ...product,
                 discounter: {

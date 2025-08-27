@@ -114,8 +114,18 @@ export interface MarkenProduktWithDetails extends Omit<MarkenProdukte, 'kategori
 
 // Shopping Cart / Einkaufszettel types
 export interface Einkaufswagen {
+  // Bestehende DB-Produkte
   handelsmarkenProdukt?: DocumentReference; // Referenz zum NoName Produkt
   markenProdukt?: DocumentReference; // Referenz zum Markenprodukt
+  
+  // Neue Custom-Items (Freitext)
+  customItem?: {
+    name: string; // "Butter", "Milch", etc.
+    type: 'brand' | 'noname'; // Produkttyp
+    marketId?: string; // Markt-ID (nur bei NoName)
+    marketName?: string; // Markt-Name für Anzeige
+  };
+  
   gekauft: boolean; // Ob das Produkt bereits gekauft wurde
   timestamp: Timestamp;
   name: string; // Name des Produkts für schnelle Anzeige

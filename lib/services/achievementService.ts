@@ -1,23 +1,23 @@
 import * as Haptics from 'expo-haptics';
 import {
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    serverTimestamp,
-    updateDoc,
-    writeBatch
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  serverTimestamp,
+  updateDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { Alert } from 'react-native';
 import { db } from '../firebase';
 import {
-    Achievement,
-    AchievementEvent,
-    ActionType,
-    DEFAULT_ACHIEVEMENTS,
-    LEVELS,
-    UserAchievementProgress,
-    UserStats
+  Achievement,
+  AchievementEvent,
+  ActionType,
+  DEFAULT_ACHIEVEMENTS,
+  LEVELS,
+  UserAchievementProgress,
+  UserStats
 } from '../types/achievements';
 
 class AchievementService {

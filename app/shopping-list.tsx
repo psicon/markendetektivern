@@ -1,3 +1,4 @@
+import { AddCustomItemModal } from '@/components/ui/AddCustomItemModal';
 import { CartToast } from '@/components/ui/CartToast';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
@@ -105,6 +106,14 @@ export default function ShoppingListScreen() {
     oldLevel: 1 
   });
   
+  // Custom Item Modal State
+  const [showCustomItemModal, setShowCustomItemModal] = useState(false);
+  
+  // Loading States für Button-Aktionen
+  const [loadingItems, setLoadingItems] = useState<Set<string>>(new Set());
+  const [deletingItems, setDeletingItems] = useState<Set<string>>(new Set());
+  const [convertingItems, setConvertingItems] = useState<Set<string>>(new Set());
+  
   const tabIndicatorPosition = useState(new Animated.Value(0))[0];
   const pagerRef = useRef<PagerView>(null);
 
@@ -126,7 +135,17 @@ export default function ShoppingListScreen() {
 
   // Header konfigurieren
   useLayoutEffect(() => {
-    navigation.setOptions(getNavigationHeaderOptions(colorScheme, 'Einkaufszettel'));
+    navigation.setOptions({
+      ...getNavigationHeaderOptions(colorScheme, 'Einkaufszettel'),
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={() => setShowCustomItemModal(true)}
+          style={{ paddingRight: 16 }}
+        >
+          <IconSymbol name="plus" size={20} color="white" />
+        </TouchableOpacity>
+      ),
+    });
   }, [colorScheme, navigation]);
   
   // Setup Achievement Toast Handler with motivational messages
@@ -173,6 +192,9 @@ export default function ShoppingListScreen() {
     try {
       setLoading(true);
       
+      // Reset selectedConversions to prevent accumulation on reload
+      setSelectedConversions([]);
+      
       // Load shopping cart items
       const items = await FirestoreService.getShoppingCartItems(user.uid);
       setShoppingCartItems(items);
@@ -184,6 +206,35 @@ export default function ShoppingListScreen() {
       let actualSavings = 0;
       
       for (const item of items) {
+        // Handle custom items (freitext)
+        if (item.customItem) {
+          const customItemData = {
+            id: item.id,
+            name: item.customItem.name,
+            isCustom: true,
+            customType: item.customItem.type,
+            marketName: item.customItem.marketName,
+            marketLand: item.customItem.marketLand,
+            marketBild: item.customItem.marketBild,
+            gekauft: item.gekauft,
+            einkaufswagenRef: item.id,
+            // Markt für NoName Items
+            ...(item.customItem.type === 'noname' && {
+              markt: {
+                name: item.customItem.marketName,
+                land: item.customItem.marketLand,
+                bild: item.customItem.marketBild
+              }
+            })
+          };
+          
+          if (item.customItem.type === 'brand') {
+            brandItems.push(customItemData);
+          } else {
+            noNameItems.push(customItemData);
+          }
+          continue;
+        }
         if (item.markenProdukt) {
           // Load brand product details and alternatives
           const productData = await FirestoreService.getDocumentByReference<MarkenProdukte>(item.markenProdukt);
@@ -251,7 +302,7 @@ export default function ShoppingListScreen() {
             let handelsmarkeData = null;
             if (productData.handelsmarke) {
               try {
-                handelsmarkeData = await FirestoreService.getDocumentByReference(productData.handelsmarke, 'handelsmarken');
+                handelsmarkeData = await FirestoreService.getDocumentByReference(productData.handelsmarke);
               } catch (error) {
                 console.error('Error loading handelsmarke for noname product:', error);
               }
@@ -262,7 +313,7 @@ export default function ShoppingListScreen() {
             if (productData.discounter) {
               try {
                 const originalId = productData.discounter.id;
-                discounterData = await FirestoreService.getDocumentByReference(productData.discounter, 'discounter');
+                discounterData = await FirestoreService.getDocumentByReference(productData.discounter);
                 // Preserve the original ID for matching
                 if (discounterData) {
                   discounterData = {
@@ -421,6 +472,9 @@ export default function ShoppingListScreen() {
   ) => {
     if (!user) return;
     
+    // Loading State setzen
+    setConvertingItems(prev => new Set(prev).add(einkaufswagenRef));
+    
     try {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       
@@ -448,16 +502,58 @@ export default function ShoppingListScreen() {
         const newItem = result.newItems[0];
         const savingsAmount = brandItem.potentialSavings || 0;
         
-        // Add to NoName products with correct ID
-        const noNameItem = {
-          id: newItem.id,
-          product: newItem.product,
-          savings: savingsAmount
+        // Load complete product data with discounter info for proper display
+        const loadCompleteNoNameItem = async () => {
+          try {
+            if (newItem.handelsmarkenProdukt) {
+              const productData = await FirestoreService.getDocumentByReference<Produkte>(newItem.handelsmarkenProdukt);
+              
+              if (productData) {
+                // Load discounter data for market display
+                let discounterData = null;
+                if (productData.discounter) {
+                  try {
+                    const originalId = productData.discounter.id;
+                    discounterData = await FirestoreService.getDocumentByReference(productData.discounter);
+                    if (discounterData) {
+                      discounterData = {
+                        ...discounterData,
+                        id: originalId
+                      };
+                    }
+                  } catch (error) {
+                    console.error('Error loading discounter for converted product:', error);
+                  }
+                }
+                
+                // Create complete NoName item with all market data
+                const completeNoNameItem = {
+                  ...newItem,
+                  product: {
+                    ...productData,
+                    discounter: discounterData
+                  },
+                  savings: savingsAmount
+                };
+                
+                setNoNameProducts(prev => [...prev, completeNoNameItem]);
+                console.log(`💰 Single conversion with market data: ${productData.name || 'NoName'} saves €${savingsAmount.toFixed(2)}`);
+              }
+            }
+          } catch (error) {
+            console.error('Error loading complete NoName item:', error);
+            // Fallback to basic item without market data
+            const basicNoNameItem = {
+              id: newItem.id,
+              product: newItem.product,
+              savings: savingsAmount
+            };
+            setNoNameProducts(prev => [...prev, basicNoNameItem]);
+          }
         };
         
-        setNoNameProducts(prev => [...prev, noNameItem]);
-        
-        console.log(`💰 Single conversion: ${newItem.product?.name || 'NoName'} saves €${savingsAmount.toFixed(2)}`);
+        // Load complete data in background
+        loadCompleteNoNameItem();
         
         // Success toast with savings amount
         showGameToast(`🔄 Umgewandelt! Du sparst €${savingsAmount.toFixed(2)} mit dem NoName-Produkt!`, 'success');
@@ -471,9 +567,16 @@ export default function ShoppingListScreen() {
       await achievementService.trackAction(user.uid, 'convert_product');
       
     } catch (error) {
-  console.error('Error converting single product:', error);
-  showGameToast('Umwandlung fehlgeschlagen. Versuch es nochmal!', 'error');
-}
+      console.error('Error converting single product:', error);
+      showGameToast('Umwandlung fehlgeschlagen. Versuch es nochmal!', 'error');
+    } finally {
+      // Loading State entfernen
+      setConvertingItems(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(einkaufswagenRef);
+        return newSet;
+      });
+    }
   };
   
   // Convert selected brand products to NoName
@@ -495,8 +598,8 @@ export default function ShoppingListScreen() {
           onPress: async () => {
             setIsConverting(true);
             try {
-              const result = await FirestoreService.convertToNoName(user!.uid, selectedConversions);
-              await FirestoreService.updateUserTotalSavings(user!.uid, totalPotentialSavings);
+              const result = await FirestoreService.convertToNoName(user.uid, selectedConversions);
+              await FirestoreService.updateUserTotalSavings(user.uid, totalPotentialSavings);
               
               // Update local state without reload
               const convertedIds = selectedConversions.map(conv => conv.einkaufswagenRef);
@@ -507,17 +610,65 @@ export default function ShoppingListScreen() {
               // Remove converted brand products
               setBrandProducts(prev => prev.filter(item => !convertedIds.includes(item.id)));
               
-              // Add new NoName items
-              const newNoNameItems = result.newItems.map((newItem, index) => {
-                const brandItem = convertedBrandItems[index];
-                return {
-                  id: newItem.id,
-                  product: newItem.product,
-                  savings: brandItem?.potentialSavings || 0
-                };
-              });
+              // Add new NoName items with complete market data
+              const loadCompleteItems = async () => {
+                const newNoNameItems = await Promise.all(
+                  result.newItems.map(async (newItem, index) => {
+                    const brandItem = convertedBrandItems[index];
+                    const savingsAmount = brandItem?.potentialSavings || 0;
+                    
+                    // Load complete product data with discounter info
+                    if (newItem.handelsmarkenProdukt) {
+                      try {
+                        const productData = await FirestoreService.getDocumentByReference<Produkte>(newItem.handelsmarkenProdukt);
+                        
+                        if (productData) {
+                          // Load discounter data for market display
+                          let discounterData = null;
+                          if (productData.discounter) {
+                            try {
+                              const originalId = productData.discounter.id;
+                              discounterData = await FirestoreService.getDocumentByReference(productData.discounter);
+                              if (discounterData) {
+                                discounterData = {
+                                  ...discounterData,
+                                  id: originalId
+                                };
+                              }
+                            } catch (error) {
+                              console.error('Error loading discounter for bulk converted product:', error);
+                            }
+                          }
+                          
+                          return {
+                            ...newItem,
+                            product: {
+                              ...productData,
+                              discounter: discounterData
+                            },
+                            savings: savingsAmount
+                          };
+                        }
+                      } catch (error) {
+                        console.error('Error loading complete data for bulk converted item:', error);
+                      }
+                    }
+                    
+                    // Fallback to basic item without market data
+                    return {
+                      id: newItem.id,
+                      product: newItem.product,
+                      savings: savingsAmount
+                    };
+                  })
+                );
+                
+                setNoNameProducts(prev => [...prev, ...newNoNameItems]);
+                console.log(`💰 Bulk conversion completed with market data for ${newNoNameItems.length} items`);
+              };
               
-              setNoNameProducts(prev => [...prev, ...newNoNameItems]);
+              // Load complete data in background
+              loadCompleteItems();
               
               // Gamified success message
               showGameToast(`🎉 Fantastisch! Du sparst €${totalPotentialSavings.toFixed(2)} mit NoName-Produkten!`, 'success');
@@ -696,13 +847,33 @@ export default function ShoppingListScreen() {
     const handleMarkAllAsPurchased = async () => {
       if (!user || noNameProducts.length === 0) return;
       
-      const productCount = noNameProducts.length;
-      const totalSavings = noNameProducts.reduce((sum, item) => sum + (item.savings || 0), 0);
+      // Separate DB products and custom items
+      const dbNoNameProducts = noNameProducts.filter(item => !item.isCustom);
+      const customItems = noNameProducts.filter(item => item.isCustom);
+      const dbProductCount = dbNoNameProducts.length;
+      const customItemCount = customItems.length;
+      const totalSavings = dbNoNameProducts.reduce((sum, item) => sum + (item.savings || 0), 0);
+      
+      // Total count for user display
+      const totalCount = dbProductCount + customItemCount;
+      
+      // Check if there are any items to process
+      if (totalCount === 0) return;
+      
+      // Create appropriate message based on what we have
+      let message = '';
+      if (dbProductCount > 0 && customItemCount > 0) {
+        message = `Möchtest du alle ${totalCount} Produkte als erledigt markieren? (${dbProductCount} NoName-Produkte für €${totalSavings.toFixed(2)} Ersparnis + ${customItemCount} Freitext-Einträge)`;
+      } else if (dbProductCount > 0) {
+        message = `Möchtest du alle ${dbProductCount} NoName-Produkte als gekauft markieren und €${totalSavings.toFixed(2)} zu deiner Ersparnis hinzufügen?`;
+      } else {
+        message = `Möchtest du alle ${customItemCount} Freitext-Einträge als erledigt markieren?`;
+      }
       
       // Confirmation dialog before bulk action
       Alert.alert(
-        'Alle als gekauft markieren?',
-        `Möchtest du alle ${productCount} NoName-Produkte als gekauft markieren und €${totalSavings.toFixed(2)} zu deiner Ersparnis hinzufügen?`,
+        'Alle als erledigt markieren?',
+        message,
         [
           {
             text: 'Abbrechen',
@@ -712,47 +883,79 @@ export default function ShoppingListScreen() {
           {
             text: 'Alle markieren',
             style: 'default',
-            onPress: () => executeMarkAllAsPurchased(productCount, totalSavings)
+            onPress: () => executeMarkAllAsPurchased(dbProductCount, customItemCount, totalSavings)
           }
         ]
       );
     };
 
-    const executeMarkAllAsPurchased = async (productCount: number, totalSavings: number) => {
+    const executeMarkAllAsPurchased = async (dbProductCount: number, customItemCount: number, totalSavings: number) => {
       try {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         
-        console.log(`📊 Bulk update: ${productCount} products, €${totalSavings.toFixed(2)} savings`);
+        const totalCount = dbProductCount + customItemCount;
+        console.log(`📊 Bulk update: ${dbProductCount} DB products, ${customItemCount} custom items, €${totalSavings.toFixed(2)} savings`);
         
-        // Mark all as purchased
-        await Promise.all(
-          noNameProducts.map(item => 
-            FirestoreService.markAsPurchased(user!.uid, item.id)
-          )
-        );
+        // Process DB products and custom items separately
+        const dbNoNameProducts = noNameProducts.filter(item => !item.isCustom);
+        const customItems = noNameProducts.filter(item => item.isCustom);
         
-        // Update user's total savings and product count
-        if (totalSavings > 0 || productCount > 0) {
-          await updateUserStats(user!.uid, {
+        const promises = [];
+        
+        // Mark DB products as purchased (creates purchase history)
+        if (dbNoNameProducts.length > 0) {
+          promises.push(
+            ...dbNoNameProducts.map(item => 
+              FirestoreService.markAsPurchased(user.uid, item.id)
+            )
+          );
+        }
+        
+        // Remove custom items from cart (no purchase history)
+        if (customItems.length > 0) {
+          promises.push(
+            ...customItems.map(item => 
+              FirestoreService.removeFromShoppingCart(user.uid, item.id)
+            )
+          );
+        }
+        
+        // Execute all operations in parallel
+        await Promise.all(promises);
+        
+        // Update user's total savings and product count (only for DB products)
+        if (totalSavings > 0 || dbProductCount > 0) {
+          await updateUserStats(user.uid, {
             savingsToAdd: totalSavings,
-            productsToAdd: productCount
+            productsToAdd: dbProductCount
           });
           
           // Profile wird automatisch über Achievement-Callback aktualisiert
         }
         
-        // Clear NoName products locally
+        // Clear all NoName products locally (both DB and custom)
         setNoNameProducts([]);
         setTotalActualSavings(0);
         
-        // Track Achievement: complete_shopping
-        await achievementService.trackAction(user.uid, 'complete_shopping', {
-          productCount,
-          totalSavings
-        });
+        // Track Achievement: complete_shopping (only for DB products)
+        if (dbProductCount > 0) {
+          await achievementService.trackAction(user.uid, 'complete_shopping', {
+            productCount: dbProductCount,
+            totalSavings
+          });
+        }
         
-        // Gamified success toast (after clearing but with saved values)
-        showGameToast(`🏆 Wow! Alle ${productCount} Produkte als gekauft markiert! Du hast €${totalSavings.toFixed(2)} gespart!`, 'success');
+        // Gamified success toast
+        let successMessage = '';
+        if (dbProductCount > 0 && customItemCount > 0) {
+          successMessage = `🏆 Fantastic! Alle ${totalCount} Einträge erledigt! (${dbProductCount} Produkte, €${totalSavings.toFixed(2)} gespart + ${customItemCount} Freitext-Einträge)`;
+        } else if (dbProductCount > 0) {
+          successMessage = `🏆 Wow! Alle ${dbProductCount} Produkte als gekauft markiert! Du hast €${totalSavings.toFixed(2)} gespart!`;
+        } else {
+          successMessage = `📝 Alle ${customItemCount} Freitext-Einträge erledigt!`;
+        }
+        
+        showGameToast(successMessage, 'success');
         
       } catch (error) {
         console.error('Error marking all as purchased:', error);
@@ -763,49 +966,89 @@ export default function ShoppingListScreen() {
     const handleMarkAsPurchased = async (itemId: string, savings?: number) => {
       if (!user?.uid) return;
     
+    // Loading State setzen
+    setLoadingItems(prev => new Set(prev).add(itemId));
+    
     try {
-      await FirestoreService.markAsPurchased(user.uid, itemId);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       
-      // Update user savings and product count
-      console.log(`📊 Single update: 1 product, €${(savings || 0).toFixed(2)} savings`);
-      await updateUserStats(user.uid, {
-        savingsToAdd: savings || 0,
-        productsToAdd: 1
-      });
+      // Check if this is a custom item (freitext)
+      const isCustomItem = [...brandProducts, ...noNameProducts].some(item => 
+        item.id === itemId && item.isCustom
+      );
       
-      // Profile wird automatisch über Achievement-Callback aktualisiert
-      
-      // Track Achievement: complete_shopping for single item
-      console.log('🎯 Tracking complete_shopping action with:', {
-        productCount: 1,
-        totalSavings: savings || 0,
-        currentLevel: (userProfile as any)?.stats?.currentLevel || userProfile?.level || 'unknown'
-      });
-      
-      await achievementService.trackAction(user.uid, 'complete_shopping', {
-        productCount: 1,
-        totalSavings: savings || 0
-      });
-      
-      // Motivational message based on savings
-      if (savings && savings > 0) {
-        showGameToast(`🎯 Gekauft! Du hast €${savings.toFixed(2)} gespart - super gemacht!`, 'success');
+      if (isCustomItem) {
+        // For custom items: only remove from cart, no purchase history
+        await FirestoreService.removeFromShoppingCart(user.uid, itemId);
+        console.log('✅ Custom item removed from cart (no purchase history):', itemId);
       } else {
-        showGameToast('✅ Produkt als gekauft markiert!', 'success');
+        // For DB items: normal purchase with history
+        await FirestoreService.markAsPurchased(user.uid, itemId);
+      }
+      
+      // Update user savings and product count (only for DB items)
+      if (!isCustomItem) {
+        console.log(`📊 Single update: 1 product, €${(savings || 0).toFixed(2)} savings`);
+        await updateUserStats(user.uid, {
+          savingsToAdd: savings || 0,
+          productsToAdd: 1
+        });
+        
+        // Profile wird automatisch über Achievement-Callback aktualisiert
+        
+        // Track Achievement: complete_shopping for single item
+        console.log('🎯 Tracking complete_shopping action with:', {
+          productCount: 1,
+          totalSavings: savings || 0,
+          currentLevel: (userProfile as any)?.stats?.currentLevel || userProfile?.level || 'unknown'
+        });
+        
+        await achievementService.trackAction(user.uid, 'complete_shopping', {
+          productCount: 1,
+          totalSavings: savings || 0
+        });
+        
+        // Motivational message based on savings
+        if (savings && savings > 0) {
+          showGameToast(`🎯 Gekauft! Du hast €${savings.toFixed(2)} gespart - super gemacht!`, 'success');
+        } else {
+          showGameToast('✅ Produkt als gekauft markiert!', 'success');
+        }
+      } else {
+        // Custom items: simple confirmation message
+        showGameToast('📝 Freitext-Eintrag erledigt!', 'success');
       }
       
       // Optimized: Remove item from local state instead of reloading
-      if (savings && savings > 0) {
-        // NoName product - remove from noname list and update savings
+      if (isCustomItem) {
+        // Custom items: Check which list they belong to
+        const customItem = [...brandProducts, ...noNameProducts].find(item => 
+          item.id === itemId && item.isCustom
+        );
+        
+        if (customItem?.customType === 'noname') {
+          setNoNameProducts(prev => prev.filter(item => item.id !== itemId));
+        } else {
+          setBrandProducts(prev => prev.filter(item => item.id !== itemId));
+        }
+      } else if (savings && savings > 0) {
+        // Regular NoName product - remove from noname list and update savings
         setNoNameProducts(prev => prev.filter(item => item.id !== itemId));
         setTotalActualSavings(prev => Math.max(0, prev - savings));
       } else {
-        // Brand product - remove from brand list
+        // Regular Brand product - remove from brand list
         setBrandProducts(prev => prev.filter(item => item.id !== itemId));
       }
     } catch (error) {
       console.error('Error marking as purchased:', error);
       showGameToast('Markierung fehlgeschlagen. Probier es nochmal!', 'error');
+    } finally {
+      // Loading State entfernen
+      setLoadingItems(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(itemId);
+        return newSet;
+      });
     }
   };
   
@@ -822,7 +1065,11 @@ export default function ShoppingListScreen() {
           text: 'Entfernen',
           style: 'destructive',
           onPress: async () => {
+            // Loading State setzen
+            setDeletingItems(prev => new Set(prev).add(itemId));
+            
             try {
+              await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               await FirestoreService.removeFromShoppingCart(user.uid, itemId);
               showGameToast('Produkt vom Einkaufszettel entfernt', 'info');
               
@@ -839,6 +1086,13 @@ export default function ShoppingListScreen() {
             } catch (error) {
               console.error('Error removing from cart:', error);
               showGameToast('Entfernen fehlgeschlagen. Versuch es nochmal!', 'error');
+            } finally {
+              // Loading State entfernen
+              setDeletingItems(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(itemId);
+                return newSet;
+              });
             }
           }
         }
@@ -990,16 +1244,53 @@ export default function ShoppingListScreen() {
                       <TouchableOpacity 
                         style={styles.productContent}
                         onPress={() => {
+                          if (item.isCustom) {
+                            // Custom items are not expandable
+                            return;
+                          }
                           if (item.alternatives?.length > 0) {
                             toggleExpanded(item.id);
                           }
                         }}
+                        disabled={item.isCustom}
                       >
-                        <ImageWithShimmer
-                          source={{ uri: item.product.bild }}
-                          style={styles.productImage}
-                        />
-                        <View style={styles.productInfo}>
+                        {/* Custom Items vs DB Items Rendering */}
+                        {item.isCustom ? (
+                          <>
+                            {/* Custom Item Placeholder Image */}
+                            <View style={[styles.productImage, { backgroundColor: colors.border, justifyContent: 'center', alignItems: 'center' }]}>
+                              <IconSymbol 
+                                name="star.fill"
+                                size={24} 
+                                color={colors.icon} 
+                              />
+                            </View>
+                            <View style={styles.productInfo}>
+                              {/* Custom Badge */}
+                              <View style={[styles.customBadge, { backgroundColor: colors.primary }]}>
+                                <Text style={styles.customBadgeText}>
+                                  MARKE
+                                </Text>
+                              </View>
+                              
+                              <Text style={[styles.productName, { color: colors.text }]} numberOfLines={2}>
+                                {item.name}
+                              </Text>
+                              
+                              {/* Freitext Hinweis */}
+                              <Text style={[styles.customItemHint, { color: colors.icon }]}>
+                                Freitext-Eintrag
+                              </Text>
+                            </View>
+                          </>
+                        ) : (
+                          <>
+                            {/* Regular DB Item Rendering */}
+                            <ImageWithShimmer
+                              source={{ uri: item.product.bild }}
+                              style={styles.productImage}
+                            />
+                            <View style={styles.productInfo}>
                           {/* Marke mit Logo zuerst */}
                           {item.product.hersteller?.name && (
                             <View style={styles.brandRow}>
@@ -1027,9 +1318,11 @@ export default function ShoppingListScreen() {
                               Ersparnis möglich: €{item.potentialSavings.toFixed(2)}
                             </Text>
                           )}
-                        </View>
+                            </View>
+                          </>
+                        )}
                         <View style={styles.productActions}>
-                          {item.alternatives?.length > 0 && (
+                          {!item.isCustom && item.alternatives?.length > 0 && (
         <TouchableOpacity
                               style={styles.expandButton}
                               onPress={() => toggleExpanded(item.id)}
@@ -1042,22 +1335,38 @@ export default function ShoppingListScreen() {
         </TouchableOpacity>
                           )}
         <TouchableOpacity
-                            style={[styles.actionButton, { backgroundColor: colors.primary }]}
+          style={[
+                              styles.actionButton, 
+                              { backgroundColor: colors.primary, opacity: loadingItems.has(item.id) ? 0.7 : 1 }
+                            ]}
                             onPress={() => handleMarkAsPurchased(item.id)}
+                            disabled={loadingItems.has(item.id)}
                           >
-                            <IconSymbol name="checkmark" size={20} color="white" />
+                            {loadingItems.has(item.id) ? (
+                              <ActivityIndicator size="small" color="white" />
+                            ) : (
+                              <IconSymbol name="checkmark" size={20} color="white" />
+                            )}
         </TouchableOpacity>
         <TouchableOpacity
-                            style={[styles.actionButton, { backgroundColor: colors.error }]}
+          style={[
+                              styles.actionButton, 
+                              { backgroundColor: colors.error, opacity: deletingItems.has(item.id) ? 0.7 : 1 }
+                            ]}
                             onPress={() => handleRemoveFromCart(item.id)}
+                            disabled={deletingItems.has(item.id)}
                           >
-                            <IconSymbol name="trash" size={20} color="white" />
+                            {deletingItems.has(item.id) ? (
+                              <ActivityIndicator size="small" color="white" />
+                            ) : (
+                              <IconSymbol name="trash" size={20} color="white" />
+                            )}
         </TouchableOpacity>
       </View>
                       </TouchableOpacity>
                       
                       {/* NoName Alternatives */}
-                      {isExpanded && item.alternatives?.length > 0 && (
+                      {!item.isCustom && isExpanded && item.alternatives?.length > 0 && (
                         <View style={styles.alternativesContainer}>
                           <Text style={[styles.alternativesTitle, { color: colors.text }]}>
                             NoName Alternativen:
@@ -1114,7 +1423,7 @@ export default function ShoppingListScreen() {
                                     <Text style={[styles.alternativePrice, { color: colors.primary }]}>
                                       €{alt.preis?.toFixed(2)}
                                     </Text>
-                                  </View>
+        </View>
           </View>
                                 <View style={styles.alternativeSavings}>
                                   <Text style={[styles.savingsAmount, { color: colors.primary }]}>
@@ -1126,10 +1435,21 @@ export default function ShoppingListScreen() {
           </View>
                                 {isSelected ? (
         <TouchableOpacity
-                                    style={[styles.convertSingleButton, { backgroundColor: colors.primary }]}
+                                    style={[
+                                      styles.convertSingleButton, 
+                                      { 
+                                        backgroundColor: colors.primary, 
+                                        opacity: convertingItems.has(item.id) ? 0.7 : 1 
+                                      }
+                                    ]}
                                     onPress={() => handleConvertSingle(item.id, item.markenProdukt.id, alt.id)}
+                                    disabled={convertingItems.has(item.id)}
                                   >
-                                    <IconSymbol name="arrow.triangle.2.circlepath" size={14} color="white" />
+                                    {convertingItems.has(item.id) ? (
+                                      <ActivityIndicator size="small" color="white" />
+                                    ) : (
+                                      <IconSymbol name="arrow.triangle.2.circlepath" size={14} color="white" />
+                                    )}
         </TouchableOpacity>
                                 ) : (
                                   <View style={styles.selectIndicator}>
@@ -1148,8 +1468,8 @@ export default function ShoppingListScreen() {
             )
           }
             </ScrollView>
-          </View>
-          
+      </View>
+
           {/* Page 2: NoName Products */}
           <View key="noname" style={styles.pageContainer}>
             <ScrollView 
@@ -1181,71 +1501,142 @@ export default function ShoppingListScreen() {
                 {applyFiltersAndSorting(noNameProducts).map((item) => (
                   <View key={item.id} style={[styles.productCard, { backgroundColor: colors.cardBackground }]}>
                     <View style={styles.productContent}>
-                      <ImageWithShimmer
-                        source={{ uri: item.product.bild }}
-                        style={styles.productImage}
-                      />
-                                            <View style={styles.productInfo}>
-                        {/* Handelsmarke zuerst */}
-                        {item.product.handelsmarke?.bezeichnung && (
-                          <Text style={[styles.brandName, { color: colors.primary }]} numberOfLines={1}>
-                            {item.product.handelsmarke.bezeichnung}
-                          </Text>
-                        )}
-                        
-                        <Text style={[styles.productName, { color: colors.text }]} numberOfLines={2}>
-                          {item.product.name || item.product.produktName || 'Unbekanntes Produkt'}
-                        </Text>
-                        
-                        {/* Discounter Info */}
-                        <View style={styles.marketInfo}>
-                          {item.product.discounter?.bild ? (
-                            <ImageWithShimmer 
-                              source={{ uri: item.product.discounter.bild }} 
-                              style={styles.marketLogo} 
+                      {/* Custom Items vs DB Items Rendering */}
+                      {item.isCustom ? (
+                        <>
+                          {/* Custom Item Placeholder Image */}
+                          <View style={[styles.productImage, { backgroundColor: colors.border, justifyContent: 'center', alignItems: 'center' }]}>
+                            <IconSymbol 
+                              name={item.customType === 'brand' ? "star.fill" : "storefront"} 
+                              size={24} 
+                              color={colors.icon} 
                             />
-                          ) : (
-                            <View style={[styles.marketLogo, styles.marketLogoFallback, { backgroundColor: colors.border }]}>
-                              <IconSymbol name="storefront" size={8} color={colors.icon} />
+          </View>
+                          <View style={styles.productInfo}>
+                            {/* Custom Badge */}
+                            <View style={[styles.customBadge, { backgroundColor: colors.primary }]}>
+                              <Text style={styles.customBadgeText}>
+                                {item.customType === 'brand' ? 'MARKE' : 'NONAME'}
+                              </Text>
+                            </View>
+                            
+                            <Text style={[styles.productName, { color: colors.text }]} numberOfLines={2}>
+                              {item.name}
+                            </Text>
+                            
+                                                        {/* Market Info for Custom NoName */}
+                            {item.customType === 'noname' && item.markt && (
+                              <View style={styles.marketInfo}>
+                                {item.markt.bild ? (
+                                  <ImageWithShimmer
+                                    source={{ uri: item.markt.bild }}
+                                    style={styles.marketLogo}
+                                    fallbackIcon="storefront"
+                                    fallbackIconSize={8}
+                                  />
+                                ) : (
+                                  <View style={[styles.marketLogo, styles.marketLogoFallback, { backgroundColor: colors.border }]}>
+                                    <IconSymbol name="storefront" size={8} color={colors.icon} />
           </View>
         )}
-                          {userProfile?.favoriteMarket === item.product.discounter?.id && (
-                            <IconSymbol name="heart.fill" size={10} color={colors.primary} style={styles.favoriteMarketIconLeft} />
-                          )}
-                          <Text style={[styles.marketName, { color: colors.icon }]} numberOfLines={1}>
-                            {item.product.discounter?.name || 'Unbekannt'}
-                            {item.product.discounter?.land && ` (${item.product.discounter.land})`}
-                          </Text>
-                        </View>
+                                <Text style={[styles.marketName, { color: colors.icon }]} numberOfLines={1}>
+                                  {item.markt.name} {item.markt.land === 'Deutschland' ? '🇩🇪' : item.markt.land === 'Schweiz' ? '🇨🇭' : item.markt.land === 'Österreich' ? '🇦🇹' : ''}
+                                </Text>
+                              </View>
+                            )}
 
-                        {/* Preis mit Ersparnis in Klammern */}
-                        <Text style={[styles.productPrice, { color: colors.primary }]}>
-                          €{item.product.preis?.toFixed(2) || '0.00'}
-                          {item.savings > 0 && (
-                            <Text style={[styles.savingsInline, { color: colors.primary }]}>
-                              {' '}(- €{item.savings.toFixed(2)})
+                            {/* Freitext Hinweis */}
+                            <Text style={[styles.customItemHint, { color: colors.icon }]}>
+                              Freitext-Eintrag
                             </Text>
-                          )}
-                        </Text>
           </View>
+                        </>
+                      ) : (
+                        <>
+                          {/* Regular DB Item Rendering */}
+                          <ImageWithShimmer
+                            source={{ uri: item.product.bild }}
+                            style={styles.productImage}
+                          />
+                          <View style={styles.productInfo}>
+                            {/* Handelsmarke zuerst */}
+                            {item.product.handelsmarke?.bezeichnung && (
+                              <Text style={[styles.brandName, { color: colors.primary }]} numberOfLines={1}>
+                                {item.product.handelsmarke.bezeichnung}
+                              </Text>
+                            )}
+                            
+                            <Text style={[styles.productName, { color: colors.text }]} numberOfLines={2}>
+                              {item.product.name || item.product.produktName || 'Unbekanntes Produkt'}
+                            </Text>
+                            
+                            {/* Discounter Info */}
+                            <View style={styles.marketInfo}>
+                              {item.product.discounter?.bild ? (
+                                <ImageWithShimmer 
+                                  source={{ uri: item.product.discounter.bild }} 
+                                  style={styles.marketLogo} 
+                                />
+                              ) : (
+                                <View style={[styles.marketLogo, styles.marketLogoFallback, { backgroundColor: colors.border }]}>
+                                  <IconSymbol name="storefront" size={8} color={colors.icon} />
+          </View>
+        )}
+                              {userProfile?.favoriteMarket === item.product.discounter?.id && (
+                                <IconSymbol name="heart.fill" size={10} color={colors.primary} style={styles.favoriteMarketIconLeft} />
+                              )}
+                              <Text style={[styles.marketName, { color: colors.icon }]} numberOfLines={1}>
+                                {item.product.discounter?.name || 'Unbekannt'}
+                                {item.product.discounter?.land && ` (${item.product.discounter.land})`}
+                              </Text>
+                            </View>
+
+                            {/* Preis mit Ersparnis in Klammern */}
+                            <Text style={[styles.productPrice, { color: colors.primary }]}>
+                              €{item.product.preis?.toFixed(2) || '0.00'}
+                              {item.savings > 0 && (
+                                <Text style={[styles.savingsInline, { color: colors.primary }]}>
+                                  {' '}(- €{item.savings.toFixed(2)})
+                                </Text>
+                              )}
+                            </Text>
+                          </View>
+                        </>
+                      )}
                       <View style={styles.productActions}>
-        <TouchableOpacity 
-                          style={[styles.actionButton, { backgroundColor: colors.primary }]}
+                        <TouchableOpacity 
+                          style={[
+                            styles.actionButton, 
+                            { backgroundColor: colors.primary, opacity: loadingItems.has(item.id) ? 0.7 : 1 }
+                          ]}
                           onPress={() => handleMarkAsPurchased(item.id, item.savings)}
+                          disabled={loadingItems.has(item.id)}
                         >
-                          <IconSymbol name="checkmark" size={20} color="white" />
-              </TouchableOpacity>
-              <TouchableOpacity 
-                          style={[styles.actionButton, { backgroundColor: colors.error }]}
+                          {loadingItems.has(item.id) ? (
+                            <ActivityIndicator size="small" color="white" />
+                          ) : (
+                            <IconSymbol name="checkmark" size={20} color="white" />
+                          )}
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                          style={[
+                            styles.actionButton, 
+                            { backgroundColor: colors.error, opacity: deletingItems.has(item.id) ? 0.7 : 1 }
+                          ]}
                           onPress={() => handleRemoveFromCart(item.id)}
-              >
-                          <IconSymbol name="trash" size={20} color="white" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
+                          disabled={deletingItems.has(item.id)}
+                        >
+                          {deletingItems.has(item.id) ? (
+                            <ActivityIndicator size="small" color="white" />
+                          ) : (
+                            <IconSymbol name="trash" size={20} color="white" />
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
                 ))}
-            </View>
+              </View>
             )
               }
       </ScrollView>
@@ -1570,6 +1961,20 @@ export default function ShoppingListScreen() {
           />
         </View>
       )}
+
+        {/* Custom Item Modal */}
+        <AddCustomItemModal
+          visible={showCustomItemModal}
+          onClose={() => setShowCustomItemModal(false)}
+          userId={user?.uid || ''}
+          onSuccess={(message) => {
+            showGameToast(message, 'success');
+            loadShoppingCart(); // Reload nach Hinzufügung
+          }}
+          onError={(message) => {
+            showGameToast(message, 'error');
+          }}
+        />
         </View>
   );
 }
@@ -2087,5 +2492,25 @@ const styles = StyleSheet.create({
     zIndex: 9999,
     elevation: 9999,
     pointerEvents: 'box-none', // Nur der Toast ist klickbar, nicht der Container
+  },
+  
+  // Custom Item Styles
+  customBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginBottom: 4,
+  },
+  customBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontFamily: 'Nunito_600SemiBold',
+  },
+  customItemHint: {
+    fontSize: 12,
+    fontFamily: 'Nunito_400Regular',
+    fontStyle: 'italic',
+    marginTop: 4,
   },
 });
