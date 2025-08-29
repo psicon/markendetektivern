@@ -1,6 +1,5 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { CartToast } from '@/components/ui/CartToast';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
@@ -10,6 +9,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import { FirestoreService } from '@/lib/services/firestore';
+import { showCartAddedToast, showInfoToast } from '@/lib/services/ui/toast';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
@@ -103,32 +103,17 @@ export default function FavoritesScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
   const hasLoadedOnce = useRef(false);
   
-  // Toast states ERWEITERT für Action-Toast
-  const [showToast, setShowToast] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
-  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
-  const [toastActionLabel, setToastActionLabel] = useState<string | undefined>(undefined);
-  const [toastActionPress, setToastActionPress] = useState<(() => void) | undefined>(undefined);
+  // Toasts laufen jetzt global über zentrale Toast-Library
 
   const showGameToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
-    setToastMessage(message);
-    setToastType(type);
-    setToastActionLabel(undefined);
-    setToastActionPress(undefined);
-    setShowToast(true);
+    showInfoToast(message, type);
   };
 
   const showGameToastWithAction = (
     message: string, 
     type: 'success' | 'error' | 'info' = 'success'
   ) => {
-    setToastMessage(message);
-    setToastType(type);
-    setToastActionLabel('Einkaufszettel');
-    setToastActionPress(() => () => {
-      router.push('/shopping-list' as any);
-    });
-    setShowToast(true);
+    showCartAddedToast(message, () => router.push('/shopping-list' as any));
   };
 
   // Header konfigurieren EXAKT wie Einkaufszettel
@@ -917,19 +902,7 @@ export default function FavoritesScreen() {
         </View>
       </Modal>
 
-      {/* Toast ERWEITERT mit Action-Button */}
-      <CartToast
-        visible={showToast}
-        message={toastMessage}
-        type={toastType}
-        actionLabel={toastActionLabel}
-        onActionPress={toastActionPress}
-        onHide={() => {
-          setShowToast(false);
-          setToastActionLabel(undefined);
-          setToastActionPress(undefined);
-        }}
-      />
+      {/* Lokaler Toast entfernt – zentrale Toast-Library übernimmt */}
     </ThemedView>
   );
 }

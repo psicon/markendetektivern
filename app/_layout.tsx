@@ -1,8 +1,10 @@
+import { Toasts } from '@backpackapp-io/react-native-toast';
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { FontLoader } from '@/components/ui/FontLoader';
@@ -48,6 +50,16 @@ function ThemedApp() {
             {showSplash && (
               <SplashScreen onAnimationComplete={handleSplashComplete} />
             )}
+
+            {/* Global Toast Host - transparenter Wrapper, damit nur unser Custom-Toast sichtbar ist */}
+            <Toasts 
+              defaultStyle={{
+                view: { backgroundColor: 'transparent', padding: 0, margin: 0, shadowOpacity: 0, elevation: 0 },
+                pressable: { backgroundColor: 'transparent' },
+                indicator: { marginRight: 0 },
+              }}
+              gutter={10}
+            />
           </NavigationThemeProvider>
         </GamificationProvider>
       </AuthProvider>
@@ -58,11 +70,13 @@ function ThemedApp() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ErrorBoundary>
-        <ThemeProvider>
-          <ThemedApp />
-        </ThemeProvider>
-      </ErrorBoundary>
+      <SafeAreaProvider>
+        <ErrorBoundary>
+          <ThemeProvider>
+            <ThemedApp />
+          </ThemeProvider>
+        </ErrorBoundary>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

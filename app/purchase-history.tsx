@@ -1,6 +1,5 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { CartToast } from '@/components/ui/CartToast';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
@@ -406,15 +405,7 @@ export default function PurchaseHistoryScreen() {
         </View>
       </View>
 
-      {/* Toast */}
-      <CartToast
-        visible={showToast}
-        message={toastMessage}
-        type={toastType}
-        onHide={() => setShowToast(false)}
-        actionLabel={toastActionLabel}
-        onActionPress={toastActionPress}
-      />
+      {/* Lokaler Toast entfernt – zentrale Toast-Library übernimmt */}
     </ThemedView>
   );
 }

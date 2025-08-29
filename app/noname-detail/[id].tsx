@@ -1,7 +1,6 @@
 import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { CartToast } from '@/components/ui/CartToast';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { CommentSkeleton, CommentsHeaderSkeleton, ListItemSkeleton, ProductComparisonSkeleton, RatingOverviewSkeleton } from '@/components/ui/ShimmerSkeleton';
@@ -862,28 +861,9 @@ export default function NoNameDetailScreen() {
             </TouchableOpacity>
           </View>
           
-          {/* Toast in Main Product Card */}
-          {showToast && (
-            <CartToast
-              visible={showToast}
-              message={toastMessage}
-              type={toastType}
-              onHide={() => setShowToast(false)}
-            />
-          )}
+          {/* Lokaler Toast entfernt – zentrale Toast-Library übernimmt */}
 
-          {/* Rating Toast with Star Icon */}
-          {showRatingToast && (
-            <View style={styles.fixedToastContainer}>
-              <CartToast
-                visible={showRatingToast}
-                message={ratingToastMessage}
-                type="success"
-                position="top"
-                onHide={() => setShowRatingToast(false)}
-              />
-            </View>
-          )}
+          {/* Rating Toast entfernt – zentrale Toast-Library übernimmt */}
         </Animated.View>
 
         {/* Ähnliche Produkte Sektion - immer anzeigen wenn Kategorie vorhanden */}

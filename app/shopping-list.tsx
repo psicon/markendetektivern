@@ -1,5 +1,4 @@
 import { AddCustomItemModal } from '@/components/ui/AddCustomItemModal';
-import { CartToast } from '@/components/ui/CartToast';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
@@ -11,6 +10,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { useTheme } from '@/lib/contexts/ThemeContext';
 import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
+import { showInfoToast, showPurchasedToast } from '@/lib/services/ui/toast';
 import { updateUserStats } from '@/lib/services/userProfile';
 import {
     Einkaufswagen,
@@ -92,12 +92,7 @@ export default function ShoppingListScreen() {
   const [availableMarkets, setAvailableMarkets] = useState<any[]>([]);
   const [availableCategories, setAvailableCategories] = useState<any[]>([]);
   
-  // Toast states for gamified feedback
-  const [showToast, setShowToast] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
-  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
-  const [toastActionLabel, setToastActionLabel] = useState<string | undefined>(undefined);
-  const [toastActionPress, setToastActionPress] = useState<(() => void) | undefined>(undefined);
+  // Toasts laufen jetzt global über zentrale Toast-Library
   
   // Level-Up Overlay State (spektakuläre Animation)
   const [showLevelUpOverlay, setShowLevelUpOverlay] = useState(false);
@@ -119,18 +114,7 @@ export default function ShoppingListScreen() {
 
   // Gamified toast helper
   const showGameToast = (message: string, type: 'success' | 'error' | 'info' = 'success', enableAudio = true) => {
-    setToastMessage(message);
-    setToastType(type);
-    setShowToast(true);
-    
-    // Haptic feedback
-    if (type === 'success') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else if (type === 'error') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    }
-    
-    // TODO: Add audio feedback here if needed
+    showInfoToast(message, type);
   };
 
   // Header konfigurieren
@@ -978,9 +962,9 @@ export default function ShoppingListScreen() {
         
         // Motivational message based on savings
         if (savings && savings > 0) {
-          showGameToast(`🎯 Gekauft! Du hast €${savings.toFixed(2)} gespart - super gemacht!`, 'success');
+          showPurchasedToast(`Gekauft! Du hast €${savings.toFixed(2)} gespart - super gemacht!`);
         } else {
-          showGameToast('✅ Produkt als gekauft markiert!', 'success');
+          showPurchasedToast('Produkt als gekauft markiert!');
         }
       } else {
         // Custom items: simple confirmation message
@@ -1911,24 +1895,7 @@ export default function ShoppingListScreen() {
         onClose={() => setShowLevelUpOverlay(false)}
       />
       
-      {/* ACHIEVEMENT TOAST - Für normale Achievements */}
-      {showToast && (
-        <View style={styles.fixedToastContainer}>
-          <CartToast
-            visible={showToast}
-            message={toastMessage}
-            type={toastType}
-            position="top"
-            actionLabel={toastActionLabel}
-            onActionPress={toastActionPress}
-            onHide={() => {
-              setShowToast(false);
-              setToastActionLabel(undefined);
-              setToastActionPress(undefined);
-            }}
-          />
-        </View>
-      )}
+      {/* Lokale CartToast-Instanz entfernt – zentrale Toast-Library übernimmt */}
 
         {/* Custom Item Modal */}
         <AddCustomItemModal

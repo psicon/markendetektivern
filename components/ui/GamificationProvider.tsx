@@ -1,8 +1,9 @@
 import {
-  setAchievementUnlockHandler,
-  setLevelUpHandler,
-  setPointsEarnedHandler
+    setAchievementUnlockHandler,
+    setLevelUpHandler,
+    setPointsEarnedHandler
 } from '@/lib/services/achievementService';
+import { showPointsToast } from '@/lib/services/ui/toast';
 import { Achievement } from '@/lib/types/achievements';
 import React, { useCallback, useEffect, useState } from 'react';
 import { AchievementUnlockOverlay } from './AchievementUnlockOverlay';
@@ -111,21 +112,9 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   }, []);
 
   const pointsHandler = useCallback((points: number, action: string, message: string) => {
-    console.log(`💰 Points Toast triggered: +${points} für ${action}`);
-    
-    // Toast für ALLE Punkte-Vergaben anzeigen (auch 1-4 Punkte)
     if (points > 0) {
-      setPointsToastData({
-        visible: true,
-        points,
-        action,
-        message
-      });
-      
-      // Auto-hide nach 2.5 Sekunden (etwas kürzer für häufigere Toasts)
-      setTimeout(() => {
-        setPointsToastData(prev => ({ ...prev, visible: false }));
-      }, 2500);
+      // Neue Toast-Bibliothek: stapelbar, top-position, swipe dismiss
+      showPointsToast(message, points);
     }
   }, []);
 

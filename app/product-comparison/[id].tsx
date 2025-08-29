@@ -1,7 +1,6 @@
 import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { CartToast } from '@/components/ui/CartToast';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
@@ -17,6 +16,7 @@ import { useFavorites } from '@/lib/hooks/useFavorites';
 import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
+import { showCartAddedToast, showFavoriteAddedToast, showFavoriteRemovedToast, showInfoToast } from '@/lib/services/ui/toast';
 import { MarkenProduktWithDetails, ProductWithDetails } from '@/lib/types/firestore';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
@@ -1138,39 +1138,29 @@ export default function ProductComparisonScreen() {
   const [achievementMessage, setAchievementMessage] = useState('');
   
   // CART Toast (normale Priorität)
-  const [showToast, setShowToast] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
-  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
-  const [toastActionLabel, setToastActionLabel] = useState<string | undefined>(undefined);
-  const [toastActionPress, setToastActionPress] = useState<(() => void) | undefined>(undefined);
+  // Toasts laufen jetzt über zentrale Toast-Library
 
   // Toast helper functions - SEPARATE für verschiedene Typen
   const showGameToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
-    setToastMessage(message);
-    setToastType(type);
-    setToastActionLabel(undefined);
-    setToastActionPress(undefined);
-    setShowToast(true);
+    showInfoToast(message, type);
   };
 
   const showGameToastWithAction = (
     message: string, 
     type: 'success' | 'error' | 'info' = 'success'
   ) => {
-    setToastMessage(message);
-    setToastType(type);
-    setToastActionLabel('Einkaufszettel');
-    setToastActionPress(() => () => {
-      router.push('/shopping-list' as any);
-    });
-    setShowToast(true);
+    showCartAddedToast(message, () => router.push('/shopping-list' as any));
   };
 
   // FAVORITEN Toast (lokale Positionierung beim Herz-Icon)
   const showFavoriteGameToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
-    setFavoriteMessage(message);
-    setFavoriteType(type);
-    setShowFavoriteToast(true);
+    if (type === 'success' && message.includes('hinzugefügt')) {
+      showFavoriteAddedToast(message.replace('💖 ', '').replace(' zu Favoriten hinzugefügt!', ''));
+    } else if (type === 'success' && message.includes('entfernt')) {
+      showFavoriteRemovedToast(message.replace('💔 ', '').replace(' aus Favoriten entfernt', ''));
+    } else {
+      showInfoToast(message, type);
+    }
   };
 
   // LEVEL-UP Overlay anzeigen (spektakuläre Animation mit Confetti)
@@ -1185,19 +1175,7 @@ export default function ProductComparisonScreen() {
     setShowAchievementToast(true);
   };
 
-  // CART Toast (mit Action-Button Support)
-  const showCartGameToastWithAction = (
-    message: string, 
-    type: 'success' | 'error' | 'info' = 'success',
-    actionLabel?: string,
-    actionPress?: () => void
-  ) => {
-    setToastMessage(message);
-    setToastType(type);
-    setToastActionLabel(actionLabel);
-    setToastActionPress(actionPress ? () => actionPress : undefined);
-    setShowToast(true);
-  };
+  // (Legacy CartToast-Helper entfernt)
 
   // Handle favorite toggle
   const handleToggleFavorite = async (product: any, productType: 'markenprodukt' | 'noname') => {
@@ -2441,7 +2419,9 @@ export default function ProductComparisonScreen() {
                   productName={noNameProduct.produktName || noNameProduct.name || 'NoName Produkt'}
                   user={user}
                   colors={colors}
-                  onShowToast={showCartGameToastWithAction}
+                  onShowToast={(message, type, actionLabel, actionPress) => {
+                    showCartAddedToast(message, () => router.push('/shopping-list' as any));
+                  }}
                 />
               </View>
               </TouchableOpacity>
@@ -3385,52 +3365,7 @@ export default function ProductComparisonScreen() {
         onClose={() => setShowLevelUpOverlay(false)}
       />
 
-      {/* TOASTS - IMMER SICHTBAR über dem gesamten Bildschirm */}
-
-      {/* ACHIEVEMENT Toast (mittlere Priorität) */}
-      {showAchievementToast && (
-        <View style={styles.fixedToastContainer}>
-          <CartToast
-            visible={showAchievementToast}
-            message={achievementMessage}
-            type="success"
-            position="top"
-            onHide={() => setShowAchievementToast(false)}
-          />
-        </View>
-      )}
-
-      {/* FAVORITEN Toast (beim Herz-Icon positioniert) */}
-      {showFavoriteToast && (
-        <View style={[styles.fixedToastContainer, { top: '30%' }]}>
-          <CartToast
-            visible={showFavoriteToast}
-            message={favoriteMessage}
-            type={favoriteType}
-            position="top"
-            onHide={() => setShowFavoriteToast(false)}
-          />
-        </View>
-      )}
-
-      {/* CART Toast (normale Priorität) */}
-      {showToast && (
-        <View style={styles.fixedToastContainer}>
-          <CartToast
-            visible={showToast}
-            message={toastMessage}
-            type={toastType}
-            position="top"
-            actionLabel={toastActionLabel}
-            onActionPress={toastActionPress}
-            onHide={() => {
-              setShowToast(false);
-              setToastActionLabel(undefined);
-              setToastActionPress(undefined);
-            }}
-          />
-        </View>
-      )}
+      {/* Alle lokalen Toast-Container entfernt – zentrale Toast-Library übernimmt */}
     </ThemedView>
     </>
   );
