@@ -124,6 +124,8 @@ export interface Einkaufswagen {
     type: 'brand' | 'noname'; // Produkttyp
     marketId?: string; // Markt-ID (nur bei NoName)
     marketName?: string; // Markt-Name für Anzeige
+    marketLand?: string; // Land des Marktes (für Flaggen)
+    marketBild?: string; // Bild-URL des Marktes
   };
   
   gekauft: boolean; // Ob das Produkt bereits gekauft wurde

@@ -5,8 +5,8 @@ import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { achievementService } from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
-import { ScanHistoryItem, scanHistoryService } from '@/lib/services/scanHistoryService';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
@@ -14,6 +14,38 @@ import { getDoc } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, InteractionManager, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+// import scanHistoryService, { ScanHistoryItem } from '@/lib/services/scanHistoryService';
+// TODO: scanHistoryService muss noch implementiert werden
+interface ScanHistoryItem {
+  id?: string;
+  ean: string;
+  productId: string;
+  productName: string;
+  productImage?: string;
+  productType: 'noname' | 'markenprodukt';
+  brandName?: string;
+  brandImage?: string;
+  price?: number;
+  timestamp?: Date;
+}
+const scanHistoryService = {
+  subscribeToScanHistory: (userId: string, limit: number, callback: (items: ScanHistoryItem[]) => void) => {
+    // Placeholder - returns empty unsubscribe function
+    return () => {};
+  },
+  getRecentScans: async (userId: string, limit: number): Promise<ScanHistoryItem[]> => {
+    return [];
+  },
+  saveScan: async (userId: string, scan: any): Promise<void> => {
+    // Placeholder
+  },
+  getBrandInfo: async (ref: any): Promise<any> => {
+    return null;
+  },
+  markAllAsDeleted: async (userId: string): Promise<void> => {
+    // Placeholder
+  }
+};
 
 export default function BarcodeScannerScreen() {
   const colorScheme = useColorScheme();
@@ -76,7 +108,7 @@ export default function BarcodeScannerScreen() {
         const unsubscribe = scanHistoryService.subscribeToScanHistory(
           user.uid,
           10,
-          (items) => setScanHistory(items)
+          (items: ScanHistoryItem[]) => setScanHistory(items)
         );
         return () => {
           unsubscribe();
@@ -196,6 +228,19 @@ export default function BarcodeScannerScreen() {
             brandImage,
             price: product.preis
           });
+          
+          // 🎯 TRACK ACTION: scan_product
+          try {
+            await achievementService.trackAction(user.uid, 'scan_product', {
+              productId: product.id,
+              productName: product.name,
+              ean: ean,
+              productType: 'noname'
+            });
+            console.log('✅ Action tracked: scan_product (NoName)');
+          } catch (error) {
+            console.error('Error tracking scan_product action:', error);
+          }
         }
         
         // 🎉 SUCCESS HAPTIC FEEDBACK
@@ -247,6 +292,19 @@ export default function BarcodeScannerScreen() {
             brandImage,
             price: product.preis
           });
+          
+          // 🎯 TRACK ACTION: scan_product
+          try {
+            await achievementService.trackAction(user.uid, 'scan_product', {
+              productId: product.id,
+              productName: product.name,
+              ean: ean,
+              productType: 'markenprodukt'
+            });
+            console.log('✅ Action tracked: scan_product (Markenprodukt)');
+          } catch (error) {
+            console.error('Error tracking scan_product action:', error);
+          }
         }
         
         // 🎉 SUCCESS HAPTIC FEEDBACK

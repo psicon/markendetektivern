@@ -2,8 +2,8 @@ import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firest
 import { db } from '../firebase';
 
 export interface UserProfile {
-  uid: string;
-  email: string;
+  uid?: string; // Optional für Kompatibilität
+  email?: string; // Optional für Kompatibilität
   display_name?: string;
   real_name?: string;
   photo_url?: string;

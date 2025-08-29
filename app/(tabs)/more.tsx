@@ -127,7 +127,7 @@ export default function MoreScreen() {
   const productCount = userProfile?.productsSaved || 0;
   const isPremium = userProfile?.isPremium || false;
   const level = (userProfile as any)?.stats?.currentLevel || userProfile?.level || 1;
-  const currentPoints = (userProfile as any)?.stats?.totalPoints || 0;
+  const currentPoints = (userProfile as any)?.stats?.pointsTotal || (userProfile as any)?.stats?.totalPoints || 0;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>

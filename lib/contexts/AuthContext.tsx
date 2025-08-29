@@ -60,7 +60,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             display_name: 'Anonymer Nutzer',
             created_time: new Date(),
             totalSavings: 0,
-            level: 1,
+            // LEVEL WIRD NICHT HIER GESETZT - kommt aus stats
             xp: 0,
             productsSaved: 0,
             ratingsGiven: 0,
@@ -97,6 +97,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsAnonymous(user?.isAnonymous || false);
       
       if (user?.uid) {
+        // 🔄 KOMPLETTER GAMIFICATION RELOAD nach Authentifizierung
+        console.log('🚀 Starte kompletten Gamification-Reload nach Authentifizierung...');
+        try {
+          // Reset Achievement Service komplett
+          achievementService.resetForNewAuth();
+          
+          // Neu-Initialisierung mit authentifizierten User
+          await achievementService.initialize();
+          console.log('✅ Gamification-System erfolgreich nach Auth reinitialisiert');
+        } catch (error) {
+          console.error('❌ Gamification-Reload nach Auth fehlgeschlagen:', error);
+          // Trotzdem weitermachen - App soll funktionieren
+        }
+
         // Stelle sicher, dass User-Profil existiert (auch für anonyme User)
         try {
           await createUserProfile(user);

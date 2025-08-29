@@ -1,0 +1,110 @@
+// ============================================
+// GAMIFICATION SECURITY RULES - ZUM HINZUFÜGEN
+// ============================================
+
+// 1. GAMIFICATION CONFIG (Read-Only für alle authentifizierten User)
+// NEUE STRUKTUR OHNE config SUBCOLLECTION!
+match /gamification/{document} {
+  allow read: if request.auth != null;
+  allow write: if false; // Nur über Admin-Console/Cloud Functions
+}
+
+// Levels Subcollection
+match /gamification/levels/items/{levelId} {
+  allow read: if request.auth != null;
+  allow write: if false; // Nur über Admin-Console/Cloud Functions
+}
+
+// 2. ACHIEVEMENTS COLLECTION (Global, Read-Only)
+match /achievements/{achievementId} {
+  allow read: if true; // Jeder kann Achievement-Definitionen sehen
+  allow write: if false; // Nur über Admin-Console
+}
+
+// 3. USER LEDGER (Punkte-Transaktionen)
+// WICHTIG: Idealerweise nur Server-Side schreiben!
+match /users/{userId}/ledger/{transactionId} {
+  // Lesen: Nur eigene Transaktionen
+  allow read: if request.auth != null && request.auth.uid == userId;
+  
+  // Schreiben: Nur wenn authentifiziert und eigener User
+  // ZUSÄTZLICHE VALIDIERUNG für Anti-Abuse
+  allow create: if request.auth != null && 
+    request.auth.uid == userId &&
+    // Transaction muss timestamp haben
+    request.resource.data.keys().hasAll(['timestamp', 'action', 'points']) &&
+    // Timestamp muss aktuell sein (±5 Minuten)
+    request.resource.data.timestamp is timestamp &&
+    math.abs(request.resource.data.timestamp.seconds() - request.time.seconds()) < 300 &&
+    // Points müssen positiv sein
+    request.resource.data.points is number &&
+    request.resource.data.points > 0 &&
+    // Action muss string sein
+    request.resource.data.action is string;
+  
+  // Updates und Deletes verbieten (append-only)
+  allow update: if false;
+  allow delete: if false;
+}
+
+// 4. USER ACHIEVEMENTS PROGRESS (Subcollection)
+match /users/{userId}/achievements/{achievementId} {
+  // Lesen: Nur eigene Achievement-Progress
+  allow read: if request.auth != null && request.auth.uid == userId;
+  
+  // Schreiben: Nur Server/Cloud Functions sollte das updaten
+  // Falls Client-Write nötig (nicht empfohlen):
+  allow write: if request.auth != null && 
+    request.auth.uid == userId &&
+    // Nur progress, completed, completedAt, lastUpdated erlaubt
+    request.resource.data.keys().hasAll(['progress', 'completed', 'lastUpdated']) &&
+    // Progress muss >= 0 sein
+    request.resource.data.progress >= 0;
+}
+
+// 5. USER STATS ERWEITERT
+// (Bereits durch bestehende /users/{userId} Regel abgedeckt,
+// aber hier explizit für stats-Felder wenn gewünscht)
+match /users/{userId} {
+  // Stats-Updates mit Validierung
+  allow update: if request.auth != null && 
+    request.auth.uid == userId &&
+    // Verhindere dass User direkt Level manipuliert
+    (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stats.currentLevel']) ||
+     // Oder erlaube nur Erhöhung um 1
+     request.resource.data.stats.currentLevel == resource.data.stats.currentLevel + 1) &&
+    // Points/Savings dürfen nur erhöht werden
+    request.resource.data.stats.pointsTotal >= resource.data.stats.pointsTotal &&
+    request.resource.data.stats.savingsTotal >= resource.data.stats.savingsTotal;
+}
+
+// 6. MISSIONS (Für spätere Erweiterung)
+match /missions/{missionId} {
+  allow read: if request.auth != null;
+  allow write: if false;
+}
+
+match /users/{userId}/missions/{missionId} {
+  allow read: if request.auth != null && request.auth.uid == userId;
+  allow write: if request.auth != null && request.auth.uid == userId;
+}
+
+// ============================================
+// WICHTIGE HINWEISE:
+// ============================================
+// 
+// 1. LEDGER sollte idealerweise NUR über Cloud Functions geschrieben werden
+//    um Anti-Abuse zu garantieren. Die obigen Rules sind ein Kompromiss.
+//
+// 2. STATS Updates (Level, Points) sollten ebenfalls Server-Side erfolgen
+//    Die Client-Rules sind nur für Prototyping/Development
+//
+// 3. Für PRODUCTION empfohlen:
+//    - Cloud Function für awardPoints()
+//    - Cloud Function für updateLevel()
+//    - Client sendet nur Events, Server validiert und schreibt
+//
+// 4. Die timestamp-Validierung in ledger verhindert,
+//    dass User alte Transaktionen "nachholen" können
+//
+// ============================================

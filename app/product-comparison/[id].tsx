@@ -14,7 +14,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { ingredientSynonyms } from '@/lib/data/ingredientSynonyms';
 import { db } from '@/lib/firebase';
 import { useFavorites } from '@/lib/hooks/useFavorites';
-import achievementService, { setAchievementUnlockHandler } from '@/lib/services/achievementService';
+import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
 import { MarkenProduktWithDetails, ProductWithDetails } from '@/lib/types/firestore';
@@ -1419,6 +1419,28 @@ export default function ProductComparisonScreen() {
 
         await FirestoreService.addProductRating(productRatingData);
         showFavoriteGameToast('⭐ Deine Bewertung wurde gespeichert!', 'success');
+        
+        // 🎯 TRACK ACTION: submit_rating (nur bei neuer Bewertung, nicht bei Update)
+        if (user?.uid) {
+          try {
+            // Check minTextLength requirement (20 chars)
+            const textLength = (comment || '').length;
+            if (textLength >= 20) {
+              await achievementService.trackAction(user.uid, 'submit_rating', {
+                productId: productId,
+                productName: isNoNameProduct ? selectedProductForDetails?.name : comparisonData?.mainProduct?.name,
+                productType: isNoNameProduct ? 'noname' : 'markenprodukt',
+                rating: overallRating,
+                commentLength: textLength
+              });
+              console.log('✅ Action tracked: submit_rating');
+            } else {
+              console.log('ℹ️ submit_rating not tracked: comment too short (min 20 chars)');
+            }
+          } catch (error) {
+            console.error('Error tracking submit_rating action:', error);
+          }
+        }
       }
 
       // Reset form
@@ -1457,7 +1479,7 @@ export default function ProductComparisonScreen() {
       return;
     }
     
-    console.log('🔍 Loading ratings for product:', productToLoad.name, 'ID:', productToLoad.id);
+
     
     // WICHTIG: Reset old ratings BEFORE loading new ones
     setProductRatings([]);
@@ -1476,7 +1498,7 @@ export default function ProductComparisonScreen() {
       const stats = FirestoreService.calculateRatingStats(ratings);
       setRatingStats(stats);
       
-      console.log(`✅ Loaded ${ratings.length} ratings with user info for product ${productToLoad.name}`);
+
     } catch (error) {
       console.error('Error loading product ratings:', error);
     } finally {
@@ -1545,12 +1567,12 @@ export default function ProductComparisonScreen() {
   const loadSimilarProducts = async (categoryName: string, excludeProductId: string) => {
     try {
       setSimilarProductsLoading(true);
-      console.log('🔍 Loading similar products for category:', categoryName);
+
       console.log('🔍 Excluding product ID:', excludeProductId);
       
       const products = await FirestoreService.getSimilarProducts(categoryName, excludeProductId, 7);
       setSimilarProducts(products);
-      console.log(`✅ Loaded ${products.length} similar products:`, products.map(p => `${p.name} (Stufe ${p.stufe})`));
+
     } catch (error) {
       console.error('❌ Error loading similar products:', error);
     } finally {
@@ -1565,7 +1587,7 @@ export default function ProductComparisonScreen() {
     }
 
     try {
-      console.log('Reloading product comparison for ID:', id, 'Type:', type);
+
       
       // Determine product type from URL parameter
       const isMarkenProdukt = type === 'brand';
@@ -1575,11 +1597,6 @@ export default function ProductComparisonScreen() {
       
       if (data) {
         setComparisonData(data);
-        console.log('Product comparison reloaded:', {
-          mainProduct: data.mainProduct.name,
-          relatedCount: data.relatedNoNameProducts.length,
-          clickedWasNoName: data.clickedWasNoName
-        });
         
         // Nach dem Laden der Firestore-Daten: OpenFood API aufrufen
         loadOpenFoodData(data);
@@ -1706,37 +1723,8 @@ export default function ProductComparisonScreen() {
   }, [navigation, router, colors.primary, colors.warning, selectedProducts]);
 
 
-  // Load product comparison data from Firestore
-  // Setup Achievement Toast Handler with motivational messages
-  useEffect(() => {
-    setAchievementUnlockHandler((notification: any) => {
-      // Check if it's a level-up notification
-      if (notification && notification.type === 'level_up') {
-        // MEGA Level-Up Animation & Haptics
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 200);
-        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light), 400);
-        
-        // LEVEL-UP Overlay mit spektakulärer Animation
-        showLevelUpAnimation(notification.level || 1, notification.oldLevel || 1);
-      } else {
-        // Normal achievement unlock
-        const motivationalMessages = [
-          '🎉 FANTASTISCH!',
-          '🚀 UNGLAUBLICH!',
-          '💪 MEGA STARK!',
-          '⭐ SENSATIONELL!',
-          '🔥 HAMMER!'
-        ];
-        const randomMessage = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
-        
-        // ACHIEVEMENT Toast (mittlere Priorität)
-        showAchievementGameToast(
-          `${randomMessage}\n🏆 ${notification.name}\n+${notification.points} Punkte verdient!`
-        );
-      }
-    });
-  }, []);
+  // 🚫 KEIN lokaler Achievement-Handler mehr!
+  // Achievements werden jetzt ZENTRAL über GamificationProvider mit großen Lottie-Overlays angezeigt!
   
   useEffect(() => {
     async function loadProductComparison() {
@@ -1750,7 +1738,7 @@ export default function ProductComparisonScreen() {
         setLoading(true);
         setError(null);
         
-        console.log('Loading product comparison for ID:', id, 'Type:', type);
+
         
         // Determine product type from URL parameter
         let isMarkenProdukt = type === 'brand';
@@ -1777,15 +1765,10 @@ export default function ProductComparisonScreen() {
         if (data) {
           setComparisonData(data);
           
-          console.log('Product comparison loaded:', {
-            mainProduct: data.mainProduct.name,
-            relatedCount: data.relatedNoNameProducts.length,
-            clickedWasNoName: data.clickedWasNoName
-          });
+
           
           // Wenn es ein Markenprodukt ist und keine NoName-Alternativen hat, lade ähnliche Produkte
           if (isMarkenProdukt && data.relatedNoNameProducts.length === 0 && data.mainProduct.kategorie?.bezeichnung) {
-            console.log('🔍 No NoName alternatives found for brand product, loading similar products...');
             loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id);
           }
           
@@ -1829,7 +1812,7 @@ export default function ProductComparisonScreen() {
   }) => {
     try {
       setOpenFoodLoading(true);
-      console.log('🌍 Loading OpenFood data...');
+
       
       // Sammle alle EANs
       const allEANs: string[] = [];
@@ -1851,10 +1834,10 @@ export default function ProductComparisonScreen() {
       });
       
       if (allEANs.length > 0) {
-        console.log(`🌍 Loading OpenFood data for ${allEANs.length} products`);
+
         const openFoodResults = await OpenFoodService.getProductsByEANs(allEANs);
         setOpenFoodData(openFoodResults);
-        console.log(`✅ OpenFood data loaded for ${openFoodResults.size} products`);
+
       }
     } catch (error) {
       console.error('❌ Error loading OpenFood data:', error);

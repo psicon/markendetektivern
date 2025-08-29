@@ -58,7 +58,7 @@ class WordPressService {
    */
   async getLatestPostsPaginated(limit: number = 5, page: number = 1): Promise<WordPressApiResponse> {
     try {
-      console.log(`🌐 Fetching WordPress posts (page ${page}, limit ${limit})...`);
+
       
       const response = await fetch(
         `${this.baseUrl}/posts?per_page=${limit}&page=${page}&_embed=wp:featuredmedia&status=publish&orderby=date&order=desc`,
@@ -83,7 +83,7 @@ class WordPressService {
         featured_image_url: this.extractFeaturedImageUrl(post)
       }));
 
-      console.log(`✅ Loaded ${postsWithImages.length} WordPress posts (page ${page})`);
+
       
       return {
         posts: postsWithImages,

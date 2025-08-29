@@ -408,7 +408,7 @@ export default function ExploreScreen() {
   const loadNoNameProducts = async (reset: boolean = false) => {
     if (noNameLoading || (!noNameHasMore && !reset)) return;
     
-    console.log(`🔄 Loading NoName products - Reset: ${reset}, HasMore: ${noNameHasMore}`);
+
 
     try {
       setNoNameLoading(true);
@@ -446,7 +446,7 @@ export default function ExploreScreen() {
   const loadMarkenprodukte = async (reset: boolean = false) => {
     if (markenproduktLoading || (!markenproduktHasMore && !reset)) return;
     
-    console.log(`🔄 Loading Markenprodukte - Reset: ${reset}, HasMore: ${markenproduktHasMore}`);
+
 
     try {
       setMarkenproduktLoading(true);
@@ -510,7 +510,7 @@ export default function ExploreScreen() {
         
         // Lade Märkte SOFORT - ohne Produktzählung
         const discounterData = await FirestoreService.getDiscounter();
-        console.log('Loaded discounter:', discounterData);
+
         
         // Sortiere Märkte alphabetisch nach Name
         const sortedDiscounter = discounterData.sort((a, b) => 
@@ -520,7 +520,7 @@ export default function ExploreScreen() {
         setMarketsLoading(false); // ✅ Märkte sofort anzeigen!
         
         // Lade Produktanzahl im Hintergrund (nicht blockierend, individuell)
-        console.log('🚀 Loading product counts in background (non-blocking)...');
+
         const startTime = Date.now();
         
         // Lade jeden Count individuell und update sofort (nicht blockierend)
@@ -556,7 +556,7 @@ export default function ExploreScreen() {
           }
         });
         
-        console.log(`✅ Product count loading initiated (non-blocking)`);
+
         
       } catch (error) {
         console.error('Error loading markets:', error);
@@ -571,7 +571,7 @@ export default function ExploreScreen() {
         
         // Lade Kategorien SOFORT - ohne Produktzählung
         const categoriesData = await FirestoreService.getKategorien();
-        console.log('Loaded categories:', categoriesData);
+
         
         // Sortiere Kategorien alphabetisch nach Bezeichnung
         const sortedCategories = categoriesData.sort((a, b) => 
@@ -581,7 +581,7 @@ export default function ExploreScreen() {
         setCategoriesLoading(false); // ✅ Kategorien sofort anzeigen!
         
         // Lade Produktanzahl im Hintergrund (nicht blockierend)
-        console.log('🚀 Loading category product counts in background (non-blocking)...');
+
         
         // Lade jeden Count individuell und update sofort (nicht blockierend)
         sortedCategories.forEach(async (category, index) => {
@@ -616,7 +616,7 @@ export default function ExploreScreen() {
           }
         });
         
-        console.log(`✅ Category product count loading initiated (non-blocking)`);
+
         
       } catch (error) {
         console.error('Error loading categories:', error);
@@ -658,7 +658,7 @@ export default function ExploreScreen() {
       const loadFilteredProducts = async () => {
         try {
           setNoNameLoading(true);
-          console.log(`🔍 Loading NoName products for category: ${params.categoryName}`);
+
           const result = await FirestoreService.getNoNameProductsPaginated(
             20,
             null,
@@ -667,7 +667,7 @@ export default function ExploreScreen() {
           setNoNameProducts(result.products);
           setNoNameLastDoc(result.lastDoc);
           setNoNameHasMore(result.hasMore);
-          console.log(`✅ Loaded ${result.products.length} NoName products for category: ${params.categoryName}`);
+
         } catch (error) {
           console.error('Error loading filtered products:', error);
           setNoNameError('Fehler beim Laden der Produkte');
@@ -699,7 +699,7 @@ export default function ExploreScreen() {
       const loadFilteredMarkenprodukte = async () => {
         try {
           setMarkenproduktLoading(true);
-          console.log(`🔍 Loading Markenprodukte for marke: ${params.markeName}`);
+
           const result = await FirestoreService.getMarkenproduktePaginated(
             20,
             null,
@@ -708,7 +708,7 @@ export default function ExploreScreen() {
           setMarkenprodukte(result.products);
           setMarkenproduktLastDoc(result.lastDoc);
           setMarkenproduktHasMore(result.hasMore);
-          console.log(`✅ Loaded ${result.products.length} Markenprodukte for marke: ${params.markeName}`);
+
         } catch (error) {
           console.error('Error loading filtered markenprodukte:', error);
           setMarkenproduktError('Fehler beim Laden der Markenprodukte');
@@ -731,7 +731,7 @@ export default function ExploreScreen() {
         ]);
         setKategorien(kategorienData);
         setMarkenData(markenData);
-        console.log('🏷️ Loaded Marken:', markenData.length, markenData.slice(0, 3));
+
       } catch (error) {
         console.error('Error loading filter options:', error);
       }
@@ -865,7 +865,7 @@ export default function ExploreScreen() {
                           setNoNameProducts(result.products);
                           setNoNameLastDoc(result.lastDoc);
                           setNoNameHasMore(result.hasMore);
-                          console.log(`✅ Loaded NoName products for category: ${category.bezeichnung} (${result.products.length} products)`);
+
                         } catch (error) {
                           console.error('Error loading filtered products:', error);
                           setNoNameError('Fehler beim Laden der Produkte');
@@ -1155,7 +1155,7 @@ export default function ExploreScreen() {
           </View>
                 )}
                 onEndReached={() => {
-                  console.log('🔄 onEndReached triggered - HasMore:', noNameHasMore, 'Loading:', noNameLoading);
+
                   if (noNameHasMore && !noNameLoading) {
                     loadNoNameProducts(false);
                   }
@@ -1172,7 +1172,7 @@ export default function ExploreScreen() {
           />
         );
       case 'markenprodukte':
-        console.log('🔍 Rendering Markenprodukte:', markenprodukte.length, 'Error:', markenproduktError);
+
         return markenproduktError ? (
           <View style={styles.contentSection}>
             <View style={styles.errorState}>
@@ -1252,7 +1252,7 @@ export default function ExploreScreen() {
               </View>
             )}
             onEndReached={() => {
-              console.log('🔄 onEndReached triggered - HasMore:', markenproduktHasMore, 'Loading:', markenproduktLoading);
+
               if (markenproduktHasMore && !markenproduktLoading) {
                 loadMarkenprodukte(false);
               }

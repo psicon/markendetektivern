@@ -6,6 +6,7 @@ import 'react-native-reanimated';
 
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { FontLoader } from '@/components/ui/FontLoader';
+import { GamificationProvider } from '@/components/ui/GamificationProvider';
 import { SplashScreen } from '@/components/ui/SplashScreen';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { AuthProvider } from '@/lib/contexts/AuthContext';
@@ -24,29 +25,31 @@ function ThemedApp() {
   return (
     <FontLoader>
       <AuthProvider>
-        <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <Stack>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="auth/welcome" options={{ headerShown: false }} />
-            <Stack.Screen name="auth/login" options={{ headerShown: false }} />
-            <Stack.Screen name="auth/register" options={{ headerShown: false }} />
-            <Stack.Screen 
-              name="barcode-scanner" 
-              options={{ 
-                headerShown: false,
-                animation: 'slide_from_right',
-                gestureEnabled: true 
-              }} 
-            />
-            <Stack.Screen name="+not-found" />
-          </Stack>
-          <StatusBar style="auto" />
-          
-          {/* Splash Screen Overlay */}
-          {showSplash && (
-            <SplashScreen onAnimationComplete={handleSplashComplete} />
-          )}
-        </NavigationThemeProvider>
+        <GamificationProvider>
+          <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+            <Stack>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="auth/welcome" options={{ headerShown: false }} />
+              <Stack.Screen name="auth/login" options={{ headerShown: false }} />
+              <Stack.Screen name="auth/register" options={{ headerShown: false }} />
+              <Stack.Screen 
+                name="barcode-scanner" 
+                options={{ 
+                  headerShown: false,
+                  animation: 'slide_from_right',
+                  gestureEnabled: true 
+                }} 
+              />
+              <Stack.Screen name="+not-found" />
+            </Stack>
+            <StatusBar style="auto" />
+            
+            {/* Splash Screen Overlay */}
+            {showSplash && (
+              <SplashScreen onAnimationComplete={handleSplashComplete} />
+            )}
+          </NavigationThemeProvider>
+        </GamificationProvider>
       </AuthProvider>
     </FontLoader>
   );

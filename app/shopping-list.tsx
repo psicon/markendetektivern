@@ -9,7 +9,7 @@ import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useTheme } from '@/lib/contexts/ThemeContext';
-import achievementService, { setAchievementUnlockHandler } from '@/lib/services/achievementService';
+import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import { updateUserStats } from '@/lib/services/userProfile';
 import {
@@ -148,40 +148,8 @@ export default function ShoppingListScreen() {
     });
   }, [colorScheme, navigation]);
   
-  // Setup Achievement Toast Handler with motivational messages
-  useEffect(() => {
-    setAchievementUnlockHandler((notification: any) => {
-      // Check if it's a level-up notification
-      if (notification && notification.type === 'level_up') {
-        // Level-Up Overlay mit spektakulärer Animation anzeigen
-        setLevelUpData({ 
-          newLevel: notification.level || 1, 
-          oldLevel: notification.oldLevel || 1 
-        });
-        setShowLevelUpOverlay(true);
-        
-        // Haptics werden jetzt im Overlay selbst gehandhabt
-      } else {
-        // Normal achievement unlock
-        const motivationalMessages = [
-          '🎉 FANTASTISCH!',
-          '🚀 UNGLAUBLICH!',
-          '💪 MEGA STARK!',
-          '⭐ SENSATIONELL!',
-          '🔥 HAMMER!'
-        ];
-        const randomMessage = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
-        
-        showGameToast(
-          `${randomMessage}\n🏆 ${notification.name}\n+${notification.points} Punkte verdient!`,
-          'success'
-        );
-        
-        // Extra haptic feedback for achievement
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }
-    });
-  }, []);
+  // 🚫 KEIN lokaler Achievement-Handler mehr!
+  // Achievements werden jetzt ZENTRAL über GamificationProvider mit großen Lottie-Overlays angezeigt!
   
   // Load shopping cart data
   const loadShoppingCart = useCallback(async () => {
@@ -360,7 +328,7 @@ export default function ShoppingListScreen() {
       setTotalPotentialSavings(potentialSavings);
       setTotalActualSavings(actualSavings);
       
-      console.log(`✅ Loaded ${brandItems.length} brand and ${noNameItems.length} noname products`);
+
       console.log(`💰 Potential savings: €${potentialSavings.toFixed(2)}, Actual savings: €${actualSavings.toFixed(2)}`);
       
     } catch (error) {
@@ -380,7 +348,7 @@ export default function ShoppingListScreen() {
   
   useEffect(() => {
     if (brandProducts.length > 0 || noNameProducts.length > 0) {
-      console.log('🔄 Products loaded, updating filter options...');
+
       loadFilterOptions();
     }
   }, [brandProducts, noNameProducts]);
@@ -743,7 +711,7 @@ export default function ShoppingListScreen() {
   // Load available markets and categories for filtering
   const loadFilterOptions = useCallback(async () => {
     try {
-      console.log('🔍 Loading filter options...');
+
       
       // Load available markets from current products
       const marketsMap = new Map();
@@ -780,10 +748,10 @@ export default function ShoppingListScreen() {
       
       // Fallback: Lade alle Kategorien aus Firestore wenn keine in Produkten gefunden
       if (categoriesArray.length === 0) {
-        console.log('🔄 No categories in products, loading all from Firestore...');
+
         try {
           const allCategories = await FirestoreService.getAllKategorien();
-          console.log(`✅ Loaded ${allCategories.length} categories from Firestore`);
+
           setAvailableCategories(allCategories);
         } catch (error) {
           console.error('Error loading categories from Firestore:', error);

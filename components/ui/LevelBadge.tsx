@@ -1,9 +1,11 @@
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { LEVELS } from '@/lib/types/achievements';
+import achievementService from '@/lib/services/achievementService';
+import { Level } from '@/lib/types/achievements';
 import { LinearGradient } from 'expo-linear-gradient';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 
 interface LevelBadgeProps {
@@ -27,9 +29,8 @@ export function LevelBadge({
 }: LevelBadgeProps) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  
-  const levelInfo = LEVELS.find(l => l.id === level) || LEVELS[0];
-  const nextLevel = LEVELS.find(l => l.id === level + 1);
+  const [levels, setLevels] = useState<Level[]>([]);
+  const [loading, setLoading] = useState(true);
   
   // Größen-Konfiguration
   const sizes = {
@@ -39,6 +40,71 @@ export function LevelBadge({
   };
   
   const currentSize = sizes[size];
+  
+  useEffect(() => {
+    // Lade Levels aus achievementService
+    const loadLevels = async () => {
+      try {
+        const loadedLevels = await achievementService.getAllLevels();
+        
+        // 🔍 DEBUG: Level-Daten in LevelBadge
+        console.log('🔍 LEVEL BADGE: Levels geladen:', loadedLevels.map(l => ({
+          id: l.id,
+          name: l.name,
+          pointsRequired: l.pointsRequired,
+          savingsRequired: l.savingsRequired
+        })));
+        
+        setLevels(loadedLevels);
+      } catch (error) {
+        console.error('Fehler beim Laden der Levels:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadLevels();
+  }, []);
+  
+  if (loading || levels.length === 0) {
+    return (
+      <View style={[styles.container, { minHeight: currentSize.height, padding: currentSize.padding }, style]}>
+        {/* Shimmer für Level Badge */}
+        <View style={styles.shimmerContainer}>
+          <ShimmerSkeleton 
+            width={currentSize.height} 
+            height={currentSize.height * 0.6} 
+            borderRadius={8}
+          />
+          {showDescription && (
+            <View style={styles.shimmerTextContainer}>
+              <ShimmerSkeleton 
+                width={80} 
+                height={currentSize.fontSize} 
+                borderRadius={4}
+              />
+              {showProgress && (
+                <View style={styles.shimmerProgressContainer}>
+                  <ShimmerSkeleton 
+                    width={120} 
+                    height={8} 
+                    borderRadius={4}
+                  />
+                  <ShimmerSkeleton 
+                    width={60} 
+                    height={currentSize.fontSize - 2} 
+                    borderRadius={4}
+                  />
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+      </View>
+    );
+  }
+  
+  const levelInfo = levels.find(l => l.id === level) || levels[0];
+  const nextLevel = levels.find(l => l.id === level + 1);
   
   // Level-spezifische Farben für Gradient (aus levelInfo für Konsistenz)
   const getLevelGradient = () => {
@@ -58,10 +124,26 @@ export function LevelBadge({
   const calculateProgress = () => {
     if (!nextLevel) return 100;
     
-    const savingsProgress = (currentSavings / nextLevel.savingsRequired) * 100;
+    // 🔍 DEBUG: Welches Level wird als nextLevel verwendet?
+    console.log('🔍 LEVEL BADGE DEBUG:', {
+      currentLevel: level,
+      nextLevelId: nextLevel.id,
+      nextLevelName: nextLevel.name,
+      nextLevelPointsRequired: nextLevel.pointsRequired,
+      nextLevelSavingsRequired: nextLevel.savingsRequired,
+      currentPoints,
+      currentSavings
+    });
+    
     const pointsProgress = (currentPoints / nextLevel.pointsRequired) * 100;
     
-    return Math.min(savingsProgress, pointsProgress);
+    // Wenn keine Ersparnis erforderlich, nur Punkte-Progress verwenden
+    if (nextLevel.savingsRequired === 0) {
+      return Math.min(pointsProgress, 100);
+    }
+    
+    const savingsProgress = (currentSavings / nextLevel.savingsRequired) * 100;
+    return Math.min(savingsProgress, pointsProgress, 100);
   };
   
   return (
@@ -112,7 +194,11 @@ export function LevelBadge({
             />
           </View>
           <Text style={styles.progressText}>
-            {currentSavings.toFixed(2)} € / {nextLevel.savingsRequired} € • {currentPoints} / {nextLevel.pointsRequired} Pkt.
+            {nextLevel.savingsRequired > 0 ? (
+              `${currentSavings.toFixed(2)} € / ${nextLevel.savingsRequired} € • ${currentPoints} / ${nextLevel.pointsRequired} Pkt.`
+            ) : (
+              `${currentPoints} / ${nextLevel.pointsRequired} Punkte`
+            )}
           </Text>
         </View>
       )}
@@ -185,5 +271,20 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 4,
     textAlign: 'center',
+  },
+  // Shimmer Loading Styles
+  shimmerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shimmerTextContainer: {
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 4,
+  },
+  shimmerProgressContainer: {
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 8,
   },
 });

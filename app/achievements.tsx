@@ -6,17 +6,20 @@ import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useAchievements } from '@/lib/hooks/useAchievements';
-import { LEVELS } from '@/lib/types/achievements';
+import { achievementService } from '@/lib/services/achievementService';
+import { Level } from '@/lib/types/achievements';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import { useEffect, useLayoutEffect, useState } from 'react';
 import {
-    ActivityIndicator,
+  ActivityIndicator,
     Animated,
     Dimensions,
+  Modal,
     ScrollView,
     StyleSheet,
-    TouchableOpacity,
+  Text,
+  TouchableOpacity,
     View
 } from 'react-native';
 
@@ -38,12 +41,50 @@ export default function AchievementsScreen() {
 
   // Header-Optionen sofort setzen mit useLayoutEffect
   useLayoutEffect(() => {
-    navigation.setOptions(getNavigationHeaderOptions(colorScheme, 'Level & Errungenschaften'));
-  }, [navigation, colorScheme]);
+    navigation.setOptions({
+      ...getNavigationHeaderOptions(colorScheme, 'Level & Errungenschaften'),
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={() => setShowInfoSheet(true)}
+          style={{ marginRight: 16 }}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <IconSymbol name="info.circle" size={24} color="white" />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, colorScheme, colors]);
 
   // Animation values
   const [shimmerAnim] = useState(new Animated.Value(0));
   const [fadeAnim] = useState(new Animated.Value(0));
+  
+  // Gamification State
+  const [levels, setLevels] = useState<Level[]>([]);
+  const [levelsLoading, setLevelsLoading] = useState(true);
+  const [showInfoSheet, setShowInfoSheet] = useState(false);
+
+  // Lade Levels aus Firebase
+  useEffect(() => {
+    const loadLevels = async () => {
+      if (!user) {
+        setLevelsLoading(false);
+        return;
+      }
+
+      try {
+        setLevelsLoading(true);
+        const loadedLevels = await achievementService.getAllLevels();
+        setLevels(loadedLevels);
+      } catch (error) {
+        console.error('Fehler beim Laden der Levels:', error);
+      } finally {
+        setLevelsLoading(false);
+      }
+    };
+
+    loadLevels();
+  }, [user]);
 
   useEffect(() => {
     // Shimmer animation
@@ -72,7 +113,7 @@ export default function AchievementsScreen() {
 
   // Get real user data
   const currentSavings = userProfile?.totalSavings || 0;
-  const currentPoints = userStats?.totalPoints || 0;
+  const currentPoints = userStats?.pointsTotal || userStats?.totalPoints || 0;
   const purchasedProducts = userProfile?.productsSaved || 0;
   // Verwende stats.currentLevel wenn vorhanden, sonst level aus userProfile, sonst berechne es
   // WICHTIG: Berechne Level basierend auf aktuellen Daten um "Popping" zu vermeiden
@@ -93,11 +134,11 @@ export default function AchievementsScreen() {
     }
     
     // Letzte Option: Berechne Level basierend auf verfügbaren Daten
-    const points = userStats?.totalPoints || (userProfile as any)?.stats?.totalPoints || 0;
-    const savings = userProfile?.totalSavings || 0;
+    const points = userStats?.pointsTotal || userStats?.totalPoints || (userProfile as any)?.stats?.pointsTotal || (userProfile as any)?.stats?.totalPoints || 0;
+    const savings = userProfile?.totalSavings || (userProfile as any)?.stats?.savingsTotal || 0;
     
-    for (let i = LEVELS.length - 1; i >= 0; i--) {
-      const level = LEVELS[i];
+    for (let i = levels.length - 1; i >= 0; i--) {
+      const level = levels[i];
       if (points >= level.pointsRequired && savings >= level.savingsRequired) {
         console.log(`🔄 Level berechnet: ${level.id} (${points} Punkte, €${savings} Ersparnis)`);
         return level.id;
@@ -109,11 +150,11 @@ export default function AchievementsScreen() {
   const currentStreak = userStats?.currentStreak || 0;
   
   // Get current level info
-  const currentLevelInfo = LEVELS.find(l => l.id === currentLevel) || LEVELS[0];
-  const nextLevel = LEVELS.find(l => l.id === currentLevel + 1);
+  const currentLevelInfo = levels.find(l => l.id === currentLevel) || levels[0];
+  const nextLevel = levels.find(l => l.id === currentLevel + 1);
   
   // Calculate levels with unlock status
-  const levelsWithStatus = LEVELS.map(level => ({
+  const levelsWithStatus = levels.map(level => ({
     ...level,
     isActive: level.id === currentLevel,
     isUnlocked: level.id <= currentLevel || 
@@ -151,34 +192,17 @@ export default function AchievementsScreen() {
     : [];
 
   const ProgressBar = ({ progress, maxProgress, color }: { progress: number; maxProgress: number; color: string }) => {
-    const [progressAnim] = useState(new Animated.Value(0));
     const percentage = Math.min(progress / maxProgress, 1);
-    
-    useEffect(() => {
-      // Animate progress bar with delay
-      setTimeout(() => {
-        Animated.timing(progressAnim, {
-          toValue: percentage,
-          duration: 1500,
-          useNativeDriver: false,
-        }).start();
-      }, 800);
-    }, [percentage]);
-
-    const animatedWidth = progressAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: ['0%', `${percentage * 100}%`],
-    });
     
     return (
       <View style={styles.progressBarContainer}>
         <View style={[styles.progressBarBackground, { backgroundColor: 'rgba(255,255,255,0.3)' }]}>
-          <Animated.View 
+          <View 
             style={[
               styles.progressBarFill, 
               { 
-                width: animatedWidth, 
-                backgroundColor: color 
+                backgroundColor: color,
+                width: `${percentage * 100}%`,
               }
             ]} 
           />
@@ -191,6 +215,33 @@ export default function AchievementsScreen() {
     inputRange: [0, 1],
     outputRange: [-screenWidth, screenWidth],
   });
+
+  // Streak Helper Functions
+  const getStreakGradient = (days: number) => {
+    if (days >= 28) return ['#FFD700', '#FFA500']; // Gold
+    if (days >= 21) return ['#9C27B0', '#673AB7']; // Purple
+    if (days >= 14) return ['#FF6B35', '#FF4E00']; // Orange
+    if (days >= 7) return ['#4CAF50', '#2E7D32']; // Green
+    return ['#2196F3', '#1976D2']; // Blue
+  };
+
+  const getStreakTier = (days: number) => {
+    if (days >= 28) return 'Legende 🏆';
+    if (days >= 21) return 'Meister ⭐';
+    if (days >= 14) return 'Experte 💪';
+    if (days >= 7) return 'Fortgeschritten 🎯';
+    return 'Starter 🔥';
+  };
+
+  // Zeige Loading wenn Levels noch nicht geladen sind
+  if (levelsLoading || levels.length === 0) {
+    return (
+      <ThemedView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={colors.tint} />
+        <ThemedText style={{ marginTop: 16, color: colors.text }}>Lade Level-System...</ThemedText>
+      </ThemedView>
+    );
+  }
 
   return (
     <ThemedView style={styles.container}>
@@ -260,15 +311,15 @@ export default function AchievementsScreen() {
             end={{ x: 1, y: -0.34 }}
             style={styles.gradientCard}
           >
-                      <View style={styles.levelHeader}>
-            <View style={styles.levelIcon}>
+            <View style={styles.levelHeader}>
+              <View style={styles.levelIcon}>
               <IconSymbol name={currentLevelInfo.icon as any} size={30} color="white" />
               </View>
-                          <View style={styles.levelInfo}>
+              <View style={styles.levelInfo}>
               <ThemedText style={styles.levelNumber}>Level {currentLevel}</ThemedText>
               <ThemedText style={styles.levelName}>{currentLevelInfo.name}</ThemedText>
               <ThemedText style={styles.levelDescription}>{currentLevelInfo.description}</ThemedText>
-            </View>
+              </View>
             </View>
 
             {/* Reward Badge */}
@@ -281,25 +332,35 @@ export default function AchievementsScreen() {
 
             {/* Progress Section */}
             {nextLevel && (
-              <View style={styles.progressSection}>
+            <View style={styles.progressSection}>
                 <ThemedText style={styles.progressLabel}>Fortschritt zu Level {nextLevel.id} ({nextLevel.name}):</ThemedText>
-                <View style={styles.progressRow}>
-                  <ThemedText style={styles.progressText}>
-                    € {currentSavings.toFixed(2)} / {nextLevel.savingsRequired}€
-                  </ThemedText>
-                </View>
-                <ProgressBar progress={currentSavings} maxProgress={nextLevel.savingsRequired} color="white" />
                 
-                <View style={styles.pointsRow}>
-                  <ThemedText style={styles.progressLabel}>Punkte aus Errungenschaften:</ThemedText>
-                  <ThemedText style={styles.progressText}>{currentPoints} / {nextLevel.pointsRequired} Pkte.</ThemedText>
-                </View>
-                <ProgressBar progress={currentPoints} maxProgress={nextLevel.pointsRequired} color="white" />
-                
-                <ThemedText style={styles.remainingText}>
-                  Noch €{Math.max(0, nextLevel.savingsRequired - currentSavings).toFixed(2)} & {Math.max(0, nextLevel.pointsRequired - currentPoints)} Punkte zum nächsten Level
+                {/* Zeige Ersparnis NUR wenn erforderlich */}
+                {nextLevel.savingsRequired > 0 && (
+                  <>
+              <View style={styles.progressRow}>
+                <ThemedText style={styles.progressText}>
+                        € {currentSavings.toFixed(2)} / {nextLevel.savingsRequired}€
                 </ThemedText>
               </View>
+                    <ProgressBar progress={currentSavings} maxProgress={nextLevel.savingsRequired} color="white" />
+                  </>
+                )}
+              
+              <View style={styles.pointsRow}>
+                  <ThemedText style={styles.progressLabel}>Punkte:</ThemedText>
+                  <ThemedText style={styles.progressText}>{currentPoints} / {nextLevel.pointsRequired} Pkte.</ThemedText>
+              </View>
+                <ProgressBar progress={currentPoints} maxProgress={nextLevel.pointsRequired} color="white" />
+              
+              <ThemedText style={styles.remainingText}>
+                  {nextLevel.savingsRequired > 0 ? (
+                    `Noch €${Math.max(0, nextLevel.savingsRequired - currentSavings).toFixed(2)} & ${Math.max(0, nextLevel.pointsRequired - currentPoints)} Punkte zum nächsten Level`
+                  ) : (
+                    `Noch ${Math.max(0, nextLevel.pointsRequired - currentPoints)} Punkte zum nächsten Level`
+                  )}
+              </ThemedText>
+            </View>
             )}
             {!nextLevel && (
               <View style={styles.progressSection}>
@@ -359,23 +420,34 @@ export default function AchievementsScreen() {
           </Animated.View>
         ))}
 
-        {/* Current Streak Display */}
+        {/* Enhanced Streak Display with Tier & Freeze Tokens */}
         {currentStreak > 0 && (
           <View style={[styles.streakCard, { backgroundColor: colors.cardBackground }]}>
             <LinearGradient
-              colors={['#FF2D55', '#FF6B6B']}
+              colors={getStreakGradient(currentStreak)}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.streakGradient}
             >
               <IconSymbol name="flame.fill" size={24} color="white" />
-              <ThemedText style={styles.streakText}>
-                {currentStreak} Tage Streak! {currentStreak >= 30 ? '🏆' : 'Weiter so!'}
-              </ThemedText>
+              <View style={styles.streakInfo}>
+                <ThemedText style={styles.streakText}>
+                  {currentStreak} {currentStreak === 1 ? 'Tag' : 'Tage'} Streak!
+                </ThemedText>
+                <ThemedText style={styles.streakTierText}>
+                  {getStreakTier(currentStreak)}
+                </ThemedText>
+              </View>
+              {userStats?.freezeTokens && userStats.freezeTokens > 0 && (
+                <View style={styles.freezeTokenBadge}>
+                  <IconSymbol name="snowflake" size={16} color="white" />
+                  <Text style={styles.freezeTokenCount}>{userStats.freezeTokens}</Text>
+                </View>
+              )}
             </LinearGradient>
           </View>
         )}
-        
+
         {/* Achievements Section */}
         <ThemedText style={[styles.sectionTitle, { marginTop: 15 }]}>Errungenschaften</ThemedText>
         
@@ -410,7 +482,7 @@ export default function AchievementsScreen() {
               <View style={styles.achievementInfo}>
                 <View style={styles.achievementHeader}>
                   <View style={styles.achievementTitleRow}>
-                    <ThemedText style={styles.achievementName}>{achievement.name}</ThemedText>
+                  <ThemedText style={styles.achievementName}>{achievement.name}</ThemedText>
                     {/* Schwierigkeitsanzeige */}
                     <View style={styles.difficultyIndicator}>
                       {achievement.points <= 10 && (
@@ -472,6 +544,165 @@ export default function AchievementsScreen() {
         ))
         )}
       </ScrollView>
+      
+      {/* Info Sheet Modal - Natives iOS Sheet */}
+      <Modal
+        visible={showInfoSheet}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowInfoSheet(false)}
+      >
+        <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
+          {/* Bottom Sheet Header */}
+          <View style={styles.bottomSheetHeader}>
+            <View style={styles.handleContainer}>
+              <View style={styles.handle} />
+            </View>
+            <View style={styles.headerRow}>
+              <TouchableOpacity 
+                style={styles.closeButtonLeft}
+                onPress={() => setShowInfoSheet(false)}
+              >
+                <IconSymbol name="xmark" size={24} color={colors.icon} />
+              </TouchableOpacity>
+              <View style={styles.titleSection}>
+                <ThemedText style={styles.bottomSheetTitle}>🎮 Level-System & Belohnungen</ThemedText>
+                <ThemedText style={[styles.bottomSheetSubtitle, { color: colors.primary }]}>
+                  Sammle Punkte und schalte Kategorien frei
+                </ThemedText>
+              </View>
+            </View>
+          </View>
+          
+          <ScrollView 
+            style={styles.bottomSheetContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Welcome Message */}
+            <View style={[styles.welcomeCard, { backgroundColor: colors.cardBackground }]}>
+              <ThemedText style={styles.welcomeTitle}>
+                🕵️‍♂️ Willkommen in der Welt von MarkenDetektive 🕵️‍♀️
+              </ThemedText>
+              <ThemedText style={[styles.welcomeText, { color: colors.text }]}>
+                Stell dir vor, MarkenDetektive ist nicht nur eine App, sondern ein{' '}
+                <Text style={[styles.welcomeHighlight, { color: colors.primary }]}>Spiel, das nie endet</Text>.
+              </ThemedText>
+              <ThemedText style={[styles.welcomeText, { color: colors.text }]}>
+                Das Ziel: <Text style={[styles.welcomeHighlight, { color: colors.primary }]}>Geld sparen, Spaß haben und Punkte sammeln</Text>, während du uns nebenbei hilfst, geheime Infos über Produkte zu sammeln und Licht ins Dunkel der Hersteller- und Markenverstrickungen zu bringen.
+              </ThemedText>
+            </View>
+
+            {/* Level System Explanation */}
+            <View style={styles.infoSection}>
+              <View style={styles.infoSectionHeader}>
+                <IconSymbol name="star.fill" size={20} color={colors.warning} />
+                <ThemedText style={styles.sectionHeaderText}>Level & coole Titel</ThemedText>
+              </View>
+              <ThemedText style={styles.infoText}>
+                Du sammelst Punkte für verschiedene Aktionen und steigst dadurch im Level auf. Je höher dein Level, desto cooler dein Titel - vom "Sparanfänger" zum "Einkaufsdetektiv"!
+              </ThemedText>
+            </View>
+            
+            {/* Categories unlock info */}
+            <View style={styles.infoSection}>
+              <View style={styles.infoSectionHeader}>
+                <IconSymbol name="folder.fill" size={20} color={colors.primary} />
+                <ThemedText style={styles.sectionHeaderText}>Kategorien freischalten</ThemedText>
+              </View>
+              <ThemedText style={styles.infoText}>
+                Das Beste: Mit höheren Leveln schaltest du neue Produktkategorien frei! Dadurch findest du immer mehr verschiedene NoName-Alternativen.
+              </ThemedText>
+              <ThemedText style={[styles.infoText, { marginTop: 8, fontWeight: '600', color: colors.primary }]}>
+                🔓 Je höher dein Level, desto mehr Produktbereiche werden verfügbar!
+              </ThemedText>
+            </View>
+            
+            {/* How to earn points */}
+            <View style={styles.infoSection}>
+              <View style={styles.infoSectionHeader}>
+                <IconSymbol name="plus.circle.fill" size={20} color={colors.success} />
+                <ThemedText style={styles.sectionHeaderText}>So sammelst du Punkte</ThemedText>
+              </View>
+              <View style={styles.pointsList}>
+                <View style={styles.pointsItem}>
+                  <IconSymbol name="camera.fill" size={16} color={colors.primary} />
+                  <Text style={[styles.pointsText, { color: colors.text }]}>Produkt scannen: <Text style={styles.pointsValue}>+2 Punkte</Text></Text>
+                </View>
+                <View style={styles.pointsItem}>
+                  <IconSymbol name="magnifyingglass" size={16} color={colors.primary} />
+                  <Text style={[styles.pointsText, { color: colors.text }]}>Produkt suchen: <Text style={styles.pointsValue}>+1 Punkt</Text></Text>
+                </View>
+                <View style={styles.pointsItem}>
+                  <IconSymbol name="chart.bar.fill" size={16} color={colors.primary} />
+                  <Text style={[styles.pointsText, { color: colors.text }]}>Vergleich anschauen: <Text style={styles.pointsValue}>+3 Punkte</Text></Text>
+                </View>
+                <View style={styles.pointsItem}>
+                  <IconSymbol name="list.bullet" size={16} color={colors.primary} />
+                  <Text style={[styles.pointsText, { color: colors.text }]}>Einkaufszettel abschließen: <Text style={styles.pointsValue}>+5 Punkte</Text></Text>
+                </View>
+                <View style={styles.pointsItem}>
+                  <IconSymbol name="star.fill" size={16} color={colors.warning} />
+                  <Text style={[styles.pointsText, { color: colors.text }]}>Bewertung schreiben: <Text style={styles.pointsValue}>+2 Punkte</Text></Text>
+                </View>
+                <View style={styles.pointsItem}>
+                  <IconSymbol name="trophy.fill" size={16} color={colors.warning} />
+                  <Text style={[styles.pointsText, { color: colors.text }]}>Erste Aktion: <Text style={styles.pointsValue}>+10 Punkte</Text></Text>
+                </View>
+              </View>
+            </View>
+            
+            {/* Achievements explanation */}
+            <View style={styles.infoSection}>
+              <View style={styles.infoSectionHeader}>
+                <IconSymbol name="trophy.fill" size={20} color={colors.warning} />
+                <ThemedText style={styles.sectionHeaderText}>Errungenschaften sammeln</ThemedText>
+              </View>
+              <ThemedText style={styles.infoText}>
+                Errungenschaften sind besondere Herausforderungen. Du schaltest sie frei, indem du bestimmte Aufgaben erfüllst - zum Beispiel 5 Produkte scannen oder deinen ersten Einkaufszettel abschließen.
+              </ThemedText>
+              <ThemedText style={[styles.infoText, { marginTop: 8, fontWeight: '600', color: colors.primary }]}>
+                💡 Tipp: Manche Achievements brauchen Zeit - scanne weiter, nutze die App regelmäßig und du wirst mehr freischalten!
+              </ThemedText>
+            </View>
+            
+            {/* Level progression with examples */}
+            <View style={styles.infoSection}>
+              <View style={styles.infoSectionHeader}>
+                <IconSymbol name="chart.line.uptrend.xyaxis" size={20} color={colors.primary} />
+                <ThemedText style={styles.sectionHeaderText}>Level-Aufstieg</ThemedText>
+              </View>
+              <ThemedText style={styles.infoText}>
+                Die ersten Level sind schnell erreicht, aber später brauchst du mehr Punkte. Ab Level 4 musst du auch Geld sparen, um aufzusteigen!
+              </ThemedText>
+              <View style={styles.levelExample}>
+                <Text style={[styles.levelText, { color: colors.text }]}>Level 1 → 2: 10 Punkte</Text>
+                <Text style={[styles.levelText, { color: colors.text }]}>Level 2 → 3: 25 Punkte</Text>
+                <Text style={[styles.levelText, { color: colors.text }]}>Level 3 → 4: 50 Punkte + 10€ sparen</Text>
+                <Text style={[styles.levelText, { color: colors.text }]}>Level 4 → 5: 100 Punkte + 50€ sparen</Text>
+              </View>
+            </View>
+            
+            {/* Fair Play */}
+            <View style={[styles.infoSection, { paddingBottom: 40 }]}>
+              <View style={styles.infoSectionHeader}>
+                <IconSymbol name="clock.fill" size={20} color={colors.secondary} />
+                <ThemedText style={styles.sectionHeaderText}>Fair Play Limits</ThemedText>
+              </View>
+              <ThemedText style={styles.infoText}>
+                Damit es fair bleibt, gibt es Tageslimits:
+              </ThemedText>
+              <View style={styles.limitsList}>
+                <Text style={[styles.limitText, { color: colors.text }]}>• Max. 10 Scans pro Tag</Text>
+                <Text style={[styles.limitText, { color: colors.text }]}>• Max. 10 Vergleiche pro Tag</Text>
+                <Text style={[styles.limitText, { color: colors.text }]}>• Max. 5 Einkaufszettel pro Woche</Text>
+              </View>
+              <ThemedText style={[styles.infoText, { marginTop: 8, fontSize: 12, color: colors.icon }]}>
+                So wird verhindert, dass jemand zu schnell durch die Level rast!
+              </ThemedText>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
     </ThemedView>
   );
 }
@@ -847,15 +1078,171 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 8,
   },
+  streakInfo: {
+    flex: 1,
+    gap: 2,
+  },
   streakText: {
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
-    flex: 1,
+  },
+  streakTierText: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  freezeTokenBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    gap: 4,
+  },
+  freezeTokenCount: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
   },
   loadingContainer: {
     padding: 40,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  // Native iOS Bottom Sheet Styles
+  bottomSheetContainer: {
+    flex: 1,
+  },
+  bottomSheetHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  handleContainer: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  handle: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#E0E0E0',
+    borderRadius: 2,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  closeButtonLeft: {
+    padding: 8,
+    marginRight: 12,
+    marginTop: -4,
+  },
+  titleSection: {
+    flex: 1,
+  },
+  bottomSheetTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  bottomSheetSubtitle: {
+    fontSize: 14,
+    opacity: 0.8,
+  },
+  bottomSheetContent: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+
+  // Welcome Card Styles
+  welcomeCard: {
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 8,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.05)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  welcomeTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'left',
+    marginBottom: 12,
+    lineHeight: 20,
+  },
+  welcomeText: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 8,
+    opacity: 0.85,
+  },
+  welcomeHighlight: {
+    fontWeight: '600',
+  },
+
+  infoSection: {
+    paddingVertical: 16,
+  },
+  infoSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
+  sectionHeaderText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  infoText: {
+    fontSize: 14,
+    lineHeight: 20,
+    opacity: 0.8,
+  },
+  pointsList: {
+    gap: 8,
+    marginTop: 8,
+  },
+  pointsItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 4,
+  },
+  pointsText: {
+    fontSize: 14,
+    flex: 1,
+  },
+  pointsValue: {
+    fontWeight: '600',
+    color: '#4CAF50',
+  },
+  limitsList: {
+    marginTop: 8,
+    paddingLeft: 8,
+  },
+  limitText: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 2,
+  },
+  levelExample: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  levelText: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 2,
+    fontFamily: 'monospace',
   },
 });

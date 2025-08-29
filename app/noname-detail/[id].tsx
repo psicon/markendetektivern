@@ -11,6 +11,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { db } from '@/lib/firebase';
 import { useFavoriteStatus } from '@/lib/hooks/useFavorites';
+import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
 import { ProductWithDetails } from '@/lib/types/firestore';
@@ -223,7 +224,7 @@ export default function NoNameDetailScreen() {
       return;
     }
     
-    console.log('🔍 Loading ratings for NoName product:', productToLoad.name, 'ID:', productToLoad.id);
+
     
     // WICHTIG: Reset old ratings BEFORE loading new ones
     setProductRatings([]);
@@ -238,7 +239,7 @@ export default function NoNameDetailScreen() {
       const stats = FirestoreService.calculateRatingStats(ratings);
       setRatingStats(stats);
       
-      console.log(`✅ Loaded ${ratings.length} ratings with user info for product ${productToLoad.name}`);
+
     } catch (error) {
       console.error('Error loading product ratings:', error);
     } finally {
@@ -346,6 +347,28 @@ export default function NoNameDetailScreen() {
 
         await FirestoreService.addProductRating(productRatingData);
         showRatingGameToast('⭐ Deine Bewertung wurde gespeichert!', 'success');
+        
+        // 🎯 TRACK ACTION: submit_rating (nur bei neuer Bewertung, nicht bei Update)
+        if (user?.uid) {
+          try {
+            // Check minTextLength requirement (20 chars)
+            const textLength = (comment || '').length;
+            if (textLength >= 20) {
+              await achievementService.trackAction(user.uid, 'submit_rating', {
+                productId: product?.id,
+                productName: product?.name,
+                productType: 'noname',
+                rating: overallRating,
+                commentLength: textLength
+              });
+              console.log('✅ Action tracked: submit_rating (NoName)');
+            } else {
+              console.log('ℹ️ submit_rating not tracked: comment too short (min 20 chars)');
+            }
+          } catch (error) {
+            console.error('Error tracking submit_rating action:', error);
+          }
+        }
       }
 
       // Reset form and close modal
@@ -528,7 +551,7 @@ export default function NoNameDetailScreen() {
         setLoading(true);
         setError(null);
 
-        console.log('🔍 Loading NoName product details for ID:', id);
+
         
         // Lade Produktdetails
         const productData = await FirestoreService.getProductWithDetails(id);
@@ -538,7 +561,7 @@ export default function NoNameDetailScreen() {
         }
 
         setProduct(productData);
-        console.log('✅ Loaded product:', productData.name);
+
         console.log('🏷️ Product kategorie:', productData.kategorie);
 
         // Setup real-time listener for rating updates
@@ -554,12 +577,12 @@ export default function NoNameDetailScreen() {
         // Lade OpenFoodFacts Daten falls EAN vorhanden
         if (productData.EANs?.[0] || productData.ean) {
           const ean = productData.EANs?.[0] || productData.ean;
-          console.log('🔍 Loading OpenFoodFacts data for EAN:', ean);
+
           try {
             const openFoodResponse = await OpenFoodService.getProductByEAN(ean);
             if (openFoodResponse) {
               setOpenFoodData(openFoodResponse);
-              console.log('✅ Loaded OpenFoodFacts data');
+
             }
           } catch (openFoodError) {
             console.log('⚠️ OpenFoodFacts data not available:', openFoodError);
@@ -605,12 +628,12 @@ export default function NoNameDetailScreen() {
   const loadSimilarProducts = async (categoryRef: any, excludeProductId: string) => {
     try {
       setSimilarProductsLoading(true);
-      console.log('🔍 Loading similar products for category:', categoryRef);
+
       console.log('🔍 Excluding product ID:', excludeProductId);
       
       const products = await FirestoreService.getSimilarProducts(categoryRef, excludeProductId, 7);
       setSimilarProducts(products);
-      console.log(`✅ Loaded ${products.length} similar products:`, products.map(p => `${p.name} (Stufe ${p.stufe})`));
+
       
       // Starte Animation für ähnliche Produkte
       products.forEach((product, index) => {

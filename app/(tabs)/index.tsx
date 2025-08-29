@@ -10,10 +10,11 @@ import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { achievementService } from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import searchHistoryService from '@/lib/services/searchHistoryService';
 import WordPressService, { WordPressPost } from '@/lib/services/wordpress';
-import { LEVELS } from '@/lib/types/achievements';
+import { Level } from '@/lib/types/achievements';
 import { FirestoreDocument, Handelsmarken, Kategorien, Produkte } from '@/lib/types/firestore';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -48,6 +49,10 @@ export default function HomeScreen() {
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
+  
+  // Gamification State
+  const [levels, setLevels] = useState<Level[]>([]);
+  const [levelsLoading, setLevelsLoading] = useState(true);
   
   // WordPress News State
   const [newsLoading, setNewsLoading] = useState(true);
@@ -118,6 +123,30 @@ export default function HomeScreen() {
     return 'square.grid.2x2'; // Default icon
   };
 
+  // Load Gamification Levels (nur wenn User authentifiziert ist)
+  useEffect(() => {
+    const loadLevels = async () => {
+      if (!user) {
+        // Kein User = keine Levels laden (spart Kosten)
+        setLevelsLoading(false);
+        return;
+      }
+
+      try {
+        setLevelsLoading(true);
+        const loadedLevels = await achievementService.getAllLevels();
+        setLevels(loadedLevels);
+      } catch (error) {
+        console.error('Fehler beim Laden der Levels:', error);
+        // Keine lokalen Fallbacks! Zeige Loading oder Error
+      } finally {
+        setLevelsLoading(false);
+      }
+    };
+
+    loadLevels();
+  }, [user]); // Nur neu laden wenn User sich ändert
+
   // Load data from Firestore
   useEffect(() => {
     const loadData = async () => {
@@ -132,7 +161,7 @@ export default function HomeScreen() {
           FirestoreService.getLatestEnttarnteProdukte(10)
         ]);
         
-        console.log('Loaded kategorien:', kategorienData);
+
         // Sortiere Kategorien alphabetisch nach bezeichnung
         const sortedKategorien = kategorienData.sort((a, b) => 
           a.bezeichnung.localeCompare(b.bezeichnung, 'de')
@@ -140,7 +169,7 @@ export default function HomeScreen() {
         setKategorien(sortedKategorien);
         setCategoriesLoading(false);
         
-        console.log('Loaded produkte:', produkteData);
+
         setEnttarnteProdukte(produkteData);
         
         // Lade Handelsmarken für alle Produkte parallel
@@ -149,10 +178,10 @@ export default function HomeScreen() {
           if (product.handelsmarke) {
             try {
               const handelsmarke = await FirestoreService.getDocumentByReference<Handelsmarken>(product.handelsmarke);
-              console.log(`Loaded handelsmarke for ${product.name}:`, handelsmarke);
+
               if (handelsmarke && handelsmarke.bezeichnung) {
                 handelsmarkenMap[product.id] = handelsmarke.bezeichnung;
-                console.log(`Set handelsmarke: ${handelsmarke.bezeichnung} for product: ${product.name}`);
+
               }
             } catch (err) {
               console.error(`Error loading handelsmarke for product ${product.id}:`, err);
@@ -206,7 +235,7 @@ export default function HomeScreen() {
       // Prüfe ob mehr Posts verfügbar sind
       setNewsHasMore(response.posts.length === 3 && response.totalPages > 1);
       
-      console.log(`✅ Loaded ${response.posts.length} news posts (Page 1)`);
+
     } catch (error) {
       console.error('❌ Error loading news:', error);
       setNewsError('Neuigkeiten konnten nicht geladen werden');
@@ -233,10 +262,10 @@ export default function HomeScreen() {
         // Prüfe ob noch mehr Posts verfügbar sind
         setNewsHasMore(nextPage < response.totalPages);
         
-        console.log(`✅ Loaded ${response.posts.length} more news posts (Page ${nextPage})`);
+
       } else {
         setNewsHasMore(false);
-        console.log('✅ No more news posts available');
+
       }
     } catch (error) {
       console.error('❌ Error loading more news:', error);
@@ -401,15 +430,25 @@ export default function HomeScreen() {
           </ScrollView>
         </View>
 
-        {/* Level Card - Mit echten Daten */}
+        {/* Level Card - Mit echten Firestore Daten */}
         {(() => {
+          // Zeige Shimmer wenn Levels noch laden
+          if (levelsLoading || levels.length === 0) {
+            return (
+              <View style={[styles.levelCard, { backgroundColor: colors.cardBackground, justifyContent: 'center', alignItems: 'center' }]}>
+                <ActivityIndicator size="small" color={colors.tint} />
+                <ThemedText style={[styles.levelSubtitle, { marginTop: 8 }]}>Lade Level-Daten...</ThemedText>
+              </View>
+            );
+          }
+
           // Get actual level data
           const level = (userProfile as any)?.stats?.currentLevel || userProfile?.level || 1;
-          const currentPoints = (userProfile as any)?.stats?.totalPoints || 0;
+          const currentPoints = (userProfile as any)?.stats?.pointsTotal || (userProfile as any)?.stats?.totalPoints || 0;
           const currentSavings = userProfile?.totalSavings || 0;
           
-          const levelInfo = LEVELS.find(l => l.id === level) || LEVELS[0];
-          const nextLevel = LEVELS.find(l => l.id === level + 1);
+          const levelInfo = levels.find(l => l.id === level) || levels[0];
+          const nextLevel = levels.find(l => l.id === level + 1);
           
           // Level-spezifische Farben (Gradient mit dunklerer Version)
           const getLevelGradient = () => {

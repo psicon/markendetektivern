@@ -6,20 +6,23 @@ import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { getStackScreenHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAuth } from '@/lib/contexts/AuthContext';
+import { achievementService } from '@/lib/services/achievementService';
 import { AlgoliaSearchResult, AlgoliaService } from '@/lib/services/algolia';
+import searchHistoryService from '@/lib/services/searchHistoryService';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  FlatList,
-  Image,
-  PanResponder,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Animated,
+    Dimensions,
+    FlatList,
+    Image,
+    PanResponder,
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -28,6 +31,7 @@ export default function SearchResultsScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const params = useLocalSearchParams();
+  const { user } = useAuth();
   
   // Search States
   const [searchQuery, setSearchQuery] = useState(params.query as string || '');
@@ -70,7 +74,7 @@ export default function SearchResultsScreen() {
       const searchResult = await AlgoliaService.searchInIndex(collection, id);
       if (searchResult) {
         result = searchResult;
-        console.log(`Loaded ${collection} for ${id}:`, result);
+
       }
     } catch (error) {
       console.error(`Failed to lookup ${path}:`, error);
@@ -104,7 +108,7 @@ export default function SearchResultsScreen() {
           const lookup = await getCachedLookup(product.handelsmarke);
           if (lookup) {
             populated.handelsmarke = lookup;
-            console.log(`Set handelsmarke: ${lookup.bezeichnung} for product: ${product.name}`);
+
           }
         }
         
@@ -135,6 +139,25 @@ export default function SearchResultsScreen() {
       
       setNoNameResults(populatedNoName);
       setMarkenproduktResults(populatedMarken);
+      
+      // 🎯 TRACK ACTION: search_product
+      if (user?.uid) {
+        try {
+          // Speichere in Search History
+          await searchHistoryService.saveSearchTerm(user.uid, query.trim(), populatedNoName.length + populatedMarken.length);
+          
+          // Track Achievement Action
+          await achievementService.trackAction(user.uid, 'search_product', {
+            searchTerm: query.trim(),
+            resultsFound: populatedNoName.length + populatedMarken.length,
+            noNameResults: populatedNoName.length,
+            markenResults: populatedMarken.length
+          });
+          console.log('✅ Action tracked: search_product');
+        } catch (trackError) {
+          console.error('Error tracking search_product action:', trackError);
+        }
+      }
       
     } catch (error) {
       console.error('Search error:', error);

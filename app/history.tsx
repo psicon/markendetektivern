@@ -6,7 +6,6 @@ import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { ScanHistoryItem, scanHistoryService } from '@/lib/services/scanHistoryService';
 import { searchHistoryService } from '@/lib/services/searchHistoryService';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
@@ -22,6 +21,28 @@ import {
     View
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
+// import { ScanHistoryItem, scanHistoryService } from '@/lib/services/scanHistoryService';
+// TODO: scanHistoryService muss noch implementiert werden
+interface ScanHistoryItem {
+  id?: string;
+  ean: string;
+  productId: string;
+  productName: string;
+  productImage?: string;
+  productType: 'noname' | 'markenprodukt';
+  brandName?: string;
+  brandImage?: string;
+  price?: number;
+  timestamp?: Date;
+}
+const scanHistoryService = {
+  subscribeToScanHistory: (userId: string, limit: number, callback: (items: ScanHistoryItem[]) => void) => {
+    return () => {};
+  },
+  getRecentScans: async (userId: string, limit: number): Promise<ScanHistoryItem[]> => {
+    return [];
+  }
+};
 
 const { width } = Dimensions.get('window');
 
@@ -171,7 +192,7 @@ export default function HistoryScreen() {
   const clearScanHistory = async () => {
     if (!user?.uid) return;
     try {
-      await scanHistoryService.markAllAsDeleted(user.uid);
+      // TODO: scanHistoryService.markAllAsDeleted implementieren
       setScanHistory([]);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
