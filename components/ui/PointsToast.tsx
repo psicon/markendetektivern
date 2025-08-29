@@ -162,9 +162,16 @@ export const PointsToast: React.FC<PointsToastProps> = ({
 
         {/* Punkte und Message */}
         <View style={styles.textContainer}>
-          <Text style={styles.pointsText}>+{points} Punkte</Text>
-          {message && (
+          {/* Bei Streak ohne Punkte nur Message zeigen */}
+          {type === 'streak' && points === 0 ? (
             <Text style={styles.messageText}>{message}</Text>
+          ) : (
+            <>
+              <Text style={styles.pointsText}>+{points} Punkte</Text>
+              {message && (
+                <Text style={styles.messageText}>{message}</Text>
+              )}
+            </>
           )}
         </View>
       </View>

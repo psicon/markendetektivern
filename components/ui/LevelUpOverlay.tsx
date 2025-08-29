@@ -6,13 +6,13 @@ import { useRouter } from 'expo-router';
 import LottieView from 'lottie-react-native';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Animated,
-  Dimensions,
-  Modal,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Animated,
+    Dimensions,
+    Modal,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { IconSymbol } from './IconSymbol';
@@ -26,57 +26,45 @@ interface LevelUpOverlayProps {
   onClose: () => void;
 }
 
-// Lottie Source Helper - Unterstützt lokale Files und URLs
-const getLottieSource = (animationName: string) => {
-  console.log(`🎬 Loading Lottie: ${animationName}`);
+// Lokale Level-Animation basierend auf Level-ID (keine Firebase-Abhängigkeit)
+const getLevelLottieSource = (levelId: number) => {
+  // Lottie loading - reduced logging
   
-  // Falls es eine URL ist
-  if (animationName.startsWith('http')) {
-    return { uri: animationName };
-  }
-  
-  // Versuche lokale Dateien zu laden (mit Try-Catch für existierende Files)
   try {
-    switch (animationName) {
-      case 'level-1':
-        return require('@/assets/lottie/level-1.json');
-      case 'level-2':
-        return require('@/assets/lottie/level-2.json');
-      case 'level-3':
-        return require('@/assets/lottie/level-3.json');
-      case 'level-4':
-        return require('@/assets/lottie/level-4.json');
-      case 'level-5':
-        return require('@/assets/lottie/level-5.json');
-      case 'level-6':
-        return require('@/assets/lottie/level-6.json');
-      case 'level-7':
-        return require('@/assets/lottie/level-7.json');
-      case 'level-8':
-        return require('@/assets/lottie/level-8.json');
-      case 'level-9':
-        return require('@/assets/lottie/level-9.json');
-      case 'level-10':
-        return require('@/assets/lottie/level-10.json');
-      case 'points-earned':
-        return require('@/assets/lottie/points-earned.json');
-      case 'achievement-unlock':
-        return require('@/assets/lottie/achievement-unlock.json');
-      case 'first-scan':
-        return require('@/assets/lottie/first-scan.json');
-      case 'first-conversion':
-        return require('@/assets/lottie/first-conversion.json');
-      case 'streak-7':
-        return require('@/assets/lottie/streak-7.json');
-      case 'savings-100':
-        return require('@/assets/lottie/savings-100.json');
-      default:
-        console.log(`⚠️ Lottie-Animation '${animationName}' nicht gefunden, verwende Fallback`);
-        return require('@/assets/lottie/points-earned.json'); // Fallback
+    // Direkte Zuordnung basierend auf Level-ID
+    switch (levelId) {
+      case 1:  return require('@/assets/lottie/level-1.json');   // Erste Schritte
+      case 2:  return require('@/assets/lottie/level-2.json');   // Konfetti
+      case 3:  return require('@/assets/lottie/level-3.json');   // Badge Pulse
+      case 4:  return require('@/assets/lottie/level-4.json');   // Sparkles
+      case 5:  return require('@/assets/lottie/level-5.json');   // Wave Effect
+      case 6:  return require('@/assets/lottie/level-6.json');   // Medal Spin
+      case 7:  return require('@/assets/lottie/level-7.json');   // Burst
+      case 8:  return require('@/assets/lottie/level-8.json');   // Crown Shine
+      case 9:  return require('@/assets/lottie/level-9.json');   // King Sparkle
+      case 10: return require('@/assets/lottie/level-10.json');  // Fireworks
+      
+      default: 
+        // Für höhere Level: Recycle die besten Animationen (statisch)
+        const cycleLevel = ((levelId - 1) % 10) + 1;
+        console.log(`🔄 Level ${levelId} -> Verwende Level ${cycleLevel} Animation`);
+        switch (cycleLevel) {
+          case 1: return require('@/assets/lottie/level-1.json');
+          case 2: return require('@/assets/lottie/level-2.json');
+          case 3: return require('@/assets/lottie/level-3.json');
+          case 4: return require('@/assets/lottie/level-4.json');
+          case 5: return require('@/assets/lottie/level-5.json');
+          case 6: return require('@/assets/lottie/level-6.json');
+          case 7: return require('@/assets/lottie/level-7.json');
+          case 8: return require('@/assets/lottie/level-8.json');
+          case 9: return require('@/assets/lottie/level-9.json');
+          case 10: return require('@/assets/lottie/level-10.json');
+          default: return require('@/assets/lottie/level-10.json'); // Ultimate Fallback
+        }
     }
   } catch (error) {
-    console.log(`⚠️ Lottie-File '${animationName}' nicht vorhanden:`, error);
-    return null; // Kein Animation wenn File fehlt
+    console.log(`⚠️ Level ${levelId} Lottie loading failed:`, error);
+    return require('@/assets/lottie/level-1.json'); // Fallback
   }
 };
 
@@ -100,15 +88,12 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
   useEffect(() => {
     // 🚀 DIREKTER SYNC-ZUGRIFF - Kein Async Loading!
     const syncLevels = achievementService.getAllLevelsSync();
-    console.log('🚀 LevelUpOverlay: Sync-Levels sofort:', syncLevels.length);
     
     if (syncLevels.length > 0) {
       setLevels(syncLevels);
     } else {
       // Fallback: Versuche Async-Loading
-      console.log('🔄 LevelUpOverlay: Sync leer - versuche Async...');
       achievementService.getAllLevels().then(loadedLevels => {
-        console.log('🎯 LevelUpOverlay: Async-Levels geladen:', loadedLevels.length);
         setLevels(loadedLevels);
       }).catch(error => {
         console.error('❌ LevelUpOverlay: Async loading failed:', error);
@@ -121,16 +106,14 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
     if (visible) {
       // 🚀 BEI JEDEM LEVEL-UP: Levels neu laden!
       const syncLevels = achievementService.getAllLevelsSync();
-      console.log('🚀 LevelUpOverlay VISIBLE: Sync-Levels reload:', syncLevels.length);
+      // LevelUp overlay visible - reduced logging
       
       if (syncLevels.length > 0) {
         setLevels(syncLevels);
         setShowContent(true);
       } else {
-        console.log('❌ KRITISCH: Keine Levels verfügbar beim Level-Up!');
         // Notfall: Versuche sofort nachzuladen
         achievementService.getAllLevels().then(loadedLevels => {
-          console.log('🎯 LevelUpOverlay NOTFALL: Levels geladen:', loadedLevels.length);
           setLevels(loadedLevels);
           setShowContent(true);
         });
@@ -227,15 +210,13 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
 
   // Early Returns - NACH allen Hooks!
   if (!showContent) {
-    console.log('🔍 LevelUpOverlay: showContent=false, nicht gerendert');
     return null;
   }
   if (levels.length === 0) {
     console.log('❌ KRITISCH: LevelUpOverlay: levels.length=0, nicht gerendert!');
     return null;
   }
-  
-  console.log('✅ LevelUpOverlay: Rendering mit', levels.length, 'Levels');
+
 
   // Computed Values
   const levelInfo = levels.find(l => l.id === newLevel) || levels[0];
@@ -326,20 +307,18 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
               <Text style={styles.levelNumber}>Level {newLevel}</Text>
             </View>
 
-            {/* Lottie Animation - Dynamisch aus Firebase */}
-            {levelInfo.lottieAnimation && (
-              <View style={styles.lottieContainer}>
-                <LottieView
-                  source={getLottieSource(levelInfo.lottieAnimation)}
-                  autoPlay
-                  loop={false}
-                  style={styles.lottieAnimation}
-                  onAnimationFinish={() => {
-                    console.log(`✨ Level ${newLevel} Lottie-Animation beendet`);
-                  }}
-                />
-              </View>
-            )}
+            {/* Lottie Animation - Lokale Zuordnung basierend auf Level */}
+            <View style={styles.lottieContainer}>
+              <LottieView
+                source={getLevelLottieSource(newLevel)}
+                autoPlay
+                loop={false}
+                style={styles.lottieAnimation}
+                onAnimationFinish={() => {
+                  console.log(`✨ Level ${newLevel} Lottie-Animation beendet`);
+                }}
+              />
+            </View>
 
             {/* Title */}
             <Text style={styles.levelTitle}>{levelInfo.name}!</Text>

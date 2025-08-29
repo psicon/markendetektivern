@@ -224,7 +224,7 @@ const NoNameCartButton = ({
   // Refresh cart status when screen comes back into focus
   useFocusEffect(
     useCallback(() => {
-      console.log('🔄 NoNameCartButton - Screen focused - refreshing cart status');
+      // Cart status refresh - reduced logging
       checkStatus();
     }, [user?.uid, productId])
   );
@@ -1110,12 +1110,7 @@ const ProductComparisonContent = ({
 export default function ProductComparisonScreen() {
   const { id, type } = useLocalSearchParams();
   
-  // DEBUG: URL Parameter prüfen
-  console.log('🔍 PRODUCT-COMPARISON GELADEN:', {
-    id: id,
-    type: type,
-    isMarkenProdukt: type === 'brand'
-  });
+  // Product comparison loaded - reduced logging
   
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -1640,31 +1635,24 @@ export default function ProductComparisonScreen() {
     if (comparisonData?.mainProduct) {
       checkIfInCart();
     }
-  }, [comparisonData, user]);
+  }, [comparisonData?.mainProduct?.id, user?.uid]);
 
   // Refresh cart status when screen comes back into focus
   useFocusEffect(
     useCallback(() => {
       if (comparisonData?.mainProduct) {
-        console.log('🔄 Screen focused - refreshing cart status');
         checkIfInCart();
       }
-    }, [comparisonData?.mainProduct, user?.uid])
+    }, [comparisonData?.mainProduct?.id, user?.uid])
   );
   
   // Alle NoName-Produkte standardmäßig auswählen wenn Daten geladen sind
   useEffect(() => {
-    console.log('🔍 Auto-selection useEffect triggered, comparisonData:', !!comparisonData);
     if (comparisonData?.relatedNoNameProducts) {
-      console.log('📦 Related NoName products found:', comparisonData.relatedNoNameProducts.length);
       const allNoNameIds = new Set(comparisonData.relatedNoNameProducts.map(product => product.id));
-      console.log('🎯 Setting selected products:', Array.from(allNoNameIds));
       setSelectedProducts(allNoNameIds);
-      console.log('✅ Auto-selected all NoName products:', allNoNameIds.size);
-    } else {
-      console.log('❌ No comparisonData or relatedNoNameProducts found');
     }
-  }, [comparisonData]);
+  }, [comparisonData?.relatedNoNameProducts?.length]);
   
   // Toggle product selection
   const toggleProductSelection = (productId: string) => {
@@ -2775,20 +2763,10 @@ export default function ProductComparisonScreen() {
                   const ean = selectedProductForDetails?.EANs?.[0];
                   const openFoodProduct = ean ? openFoodData.get(ean) : null;
                   
-                  console.log(`🎯 SCORES DEBUG - Selected Product: ${selectedProductForDetails?.name}`);
-                  console.log(`🎯 SCORES DEBUG - EAN: ${ean}`);
-                  console.log(`🎯 SCORES DEBUG - OpenFood Product:`, openFoodProduct ? 'FOUND' : 'NOT FOUND');
-                  console.log(`🎯 SCORES DEBUG - Scores:`, {
-                    nutri: openFoodProduct?.nutriscore_grade,
-                    eco: openFoodProduct?.ecoscore_grade,
-                    nova: openFoodProduct?.nova_group
-                  });
-                  
+                  // Scores debug - reduced logging
                   const hasAnyScore = openFoodProduct?.nutriscore_grade || 
                                      openFoodProduct?.ecoscore_grade || 
                                      openFoodProduct?.nova_group;
-                  
-                  console.log(`🎯 SCORES DEBUG - Has any score: ${!!hasAnyScore}`);
                   
                   if (!hasAnyScore) return null;
                   

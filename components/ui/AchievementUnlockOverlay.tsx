@@ -4,13 +4,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import LottieView from 'lottie-react-native';
 import React, { useCallback, useEffect, useRef } from 'react';
 import {
-    Animated,
-    Dimensions,
-    Modal,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Animated,
+  Dimensions,
+  Modal,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { IconSymbol } from './IconSymbol';
@@ -24,34 +24,35 @@ interface AchievementUnlockOverlayProps {
   autoHide?: boolean;     // Versteckt Buttons und schließt automatisch
 }
 
-// Lottie Source Helper für Achievements
-const getAchievementLottieSource = (animationName: string | undefined) => {
-  if (!animationName) return null;
-  
-  console.log(`🎬 Loading Achievement Lottie: ${animationName}`);
-  
-  if (animationName.startsWith('http')) {
-    return { uri: animationName };
-  }
+// Intelligente lokale Lottie-Zuordnung basierend auf Achievement-Eigenschaften
+const getAchievementLottieSource = (achievement: Achievement) => {
+  // Achievement Lottie loading - reduced logging
   
   try {
-    switch (animationName) {
-      case 'achievement-unlock':
-        return require('@/assets/lottie/achievement-unlock.json');
-      case 'first-scan':
-        return require('@/assets/lottie/first-scan.json');
-      case 'first-conversion':
-        return require('@/assets/lottie/first-conversion.json');
-      case 'streak-7':
-        return require('@/assets/lottie/streak-7.json');
-      case 'savings-100':
-        return require('@/assets/lottie/savings-100.json');
+    // Intelligente Zuordnung basierend auf Action-Type (mit vorhandenen Files)
+    switch (achievement.trigger.action) {
+      case 'first_action_any':
+        return require('@/assets/lottie/firstaction.json');
+       
+      case 'daily_streak':
+        if (achievement.trigger.target >= 7) {
+          return require('@/assets/lottie/streak-fire.json');
+        }
+        
+        return require('@/assets/lottie/streak-bonus.json');
+        
+      // Für alle anderen: Verwende den Fallback (bis spezifische Animationen erstellt sind)
+      case 'scan_product':
+      case 'view_comparison': 
+      case 'complete_shopping':
+      case 'search_product':
+      case 'submit_rating':
       default:
-        return require('@/assets/lottie/achievement-unlock.json'); // Default
+        return require('@/assets/lottie/achievement-unlock.json');
     }
   } catch (error) {
-    console.log(`⚠️ Achievement Lottie '${animationName}' nicht vorhanden:`, error);
-    return null;
+    console.log(`⚠️ Achievement Lottie loading failed for ${achievement.name}:`, error);
+    return require('@/assets/lottie/achievement-unlock.json'); // Fallback
   }
 };
 
@@ -65,9 +66,26 @@ export const AchievementUnlockOverlay: React.FC<AchievementUnlockOverlayProps> =
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const confettiRef = useRef<ConfettiCannon>(null);
 
+  const handleClose = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleAnim, {
+        toValue: 0.8,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      onClose();
+    });
+  }, [fadeAnim, scaleAnim, onClose]);
+
   useEffect(() => {
     if (visible && achievement) {
-      console.log('🏆 Achievement Overlay getriggert:', achievement.name);
+      // Achievement overlay triggered - reduced logging
       
       // Haptic Feedback
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -101,24 +119,7 @@ export const AchievementUnlockOverlay: React.FC<AchievementUnlockOverlayProps> =
         return () => clearTimeout(timer);
       }
     }
-  }, [visible, achievement, autoHide, fadeAnim, scaleAnim, handleClose]);
-
-  const handleClose = useCallback(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(scaleAnim, {
-        toValue: 0.8,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      onClose();
-    });
-  }, [fadeAnim, scaleAnim, onClose]);
+  }, [visible, achievement?.id, autoHide, fadeAnim, scaleAnim, handleClose]);
 
   if (!visible || !achievement) return null;
 
@@ -183,20 +184,18 @@ export const AchievementUnlockOverlay: React.FC<AchievementUnlockOverlayProps> =
               </View>
             </View>
 
-            {/* Lottie Animation - Falls vorhanden */}
-            {achievement.lottieAnimation && (
-              <View style={styles.lottieContainer}>
-                <LottieView
-                  source={getAchievementLottieSource(achievement.lottieAnimation)}
-                  autoPlay
-                  loop={false}
-                  style={styles.lottieAnimation}
-                  onAnimationFinish={() => {
-                    console.log(`✨ Achievement ${achievement.name} Lottie-Animation beendet`);
-                  }}
-                />
-              </View>
-            )}
+            {/* Lottie Animation - Immer anzeigen (intelligente Zuordnung) */}
+            <View style={styles.lottieContainer}>
+              <LottieView
+                source={getAchievementLottieSource(achievement)}
+                autoPlay
+                loop={false}
+                style={styles.lottieAnimation}
+                onAnimationFinish={() => {
+                  console.log(`✨ Achievement ${achievement.name} Lottie-Animation beendet`);
+                }}
+              />
+            </View>
 
             {/* Achievement Title */}
             <Text style={styles.achievementTitle}>🏆 Achievement freigeschaltet!</Text>

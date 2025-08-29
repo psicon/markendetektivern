@@ -1,13 +1,14 @@
 import {
-    setAchievementUnlockHandler,
-    setLevelUpHandler,
-    setPointsEarnedHandler
+  setAchievementUnlockHandler,
+  setLevelUpHandler,
+  setPointsEarnedHandler
 } from '@/lib/services/achievementService';
 import { Achievement } from '@/lib/types/achievements';
 import React, { useCallback, useEffect, useState } from 'react';
 import { AchievementUnlockOverlay } from './AchievementUnlockOverlay';
 import { LevelUpOverlay } from './LevelUpOverlay';
 import { PointsToast } from './PointsToast';
+// StreakToast entfernt - nutze PointsToast mit type='streak'
 
 interface GamificationProviderProps {
   children: React.ReactNode;
@@ -32,6 +33,8 @@ interface PointsToastData {
   message: string;
 }
 
+// StreakToast wird jetzt über PointsToast mit type='streak' abgewickelt
+
 /**
  * Zentraler Provider für alle Gamification-Overlays und Toasts
  * Registriert sich bei AchievementService Callbacks und zeigt UI-Komponenten
@@ -54,6 +57,14 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     visible: false,
     points: 0,
     action: '',
+    message: ''
+  });
+
+  // Verwende PointsToast für Streak (type='streak' ist bereits eingebaut!)
+  const [streakToastData, setStreakToastData] = useState<PointsToastData>({
+    visible: false,
+    points: 0,
+    action: 'streak',
     message: ''
   });
 
@@ -185,6 +196,32 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     setPointsToastData(prev => ({ ...prev, visible: false }));
   };
 
+  // Funktion zum Anzeigen der Streak Toast (nutzt PointsToast mit type='streak')
+  const showStreakToast = useCallback((streakDays: number, bonusPoints?: number) => {
+    console.log(`🔥 Streak Toast triggered: ${streakDays} Tage (${bonusPoints || 0} Punkte)`);
+    
+    // Zeige Punkte nur wenn > 0 (bei wiederholtem Öffnen am selben Tag keine Punkte)
+    const showPoints = bonusPoints && bonusPoints > 0;
+    
+    setStreakToastData({
+      visible: true,
+      points: showPoints ? bonusPoints : 0,
+      action: 'streak',
+      message: showPoints 
+        ? `${streakDays} ${streakDays === 1 ? 'Tag' : 'Tage'} Streak! +${bonusPoints} Punkte`
+        : `${streakDays} ${streakDays === 1 ? 'Tag' : 'Tage'} Streak!`
+    });
+  }, []);
+
+  // Expose showStreakToast globally für einfachen Zugriff
+  React.useEffect(() => {
+    (global as any).showStreakToast = showStreakToast;
+    
+    return () => {
+      delete (global as any).showStreakToast;
+    };
+  }, [showStreakToast]);
+
   return (
     <>
       {children}
@@ -212,6 +249,15 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         message={pointsToastData.message}
         onHide={handlePointsToastHide}
         type="points"
+      />
+
+      {/* Streak Toast - nutze PointsToast mit type='streak' */}
+      <PointsToast
+        visible={streakToastData.visible}
+        points={streakToastData.points}
+        message={streakToastData.message}
+        type="streak"
+        onHide={() => setStreakToastData({ visible: false, points: 0, action: '', message: '' })}
       />
     </>
   );

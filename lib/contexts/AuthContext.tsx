@@ -32,6 +32,45 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Hilfsfunktion für Streak Toast bei App-Start
+const checkStreakOnAppStart = async (userId: string) => {
+  try {
+    // Hole aktuelle User-Stats
+    const userStats = await achievementService.getUserStats(userId);
+    const currentStreak = userStats?.currentStreak || 0;
+    const lastStreakCheck = userStats?.lastStreakCheckDate;
+    
+    // Prüfe ob heute schon gecheckt wurde (dann keine Punkte anzeigen)
+    const today = new Date().toISOString().split('T')[0];
+    const isFirstOpenToday = lastStreakCheck !== today;
+    
+    // Zeige Toast nur wenn Streak >= 2 Tage (erste Tag ist noch nicht interessant)
+    if (currentStreak >= 2) {
+      // Berechne Bonus-Punkte (aber zeige nur an wenn heute der erste Check ist)
+      const bonusPoints = isFirstOpenToday ? Math.max(0, currentStreak - 1) : 0;
+      
+      console.log(`🔥 Zeige Streak Toast für ${currentStreak} Tage (${bonusPoints} Punkte)`);
+      
+      // Prüfe ob global showStreakToast verfügbar ist (von GamificationProvider)
+      if (typeof (global as any).showStreakToast === 'function') {
+        (global as any).showStreakToast(currentStreak, bonusPoints);
+      } else {
+        console.log('⚠️ showStreakToast nicht verfügbar - GamificationProvider noch nicht ready');
+        // Retry nach 2 Sekunden falls GamificationProvider noch lädt
+        setTimeout(() => {
+          if (typeof (global as any).showStreakToast === 'function') {
+            (global as any).showStreakToast(currentStreak, bonusPoints);
+          }
+        }, 2000);
+      }
+    } else {
+      console.log(`⏭️ Kein Streak Toast - nur ${currentStreak} Tage`);
+    }
+  } catch (error) {
+    console.error('❌ Fehler beim Streak Toast Check:', error);
+  }
+};
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
@@ -133,6 +172,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           
           await achievementService.checkAndUpdateLevel(user.uid);
           console.log('✅ Level gecheckt für User:', user.uid, '(anonymous:', user.isAnonymous, ')');
+          
+          // 🔥 Zeige Streak Toast falls aktiv (nach kurzer Verzögerung für bessere UX)
+          setTimeout(() => checkStreakOnAppStart(user.uid), 1500);
         } catch (error) {
           console.warn('⚠️ Achievement-Checks fehlgeschlagen für User:', user.uid, error);
         }

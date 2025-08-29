@@ -225,13 +225,7 @@ export default function AchievementsScreen() {
     return ['#2196F3', '#1976D2']; // Blue
   };
 
-  const getStreakTier = (days: number) => {
-    if (days >= 28) return 'Legende 🏆';
-    if (days >= 21) return 'Meister ⭐';
-    if (days >= 14) return 'Experte 💪';
-    if (days >= 7) return 'Fortgeschritten 🎯';
-    return 'Starter 🔥';
-  };
+
 
   // Zeige Loading wenn Levels noch nicht geladen sind
   if (levelsLoading || levels.length === 0) {
@@ -252,6 +246,8 @@ export default function AchievementsScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
+
+
         {/* Savings Card with Shimmer */}
         <Animated.View style={[styles.savingsCard, { opacity: fadeAnim }]}>
           <LinearGradient
@@ -263,12 +259,12 @@ export default function AchievementsScreen() {
             <View style={styles.savingsContent}>
               <View style={styles.savingsLeft}>
                 <ThemedText style={styles.savingsLabel}>Deine Gesamtersparnis</ThemedText>
-                <ThemedText style={styles.savingsAmount}>€ {currentSavings.toFixed(2)}</ThemedText>
+                <ThemedText style={styles.savingsAmount}>{`€ ${currentSavings.toFixed(2)}`}</ThemedText>
               </View>
               <View style={styles.savingsRight}>
                 <TouchableOpacity style={styles.productsBadge} onPress={() => router.push('/purchase-history' as any)}>
                   <IconSymbol name="number" size={14} color={colors.warning} />
-                  <ThemedText style={styles.productsBadgeText}>{purchasedProducts} gekaufte Produkte</ThemedText>
+                  <ThemedText style={styles.productsBadgeText}>{`${purchasedProducts} gekaufte Produkte`}</ThemedText>
                 </TouchableOpacity>
               </View>
             </View>
@@ -316,7 +312,7 @@ export default function AchievementsScreen() {
               <IconSymbol name={currentLevelInfo.icon as any} size={30} color="white" />
               </View>
               <View style={styles.levelInfo}>
-              <ThemedText style={styles.levelNumber}>Level {currentLevel}</ThemedText>
+              <ThemedText style={styles.levelNumber}>{`Level ${currentLevel}`}</ThemedText>
               <ThemedText style={styles.levelName}>{currentLevelInfo.name}</ThemedText>
               <ThemedText style={styles.levelDescription}>{currentLevelInfo.description}</ThemedText>
               </View>
@@ -326,21 +322,21 @@ export default function AchievementsScreen() {
             <View style={styles.rewardBadge}>
               <IconSymbol name="gift" size={16} color="white" />
               <ThemedText style={styles.rewardText}>
-                Belohnung: {currentLevelInfo.reward}
+                {`Belohnung: ${currentLevelInfo.reward}`}
               </ThemedText>
             </View>
 
             {/* Progress Section */}
             {nextLevel && (
             <View style={styles.progressSection}>
-                <ThemedText style={styles.progressLabel}>Fortschritt zu Level {nextLevel.id} ({nextLevel.name}):</ThemedText>
+                <ThemedText style={styles.progressLabel}>{`Fortschritt zu Level ${nextLevel.id} (${nextLevel.name}):`}</ThemedText>
                 
                 {/* Zeige Ersparnis NUR wenn erforderlich */}
                 {nextLevel.savingsRequired > 0 && (
                   <>
               <View style={styles.progressRow}>
                 <ThemedText style={styles.progressText}>
-                        € {currentSavings.toFixed(2)} / {nextLevel.savingsRequired}€
+                        {`€ ${currentSavings.toFixed(2)} / ${nextLevel.savingsRequired}€`}
                 </ThemedText>
               </View>
                     <ProgressBar progress={currentSavings} maxProgress={nextLevel.savingsRequired} color="white" />
@@ -349,16 +345,15 @@ export default function AchievementsScreen() {
               
               <View style={styles.pointsRow}>
                   <ThemedText style={styles.progressLabel}>Punkte:</ThemedText>
-                  <ThemedText style={styles.progressText}>{currentPoints} / {nextLevel.pointsRequired} Pkte.</ThemedText>
+                  <ThemedText style={styles.progressText}>{`${currentPoints} / ${nextLevel.pointsRequired} Pkte.`}</ThemedText>
               </View>
                 <ProgressBar progress={currentPoints} maxProgress={nextLevel.pointsRequired} color="white" />
               
               <ThemedText style={styles.remainingText}>
-                  {nextLevel.savingsRequired > 0 ? (
-                    `Noch €${Math.max(0, nextLevel.savingsRequired - currentSavings).toFixed(2)} & ${Math.max(0, nextLevel.pointsRequired - currentPoints)} Punkte zum nächsten Level`
-                  ) : (
-                    `Noch ${Math.max(0, nextLevel.pointsRequired - currentPoints)} Punkte zum nächsten Level`
-                  )}
+                  {nextLevel.savingsRequired > 0 
+                    ? `Noch €${Math.max(0, nextLevel.savingsRequired - currentSavings).toFixed(2)} & ${Math.max(0, nextLevel.pointsRequired - currentPoints)} Punkte zum nächsten Level`
+                    : `Noch ${Math.max(0, nextLevel.pointsRequired - currentPoints)} Punkte zum nächsten Level`
+                  }
               </ThemedText>
             </View>
             )}
@@ -370,6 +365,43 @@ export default function AchievementsScreen() {
             )}
           </LinearGradient>
         </Animated.View>
+
+        {/* Streak Display - nutze levelListCard wie andere Level auch */}
+        {currentStreak > 0 && (
+          <Animated.View style={[
+            styles.levelListCard, 
+            { 
+              opacity: fadeAnim,
+              backgroundColor: colors.cardBackground,
+              marginBottom: 16,
+            }
+          ]}>
+            <View style={styles.levelListContent}>
+              <View style={[styles.levelListIcon, { backgroundColor: getStreakGradient(currentStreak)[0] }]}>
+                <IconSymbol name="flame.fill" size={20} color="white" />
+              </View>
+              
+              <View style={styles.levelListInfo}>
+                <View style={styles.levelListHeader}>
+                  <ThemedText style={[styles.levelListName, { color: colors.text }]}>
+                    {`${currentStreak} ${currentStreak === 1 ? 'Tag' : 'Tage'} Streak!`}
+                  </ThemedText>
+                </View>
+                <ThemedText style={styles.levelListDescription}>
+                  <Text>{currentStreak >= 7 ? 'Du bist richtig auf Feuer! 🎯' : 'Weiter so! 💪'}</Text>
+                </ThemedText>
+                <ThemedText style={styles.levelListDescription}>
+                  <Text>{`${userStats?.freezeTokens || 0}❄️ Freeze-Token verfügbar`}</Text>
+                </ThemedText>
+              </View>
+
+              <View style={styles.levelStatus}>
+                <IconSymbol name="checkmark.circle.fill" size={24} color={getStreakGradient(currentStreak)[0]} />
+              </View>
+            </View>
+            
+          </Animated.View>
+        )}
 
         {/* All Levels Section */}
         <ThemedText style={styles.sectionTitle}>Alle Level</ThemedText>
@@ -395,7 +427,7 @@ export default function AchievementsScreen() {
               <View style={styles.levelListInfo}>
                 <View style={styles.levelListHeader}>
                   <ThemedText style={[styles.levelListName, level.isActive && { color: level.color }]}>
-                    Level {level.id} {level.name}
+                    {`Level ${level.id} ${level.name}`}
                   </ThemedText>
                 </View>
                 <ThemedText style={styles.levelListDescription}>
@@ -420,33 +452,7 @@ export default function AchievementsScreen() {
           </Animated.View>
         ))}
 
-        {/* Enhanced Streak Display with Tier & Freeze Tokens */}
-        {currentStreak > 0 && (
-          <View style={[styles.streakCard, { backgroundColor: colors.cardBackground }]}>
-            <LinearGradient
-              colors={getStreakGradient(currentStreak)}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.streakGradient}
-            >
-              <IconSymbol name="flame.fill" size={24} color="white" />
-              <View style={styles.streakInfo}>
-                <ThemedText style={styles.streakText}>
-                  {currentStreak} {currentStreak === 1 ? 'Tag' : 'Tage'} Streak!
-                </ThemedText>
-                <ThemedText style={styles.streakTierText}>
-                  {getStreakTier(currentStreak)}
-                </ThemedText>
-              </View>
-              {userStats?.freezeTokens && userStats.freezeTokens > 0 && (
-                <View style={styles.freezeTokenBadge}>
-                  <IconSymbol name="snowflake" size={16} color="white" />
-                  <Text style={styles.freezeTokenCount}>{userStats.freezeTokens}</Text>
-                </View>
-              )}
-            </LinearGradient>
-          </View>
-        )}
+        {/* STREAK-ANZEIGE ENTFERNT - War die Ursache für den Crash */}
 
         {/* Achievements Section */}
         <ThemedText style={[styles.sectionTitle, { marginTop: 15 }]}>Errungenschaften</ThemedText>
@@ -523,7 +529,7 @@ export default function AchievementsScreen() {
                     </View>
                     <View style={styles.progressTextRow}>
                       <ThemedText style={styles.progressValue}>
-                        {achievement.progress}/{achievement.maxProgress}
+                        {`${achievement.progress}/${achievement.maxProgress}`}
                       </ThemedText>
                     </View>
                   </>
@@ -1062,50 +1068,7 @@ const styles = StyleSheet.create({
     height: 1,
     marginHorizontal: 8,
   },
-  streakCard: {
-    marginBottom: 12,
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.09,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  streakGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    gap: 8,
-  },
-  streakInfo: {
-    flex: 1,
-    gap: 2,
-  },
-  streakText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  streakTierText: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  freezeTokenBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    gap: 4,
-  },
-  freezeTokenCount: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+
   loadingContainer: {
     padding: 40,
     alignItems: 'center',

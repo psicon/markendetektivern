@@ -1,0 +1,98 @@
+// ============================================
+// SCAN HISTORY SECURITY RULES - ZUM HINZUFÜGEN
+// ============================================
+
+// USER SCAN HISTORY (Subcollection)
+match /users/{userId}/scanHistory/{scanId} {
+  // Lesen: Nur eigene Scan-Historie
+  allow read: if request.auth != null && request.auth.uid == userId;
+  
+  // Erstellen: Nur authentifizierte User für ihre eigene Historie
+  allow create: if request.auth != null && 
+    request.auth.uid == userId &&
+    // Alle erforderlichen Felder müssen vorhanden sein
+    request.resource.data.keys().hasAll(['ean', 'productId', 'productName', 'productType', 'timestamp']) &&
+    // EAN muss string und nicht leer sein
+    request.resource.data.ean is string &&
+    request.resource.data.ean.size() > 0 &&
+    // ProductId muss string und nicht leer sein
+    request.resource.data.productId is string &&
+    request.resource.data.productId.size() > 0 &&
+    // ProductName muss string und nicht leer sein
+    request.resource.data.productName is string &&
+    request.resource.data.productName.size() > 0 &&
+    // ProductType muss 'noname' oder 'markenprodukt' sein
+    request.resource.data.productType is string &&
+    request.resource.data.productType in ['noname', 'markenprodukt'] &&
+    // Timestamp muss aktuell sein (±5 Minuten)
+    request.resource.data.timestamp is timestamp &&
+    math.abs(request.resource.data.timestamp.seconds() - request.time.seconds()) < 300 &&
+    // Deleted flag muss boolean sein (falls vorhanden)
+    (!request.resource.data.keys().hasAny(['deleted']) || 
+     request.resource.data.deleted is bool);
+  
+  // Updates: Nur für Soft-Delete (deleted flag setzen)
+  allow update: if request.auth != null && 
+    request.auth.uid == userId &&
+    // Nur deleted Flag darf geändert werden
+    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted']) &&
+    // deleted muss boolean sein
+    request.resource.data.deleted is bool;
+  
+  // Delete: Nicht erlaubt (verwende Soft-Delete)
+  allow delete: if false;
+}
+
+// USER SEARCH HISTORY (Subcollection) - für Vollständigkeit
+match /users/{userId}/searchHistory/{searchId} {
+  // Lesen: Nur eigene Such-Historie
+  allow read: if request.auth != null && request.auth.uid == userId;
+  
+  // Erstellen: Nur authentifizierte User für ihre eigene Historie
+  allow create: if request.auth != null && 
+    request.auth.uid == userId &&
+    // Erforderliche Felder
+    request.resource.data.keys().hasAll(['searchTerm', 'timestamp']) &&
+    // SearchTerm muss string und nicht leer sein
+    request.resource.data.searchTerm is string &&
+    request.resource.data.searchTerm.size() > 0 &&
+    // Timestamp muss aktuell sein (±5 Minuten)
+    request.resource.data.timestamp is timestamp &&
+    math.abs(request.resource.data.timestamp.seconds() - request.time.seconds()) < 300;
+  
+  // Updates: Nur für Soft-Delete
+  allow update: if request.auth != null && 
+    request.auth.uid == userId &&
+    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted']) &&
+    request.resource.data.deleted is bool;
+  
+  // Delete: Nicht erlaubt (verwende Soft-Delete)
+  allow delete: if false;
+}
+
+// ============================================
+// WICHTIGE HINWEISE:
+// ============================================
+//
+// 1. ANTI-SPAM PROTECTION:
+//    - Timestamp-Validierung verhindert Backdating
+//    - EAN/ProductId Validierung verhindert leere Einträge
+//
+// 2. SOFT DELETE:
+//    - Keine echten Löschungen erlaubt
+//    - Nur 'deleted' Flag setzen für bessere Datenintegrität
+//
+// 3. PRODUKTTYP VALIDIERUNG:
+//    - Nur 'noname' oder 'markenprodukt' erlaubt
+//    - Verhindert ungültige Werte
+//
+// 4. RATE LIMITING:
+//    - Sollte zusätzlich im Client implementiert werden
+//    - Service macht bereits Dedupe-Check (1 Stunde)
+//
+// 5. OPTIONAL: Zusätzliche Cloud Function Validation
+//    - Prüfung ob ProductId wirklich existiert
+//    - EAN Format-Validierung (8/12/13 Stellen)
+//    - Rate-Limiting pro User
+//
+// Diese Rules in die hauptsächliche firestore.rules Datei kopieren!

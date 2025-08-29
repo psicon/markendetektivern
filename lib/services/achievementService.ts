@@ -1,29 +1,29 @@
 import * as Haptics from 'expo-haptics';
 import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  query,
-  serverTimestamp,
-  updateDoc,
-  where,
-  writeBatch
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    limit,
+    query,
+    serverTimestamp,
+    updateDoc,
+    where,
+    writeBatch
 } from 'firebase/firestore';
 import { Alert } from 'react-native';
 import { db } from '../firebase';
 import {
-  Achievement,
-  AchievementEvent,
-  ActionType,
-  GameActionsConfig,
-  Level,
-  PointsLedgerEntry,
-  StreakConfig,
-  UserAchievementProgress,
-  UserStats
+    Achievement,
+    AchievementEvent,
+    ActionType,
+    GameActionsConfig,
+    Level,
+    PointsLedgerEntry,
+    StreakConfig,
+    UserAchievementProgress,
+    UserStats
 } from '../types/achievements';
 
 class AchievementService {
@@ -184,14 +184,7 @@ class AchievementService {
         } as Level)).sort((a, b) => a.id - b.id);
         console.log(`✅ ${this.levels.length} Levels geladen`);
         
-        // 🔍 DEBUG: Zeige ALLE Level-Daten direkt aus Firestore  
-        console.log('🔍 FIRESTORE LEVEL-DATEN:', this.levels.map(l => ({
-          id: l.id, 
-          name: l.name,
-          pointsRequired: l.pointsRequired,
-          savingsRequired: l.savingsRequired,
-          color: l.color
-        })));
+        // Firestore level data - reduced logging
       } else {
         throw new Error('Keine Levels in Firestore gefunden!');
       }
@@ -199,7 +192,7 @@ class AchievementService {
       // Actions verarbeiten
       if (actionsDoc.exists()) {
         const data = actionsDoc.data();
-        this.gameActions = data.actions as GameActionsConfig;
+        this.gameActions = data as GameActionsConfig;
         console.log('✅ Game Actions geladen');
       } else {
         throw new Error('Keine Actions-Config in Firestore gefunden!');
@@ -377,11 +370,7 @@ class AchievementService {
 
       // Prüfe jeden relevanten Achievement
       for (const achievement of relevantAchievements) {
-        // SPECIAL: Skip first_action_any hier - wird separat in trackFirstActionInternal behandelt
-        if (achievement.trigger.action === 'first_action_any') {
-          console.log('⏭️ Überspringe first_action_any - wird separat behandelt');
-          continue;
-        }
+        // Keine Special Cases mehr - alle Achievements durch normale Schleife
         
         const progressKey = achievement.id;
         const currentProgress = userAchievements[progressKey] || {
@@ -469,13 +458,10 @@ class AchievementService {
       console.log('🎯 Triggering level check after achievement action');
       await this.checkAndUpdateLevel(userId);
       
-      // Profile-Refresh triggern nach jeder Achievement-Action (nur wenn Stats sich geändert haben)  
-      if (pointsEarned > 0 || Object.keys(updates.stats || {}).length > 1) {
-        console.log('🔄 Triggering profile refresh after achievement action');
-        if (AchievementService.onProfileRefreshNeeded) {
-          await AchievementService.onProfileRefreshNeeded();
-          console.log('✅ Profile refreshed via callback');
-        }
+      // 🔄 ZENTRALER Profile-Refresh am Ende (verhindert Duplikate)
+      if (AchievementService.onProfileRefreshNeeded) {
+        await AchievementService.onProfileRefreshNeeded();
+        console.log('✅ Profile refreshed at end of trackAction');
       }
 
     } catch (error) {
@@ -560,14 +546,7 @@ class AchievementService {
       const totalSavings = userData.totalSavings || stats.savingsTotal || stats.totalSavings || 0;
       const currentLevel = stats.currentLevel || userData.level || 1;
       
-      console.log(`🔍 Level-Check Daten:`, {
-        totalPoints,
-        totalSavings,  
-        currentLevel,
-        userData_totalSavings: userData.totalSavings,
-        stats_totalSavings: stats.totalSavings,
-        levelsLoaded: this.levels?.length || 0
-      });
+      // Level-Check Debug - reduced logging
       
       // Berechne korrektes Level
       const correctLevel = this.calculateLevel(totalPoints, totalSavings);
@@ -588,14 +567,7 @@ class AchievementService {
           // 🚀 SOFORT Level-Up UI triggern - OHNE auf DB-Updates zu warten!
           this.notifyLevelUp(correctLevel, currentLevel);
           
-          // Profile-Refresh PARALLEL im Hintergrund
-          if (AchievementService.onProfileRefreshNeeded) {
-            AchievementService.onProfileRefreshNeeded().then(() => {
-              console.log('✅ Profile refreshed after level update');
-            }).catch(err => {
-              console.error('Profile refresh error:', err);
-            });
-          }
+          // Profile-Refresh wird zentral in trackAction gemacht
         } else {
           console.log(`🔄 Level-Korrektur ohne Benachrichtigung: ${currentLevel} → ${correctLevel}`);
           
@@ -668,8 +640,43 @@ class AchievementService {
 
       await updateDoc(userRef, updates);
 
-      // Track daily_streak action für Achievements
+      // Track daily_streak action für Achievements und vergebe Punkte
       if (newStreak > (stats.currentStreak || 0)) {
+        // Vergebe Streak-Bonus-Punkte: ab Tag 2 gibt's Punkte (Tag 2 = 1 Punkt, Tag 3 = 2 Punkte, etc.)
+        const bonusPoints = Math.max(0, newStreak - 1);
+        
+        if (bonusPoints > 0) {
+          // Füge Punkte zum Ledger hinzu
+          const ledgerEntry: PointsLedgerEntry = {
+            action: 'daily_streak',
+            points: bonusPoints,
+            timestamp: serverTimestamp() as any,
+            metadata: {
+              streakDay: newStreak
+            }
+          };
+          
+          await addDoc(collection(db, 'users', userId, 'ledger'), ledgerEntry);
+          
+          // Update User Points
+          const currentPoints = stats.pointsTotal || 0;
+          await updateDoc(userRef, {
+            'stats.pointsTotal': currentPoints + bonusPoints
+          });
+          
+          // Trigger Points Toast
+          if (AchievementService.onPointsEarned) {
+            AchievementService.onPointsEarned(
+              bonusPoints, 
+              'daily_streak',
+              `Tag ${newStreak} Streak!`
+            );
+          }
+          
+          console.log(`🔥 Streak-Bonus: +${bonusPoints} Punkte für Tag ${newStreak}`);
+        }
+        
+        // Tracke die Action trotzdem für Achievements (ohne zusätzliche Punkte)
         await this.trackAction(userId, 'daily_streak');
       }
 
@@ -1114,31 +1121,9 @@ class AchievementService {
 
       console.log(`🥇 First action tracked! +${points} Punkte für erste Aktion (${triggerAction})`);
 
-      // 🎯 FINDE das first_action_any Achievement und markiere es als completed
-      const firstActionAchievement = this.achievements.find(
-        a => a.trigger.action === 'first_action_any' && a.isActive
-      );
-      
-      if (firstActionAchievement) {
-        // Markiere Achievement als completed
-        const achievementProgress = {
-          achievementId: firstActionAchievement.id,
-          progress: 1,
-          completed: true,
-          completedAt: new Date(),
-          lastUpdated: new Date()
-        };
-        
-        await updateDoc(userRef, {
-          [`achievements.${firstActionAchievement.id}`]: achievementProgress
-        });
-        
-        // 🏆 TRIGGER Achievement Unlock Overlay!
-        console.log('🏆 First Action Achievement wird angezeigt:', firstActionAchievement.name);
-        await this.notifyAchievementUnlock([firstActionAchievement]);
-      } else {
-        console.warn('⚠️ first_action_any Achievement nicht in der Liste gefunden!');
-      }
+      // 🚫 Achievement wird NICHT mehr hier getriggert!
+      // Das first_action_any Achievement wird durch die normale Achievement-Schleife 
+      // in trackAction gefunden und dort korrekt abgehandelt
     } catch (error) {
       console.error('Error tracking first_action_any:', error);
     }
