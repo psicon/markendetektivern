@@ -6,8 +6,8 @@ import * as Haptics from 'expo-haptics';
 import React, { useEffect, useRef } from 'react';
 import { Animated, Dimensions, Easing, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-type ToastType = 'success' | 'error' | 'info';
-type ToastVisualType = 'success' | 'error' | 'info';
+type ToastType = 'success' | 'error' | 'info' | 'points';
+type ToastVisualType = 'success' | 'error' | 'info' | 'points';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -36,7 +36,7 @@ const StandardToast: React.FC<{
     }
   }, [spinIcon, rotateAnim]);
 
-  const backgroundColor = type === 'success' ? colors.success : type === 'error' ? '#ff3b30' : colors.primary;
+  const backgroundColor = type === 'success' ? colors.success : type === 'error' ? '#ff3b30' : type === 'points' ? '#ffcf40' : colors.primary;
   const rotate = rotateAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
   return (
@@ -74,7 +74,7 @@ export function showPointsToast(message: string, points: number) {
       customToast: (t: RNToast) => (
         <StandardToast
           message={resolveValue(t.message, t) as any}
-          type="success"
+          type="points"
           icon="plus.circle.fill"
           toast={t}
         />
@@ -92,7 +92,7 @@ export function showFavoriteAddedToast(productName: string) {
     width: SCREEN_WIDTH,
     styles: { view: { backgroundColor: 'transparent' } },
     customToast: (t: RNToast) => (
-      <StandardToast message={resolveValue(t.message, t) as any} type="success" icon="heart.fill" toast={t} />
+      <StandardToast message={resolveValue(t.message, t) as any} type="error" icon="heart.fill" toast={t} />
     ),
   });
 }
@@ -106,7 +106,7 @@ export function showFavoriteRemovedToast(productName: string) {
     width: SCREEN_WIDTH,
     styles: { view: { backgroundColor: 'transparent' } },
     customToast: (t: RNToast) => (
-      <StandardToast message={resolveValue(t.message, t) as any} type="info" icon="heart.slash.fill" toast={t} />
+      <StandardToast message={resolveValue(t.message, t) as any} type="error" icon="heart.slash.fill" toast={t} />
     ),
   });
 }
@@ -156,7 +156,7 @@ export function showPurchasedToast(message: string) {
     width: SCREEN_WIDTH,
     styles: { view: { backgroundColor: 'transparent' } },
     customToast: (t: RNToast) => (
-      <StandardToast message={resolveValue(t.message, t) as any} type="success" icon="star.fill" spinIcon toast={t} />
+      <StandardToast message={resolveValue(t.message, t) as any} type="info" icon="star.fill" spinIcon toast={t} />
     ),
   });
 }
