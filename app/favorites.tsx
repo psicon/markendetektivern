@@ -5,11 +5,12 @@ import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
+import { TOAST_MESSAGES } from '@/constants/ToastMessages';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import { FirestoreService } from '@/lib/services/firestore';
-import { showCartAddedToast, showInfoToast } from '@/lib/services/ui/toast';
+import { showCartAddedToast, showFavoriteRemovedToast, showInfoToast } from '@/lib/services/ui/toast';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
@@ -339,11 +340,11 @@ export default function FavoritesScreen() {
       
       await removeFromFavorites(product.id, product.type);
       
-      showGameToast(`💔 ${product.name || product.produktName} aus Favoriten entfernt`, 'success');
+      showFavoriteRemovedToast(product.name || product.produktName);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       console.error('Error removing favorite:', error);
-      showGameToast('Fehler beim Entfernen des Favoriten', 'error');
+      showInfoToast(TOAST_MESSAGES.FAVORITES.removeError, 'error');
       // Bei Fehler: Reload
       loadInitialData();
     }
@@ -398,7 +399,7 @@ export default function FavoritesScreen() {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       console.error('Error in bulk add to cart:', error);
-      showGameToast('Fehler beim Hinzufügen zum Einkaufszettel', 'error');
+      showInfoToast(TOAST_MESSAGES.SHOPPING.bulkAddError, 'error');
     } finally {
       setIsAddingToCart(false);
     }

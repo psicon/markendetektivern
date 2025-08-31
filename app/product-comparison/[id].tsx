@@ -8,6 +8,7 @@ import { CommentSkeleton, CommentsHeaderSkeleton, RatingOverviewSkeleton, Shimme
 import { getStufenColor, getStufenDescription, getStufenTitle } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
+import { TOAST_MESSAGES, interpolateMessage } from '@/constants/ToastMessages';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { ingredientSynonyms } from '@/lib/data/ingredientSynonyms';
@@ -16,23 +17,24 @@ import { useFavorites } from '@/lib/hooks/useFavorites';
 import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
-import { showCartAddedToast, showFavoriteAddedToast, showFavoriteRemovedToast, showInfoToast } from '@/lib/services/ui/toast';
+import { showAlreadyInCartToast, showCartAddedToast, showFavoriteAddedToast, showFavoriteRemovedToast, showInfoToast, showRatingToast } from '@/lib/services/ui/toast';
 import { MarkenProduktWithDetails, ProductWithDetails } from '@/lib/types/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -204,14 +206,16 @@ const NoNameCartButton = ({
   productId, 
   productName, 
   user, 
-  colors, 
-  onShowToast 
+  colors,
+  animateButtonPress,
+  buttonAnimations
 }: {
   productId: string;
   productName: string;
   user: any;
   colors: any;
-  onShowToast: (message: string, type: 'success' | 'error' | 'info', actionLabel?: string, actionPress?: () => void) => void;
+  animateButtonPress: (buttonId: string) => void;
+  buttonAnimations: {[key: string]: Animated.Value};
 }) => {
   const router = useRouter();
   const [isInCart, setIsInCart] = useState(false);
@@ -241,15 +245,17 @@ const NoNameCartButton = ({
   
   const handlePress = async () => {
     if (!user?.uid) {
-      onShowToast('Bitte melde dich an, um Produkte hinzuzufügen', 'info');
+      showInfoToast(TOAST_MESSAGES.SHOPPING.addToCartAuthRequired, 'info');
       return;
     }
     
     if (isInCart) {
-      onShowToast('Produkt ist bereits im Einkaufszettel', 'info');
+      showAlreadyInCartToast(() => router.push('/shopping-list' as any));
       return;
     }
     
+    // Animate cart button before action
+    animateButtonPress(`cart-${productId}`);
     setIsLoading(true);
     
     try {
@@ -260,15 +266,11 @@ const NoNameCartButton = ({
         false // NoName product
       );
       setIsInCart(true);
-      onShowToast(
-        '🛒 Produkt hinzugefügt!', 
-        'success', 
-        'Einkaufszettel',
-        () => router.push('/shopping-list' as any)
-      );
+      const message = interpolateMessage(TOAST_MESSAGES.SHOPPING.addedToCart, { productName });
+      showCartAddedToast(message, () => router.push('/shopping-list' as any));
     } catch (error) {
       console.error('Error adding to cart:', error);
-      onShowToast('Produkt konnte nicht hinzugefügt werden', 'error');
+      showInfoToast(TOAST_MESSAGES.SHOPPING.addToCartError, 'error');
     } finally {
       setIsLoading(false);
     }
@@ -286,11 +288,15 @@ const NoNameCartButton = ({
         {isLoading ? (
           <ActivityIndicator size="small" color="white" />
         ) : (
-          <IconSymbol 
-            name={isInCart ? "checkmark.circle.fill" : "cart.badge.plus"} 
-            size={20} 
-            color="white" 
-          />
+          <Animated.View style={{
+            transform: [{ scale: buttonAnimations[`cart-${productId}`] || new Animated.Value(1) }]
+          }}>
+            <IconSymbol 
+              name={isInCart ? "checkmark.circle.fill" : "cart.badge.plus"} 
+              size={24} 
+              color="white" 
+            />
+          </Animated.View>
         )}
       </TouchableOpacity>
     </>
@@ -1154,13 +1160,7 @@ export default function ProductComparisonScreen() {
 
   // FAVORITEN Toast (lokale Positionierung beim Herz-Icon)
   const showFavoriteGameToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
-    if (type === 'success' && message.includes('hinzugefügt')) {
-      showFavoriteAddedToast(message.replace('💖 ', '').replace(' zu Favoriten hinzugefügt!', ''));
-    } else if (type === 'success' && message.includes('entfernt')) {
-      showFavoriteRemovedToast(message.replace('💔 ', '').replace(' aus Favoriten entfernt', ''));
-    } else {
-      showInfoToast(message, type);
-    }
+    showInfoToast(message, type);
   };
 
   // LEVEL-UP Overlay anzeigen (spektakuläre Animation mit Confetti)
@@ -1180,7 +1180,7 @@ export default function ProductComparisonScreen() {
   // Handle favorite toggle
   const handleToggleFavorite = async (product: any, productType: 'markenprodukt' | 'noname') => {
     if (!user?.uid) {
-      showFavoriteGameToast('Bitte melde dich an, um Favoriten zu speichern', 'info');
+      showInfoToast(TOAST_MESSAGES.FAVORITES.authRequired, 'info');
       return;
     }
 
@@ -1207,18 +1207,18 @@ export default function ProductComparisonScreen() {
         brand: product.marke?.bezeichnung || product.brand
       });
 
-      const message = wasAdded 
-        ? `💖 ${product.name} zu Favoriten hinzugefügt!`
-        : `💔 ${product.name} aus Favoriten entfernt`;
-      
-      // FAVORITEN Toast (lokale Positionierung beim Herz-Icon)
-      showFavoriteGameToast(message, 'success');
+      // Konsistente Favoriten-Toasts (wie bei Stufe 1,2)
+      if (wasAdded) {
+        showFavoriteAddedToast(product.name);
+      } else {
+        showFavoriteRemovedToast(product.name);
+      }
       
       // Haptic Feedback
       Haptics.impactAsync(wasAdded ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Medium);
     } catch (error) {
       console.error('Error toggling favorite:', error);
-      showFavoriteGameToast('Fehler beim Speichern des Favoriten', 'error');
+      showInfoToast(TOAST_MESSAGES.FAVORITES.addError, 'error');
     }
   };
 
@@ -1302,16 +1302,19 @@ export default function ProductComparisonScreen() {
   // Add to shopping cart
   const handleAddToCart = async () => {
     if (!user?.uid) {
-      showGameToast('Bitte melde dich an, um Produkte hinzuzufügen', 'info');
+      showInfoToast(TOAST_MESSAGES.SHOPPING.addToCartAuthRequired, 'info');
       return;
     }
     
     if (!comparisonData?.mainProduct) return;
     
     if (isInCart) {
-      showGameToast('Produkt ist bereits im Einkaufszettel', 'info');
+      showAlreadyInCartToast(() => router.push('/shopping-list' as any));
       return;
     }
+    
+    // Animate main cart button before action
+    animateButtonPress('main-cart-button');
     
     // Execute the add to cart logic
     executeMainAddToCart();
@@ -1338,10 +1341,11 @@ export default function ProductComparisonScreen() {
         isMarke
       );
       setIsInCart(true);
-      showGameToastWithAction('🛒 Produkt zum Einkaufszettel hinzugefügt!', 'success');
+      const message = interpolateMessage(TOAST_MESSAGES.SHOPPING.addedToCart, { productName });
+      showCartAddedToast(message, () => router.push('/shopping-list' as any));
     } catch (error) {
       console.error('Error adding to cart:', error);
-      showGameToast('Produkt konnte nicht hinzugefügt werden', 'error');
+      showInfoToast(TOAST_MESSAGES.SHOPPING.addToCartError, 'error');
     } finally {
       setIsAddingToCart(false);
     }
@@ -1350,7 +1354,7 @@ export default function ProductComparisonScreen() {
   // Submit rating function for productRatings table
   const submitRating = async () => {
     if (overallRating === 0) {
-              showFavoriteGameToast('Bitte gib eine Gesamtbewertung ab', 'info');
+              showRatingToast(TOAST_MESSAGES.RATINGS.ratingRequired, 'error');
         return;
     }
 
@@ -1373,7 +1377,7 @@ export default function ProductComparisonScreen() {
         };
 
         await FirestoreService.updateProductRating(existingRating.id, updateData);
-        showFavoriteGameToast('⭐ Deine Bewertung wurde aktualisiert!', 'success');
+        showRatingToast(TOAST_MESSAGES.RATINGS.ratingUpdated, 'success');
       } else {
         // Create new rating
         const productRatingData = {
@@ -1391,7 +1395,7 @@ export default function ProductComparisonScreen() {
         };
 
         await FirestoreService.addProductRating(productRatingData);
-        showFavoriteGameToast('⭐ Deine Bewertung wurde gespeichert!', 'success');
+        showRatingToast(TOAST_MESSAGES.RATINGS.ratingSaved, 'success');
         
         // 🎯 TRACK ACTION: submit_rating (nur bei neuer Bewertung, nicht bei Update)
         if (user?.uid) {
@@ -1439,7 +1443,7 @@ export default function ProductComparisonScreen() {
       
     } catch (error) {
       console.error('Error submitting rating:', error);
-      showFavoriteGameToast('Bewertung konnte nicht gespeichert werden', 'error');
+      showRatingToast(TOAST_MESSAGES.RATINGS.ratingError, 'error');
     } finally {
       setIsSubmittingRating(false);
     }
@@ -1482,7 +1486,7 @@ export default function ProductComparisonScreen() {
   // Check for existing rating and open appropriate modal
   const openRatingModal = async () => {
     if (!user?.uid) {
-      showFavoriteGameToast('Kein Benutzer angemeldet', 'error');
+      showRatingToast(TOAST_MESSAGES.RATINGS.authRequired, 'error');
       return;
     }
 
@@ -1607,6 +1611,139 @@ export default function ProductComparisonScreen() {
   // Product Selection States für Vergleichsfunktion
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const [showComparisonSheet, setShowComparisonSheet] = useState(false);
+  
+  // Button Animation States (Herz, Cart, Selection)
+  const [buttonAnimations, setButtonAnimations] = useState<{[key: string]: Animated.Value}>({});
+  
+  // Card Selection Animation States (subtile Card-Animation)
+  const [cardAnimations, setCardAnimations] = useState<{[key: string]: Animated.Value}>({});
+  
+  // Header Button Animation (für Vergleich-Button)
+  const [headerButtonAnimation] = useState(new Animated.Value(1));
+  
+  // Onboarding Detection - solange bis Sheet geöffnet wurde
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  
+  // Helper: Animate any button on press (universal für alle Buttons)
+  const animateButtonPress = (buttonId: string) => {
+    if (!buttonAnimations[buttonId]) {
+      const newAnim = new Animated.Value(1);
+      setButtonAnimations(prev => ({ ...prev, [buttonId]: newAnim }));
+      
+      // Quick scale animation
+      Animated.sequence([
+        Animated.timing(newAnim, {
+          toValue: 1.2,
+          duration: 100,
+          useNativeDriver: true,
+        }),
+        Animated.timing(newAnim, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } else {
+      // Reuse existing animation
+      Animated.sequence([
+        Animated.timing(buttonAnimations[buttonId], {
+          toValue: 1.2,
+          duration: 100,
+          useNativeDriver: true,
+        }),
+        Animated.timing(buttonAnimations[buttonId], {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  };
+
+  // Helper: Animate card on selection (subtile Scale-Animation)
+  const animateCardSelection = (cardId: string) => {
+    if (!cardAnimations[cardId]) {
+      const newAnim = new Animated.Value(1);
+      setCardAnimations(prev => ({ ...prev, [cardId]: newAnim }));
+      
+      // Subtle card bounce animation
+      Animated.sequence([
+        Animated.timing(newAnim, {
+          toValue: 1.02,  // Sehr subtil - nur 2% größer
+          duration: 120,
+          useNativeDriver: true,
+        }),
+        Animated.timing(newAnim, {
+          toValue: 1,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } else {
+      // Reuse existing animation
+      Animated.sequence([
+        Animated.timing(cardAnimations[cardId], {
+          toValue: 1.02,
+          duration: 120,
+          useNativeDriver: true,
+        }),
+        Animated.timing(cardAnimations[cardId], {
+          toValue: 1,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  };
+
+  // Helper: Pulse animation für Onboarding-Hints
+  const pulseIcon = (animationValue: Animated.Value, iterations: number = 3) => {
+    const animations = [];
+    for (let i = 0; i < iterations; i++) {
+      animations.push(
+        Animated.timing(animationValue, {
+          toValue: 1.3,
+          duration: 400,
+          useNativeDriver: true,
+        }),
+        Animated.timing(animationValue, {
+          toValue: 1,
+          duration: 400,
+          useNativeDriver: true,
+        })
+      );
+    }
+    Animated.sequence(animations).start();
+  };
+
+  // Helper: Pulse Header-Button
+  const pulseHeaderButton = () => {
+    pulseIcon(headerButtonAnimation, 2); // 2 Pulse-Zyklen
+  };
+
+  // Helper: Prepare animation for icon if it doesn't exist
+  const prepareIconAnimation = (buttonId: string) => {
+    if (!buttonAnimations[buttonId]) {
+      const newAnim = new Animated.Value(1);
+      setButtonAnimations(prev => ({ ...prev, [buttonId]: newAnim }));
+      return newAnim;
+    }
+    return buttonAnimations[buttonId];
+  };
+
+  // Helper: Open comparison sheet and mark as used (Onboarding beenden)
+  const openComparisonSheet = async () => {
+    setShowComparisonSheet(true);
+    // Onboarding nur beim ersten Sheet-Öffnen beenden
+    if (showOnboarding) {
+      try {
+        await AsyncStorage.setItem('@comparison_sheet_used', 'true');
+        setShowOnboarding(false);
+      } catch (error) {
+        console.log('Could not save sheet usage status');
+      }
+    }
+  };
 
   // Check if product is in cart when data loads
   useEffect(() => {
@@ -1631,6 +1768,43 @@ export default function ProductComparisonScreen() {
       setSelectedProducts(allNoNameIds);
     }
   }, [comparisonData?.relatedNoNameProducts?.length]);
+
+  // Onboarding Detection - prüfen ob Sheet schon mal geöffnet wurde
+  useEffect(() => {
+    const checkSheetUsage = async () => {
+      try {
+        const hasUsedSheet = await AsyncStorage.getItem('@comparison_sheet_used');
+        if (!hasUsedSheet) {
+          setShowOnboarding(true);
+        }
+      } catch (error) {
+        console.log('Could not check sheet usage status');
+      }
+    };
+    checkSheetUsage();
+  }, []);
+
+  // Onboarding-Animation-Sequenz (bis Sheet verwendet wurde)
+  useEffect(() => {
+    if (showOnboarding && comparisonData?.relatedNoNameProducts && comparisonData.relatedNoNameProducts.length > 0) {
+      // Warte 1.5 Sekunden, dann starte subtile Hints
+      setTimeout(() => {
+        // 1. Auswahl-Icons pulsieren (staggered)
+        comparisonData.relatedNoNameProducts.forEach((product, index) => {
+          setTimeout(() => {
+            const iconAnim = prepareIconAnimation(`selection-${product.id}`);
+            pulseIcon(iconAnim, 2); // 2 Pulse-Zyklen pro Icon
+          }, index * 300); // 300ms Stagger zwischen Icons
+        });
+        
+        // 2. Header-Button pulsiert nach den Icons (1.5s nach dem letzten Icon)
+        const totalIconTime = comparisonData.relatedNoNameProducts.length * 300 + 1500;
+        setTimeout(() => {
+          pulseHeaderButton();
+        }, totalIconTime);
+      }, 1500); // Initial delay
+    }
+  }, [showOnboarding, comparisonData?.relatedNoNameProducts, buttonAnimations]);
   
   // Toggle product selection
   const toggleProductSelection = (productId: string) => {
@@ -1651,7 +1825,7 @@ export default function ProductComparisonScreen() {
       ...getNavigationHeaderOptions(colorScheme, 'Produktvergleich'),
       headerRight: selectedProducts.size > 0 ? () => (
         <TouchableOpacity 
-          onPress={() => setShowComparisonSheet(true)}
+          onPress={openComparisonSheet}
           style={{ 
             paddingLeft: 8, 
             paddingRight: 0, 
@@ -1659,9 +1833,13 @@ export default function ProductComparisonScreen() {
             position: 'relative'
           }}
         >
-          <IconSymbol name="arrow.left.arrow.right" size={24} color="white" />
+          <Animated.View style={{
+            transform: [{ scale: headerButtonAnimation }]
+          }}>
+            <IconSymbol name="arrow.left.arrow.right" size={24} color="white" />
+          </Animated.View>
           {selectedProducts.size > 0 && (
-            <View style={{
+            <Animated.View style={{
               position: 'absolute',
               top: 4,
               right: -2,
@@ -1672,6 +1850,7 @@ export default function ProductComparisonScreen() {
               justifyContent: 'center',
               alignItems: 'center',
               paddingHorizontal: 4,
+              transform: [{ scale: headerButtonAnimation }]
             }}>
               <ThemedText style={{
                 color: 'white',
@@ -1681,7 +1860,7 @@ export default function ProductComparisonScreen() {
               }}>
                 {selectedProducts.size}
               </ThemedText>
-            </View>
+            </Animated.View>
           )}
         </TouchableOpacity>
       ) : undefined,
@@ -2075,7 +2254,7 @@ export default function ProductComparisonScreen() {
               </View>
             )}
             <View style={styles.spacer} />
-            <TouchableOpacity onPress={async () => {
+            <TouchableOpacity style={[styles.actionIconButton, { backgroundColor: colors.background }]} onPress={async () => {
               if (comparisonData?.mainProduct) {
                 // Intelligente Typ-Erkennung
                 let correctType: 'markenprodukt' | 'noname' = type === 'brand' ? 'markenprodukt' : 'noname';
@@ -2095,14 +2274,20 @@ export default function ProductComparisonScreen() {
                   productId: comparisonData.mainProduct.id,
                   productName: comparisonData.mainProduct.name
                 });
+                // Animate heart before action
+                animateButtonPress('main-product-heart');
                 handleToggleFavorite(comparisonData.mainProduct, correctType);
               }
             }}>
-              <IconSymbol 
-                name={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? "heart.fill" : "heart"} 
-                size={20} 
-                color={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? colors.error : colors.icon} 
-              />
+              <Animated.View style={{
+                transform: [{ scale: buttonAnimations['main-product-heart'] || new Animated.Value(1) }]
+              }}>
+                <IconSymbol 
+                  name={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? "heart.fill" : "heart"} 
+                  size={24} 
+                  color={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? colors.error : colors.icon} 
+                />
+              </Animated.View>
             </TouchableOpacity>
                 </View>
 
@@ -2205,11 +2390,15 @@ export default function ProductComparisonScreen() {
               {isAddingToCart ? (
                 <ActivityIndicator size="small" color="white" />
               ) : (
-                <IconSymbol 
-                  name={isInCart ? "checkmark.circle.fill" : "cart.badge.plus"} 
-                  size={20} 
-                  color="white" 
-                />
+                <Animated.View style={{
+                  transform: [{ scale: buttonAnimations['main-cart-button'] || new Animated.Value(1) }]
+                }}>
+                  <IconSymbol 
+                    name={isInCart ? "checkmark.circle.fill" : "cart.badge.plus"} 
+                    size={24} 
+                    color="white" 
+                  />
+                </Animated.View>
               )}
             </TouchableOpacity>
         </View>
@@ -2241,7 +2430,10 @@ export default function ProductComparisonScreen() {
                 key={noNameProduct.id}
                 style={[
                   {
-                    opacity: productAnimations[noNameProduct.id] || 0 // ✨ Animation
+                    opacity: productAnimations[noNameProduct.id] || 0, // ✨ Einblend-Animation
+                    transform: [{ 
+                      scale: cardAnimations[`card-${noNameProduct.id}`] || new Animated.Value(1) 
+                    }] // ✨ Card-Selection-Animation
                   }
                 ]}
               >
@@ -2250,14 +2442,23 @@ export default function ProductComparisonScreen() {
                     styles.productCard, 
                     { 
                       backgroundColor: colors.cardBackground,
-                      shadowColor: isSelected ? colors.primary : '#000',
-                      shadowOffset: { width: 0, height: isSelected ? 4 : 2 },
-                      shadowOpacity: isSelected ? 0.4 : 0.1,
-                      shadowRadius: isSelected ? 8 : 4,
-                      elevation: isSelected ? 6 : 3,
+                      // KONSTANTE Border-Width verhindert "Hüpfen" komplett
+                      borderWidth: 2,  // Immer 2pt border (elegante Dicke)
+                      borderColor: isSelected ? colors.primary : 'transparent',  // Grün sichtbar/unsichtbar
+                      // Shadow ersetzt transparente Border bei nicht-ausgewählten Cards
+                      shadowColor: isSelected ? 'transparent' : '#000',
+                      shadowOffset: { width: 0, height: isSelected ? 0 : 2 },
+                      shadowOpacity: isSelected ? 0 : 0.1,
+                      shadowRadius: isSelected ? 0 : 4,
+                      elevation: isSelected ? 0 : 3,
                     }
                   ]}
-                  onPress={() => toggleProductSelection(noNameProduct.id)}
+                  onPress={() => {
+                    // Animate both card and selection icon when card is tapped
+                    animateButtonPress(`selection-${noNameProduct.id}`);
+                    animateCardSelection(`card-${noNameProduct.id}`);
+                    toggleProductSelection(noNameProduct.id);
+                  }}
                   activeOpacity={0.7}
               >
                 {/* Alternative Chips Row */}
@@ -2292,30 +2493,43 @@ export default function ProductComparisonScreen() {
                   {/* Action Icons rechts oben */}
                   <View style={styles.topActionIcons}>
                     <TouchableOpacity 
-                      style={styles.actionIconButton}
+                      style={[styles.actionIconButton, { backgroundColor: colors.background }]}
                       onPress={(e) => {
                         e.stopPropagation();
+                        // Animate both selection icon and card before action
+                        animateButtonPress(`selection-${noNameProduct.id}`);
+                        animateCardSelection(`card-${noNameProduct.id}`);
                         toggleProductSelection(noNameProduct.id);
                       }}
                     >
-                      <IconSymbol 
-                        name={isSelected ? "checkmark.circle.fill" : "circle"} 
-                        size={20} 
-                        color={isSelected ? colors.primary : colors.icon} 
-                      />
+                      <Animated.View style={{
+                        transform: [{ scale: buttonAnimations[`selection-${noNameProduct.id}`] || new Animated.Value(1) }]
+                      }}>
+                        <IconSymbol 
+                          name={isSelected ? "checkmark.circle.fill" : "circle"} 
+                          size={24} 
+                          color={isSelected ? colors.primary : colors.icon} 
+                        />
+                      </Animated.View>
                     </TouchableOpacity>
                     <TouchableOpacity 
-                      style={styles.actionIconButton}
+                      style={[styles.actionIconButton, { backgroundColor: colors.background }]}
                       onPress={(e) => {
                         e.stopPropagation();
+                        // Animate heart before action
+                        animateButtonPress(`noname-heart-${noNameProduct.id}`);
                         handleToggleFavorite(noNameProduct, 'noname');
                       }}
                     >
-                      <IconSymbol 
-                        name={isLocalFavorite(noNameProduct.id, 'noname') ? "heart.fill" : "heart"} 
-                        size={20} 
-                        color={isLocalFavorite(noNameProduct.id, 'noname') ? colors.error : colors.icon} 
-                      />
+                      <Animated.View style={{
+                        transform: [{ scale: buttonAnimations[`noname-heart-${noNameProduct.id}`] || new Animated.Value(1) }]
+                      }}>
+                        <IconSymbol 
+                          name={isLocalFavorite(noNameProduct.id, 'noname') ? "heart.fill" : "heart"} 
+                          size={24} 
+                          color={isLocalFavorite(noNameProduct.id, 'noname') ? colors.error : colors.icon} 
+                        />
+                      </Animated.View>
                     </TouchableOpacity>
                 </View>
               </View>
@@ -2419,9 +2633,8 @@ export default function ProductComparisonScreen() {
                   productName={noNameProduct.produktName || noNameProduct.name || 'NoName Produkt'}
                   user={user}
                   colors={colors}
-                  onShowToast={(message, type, actionLabel, actionPress) => {
-                    showCartAddedToast(message, () => router.push('/shopping-list' as any));
-                  }}
+                  animateButtonPress={animateButtonPress}
+                  buttonAnimations={buttonAnimations}
                 />
               </View>
               </TouchableOpacity>
@@ -3558,7 +3771,7 @@ const styles = StyleSheet.create({
   },
   discountValue: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'Nunito_700Bold',
   },
   ratingRow: {
     flexDirection: 'row',
@@ -3604,7 +3817,7 @@ const styles = StyleSheet.create({
   },
   mainWeight: {
     fontSize: 12,
-    opacity: 0.7,
+    
   },
 
   // Action Buttons Row
@@ -3619,21 +3832,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 1,
+    paddingVertical: 8,     // Erhöht von 1 auf 8 (viel höher)
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
     backgroundColor: 'transparent',
     gap: 6,
-    height: 30,
+    height: 44,             // Erhöht von 30 auf 44 (konsistent mit actionIconButton)
   },
   detailsText: {
     fontSize: 14,
     fontWeight: '500',
   },
   cartButton: {
-    width: 35,
-    height: 30,
+    width: 44,              // Breiter (35→44)
+    height: 44,             // Höher (30→44) - äquivalent zu Details
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
@@ -4216,13 +4429,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   
-  // Top action icons
+  // Top action icons - Mobile UX optimiert
   topActionIcons: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 12,  // Mehr Abstand zwischen Buttons (8→12)
+    alignItems: 'center',
   },
   actionIconButton: {
-    padding: 4,
+    width: 44,        // Apple HIG: Minimum 44pt Touch-Target
+    height: 44,       // Quadratisch für optimale Ergonomie
+    borderRadius: 22, // Perfekt rund
+    justifyContent: 'center',
+    alignItems: 'center',
+    // backgroundColor wird dynamisch über colors.background gesetzt (Light: #f5f5f5, Dark: #000000)
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
 
 
@@ -4953,14 +5177,5 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
   },
   
-  // FIXED TOAST CONTAINER - schwebt über dem gesamten Bildschirm
-  fixedToastContainer: {
-    position: 'absolute',
-    top: 60, // Unter der Status Bar
-    left: 0,
-    right: 0,
-    zIndex: 9999,
-    elevation: 9999,
-    pointerEvents: 'box-none', // Nur der Toast ist klickbar, nicht der Container
-  },
+  // Alte Toast-Container Styles entfernt - zentrale Toast-Library übernimmt
 });

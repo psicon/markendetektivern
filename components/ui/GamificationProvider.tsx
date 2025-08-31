@@ -1,15 +1,15 @@
+import { useColorScheme } from '@/hooks/useColorScheme';
 import {
     setAchievementUnlockHandler,
     setLevelUpHandler,
     setPointsEarnedHandler
 } from '@/lib/services/achievementService';
-import { showPointsToast } from '@/lib/services/ui/toast';
+import { showPointsToast, showStreakToast as showStreakToastNew } from '@/lib/services/ui/toast';
 import { Achievement } from '@/lib/types/achievements';
 import React, { useCallback, useEffect, useState } from 'react';
 import { AchievementUnlockOverlay } from './AchievementUnlockOverlay';
 import { LevelUpOverlay } from './LevelUpOverlay';
-import { PointsToast } from './PointsToast';
-// StreakToast entfernt - nutze PointsToast mit type='streak'
+// Alle Toasts laufen über zentrale Toast-Library
 
 interface GamificationProviderProps {
   children: React.ReactNode;
@@ -27,20 +27,14 @@ interface AchievementData {
   autoHide?: boolean;      // Für Achievement + Level-Up Sequencing
 }
 
-interface PointsToastData {
-  visible: boolean;
-  points: number;
-  action: string;
-  message: string;
-}
-
-// StreakToast wird jetzt über PointsToast mit type='streak' abgewickelt
+// Alte Interfaces entfernt - zentrale Toast-Library verwendet
 
 /**
  * Zentraler Provider für alle Gamification-Overlays und Toasts
  * Registriert sich bei AchievementService Callbacks und zeigt UI-Komponenten
  */
 export const GamificationProvider: React.FC<GamificationProviderProps> = ({ children }) => {
+  const colorScheme = useColorScheme();
   // State für verschiedene UI-Overlays
   const [levelUpData, setLevelUpData] = useState<LevelUpData>({
     visible: false,
@@ -54,20 +48,7 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     autoHide: false
   });
 
-  const [pointsToastData, setPointsToastData] = useState<PointsToastData>({
-    visible: false,
-    points: 0,
-    action: '',
-    message: ''
-  });
-
-  // Verwende PointsToast für Streak (type='streak' ist bereits eingebaut!)
-  const [streakToastData, setStreakToastData] = useState<PointsToastData>({
-    visible: false,
-    points: 0,
-    action: 'streak',
-    message: ''
-  });
+  // Alte Toast-States entfernt - alles läuft über zentrale Toast-Library
 
   // Queue für Level-Ups (falls Achievement zuerst angezeigt wird)
   const [pendingLevelUp, setPendingLevelUp] = useState<LevelUpData | null>(null);
@@ -113,10 +94,10 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
 
   const pointsHandler = useCallback((points: number, action: string, message: string) => {
     if (points > 0) {
-      // Neue Toast-Bibliothek: stapelbar, top-position, swipe dismiss
-      showPointsToast(message, points);
+      // Neue Toast-Bibliothek: stapelbar, top-position, swipe dismiss, theme-aware
+      showPointsToast(message, points, colorScheme || 'light');
     }
-  }, []);
+  }, [colorScheme]);
 
   const levelUpHandler = useCallback((newLevel: number, oldLevel: number) => {
     console.log(`🎯 Level-Up UI triggered: ${oldLevel} → ${newLevel}`);
@@ -181,26 +162,15 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     setAchievementData({ visible: false, achievement: null });
   };
 
-  const handlePointsToastHide = () => {
-    setPointsToastData(prev => ({ ...prev, visible: false }));
-  };
+  // Alte Toast-Handler entfernt - zentrale Library übernimmt
 
-  // Funktion zum Anzeigen der Streak Toast (nutzt PointsToast mit type='streak')
+  // Funktion zum Anzeigen der Streak Toast (nutzt neue Toast-Library mit STREAK-Farbe)
   const showStreakToast = useCallback((streakDays: number, bonusPoints?: number) => {
     console.log(`🔥 Streak Toast triggered: ${streakDays} Tage (${bonusPoints || 0} Punkte)`);
     
-    // Zeige Punkte nur wenn > 0 (bei wiederholtem Öffnen am selben Tag keine Punkte)
-    const showPoints = bonusPoints && bonusPoints > 0;
-    
-    setStreakToastData({
-      visible: true,
-      points: showPoints ? bonusPoints : 0,
-      action: 'streak',
-      message: showPoints 
-        ? `${streakDays} ${streakDays === 1 ? 'Tag' : 'Tage'} Streak! +${bonusPoints} Punkte`
-        : `${streakDays} ${streakDays === 1 ? 'Tag' : 'Tage'} Streak!`
-    });
-  }, []);
+    // Verwende neue Toast-Library mit konfigurierbarer STREAK-Farbe (orange), theme-aware
+    showStreakToastNew(streakDays, bonusPoints, colorScheme || 'light');
+  }, [colorScheme]);
 
   // Expose showStreakToast globally für einfachen Zugriff
   React.useEffect(() => {
@@ -231,23 +201,14 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         autoHide={achievementData.autoHide}
       />
 
-      {/* Points Toast - Subtile Punkte-Benachrichtigung */}
-      <PointsToast
-        visible={pointsToastData.visible}
-        points={pointsToastData.points}
-        message={pointsToastData.message}
-        onHide={handlePointsToastHide}
-        type="points"
-      />
-
-      {/* Streak Toast - nutze PointsToast mit type='streak' */}
-      <PointsToast
-        visible={streakToastData.visible}
-        points={streakToastData.points}
-        message={streakToastData.message}
-        type="streak"
-        onHide={() => setStreakToastData({ visible: false, points: 0, action: '', message: '' })}
-      />
+      {/* 
+        WICHTIG: Alle alten PointsToast/StreakToast Komponenten entfernt!
+        Jetzt läuft alles über zentrale Toast-Library mit kategorie-spezifischen Farben:
+        - showPointsToast() → GELB
+        - showStreakToast() → ORANGE  
+        - showCartAddedToast() → GRÜN
+        - showFavoriteAddedToast() → ROSA
+      */}
     </>
   );
 };

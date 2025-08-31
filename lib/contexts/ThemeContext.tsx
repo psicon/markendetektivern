@@ -42,6 +42,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }, [themeMode, isLoading]);
 
+  // Setze colorScheme global für Toast-System
+  useEffect(() => {
+    (global as any).__colorScheme = colorScheme;
+  }, [colorScheme]);
+
   const loadThemeMode = async () => {
     try {
       const savedThemeMode = await AsyncStorage.getItem(THEME_STORAGE_KEY);

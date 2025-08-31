@@ -1,3 +1,4 @@
+import { TOAST_MESSAGES } from '@/constants/ToastMessages';
 import * as Haptics from 'expo-haptics';
 import {
     addDoc,
@@ -25,6 +26,7 @@ import {
     UserAchievementProgress,
     UserStats
 } from '../types/achievements';
+import { showDailyCapToast, showDedupeWindowToast, showOneTimeRestrictionToast, showWeeklyCapToast } from './ui/antiAbuseToast';
 
 class AchievementService {
   private static instance: AchievementService;
@@ -263,6 +265,26 @@ class AchievementService {
    */
   getGameActions(): GameActionsConfig | null {
     return this.gameActions;
+  }
+
+  /**
+   * Findet das Level basierend auf Punkten und Ersparnis (für User-Kommentare)
+   */
+  getLevelForPoints(totalPoints: number, totalSavings: number = 0): Level | null {
+    if (!this.levels || this.levels.length === 0) return null;
+    
+    // Sortiere Levels nach pointsRequired (höchste zuerst) um das korrekte Level zu finden
+    const sortedLevels = [...this.levels].sort((a, b) => b.pointsRequired - a.pointsRequired);
+    
+    for (const level of sortedLevels) {
+      // User muss BEIDE Anforderungen erfüllen: Punkte UND Ersparnis
+      if (totalPoints >= level.pointsRequired && totalSavings >= level.savingsRequired) {
+        return level;
+      }
+    }
+    
+    // Fallback: Kleinstes Level
+    return this.levels.sort((a, b) => a.pointsRequired - b.pointsRequired)[0] || null;
   }
 
   /**
@@ -896,6 +918,7 @@ class AchievementService {
         const existingDocs = await getDocs(existingQuery);
         if (!existingDocs.empty) {
           console.log(`⚠️ One-time action ${action} bereits ausgeführt`);
+          await showOneTimeRestrictionToast(action);
           return;
         }
       }
@@ -912,6 +935,12 @@ class AchievementService {
         const dedupeDocs = await getDocs(dedupeQuery);
         if (!dedupeDocs.empty) {
           console.log(`⚠️ Action ${action} zu schnell wiederholt (Dedupe Window)`);
+          const lastDoc = dedupeDocs.docs[0];
+          const lastTimestamp = lastDoc.data().timestamp.toDate();
+          const remainingSeconds = Math.ceil((lastTimestamp.getTime() + actionConfig.antiAbuse.dedupeWindowSec * 1000 - now.getTime()) / 1000);
+          if (remainingSeconds > 0) {
+            await showDedupeWindowToast(action, remainingSeconds);
+          }
           return;
         }
       }
@@ -928,6 +957,7 @@ class AchievementService {
         const dailyDocs = await getDocs(dailyQuery);
         if (dailyDocs.size >= actionConfig.antiAbuse.dailyCap) {
           console.log(`⚠️ Daily cap erreicht für ${action} (${actionConfig.antiAbuse.dailyCap})`);
+          await showDailyCapToast(action);
           return;
         }
       }
@@ -948,6 +978,7 @@ class AchievementService {
         const weeklyDocs = await getDocs(weeklyQuery);
         if (weeklyDocs.size >= actionConfig.antiAbuse.weeklyCap) {
           console.log(`⚠️ Weekly cap erreicht für ${action} (${actionConfig.antiAbuse.weeklyCap})`);
+          await showWeeklyCapToast(action);
           return;
         }
       }
@@ -965,7 +996,7 @@ class AchievementService {
         action: action,
         points: points,
         timestamp: serverTimestamp() as any,
-        metadata: metadata
+        ...(metadata !== undefined && { metadata })  // Nur wenn nicht undefined
       };
 
       await addDoc(ledgerRef, ledgerEntry);
@@ -1007,21 +1038,10 @@ class AchievementService {
       
       // Trigger Points Toast notification
       if (AchievementService.onPointsEarned) {
-        const actionMessages: Record<string, string> = {
-          scan_product: 'Produkt gescannt',
-          search_product: 'Produkt gesucht',
-          view_comparison: 'Vergleich angeschaut',
-          complete_shopping: 'Einkauf abgeschlossen',
-          convert_product: 'Produkt umgewandelt',
-          submit_rating: 'Bewertung abgegeben',
-          daily_streak: 'Täglicher Streak',
-          first_action_any: 'Erste Aktion'
-        };
-        
         AchievementService.onPointsEarned(
           points,
           action,
-          actionMessages[action] || action
+          TOAST_MESSAGES.POINTS[action] || action
         );
       }
       

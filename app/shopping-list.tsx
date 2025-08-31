@@ -5,12 +5,13 @@ import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
+import { TOAST_MESSAGES } from '@/constants/ToastMessages';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useTheme } from '@/lib/contexts/ThemeContext';
 import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
-import { showInfoToast, showPurchasedToast } from '@/lib/services/ui/toast';
+import { showBulkConvertSuccessToast, showBulkPurchasedToast, showConvertSuccessToast, showInfoToast, showPurchasedToast } from '@/lib/services/ui/toast';
 import { updateUserStats } from '@/lib/services/userProfile';
 import {
     Einkaufswagen,
@@ -317,7 +318,7 @@ export default function ShoppingListScreen() {
       
     } catch (error) {
       console.error('Error loading shopping cart:', error);
-      showGameToast('Einkaufszettel konnte nicht geladen werden', 'error');
+      showInfoToast(TOAST_MESSAGES.SHOPPING.loadError, 'error');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -508,10 +509,10 @@ export default function ShoppingListScreen() {
         loadCompleteNoNameItem();
         
         // Success toast with savings amount
-        showGameToast(`🔄 Umgewandelt! Du sparst €${savingsAmount.toFixed(2)} mit dem NoName-Produkt!`, 'success');
+        showConvertSuccessToast(savingsAmount);
       } else {
         // Fallback if something went wrong
-        showGameToast('🔄 Produkt erfolgreich umgewandelt!', 'success');
+        showInfoToast(TOAST_MESSAGES.SHOPPING.convertedSimple, 'success');
         loadShoppingCart();
       }
       
@@ -520,7 +521,7 @@ export default function ShoppingListScreen() {
       
     } catch (error) {
       console.error('Error converting single product:', error);
-      showGameToast('Umwandlung fehlgeschlagen. Versuch es nochmal!', 'error');
+      showInfoToast(TOAST_MESSAGES.SHOPPING.convertError, 'error');
     } finally {
       // Loading State entfernen
       setConvertingItems(prev => {
@@ -534,7 +535,7 @@ export default function ShoppingListScreen() {
   // Convert selected brand products to NoName
   const handleConvertSelected = async () => {
     if (selectedConversions.length === 0) {
-      showGameToast('Wähle zuerst Produkte zum Umwandeln aus! 🛒', 'info');
+      showInfoToast(TOAST_MESSAGES.SHOPPING.selectFirstPrompt, 'info');
       return;
     }
     
@@ -622,8 +623,8 @@ export default function ShoppingListScreen() {
               // Load complete data in background
               loadCompleteItems();
               
-              // Gamified success message
-              showGameToast(`🎉 Fantastisch! Du sparst €${totalPotentialSavings.toFixed(2)} mit NoName-Produkten!`, 'success');
+              // Gamified success message - spezielle Konvertierung-Toast
+              showBulkConvertSuccessToast(totalPotentialSavings);
               
               setSelectedConversions([]);
               setExpandedItems([]);
@@ -634,7 +635,7 @@ export default function ShoppingListScreen() {
               }
             } catch (error) {
               console.error('Error converting products:', error);
-              showGameToast('Umwandlung fehlgeschlagen. Keine Sorge, versuch es nochmal!', 'error');
+              showInfoToast(TOAST_MESSAGES.SHOPPING.bulkConvertError, 'error');
             } finally {
               setIsConverting(false);
             }
@@ -907,11 +908,12 @@ export default function ShoppingListScreen() {
           successMessage = `📝 Alle ${customItemCount} Freitext-Einträge erledigt!`;
         }
         
-        showGameToast(successMessage, 'success');
+        // Verwende Bulk-Purchased-Toast mit intelligenter Message-Auswahl
+        showBulkPurchasedToast(dbProductCount, customItemCount, totalSavings);
         
       } catch (error) {
         console.error('Error marking all as purchased:', error);
-        showGameToast('Oops! Markierung fehlgeschlagen. Versuch es nochmal!', 'error');
+        showInfoToast(TOAST_MESSAGES.SHOPPING.bulkPurchaseError, 'error');
       }
     };
 
@@ -964,11 +966,11 @@ export default function ShoppingListScreen() {
         if (savings && savings > 0) {
           showPurchasedToast(`Gekauft! Du hast €${savings.toFixed(2)} gespart - super gemacht!`);
         } else {
-          showPurchasedToast('Produkt als gekauft markiert!');
+          showPurchasedToast(TOAST_MESSAGES.SHOPPING.purchasedSimple);
         }
       } else {
         // Custom items: simple confirmation message
-        showGameToast('📝 Freitext-Eintrag erledigt!', 'success');
+        showInfoToast(TOAST_MESSAGES.SHOPPING.customItemPurchased, 'success');
       }
       
       // Optimized: Remove item from local state instead of reloading
@@ -993,7 +995,7 @@ export default function ShoppingListScreen() {
       }
     } catch (error) {
       console.error('Error marking as purchased:', error);
-      showGameToast('Markierung fehlgeschlagen. Probier es nochmal!', 'error');
+      showInfoToast(TOAST_MESSAGES.SHOPPING.purchaseError, 'error');
     } finally {
       // Loading State entfernen
       setLoadingItems(prev => {
@@ -1023,7 +1025,7 @@ export default function ShoppingListScreen() {
             try {
               await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               await FirestoreService.removeFromShoppingCart(user.uid, itemId);
-              showGameToast('Produkt vom Einkaufszettel entfernt', 'info');
+              showInfoToast(TOAST_MESSAGES.SHOPPING.removedFromCart, 'info');
               
               // Optimized: Remove from local state instead of reloading
               setBrandProducts(prev => prev.filter(item => item.id !== itemId));
@@ -1037,7 +1039,7 @@ export default function ShoppingListScreen() {
               });
             } catch (error) {
               console.error('Error removing from cart:', error);
-              showGameToast('Entfernen fehlgeschlagen. Versuch es nochmal!', 'error');
+              showInfoToast(TOAST_MESSAGES.SHOPPING.removeError, 'error');
             } finally {
               // Loading State entfernen
               setDeletingItems(prev => {
@@ -1903,11 +1905,11 @@ export default function ShoppingListScreen() {
           onClose={() => setShowCustomItemModal(false)}
           userId={user?.uid || ''}
           onSuccess={(message) => {
-            showGameToast(message, 'success');
+            showInfoToast(message, 'success');
             loadShoppingCart(); // Reload nach Hinzufügung
           }}
           onError={(message) => {
-            showGameToast(message, 'error');
+            showInfoToast(message, 'error');
           }}
         />
         </View>
@@ -2418,16 +2420,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   
-  // FIXED TOAST CONTAINER - schwebt über dem gesamten Bildschirm
-  fixedToastContainer: {
-    position: 'absolute',
-    top: 60, // Unter der Status Bar
-    left: 0,
-    right: 0,
-    zIndex: 9999,
-    elevation: 9999,
-    pointerEvents: 'box-none', // Nur der Toast ist klickbar, nicht der Container
-  },
+  // Alte Toast-Container Styles entfernt - zentrale Toast-Library übernimmt
   
   // Custom Item Styles
   customBadge: {

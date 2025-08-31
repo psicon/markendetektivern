@@ -33,6 +33,7 @@ import {
     ProductWithDetails,
     Produkte
 } from '../types/firestore';
+import achievementService from './achievementService';
 
 export class FirestoreService {
   
@@ -1395,18 +1396,29 @@ export class FirestoreService {
         console.log('Stats not accessible, using user level:', userLevel);
       }
       
-      // Level-Namen und Farben nach dem Achievement-System
-      const getLevelInfo = (level: number) => {
-        if (level >= 50) return { name: 'Legende', color: '#DC2626', icon: 'crown' };
-        if (level >= 30) return { name: 'Experte', color: '#7C3AED', icon: 'star' };
-        if (level >= 20) return { name: 'Profi', color: '#2563EB', icon: 'trophy' };
-        if (level >= 10) return { name: 'Kenner', color: '#059669', icon: 'shield' };
-        if (level >= 5) return { name: 'Entdecker', color: '#D97706', icon: 'magnifyingglass' };
-        if (level >= 2) return { name: 'Sparprofi', color: '#10B981', icon: 'cart' };
-        return { name: 'Neuling', color: '#6B7280', icon: 'person' };
-      };
+      // Level-Daten aus echtem Achievement-System laden
+      let levelInfo = { name: 'Neuling', color: '#6B7280', icon: 'person' };
       
-      const levelInfo = getLevelInfo(userLevel);
+      try {
+        // Verwende echtes Achievement-Service für korrekte Level-Daten
+        await achievementService.initialize();
+        const userPoints = userData.stats?.pointsTotal || 0;
+        const userSavings = userData.stats?.savingsTotal || userData.totalSavings || 0;
+        const realLevel = achievementService.getLevelForPoints(userPoints, userSavings);
+        
+        if (realLevel) {
+          levelInfo = {
+            name: realLevel.name,
+            color: realLevel.color,
+            icon: realLevel.icon
+          };
+          userLevel = realLevel.id; // Verwende echte Level-ID
+          console.log(`✅ User Level für Kommentar: ${realLevel.name} (${userPoints} Punkte, €${userSavings} Ersparnis)`);
+        }
+      } catch (levelError) {
+        console.log('Could not load achievement levels, using fallback');
+        // Fallback bleibt bestehen
+      }
       
       // Bessere Fallbacks für Display Name
       const displayName = userData.displayName || 
@@ -1423,63 +1435,149 @@ export class FirestoreService {
       };
     } catch (error) {
       console.log('Could not load full user info, using defaults');
-      // Besserer Fallback
+      
+      // Fallback mit echten Level-1 Daten
+      let fallbackLevel = { name: 'Neuling', color: '#6B7280', icon: 'person' };
+      try {
+        await achievementService.initialize();
+        const level1 = achievementService.getLevelForPoints(0, 0);
+        if (level1) {
+          fallbackLevel = {
+            name: level1.name,
+            color: level1.color,
+            icon: level1.icon
+          };
+        }
+      } catch (e) {
+        // Hardcoded Fallback bleibt bestehen
+      }
+      
       return {
         displayName: 'Community Mitglied',
         level: 1,
-        currentLevel: {
-          name: 'Neuling',
-          color: '#6B7280',
-          icon: 'person'
-        }
+        currentLevel: fallbackLevel
       };
     }
   }
 
   /**
-   * Lädt alle Bewertungen für ein Produkt mit User-Informationen
+   * Lädt alle Bewertungen für ein Produkt mit LIVE User-Informationen
+   * User-Level wird beim Öffnen des Rating-Sheets LIVE aus User-Dokument geladen
    */
   static async getProductRatingsWithUserInfo(productId: string, isNoNameProduct: boolean = true): Promise<any[]> {
     try {
-      console.log('📊 Loading ratings with user info for product:', productId);
+      console.log('📊 LIVE Loading ratings with current user info for product:', productId);
       
-      // Erst normale Bewertungen laden
+      // Erst normale Bewertungen laden (schnell)
       const ratings = await this.getProductRatings(productId, isNoNameProduct);
       
-      // Dann User-Infos parallel laden
+      // Dann User-Infos LIVE laden (jedes Mal aktuell!)
       const ratingsWithUserInfo = await Promise.all(
         ratings.map(async (rating) => {
-          // userID ist der korrekte Feldname in der productRatings Collection
           const userId = rating.userID;
           if (userId) {
-            const userInfo = await this.getUserInfo(userId);
+            // LIVE User-Info aus User-Dokument → Immer aktuelles Level!
+            const userInfo = await this.getLiveUserInfo(userId);
             return {
               ...rating,
               userInfo
             };
           }
-          // Fallback wenn keine userID vorhanden
+          
+          // Fallback für Kommentare ohne userID
           return {
             ...rating,
             userInfo: {
               displayName: 'Community Mitglied',
               level: 1,
-              currentLevel: {
-                name: 'Neuling',
-                color: '#6B7280',
-                icon: 'person'
-              }
+              currentLevel: await this.getLevel1Info()
             }
           };
         })
       );
       
-      console.log(`✅ Loaded ${ratingsWithUserInfo.length} ratings with user info`);
+      console.log(`✅ LIVE Loaded ${ratingsWithUserInfo.length} ratings with current user levels`);
       return ratingsWithUserInfo;
       
     } catch (error) {
-      console.error('Error loading ratings with user info:', error);
+      console.error('Error loading ratings with live user info:', error);
       return [];
+    }
+  }
+
+  /**
+   * Lädt LIVE User-Info direkt aus User-Dokument (immer aktuell!)
+   */
+  static async getLiveUserInfo(userId: string): Promise<{
+    displayName: string;
+    avatarUrl?: string;
+    level: number;
+    currentLevel: { name: string; color: string; icon: string; };
+  }> {
+    try {
+      // User-Dokument direkt laden → Aktuellste Daten
+      const userRef = doc(db, 'users', userId);
+      const userDoc = await getDoc(userRef);
+      
+      if (!userDoc.exists()) {
+        return {
+          displayName: 'Community Mitglied',
+          level: 1,
+          currentLevel: await this.getLevel1Info()
+        };
+      }
+      
+      const userData = userDoc.data();
+      
+      // Level LIVE aus Achievement-Service berechnen
+      await achievementService.initialize();
+      const userPoints = userData.stats?.pointsTotal || 0;
+      const userSavings = userData.stats?.savingsTotal || userData.totalSavings || 0;
+      const realLevel = achievementService.getLevelForPoints(userPoints, userSavings);
+      
+      const levelInfo = realLevel ? {
+        name: realLevel.name,
+        color: realLevel.color,
+        icon: realLevel.icon
+      } : await this.getLevel1Info();
+      
+      const displayName = userData.display_name || 
+                         userData.displayName || 
+                         userData.name || 
+                         userData.email?.split('@')[0] || 
+                         'Community Mitglied';
+      
+      return {
+        displayName,
+        avatarUrl: userData.photo_url || userData.photoURL,
+        level: realLevel?.id || 1,
+        currentLevel: levelInfo
+      };
+      
+    } catch (error) {
+      console.log('Error loading live user info, using fallback');
+      return {
+        displayName: 'Community Mitglied',
+        level: 1,
+        currentLevel: await this.getLevel1Info()
+      };
+    }
+  }
+
+  /**
+   * Helper: Level-1 Daten aus Achievement-System
+   */
+  private static async getLevel1Info(): Promise<{ name: string; color: string; icon: string; }> {
+    try {
+      await achievementService.initialize();
+      const level1 = achievementService.getLevelForPoints(0, 0);
+      return level1 ? {
+        name: level1.name,
+        color: level1.color,
+        icon: level1.icon
+      } : { name: 'Neuling', color: '#6B7280', icon: 'person' };
+    } catch (e) {
+      return { name: 'Neuling', color: '#6B7280', icon: 'person' };
     }
   }
 

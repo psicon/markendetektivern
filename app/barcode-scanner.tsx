@@ -8,12 +8,14 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { achievementService } from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import scanHistoryService, { ScanHistoryItem } from '@/lib/services/scanHistoryService';
-import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
 import { getDoc } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, InteractionManager, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import HybridBarcodeScanner from '@/components/ui/HybridBarcodeScanner';
+import { CameraType, useCameraPermissions } from 'expo-camera';
+import { isExpoGo, platformLog } from '@/lib/utils/platform';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function BarcodeScannerScreen() {
@@ -49,7 +51,8 @@ export default function BarcodeScannerScreen() {
   
   // 🎥 Kamera-Initialisierung nach Navigation optimieren  
   useEffect(() => {
-    if (!permission?.granted) return;
+    // Für Expo Go: Warte auf Permission, für Native: Starte sofort
+    if (isExpoGo() && !permission?.granted) return;
     
     // Kamera erst nach allen Navigationsinteraktionen initialisieren
     const interaction = InteractionManager.runAfterInteractions(() => {
@@ -62,11 +65,7 @@ export default function BarcodeScannerScreen() {
   const topOffset = isSmallDevice ? height * 0.08 + 90 : height * 0.12 + 140;
   const bottomSpaceAvailable = height - topOffset - scanAreaHeight - 100; // Space für Content
 
-  useEffect(() => {
-    if (!permission?.granted) {
-      requestPermission();
-    }
-  }, [permission]);
+
 
   // Lade Scanhistorie beim Mount und Focus
   useFocusEffect(
@@ -372,6 +371,8 @@ export default function BarcodeScannerScreen() {
     }
   };
 
+
+
   const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
     const timestamp = Date.now();
     
@@ -387,8 +388,8 @@ export default function BarcodeScannerScreen() {
       return;
     }
     
-    // Filtere nur EAN-Codes (EAN-8, EAN-13, UPC-A)
-    const allowedTypes = ['ean13', 'ean8', 'upc_a', 'org.gs1.EAN-13', 'org.gs1.EAN-8', 'org.gs1.UPC-A'];
+    // Filtere nur EAN-Codes (EAN-8, EAN-13, UPC-A) - Hybrid Scanner normalisiert auf lowercase
+    const allowedTypes = ['ean13', 'ean8', 'upc_a', 'ean-13', 'ean-8', 'org.gs1.EAN-13', 'org.gs1.EAN-8', 'org.gs1.UPC-A'];
     if (!allowedTypes.includes(type)) {
       console.log(`🚫 SCAN IGNORED: Non-EAN barcode type: ${type}`);
       return;
@@ -439,7 +440,19 @@ export default function BarcodeScannerScreen() {
     setFacing(current => (current === 'back' ? 'front' : 'back'));
   };
 
-  if (!permission) {
+  const toggleFlash = () => {
+    setFlashEnabled(current => !current);
+  };
+
+    // 📱 PERMISSION CHECKS (für Expo Go Path)
+  useEffect(() => {
+    if (isExpoGo() && !permission?.granted) {
+      requestPermission();
+    }
+  }, [permission]);
+
+  // 📱 PERMISSION SCREEN (nur für Expo Go)
+  if (isExpoGo() && !permission) {
     return (
       <ThemedView style={styles.container}>
         <ThemedText>Kamera-Berechtigung wird geladen...</ThemedText>
@@ -447,7 +460,7 @@ export default function BarcodeScannerScreen() {
     );
   }
 
-  if (!permission.granted) {
+  if (isExpoGo() && !permission.granted) {
     return (
       <ThemedView style={styles.container}>
         {/* Custom Back Button */}
@@ -479,17 +492,23 @@ export default function BarcodeScannerScreen() {
     );
   }
 
+  platformLog(`📱 Scanner Mode: ${isExpoGo() ? 'EXPO-GO' : 'NATIVE'}`);
+
   return (
     <ThemedView style={styles.container}>
       <View style={styles.cameraContainer}>
         {cameraReady ? (
-        <CameraView
+          <HybridBarcodeScanner
           style={styles.camera}
-          facing={facing}
-            enableTorch={flashEnabled}
-            onBarcodeScanned={(scanned || hasNavigated) ? undefined : handleBarCodeScanned}
-          barcodeScannerSettings={{
-              barcodeTypes: ['ean13', 'ean8', 'upc_a'], // Nur EAN/UPC Codes
+            onBarcodeScanned={!scanned && !hasNavigated ? handleBarCodeScanned : () => {}}
+            isActive={!scanned && !hasNavigated}
+            flashEnabled={flashEnabled}
+            cameraType={facing}
+            onCameraReady={() => {
+              platformLog('🎥 Hybrid Camera ist bereit!');
+            }}
+            onError={(error) => {
+              platformLog('❌ Hybrid Camera Error:', error);
             }}
           />
         ) : (
@@ -725,9 +744,9 @@ export default function BarcodeScannerScreen() {
             }]}
             onPress={() => {
               if (!cameraReady) return;
-              console.log(`💡 Flash toggled: ${!flashEnabled}`);
+              console.log(`💡 Flash toggled: ${!flashEnabled ? 'ON' : 'OFF'}`);
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              setFlashEnabled(!flashEnabled);
+              toggleFlash();
             }}
           >
             <IconSymbol 

@@ -6,6 +6,8 @@ import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { CommentSkeleton, CommentsHeaderSkeleton, ListItemSkeleton, ProductComparisonSkeleton, RatingOverviewSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor, getStufenDescription, getStufenTitle } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
+import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
+import { TOAST_MESSAGES, interpolateMessage } from '@/constants/ToastMessages';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { db } from '@/lib/firebase';
@@ -13,6 +15,7 @@ import { useFavoriteStatus } from '@/lib/hooks/useFavorites';
 import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
+import { showAlreadyInCartToast, showCartAddedToast, showFavoriteAddedToast, showFavoriteRemovedToast, showInfoToast, showRatingToast } from '@/lib/services/ui/toast';
 import { ProductWithDetails } from '@/lib/types/firestore';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -98,20 +101,7 @@ export default function NoNameDetailScreen() {
   // Favorites Hook
   const { isFavorite, loading: favoriteLoading, toggleFavorite } = useFavoriteStatus(id || '', 'noname');
   
-  // Toast states
-  const [showToast, setShowToast] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
-  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
-  
-  // Rating Toast states
-  const [showRatingToast, setShowRatingToast] = useState(false);
-  const [ratingToastMessage, setRatingToastMessage] = useState('');
-  
-  // Show rating toast function
-  const showRatingGameToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
-    setRatingToastMessage(message);
-    setShowRatingToast(true);
-  };
+  // Alle Toasts laufen jetzt über zentrale Toast-Library (konsistent mit Stufe 3+)
   
   const [product, setProduct] = useState<ProductWithDetails | null>(null);
   const [isInCart, setIsInCart] = useState(false);
@@ -122,16 +112,37 @@ export default function NoNameDetailScreen() {
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
   const [showProductDetails, setShowProductDetails] = useState(false);
   
+  // Button Animation States (Herz + Cart)
+  const [heartAnimation] = useState(new Animated.Value(1));
+  const [cartAnimation] = useState(new Animated.Value(1));
+  
+  // Helper: Animate button on press
+  const animateButtonPress = (animationRef: Animated.Value) => {
+    Animated.sequence([
+      Animated.timing(animationRef, {
+        toValue: 1.2,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(animationRef, {
+        toValue: 1,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+  
   // Handle favorite toggle
   const handleToggleFavorite = async () => {
     if (!user?.uid) {
-      setToastMessage('Bitte melde dich an, um Favoriten zu speichern');
-      setToastType('info');
-      setShowToast(true);
+      showInfoToast(TOAST_MESSAGES.FAVORITES.authRequired, 'info');
       return;
     }
 
     if (!product) return;
+
+    // Animate heart before action
+    animateButtonPress(heartAnimation);
 
     try {
       const wasAdded = await toggleFavorite({
@@ -144,18 +155,15 @@ export default function NoNameDetailScreen() {
         category: product.kategorie?.bezeichnung
       });
 
-      const message = wasAdded 
-        ? `💖 ${product.name} zu Favoriten hinzugefügt!`
-        : `💔 ${product.name} aus Favoriten entfernt`;
-      
-      setToastMessage(message);
-      setToastType('success');
-      setShowToast(true);
+      // Konsistente Favoriten-Toasts (wie bei Stufe 3+)
+      if (wasAdded) {
+        showFavoriteAddedToast(product.name);
+      } else {
+        showFavoriteRemovedToast(product.name);
+      }
     } catch (error) {
       console.error('Error toggling favorite:', error);
-      setToastMessage('Fehler beim Speichern des Favoriten');
-      setToastType('error');
-      setShowToast(true);
+      showInfoToast(TOAST_MESSAGES.FAVORITES.addError, 'error');
     }
   };
 
@@ -178,21 +186,19 @@ export default function NoNameDetailScreen() {
   // Add to shopping cart
   const handleAddToCart = async () => {
     if (!user?.uid) {
-      setToastMessage('Bitte melde dich an, um Produkte hinzuzufügen');
-      setToastType('info');
-      setShowToast(true);
+      showInfoToast(TOAST_MESSAGES.SHOPPING.addToCartAuthRequired, 'info');
       return;
     }
     
     if (!product) return;
     
     if (isInCart) {
-      setToastMessage('Produkt ist bereits im Einkaufszettel');
-      setToastType('info');
-      setShowToast(true);
+      showAlreadyInCartToast(() => router.push('/shopping-list' as any));
       return;
     }
     
+    // Animate cart button before action
+    animateButtonPress(cartAnimation);
     setIsAddingToCart(true);
     
     try {
@@ -203,14 +209,12 @@ export default function NoNameDetailScreen() {
         false // NoName product
       );
       setIsInCart(true);
-      setToastMessage('Produkt wurde zum Einkaufszettel hinzugefügt');
-      setToastType('success');
-      setShowToast(true);
+      const productName = product.produktName || product.name || 'NoName Produkt';
+      const message = interpolateMessage(TOAST_MESSAGES.SHOPPING.addedToCart, { productName });
+      showCartAddedToast(message, () => router.push('/shopping-list' as any));
     } catch (error) {
       console.error('Error adding to cart:', error);
-      setToastMessage('Produkt konnte nicht hinzugefügt werden');
-      setToastType('error');
-      setShowToast(true);
+      showInfoToast(TOAST_MESSAGES.SHOPPING.addToCartError, 'error');
     } finally {
       setIsAddingToCart(false);
     }
@@ -249,7 +253,7 @@ export default function NoNameDetailScreen() {
   // Check for existing rating and open appropriate modal - copied from product-comparison
   const openRatingModal = async () => {
     if (!user?.uid) {
-      showRatingGameToast('Kein Benutzer angemeldet', 'error');
+      showRatingToast(TOAST_MESSAGES.RATINGS.authRequired, 'error');
       return;
     }
 
@@ -307,7 +311,7 @@ export default function NoNameDetailScreen() {
   // Submit rating function - copied from product-comparison
   const submitRating = async () => {
     if (overallRating === 0) {
-      showRatingGameToast('Bitte gib eine Gesamtbewertung ab', 'info');
+      showRatingToast(TOAST_MESSAGES.RATINGS.ratingRequired, 'error');
       return;
     }
 
@@ -327,7 +331,7 @@ export default function NoNameDetailScreen() {
         };
 
         await FirestoreService.updateProductRating(existingRating.id, updateData);
-        showRatingGameToast('⭐ Deine Bewertung wurde aktualisiert!', 'success');
+        showRatingToast(TOAST_MESSAGES.RATINGS.ratingUpdated, 'success');
       } else {
         // Create new rating
         const productRatingData = {
@@ -345,7 +349,7 @@ export default function NoNameDetailScreen() {
         };
 
         await FirestoreService.addProductRating(productRatingData);
-        showRatingGameToast('⭐ Deine Bewertung wurde gespeichert!', 'success');
+        showRatingToast(TOAST_MESSAGES.RATINGS.ratingSaved, 'success');
         
         // 🎯 TRACK ACTION: submit_rating (nur bei neuer Bewertung, nicht bei Update)
         if (user?.uid) {
@@ -396,7 +400,7 @@ export default function NoNameDetailScreen() {
       
     } catch (error) {
       console.error('Error submitting rating:', error);
-      showRatingGameToast('Bewertung konnte nicht gespeichert werden', 'error');
+      showRatingToast(TOAST_MESSAGES.RATINGS.ratingError, 'error');
     } finally {
       setIsSubmittingRating(false);
     }
@@ -454,45 +458,12 @@ export default function NoNameDetailScreen() {
     }
   };
 
-  // Header konfigurieren
+  // Header konfigurieren (konsistent mit Produktvergleich - fester Titel verhindert "Poppen")
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: product?.name || 'NoName-Produkt',
-      headerStyle: { 
-        backgroundColor: colors.primary,
-        borderBottomWidth: 0,
-        elevation: 0,
-        shadowOpacity: 0,
-      },
-      headerTintColor: 'white',
-      headerTitleStyle: { 
-        color: 'white',
-        fontFamily: 'Nunito_600SemiBold',
-        fontSize: 16
-      },
-      headerShadowVisible: false,
-      headerBackVisible: false,
-      headerTransparent: false,
-      headerBlurEffect: 'none',
-      headerLargeTitle: false,
-      headerSearchBarOptions: undefined,
-      headerBackTitleVisible: false,
-      gestureEnabled: true,
-      animation: 'slide_from_right',
-      headerLeft: () => (
-        <TouchableOpacity 
-          onPress={() => router.back()}
-          style={{ 
-            paddingLeft: 0, 
-            paddingRight: 8, 
-            paddingVertical: 8 
-          }}
-        >
-          <IconSymbol name="chevron.left" size={24} color="white" />
-        </TouchableOpacity>
-      ),
+      ...getNavigationHeaderOptions(colorScheme, 'NoName-Produkt'),
     });
-  }, [navigation, colors.primary, product?.name]);
+  }, [navigation, colorScheme]);
 
   // Check if product is in cart when product loads
   useEffect(() => {
@@ -746,15 +717,19 @@ export default function NoNameDetailScreen() {
             {/* Action Icons */}
             <View style={styles.topActionIcons}>
               <TouchableOpacity 
-                style={styles.actionIconButton}
+                style={[styles.actionIconButton, { backgroundColor: colors.background }]}
                 onPress={handleToggleFavorite}
                 disabled={favoriteLoading}
               >
-                <IconSymbol 
-                  name={isFavorite ? "heart.fill" : "heart"} 
-                  size={20} 
-                  color={isFavorite ? colors.error : colors.icon} 
-                />
+                <Animated.View style={{
+                  transform: [{ scale: heartAnimation }]
+                }}>
+                  <IconSymbol 
+                    name={isFavorite ? "heart.fill" : "heart"} 
+                    size={24} 
+                    color={isFavorite ? colors.error : colors.icon} 
+                  />
+                </Animated.View>
               </TouchableOpacity>
             </View>
           </View>
@@ -852,11 +827,15 @@ export default function NoNameDetailScreen() {
               {isAddingToCart ? (
                 <ActivityIndicator size="small" color="white" />
               ) : (
-                <IconSymbol 
-                  name={isInCart ? "checkmark.circle.fill" : "cart.badge.plus"} 
-                  size={20} 
-                  color="white" 
-                />
+                <Animated.View style={{
+                  transform: [{ scale: cartAnimation }]
+                }}>
+                  <IconSymbol 
+                    name={isInCart ? "checkmark.circle.fill" : "cart.badge.plus"} 
+                    size={24} 
+                    color="white" 
+                  />
+                </Animated.View>
               )}
             </TouchableOpacity>
           </View>
@@ -1797,16 +1776,24 @@ const styles = StyleSheet.create({
   spacer: {
     flex: 1,
   },
+  // Top action icons - Mobile UX optimiert (konsistent mit product-comparison)
   topActionIcons: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 12,  // Mehr Abstand zwischen Buttons
+    alignItems: 'center',
   },
   actionIconButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 44,        // Apple HIG: Minimum 44pt Touch-Target
+    height: 44,       // Quadratisch für optimale Ergonomie
+    borderRadius: 22, // Perfekt rund
     justifyContent: 'center',
     alignItems: 'center',
+    // backgroundColor wird dynamisch über colors.background gesetzt
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   productRow: {
     flexDirection: 'row',
@@ -1896,21 +1883,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 1,
+    paddingVertical: 8,     // Erhöht von 1 auf 8 (viel höher)
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
     backgroundColor: 'transparent',
     gap: 6,
-    height: 30,
+    height: 44,             // Erhöht von 30 auf 44 (konsistent mit actionIconButton)
   },
   detailsText: {
     fontSize: 14,
     fontWeight: '500',
   },
   cartButton: {
-    width: 35,
-    height: 30,
+    width: 44,              // Breiter (35→44)
+    height: 44,             // Höher (30→44) - äquivalent zu Details
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
@@ -2698,13 +2685,5 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_600SemiBold',
   },
   
-  // Toast Styles
-  fixedToastContainer: {
-    position: 'absolute',
-    top: 80,
-    left: 0,
-    right: 0,
-    zIndex: 999999,
-    elevation: 999,
-  } as any,
+  // Alte Toast-Container Styles entfernt - zentrale Toast-Library übernimmt
 });

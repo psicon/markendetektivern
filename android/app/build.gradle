@@ -87,13 +87,13 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.patze1411.markendetektivern'
+    namespace 'de.markendetektive'
     defaultConfig {
-        applicationId 'com.patze1411.markendetektivern'
+        applicationId 'de.markendetektive'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
+        versionCode 800
+        versionName "4.5.0"
     }
     signingConfigs {
         debug {

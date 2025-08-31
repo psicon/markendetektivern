@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "markendetektivern",
-    "slug": "markendetektivern",
-    "version": "1.0.0",
+    "name": "MarkenDetektive",
+    "slug": "markendetektive",
+    "version": "4.5.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "markendetektivern",
@@ -19,11 +19,11 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.patze1411.markendetektivern"
+      "bundleIdentifier": "de.markendetektive"
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
@@ -36,7 +36,7 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
       ],
-      "package": "com.patze1411.markendetektivern"
+      "package": "de.markendetektive"
     },
     "web": {
       "bundler": "metro",
@@ -48,7 +48,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/splash1.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
@@ -63,6 +63,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "5b645e59-c337-44e5-81cd-7681b4515623"
+      }
+    },
+    "owner": "patze1411"
   }
 }
