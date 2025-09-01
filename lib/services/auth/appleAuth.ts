@@ -11,20 +11,23 @@ import { Platform } from 'react-native';
 export const isAppleAuthAvailable = async (): Promise<boolean> => {
   try {
     if (Platform.OS !== 'ios') {
+      console.log('📱 Apple Auth: Nur iOS unterstützt');
       return false;
     }
 
     // Check if native module is available
     const { NativeModules } = require('react-native');
     if (!NativeModules.RNAppleAuthentication) {
-      console.log('📱 Apple Auth nicht verfügbar in Expo Go');
+      console.log('📱 Apple Auth Module nicht verfügbar (Expo Go oder nicht konfiguriert)');
       return false;
     }
 
     const { appleAuth } = require('@invertase/react-native-apple-authentication');
-    return await appleAuth.isSupported();
+    const isSupported = await appleAuth.isSupported();
+    console.log(`🍎 Apple Auth Support Status: ${isSupported}`);
+    return isSupported;
   } catch (error: any) {
-    console.log('📱 Apple Auth nicht verfügbar:', error.message);
+    console.log('📱 Apple Auth Fehler:', error.message);
     return false;
   }
 };

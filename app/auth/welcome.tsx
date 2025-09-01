@@ -148,16 +148,18 @@ export default function WelcomeScreen() {
 
             <ThemedText style={styles.orText}>Oder direkt mit:</ThemedText>
 
-            {/* Google Sign-In (verfügbar auf beiden Plattformen) */}
-            <TouchableOpacity 
-              style={[styles.socialButton, isSmallScreen && styles.socialButtonSmall]} 
-              onPress={handleGoogleSignIn}
-            >
-              <View style={styles.googleIconContainer}>
-                <ThemedText style={styles.googleIcon}>G</ThemedText>
-              </View>
-              <ThemedText style={styles.socialButtonText}>Google</ThemedText>
-            </TouchableOpacity>
+            {/* Google Sign-In (nur Android - iOS vorerst deaktiviert) */}
+            {Platform.OS === 'android' && (
+              <TouchableOpacity 
+                style={[styles.socialButton, isSmallScreen && styles.socialButtonSmall]} 
+                onPress={handleGoogleSignIn}
+              >
+                <View style={styles.googleIconContainer}>
+                  <ThemedText style={styles.googleIcon}>G</ThemedText>
+                </View>
+                <ThemedText style={styles.socialButtonText}>Google</ThemedText>
+              </TouchableOpacity>
+            )}
 
             {/* Apple Sign-In (nur iOS) */}
             {Platform.OS === 'ios' && (

@@ -10,17 +10,17 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -608,16 +608,18 @@ export default function RegisterScreen() {
             <View style={styles.socialSection}>
               <ThemedText style={styles.orText}>Oder direkt mit:</ThemedText>
               
-              {/* Google Sign-In (verfügbar auf beiden Plattformen) */}
-              <TouchableOpacity 
-                style={styles.socialButton}
-                onPress={handleGoogleSignIn}
-              >
-                <View style={styles.googleIconContainer}>
-                  <ThemedText style={styles.googleIcon}>G</ThemedText>
-                </View>
-                <ThemedText style={styles.socialButtonText}>Google</ThemedText>
-              </TouchableOpacity>
+              {/* Google Sign-In (nur Android - iOS vorerst deaktiviert) */}
+              {Platform.OS === 'android' && (
+                <TouchableOpacity 
+                  style={styles.socialButton}
+                  onPress={handleGoogleSignIn}
+                >
+                  <View style={styles.googleIconContainer}>
+                    <ThemedText style={styles.googleIcon}>G</ThemedText>
+                  </View>
+                  <ThemedText style={styles.socialButtonText}>Google</ThemedText>
+                </TouchableOpacity>
+              )}
 
               {/* Apple Sign-In (nur iOS) */}
               {Platform.OS === 'ios' && (
