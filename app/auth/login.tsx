@@ -270,13 +270,15 @@ export default function LoginScreen() {
             <ThemedText style={styles.orText}>Oder direkt mit:</ThemedText>
 
             {/* Platform-specific Social Buttons */}
-            {Platform.OS === 'android' && (
-              <TouchableOpacity style={styles.socialButton} onPress={handleGoogleSignIn}>
+            {/* Google Sign-In (verfügbar auf beiden Plattformen) */}
+            <TouchableOpacity style={styles.socialButton} onPress={handleGoogleSignIn}>
+              <View style={styles.googleIconContainer}>
                 <ThemedText style={styles.googleIcon}>G</ThemedText>
-                <ThemedText style={styles.socialButtonText}>Google</ThemedText>
-              </TouchableOpacity>
-            )}
+              </View>
+              <ThemedText style={styles.socialButtonText}>Google</ThemedText>
+            </TouchableOpacity>
 
+            {/* Apple Sign-In (nur iOS) */}
             {Platform.OS === 'ios' && (
               <TouchableOpacity style={styles.socialButtonDark} onPress={handleAppleSignIn}>
                 <IconSymbol name="apple.logo" size={20} color="white" />
@@ -452,10 +454,20 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     gap: 12,
   },
+  googleIconContainer: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
+  },
   googleIcon: {
-    fontSize: 20,
+    fontSize: 14,
     fontFamily: 'Nunito_700Bold',
     color: '#4285F4',
+    textAlign: 'center',
   },
   socialButtonText: {
     fontSize: 16,

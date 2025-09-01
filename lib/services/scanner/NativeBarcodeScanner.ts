@@ -18,8 +18,12 @@ class NativeBarcodeScannerService {
   private isInitialized = false;
 
   constructor() {
+    // Graceful degradation: Native Module nur verfügbar in Production Builds
     if (Platform.OS === 'ios' && AVFoundationBarcodeScanner) {
       this.eventEmitter = new NativeEventEmitter(AVFoundationBarcodeScanner);
+      console.log('🍎 Native iOS AVFoundation Scanner available');
+    } else {
+      console.log('📱 Native Scanner not available - using Expo Go fallback');
     }
   }
 

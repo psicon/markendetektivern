@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 // WICHTIG: Apple Sign-In funktioniert nur mit Development Build
 // Für Expo Go müssen wir temporär deaktivieren
 
@@ -7,15 +9,24 @@
  * HINWEIS: Für Expo Go ist diese Funktion temporär deaktiviert
  */
 export const isAppleAuthAvailable = async (): Promise<boolean> => {
-  // Temporär deaktiviert für Expo Go
-  return false;
-  
-  // TODO: Nach Development Build aktivieren:
-  // if (Platform.OS !== 'ios') {
-  //   return false;
-  // }
-  // const { appleAuth } = require('@invertase/react-native-apple-authentication');
-  // return await appleAuth.isSupported();
+  try {
+    if (Platform.OS !== 'ios') {
+      return false;
+    }
+
+    // Check if native module is available
+    const { NativeModules } = require('react-native');
+    if (!NativeModules.RNAppleAuthentication) {
+      console.log('📱 Apple Auth nicht verfügbar in Expo Go');
+      return false;
+    }
+
+    const { appleAuth } = require('@invertase/react-native-apple-authentication');
+    return await appleAuth.isSupported();
+  } catch (error: any) {
+    console.log('📱 Apple Auth nicht verfügbar:', error.message);
+    return false;
+  }
 };
 
 /**
@@ -23,26 +34,48 @@ export const isAppleAuthAvailable = async (): Promise<boolean> => {
  * HINWEIS: Für Expo Go ist diese Funktion temporär deaktiviert
  */
 export const signInWithApple = async () => {
-  // Temporär deaktiviert für Expo Go
-  throw new Error('Apple Sign-In ist nur mit Development Build verfügbar. Bitte Email/Password Login verwenden.');
-  
-  // TODO: Nach Development Build aktivieren:
-  // try {
-  //   const { appleAuth } = require('@invertase/react-native-apple-authentication');
-  //   
-  //   const appleAuthRequestResponse = await appleAuth.performRequest({
-  //     requestedOperation: appleAuth.Operation.LOGIN,
-  //     requestedScopes: [
-  //       appleAuth.Scope.EMAIL,
-  //       appleAuth.Scope.FULL_NAME,
-  //     ],
-  //   });
+  try {
+    if (Platform.OS !== 'ios') {
+      throw new Error('Apple Sign-In ist nur auf iOS verfügbar');
+    }
 
-  //   // Rest des Codes nach Development Build...
-  // } catch (error: any) {
-  //   console.error('❌ Apple Sign-In error:', error);
-  //   throw error;
-  // }
+    // Check if native module is available
+    const { NativeModules } = require('react-native');
+    if (!NativeModules.RNAppleAuthentication) {
+      throw new Error('Apple Sign-In ist nur in Production Builds verfügbar. Bitte Email/Password Login verwenden.');
+    }
+
+    const { appleAuth } = require('@invertase/react-native-apple-authentication');
+    const { OAuthProvider, signInWithCredential } = require('firebase/auth');
+    const { auth } = require('../../firebase');
+    
+    const appleAuthRequestResponse = await appleAuth.performRequest({
+      requestedOperation: appleAuth.Operation.LOGIN,
+      requestedScopes: [
+        appleAuth.Scope.EMAIL,
+        appleAuth.Scope.FULL_NAME,
+      ],
+    });
+
+    const { identityToken, nonce } = appleAuthRequestResponse;
+    
+    if (!identityToken) {
+      throw new Error('Apple Sign-In failed - no identity token');
+    }
+
+    const provider = new OAuthProvider('apple.com');
+    const credential = provider.credential({
+      idToken: identityToken,
+      rawNonce: nonce,
+    });
+
+    const userCredential = await signInWithCredential(auth, credential);
+    console.log('✅ Apple Sign-In successful:', userCredential.user.email);
+    return userCredential;
+  } catch (error: any) {
+    console.error('❌ Apple Sign-In error:', error);
+    throw error;
+  }
 };
 
 /**

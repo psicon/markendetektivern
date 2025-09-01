@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { ActivityIndicator, Animated, Dimensions, ImageBackground, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Dimensions, ImageBackground, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function WelcomeScreen() {
@@ -24,18 +24,33 @@ export default function WelcomeScreen() {
   const [isAnonymousLoading, setIsAnonymousLoading] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
 
-  const handleGoogleSignIn = () => {
-    // TODO: Implement Google Sign In
-    console.log('Google Sign In pressed');
-    // For now, redirect to register as fallback
-    router.push('/auth/register');
+  const { signInWithGoogle, signInWithApple, isAppleAuthAvailable } = useAuth();
+
+  const handleGoogleSignIn = async () => {
+    try {
+      await signInWithGoogle();
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      console.error('Google Sign-In error:', error);
+      Alert.alert('Google Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
+    }
   };
 
-  const handleAppleSignIn = () => {
-    // TODO: Implement Apple Sign In
-    console.log('Apple Sign In pressed');
-    // For now, redirect to register as fallback
-    router.push('/auth/register');
+  const handleAppleSignIn = async () => {
+    try {
+      // Check if Apple Sign-In is available
+      const isAvailable = await isAppleAuthAvailable();
+      if (!isAvailable) {
+        Alert.alert('Nicht verfügbar', 'Apple Sign-In ist auf diesem Gerät nicht verfügbar');
+        return;
+      }
+      
+      await signInWithApple();
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      console.error('Apple Sign-In error:', error);
+      Alert.alert('Apple Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
+    }
   };
 
   const handleImageLoad = () => {
@@ -133,21 +148,27 @@ export default function WelcomeScreen() {
 
             <ThemedText style={styles.orText}>Oder direkt mit:</ThemedText>
 
+            {/* Google Sign-In (verfügbar auf beiden Plattformen) */}
             <TouchableOpacity 
               style={[styles.socialButton, isSmallScreen && styles.socialButtonSmall]} 
               onPress={handleGoogleSignIn}
             >
-              <ThemedText style={styles.googleIcon}>G</ThemedText>
+              <View style={styles.googleIconContainer}>
+                <ThemedText style={styles.googleIcon}>G</ThemedText>
+              </View>
               <ThemedText style={styles.socialButtonText}>Google</ThemedText>
             </TouchableOpacity>
 
-            <TouchableOpacity 
-              style={[styles.socialButtonDark, isSmallScreen && styles.socialButtonDarkSmall]} 
-              onPress={handleAppleSignIn}
-            >
-              <IconSymbol name="apple.logo" size={20} color="white" />
-              <ThemedText style={styles.socialButtonTextDark}>Apple Account</ThemedText>
-            </TouchableOpacity>
+            {/* Apple Sign-In (nur iOS) */}
+            {Platform.OS === 'ios' && (
+              <TouchableOpacity 
+                style={[styles.socialButtonDark, isSmallScreen && styles.socialButtonDarkSmall]} 
+                onPress={handleAppleSignIn}
+              >
+                <IconSymbol name="apple.logo" size={20} color="white" />
+                <ThemedText style={styles.socialButtonTextDark}>Apple Account</ThemedText>
+              </TouchableOpacity>
+            )}
 
             {/* Login Button */}
             <TouchableOpacity 
@@ -361,10 +382,20 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     gap: 8,
   },
+  googleIconContainer: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
+  },
   googleIcon: {
-    fontSize: 20,
+    fontSize: 14,
     fontFamily: 'Nunito_700Bold',
     color: '#4285F4',
+    textAlign: 'center',
   },
   socialButtonText: {
     fontSize: 16,

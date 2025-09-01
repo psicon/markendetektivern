@@ -5,24 +5,24 @@ import { Platform } from 'react-native';
  */
 export const isExpoGo = (): boolean => {
   try {
-    // Check for Expo Go specific global
-    if ((global as any).expo) {
-      return true;
+    // Check if native modules are available (Production/Development Build)
+    if (Platform.OS === 'ios') {
+      const { NativeModules } = require('react-native');
+      // Wenn unser natives Module verfügbar ist = Production Build
+      if (NativeModules.AVFoundationBarcodeScanner) {
+        return false; // Production Build
+      }
     }
     
-    // Check for Expo Go specific constants
-    if ((global as any).__expo) {
-      return true;
+    // Check for Expo Go specific globals
+    if ((global as any).expo || (global as any).__expo) {
+      return true; // Expo Go
     }
     
-    // Check for development mode indicators
-    if (__DEV__ && (global as any).nativeCallSyncHook) {
-      return true;
-    }
-    
-    return false;
+    // Default: In Development ohne native Module = wahrscheinlich Expo Go
+    return __DEV__;
   } catch (error) {
-    return false;
+    return true; // Safe fallback zu Expo Go
   }
 };
 
