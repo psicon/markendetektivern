@@ -1210,9 +1210,6 @@ PODS:
     - ExpoModulesCore
   - EXConstants (17.1.7):
     - ExpoModulesCore
-  - EXJSONUtils (0.15.0)
-  - EXManifests (0.16.6):
-    - ExpoModulesCore
   - Expo (53.0.20):
     - DoubleConversion
     - ExpoModulesCore
@@ -1236,242 +1233,6 @@ PODS:
     - React-rendererdebug
     - React-utils
     - ReactAppDependencyProvider
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - Yoga
-  - expo-dev-client (5.2.4):
-    - EXManifests
-    - expo-dev-launcher
-    - expo-dev-menu
-    - expo-dev-menu-interface
-    - EXUpdatesInterface
-  - expo-dev-launcher (5.1.16):
-    - DoubleConversion
-    - EXManifests
-    - expo-dev-launcher/Main (= 5.1.16)
-    - expo-dev-menu
-    - expo-dev-menu-interface
-    - ExpoModulesCore
-    - EXUpdatesInterface
-    - glog
-    - hermes-engine
-    - RCT-Folly (= 2024.11.18.00)
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-hermes
-    - React-ImageManager
-    - React-jsi
-    - React-jsinspector
-    - React-NativeModulesApple
-    - React-RCTAppDelegate
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactAppDependencyProvider
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - Yoga
-  - expo-dev-launcher/Main (5.1.16):
-    - DoubleConversion
-    - EXManifests
-    - expo-dev-launcher/Unsafe
-    - expo-dev-menu
-    - expo-dev-menu-interface
-    - ExpoModulesCore
-    - EXUpdatesInterface
-    - glog
-    - hermes-engine
-    - RCT-Folly (= 2024.11.18.00)
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-hermes
-    - React-ImageManager
-    - React-jsi
-    - React-jsinspector
-    - React-NativeModulesApple
-    - React-RCTAppDelegate
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactAppDependencyProvider
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - Yoga
-  - expo-dev-launcher/Unsafe (5.1.16):
-    - DoubleConversion
-    - EXManifests
-    - expo-dev-menu
-    - expo-dev-menu-interface
-    - ExpoModulesCore
-    - EXUpdatesInterface
-    - glog
-    - hermes-engine
-    - RCT-Folly (= 2024.11.18.00)
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-hermes
-    - React-ImageManager
-    - React-jsi
-    - React-jsinspector
-    - React-NativeModulesApple
-    - React-RCTAppDelegate
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactAppDependencyProvider
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - Yoga
-  - expo-dev-menu (6.1.14):
-    - DoubleConversion
-    - expo-dev-menu/Main (= 6.1.14)
-    - expo-dev-menu/ReactNativeCompatibles (= 6.1.14)
-    - glog
-    - hermes-engine
-    - RCT-Folly (= 2024.11.18.00)
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-hermes
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - Yoga
-  - expo-dev-menu-interface (1.10.0)
-  - expo-dev-menu/Main (6.1.14):
-    - DoubleConversion
-    - EXManifests
-    - expo-dev-menu-interface
-    - expo-dev-menu/Vendored
-    - ExpoModulesCore
-    - glog
-    - hermes-engine
-    - RCT-Folly (= 2024.11.18.00)
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-hermes
-    - React-ImageManager
-    - React-jsi
-    - React-jsinspector
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-rendererconsistency
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactAppDependencyProvider
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - Yoga
-  - expo-dev-menu/ReactNativeCompatibles (6.1.14):
-    - DoubleConversion
-    - glog
-    - hermes-engine
-    - RCT-Folly (= 2024.11.18.00)
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-hermes
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - Yoga
-  - expo-dev-menu/SafeAreaView (6.1.14):
-    - DoubleConversion
-    - ExpoModulesCore
-    - glog
-    - hermes-engine
-    - RCT-Folly (= 2024.11.18.00)
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-hermes
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - Yoga
-  - expo-dev-menu/Vendored (6.1.14):
-    - DoubleConversion
-    - expo-dev-menu/SafeAreaView
-    - glog
-    - hermes-engine
-    - RCT-Folly (= 2024.11.18.00)
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-hermes
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
     - ReactCodegen
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
@@ -1546,30 +1307,46 @@ PODS:
     - ExpoModulesCore
   - ExpoWebBrowser (14.2.0):
     - ExpoModulesCore
-  - EXUpdatesInterface (1.1.0):
-    - ExpoModulesCore
   - fast_float (6.1.4)
   - FBLazyVector (0.79.5)
-  - Firebase/CoreOnly (12.1.0):
-    - FirebaseCore (~> 12.1.0)
-  - Firebase/Firestore (12.1.0):
+  - Firebase/CoreOnly (12.2.0):
+    - FirebaseCore (~> 12.2.0)
+  - Firebase/Firestore (12.2.0):
     - Firebase/CoreOnly
-    - FirebaseFirestore (~> 12.1.0)
-  - FirebaseAppCheckInterop (12.1.0)
-  - FirebaseCore (12.1.0):
-    - FirebaseCoreInternal (~> 12.1.0)
+    - FirebaseFirestore (~> 12.2.0)
+  - FirebaseAnalytics/Core (12.2.0):
+    - FirebaseCore (~> 12.2.0)
+    - FirebaseInstallations (~> 12.2.0)
+    - GoogleAppMeasurement/Core (= 12.2.0)
+    - GoogleUtilities/AppDelegateSwizzler (~> 8.1)
+    - GoogleUtilities/MethodSwizzler (~> 8.1)
+    - GoogleUtilities/Network (~> 8.1)
+    - "GoogleUtilities/NSData+zlib (~> 8.1)"
+    - nanopb (~> 3.30910.0)
+  - FirebaseAnalytics/IdentitySupport (12.2.0):
+    - FirebaseCore (~> 12.2.0)
+    - FirebaseInstallations (~> 12.2.0)
+    - GoogleAppMeasurement/IdentitySupport (= 12.2.0)
+    - GoogleUtilities/AppDelegateSwizzler (~> 8.1)
+    - GoogleUtilities/MethodSwizzler (~> 8.1)
+    - GoogleUtilities/Network (~> 8.1)
+    - "GoogleUtilities/NSData+zlib (~> 8.1)"
+    - nanopb (~> 3.30910.0)
+  - FirebaseAppCheckInterop (12.2.0)
+  - FirebaseCore (12.2.0):
+    - FirebaseCoreInternal (~> 12.2.0)
     - GoogleUtilities/Environment (~> 8.1)
     - GoogleUtilities/Logger (~> 8.1)
-  - FirebaseCoreExtension (12.1.0):
-    - FirebaseCore (~> 12.1.0)
-  - FirebaseCoreInternal (12.1.0):
+  - FirebaseCoreExtension (12.2.0):
+    - FirebaseCore (~> 12.2.0)
+  - FirebaseCoreInternal (12.2.0):
     - "GoogleUtilities/NSData+zlib (~> 8.1)"
-  - FirebaseFirestore (12.1.0):
-    - FirebaseCore (~> 12.1.0)
-    - FirebaseCoreExtension (~> 12.1.0)
-    - FirebaseFirestoreInternal (~> 12.1.0)
-    - FirebaseSharedSwift (~> 12.1.0)
-  - FirebaseFirestoreInternal (12.1.0):
+  - FirebaseFirestore (12.2.0):
+    - FirebaseCore (~> 12.2.0)
+    - FirebaseCoreExtension (~> 12.2.0)
+    - FirebaseFirestoreInternal (~> 12.2.0)
+    - FirebaseSharedSwift (~> 12.2.0)
+  - FirebaseFirestoreInternal (12.2.0):
     - abseil/algorithm (~> 1.20240722.0)
     - abseil/base (~> 1.20240722.0)
     - abseil/container/flat_hash_map (~> 1.20240722.0)
@@ -1578,28 +1355,62 @@ PODS:
     - abseil/strings/strings (~> 1.20240722.0)
     - abseil/time (~> 1.20240722.0)
     - abseil/types (~> 1.20240722.0)
-    - FirebaseAppCheckInterop (~> 12.1.0)
-    - FirebaseCore (~> 12.1.0)
+    - FirebaseAppCheckInterop (~> 12.2.0)
+    - FirebaseCore (~> 12.2.0)
     - "gRPC-C++ (~> 1.69.0)"
     - gRPC-Core (~> 1.69.0)
     - leveldb-library (~> 1.22)
     - nanopb (~> 3.30910.0)
-  - FirebaseSharedSwift (12.1.0)
+  - FirebaseInstallations (12.2.0):
+    - FirebaseCore (~> 12.2.0)
+    - GoogleUtilities/Environment (~> 8.1)
+    - GoogleUtilities/UserDefaults (~> 8.1)
+    - PromisesObjC (~> 2.4)
+  - FirebaseSharedSwift (12.2.0)
   - fmt (11.0.2)
   - glog (0.3.5)
+  - GoogleAppMeasurement/Core (12.2.0):
+    - GoogleUtilities/AppDelegateSwizzler (~> 8.1)
+    - GoogleUtilities/MethodSwizzler (~> 8.1)
+    - GoogleUtilities/Network (~> 8.1)
+    - "GoogleUtilities/NSData+zlib (~> 8.1)"
+    - nanopb (~> 3.30910.0)
+  - GoogleAppMeasurement/IdentitySupport (12.2.0):
+    - GoogleAppMeasurement/Core (= 12.2.0)
+    - GoogleUtilities/AppDelegateSwizzler (~> 8.1)
+    - GoogleUtilities/MethodSwizzler (~> 8.1)
+    - GoogleUtilities/Network (~> 8.1)
+    - "GoogleUtilities/NSData+zlib (~> 8.1)"
+    - nanopb (~> 3.30910.0)
   - GoogleSignIn (8.0.0):
     - AppAuth (< 2.0, >= 1.7.3)
     - AppCheckCore (~> 11.0)
     - GTMAppAuth (< 5.0, >= 4.1.1)
     - GTMSessionFetcher/Core (~> 3.3)
+  - GoogleUtilities/AppDelegateSwizzler (8.1.0):
+    - GoogleUtilities/Environment
+    - GoogleUtilities/Logger
+    - GoogleUtilities/Network
+    - GoogleUtilities/Privacy
   - GoogleUtilities/Environment (8.1.0):
     - GoogleUtilities/Privacy
   - GoogleUtilities/Logger (8.1.0):
     - GoogleUtilities/Environment
     - GoogleUtilities/Privacy
+  - GoogleUtilities/MethodSwizzler (8.1.0):
+    - GoogleUtilities/Logger
+    - GoogleUtilities/Privacy
+  - GoogleUtilities/Network (8.1.0):
+    - GoogleUtilities/Logger
+    - "GoogleUtilities/NSData+zlib"
+    - GoogleUtilities/Privacy
+    - GoogleUtilities/Reachability
   - "GoogleUtilities/NSData+zlib (8.1.0)":
     - GoogleUtilities/Privacy
   - GoogleUtilities/Privacy (8.1.0)
+  - GoogleUtilities/Reachability (8.1.0):
+    - GoogleUtilities/Logger
+    - GoogleUtilities/Privacy
   - GoogleUtilities/UserDefaults (8.1.0):
     - GoogleUtilities/Logger
     - GoogleUtilities/Privacy
@@ -3573,11 +3384,16 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - Yoga
-  - RNFBApp (23.0.0):
-    - Firebase/CoreOnly (= 12.1.0)
+  - RNFBAnalytics (23.2.2):
+    - FirebaseAnalytics/Core (= 12.2.0)
+    - FirebaseAnalytics/IdentitySupport (= 12.2.0)
     - React-Core
-  - RNFBFirestore (23.0.0):
-    - Firebase/Firestore (= 12.1.0)
+    - RNFBApp
+  - RNFBApp (23.2.2):
+    - Firebase/CoreOnly (= 12.2.0)
+    - React-Core
+  - RNFBFirestore (23.2.2):
+    - Firebase/Firestore (= 12.2.0)
     - React-Core
     - RNFBApp
   - RNGestureHandler (2.24.0):
@@ -3805,6 +3621,30 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - Yoga
+  - RNStoreReview (0.4.3):
+    - DoubleConversion
+    - glog
+    - hermes-engine
+    - RCT-Folly (= 2024.11.18.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - Yoga
   - RNSVG (15.12.1):
     - DoubleConversion
     - glog
@@ -3878,13 +3718,7 @@ DEPENDENCIES:
   - DoubleConversion (from `../node_modules/react-native/third-party-podspecs/DoubleConversion.podspec`)
   - EXApplication (from `../node_modules/expo-application/ios`)
   - EXConstants (from `../node_modules/expo-constants/ios`)
-  - EXJSONUtils (from `../node_modules/expo-json-utils/ios`)
-  - EXManifests (from `../node_modules/expo-manifests/ios`)
   - Expo (from `../node_modules/expo`)
-  - expo-dev-client (from `../node_modules/expo-dev-client/ios`)
-  - expo-dev-launcher (from `../node_modules/expo-dev-launcher`)
-  - expo-dev-menu (from `../node_modules/expo-dev-menu`)
-  - expo-dev-menu-interface (from `../node_modules/expo-dev-menu-interface/ios`)
   - "ExpoAdapterGoogleSignIn (from `../node_modules/@react-native-google-signin/google-signin/expo/ios`)"
   - ExpoAsset (from `../node_modules/expo-asset/ios`)
   - ExpoBlur (from `../node_modules/expo-blur/ios`)
@@ -3904,7 +3738,6 @@ DEPENDENCIES:
   - ExpoSymbols (from `../node_modules/expo-symbols/ios`)
   - ExpoSystemUI (from `../node_modules/expo-system-ui/ios`)
   - ExpoWebBrowser (from `../node_modules/expo-web-browser/ios`)
-  - EXUpdatesInterface (from `../node_modules/expo-updates-interface/ios`)
   - fast_float (from `../node_modules/react-native/third-party-podspecs/fast_float.podspec`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
   - fmt (from `../node_modules/react-native/third-party-podspecs/fmt.podspec`)
@@ -3984,12 +3817,14 @@ DEPENDENCIES:
   - "RNAppleAuthentication (from `../node_modules/@invertase/react-native-apple-authentication`)"
   - "RNCAsyncStorage (from `../node_modules/@react-native-async-storage/async-storage`)"
   - "RNDateTimePicker (from `../node_modules/@react-native-community/datetimepicker`)"
+  - "RNFBAnalytics (from `../node_modules/@react-native-firebase/analytics`)"
   - "RNFBApp (from `../node_modules/@react-native-firebase/app`)"
   - "RNFBFirestore (from `../node_modules/@react-native-firebase/firestore`)"
   - RNGestureHandler (from `../node_modules/react-native-gesture-handler`)
   - "RNGoogleSignin (from `../node_modules/@react-native-google-signin/google-signin`)"
   - RNReanimated (from `../node_modules/react-native-reanimated`)
   - RNScreens (from `../node_modules/react-native-screens`)
+  - RNStoreReview (from `../node_modules/react-native-store-review`)
   - RNSVG (from `../node_modules/react-native-svg`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
@@ -4000,13 +3835,16 @@ SPEC REPOS:
     - AppCheckCore
     - BoringSSL-GRPC
     - Firebase
+    - FirebaseAnalytics
     - FirebaseAppCheckInterop
     - FirebaseCore
     - FirebaseCoreExtension
     - FirebaseCoreInternal
     - FirebaseFirestore
     - FirebaseFirestoreInternal
+    - FirebaseInstallations
     - FirebaseSharedSwift
+    - GoogleAppMeasurement
     - GoogleSignIn
     - GoogleUtilities
     - "gRPC-C++"
@@ -4036,20 +3874,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-application/ios"
   EXConstants:
     :path: "../node_modules/expo-constants/ios"
-  EXJSONUtils:
-    :path: "../node_modules/expo-json-utils/ios"
-  EXManifests:
-    :path: "../node_modules/expo-manifests/ios"
   Expo:
     :path: "../node_modules/expo"
-  expo-dev-client:
-    :path: "../node_modules/expo-dev-client/ios"
-  expo-dev-launcher:
-    :path: "../node_modules/expo-dev-launcher"
-  expo-dev-menu:
-    :path: "../node_modules/expo-dev-menu"
-  expo-dev-menu-interface:
-    :path: "../node_modules/expo-dev-menu-interface/ios"
   ExpoAdapterGoogleSignIn:
     :path: "../node_modules/@react-native-google-signin/google-signin/expo/ios"
   ExpoAsset:
@@ -4088,8 +3914,6 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-system-ui/ios"
   ExpoWebBrowser:
     :path: "../node_modules/expo-web-browser/ios"
-  EXUpdatesInterface:
-    :path: "../node_modules/expo-updates-interface/ios"
   fast_float:
     :podspec: "../node_modules/react-native/third-party-podspecs/fast_float.podspec"
   FBLazyVector:
@@ -4241,6 +4065,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/@react-native-async-storage/async-storage"
   RNDateTimePicker:
     :path: "../node_modules/@react-native-community/datetimepicker"
+  RNFBAnalytics:
+    :path: "../node_modules/@react-native-firebase/analytics"
   RNFBApp:
     :path: "../node_modules/@react-native-firebase/app"
   RNFBFirestore:
@@ -4253,6 +4079,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-reanimated"
   RNScreens:
     :path: "../node_modules/react-native-screens"
+  RNStoreReview:
+    :path: "../node_modules/react-native-store-review"
   RNSVG:
     :path: "../node_modules/react-native-svg"
   Yoga:
@@ -4267,13 +4095,7 @@ SPEC CHECKSUMS:
   DoubleConversion: cb417026b2400c8f53ae97020b2be961b59470cb
   EXApplication: 50cc8ea58c138da6e3f25cd789634219c86b90d5
   EXConstants: 9d62a46a36eae6d28cb978efcbc68aef354d1704
-  EXJSONUtils: 1d3e4590438c3ee593684186007028a14b3686cd
-  EXManifests: f4cc4a62ee4f1c8a9cf2bb79d325eac6cb9f5684
   Expo: f36ead9aa4bf1f3d238ddf2a8e43c64510eae109
-  expo-dev-client: f1b99dfea0c9174d2e4ec96c2c5461587dda1e86
-  expo-dev-launcher: 772afd177066a622ab6622b65e6fa9783640433b
-  expo-dev-menu: 126a85a8ab88dd745c00c603c6673675af88fd33
-  expo-dev-menu-interface: 609c35ae8b97479cdd4c9e23c8cf6adc44beea0e
   ExpoAdapterGoogleSignIn: 9d88eeee716507923d8f43f6f049483f6974a88a
   ExpoAsset: 7bdbbacf4e6752ae6e3cf70555cee076f6229e6e
   ExpoBlur: 846780b2c90f59e964b9a50385d4deb67174ebfb
@@ -4293,19 +4115,21 @@ SPEC CHECKSUMS:
   ExpoSymbols: bd4e20b0b6a9dbacc31dd7c861e0d6d01b56e1f2
   ExpoSystemUI: ecb2b2e8ee9468295e7c33fa10eb4e73e581389a
   ExpoWebBrowser: eeb47f52e85b2686b56178749675cf90d0822f86
-  EXUpdatesInterface: 64f35449b8ef89ce08cdd8952a4d119b5de6821d
   fast_float: 06eeec4fe712a76acc9376682e4808b05ce978b6
   FBLazyVector: d2a9cd223302b6c9aa4aa34c1a775e9db609eb52
-  Firebase: 9edc9acf71313eb20e209c42e5469a42564fe1aa
-  FirebaseAppCheckInterop: de890554a81967f16a0eb8d3def541c2bb42dece
-  FirebaseCore: 5a452ffa66f37c8e281076996837626c5d08c090
-  FirebaseCoreExtension: dd89d73548ee9be5d8dc60e5c76bc421b965853b
-  FirebaseCoreInternal: ff526c22671bb564d1b34a47615e29ba99389dee
-  FirebaseFirestore: 7f06732c905092d12a6e060aace72a28ad528190
-  FirebaseFirestoreInternal: 1e6d681414d7fe2b8b99315784e242e7f301cf44
-  FirebaseSharedSwift: ee4344de8a4d5b5290de3600667307a44f85fd40
+  Firebase: 26f6f8d460603af3df970ad505b16b15f5e2e9a1
+  FirebaseAnalytics: e04e23bc070e3014aa5cf4980f9df7ce5cd79ec8
+  FirebaseAppCheckInterop: a1b2598c64c5a8c42fd6f6a1c3d0938ae4324678
+  FirebaseCore: 311c48a147ad4a0ab7febbaed89e8025c67510cd
+  FirebaseCoreExtension: 73af080c22a2f7b44cefa391dc08f7e4ee162cb5
+  FirebaseCoreInternal: 56ea29f3dad2894f81b060f706f9d53509b6ed3b
+  FirebaseFirestore: 2baa1360623e942007726627653d43a5bc618ba8
+  FirebaseFirestoreInternal: 6506aef21ac270bf137c34cd7283723d930eddb0
+  FirebaseInstallations: 3e884b01feabdf67582a80f3250425a00979b4ed
+  FirebaseSharedSwift: 52d868d4c269fcb4e4e1310c548435a9c1f46e25
   fmt: a40bb5bd0294ea969aaaba240a927bd33d878cdd
   glog: 5683914934d5b6e4240e497e0f4a3b42d1854183
+  GoogleAppMeasurement: 09f341dfa8527d1612a09cbfe809a242c0b737af
   GoogleSignIn: ce8c89bb9b37fb624b92e7514cc67335d1e277e4
   GoogleUtilities: 00c88b9a86066ef77f0da2fab05f65d7768ed8e1
   "gRPC-C++": cc207623316fb041a7a3e774c252cf68a058b9e8
@@ -4390,12 +4214,14 @@ SPEC CHECKSUMS:
   RNAppleAuthentication: b2d8b5ccba86b5b1e55a1a2e858f7ac6d8a21816
   RNCAsyncStorage: faf86846c58994b6b8aab074a4914eb1796c2a9f
   RNDateTimePicker: 9d94d39bcece53d0dfdb64e18b409d9005529191
-  RNFBApp: b7b23d12712d8d624eb9c28141b54276f05a408b
-  RNFBFirestore: 2b6e10ebf7b388816643e7baae57590cd4fde6c1
+  RNFBAnalytics: 2ad1e9a7ea40f5d1e97c33dc972dc57c59619c56
+  RNFBApp: d2676150d5433b9371c315a38077e0276553965d
+  RNFBFirestore: b98a338bed33d097e596abb3a1a1111314386b2b
   RNGestureHandler: 85b0463dbfed54eaba4360e31c0aa1a0fe83a6a6
   RNGoogleSignin: be1fbe1c9e0d438e87ae3d79329cc3f1407ba98c
   RNReanimated: 7b926938d4190114e5848b5b022d83dbc2c0fe2c
   RNScreens: d9d5d8a2a484bb4446968bfa00db991f1117db44
+  RNStoreReview: 190b16eb7ed8a959fe2d067b435f76f553d19de8
   RNSVG: 9346c68a0d5c5e4e74d82d664b745f28e6cfc1cb
   SDWebImage: 9f177d83116802728e122410fb25ad88f5c7608a
   SDWebImageAVIFCoder: 00310d246aab3232ce77f1d8f0076f8c4b021d90

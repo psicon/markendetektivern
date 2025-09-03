@@ -11,6 +11,7 @@ import { FontLoader } from '@/components/ui/FontLoader';
 import { GamificationProvider } from '@/components/ui/GamificationProvider';
 import { SplashScreen } from '@/components/ui/SplashScreen';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { AnalyticsProvider } from '@/lib/contexts/AnalyticsProvider';
 import { AuthProvider } from '@/lib/contexts/AuthContext';
 import { ThemeProvider } from '@/lib/contexts/ThemeContext';
 import React, { useState } from 'react';
@@ -27,41 +28,43 @@ function ThemedApp() {
   return (
     <FontLoader>
       <AuthProvider>
-        <GamificationProvider>
-          <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-            <Stack>
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="auth/welcome" options={{ headerShown: false }} />
-              <Stack.Screen name="auth/login" options={{ headerShown: false }} />
-              <Stack.Screen name="auth/register" options={{ headerShown: false }} />
-              <Stack.Screen 
-                name="barcode-scanner" 
-                options={{ 
-                  headerShown: false,
-                  animation: 'slide_from_right',
-                  gestureEnabled: true 
-                }} 
-              />
-              <Stack.Screen name="+not-found" />
-            </Stack>
-            <StatusBar style="auto" />
-            
-            {/* Splash Screen Overlay */}
-            {showSplash && (
-              <SplashScreen onAnimationComplete={handleSplashComplete} />
-            )}
+        <AnalyticsProvider>
+          <GamificationProvider>
+            <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+              <Stack>
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="auth/welcome" options={{ headerShown: false }} />
+                <Stack.Screen name="auth/login" options={{ headerShown: false }} />
+                <Stack.Screen name="auth/register" options={{ headerShown: false }} />
+                <Stack.Screen 
+                  name="barcode-scanner" 
+                  options={{ 
+                    headerShown: false,
+                    animation: 'slide_from_right',
+                    gestureEnabled: true 
+                  }} 
+                />
+                <Stack.Screen name="+not-found" />
+              </Stack>
+              <StatusBar style="auto" />
+              
+              {/* Splash Screen Overlay */}
+              {showSplash && (
+                <SplashScreen onAnimationComplete={handleSplashComplete} />
+              )}
 
-            {/* Global Toast Host - transparenter Wrapper, damit nur unser Custom-Toast sichtbar ist */}
-            <Toasts 
-              defaultStyle={{
-                view: { backgroundColor: 'transparent', padding: 0, margin: 0, shadowOpacity: 0, elevation: 0 },
-                pressable: { backgroundColor: 'transparent' },
-                indicator: { marginRight: 0 },
-              }}
-              gutter={10}
-            />
-          </NavigationThemeProvider>
-        </GamificationProvider>
+              {/* Global Toast Host - transparenter Wrapper, damit nur unser Custom-Toast sichtbar ist */}
+              <Toasts 
+                defaultStyle={{
+                  view: { backgroundColor: 'transparent', padding: 0, margin: 0, shadowOpacity: 0, elevation: 0 },
+                  pressable: { backgroundColor: 'transparent' },
+                  indicator: { marginRight: 0 },
+                }}
+                gutter={10}
+              />
+            </NavigationThemeProvider>
+          </GamificationProvider>
+        </AnalyticsProvider>
       </AuthProvider>
     </FontLoader>
   );

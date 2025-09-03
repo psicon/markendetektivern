@@ -1649,17 +1649,30 @@ export default function ExploreScreen() {
                     onPress={kategorie.isLocked ? undefined : () => toggleCategoryFilter(kategorie.id)}
                     disabled={kategorie.isLocked}
                   >
-                    <IconSymbol 
-                      name={getCategoryIcon(kategorie.bezeichnung)} 
-                      size={16} 
-                      color={
-                        noNameFilters.categoryFilters.includes(kategorie.id) 
-                          ? 'white' 
-                          : kategorie.isLocked 
-                            ? colors.icon 
-                            : colors.primary
-                      }
-                    />
+                    {kategorie.bild && kategorie.bild.trim() !== '' && !failedImages.has(`filter-cat-${kategorie.id}`) ? (
+                      <ImageWithShimmer
+                        source={{ uri: kategorie.bild }}
+                        style={styles.chipCategoryImage}
+                        fallbackIcon={getCategoryIcon(kategorie.bezeichnung)}
+                        fallbackIconSize={16}
+                        resizeMode="contain"
+                        onError={() => {
+                          setFailedImages(prev => new Set([...prev, `filter-cat-${kategorie.id}`]));
+                        }}
+                      />
+                    ) : (
+                      <IconSymbol 
+                        name={getCategoryIcon(kategorie.bezeichnung)} 
+                        size={16} 
+                        color={
+                          noNameFilters.categoryFilters.includes(kategorie.id) 
+                            ? 'white' 
+                            : kategorie.isLocked 
+                              ? colors.icon 
+                              : colors.primary
+                        }
+                      />
+                    )}
                     <ThemedText style={[
                       styles.chipText, 
                       { 
@@ -1877,17 +1890,30 @@ export default function ExploreScreen() {
                     onPress={kategorie.isLocked ? undefined : () => toggleMarkenproduktCategoryFilter(kategorie.id)}
                     disabled={kategorie.isLocked}
                   >
-                    <IconSymbol 
-                      name={getCategoryIcon(kategorie.bezeichnung)} 
-                      size={16} 
-                      color={
-                        markenproduktFilters.categoryFilters.includes(kategorie.id) 
-                          ? 'white' 
-                          : kategorie.isLocked 
-                            ? colors.icon 
-                            : colors.primary
-                      }
-                    />
+                    {kategorie.bild && kategorie.bild.trim() !== '' && !failedImages.has(`filter-marken-cat-${kategorie.id}`) ? (
+                      <ImageWithShimmer
+                        source={{ uri: kategorie.bild }}
+                        style={styles.chipCategoryImage}
+                        fallbackIcon={getCategoryIcon(kategorie.bezeichnung)}
+                        fallbackIconSize={16}
+                        resizeMode="contain"
+                        onError={() => {
+                          setFailedImages(prev => new Set([...prev, `filter-marken-cat-${kategorie.id}`]));
+                        }}
+                      />
+                    ) : (
+                      <IconSymbol 
+                        name={getCategoryIcon(kategorie.bezeichnung)} 
+                        size={16} 
+                        color={
+                          markenproduktFilters.categoryFilters.includes(kategorie.id) 
+                            ? 'white' 
+                            : kategorie.isLocked 
+                              ? colors.icon 
+                              : colors.primary
+                        }
+                      />
+                    )}
                     <ThemedText style={[
                       styles.chipText, 
                       { 
@@ -2245,6 +2271,10 @@ const styles = StyleSheet.create({
     height: 16,
     borderRadius: 2,
     resizeMode: 'contain',
+  },
+  chipCategoryImage: {
+    width: 16,
+    height: 16,
   },
   chipText: {
     fontSize: 12,
