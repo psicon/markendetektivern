@@ -4,6 +4,7 @@ import { ThemedView } from '@/components/ThemedView';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
+import { LockedCategoryModal } from '@/components/ui/LockedCategoryModal';
 import { SearchBottomSheet } from '@/components/ui/SearchBottomSheet';
 import { CategorySkeleton, NewsCardSkeleton, ProductCardSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor } from '@/constants/AppTexts';
@@ -11,6 +12,7 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { achievementService } from '@/lib/services/achievementService';
+import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { FirestoreService } from '@/lib/services/firestore';
 import searchHistoryService from '@/lib/services/searchHistoryService';
 import WordPressService, { WordPressPost } from '@/lib/services/wordpress';
@@ -40,6 +42,12 @@ export default function HomeScreen() {
   // Search Bottom Sheet State
   const [showSearchSheet, setShowSearchSheet] = useState(false);
   const [searchBarPosition, setSearchBarPosition] = useState({ y: 0, height: 0 });
+  
+  // Locked Category Modal State
+  const [lockedCategoryModal, setLockedCategoryModal] = useState<{
+    visible: boolean;
+    category: FirestoreDocument<Kategorien> | null;
+  }>({ visible: false, category: null });
 
   // Firestore State
   const [enttarnteProdukte, setEnttarnteProdukte] = useState<FirestoreDocument<Produkte>[]>([]);
@@ -155,18 +163,17 @@ export default function HomeScreen() {
         setCategoriesLoading(true);
         setError(null);
         
+        // User Level für Kategorie-Zugriff
+        const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
+        
         // Lade Kategorien und Produkte parallel
-        const [kategorienData, produkteData] = await Promise.all([
-          FirestoreService.getKategorien(),
+        const [kategorienWithAccess, produkteData] = await Promise.all([
+          categoryAccessService.getAllCategoriesWithAccess(userLevel),
           FirestoreService.getLatestEnttarnteProdukte(10)
         ]);
         
-
-        // Sortiere Kategorien alphabetisch nach bezeichnung
-        const sortedKategorien = kategorienData.sort((a, b) => 
-          a.bezeichnung.localeCompare(b.bezeichnung, 'de')
-        );
-        setKategorien(sortedKategorien);
+        // Kategorien sind bereits sortiert vom Service
+        setKategorien(kategorienWithAccess);
         setCategoriesLoading(false);
         
 
@@ -201,7 +208,7 @@ export default function HomeScreen() {
     };
 
     loadData();
-  }, []);
+  }, [userProfile]);
 
   // Helper function to format price
   const formatPrice = (price: number) => {
@@ -395,36 +402,69 @@ export default function HomeScreen() {
               kategorien.map((kategorie, index) => (
                 <TouchableOpacity 
                   key={kategorie.id} 
-                  style={[styles.categoryChip, { backgroundColor: colors.cardBackground }]}
+                  style={[
+                    styles.categoryChip, 
+                    { 
+                      backgroundColor: colors.cardBackground,
+                      opacity: kategorie.isLocked ? 0.6 : 1
+                    }
+                  ]}
                   onPress={() => {
-                    // Navigate to explore tab with NoName products and category filter
-                    router.push({
-                      pathname: '/(tabs)/explore',
-                      params: {
-                        tab: 'nonames',
-                        categoryFilter: kategorie.id,
-                        categoryName: kategorie.bezeichnung
-                      }
-                    });
+                    if (kategorie.isLocked) {
+                      // Zeige gesperrte Kategorie Modal
+                      setLockedCategoryModal({
+                        visible: true,
+                        category: kategorie
+                      });
+                    } else {
+                      // Navigate to explore tab with NoName products and category filter
+                      router.push({
+                        pathname: '/(tabs)/explore',
+                        params: {
+                          tab: 'nonames',
+                          categoryFilter: kategorie.id,
+                          categoryName: kategorie.bezeichnung
+                        }
+                      });
+                    }
                   }}
                 >
-                  {kategorie.bild && kategorie.bild.trim() !== '' && !failedImages.has(kategorie.id) ? (
-                    <ImageWithShimmer
-                      source={{ uri: kategorie.bild }}
-                      style={styles.categoryImage}
-                      fallbackIcon="square.grid.2x2"
-                      fallbackIconSize={24}
-                      resizeMode="cover"
-                      onError={() => {
-                        console.log(`Failed to load image for category: ${kategorie.bezeichnung}`);
-                        setFailedImages(prev => new Set([...prev, kategorie.id]));
-                      }}
-                    />
-                  ) : (
-                    <IconSymbol name={getCategoryIcon(kategorie.bezeichnung)} size={20} color={colors.primary} />
-                  )}
-                  <ThemedText style={styles.categoryText}>{kategorie.bezeichnung}</ThemedText>
-              </TouchableOpacity>
+                  <View style={styles.categoryImageContainer}>
+                    {kategorie.bild && kategorie.bild.trim() !== '' && !failedImages.has(kategorie.id) ? (
+                      <ImageWithShimmer
+                        source={{ uri: kategorie.bild }}
+                        style={[
+                          styles.categoryImage,
+                          kategorie.isLocked && styles.categoryImageLocked
+                        ]}
+                        fallbackIcon="square.grid.2x2"
+                        fallbackIconSize={24}
+                        resizeMode="cover"
+                        onError={() => {
+                          console.log(`Failed to load image for category: ${kategorie.bezeichnung}`);
+                          setFailedImages(prev => new Set([...prev, kategorie.id]));
+                        }}
+                      />
+                    ) : (
+                      <IconSymbol 
+                        name={getCategoryIcon(kategorie.bezeichnung)} 
+                        size={20} 
+                        color={kategorie.isLocked ? colors.icon : colors.primary} 
+                      />
+                    )}
+                    {kategorie.isLocked && (
+                      <View style={styles.categoryLockBadge}>
+                        <IconSymbol name="lock" size={12} color="white" />
+                      </View>
+                    )}
+                  </View>
+                  <ThemedText style={[
+                    styles.categoryText, 
+                    { color: kategorie.isLocked ? colors.icon : colors.text }
+                  ]}>
+                    {kategorie.bezeichnung}
+                  </ThemedText>
+                </TouchableOpacity>
               ))
             )}
           </ScrollView>
@@ -655,6 +695,22 @@ export default function HomeScreen() {
         colors={colors}
         onSearch={handleSearch}
       />
+      
+      {/* Locked Category Modal */}
+      {lockedCategoryModal.category && (
+        <LockedCategoryModal
+          visible={lockedCategoryModal.visible}
+          categoryName={lockedCategoryModal.category.bezeichnung}
+          categoryImage={lockedCategoryModal.category.bild}
+          requiredLevel={lockedCategoryModal.category.requiredLevel || 1}
+          currentLevel={userProfile?.stats?.currentLevel || userProfile?.level || 1}
+          onClose={() => setLockedCategoryModal({ visible: false, category: null })}
+          onNavigateToLevels={() => {
+            setLockedCategoryModal({ visible: false, category: null });
+            router.push('/achievements' as any);
+          }}
+        />
+      )}
       </ThemedView>
   );
 }
@@ -810,11 +866,30 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 2,
   },
+  categoryImageContainer: {
+    position: 'relative',
+    width: 20,
+    height: 20,
+  },
   categoryImage: {
     width: 20,
     height: 20,
     borderRadius: 4,
     resizeMode: 'cover',
+  },
+  categoryImageLocked: {
+    opacity: 0.5,
+  },
+  categoryLockBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   categoryText: {
     fontSize: 14,

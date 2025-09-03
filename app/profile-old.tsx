@@ -360,9 +360,6 @@ export default function ProfileScreen() {
           level={level}
           size="large"
           showDescription={true}
-          showProgress={true}
-          currentSavings={currentSavings}
-          currentPoints={currentPoints}
         />
       </TouchableOpacity>
 

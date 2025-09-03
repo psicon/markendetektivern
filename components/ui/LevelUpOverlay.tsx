@@ -23,6 +23,11 @@ interface LevelUpOverlayProps {
   visible: boolean;
   newLevel: number;
   oldLevel: number;
+  unlockedCategory?: {
+    id: string;
+    name: string;
+    imageUrl: string;
+  };
   onClose: () => void;
 }
 
@@ -72,6 +77,7 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
   visible,
   newLevel,
   oldLevel,
+  unlockedCategory,
   onClose,
 }) => {
   const router = useRouter();
@@ -200,6 +206,8 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
     ]).start(() => {
       setShowContent(false);
       onClose();
+      // 📱 Periodic check will handle rating after overlay closes
+      console.log('🎯 Level-Up closed - periodic check will handle rating');
     });
   };
 
@@ -295,27 +303,15 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
               <IconSymbol name="xmark" size={16} color="rgba(255,255,255,0.9)" />
             </TouchableOpacity>
 
-            {/* Level Badge */}
-            <View style={styles.levelBadge}>
-              <View style={styles.levelIconContainer}>
-                <IconSymbol 
-                  name={levelInfo.icon as any} 
-                  size={40} 
-                  color="white" 
-                />
-              </View>
-              <Text style={styles.levelNumber}>Level {newLevel}</Text>
-            </View>
-
-            {/* Lottie Animation - Lokale Zuordnung basierend auf Level */}
+            {/* Große Lottie Animation (Icon oben entfernt) */}
             <View style={styles.lottieContainer}>
               <LottieView
                 source={getLevelLottieSource(newLevel)}
                 autoPlay
-                loop={false}
-                style={styles.lottieAnimation}
+                loop={true}
+                style={styles.lottieAnimationResponsive}
                 onAnimationFinish={() => {
-                  console.log(`✨ Level ${newLevel} Lottie-Animation beendet`);
+                  console.log(`✨ Level ${newLevel} Lottie-Animation wiederholt`);
                 }}
               />
             </View>
@@ -327,26 +323,62 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
             {/* Reward Section */}
             <View style={styles.rewardSection}>
               <Text style={styles.rewardLabel}>BELOHNUNG</Text>
-              <View style={styles.rewardBox}>
-                <IconSymbol name="gift" size={18} color="white" />
-                <Text style={styles.rewardText}>{levelInfo.reward}</Text>
-              </View>
+              
+              {/* Spezielle Kategorie-Freischaltung Anzeige */}
+              {unlockedCategory ? (
+                <View style={styles.categoryUnlockSection}>
+                  <Text style={styles.categoryUnlockTitle}>NEUE KATEGORIE FREIGESCHALTET!</Text>
+                  <View style={styles.categoryImageContainer}>
+                    <Animated.Image 
+                      source={{ uri: unlockedCategory.imageUrl }}
+                      style={[
+                        styles.categoryImage,
+                        { transform: [{ scale: scaleAnim }] }
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.categoryName}>{unlockedCategory.name}</Text>
+                  <View style={styles.rewardBox}>
+                    <IconSymbol name="sparkles" size={18} color="white" />
+                    <Text style={styles.rewardText}>Jetzt in Stöbern verfügbar!</Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.rewardBox}>
+                  <IconSymbol name="gift" size={18} color="white" />
+                  <Text style={styles.rewardText}>{levelInfo.reward}</Text>
+                </View>
+              )}
             </View>
 
-            {/* Progress Info */}
-            <View style={styles.progressInfo}>
-              <Text style={styles.progressText}>
-                Du warst {oldLevel === 1 ? 'Neuling' : oldLevelInfo.name}
-              </Text>
+            {/* Level Icons Vergleich */}
+            <View style={styles.levelComparison}>
+              {/* Altes Level (kleiner, ausgeblichen) */}
+              <View style={styles.oldLevelContainer}>
+                <IconSymbol 
+                  name={oldLevelInfo.icon as any}
+                  size={32} 
+                  color="rgba(255,255,255,0.5)"
+                />
+                <Text style={styles.oldLevelText}>Level {oldLevel}</Text>
+              </View>
+              
               <IconSymbol 
                 name="arrow.right" 
-                size={14} 
+                size={16} 
                 color="rgba(255,255,255,0.8)" 
-                style={{ marginHorizontal: 8 }}
+                style={{ marginHorizontal: 16 }}
               />
-              <Text style={styles.progressText}>
-                Jetzt {levelInfo.name}
-              </Text>
+              
+              {/* Neues Level (größer, hell) */}
+              <View style={styles.newLevelContainer}>
+                <IconSymbol 
+                  name={levelInfo.icon as any}
+                  size={48} 
+                  color="white"
+                />
+                <Text style={styles.newLevelText}>Level {newLevel}</Text>
+              </View>
             </View>
 
             {/* Action Buttons */}
@@ -362,7 +394,7 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
                 style={styles.secondaryButton}
                 onPress={handleClose}
               >
-                <Text style={styles.secondaryButtonText}>Weiter spielen</Text>
+                <Text style={styles.secondaryButtonText}>Weiter</Text>
               </TouchableOpacity>
             </View>
           </LinearGradient>
@@ -446,7 +478,7 @@ const styles = StyleSheet.create({
   },
   lottieContainer: {
     width: '100%',
-    height: 180,
+    height: Math.min(SCREEN_WIDTH * 0.7, 220) + 20,
     marginVertical: 20,
     justifyContent: 'center',
     alignItems: 'center',
@@ -454,6 +486,40 @@ const styles = StyleSheet.create({
   lottieAnimation: {
     width: 180,
     height: 180,
+  },
+  lottieAnimationLarge: {
+    width: 200,
+    height: 200,
+  },
+  lottieAnimationResponsive: {
+    width: Math.min(SCREEN_WIDTH * 0.6, 220),
+    height: Math.min(SCREEN_WIDTH * 0.6, 220),
+  },
+  levelComparison: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 16,
+  },
+  oldLevelContainer: {
+    alignItems: 'center',
+  },
+  newLevelContainer: {
+    alignItems: 'center',
+  },
+  oldLevelText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.6)',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  newLevelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
+    marginTop: 6,
+    textAlign: 'center',
   },
   rewardSection: {
     width: '100%',
@@ -518,5 +584,48 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: 'white',
+  },
+  // Kategorie-Freischaltung Styles
+  categoryUnlockSection: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  categoryUnlockTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFD700',
+    letterSpacing: 0.5,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  categoryImageContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    padding: 4,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  categoryImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 56,
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.9)',
+  },
+  categoryName: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: 'white',
+    marginBottom: 16,
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.3)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
 });

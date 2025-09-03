@@ -57,6 +57,7 @@ export interface Kategorien {
   bezeichnung: string;
   bild: string;
   isFree: boolean;
+  getsFreeAtLevel?: number; // 0 = sofort verfügbar, 1-10 = bei diesem Level freigeschaltet
 }
 
 export interface Discounter {

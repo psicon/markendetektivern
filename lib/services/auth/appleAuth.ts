@@ -15,13 +15,6 @@ export const isAppleAuthAvailable = async (): Promise<boolean> => {
       return false;
     }
 
-    // Check if native module is available
-    const { NativeModules } = require('react-native');
-    if (!NativeModules.RNAppleAuthentication) {
-      console.log('📱 Apple Auth Module nicht verfügbar (Expo Go oder nicht konfiguriert)');
-      return false;
-    }
-
     const { appleAuth } = require('@invertase/react-native-apple-authentication');
     const isSupported = await appleAuth.isSupported();
     console.log(`🍎 Apple Auth Support Status: ${isSupported}`);
@@ -42,15 +35,10 @@ export const signInWithApple = async () => {
       throw new Error('Apple Sign-In ist nur auf iOS verfügbar');
     }
 
-    // Check if native module is available
-    const { NativeModules } = require('react-native');
-    if (!NativeModules.RNAppleAuthentication) {
-      throw new Error('Apple Sign-In ist nur in Production Builds verfügbar. Bitte Email/Password Login verwenden.');
-    }
-
     const { appleAuth } = require('@invertase/react-native-apple-authentication');
     const { OAuthProvider, signInWithCredential } = require('firebase/auth');
     const { auth } = require('../../firebase');
+    const { createUserProfile } = require('../userProfile');
     
     const appleAuthRequestResponse = await appleAuth.performRequest({
       requestedOperation: appleAuth.Operation.LOGIN,
@@ -60,7 +48,7 @@ export const signInWithApple = async () => {
       ],
     });
 
-    const { identityToken, nonce } = appleAuthRequestResponse;
+    const { identityToken, nonce, fullName, email } = appleAuthRequestResponse;
     
     if (!identityToken) {
       throw new Error('Apple Sign-In failed - no identity token');
@@ -73,7 +61,30 @@ export const signInWithApple = async () => {
     });
 
     const userCredential = await signInWithCredential(auth, credential);
-    console.log('✅ Apple Sign-In successful:', userCredential.user.email);
+    const user = userCredential.user;
+    
+    // 🧠 INTELLIGENTE LOGIN/REGISTER UNTERSCHEIDUNG
+    const isNewUser = userCredential.additionalUserInfo?.isNewUser;
+    
+    if (isNewUser) {
+      console.log('🍎 Apple Sign-In: NEUER USER → Automatische Registrierung');
+      
+      // User-Profil für Apple-User erstellen
+      const displayName = fullName ? 
+        `${fullName.givenName || ''} ${fullName.familyName || ''}`.trim() : 
+        'Apple User';
+      
+      await createUserProfile(user, {
+        realName: displayName,
+        email: email || user.email || '',
+        // Apple gibt nicht viele Daten - Rest leer lassen
+      });
+      
+      console.log(`✅ Apple Registrierung erfolgreich: ${user.email}`);
+    } else {
+      console.log('🍎 Apple Sign-In: BESTEHENDER USER → Login');
+    }
+    
     return userCredential;
   } catch (error: any) {
     console.error('❌ Apple Sign-In error:', error);

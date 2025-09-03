@@ -1,5 +1,5 @@
 import { Tabs, useRouter, useSegments } from 'expo-router';
-import React, { useEffect } from 'react';
+import React from 'react';
 import { ActivityIndicator, Platform, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -65,13 +65,7 @@ export default function TabLayout() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  // Auth Guard - Redirect to welcome if not logged in
-  useEffect(() => {
-    if (!loading && !user) {
-      router.replace('/auth/welcome');
-    }
-  }, [user, loading, router]);
-
+  // Loading screen while auto-anonymous login happens
   if (loading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors[colorScheme ?? 'light'].background }}>
@@ -80,9 +74,13 @@ export default function TabLayout() {
     );
   }
 
-  // Require authentication to access tabs
+  // Fallback: Falls auto-anonymous login fehlschlägt
   if (!user) {
-    return null; // Will redirect to welcome screen
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors[colorScheme ?? 'light'].background }}>
+        <ActivityIndicator size="large" color={Colors[colorScheme ?? 'light'].primary} />
+      </View>
+    );
   }
 
   return (

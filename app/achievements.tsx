@@ -10,7 +10,7 @@ import { achievementService } from '@/lib/services/achievementService';
 import { Level } from '@/lib/types/achievements';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
-import { useEffect, useLayoutEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
   ActivityIndicator,
     Animated,
@@ -24,6 +24,54 @@ import {
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
+
+// Text Shimmer Component für Kategorie-Belohnungen (Best Practice)
+const TextShimmer: React.FC<{ children: React.ReactNode; isShimmering: boolean }> = ({ 
+  children, 
+  isShimmering 
+}) => {
+  const [shimmerAnim] = useState(new Animated.Value(0));
+  
+  useEffect(() => {
+    if (isShimmering) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(shimmerAnim, {
+            toValue: 1,
+            duration: 1500,
+            useNativeDriver: false, // Für opacity changes
+          }),
+          Animated.timing(shimmerAnim, {
+            toValue: 0,
+            duration: 1500,
+            useNativeDriver: false,
+          }),
+        ])
+      ).start();
+    }
+  }, [isShimmering, shimmerAnim]);
+
+  const animatedStyle = isShimmering 
+    ? {
+        opacity: shimmerAnim.interpolate({
+          inputRange: [0, 0.5, 1],
+          outputRange: [0.6, 1, 0.6], // Deutlicherer Kontrast
+        }),
+        transform: [{
+          scale: shimmerAnim.interpolate({
+            inputRange: [0, 0.5, 1],
+            outputRange: [1, 1.02, 1], // Leichte Größenänderung
+          })
+        }]
+      }
+    : {};
+
+  return (
+    <Animated.View style={animatedStyle}>
+      {children}
+    </Animated.View>
+  );
+};
 
 export default function AchievementsScreen() {
   const colorScheme = useColorScheme();
@@ -158,7 +206,8 @@ export default function AchievementsScreen() {
     ...level,
     isActive: level.id === currentLevel,
     isUnlocked: level.id <= currentLevel || 
-                (currentSavings >= level.savingsRequired && currentPoints >= level.pointsRequired)
+                (currentSavings >= level.savingsRequired && currentPoints >= level.pointsRequired),
+    hasNewCategory: [4, 6, 8, 10].includes(level.id) // Kategorie-Level hervorheben
   }));
   
   // Helper function to get color based on points
@@ -412,38 +461,87 @@ export default function AchievementsScreen() {
             style={[
               styles.levelListCard,
               { backgroundColor: colors.cardBackground },
-              level.isActive && { borderColor: level.color, borderWidth: 2 }
+              level.isActive && { borderColor: level.color, borderWidth: 2 },
+              level.isUnlocked && !level.isActive && { 
+                borderColor: colors.success + '40', 
+                borderWidth: 1,
+                backgroundColor: colors.success + '08'
+              },
+              !level.isUnlocked && level.hasNewCategory && {
+                opacity: 0.95 // Besserer Kontrast für goldene Level
+              },
+              !level.isUnlocked && !level.hasNewCategory && { opacity: 0.75 } // Besserer Kontrast
             ]}
           >
             <View style={styles.levelListContent}>
-              <View style={[styles.levelListIcon, { backgroundColor: level.color }]}>
+              <View style={[
+                styles.levelListIcon, 
+                { 
+                  backgroundColor: level.isUnlocked ? level.color : colors.border,
+                  opacity: level.isUnlocked ? 1 : 0.5
+                }
+              ]}>
                 <IconSymbol 
                   name={level.icon as any} 
                   size={20} 
-                  color={level.isActive ? 'white' : colors.icon} 
+                  color={level.isUnlocked ? 'white' : colors.icon} 
                 />
               </View>
               
               <View style={styles.levelListInfo}>
                 <View style={styles.levelListHeader}>
-                  <ThemedText style={[styles.levelListName, level.isActive && { color: level.color }]}>
+                  <ThemedText style={[
+                    styles.levelListName, 
+                    level.isActive && { color: colors.text, fontFamily: 'Nunito_700Bold' },
+                    level.isUnlocked && !level.isActive && { color: colors.icon, fontFamily: 'Nunito' },
+                    !level.isUnlocked && { opacity: 0.4 } // Besserer Kontrast - GLEICH für alle
+                  ]}>
                     {`Level ${level.id} ${level.name}`}
                   </ThemedText>
                 </View>
-                <ThemedText style={styles.levelListDescription}>
+                <ThemedText style={[
+                  styles.levelListDescription,
+                  level.isUnlocked && !level.isActive && { color: colors.success + 'AA' },
+                  !level.isUnlocked && { opacity: 0.6 } // Besserer Kontrast - GLEICH für alle
+                ]}>
                   {level.description}
                 </ThemedText>
                 <View style={styles.rewardRow}>
-                  <IconSymbol name="gift" size={12} color={level.isActive ? level.color : colors.icon} />
-                  <ThemedText style={[styles.rewardRowText, level.isActive && { color: level.color }]}>
+                  <TextShimmer 
+                    isShimmering={!level.isUnlocked}
+                  >
+                    <View style={styles.rewardContent}>
+                      <IconSymbol 
+                        name="gift" 
+                        size={12} 
+                        color={
+                          level.isActive ? level.color : 
+                          level.isUnlocked ? colors.success :
+                          !level.isUnlocked ? '#FFD54F' : colors.icon
+                        } 
+                      />
+                      <ThemedText style={[
+                        styles.rewardRowText, 
+                        level.isActive && { color: level.color },
+                        level.isUnlocked && !level.isActive && { color: colors.success },
+                        !level.isUnlocked && { 
+                          fontFamily: 'Nunito_700Bold', // Fett für alle gesperrten Level
+                          opacity: 0.9, 
+                          color: colors.text // Dunkler + kontrastreicher
+                        }
+                      ]}>
                     {level.reward}
                   </ThemedText>
+                    </View>
+                  </TextShimmer>
                 </View>
               </View>
               
               <View style={styles.levelStatus}>
                 {level.isActive ? (
                   <IconSymbol name="star.fill" size={24} color={colors.warning} />
+                ) : level.isUnlocked ? (
+                  <IconSymbol name="checkmark.circle.fill" size={24} color={colors.success} />
                 ) : (
                   <IconSymbol name="lock" size={24} color={colors.icon} />
                 )}
@@ -963,6 +1061,11 @@ const styles = StyleSheet.create({
     lineHeight: 14,
   },
   rewardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  rewardContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,

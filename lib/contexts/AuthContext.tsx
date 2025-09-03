@@ -165,6 +165,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         await refreshUserProfile();
         
+        // 📱 App Rating temporär deaktiviert - verursacht App-Freeze  
+        try {
+          console.log('📱 App Rating Login-Tracking DEAKTIVIERT (Freeze-Fix)');
+          // await appRatingService.incrementLoginCount(user.uid);
+        } catch (error) {
+          console.error('❌ App Rating Login-Tracking Fehler:', error);
+        }
+        
         // Achievement-Checks für ALLE User (anonym + registriert)
         try {
           await achievementService.checkDailyStreak(user.uid);
@@ -180,6 +188,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } else {
         setUserProfile(null);
+        
+        // 🚀 AUTO-ANONYMOUS LOGIN: Wenn kein User vorhanden, automatisch anonym anmelden
+        console.log('👤 Kein User gefunden - starte automatische anonyme Anmeldung...');
+        try {
+          await signInAnonymously(auth);
+          console.log('✅ Anonyme Anmeldung erfolgreich');
+          // onAuthStateChanged wird automatisch getriggert, daher kein setLoading(false) hier
+          return; // Wichtig: nicht setLoading(false) aufrufen, da Auth-Zustand sich ändert
+        } catch (error) {
+          console.error('❌ Anonyme Anmeldung fehlgeschlagen:', error);
+          // Fallback: Lade trotzdem die App ohne User
+        }
       }
       
       setLoading(false);

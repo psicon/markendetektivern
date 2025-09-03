@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Dimensions, ImageBackground, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Dimensions, ImageBackground, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function WelcomeScreen() {
@@ -17,14 +17,13 @@ export default function WelcomeScreen() {
   const insets = useSafeAreaInsets();
   const screenHeight = Dimensions.get('window').height;
   const isSmallScreen = screenHeight < 700; // iPhone SE, etc.
-  const { signInAnonymously } = useAuth();
+
   
   // States
   const [imageLoaded, setImageLoaded] = useState(false);
-  const [isAnonymousLoading, setIsAnonymousLoading] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
 
-  const { signInWithGoogle, signInWithApple, isAppleAuthAvailable } = useAuth();
+  const { signInWithGoogle, signInWithApple } = useAuth();
 
   const handleGoogleSignIn = async () => {
     try {
@@ -38,13 +37,6 @@ export default function WelcomeScreen() {
 
   const handleAppleSignIn = async () => {
     try {
-      // Check if Apple Sign-In is available
-      const isAvailable = await isAppleAuthAvailable();
-      if (!isAvailable) {
-        Alert.alert('Nicht verfügbar', 'Apple Sign-In ist auf diesem Gerät nicht verfügbar');
-        return;
-      }
-      
       await signInWithApple();
       router.replace('/(tabs)');
     } catch (error: any) {
@@ -62,20 +54,7 @@ export default function WelcomeScreen() {
     }).start();
   };
 
-  const handleAnonymousSignIn = async () => {
-    try {
-      setIsAnonymousLoading(true);
-      await signInAnonymously();
-      console.log('🔒 Anonymer Login erfolgreich');
-      router.replace('/(tabs)');
-    } catch (error) {
-      console.error('Fehler beim anonymen Login:', error);
-      // Fallback: Gehe trotzdem zur App
-      router.replace('/(tabs)');
-    } finally {
-      setIsAnonymousLoading(false);
-    }
-  };
+
 
   return (
     <View style={styles.container}>
@@ -185,21 +164,7 @@ export default function WelcomeScreen() {
               <ThemedText style={styles.secondaryButtonText}>Bereits angemeldet: Login</ThemedText>
             </TouchableOpacity>
 
-            {/* Anonymous Button */}
-            <TouchableOpacity 
-              style={[styles.secondaryButton, isSmallScreen && styles.secondaryButtonSmall]} 
-              onPress={handleAnonymousSignIn}
-              disabled={isAnonymousLoading}
-            >
-              {isAnonymousLoading ? (
-                <ActivityIndicator size="small" color="rgba(255,255,255,0.9)" />
-              ) : (
-                <>
-                  <IconSymbol name="arrow.right" size={18} color="rgba(255,255,255,0.8)" />
-                  <ThemedText style={styles.secondaryButtonText}>App ohne Account nutzen</ThemedText>
-                </>
-              )}
-            </TouchableOpacity>
+
 
             <ThemedText style={styles.termsText}>
               Ich akzeptiere: <ThemedText style={[styles.termsLink, { color: colors.primary }]}>AGB + Datenschutz</ThemedText>

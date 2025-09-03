@@ -10,6 +10,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useTheme } from '@/lib/contexts/ThemeContext';
 import achievementService from '@/lib/services/achievementService';
+import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { FirestoreService } from '@/lib/services/firestore';
 import { showBulkConvertSuccessToast, showBulkPurchasedToast, showConvertSuccessToast, showInfoToast, showPurchasedToast } from '@/lib/services/ui/toast';
 import { updateUserStats } from '@/lib/services/userProfile';
@@ -42,23 +43,61 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const { width } = Dimensions.get('window');
 
-// Shopping List Skeleton Loader Component
+// Einfacher Shopping List Skeleton
 const ShoppingListSkeleton = () => {
   const { theme } = useTheme();
   const colors = Colors[theme ?? 'light'];
 
-  const SkeletonItem = () => (
-    <View style={[styles.productCard, { backgroundColor: colors.cardBackground }]}>
-      <ShimmerSkeleton width="100%" height={80} borderRadius={12} />
-    </View>
-  );
-
   return (
-    <View style={styles.productContainer}>
-      <SkeletonItem />
-      <SkeletonItem />
-      <SkeletonItem />
-    </View>
+ 
+      
+        <View style={styles.productContainer}>
+          <View  style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 12 }]}>
+            <ShimmerSkeleton width={60} height={60} borderRadius={8}  style={{ marginLeft: 12 , marginTop: 12, marginRight: 12, marginBottom: 12 } } />
+
+            <View style={{ alignItems: 'center', width: 80 }}>
+               
+            </View>
+          </View>
+          <View  style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 12 }]}>
+            <ShimmerSkeleton width={60} height={60} borderRadius={8}  style={{ marginLeft: 12 , marginTop: 12, marginRight: 12, marginBottom: 12 } } />
+
+            <View style={{ alignItems: 'center', width: 80 }}>
+               
+            </View>
+          </View>
+          <View  style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 12 }]}>
+            <ShimmerSkeleton width={60} height={60} borderRadius={8}  style={{ marginLeft: 12 , marginTop: 12, marginRight: 12, marginBottom: 12 } } />
+
+            <View style={{ alignItems: 'center', width: 80 }}>
+               
+            </View>
+          </View>
+          <View  style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 12 }]}>
+            <ShimmerSkeleton width={60} height={60} borderRadius={8}  style={{ marginLeft: 12 , marginTop: 12, marginRight: 12, marginBottom: 12 } } />
+
+            <View style={{ alignItems: 'center', width: 80 }}>
+               
+            </View>
+          </View>
+             <View  style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 12 }]}>
+            <ShimmerSkeleton width={60} height={60} borderRadius={8}  style={{ marginLeft: 12 , marginTop: 12, marginRight: 12, marginBottom: 12 } } />
+
+            <View style={{ alignItems: 'center', width: 80 }}>
+               
+            </View>
+          </View>
+          <View  style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 12 }]}>
+            <ShimmerSkeleton width={60} height={60} borderRadius={8}  style={{ marginLeft: 12 , marginTop: 12, marginRight: 12, marginBottom: 12 } } />
+
+            <View style={{ alignItems: 'center', width: 80 }}>
+               
+            </View>
+          </View>
+          </View>
+        
+      
+
   );
 };
 
@@ -733,24 +772,38 @@ export default function ShoppingListScreen() {
       
       // Fallback: Lade alle Kategorien aus Firestore wenn keine in Produkten gefunden
       if (categoriesArray.length === 0) {
-
         try {
-          const allCategories = await FirestoreService.getAllKategorien();
-
-          setAvailableCategories(allCategories);
+          // User Level für Kategorie-Zugriff
+          const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
+          const categoriesWithAccess = await categoryAccessService.getAllCategoriesWithAccess(userLevel);
+          
+          // Zeige nur verfügbare Kategorien
+          const availableCategories = categoriesWithAccess.filter(cat => !cat.isLocked);
+          setAvailableCategories(availableCategories);
         } catch (error) {
           console.error('Error loading categories from Firestore:', error);
           setAvailableCategories([]);
         }
       } else {
-        setAvailableCategories(categoriesArray);
+        // Filtere gefundene Kategorien basierend auf User-Level
+        const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
+        const filteredCategories = [];
+        
+        for (const cat of categoriesArray) {
+          const isAvailable = await categoryAccessService.isCategoryAvailable(cat.id, userLevel);
+          if (isAvailable) {
+            filteredCategories.push(cat);
+          }
+        }
+        
+        setAvailableCategories(filteredCategories);
       }
       
       setAvailableMarkets(marketsArray);
     } catch (error) {
       console.error('Error loading filter options:', error);
     }
-  }, [brandProducts, noNameProducts]);
+  }, [brandProducts, noNameProducts, userProfile]);
   
   // Apply filters and sorting
   const applyFiltersAndSorting = useCallback((products: any[]) => {
@@ -1058,27 +1111,16 @@ export default function ShoppingListScreen() {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
         {/* Simple Header */}
-        <View style={[styles.header, { backgroundColor: colors.primary }]}>
+        <View style={{ backgroundColor: colors.warning }}>
           <View style={styles.headerContent}>
-            <ShimmerSkeleton width={150} height={24} borderRadius={4} />
+            <ShimmerSkeleton width={150} height={44} borderRadius={0}  />
         </View>
         </View>
         
         {/* Simple Summary */}
-        <View style={[styles.summaryContainer, { backgroundColor: colors.cardBackground }]}>
-          <ShimmerSkeleton width="100%" height={60} borderRadius={8} />
-        </View>
-
-        {/* Simple Tabs */}
-        <View style={styles.tabContainer}>
-          <ShimmerSkeleton width="100%" height={50} borderRadius={25} />
-      </View>
-
-        {/* Simple Content */}
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-          <ShoppingListSkeleton />
-        </ScrollView>
-      </SafeAreaView>
+     
+ <ShoppingListSkeleton /> 
+       </SafeAreaView>
     );
   }
 
@@ -1138,22 +1180,26 @@ export default function ShoppingListScreen() {
                 </View>
                 {activeTab === 'brand' && (
                   <Text style={styles.summarySubtitle}>
-                    Mit NoName-Produkten
+                    Mit NoName-Alternativen
+                  </Text>
+                )}{activeTab === 'noname' && (
+                  <Text style={styles.summarySubtitle}>
+                    Durch gewählte NoName-Produkte
                   </Text>
                 )}
         </TouchableOpacity>
               <View style={styles.summaryRight}>
                 <View style={styles.savingsContainer}>
-                  <IconSymbol name="leaf.fill" size={16} color="white" style={styles.savingsIcon} />
+                  <IconSymbol name="tag.fill" size={16} color="white" style={styles.savingsIcon} />
                   <Text style={styles.summaryAmount}>
-                    €{activeTab === 'brand' ? totalPotentialSavings.toFixed(2) : totalActualSavings.toFixed(2)}
+                    -€{activeTab === 'brand' ? totalPotentialSavings.toFixed(2) : totalActualSavings.toFixed(2)}
                   </Text>
                 </View>
               </View>
             </View>
           </LinearGradient>
-      )}
-    </View>
+          )}
+        </View>
 
         <PagerView 
           ref={pagerRef}
@@ -1186,7 +1232,7 @@ export default function ShoppingListScreen() {
                 <Text style={[styles.emptySubtext, { color: colors.icon }]}>
                   Füge Produkte über den Barcode-Scanner oder die Produktsuche hinzu
                 </Text>
-              </View>
+        </View>
             ) : (
               <View style={styles.productContainer}>
                 {applyFiltersAndSorting(brandProducts).map((item) => {
@@ -1257,7 +1303,7 @@ export default function ShoppingListScreen() {
                               <Text style={[styles.brandName, { color: colors.primary }]} numberOfLines={1}>
                                 {item.product.hersteller.name}
                               </Text>
-                            </View>
+      </View>
                           )}
                           
                           <Text style={[styles.productName, { color: colors.text }]} numberOfLines={2}>
@@ -1287,7 +1333,7 @@ export default function ShoppingListScreen() {
                                 color={colors.icon} 
                               />
         </TouchableOpacity>
-                          )}
+      )}
         <TouchableOpacity
           style={[
                               styles.actionButton, 
@@ -1316,7 +1362,7 @@ export default function ShoppingListScreen() {
                               <IconSymbol name="trash" size={20} color="white" />
                             )}
         </TouchableOpacity>
-      </View>
+    </View>
                       </TouchableOpacity>
                       
                       {/* NoName Alternatives */}
@@ -1332,9 +1378,9 @@ export default function ShoppingListScreen() {
                               alt.packSize,
                               item.product.preis,
                               item.product.packSize
-                            );
-                            
-                            return (
+  );
+
+  return (
         <TouchableOpacity
                                 key={alt.id}
           style={[
@@ -1389,7 +1435,7 @@ export default function ShoppingListScreen() {
           </View>
                                 {isSelected ? (
         <TouchableOpacity
-                                    style={[
+          style={[
                                       styles.convertSingleButton, 
                                       { 
                                         backgroundColor: colors.primary, 
@@ -1496,8 +1542,8 @@ export default function ShoppingListScreen() {
                                 <Text style={[styles.marketName, { color: colors.icon }]} numberOfLines={1}>
                                   {item.markt.name} {item.markt.land === 'Deutschland' ? '🇩🇪' : item.markt.land === 'Schweiz' ? '🇨🇭' : item.markt.land === 'Österreich' ? '🇦🇹' : ''}
                                 </Text>
-                              </View>
-                            )}
+        </View>
+      )}
 
                             {/* Freitext Hinweis */}
                             <Text style={[styles.customItemHint, { color: colors.icon }]}>

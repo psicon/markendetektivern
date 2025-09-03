@@ -2,16 +2,19 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
+import { LockedCategoryModal } from '@/components/ui/LockedCategoryModal';
 import { ListItemSkeleton, LoadingFooterSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAuth } from '@/lib/contexts/AuthContext';
+import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { FirestoreService } from '@/lib/services/firestore';
 import { Discounter, FirestoreDocument, Handelsmarken, Kategorien, Produkte } from '@/lib/types/firestore';
 import { router, useLocalSearchParams } from 'expo-router';
 import type { SymbolViewProps } from 'expo-symbols';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Dimensions, FlatList, Modal, PanResponder, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Dimensions, FlatList, Modal, PanResponder, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -19,9 +22,10 @@ export default function ExploreScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const params = useLocalSearchParams();
+  const { userProfile } = useAuth();
   const [activeTab, setActiveTab] = useState('märkte');
   
-  // Animation für Swipe-Navigation
+  // 🎯 OPTIMIERTE Animation für Swipe-Navigation
   const translateX = useRef(new Animated.Value(0)).current;
   const isAnimating = useRef(false);
   
@@ -37,6 +41,12 @@ export default function ExploreScreen() {
   
   // Failed images state (für alle Tabs)
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
+  
+  // Locked Category Modal State
+  const [lockedCategoryModal, setLockedCategoryModal] = useState<{
+    visible: boolean;
+    category: FirestoreDocument<Kategorien> | null;
+  }>({ visible: false, category: null });
   
   // Animation für sanftes Einblenden der Produktzahlen
   const [countOpacities, setCountOpacities] = useState<{[key: string]: Animated.Value}>({});
@@ -251,6 +261,40 @@ export default function ExploreScreen() {
       stufeFilters: []
     });
   };
+  
+  // Automatisch verfügbare Kategorien als Filter hinzufügen
+  const getAvailableCategoriesFilter = () => {
+    const availableCategories = kategorien.filter(k => !k.isLocked);
+    return availableCategories.map(k => k.id);
+  };
+  
+  // Synchrone Filter-Validation (keine async Calls)  
+  const validateFiltersSync = (filters: any) => {
+    // IMMER auf verfügbare Kategorien beschränken
+    const availableCategoryIds = getAvailableCategoriesFilter();
+    
+    let finalCategoryFilters = availableCategoryIds;
+    
+    // Wenn explizite Filter gesetzt: Intersection mit verfügbaren
+    if (filters.categoryFilters && filters.categoryFilters.length > 0) {
+      finalCategoryFilters = filters.categoryFilters.filter((categoryId: string) => {
+        const isValid = availableCategoryIds.includes(categoryId);
+        if (!isValid) {
+          console.warn(`🔒 Kategorie ${categoryId} ist gesperrt - aus Filter entfernt`);
+        }
+        return isValid;
+      });
+      console.log(`🔍 Explizite Filter: ${filters.categoryFilters.length} → ${finalCategoryFilters.length} verfügbar`);
+    } else {
+      console.log(`🔍 Keine expliziten Filter → Verwende alle ${finalCategoryFilters.length} verfügbaren Kategorien`);
+    }
+    
+    return {
+      ...filters,
+      categoryFilters: finalCategoryFilters, // Immer nur verfügbare Kategorien
+      sortBy: filters.sortBy || 'name' // Sortierung beibehalten
+    };
+  };
 
   // Helper functions for Markenprodukte filters
   const toggleMarkenproduktCategoryFilter = (categoryId: string) => {
@@ -323,6 +367,7 @@ export default function ExploreScreen() {
   // Swipe Navigation Logic - KORREKTE Reihenfolge wie in UI
   const tabOrder = ['märkte', 'kategorien', 'markenprodukte', 'nonames'];
   
+  // 🎯 OPTIMIERTE Tab-Wechsel Animation (smoother Timing)
   const switchToTab = (newTab: string) => {
     if (isAnimating.current || newTab === activeTab) return;
     
@@ -332,10 +377,11 @@ export default function ExploreScreen() {
     
     isAnimating.current = true;
     
-    // Slide-out Animation
+    // 🚀 VERBESSERTE Animation-Parameter:
+    // Slide-out Animation (schneller)
     Animated.timing(translateX, {
       toValue: direction * screenWidth,
-      duration: 200,
+      duration: 150, // 200→150: snappier
       useNativeDriver: true,
     }).start(() => {
       // Tab wechseln
@@ -344,10 +390,10 @@ export default function ExploreScreen() {
       // Von der anderen Seite einsliden
       translateX.setValue(-direction * screenWidth);
       
-      // Slide-in Animation
+      // Slide-in Animation (schneller)
       Animated.timing(translateX, {
         toValue: 0,
-        duration: 200,
+        duration: 150, // 200→150: snappier
         useNativeDriver: true,
       }).start(() => {
         isAnimating.current = false;
@@ -355,54 +401,50 @@ export default function ExploreScreen() {
     });
   };
   
+  // 🎯 OPTIMIERTER PanResponder (kleine Performance-Verbesserung)
   const panResponder = PanResponder.create({
     onMoveShouldSetPanResponder: (evt, gestureState) => {
-      return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > 10;
-    },
-    
-    onPanResponderGrant: () => {
-      if (isAnimating.current) return;
+      return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > 8; // 10→8: responsiver
     },
     
     onPanResponderMove: (evt, gestureState) => {
-      if (isAnimating.current) return;
-      
-      // Live-Feedback während des Swipes
-      const maxTranslation = screenWidth * 0.3; // Maximal 30% der Bildschirmbreite
+      // Live-Feedback während des Swipes - weniger Resistance
+      const maxTranslation = screenWidth * 0.2; // 30%→20%: weniger Widerstand
       let translation = Math.max(-maxTranslation, Math.min(maxTranslation, gestureState.dx));
       
       translateX.setValue(translation);
     },
     
     onPanResponderRelease: (evt, gestureState) => {
-      if (isAnimating.current) return;
-      
       const currentIndex = tabOrder.indexOf(activeTab);
-      const threshold = screenWidth * 0.25; // 25% der Bildschirmbreite
+      const threshold = screenWidth * 0.15; // 25%→15%: einfacher zu triggern
       
       if (Math.abs(gestureState.dx) > threshold) {
         let nextIndex;
         
         if (gestureState.dx < 0) {
-          // Swipe nach LINKS = NÄCHSTER Tab (Index +1)
-          nextIndex = (currentIndex + 1) % tabOrder.length; // Zirkulär: nach letztem kommt erster
+          // Swipe nach LINKS = NÄCHSTER Tab
+          nextIndex = (currentIndex + 1) % tabOrder.length;
         } else {
-          // Swipe nach RECHTS = VORHERIGER Tab (Index -1)  
-          nextIndex = (currentIndex - 1 + tabOrder.length) % tabOrder.length; // Zirkulär: vor erstem kommt letzter
+          // Swipe nach RECHTS = VORHERIGER Tab  
+          nextIndex = (currentIndex - 1 + tabOrder.length) % tabOrder.length;
         }
         
-        console.log(`🔄 Swipe: ${activeTab} (${currentIndex}) → ${tabOrder[nextIndex]} (${nextIndex})`);
         switchToTab(tabOrder[nextIndex]);
         return;
       }
       
-      // Zurück zur ursprünglichen Position
+      // Zurück zur ursprünglichen Position - schnellere Animation
       Animated.spring(translateX, {
         toValue: 0,
         useNativeDriver: true,
+        tension: 120, // Höher = schnapper
+        friction: 6,  // Niedriger = weniger Dampfing
       }).start();
     },
   });
+
+
 
   // Load NoName Products with pagination
   const loadNoNameProducts = async (reset: boolean = false) => {
@@ -414,10 +456,16 @@ export default function ExploreScreen() {
       setNoNameLoading(true);
       setNoNameError(null);
 
+      // Validiere Filter vor der Abfrage (synchron)
+      const validatedFilters = validateFiltersSync({
+        ...noNameFilters,
+        sortBy: 'name' // Explizit nach Namen sortieren
+      });
+      
       const result = await FirestoreService.getNoNameProductsPaginated(
         20, // Page size
         reset ? null : noNameLastDoc,
-        noNameFilters // Filter anwenden
+        validatedFilters // Validierte Filter anwenden
       );
 
       if (reset) {
@@ -452,10 +500,16 @@ export default function ExploreScreen() {
       setMarkenproduktLoading(true);
       setMarkenproduktError(null);
 
+      // Validiere Filter vor der Abfrage (synchron)
+      const validatedFilters = validateFiltersSync({
+        ...markenproduktFilters,
+        sortBy: 'name' // Explizit nach Namen sortieren
+      });
+      
       const result = await FirestoreService.getMarkenproduktePaginated(
         20, // Page size
         reset ? null : markenproduktLastDoc,
-        markenproduktFilters // Filter anwenden
+        validatedFilters // Validierte Filter anwenden
       );
 
       if (reset) {
@@ -569,22 +623,22 @@ export default function ExploreScreen() {
       try {
         setCategoriesLoading(true);
         
-        // Lade Kategorien SOFORT - ohne Produktzählung
-        const categoriesData = await FirestoreService.getKategorien();
-
+        // User Level für Kategorie-Zugriff
+        const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
         
-        // Sortiere Kategorien alphabetisch nach Bezeichnung
-        const sortedCategories = categoriesData.sort((a, b) => 
-          a.bezeichnung.localeCompare(b.bezeichnung, 'de')
-        );
-        setCategoriesData(sortedCategories);
+        // Lade Kategorien mit Access-Information
+        const categoriesWithAccess = await categoryAccessService.getAllCategoriesWithAccess(userLevel);
+        
+        // Zeige ALLE Kategorien, auch gesperrte (wie auf Startseite)
+        setCategoriesData(categoriesWithAccess);
         setCategoriesLoading(false); // ✅ Kategorien sofort anzeigen!
         
         // Lade Produktanzahl im Hintergrund (nicht blockierend)
 
         
         // Lade jeden Count individuell und update sofort (nicht blockierend)
-        sortedCategories.forEach(async (category, index) => {
+        // Für ALLE Kategorien (auch gesperrte) um Wert zu zeigen
+        categoriesWithAccess.forEach(async (category, index) => {
           try {
             // Kleine Verzögerung zwischen Requests für bessere Performance
             setTimeout(async () => {
@@ -626,7 +680,7 @@ export default function ExploreScreen() {
 
     loadMarkets();
     loadCategories();
-  }, []);
+  }, [userProfile]); // Reload wenn sich User-Level ändert
 
 
 
@@ -639,44 +693,70 @@ export default function ExploreScreen() {
     if (params.categoryFilter && params.categoryName) {
       console.log(`🔗 Processing URL params - Category: ${params.categoryName}, Filter: ${params.categoryFilter}`);
       
-      // Set category filter for NoName products
-      const newFilters = {
-        discounterFilters: [],
-        categoryFilters: [params.categoryFilter as string],
-        stufeFilters: [],
-        priceRange: [0, 100]
-      };
-      setNoNameFilters(newFilters);
-      
-      // Reset and load NoName products with category filter
-      setNoNameProducts([]);
-      setNoNameLastDoc(null);
-      setNoNameHasMore(true);
-      setNoNameError(null);
-      
-      // Load products immediately without setTimeout
-      const loadFilteredProducts = async () => {
-        try {
-          setNoNameLoading(true);
-
-          const result = await FirestoreService.getNoNameProductsPaginated(
-            20,
-            null,
-            newFilters
+      // Prüfe ob Kategorie verfügbar ist
+      const checkCategoryAccess = async () => {
+        const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
+        const isAvailable = await categoryAccessService.isCategoryAvailable(params.categoryFilter as string, userLevel);
+        
+        if (!isAvailable) {
+          // Kategorie ist gesperrt - zeige Hinweis und navigiere zurück
+          Alert.alert(
+            'Kategorie gesperrt 🔒',
+            `Die Kategorie "${params.categoryName}" ist noch nicht verfügbar. Du musst ein höheres Level erreichen.`,
+            [
+              { text: 'OK', onPress: () => router.back() }
+            ]
           );
-          setNoNameProducts(result.products);
-          setNoNameLastDoc(result.lastDoc);
-          setNoNameHasMore(result.hasMore);
-
-        } catch (error) {
-          console.error('Error loading filtered products:', error);
-          setNoNameError('Fehler beim Laden der Produkte');
-        } finally {
-          setNoNameLoading(false);
+          return;
         }
+        
+        // Kategorie ist verfügbar - setze Filter
+        const newFilters = {
+          discounterFilters: [],
+          categoryFilters: [params.categoryFilter as string],
+          stufeFilters: [],
+          priceRange: [0, 100]
+        };
+        setNoNameFilters(newFilters);
+        
+        // Reset and load NoName products with category filter
+        setNoNameProducts([]);
+        setNoNameLastDoc(null);
+        setNoNameHasMore(true);
+        setNoNameError(null);
+        
+        // Load products immediately without setTimeout
+        const loadFilteredProducts = async () => {
+          try {
+            setNoNameLoading(true);
+
+            // Validiere Filter vor der Abfrage (synchron)
+            const validatedFilters = validateFiltersSync({
+              ...newFilters,
+              sortBy: 'name'
+            });
+            
+            const result = await FirestoreService.getNoNameProductsPaginated(
+              20,
+              null,
+              validatedFilters
+            );
+            setNoNameProducts(result.products);
+            setNoNameLastDoc(result.lastDoc);
+            setNoNameHasMore(result.hasMore);
+
+          } catch (error) {
+            console.error('Error loading filtered products:', error);
+            setNoNameError('Fehler beim Laden der Produkte');
+          } finally {
+            setNoNameLoading(false);
+          }
+        };
+        
+        loadFilteredProducts();
       };
       
-      loadFilteredProducts();
+      checkCategoryAccess();
     }
     
     if (params.markeFilter && params.markeName) {
@@ -700,10 +780,16 @@ export default function ExploreScreen() {
         try {
           setMarkenproduktLoading(true);
 
+          // Validiere Filter vor der Abfrage (synchron)
+          const validatedFilters = validateFiltersSync({
+            ...newFilters,
+            sortBy: 'name'
+          });
+          
           const result = await FirestoreService.getMarkenproduktePaginated(
             20,
             null,
-            newFilters
+            validatedFilters
           );
           setMarkenprodukte(result.products);
           setMarkenproduktLastDoc(result.lastDoc);
@@ -725,11 +811,14 @@ export default function ExploreScreen() {
   useEffect(() => {
     const loadFilterOptions = async () => {
       try {
-        const [kategorienData, markenData] = await Promise.all([
-          FirestoreService.getKategorien(),
+        // User Level für Filter-Kategorien
+        const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
+        
+        const [kategorienWithAccess, markenData] = await Promise.all([
+          categoryAccessService.getAllCategoriesWithAccess(userLevel),
           FirestoreService.getMarken()
         ]);
-        setKategorien(kategorienData);
+        setKategorien(kategorienWithAccess);
         setMarkenData(markenData);
 
       } catch (error) {
@@ -738,21 +827,21 @@ export default function ExploreScreen() {
     };
 
     loadFilterOptions();
-  }, []);
+  }, [userProfile]); // Reload wenn sich User-Level ändert
 
   // Load NoName Products when tab becomes active or filters change
   useEffect(() => {
-    if (activeTab === 'nonames') {
+    if (activeTab === 'nonames' && kategorien.length > 0) { // Warte auf Kategorien
       loadNoNameProducts(true);
     }
-  }, [activeTab, noNameFilters]);
+  }, [activeTab, noNameFilters, kategorien]);
 
   // Load Markenprodukte when tab becomes active or filters change
   useEffect(() => {
-    if (activeTab === 'markenprodukte') {
+    if (activeTab === 'markenprodukte' && kategorien.length > 0) { // Warte auf Kategorien
       loadMarkenprodukte(true);
     }
-  }, [activeTab, markenproduktFilters]);
+  }, [activeTab, markenproduktFilters, kategorien]);
 
   // Static tab titles without counts
   const getTabTitle = (tabId: string) => {
@@ -837,9 +926,22 @@ export default function ExploreScreen() {
                       styles.marketListItem,
                       index === 0 && styles.firstMarketItem,
                       index === categoriesData.length - 1 && styles.lastMarketItem,
-                      { borderBottomColor: colors.border }
+                      index < categoriesData.length - 1 && { 
+                        borderBottomColor: colors.border, 
+                        borderBottomWidth: 0.5 
+                      },
+                      category.isLocked && { opacity: 0.6 } // Ausgegraut für gesperrte
                     ]}
                     onPress={() => {
+                      if (category.isLocked) {
+                        // Zeige gesperrte Kategorie Modal
+                        setLockedCategoryModal({
+                          visible: true,
+                          category: category
+                        });
+                        return;
+                      }
+                      
                       // Switch to NoName tab with category filter
                       setActiveTab('nonames');
                       
@@ -857,10 +959,16 @@ export default function ExploreScreen() {
                       setTimeout(async () => {
                         try {
                           setNoNameLoading(true);
+                          // Validiere Filter vor der Abfrage (synchron)
+                          const validatedFilters = validateFiltersSync({
+                            ...newFilters,
+                            sortBy: 'name'
+                          });
+                          
                           const result = await FirestoreService.getNoNameProductsPaginated(
                             20,
                             null,
-                            newFilters
+                            validatedFilters
                           );
                           setNoNameProducts(result.products);
                           setNoNameLastDoc(result.lastDoc);
@@ -879,7 +987,10 @@ export default function ExploreScreen() {
                       {category.bild && category.bild.trim() !== '' && !failedImages.has(category.id) ? (
                         <ImageWithShimmer
                           source={{ uri: category.bild }}
-                          style={styles.marketImage}
+                          style={[
+                            styles.marketImage,
+                            category.isLocked && styles.marketImageLocked
+                          ]}
                           fallbackIcon={getCategoryIcon(category.bezeichnung.toLowerCase())}
                           fallbackIconSize={24}
                           resizeMode="contain"
@@ -892,16 +1003,30 @@ export default function ExploreScreen() {
                         <IconSymbol 
                           name={getCategoryIcon(category.bezeichnung.toLowerCase())} 
                           size={24} 
-                          color={colors.primary} 
+                          color={category.isLocked ? colors.icon : colors.primary}
                         />
+                      )}
+                      {category.isLocked && (
+                        <View style={styles.marketLockBadge}>
+                          <IconSymbol name="lock" size={12} color="white" />
+                        </View>
                       )}
                     </View>
                     <View style={styles.marketContent}>
-                      <ThemedText style={[styles.marketTitle, { color: colors.text }]}>
+                      <ThemedText style={[
+                        styles.marketTitle, 
+                        { color: category.isLocked ? colors.icon : colors.text }
+                      ]}>
                         {category.bezeichnung}
                       </ThemedText>
                       <Animated.View style={{ opacity: countOpacities[category.id] || 1 }}>
-                        <ThemedText style={[styles.marketCount, { color: colors.text }]}>
+                        <ThemedText style={[
+                          styles.marketCount, 
+                          { 
+                            color: category.isLocked ? colors.icon : colors.text, 
+                            marginTop: -1
+                          }
+                        ]}>
                           {categoryProductCounts[category.id] !== undefined 
                             ? `${categoryProductCounts[category.id]} Produkte`
                             : '... Produkte'
@@ -968,10 +1093,16 @@ export default function ExploreScreen() {
                       setTimeout(async () => {
                         try {
                           setNoNameLoading(true);
+                          // Validiere Filter vor der Abfrage (synchron)
+                          const validatedFilters = validateFiltersSync({
+                            ...newFilters,
+                            sortBy: 'name'
+                          });
+                          
                           const result = await FirestoreService.getNoNameProductsPaginated(
                             20,
                             null,
-                            newFilters // Verwende die neuen Filter direkt
+                            validatedFilters // Verwende die validierten Filter
                           );
                           setNoNameProducts(result.products);
                           setNoNameLastDoc(result.lastDoc);
@@ -1005,7 +1136,7 @@ export default function ExploreScreen() {
                 <View style={styles.marketContent}>
                   <View style={styles.marketHeader}>
                         <ThemedText style={styles.marketTitle}>
-                          {market.name} - ({market.land})
+                          {market.name}
                         </ThemedText>
                         <ThemedText style={styles.marketFlag}>
                           {getCountryFlag(market.land)}
@@ -1310,15 +1441,15 @@ export default function ExploreScreen() {
         </View>
       </View>
 
-            {/* Content mit Swipe-Gesten */}
+      {/* Content mit optimiertem Swipe-Verhalten */}
       <Animated.View 
         style={[
           { flex: 1, transform: [{ translateX }] }
         ]}
         {...panResponder.panHandlers}
       >
-                                {activeTab === 'nonames' || activeTab === 'markenprodukte' || activeTab === 'marken' ? (
-          // ✅ FlatList direkt ohne ScrollView für Produkt-Listen und Marken - volle Höhe
+        {activeTab === 'nonames' || activeTab === 'markenprodukte' ? (
+          // ✅ FlatList direkt ohne ScrollView für Produkt-Listen - volle Höhe
           renderContent()
         ) : (
           // ScrollView für andere Tabs (märkte, kategorien)
@@ -1327,7 +1458,7 @@ export default function ExploreScreen() {
             showsVerticalScrollIndicator={false}
           >
             {renderContent()}
-        </ScrollView>
+          </ScrollView>
         )}
       </Animated.View>
 
@@ -1444,8 +1575,16 @@ export default function ExploreScreen() {
             {/* Markt Filter - Chips */}
             <View style={styles.filterSection}>
               <ThemedText style={[styles.filterSectionTitle, { color: colors.text }]}>Märkte</ThemedText>
+              {selectedCountry !== 'Alle Länder' && (
+                <View style={[styles.countryHint, { backgroundColor: colors.primary + '15' }]}>
+                  <IconSymbol name="info.circle" size={14} color={colors.primary} />
+                  <ThemedText style={[styles.countryHintText, { color: colors.text }]}>
+                    Nur Märkte aus {selectedCountry} (wie im Märkte-Tab gewählt)
+                  </ThemedText>
+                </View>
+              )}
               <View style={styles.chipsContainer}>
-                {discounter.map((market) => (
+                {filteredMarkets.map((market) => (
                   <TouchableOpacity 
                     key={market.id}
                     style={[
@@ -1494,7 +1633,7 @@ export default function ExploreScreen() {
             <View style={styles.filterSection}>
               <ThemedText style={[styles.filterSectionTitle, { color: colors.text }]}>Kategorien</ThemedText>
               <View style={styles.chipsContainer}>
-                {kategorien.map((kategorie) => (
+                                {kategorien.map((kategorie) => (
                   <TouchableOpacity 
                     key={kategorie.id}
                     style={[
@@ -1503,26 +1642,39 @@ export default function ExploreScreen() {
                         backgroundColor: noNameFilters.categoryFilters.includes(kategorie.id) 
                           ? colors.primary 
                           : colors.cardBackground,
-                        borderColor: colors.border
+                        borderColor: colors.border,
+                        opacity: kategorie.isLocked ? 0.4 : 1
                       }
                     ]}
-                    onPress={() => toggleCategoryFilter(kategorie.id)}
+                    onPress={kategorie.isLocked ? undefined : () => toggleCategoryFilter(kategorie.id)}
+                    disabled={kategorie.isLocked}
                   >
                     <IconSymbol 
                       name={getCategoryIcon(kategorie.bezeichnung)} 
                       size={16} 
-                      color={noNameFilters.categoryFilters.includes(kategorie.id) ? 'white' : colors.primary}
+                      color={
+                        noNameFilters.categoryFilters.includes(kategorie.id) 
+                          ? 'white' 
+                          : kategorie.isLocked 
+                            ? colors.icon 
+                            : colors.primary
+                      }
                     />
                     <ThemedText style={[
                       styles.chipText, 
                       { 
-                        color: noNameFilters.categoryFilters.includes(kategorie.id) 
+                        color: noNameFilters.categoryFilters.includes(kategorie.id)
                           ? 'white' 
-                          : colors.text 
+                          : kategorie.isLocked
+                            ? colors.icon
+                            : colors.text 
                       }
                     ]}>
                       {kategorie.bezeichnung}
                     </ThemedText>
+                    {kategorie.isLocked && (
+                      <IconSymbol name="lock" size={12} color={colors.icon} />
+                    )}
                   </TouchableOpacity>
                 ))}
               </View>
@@ -1718,26 +1870,39 @@ export default function ExploreScreen() {
                         backgroundColor: markenproduktFilters.categoryFilters.includes(kategorie.id) 
                           ? colors.primary 
                           : colors.cardBackground,
-                        borderColor: colors.border
+                        borderColor: colors.border,
+                        opacity: kategorie.isLocked ? 0.4 : 1
                       }
                     ]}
-                    onPress={() => toggleMarkenproduktCategoryFilter(kategorie.id)}
+                    onPress={kategorie.isLocked ? undefined : () => toggleMarkenproduktCategoryFilter(kategorie.id)}
+                    disabled={kategorie.isLocked}
                   >
                     <IconSymbol 
                       name={getCategoryIcon(kategorie.bezeichnung)} 
                       size={16} 
-                      color={markenproduktFilters.categoryFilters.includes(kategorie.id) ? 'white' : colors.primary}
+                      color={
+                        markenproduktFilters.categoryFilters.includes(kategorie.id) 
+                          ? 'white' 
+                          : kategorie.isLocked 
+                            ? colors.icon 
+                            : colors.primary
+                      }
                     />
                     <ThemedText style={[
                       styles.chipText, 
                       { 
                         color: markenproduktFilters.categoryFilters.includes(kategorie.id) 
                           ? 'white' 
-                          : colors.text 
+                          : kategorie.isLocked
+                            ? colors.icon
+                            : colors.text 
                       }
                     ]}>
                       {kategorie.bezeichnung}
                     </ThemedText>
+                    {kategorie.isLocked && (
+                      <IconSymbol name="lock" size={12} color={colors.icon} />
+                    )}
       </TouchableOpacity>
                 ))}
               </View>
@@ -1747,6 +1912,22 @@ export default function ExploreScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* Locked Category Modal */}
+      {lockedCategoryModal.category && (
+        <LockedCategoryModal
+          visible={lockedCategoryModal.visible}
+          categoryName={lockedCategoryModal.category.bezeichnung}
+          categoryImage={lockedCategoryModal.category.bild}
+          requiredLevel={lockedCategoryModal.category.requiredLevel || 1}
+          currentLevel={userProfile?.stats?.currentLevel || userProfile?.level || 1}
+          onClose={() => setLockedCategoryModal({ visible: false, category: null })}
+          onNavigateToLevels={() => {
+            setLockedCategoryModal({ visible: false, category: null });
+            router.push('/achievements' as any);
+          }}
+        />
+      )}
 
     </ThemedView>
   );
@@ -1869,6 +2050,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 6,
+    position: 'relative', // Für Lock-Badge Positionierung
   },
   marketEmoji: {
     fontSize: 24,
@@ -1878,6 +2060,20 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 1,
     resizeMode: 'contain',
+  },
+  marketImageLocked: {
+    opacity: 0.5,
+  },
+  marketLockBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   marketContent: {
@@ -2373,10 +2569,31 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     opacity: 0.7,
   },
+  // Country Hint Styles
+  countryHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginHorizontal: 20,
+    marginTop: 4,
+    marginBottom: 8,
+    gap: 6,
+  },
+  countryHintText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+  },
   noResultsText: {
     fontSize: 12,
     fontStyle: 'italic',
     textAlign: 'center',
     paddingVertical: 12,
+  },
+
+  // 🎯 Optimiertes Content-Layout
+  contentContainer: {
+    flex: 1,
   },
 });

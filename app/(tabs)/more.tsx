@@ -5,24 +5,25 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useTheme } from '@/lib/contexts/ThemeContext';
+import { ratingPromptService } from '@/lib/services/ratingPrompt';
 import { useRouter } from 'expo-router';
 // @ts-ignore
 import { LinearGradient } from 'expo-linear-gradient';
 // @ts-ignore
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
-    Linking,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    Share,
-    StatusBar,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View
+  Alert,
+  Linking,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  Share,
+  StatusBar,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { version as packageVersion } from '../../package.json';
 
@@ -56,8 +57,8 @@ export default function MoreScreen() {
   };
 
   const handleShoppingCart = () => {
-    // TODO: Navigate to shopping cart
-    console.log('Navigate to shopping cart');
+    console.log('Navigate to shopping list');
+    router.push('/shopping-list' as any);
   };
 
   const handleFavoriteProducts = () => {
@@ -78,8 +79,8 @@ export default function MoreScreen() {
   };
 
   const handleTipsAndTricks = () => {
-    // TODO: Navigate to tips and tricks page
     console.log('Navigate to tips and tricks');
+    router.push('/tipps-und-tricks' as any);
   };
 
   const handleNews = () => {
@@ -98,10 +99,7 @@ export default function MoreScreen() {
     );
   };
 
-  const handleRateApp = () => {
-    // TODO: Open app store rating
-    Alert.alert('App bewerten', 'Vielen Dank für dein Feedback!');
-  };
+
 
   const handleShareApp = () => {
     Share.share({
@@ -156,9 +154,6 @@ export default function MoreScreen() {
             level={level}
             size="medium"
             showDescription={true}
-            showProgress={false}
-            currentSavings={totalSavings}
-            currentPoints={currentPoints}
           />
         </TouchableOpacity>
 
@@ -317,7 +312,18 @@ export default function MoreScreen() {
             
             <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
             
-            <TouchableOpacity style={styles.menuItem} onPress={handleRateApp}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => {
+              console.log('⭐ App bewerten clicked');
+              // Direkt das Modal zeigen
+              const handler = ratingPromptService['showRatingModal'];
+              if (handler) {
+                console.log('✅ Modal handler found - showing rating modal');
+                handler(true);
+              } else {
+                console.error('❌ No modal handler found!');
+                Alert.alert('Fehler', 'Bewertung konnte nicht geöffnet werden');
+              }
+            }}>
               <IconSymbol name="star" size={24} color={colors.secondary} />
               <Text style={[styles.menuItemText, { color: colors.text }]}>App bewerten</Text>
               <IconSymbol name="chevron.right" size={14} color={colors.icon} />
@@ -531,6 +537,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     fontFamily: 'Nunito_600SemiBold',
+    color: Colors.light.primary,
   },
   premiumCard: {
     borderRadius: 16,

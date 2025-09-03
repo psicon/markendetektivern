@@ -25,7 +25,7 @@ export default function LoginScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const { signIn, signInWithGoogle, signInWithApple, isAppleAuthAvailable } = useAuth();
+  const { signIn, signInWithGoogle, signInWithApple } = useAuth();
   const insets = useSafeAreaInsets();
   const screenHeight = Dimensions.get('window').height;
 
@@ -135,13 +135,6 @@ export default function LoginScreen() {
 
   const handleAppleSignIn = async () => {
     try {
-      // Check if Apple Sign-In is available
-      const isAvailable = await isAppleAuthAvailable();
-      if (!isAvailable) {
-        Alert.alert('Nicht verfügbar', 'Apple Sign-In ist auf diesem Gerät nicht verfügbar');
-        return;
-      }
-      
       setLoading(true);
       await signInWithApple();
       router.replace('/(tabs)');
@@ -179,10 +172,11 @@ export default function LoginScreen() {
       >
         {/* Back Button */}
         <TouchableOpacity 
-          style={styles.backButton}
+          style={styles.backButtonWithText}
           onPress={() => router.back()}
         >
-          <IconSymbol name="chevron.left" size={24} color="white" />
+          <IconSymbol name="chevron.left" size={20} color="white" />
+          <ThemedText style={styles.backButtonText}>Zurück</ThemedText>
         </TouchableOpacity>
 
         {/* Logo */}
@@ -330,6 +324,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
+  },
+  backButtonWithText: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    gap: 6,
+    zIndex: 10,
+  },
+  backButtonText: {
+    fontSize: 16,
+    fontFamily: 'Nunito_500Medium',
+    color: 'white',
   },
   logoContainer: {
     alignItems: 'center',

@@ -12,9 +12,6 @@ interface LevelBadgeProps {
   level: number;
   size?: 'small' | 'medium' | 'large';
   showDescription?: boolean;
-  showProgress?: boolean;
-  currentSavings?: number;
-  currentPoints?: number;
   style?: ViewStyle;
 }
 
@@ -22,9 +19,6 @@ export function LevelBadge({
   level, 
   size = 'medium', 
   showDescription = true,
-  showProgress = false,
-  currentSavings = 0,
-  currentPoints = 0,
   style 
 }: LevelBadgeProps) {
   const colorScheme = useColorScheme();
@@ -82,20 +76,6 @@ export function LevelBadge({
                 height={currentSize.fontSize} 
                 borderRadius={4}
               />
-              {showProgress && (
-                <View style={styles.shimmerProgressContainer}>
-                  <ShimmerSkeleton 
-                    width={120} 
-                    height={8} 
-                    borderRadius={4}
-                  />
-                  <ShimmerSkeleton 
-                    width={60} 
-                    height={currentSize.fontSize - 2} 
-                    borderRadius={4}
-                  />
-                </View>
-              )}
             </View>
           )}
         </View>
@@ -120,31 +100,7 @@ export function LevelBadge({
     }
   };
   
-  // Fortschritt zum nächsten Level berechnen
-  const calculateProgress = () => {
-    if (!nextLevel) return 100;
-    
-    // 🔍 DEBUG: Welches Level wird als nextLevel verwendet?
-    console.log('🔍 LEVEL BADGE DEBUG:', {
-      currentLevel: level,
-      nextLevelId: nextLevel.id,
-      nextLevelName: nextLevel.name,
-      nextLevelPointsRequired: nextLevel.pointsRequired,
-      nextLevelSavingsRequired: nextLevel.savingsRequired,
-      currentPoints,
-      currentSavings
-    });
-    
-    const pointsProgress = (currentPoints / nextLevel.pointsRequired) * 100;
-    
-    // Wenn keine Ersparnis erforderlich, nur Punkte-Progress verwenden
-    if (nextLevel.savingsRequired === 0) {
-      return Math.min(pointsProgress, 100);
-    }
-    
-    const savingsProgress = (currentSavings / nextLevel.savingsRequired) * 100;
-    return Math.min(savingsProgress, pointsProgress, 100);
-  };
+
   
   return (
     <LinearGradient
@@ -176,32 +132,18 @@ export function LevelBadge({
           )}
         </View>
         
+        {/* Chevron Right - Indicates tappable */}
+        <View style={styles.chevronContainer}>
+          <IconSymbol name="chevron.right" size={20} color="rgba(255, 255, 255, 0.7)" />
+        </View>
+        
         {level === 5 && (
           <View style={styles.starBadge}>
             <IconSymbol name="star.fill" size={16} color="#FFD700" />
           </View>
         )}
       </View>
-      
-      {showProgress && nextLevel && (
-        <View style={styles.progressContainer}>
-          <View style={styles.progressBar}>
-            <View 
-              style={[
-                styles.progressFill, 
-                { width: `${calculateProgress()}%` }
-              ]} 
-            />
-          </View>
-          <Text style={styles.progressText}>
-            {nextLevel.savingsRequired > 0 ? (
-              `${currentSavings.toFixed(2)} € / ${nextLevel.savingsRequired} € • ${currentPoints} / ${nextLevel.pointsRequired} Pkt.`
-            ) : (
-              `${currentPoints} / ${nextLevel.pointsRequired} Punkte`
-            )}
-          </Text>
-        </View>
-      )}
+
     </LinearGradient>
   );
 }
@@ -243,6 +185,11 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.8)',
     fontFamily: 'Nunito_400Regular',
   },
+  chevronContainer: {
+    marginLeft: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   starBadge: {
     position: 'absolute',
     top: -5,
@@ -250,27 +197,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderRadius: 12,
     padding: 4,
-  },
-  progressContainer: {
-    marginTop: 12,
-  },
-  progressBar: {
-    height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-    borderRadius: 3,
-  },
-  progressText: {
-    color: 'rgba(255, 255, 255, 0.9)',
-    fontFamily: 'Nunito_400Regular',
-    fontSize: 11,
-    marginTop: 4,
-    textAlign: 'center',
   },
   // Shimmer Loading Styles
   shimmerContainer: {
@@ -281,10 +207,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 8,
     gap: 4,
-  },
-  shimmerProgressContainer: {
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 8,
   },
 });

@@ -94,23 +94,7 @@ export default function RegisterScreen() {
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    try {
-      await signInWithGoogle();
-      router.replace('/(tabs)');
-    } catch (error: any) {
-      Alert.alert('Fehler', 'Google Anmeldung fehlgeschlagen. Bitte versuche es erneut.');
-    }
-  };
 
-  const handleAppleSignIn = async () => {
-    try {
-      await signInWithApple();
-      router.replace('/(tabs)');
-    } catch (error: any) {
-      Alert.alert('Fehler', 'Apple Anmeldung fehlgeschlagen. Bitte versuche es erneut.');
-    }
-  };
 
   const handleRegister = async () => {
     // Reset validation errors
@@ -210,6 +194,32 @@ export default function RegisterScreen() {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    try {
+      setLoading(true);
+      await signInWithGoogle();
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      console.error('Google Sign-In error:', error);
+      Alert.alert('Google Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    try {
+      setLoading(true);
+      await signInWithApple();
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      console.error('Apple Sign-In error:', error);
+      Alert.alert('Apple Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <KeyboardAvoidingView 
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -225,10 +235,11 @@ export default function RegisterScreen() {
         <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
           {canGoBack && (
             <TouchableOpacity 
-              style={styles.backButton}
+              style={styles.backButtonWithText}
               onPress={() => router.back()}
             >
-              <IconSymbol name="chevron.left" size={24} color={colors.text} />
+              <IconSymbol name="chevron.left" size={20} color={colors.text} />
+              <ThemedText style={[styles.backButtonText, { color: colors.text }]}>Zurück</ThemedText>
             </TouchableOpacity>
           )}
         </View>
@@ -239,6 +250,40 @@ export default function RegisterScreen() {
             <ThemedText style={styles.subtitle}>
               und herausfinden, wer dahintersteckt.
             </ThemedText>
+          </View>
+
+          {/* Social Login Buttons First - Best Practice! */}
+          <View style={styles.socialSection}>
+            {Platform.OS === 'ios' && (
+              <TouchableOpacity 
+                style={[styles.socialButton, styles.appleButton]}
+                onPress={handleAppleSignIn}
+                disabled={loading}
+              >
+                <IconSymbol name="apple.logo" size={20} color="white" />
+                <ThemedText style={styles.appleButtonText}>Mit Apple registrieren</ThemedText>
+              </TouchableOpacity>
+            )}
+            
+            {Platform.OS === 'android' && (
+              <TouchableOpacity 
+                style={[styles.socialButton, styles.googleButton]}
+                onPress={handleGoogleSignIn}
+                disabled={loading}
+              >
+                <View style={styles.googleIconContainer}>
+                  <IconSymbol name="g.circle.fill" size={20} color="#4285f4" />
+                </View>
+                <ThemedText style={styles.googleButtonText}>Mit Google registrieren</ThemedText>
+              </TouchableOpacity>
+            )}
+
+            {/* Or Divider */}
+            <View style={styles.dividerContainer}>
+              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+              <ThemedText style={[styles.dividerText, { color: colors.icon }]}>oder mit E-Mail Adresse registrieren:</ThemedText>
+              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+            </View>
           </View>
 
           {/* Form */}
@@ -604,34 +649,7 @@ export default function RegisterScreen() {
               )}
             </TouchableOpacity>
 
-            {/* Platform-specific Social Login Options */}
-            <View style={styles.socialSection}>
-              <ThemedText style={styles.orText}>Oder direkt mit:</ThemedText>
-              
-              {/* Google Sign-In (nur Android - iOS vorerst deaktiviert) */}
-              {Platform.OS === 'android' && (
-                <TouchableOpacity 
-                  style={styles.socialButton}
-                  onPress={handleGoogleSignIn}
-                >
-                  <View style={styles.googleIconContainer}>
-                    <ThemedText style={styles.googleIcon}>G</ThemedText>
-                  </View>
-                  <ThemedText style={styles.socialButtonText}>Google</ThemedText>
-                </TouchableOpacity>
-              )}
-
-              {/* Apple Sign-In (nur iOS) */}
-              {Platform.OS === 'ios' && (
-                <TouchableOpacity 
-                  style={styles.socialButtonDark}
-                  onPress={handleAppleSignIn}
-                >
-                  <IconSymbol name="apple.logo" size={20} color="white" />
-                  <ThemedText style={styles.socialButtonTextDark}>Apple Account</ThemedText>
-                </TouchableOpacity>
-              )}
-            </View>
+            
             
             {/* Bottom Spacing */}
             <View style={{ height: 40 }} />
@@ -745,6 +763,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginLeft: -10,
   },
+  backButtonWithText: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginLeft: -12,
+    borderRadius: 20,
+    gap: 6,
+  },
+  backButtonText: {
+    fontSize: 16,
+    fontFamily: 'Nunito_500Medium',
+  },
   content: {
     flex: 1,
     paddingHorizontal: 24,
@@ -763,6 +794,64 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_400Regular',
     opacity: 0.7,
     lineHeight: 22,
+  },
+  socialSection: {
+    marginBottom: 30,
+    gap: 16,
+  },
+  socialButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    gap: 12,
+    borderWidth: 1,
+  },
+  appleButton: {
+    backgroundColor: '#000',
+    borderColor: '#000',
+  },
+  appleButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontFamily: 'Nunito_600SemiBold',
+  },
+  googleButton: {
+    backgroundColor: 'white',
+    borderColor: '#dadce0',
+  },
+  googleIconContainer: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  googleButtonText: {
+    color: '#3c4043',
+    fontSize: 16,
+    fontFamily: 'Nunito_600SemiBold',
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 8,
+    gap: 16,
+  },
+  dividerLine: {
+    flex: 1,
+    marginBottom: 20,
+    marginTop: 20,
+    height: 1,
+  },
+  dividerText: {
+    fontSize: 14,
+    fontFamily: 'Nunito_400Regular',
+    marginBottom: 20,
+    marginTop: 20,
   },
   form: {
     gap: 20,

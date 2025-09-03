@@ -32,7 +32,7 @@ const getAchievementLottieSource = (achievement: Achievement) => {
     // Intelligente Zuordnung basierend auf Action-Type (mit vorhandenen Files)
     switch (achievement.trigger.action) {
       case 'first_action_any':
-        return require('@/assets/lottie/firstaction.json');
+        return require('@/assets/lottie/rocket.json');
        
       case 'daily_streak':
         if (achievement.trigger.target >= 7) {
@@ -43,12 +43,33 @@ const getAchievementLottieSource = (achievement: Achievement) => {
         
       // Für alle anderen: Verwende den Fallback (bis spezifische Animationen erstellt sind)
       case 'scan_product':
+        return require('@/assets/lottie/scanner-line.json');  
       case 'view_comparison': 
+        return require('@/assets/lottie/comparison.json');
       case 'complete_shopping':
+        return require('@/assets/lottie/task.json');
       case 'search_product':
+        return require('@/assets/lottie/search.json');
       case 'submit_rating':
+        return require('@/assets/lottie/ratingsthumbsup.json');
+      case 'create_list':
+        return require('@/assets/lottie/task.json');
+      case 'convert_product':
+        return require('@/assets/lottie/swap.json');
+      case 'share_app':
+        return require('@/assets/lottie/review.json');
+      case 'submit_product':
+        return require('@/assets/lottie/favorites.json');
+      case 'save_product':
+        return require('@/assets/lottie/favorites2.json');
+      case 'mission_daily_done':
+        return require('@/assets/lottie/mission-daily.json');
+      case 'mission_weekly_done':
+        return require('@/assets/lottie/mission-weekly.json');
+      case 'savings_total':
+        return require('@/assets/lottie/savings.json');
       default:
-        return require('@/assets/lottie/achievement-unlock.json');
+        return require('@/assets/lottie/confetti.json');
     }
   } catch (error) {
     console.log(`⚠️ Achievement Lottie loading failed for ${achievement.name}:`, error);
@@ -110,14 +131,7 @@ export const AchievementUnlockOverlay: React.FC<AchievementUnlockOverlayProps> =
         confettiRef.current?.start();
       }, 500);
 
-      // Auto-close nur wenn nicht im autoHide Modus (dann übernimmt GamificationProvider die Kontrolle)
-      if (!autoHide) {
-        const timer = setTimeout(() => {
-          handleClose();
-        }, 4000);
-
-        return () => clearTimeout(timer);
-      }
+      // Kein Auto-close mehr - User muss selbst wegklicken
     }
   }, [visible, achievement?.id, autoHide, fadeAnim, scaleAnim, handleClose]);
 
@@ -173,26 +187,15 @@ export const AchievementUnlockOverlay: React.FC<AchievementUnlockOverlayProps> =
               </TouchableOpacity>
             )}
 
-            {/* Achievement Icon */}
-            <View style={styles.achievementBadge}>
-              <View style={styles.iconContainer}>
-                <IconSymbol 
-                  name={achievement.icon as any} 
-                  size={40} 
-                  color="white" 
-                />
-              </View>
-            </View>
-
-            {/* Lottie Animation - Immer anzeigen (intelligente Zuordnung) */}
+            {/* Große responsive Lottie Animation (Icon entfernt) */}
             <View style={styles.lottieContainer}>
               <LottieView
                 source={getAchievementLottieSource(achievement)}
                 autoPlay
-                loop={false}
-                style={styles.lottieAnimation}
+                loop={true}
+                style={styles.lottieAnimationResponsive}
                 onAnimationFinish={() => {
-                  console.log(`✨ Achievement ${achievement.name} Lottie-Animation beendet`);
+                  console.log(`✨ Achievement ${achievement.name} Lottie-Animation wiederholt`);
                 }}
               />
             </View>
@@ -212,12 +215,14 @@ export const AchievementUnlockOverlay: React.FC<AchievementUnlockOverlayProps> =
 
             {/* Action Button - nur wenn NICHT autoHide */}
             {!autoHide && (
-              <TouchableOpacity 
-                style={styles.actionButton}
-                onPress={handleClose}
-              >
-                <Text style={styles.actionButtonText}>Fantastisch!</Text>
-              </TouchableOpacity>
+              <View style={styles.buttonContainer}>
+                <TouchableOpacity 
+                  style={styles.actionButton}
+                  onPress={handleClose}
+                >
+                  <Text style={styles.actionButtonText}>Weiter</Text>
+                </TouchableOpacity>
+              </View>
             )}
 
             {/* Auto-Hide Hinweis */}
@@ -282,14 +287,22 @@ const styles = StyleSheet.create({
   },
   lottieContainer: {
     width: '100%',
-    height: 100,
-    marginVertical: 16,
+    height: Math.min(SCREEN_WIDTH * 0.65, 240) + 20,
+    marginVertical: 20,
     justifyContent: 'center',
     alignItems: 'center',
   },
   lottieAnimation: {
     width: 100,
     height: 100,
+  },
+  lottieAnimationLarge: {
+    width: 150,
+    height: 150,
+  },
+  lottieAnimationResponsive: {
+    width: Math.min(SCREEN_WIDTH * 0.65, 240),
+    height: Math.min(SCREEN_WIDTH * 0.65, 240),
   },
   achievementTitle: {
     fontSize: 16,
@@ -315,7 +328,7 @@ const styles = StyleSheet.create({
   },
   pointsSection: {
     width: '100%',
-    marginBottom: 24,
+    marginBottom: 12,
   },
   pointsBox: {
     flexDirection: 'row',
@@ -333,17 +346,23 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   actionButton: {
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderRadius: 25,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 12,
     paddingVertical: 14,
-    paddingHorizontal: 32,
-    minWidth: 140,
+    alignItems: 'center',
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   actionButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#FFA500',
+    color: 'white',
     textAlign: 'center',
+  },
+  buttonContainer: {
+    width: '100%',
+    gap: 10,
   },
   autoHideHint: {
     backgroundColor: 'rgba(255,255,255,0.1)',

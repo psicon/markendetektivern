@@ -79,6 +79,7 @@ export class FirestoreService {
       priceMin?: number;
       priceMax?: number;
       markeFilter?: string; // hersteller_new ID
+      sortBy?: string; // 'name' | 'created_at' | 'preis'
     }
   ): Promise<{
     products: (FirestoreDocument<Produkte> & {
@@ -94,17 +95,23 @@ export class FirestoreService {
       
       const produkteRef = collection(db, 'produkte');
       
-      // Check if we have any filters that would require composite indexes
-      const hasFilters = (filters?.categoryFilters && filters.categoryFilters.length > 0) || 
-                        (filters?.discounterFilters && filters.discounterFilters.length > 0) || 
-                        (filters?.stufeFilters && filters.stufeFilters.length > 0) || 
-                        filters?.priceMin !== undefined || 
-                        filters?.priceMax !== undefined;
+      // Sortierung standardmäßig nach Name, außer bei Preis-Filtern
+      const sortBy = filters?.sortBy || 'name';
+      const sortDirection = sortBy === 'preis' ? 'asc' : 'asc';
       
-      // Start with base query - only add orderBy if no complex filters
-      let q = hasFilters ? 
-        query(produkteRef) : 
-        query(produkteRef, orderBy('name', 'asc'));
+      // Check if we have complex filters (not just category)
+      const hasComplexFilters = (filters?.discounterFilters && filters.discounterFilters.length > 0) || 
+                               (filters?.stufeFilters && filters.stufeFilters.length > 0) || 
+                               filters?.priceMin !== undefined || 
+                               filters?.priceMax !== undefined;
+      
+      // Sortierung möglich bei category-only Filtern (braucht composite index)
+      const canSort = !hasComplexFilters;
+      
+      // Start with base query
+      let q = canSort ? 
+        query(produkteRef, orderBy(sortBy, sortDirection)) : 
+        query(produkteRef);
 
       // Add filters if provided
       if (filters?.categoryFilters && filters.categoryFilters.length > 0) {
@@ -317,6 +324,7 @@ export class FirestoreService {
       herstellerFilters?: string[]; // hersteller_new IDs
       priceMin?: number;
       priceMax?: number;
+      sortBy?: string; // 'name' | 'created_at' | 'preis'
     }
   ): Promise<{
     products: (FirestoreDocument<any> & {
@@ -331,16 +339,21 @@ export class FirestoreService {
       
       const produkteRef = collection(db, 'markenProdukte');
       
-      // Check if we have any filters that would require composite indexes
-      const hasFilters = (filters?.categoryFilters && filters.categoryFilters.length > 0) || 
-                        (filters?.herstellerFilters && filters.herstellerFilters.length > 0) ||
-                        filters?.priceMin !== undefined || 
-                        filters?.priceMax !== undefined;
+      // Sortierung standardmäßig nach Name
+      const sortBy = filters?.sortBy || 'name';
+      const sortDirection = sortBy === 'preis' ? 'asc' : 'asc';
       
-      // Start with base query - only add orderBy if no complex filters
-      let q = hasFilters ? 
-        query(produkteRef) : 
-        query(produkteRef, orderBy('name', 'asc'));
+      // Check if we have complex filters (preis macht composite indexes schwierig)
+      const hasComplexFilters = filters?.priceMin !== undefined || 
+                               filters?.priceMax !== undefined;
+      
+      // Sortierung möglich bei category/hersteller-only Filtern (braucht composite index)
+      const canSort = !hasComplexFilters;
+      
+      // Start with base query
+      let q = canSort ? 
+        query(produkteRef, orderBy(sortBy, sortDirection)) : 
+        query(produkteRef);
 
       // Add filters if provided
       if (filters?.categoryFilters && filters.categoryFilters.length > 0) {

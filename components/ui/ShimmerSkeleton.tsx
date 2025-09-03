@@ -408,6 +408,7 @@ export function LoadingFooterSkeleton() {
   const colors = Colors[colorScheme ?? 'light'];
   
   return (
+    <View>
     <View style={{
       flexDirection: 'row',
       alignItems: 'center',
@@ -425,6 +426,205 @@ export function LoadingFooterSkeleton() {
         height={16} 
         borderRadius={8}
       />
+    </View>
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 20,
+      gap: 12,
+    }}>
+      <ShimmerSkeleton 
+        width={40} 
+        height={40} 
+        borderRadius={20}
+      />
+      <ShimmerSkeleton 
+        width={150} 
+        height={16} 
+        borderRadius={8}
+      />
+    </View>
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 20,
+      gap: 12,
+    }}>
+      <ShimmerSkeleton 
+        width={40} 
+        height={40} 
+        borderRadius={20}
+      />
+      <ShimmerSkeleton 
+        width={150} 
+        height={16} 
+        borderRadius={8}
+      />
+    </View>
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 20,
+      gap: 12,
+    }}>
+      <ShimmerSkeleton 
+        width={40} 
+        height={40} 
+        borderRadius={20}
+      />
+      <ShimmerSkeleton 
+        width={150} 
+        height={16} 
+        borderRadius={8}
+      />
+    </View>
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 20,
+      gap: 12,
+    }}>
+      <ShimmerSkeleton 
+        width={40} 
+        height={40} 
+        borderRadius={20}
+      />
+      <ShimmerSkeleton 
+        width={150} 
+        height={16} 
+        borderRadius={8}
+      />
+    </View>
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 20,
+      gap: 12,
+    }}>
+      <ShimmerSkeleton 
+        width={40} 
+        height={40} 
+        borderRadius={20}
+      />
+      <ShimmerSkeleton 
+        width={150} 
+        height={16} 
+        borderRadius={8}
+      />
+    </View>
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 20,
+      gap: 12,
+    }}>
+      <ShimmerSkeleton 
+        width={40} 
+        height={40} 
+        borderRadius={20}
+      />
+      <ShimmerSkeleton 
+        width={150} 
+        height={16} 
+        borderRadius={8}
+      />
+    </View>
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 20,
+      gap: 12,
+    }}>
+      <ShimmerSkeleton 
+        width={40} 
+        height={40} 
+        borderRadius={20}
+      />
+      <ShimmerSkeleton 
+        width={150} 
+        height={16} 
+        borderRadius={8}
+      />
+    </View>
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 20,
+      gap: 12,
+    }}>
+      <ShimmerSkeleton 
+        width={40} 
+        height={40} 
+        borderRadius={20}
+      />
+      <ShimmerSkeleton 
+        width={150} 
+        height={16} 
+        borderRadius={8}
+      />
+    </View>
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 20,
+      gap: 12,
+    }}>
+      <ShimmerSkeleton 
+        width={40} 
+        height={40} 
+        borderRadius={20}
+      />
+      <ShimmerSkeleton 
+        width={150} 
+        height={16} 
+        borderRadius={8}
+      />
+    </View>
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 20,
+      gap: 12,
+    }}>
+      <ShimmerSkeleton 
+        width={40} 
+        height={40} 
+        borderRadius={20}
+      />
+      <ShimmerSkeleton 
+        width={150} 
+        height={16} 
+        borderRadius={8}
+      />
+    </View>
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 20,
+      gap: 12,
+    }}>
+      <ShimmerSkeleton 
+        width={40} 
+        height={40} 
+        borderRadius={20}
+      />
+      <ShimmerSkeleton 
+        width={150} 
+        height={16} 
+        borderRadius={8}
+      />
+    </View>
     </View>
   );
 }

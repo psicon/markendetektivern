@@ -26,6 +26,7 @@ import {
     UserAchievementProgress,
     UserStats
 } from '../types/achievements';
+import { categoryAccessService } from './categoryAccessService';
 import { showDailyCapToast, showDedupeWindowToast, showOneTimeRestrictionToast, showWeeklyCapToast } from './ui/antiAbuseToast';
 
 class AchievementService {
@@ -43,7 +44,7 @@ class AchievementService {
   // Static Callbacks für UI-Integration
   static onAchievementUnlock: ((achievement: Achievement) => void) | null = null;
   static onPointsEarned: ((points: number, action: string, message: string) => void) | null = null;
-  static onLevelUp: ((newLevel: number, oldLevel: number) => void) | null = null;
+  static onLevelUp: ((newLevel: number, oldLevel: number, unlockedCategory?: { id: string; name: string; imageUrl: string }) => void) | null = null;
   static onProfileRefreshNeeded: (() => Promise<void>) | null = null;
 
   private constructor() {
@@ -87,7 +88,7 @@ class AchievementService {
     console.log('🔗 Points Earned Handler registriert:', handler ? 'JA' : 'NEIN');
   }
 
-  static setLevelUpHandler(handler: ((newLevel: number, oldLevel: number) => void) | null): void {
+  static setLevelUpHandler(handler: ((newLevel: number, oldLevel: number, unlockedCategory?: { id: string; name: string; imageUrl: string }) => void) | null): void {
     AchievementService.onLevelUp = handler;
     console.log('🔗 Level Up Handler registriert:', handler ? 'JA' : 'NEIN');
   }
@@ -209,6 +210,9 @@ class AchievementService {
       }
 
       this.lastConfigLoad = now;
+      
+      // Erweitere Level-Rewards mit Kategorie-Namen
+      await this.enhanceLevelRewardsWithCategories();
     } catch (error: any) {
       // Detaillierte Error-Analyse
       console.error('❌ Fehler beim Laden der Gamification-Config:', error);
@@ -233,6 +237,35 @@ class AchievementService {
       
       console.error('❌ Kritischer Gamification-Config Fehler');
       throw error;
+    }
+  }
+
+  /**
+   * Erweitert Level-Rewards mit dynamischen Kategorie-Namen
+   */
+  private async enhanceLevelRewardsWithCategories(): Promise<void> {
+    try {
+      // Für jedes Level prüfen ob eine Kategorie freigeschaltet wird
+      for (const level of this.levels) {
+        const unlockedCategory = await categoryAccessService.getCategoryUnlockedAtLevel(level.id);
+        
+        if (unlockedCategory) {
+          // Erweitere den Reward-Text mit dem Kategorie-Namen
+          level.reward = `${unlockedCategory.bezeichnung} freigeschaltet`;
+          
+          // Speichere zusätzliche Infos im Level-Objekt (für LevelUpOverlay)
+          (level as any).unlockedCategory = {
+            id: unlockedCategory.id,
+            name: unlockedCategory.bezeichnung,
+            imageUrl: unlockedCategory.bild
+          };
+          
+          console.log(`📦 Level ${level.id} schaltet "${unlockedCategory.bezeichnung}" frei`);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Fehler beim Erweitern der Level-Rewards:', error);
+      // Nicht kritisch - verwende Standard-Rewards
     }
   }
 
@@ -486,6 +519,9 @@ class AchievementService {
         console.log('✅ Profile refreshed at end of trackAction');
       }
 
+      // 📱 App Rating temporär deaktiviert - verursacht Freeze
+      // appRatingService.checkPendingRating();
+
     } catch (error) {
       console.error('❌ Fehler beim Tracken der Action:', error);
       throw error;
@@ -587,7 +623,7 @@ class AchievementService {
           console.log(`🎉 ECHTER Level-Aufstieg erkannt: ${currentLevel} → ${correctLevel}`);
           
           // 🚀 SOFORT Level-Up UI triggern - OHNE auf DB-Updates zu warten!
-          this.notifyLevelUp(correctLevel, currentLevel);
+          this.notifyLevelUp(correctLevel, currentLevel, userId);
           
           // Profile-Refresh wird zentral in trackAction gemacht
         } else {
@@ -761,15 +797,30 @@ class AchievementService {
   /**
    * Benachrichtigt über Level-Aufstieg
    */
-  private async notifyLevelUp(newLevel: number, oldLevel: number): Promise<void> {
+  private async notifyLevelUp(newLevel: number, oldLevel: number, userId: string): Promise<void> {
     console.log(`🎉 Level-Up Benachrichtigung: Level ${oldLevel} → ${newLevel}`);
+    
+    // Prüfe ob eine Kategorie freigeschaltet wurde
+    let unlockedCategory: { id: string; name: string; imageUrl: string } | undefined;
+    
+    const levelInfo = this.levels.find(l => l.id === newLevel);
+    if (levelInfo && (levelInfo as any).unlockedCategory) {
+      unlockedCategory = (levelInfo as any).unlockedCategory;
+      console.log(`🎁 Kategorie "${unlockedCategory.name}" wird freigeschaltet!`);
+    }
     
     // Trigger Level-Up UI (EIGENER Callback)
     if (AchievementService.onLevelUp) {
-      AchievementService.onLevelUp(newLevel, oldLevel);
+      AchievementService.onLevelUp(newLevel, oldLevel, unlockedCategory);
       console.log('✅ Level-Up UI getriggert');
     } else {
       console.log('⚠️ Kein Level-Up Handler registriert');
+    }
+
+    // 📱 App Rating: Flag wird SPÄTER gesetzt (nach Level-Up Close)
+    if (newLevel >= 3) {
+      console.log(`📱 Level ${newLevel} reached - rating will be triggered AFTER overlay closes`);
+      // Die Flag wird erst vom GamificationProvider gesetzt wenn das Overlay zu ist
     }
   }
   

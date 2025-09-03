@@ -1,13 +1,16 @@
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAuth } from '@/lib/contexts/AuthContext';
 import {
     setAchievementUnlockHandler,
     setLevelUpHandler,
     setPointsEarnedHandler
 } from '@/lib/services/achievementService';
+import { ratingPromptService } from '@/lib/services/ratingPrompt';
 import { showPointsToast, showStreakToast as showStreakToastNew } from '@/lib/services/ui/toast';
 import { Achievement } from '@/lib/types/achievements';
 import React, { useCallback, useEffect, useState } from 'react';
 import { AchievementUnlockOverlay } from './AchievementUnlockOverlay';
+import { AppRatingModal } from './AppRatingModal';
 import { LevelUpOverlay } from './LevelUpOverlay';
 // Alle Toasts laufen über zentrale Toast-Library
 
@@ -19,6 +22,11 @@ interface LevelUpData {
   visible: boolean;
   newLevel: number;
   oldLevel: number;
+  unlockedCategory?: {
+    id: string;
+    name: string;
+    imageUrl: string;
+  };
 }
 
 interface AchievementData {
@@ -35,6 +43,7 @@ interface AchievementData {
  */
 export const GamificationProvider: React.FC<GamificationProviderProps> = ({ children }) => {
   const colorScheme = useColorScheme();
+  const { user } = useAuth();
   // State für verschiedene UI-Overlays
   const [levelUpData, setLevelUpData] = useState<LevelUpData>({
     visible: false,
@@ -53,6 +62,9 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   // Queue für Level-Ups (falls Achievement zuerst angezeigt wird)
   const [pendingLevelUp, setPendingLevelUp] = useState<LevelUpData | null>(null);
 
+  // 📱 App Rating Modal State
+  const [showAppRatingModal, setShowAppRatingModal] = useState(false);
+
   // 🎯 Stabile Callback-Funktionen mit useCallback
   const achievementHandler = useCallback((achievement: Achievement) => {
     console.log('🏆 Achievement Unlock UI triggered:', achievement.name);
@@ -62,24 +74,8 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
       setPendingLevelUp(currentPending => {
         const hasLevelUpPending = currentPending !== null;
         
-        // Wenn Level-Up geplant: Achievement automatisch nach 3 Sekunden schließen
-        if (hasLevelUpPending) {
-          console.log('🎯 Achievement wird automatisch geschlossen - Level-Up folgt');
-          setTimeout(() => {
-            setAchievementData({ visible: false, achievement: null, autoHide: false });
-            
-            // Triggere Level-Up nach Achievement
-            setTimeout(() => {
-              setPendingLevelUp(pending => {
-                if (pending) {
-                  setLevelUpData(pending);
-                  return null;
-                }
-                return pending;
-              });
-            }, 300); // Kurzer Übergang
-          }, 3000);
-        }
+        // Level-Up wird erst nach manuellem Achievement-Close angezeigt
+        // Kein Auto-Close mehr!
         
         return currentPending; // Unchanged
       });
@@ -87,7 +83,7 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
       return {
         visible: true,
         achievement: achievement,
-        autoHide: false  // Wird später per setTimeout gesetzt wenn nötig
+        autoHide: false  // Nie auto-hide - immer manuell
       };
     });
   }, []);
@@ -99,10 +95,13 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     }
   }, [colorScheme]);
 
-  const levelUpHandler = useCallback((newLevel: number, oldLevel: number) => {
+  const levelUpHandler = useCallback((newLevel: number, oldLevel: number, unlockedCategory?: { id: string; name: string; imageUrl: string }) => {
     console.log(`🎯 Level-Up UI triggered: ${oldLevel} → ${newLevel}`);
+    if (unlockedCategory) {
+      console.log(`🎁 Mit freigeschalteter Kategorie: ${unlockedCategory.name}`);
+    }
     
-    const newLevelData = { visible: true, newLevel, oldLevel };
+    const newLevelData = { visible: true, newLevel, oldLevel, unlockedCategory };
     
     // Prüfe ob bereits ein Achievement angezeigt wird - verwende aktuellen State
     setAchievementData(currentAchievement => {
@@ -110,19 +109,10 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         console.log('🏆 Achievement aktiv - Level-Up wird in Queue gestellt');
         setPendingLevelUp(newLevelData);
         
-        // Achievement automatisch schließen nach 3 Sekunden
-        setTimeout(() => {
-          setAchievementData({ visible: false, achievement: null, autoHide: false });
-          
-          // Level-Up anzeigen nach Achievement
-          setTimeout(() => {
-            setLevelUpData(newLevelData);
-            setPendingLevelUp(null);
-          }, 300);
-        }, 3000);
+        // KEIN Auto-Close mehr! User muss Achievement manuell schließen
+        // Level-Up wird erst nach manuellem Achievement-Close gezeigt
         
-        // Achievement auf Auto-Hide setzen
-        return { ...currentAchievement, autoHide: true };
+        return currentAchievement; // Unverändert, kein autoHide
       } else {
         // Kein Achievement aktiv - Level-Up direkt anzeigen
         setLevelUpData(newLevelData);
@@ -143,23 +133,73 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   useEffect(() => {
     registerCallbacks();
     
+    // 📱 App Rating Modal Handler registrieren (neuer Service)
+    console.log('📱 Registriere App Rating Modal Handler...');
+    ratingPromptService.setRatingModalHandler(setShowAppRatingModal);
+    console.log('📱 App Rating Modal Handler registriert!');
+    
     return () => {
       console.log('🎮 Gamification UI-Callbacks deregistriert');
       setAchievementUnlockHandler(null);
       setPointsEarnedHandler(null);
       setLevelUpHandler(null);
+      ratingPromptService.setRatingModalHandler(() => {});
     };
   }, [registerCallbacks]);
 
-
+  // 📱 Periodic check for pending rating - BUT BLOCKED DURING OVERLAYS!
+  useEffect(() => {
+    console.log('📱 Starting periodic rating check interval...');
+    let checkCount = 0;
+    
+    const checkInterval = setInterval(async () => {
+      // 🛡️ CRITICAL: Skip if ANY overlay is active!
+      if (levelUpData.visible || achievementData.visible || showAppRatingModal) {
+        return; // Skip silently - happens often
+      }
+      
+      checkCount++;
+      
+      try {
+        await ratingPromptService.checkAndShowPendingRating();
+      } catch (error) {
+        console.error('❌ Periodic rating check error:', error);
+      }
+    }, 2000); // Check every 2 seconds
+    
+    return () => {
+      console.log('📱 Stopping periodic rating check');
+      clearInterval(checkInterval);
+    };
+  }, [levelUpData.visible, achievementData.visible, showAppRatingModal]);
 
   // Handler für Overlay-Schließungen
-  const handleLevelUpClose = () => {
+  const handleLevelUpClose = async () => {
+    const { newLevel } = levelUpData;
     setLevelUpData(prev => ({ ...prev, visible: false }));
+    
+    // 📱 NOW set rating flag AFTER level-up closes
+    if (newLevel >= 3 && user?.uid) {
+      console.log(`📱 Level-Up closed, NOW setting rating flag for level ${newLevel}`);
+      try {
+        await ratingPromptService.setPendingRating(user.uid, newLevel);
+        console.log(`✅ Rating flag set - will be checked by periodic interval`);
+      } catch (error) {
+        console.error('❌ Error setting rating flag:', error);
+      }
+    }
   };
 
   const handleAchievementClose = () => {
     setAchievementData({ visible: false, achievement: null });
+    
+    // Prüfe ob Level-Up pending ist nach Achievement-Close
+    if (pendingLevelUp) {
+      setTimeout(() => {
+        setLevelUpData(pendingLevelUp);
+        setPendingLevelUp(null);
+      }, 300); // Kurzer Übergang
+    }
   };
 
   // Alte Toast-Handler entfernt - zentrale Library übernimmt
@@ -190,6 +230,7 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         visible={levelUpData.visible}
         newLevel={levelUpData.newLevel}
         oldLevel={levelUpData.oldLevel}
+        unlockedCategory={levelUpData.unlockedCategory}
         onClose={handleLevelUpClose}
       />
 
@@ -199,6 +240,12 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         achievement={achievementData.achievement}
         onClose={handleAchievementClose}
         autoHide={achievementData.autoHide}
+      />
+
+      {/* App Rating Modal - Nach Login/Level-Up */}
+      <AppRatingModal
+        visible={showAppRatingModal}
+        onClose={() => setShowAppRatingModal(false)}
       />
 
       {/* 

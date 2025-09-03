@@ -33,7 +33,7 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>801</string>
+    <string>802</string>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>
@@ -50,13 +50,13 @@
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Diese App benötigt Zugriff auf deinen Standort, um dir lokale Angebote zu zeigen.</string>
     <key>NSLocationAlwaysUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your location</string>
+    <string>$(PRODUCT_NAME) erlauben deinen Standort zu verwenden</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your location</string>
+    <string>$(PRODUCT_NAME) erlauben deinen Standort zu verwenden</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your microphone</string>
+    <string>$(PRODUCT_NAME) erlauben dein Mikrofon zu verwenden</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your photos</string>
+    <string>$(PRODUCT_NAME) Zugriff auf deine Fotos erlauben</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
