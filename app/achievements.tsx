@@ -13,14 +13,14 @@ import { useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
   ActivityIndicator,
-    Animated,
-    Dimensions,
+  Animated,
+  Dimensions,
   Modal,
-    ScrollView,
-    StyleSheet,
+  ScrollView,
+  StyleSheet,
   Text,
   TouchableOpacity,
-    View
+  View
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
