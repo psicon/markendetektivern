@@ -680,7 +680,7 @@ export default function ExploreScreen() {
 
     loadMarkets();
     loadCategories();
-  }, [userProfile]); // Reload wenn sich User-Level ändert
+  }, [userProfile?.stats?.currentLevel, userProfile?.level]); // Nur bei Level-Änderung, nicht bei jedem Profile-Update
 
 
 

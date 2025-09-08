@@ -784,7 +784,7 @@ export class FirestoreService {
   /**
    * Holt Markenprodukt mit allen Details (populated references)
    */
-  static async getMarkenProduktWithDetails(productId: string): Promise<MarkenProduktWithDetails | null> {
+  static async getMarkenProduktWithDetails(productId: string, skipRelatedProducts: boolean = false, skipBrandsQuery: boolean = false): Promise<MarkenProduktWithDetails | null> {
     try {
       const productRef = doc(db, 'markenProdukte', productId);
       const productSnap = await getDoc(productRef);
@@ -803,8 +803,7 @@ export class FirestoreService {
         productData.packTyp ? this.getDocumentByReference<Packungstypen>(productData.packTyp) : Promise.resolve(null)
       ]);
 
-      console.log(`🔍 HerstellerOrMarke für Produkt ${productId}:`, herstellerOrMarke);
-      console.log(`🔍 Hersteller Reference Path:`, productData.hersteller);
+      // Removed verbose logs
 
       // Prüfe ob die hersteller Referenz auf eine Marke oder einen Hersteller zeigt
       let marke: any = null;
@@ -812,20 +811,20 @@ export class FirestoreService {
       let brands: any[] = [];
       
       if (herstellerOrMarke) {
-        console.log(`🔍 Feld "hersteller" zeigt auf: ${herstellerOrMarke.name || herstellerOrMarke.herstellername}`);
+        // Feld zeigt auf: herstellerOrMarke.name || herstellerOrMarke.herstellername
         
         // Prüfe ob es eine Marke ist (hat herstellerref) oder ein Hersteller (hat herstellername)
         if (herstellerOrMarke.herstellerref) {
           // Das ist eine MARKE
           marke = herstellerOrMarke;
           hersteller = await this.getDocumentByReference<any>(marke.herstellerref);
-          brands = await this.getMarkenByHersteller(marke.herstellerref);
-          console.log(`✅ MARKE gefunden: ${marke.name}, Hersteller: ${hersteller?.herstellername}`);
+          brands = skipBrandsQuery ? [] : await this.getMarkenByHersteller(marke.herstellerref);
+          // MARKE gefunden
         } else if (herstellerOrMarke.herstellername) {
           // Das ist direkt ein HERSTELLER
           hersteller = herstellerOrMarke;
-          brands = await this.getMarkenByHersteller(productData.hersteller);
-          console.log(`✅ HERSTELLER gefunden: ${hersteller.herstellername}, Brands: ${brands.length}`);
+          brands = skipBrandsQuery ? [] : await this.getMarkenByHersteller(productData.hersteller);
+          // HERSTELLER gefunden
         }
       }
       
@@ -839,8 +838,8 @@ export class FirestoreService {
         brands // Alle Marken dieses Herstellers
       };
 
-      // Resolve related products if available
-      if (productData.relatedProdukte && productData.relatedProdukte.length > 0) {
+      // Resolve related products if available (SKIP for performance in comparison view)
+      if (!skipRelatedProducts && productData.relatedProdukte && productData.relatedProdukte.length > 0) {
         const relatedProducts = await Promise.all(
           productData.relatedProdukte.map(async (ref) => {
             const relatedProductSnap = await getDoc(ref);
@@ -898,7 +897,6 @@ export class FirestoreService {
     clickedWasNoName: boolean;
   } | null> {
     try {
-      console.log(`🎯 Getting comparison data for ${productId} (${isMarkenProdukt ? 'Brand' : 'NoName'} product)`);
       const totalStartTime = Date.now();
       
       let result;
@@ -911,7 +909,7 @@ export class FirestoreService {
       }
       
       const totalEndTime = Date.now();
-      console.log(`🏁 Total comparison data loaded in ${totalEndTime - totalStartTime}ms`);
+      // Total time logged in individual cases
       
       return result;
     } catch (error) {
@@ -931,21 +929,31 @@ export class FirestoreService {
     clickedWasNoName: boolean;
   } | null> {
     try {
-      console.log('📱 CASE 1: Brand product clicked, ID:', brandProductId);
+      const stepTimes: Record<string, number> = {};
+      const totalStartTime = Date.now();
       
-      // Get the brand product
-      const brandProduct = await this.getMarkenProduktWithDetails(brandProductId);
+      // Get the brand product (skip related products and brands query for performance)
+      let lastTime = Date.now();
+      const brandProduct = await this.getMarkenProduktWithDetails(brandProductId, true, true);
+      stepTimes['1_getBrandProduct'] = Date.now() - lastTime;
+      lastTime = Date.now();
       if (!brandProduct) {
         console.error('❌ Brand product not found:', brandProductId);
         return null;
       }
       
-      console.log('✅ Found brand product:', brandProduct.name);
+      // Found brand product
       
       // Find all NoName products that link to this brand product
       const relatedNoNameProducts = await this.findNoNameProductsByBrandId(brandProductId);
+      stepTimes['2_findNoNameProducts'] = Date.now() - lastTime;
       
-      console.log(`🔗 Found ${relatedNoNameProducts.length} related NoName products`);
+      console.log(`⏱️ BRAND CLICKED Performance:`);
+      Object.entries(stepTimes).forEach(([step, time]) => {
+        console.log(`  ${step}: ${time}ms`);
+      });
+      console.log(`  TOTAL: ${Date.now() - totalStartTime}ms`);
+      console.log(`  Found ${relatedNoNameProducts.length} NoName alternatives`);
       
       return {
         mainProduct: brandProduct,
@@ -970,113 +978,56 @@ export class FirestoreService {
     clickedWasNoName: boolean;
   } | null> {
     try {
-      console.log('🛒 CASE 2: NoName product clicked, ID:', noNameProductId);
+      const stepTimes: Record<string, number> = {};
+      const totalStartTime = Date.now();
+      let lastTime = Date.now();
       
-      // Get the NoName product
-      const noNameProduct = await this.getProductWithDetails(noNameProductId);
-      if (!noNameProduct) {
+      // 🚀 PERFORMANCE FIX: Single Firebase call with parallel reference extraction
+      const rawProductDoc = await getDoc(doc(db, 'produkte', noNameProductId));
+      stepTimes['1_getRawProduct'] = Date.now() - lastTime;
+      lastTime = Date.now();
+      if (!rawProductDoc.exists()) {
         console.error('❌ NoName product not found:', noNameProductId);
         return null;
       }
       
-      console.log('✅ Found NoName product:', noNameProduct.name);
+      const rawData = rawProductDoc.data();
+      // Found NoName product
       
-      // Check if markenProdukt field exists and is populated
-      const markenProduktField = noNameProduct.markenProdukt;
-      if (!markenProduktField) {
-        console.error('❌ NoName product has no markenProdukt field');
+      // Extract brand product ID from reference
+      const originalMarkenProduktRef = rawData.markenProdukt;
+      if (!originalMarkenProduktRef || !originalMarkenProduktRef.id) {
+        console.error('❌ NoName product has no valid markenProdukt reference');
         return null;
       }
       
-      // The markenProdukt field is already populated with the full brand product object!
-      console.log('✅ markenProdukt is populated object:', markenProduktField.name);
+      const markenProduktId = originalMarkenProduktRef.id;
+      // Extracted brand product ID
       
-      // Extract the ID: Get it from the original DocumentReference in rawProductDoc
-      let markenProduktId = 'unknown-brand-id';
+      // 🚀 PARALLEL: Load NoName product details + Brand product simultaneously
+      const [noNameProduct, brandProduct] = await Promise.all([
+        this.populateProductReferences(rawData, noNameProductId),
+        this.getMarkenProduktWithDetails(markenProduktId, true, true) // skip both for max performance!
+      ]);
+      stepTimes['2_loadBothProducts'] = Date.now() - lastTime;
+      lastTime = Date.now();
       
-      // Get the original DocumentReference from the raw Firestore data
-      const rawProductDoc = await getDoc(doc(db, 'produkte', noNameProductId));
-      if (rawProductDoc.exists()) {
-        const rawData = rawProductDoc.data();
-        const originalMarkenProduktRef = rawData.markenProdukt;
-        
-        if (originalMarkenProduktRef && originalMarkenProduktRef.id) {
-          markenProduktId = originalMarkenProduktRef.id;
-          console.log('✅ Extracted brand product ID:', markenProduktId);
-        } else {
-          console.log('❌ Could not extract brand product ID from reference');
-        }
+      if (!noNameProduct || !brandProduct) {
+        console.error('❌ Failed to load product details');
+        return null;
       }
       
-      // Convert the populated markenProdukt to our MarkenProduktWithDetails format
-      // and populate its references properly
-      const brandProduct: MarkenProduktWithDetails = {
-        id: markenProduktId,
-        name: markenProduktField.name,
-        bild: markenProduktField.bild,
-        beschreibung: markenProduktField.beschreibung,
-        preis: markenProduktField.preis,
-        packSize: markenProduktField.packSize,
-        EAN: markenProduktField.EAN,
-        rating: markenProduktField.rating,
-        ratingCount: markenProduktField.ratingCount,
-        created_at: markenProduktField.created_at,
-        preisDatum: markenProduktField.preisDatum,
-        averageRatingOverall: markenProduktField.averageRatingOverall,
-        averageRatingContent: markenProduktField.averageRatingContent,
-        averageRatingPriceValue: markenProduktField.averageRatingPriceValue,
-        averageRatingSimilarity: markenProduktField.averageRatingSimilarity,
-        averageRatingTasteFunction: markenProduktField.averageRatingTasteFunction,
-        EANs: markenProduktField.EANs || [],
-        relatedProdukteIDs: [],
-        // Populate the references
-        kategorie: markenProduktField.kategorie ? await this.getDocumentByReference(markenProduktField.kategorie, 'kategorien') : undefined,
-        hersteller: markenProduktField.hersteller ? await this.getDocumentByReference(markenProduktField.hersteller, 'hersteller_new') : undefined,
-        packTypInfo: markenProduktField.packTyp ? await this.getDocumentByReference(markenProduktField.packTyp, 'packungstypen') : undefined
-      };
+      // Found products, now find alternatives
       
-      console.log('✅ Converted to brand product format:', brandProduct.name, 'with ID:', markenProduktId);
+      const relatedNoNameProducts = await this.findNoNameProductsByBrandReference(originalMarkenProduktRef);
+      stepTimes['3_findAlternatives'] = Date.now() - lastTime;
       
-      // SPEED OPTIMIZATION: Use the original markenProdukt reference directly!
-      console.log('⚡ Using original markenProdukt reference for super-fast query...');
-      
-      let relatedNoNameProducts: ProductWithDetails[];
-      
-      // We already have the rawProductDoc and originalMarkenProduktRef from above
-      if (rawProductDoc.exists()) {
-        const rawData = rawProductDoc.data();
-        const originalMarkenProduktRef = rawData.markenProdukt;
-        
-        if (originalMarkenProduktRef && typeof originalMarkenProduktRef === 'object') {
-          console.log('✅ Using original DocumentReference for super-fast query');
-          relatedNoNameProducts = await this.findNoNameProductsByBrandReference(originalMarkenProduktRef);
-        } else {
-          console.log('🔄 Fallback: Creating DocumentReference from brand ID...');
-          if (markenProduktId !== 'unknown-brand-id') {
-            const brandDocRef = doc(db, 'markenProdukte', markenProduktId);
-            relatedNoNameProducts = await this.findNoNameProductsByBrandReference(brandDocRef);
-          } else {
-            console.log('🔄 Final Fallback: Using brand name query...');
-            const markenProdukteRef = collection(db, 'markenProdukte');
-            const brandQuery = query(markenProdukteRef, where('name', '==', brandProduct.name), limit(1));
-            const brandQuerySnapshot = await getDocs(brandQuery);
-            
-            if (brandQuerySnapshot.empty) {
-              console.error('❌ Could not find brand product in markenProdukte collection');
-              relatedNoNameProducts = [noNameProduct];
-            } else {
-              const brandDoc = brandQuerySnapshot.docs[0];
-              const brandDocRef = doc(db, 'markenProdukte', brandDoc.id);
-              relatedNoNameProducts = await this.findNoNameProductsByBrandReference(brandDocRef);
-            }
-          }
-        }
-      } else {
-        console.error('❌ Could not fetch raw product data');
-        relatedNoNameProducts = [noNameProduct];
-      }
-      
-      console.log(`🔗 Found ${relatedNoNameProducts.length} total related NoName products`);
+      console.log(`⏱️ NONAME CLICKED Performance:`);
+      Object.entries(stepTimes).forEach(([step, time]) => {
+        console.log(`  ${step}: ${time}ms`);
+      });
+      console.log(`  TOTAL: ${Date.now() - totalStartTime}ms`);
+      console.log(`  Found ${relatedNoNameProducts.length} NoName alternatives`);
       
       return {
         mainProduct: brandProduct,
@@ -1139,40 +1090,77 @@ export class FirestoreService {
    */
   private static async findNoNameProductsByBrandReference(brandProductRef: any): Promise<ProductWithDetails[]> {
     try {
-      console.log('⚡ SUPER FAST: Finding NoName products using DocumentReference');
+      // Finding NoName products using DocumentReference
       
       const produkteRef = collection(db, 'produkte');
       const q = query(produkteRef, where('markenProdukt', '==', brandProductRef));
       const querySnapshot = await getDocs(q);
       
-      console.log(`🔍 Found ${querySnapshot.docs.length} NoName products`);
+      // Found NoName products
       
-      const relatedProducts: ProductWithDetails[] = [];
+      // 🚀 PERFORMANCE REVOLUTION: Use the shared batching function!
+      return await this.batchProcessNoNameProducts(querySnapshot.docs);
       
-      // Process all products in parallel for maximum speed
+      // Sammle alle einzigartigen Referenzen
+      querySnapshot.docs.forEach((docSnap) => {
+        const productData = docSnap.data() as Produkte;
+        
+        if (productData.handelsmarke) uniqueReferences.set(productData.handelsmarke.path || productData.handelsmarke.id, productData.handelsmarke);
+        if (productData.kategorie) uniqueReferences.set(productData.kategorie.path || productData.kategorie.id, productData.kategorie);
+        if (productData.hersteller) uniqueReferences.set(productData.hersteller.path || productData.hersteller.id, productData.hersteller);
+        if (productData.packTyp) uniqueReferences.set(productData.packTyp.path || productData.packTyp.id, productData.packTyp);
+        if (productData.discounter) uniqueReferences.set(productData.discounter.path || productData.discounter.id, productData.discounter);
+      });
+      
+      // 🚀 PARALLEL: Load ALL unique references at once
+      const referenceStartTime = Date.now();
+      
+      const referencePromises = Array.from(uniqueReferences.values()).map(async (ref) => {
+        try {
+          const doc = await this.getDocumentByReference(ref);
+          return { ref: ref.path || ref.id, doc };
+        } catch (error) {
+          return { ref: ref.path || ref.id, doc: null };
+        }
+      });
+      
+      const referenceResults = await Promise.all(referencePromises);
+      const referenceMap = new Map();
+      referenceResults.forEach(result => {
+        if (result.doc) referenceMap.set(result.ref, result.doc);
+      });
+      
+      // Loaded references
+      
+      // Process products with cached references
       const productPromises = querySnapshot.docs.map(async (docSnap) => {
         const productData = docSnap.data() as Produkte;
         const productWithDetails: ProductWithDetails = { id: docSnap.id, ...productData };
         
-        // Populate references in parallel
-        const [handelsmarke, kategorie, hersteller, packTypInfo, discounter] = await Promise.all([
-          productWithDetails.handelsmarke ? this.getDocumentByReference(productWithDetails.handelsmarke) : null,
-          productWithDetails.kategorie ? this.getDocumentByReference(productWithDetails.kategorie) : null,
-          productWithDetails.hersteller ? this.getDocumentByReference(productWithDetails.hersteller) : null,
-          productWithDetails.packTyp ? this.getDocumentByReference(productWithDetails.packTyp) : null,
-          productWithDetails.discounter ? this.getDocumentByReference(productWithDetails.discounter) : null,
-        ]);
-        
-        if (handelsmarke) productWithDetails.handelsmarke = handelsmarke;
-        if (kategorie) productWithDetails.kategorie = kategorie;
-        if (hersteller) productWithDetails.hersteller = hersteller;
-        if (packTypInfo) productWithDetails.packTypInfo = packTypInfo;
-        if (discounter) productWithDetails.discounter = discounter;
-
-        // Lade Marken für den Hersteller (Reverse Lookup)
-        if (productWithDetails.hersteller && productData.hersteller) {
-          productWithDetails.brands = await this.getMarkenByHersteller(productData.hersteller);
+        // Use cached references
+        if (productData.handelsmarke) {
+          const key = productData.handelsmarke.path || productData.handelsmarke.id;
+          productWithDetails.handelsmarke = referenceMap.get(key) || null;
         }
+        if (productData.kategorie) {
+          const key = productData.kategorie.path || productData.kategorie.id;
+          productWithDetails.kategorie = referenceMap.get(key) || null;
+        }
+        if (productData.hersteller) {
+          const key = productData.hersteller.path || productData.hersteller.id;
+          productWithDetails.hersteller = referenceMap.get(key) || null;
+        }
+        if (productData.packTyp) {
+          const key = productData.packTyp.path || productData.packTyp.id;
+          productWithDetails.packTypInfo = referenceMap.get(key) || null;
+        }
+        if (productData.discounter) {
+          const key = productData.discounter.path || productData.discounter.id;
+          productWithDetails.discounter = referenceMap.get(key) || null;
+        }
+
+       // 🚫 REMOVED: NoName-Produkte brauchen keine Marken-Abfrage!
+       // Das war völlig unnötig und hat Performance gekostet
         
         return productWithDetails;
       });
@@ -1180,7 +1168,32 @@ export class FirestoreService {
       const results = await Promise.all(productPromises);
       relatedProducts.push(...results);
       
-      console.log(`✅ SUPER FAST: Loaded ${relatedProducts.length} NoName products with full details`);
+      // ✅ Sortiere nach preisDatum (neueste zuerst)
+      relatedProducts.sort((a, b) => {
+        const dateA = a.preisDatum;
+        const dateB = b.preisDatum;
+        
+        // Wenn beide Daten vorhanden, nach Datum sortieren (neueste zuerst)
+        if (dateA && dateB) {
+          // Firestore Timestamp oder ISO String handling
+          const timeA = typeof dateA === 'string' ? new Date(dateA).getTime() : 
+                       dateA.seconds ? dateA.seconds * 1000 : 0;
+          const timeB = typeof dateB === 'string' ? new Date(dateB).getTime() : 
+                       dateB.seconds ? dateB.seconds * 1000 : 0;
+          return timeB - timeA; // Neueste zuerst (DESC)
+        }
+        
+        // Fallback: Produkte ohne Datum nach unten, dann nach Preis
+        if (!dateA && dateB) return 1;
+        if (dateA && !dateB) return -1;
+        
+        // Beide ohne Datum: Nach Preis sortieren
+        const priceA = a.preis || 999999;
+        const priceB = b.preis || 999999;
+        return priceA - priceB;
+      });
+      
+      // Loaded NoName products with full details
       return relatedProducts;
     } catch (error) {
       console.error('Error in findNoNameProductsByBrandReference:', error);
@@ -1205,43 +1218,10 @@ export class FirestoreService {
       
       const querySnapshot = await getDocs(q);
       
-      // ✅ OPTIMIERT: Alle Produkte parallel verarbeiten statt sequenziell
-      console.log(`🚀 Processing ${querySnapshot.docs.length} NoName products in parallel...`);
-      const startTime = Date.now();
+      // Processing NoName products with mega-batch optimization
       
-      const productPromises = querySnapshot.docs.map(async (docSnap) => {
-        const productData = docSnap.data() as Produkte;
-        const productWithDetails: ProductWithDetails = {
-          id: docSnap.id,
-          ...productData
-        };
-
-        // Populate references parallel für DIESES Produkt
-        const [kategorie, discounter, handelsmarke, hersteller, packTypInfo] = await Promise.all([
-          this.getDocumentByReference<Kategorien>(productData.kategorie),
-          this.getDocumentByReference<Discounter>(productData.discounter),
-          this.getDocumentByReference<Handelsmarken>(productData.handelsmarke),
-          this.getDocumentByReference<HerstellerNew>(productData.hersteller),
-          this.getDocumentByReference<Packungstypen>(productData.packTyp)
-        ]);
-
-        if (kategorie) productWithDetails.kategorie = kategorie;
-        if (discounter) productWithDetails.discounter = discounter;
-        if (handelsmarke) productWithDetails.handelsmarke = handelsmarke;
-        if (hersteller) productWithDetails.hersteller = hersteller;
-        if (packTypInfo) productWithDetails.packTypInfo = packTypInfo;
-
-        return productWithDetails;
-      });
-      
-      // Warte auf ALLE Produkte parallel
-      const relatedProducts = await Promise.all(productPromises);
-      
-      const endTime = Date.now();
-      console.log(`✅ Processed ${relatedProducts.length} products in ${endTime - startTime}ms (parallel)`);
-      
-      console.log(`✅ Found ${relatedProducts.length} NoName products linked to brand ${brandProductId}`);
-      return relatedProducts;
+      // 🚀 PERFORMANCE REVOLUTION: Use the shared batching function!
+      return await this.batchProcessNoNameProducts(querySnapshot.docs);
     } catch (error) {
       console.error('Error finding related NoName products:', error);
       return [];
@@ -1253,7 +1233,7 @@ export class FirestoreService {
    */
   static async getMarkenByHersteller(herstellerNewDocRef: DocumentReference): Promise<any[]> {
     try {
-      console.log(`🔍 Suche Marken für Hersteller:`, herstellerNewDocRef.path);
+      // Suche Marken für Hersteller
       
       // Query alle hersteller Dokumente, die auf diesen hersteller_new zeigen
       const markenQuery = query(
@@ -1271,7 +1251,7 @@ export class FirestoreService {
         });
       });
       
-      console.log(`✅ Gefundene Marken für ${herstellerNewDocRef.path}:`, marken.map(m => m.name));
+      // Gefundene Marken
       return marken;
     } catch (error) {
       console.error('❌ Fehler beim Laden der Marken:', error);
@@ -2312,15 +2292,33 @@ export class FirestoreService {
         otherProducts = allProducts;
       }
 
-      // Sortiere beide Arrays nach Preis
-      const sortByPrice = (a: FirestoreDocument<Produkte>, b: FirestoreDocument<Produkte>) => {
+      // Sortiere beide Arrays nach preisDatum (neueste zuerst)
+      const sortByPreisDatum = (a: FirestoreDocument<Produkte>, b: FirestoreDocument<Produkte>) => {
+        const dateA = a.preisDatum;
+        const dateB = b.preisDatum;
+        
+        // Wenn beide Daten vorhanden, nach Datum sortieren (neueste zuerst)
+        if (dateA && dateB) {
+          // Firestore Timestamp oder ISO String handling
+          const timeA = typeof dateA === 'string' ? new Date(dateA).getTime() : 
+                       dateA.seconds ? dateA.seconds * 1000 : 0;
+          const timeB = typeof dateB === 'string' ? new Date(dateB).getTime() : 
+                       dateB.seconds ? dateB.seconds * 1000 : 0;
+          return timeB - timeA; // Neueste zuerst (DESC)
+        }
+        
+        // Fallback: Produkte ohne Datum nach unten, dann nach Preis
+        if (!dateA && dateB) return 1;
+        if (dateA && !dateB) return -1;
+        
+        // Beide ohne Datum: Nach Preis sortieren
         const priceA = a.preis || 999999;
         const priceB = b.preis || 999999;
         return priceA - priceB;
       };
 
-      favoriteProducts.sort(sortByPrice);
-      otherProducts.sort(sortByPrice);
+      favoriteProducts.sort(sortByPreisDatum);
+      otherProducts.sort(sortByPreisDatum);
 
       // Kombiniere: Lieblingsmarkt zuerst, dann andere
       let finalProducts = [
@@ -2389,6 +2387,138 @@ export class FirestoreService {
       console.error('Error getting all categories:', error);
       return [];
     }
+  }
+
+  /**
+   * 🚀 PERFORMANCE: Helper to populate product references from raw data
+   * Avoids duplicate Firebase calls by reusing raw data
+   */
+  private static async populateProductReferences(
+    rawData: any, 
+    productId: string
+  ): Promise<ProductWithDetails | null> {
+    try {
+      // 🚀 PARALLEL: Load all references at once
+      const [kategorie, discounter, handelsmarke, hersteller, markenProdukt] = await Promise.all([
+        this.getDocumentByReference<Kategorien>(rawData.kategorie),
+        this.getDocumentByReference<Discounter>(rawData.discounter),
+        this.getDocumentByReference<Handelsmarken>(rawData.handelsmarke),
+        this.getDocumentByReference<HerstellerNew>(rawData.hersteller),
+        this.getDocumentByReference<MarkenProdukte>(rawData.markenProdukt)
+      ]);
+
+      return {
+        id: productId,
+        ...rawData,
+        kategorie,
+        discounter,
+        handelsmarke,
+        hersteller,
+        markenProdukt
+      };
+    } catch (error) {
+      console.error('Error populating product references:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 🚀 PERFORMANCE: Batch process NoName products with mega-optimization
+   * Eliminates redundant reference calls and caches Hersteller lookups
+   */
+  private static async batchProcessNoNameProducts(docs: any[]): Promise<ProductWithDetails[]> {
+     const uniqueReferences = new Map();
+    
+    // Sammle alle einzigartigen Referenzen
+    docs.forEach((docSnap) => {
+      const productData = docSnap.data() as Produkte;
+      
+      if (productData.handelsmarke) uniqueReferences.set(productData.handelsmarke.path || productData.handelsmarke.id, productData.handelsmarke);
+      if (productData.kategorie) uniqueReferences.set(productData.kategorie.path || productData.kategorie.id, productData.kategorie);
+      if (productData.hersteller) uniqueReferences.set(productData.hersteller.path || productData.hersteller.id, productData.hersteller);
+      if (productData.packTyp) uniqueReferences.set(productData.packTyp.path || productData.packTyp.id, productData.packTyp);
+      if (productData.discounter) uniqueReferences.set(productData.discounter.path || productData.discounter.id, productData.discounter);
+    });
+    
+    // 🚀 PARALLEL: Load ALL unique references at once
+    console.log(`🚀 Loading ${uniqueReferences.size} unique references in mega-batch...`);
+    const referenceStartTime = Date.now();
+    
+    const referencePromises = Array.from(uniqueReferences.values()).map(async (ref) => {
+      try {
+        const doc = await this.getDocumentByReference(ref);
+        return { ref: ref.path || ref.id, doc };
+      } catch (error) {
+        return { ref: ref.path || ref.id, doc: null };
+      }
+    });
+    
+    const referenceResults = await Promise.all(referencePromises);
+    const referenceMap = new Map();
+    referenceResults.forEach(result => {
+      if (result.doc) referenceMap.set(result.ref, result.doc);
+    });
+    
+    console.log(`⚡ Loaded ${referenceMap.size} references in ${Date.now() - referenceStartTime}ms`);
+    
+    // Process products with cached references
+    const productPromises = docs.map(async (docSnap) => {
+      const productData = docSnap.data() as Produkte;
+      const productWithDetails: ProductWithDetails = { id: docSnap.id, ...productData };
+      
+      // Use cached references
+      if (productData.handelsmarke) {
+        const key = productData.handelsmarke.path || productData.handelsmarke.id;
+        productWithDetails.handelsmarke = referenceMap.get(key) || null;
+      }
+      if (productData.kategorie) {
+        const key = productData.kategorie.path || productData.kategorie.id;
+        productWithDetails.kategorie = referenceMap.get(key) || null;
+      }
+      if (productData.hersteller) {
+        const key = productData.hersteller.path || productData.hersteller.id;
+        productWithDetails.hersteller = referenceMap.get(key) || null;
+      }
+      if (productData.packTyp) {
+        const key = productData.packTyp.path || productData.packTyp.id;
+        productWithDetails.packTypInfo = referenceMap.get(key) || null;
+      }
+      if (productData.discounter) {
+        const key = productData.discounter.path || productData.discounter.id;
+        productWithDetails.discounter = referenceMap.get(key) || null;
+      }
+
+       // 🚫 REMOVED: NoName-Produkte brauchen keine Marken-Abfrage!
+       // Das war völlig unnötig und hat Performance gekostet
+      
+      return productWithDetails;
+    });
+    
+    const results = await Promise.all(productPromises);
+    
+    // ✅ Sortiere nach preisDatum (neueste zuerst)
+    results.sort((a, b) => {
+      const dateA = a.preisDatum;
+      const dateB = b.preisDatum;
+      
+      // Wenn beide Daten vorhanden, nach Datum sortieren (neueste zuerst)
+      if (dateA && dateB) {
+        // Firestore Timestamp oder ISO String handling
+        const timeA = typeof dateA === 'string' ? new Date(dateA).getTime() : 
+                     dateA.seconds ? dateA.seconds * 1000 : 0;
+        const timeB = typeof dateB === 'string' ? new Date(dateB).getTime() : 
+                     dateB.seconds ? dateB.seconds * 1000 : 0;
+        return timeB - timeA; // Neueste zuerst
+      }
+      
+      // Fallback: Produkte mit Datum vor solche ohne
+      if (dateA && !dateB) return -1;
+      if (!dateA && dateB) return 1;
+      
+      return 0; // Beide ohne Datum: Reihenfolge beibehalten
+    });
+    
+    return results;
   }
 
 }

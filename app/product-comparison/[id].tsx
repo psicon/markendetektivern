@@ -23,7 +23,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -48,10 +48,27 @@ const formatPrice = (price: number | undefined): string => {
   return `€ ${price.toFixed(2)}`;
 };
 
-// Helper function to calculate savings percentage based on price per unit
-const calculateSavingsPercentage = (brandProduct: any, noNameProduct: any): number => {
+// Helper function to get savings data (€ and %) - uses Firestore fields if available, otherwise calculates
+const getSavingsData = (brandProduct: any, noNameProduct: any): { savingsEur: number; savingsPercent: number } => {
+  // 🚀 OPTIMIERUNG: Nutze serverseitige Berechnung falls vorhanden
+  if (noNameProduct.ersparnis !== undefined && noNameProduct.ersparnisProz !== undefined) {
+    // 🔇 Log nur bei Development (reduziert Spam)
+    if (__DEV__ && Math.random() < 0.1) { // Nur 10% der Aufrufe loggen
+      console.log(`💰 Using server-calculated savings: €${noNameProduct.ersparnis}, ${noNameProduct.ersparnisProz}%`);
+    }
+    return {
+      savingsEur: parseFloat(String(noNameProduct.ersparnis || 0)),
+      savingsPercent: parseInt(String(noNameProduct.ersparnisProz || 0))
+    };
+  }
+  
+  // 🔄 FALLBACK: Client-side Berechnung (für Stufe 1,2 oder noch nicht berechnete)
+  if (__DEV__ && Math.random() < 0.1) { // Nur 10% der Aufrufe loggen
+    console.log('🔄 Calculating savings client-side (Firestore fields missing)');
+  }
+  
   if (!brandProduct.preis || !noNameProduct.preis || !brandProduct.packSize || !noNameProduct.packSize) {
-    return 0;
+    return { savingsEur: 0, savingsPercent: 0 };
   }
   
   // Preis pro Einheit (Gramm/Milliliter)
@@ -59,35 +76,50 @@ const calculateSavingsPercentage = (brandProduct: any, noNameProduct: any): numb
   const noNamePricePerUnit = noNameProduct.preis / noNameProduct.packSize;
   
   // Ersparnis in Prozent (kann positiv oder negativ sein)
-  const savings = ((brandPricePerUnit - noNamePricePerUnit) / brandPricePerUnit) * 100;
+  const savingsPercent = ((brandPricePerUnit - noNamePricePerUnit) / brandPricePerUnit) * 100;
   
-  return Math.round(savings); // Kann positiv (Ersparnis) oder negativ (Mehrkosten) sein
+  // Ersparnis in Euro (basiert auf NoName packSize)
+  const savingsEur = (brandPricePerUnit - noNamePricePerUnit) * noNameProduct.packSize;
+  
+  return {
+    savingsEur: Math.round(savingsEur * 100) / 100, // Auf 2 Nachkommastellen runden
+    savingsPercent: Math.round(savingsPercent) // Ganze Prozent
+  };
+};
+
+// Helper function to calculate savings percentage (LEGACY - for backwards compatibility)
+const calculateSavingsPercentage = (brandProduct: any, noNameProduct: any): number => {
+  const data = getSavingsData(brandProduct, noNameProduct);
+  return data.savingsPercent;
 };
 
 // Helper function to get savings display with correct sign and color
 const getSavingsDisplay = (brandProduct: any, noNameProduct: any, colors: any) => {
-  const savings = calculateSavingsPercentage(brandProduct, noNameProduct);
+  const { savingsEur, savingsPercent } = getSavingsData(brandProduct, noNameProduct);
   
-  if (savings > 0) {
+  if (savingsPercent > 0) {
     // Ersparnis: grün mit Minus-Zeichen
     return {
-      text: `-${savings}%`,
+      text: `-${savingsPercent}%`,
       color: colors.success,
-      icon: "tag.fill"
+      icon: "tag.fill",
+      savingsEur: savingsEur // Zusätzliche Euro-Info
     };
-  } else if (savings < 0) {
+  } else if (savingsPercent < 0) {
     // Mehrkosten: rot mit Plus-Zeichen
     return {
-      text: `+${Math.abs(savings)}%`,
+      text: `+${Math.abs(savingsPercent)}%`,
       color: '#FF3B30', // Rot
-      icon: "exclamationmark.triangle.fill"
+      icon: "exclamationmark.triangle.fill",
+      savingsEur: Math.abs(savingsEur) // Zusätzliche Euro-Info
     };
   } else {
     // Gleicher Preis
     return {
       text: `±0%`,
       color: colors.icon,
-      icon: "equal"
+      icon: "equal",
+      savingsEur: 0
     };
   }
 };
@@ -279,22 +311,22 @@ const NoNameCartButton = ({
   return (
     <>
       <TouchableOpacity 
-        style={[styles.cartButton, { 
-          backgroundColor: isInCart ? colors.success : colors.primary 
+        style={[styles.cartButtonGray, { 
+          backgroundColor: isInCart ? colors.success : colors.background 
         }]}
         onPress={handlePress}
         disabled={isLoading}
       >
         {isLoading ? (
-          <ActivityIndicator size="small" color="white" />
+          <ActivityIndicator size="small" color={isInCart ? "white" : colors.icon} />
         ) : (
           <Animated.View style={{
             transform: [{ scale: buttonAnimations[`cart-${productId}`] || new Animated.Value(1) }]
           }}>
             <IconSymbol 
-              name={isInCart ? "checkmark.circle.fill" : "cart.badge.plus"} 
-              size={24} 
-              color="white" 
+              name={isInCart ? "checkmark" : "plus"} 
+              size={20} 
+              color={isInCart ? "white" : colors.icon}
             />
           </Animated.View>
         )}
@@ -689,7 +721,8 @@ const ProductComparisonContent = ({
           styles.detailCard, 
           { 
             backgroundColor: colors.cardBackground,
-            opacity: productAnimations[mainProduct.id] || 0 // ✨ Animation für Brand-Produkt
+            opacity: productAnimations[mainProduct.id] || 0, // ✨ Animation für Brand-Produkt
+            transform: [{ scale: productAnimations[`${mainProduct.id}_scale`] || 0.8 }]
           }
         ]}
       >
@@ -701,10 +734,10 @@ const ProductComparisonContent = ({
           />
           <View style={styles.productHeaderInfo}>
             <ThemedText style={[styles.cardTitle, { color: colors.primary }]}>
-              Markenprodukt
+              {comparisonData?.mainProduct?.marke?.name || comparisonData?.mainProduct?.hersteller?.herstellername || comparisonData?.mainProduct?.hersteller?.name || 'Markenprodukt'}
             </ThemedText>
             <ThemedText style={styles.cardSubtitle}>
-{comparisonData?.mainProduct?.marke?.name || comparisonData?.mainProduct?.hersteller?.herstellername || comparisonData?.mainProduct?.hersteller?.name || 'Unbekannte Marke'} - {comparisonData?.mainProduct?.name || 'Unbekanntes Produkt'}
+{comparisonData?.mainProduct?.name || 'Unbekanntes Produkt'}
             </ThemedText>
           </View>
         </View>
@@ -795,7 +828,8 @@ const ProductComparisonContent = ({
               { 
                 backgroundColor: colors.cardBackground, 
                 marginTop: 12,
-                opacity: productAnimations[product.id] || 0 // ✨ Animation
+                opacity: productAnimations[product.id] || 0, // ✨ Animation
+                transform: [{ scale: productAnimations[`${product.id}_scale`] || 0.8 }]
               }
             ]}
           >
@@ -1265,18 +1299,47 @@ export default function ProductComparisonScreen() {
   // Animation States für sanftes Einblenden der Produktkarten
   const [productAnimations, setProductAnimations] = useState<{[key: string]: Animated.Value}>({});
 
-  // Sanfte Animation für Produktkarten
+  // Animation für den Alternatives Header
+  const [headerAnimation] = useState(new Animated.Value(0));
+  
+  // Animation für "Weitere enttarnte Produkte" Header
+  const [weitereHeaderAnimation] = useState(new Animated.Value(0));
+
+  // 🎨 Sanfte Animation für Produktkarten mit Scale + Fade
+  // Get rating circle color based on rating value
+  const getRatingCircleColor = (rating: number) => {
+    if (rating >= 4.5) return colors.primary; // Primary grün bei 4.5-5
+    if (rating >= 4) return '#4CAF50'; // Leicht grün bei 4-4.5  
+    if (rating >= 3) return '#FFC107'; // Gelb bei 3-4
+    if (rating >= 2) return '#FF9800'; // Orange bei 2-3
+    return '#F44336'; // Rot bei 1-2
+  };
+
   const animateProductCard = (productId: string, delay: number = 0) => {
     if (!productAnimations[productId]) {
       const newOpacity = new Animated.Value(0);
-      setProductAnimations(prev => ({ ...prev, [productId]: newOpacity }));
+      const newScale = new Animated.Value(0.8); // Startet etwas kleiner
+      setProductAnimations(prev => ({ 
+        ...prev, 
+        [productId]: newOpacity,
+        [`${productId}_scale`]: newScale
+      }));
       
       setTimeout(() => {
+        // Parallel Animation: Fade + Scale
+        Animated.parallel([
         Animated.timing(newOpacity, {
           toValue: 1,
-          duration: 400, // Etwas länger als bei Märkten für eleganten Effekt
+            duration: 250, // Schnellere Animation
           useNativeDriver: true,
-        }).start();
+          }),
+          Animated.spring(newScale, {
+            toValue: 1,
+            tension: 120, // Straffere Feder
+            friction: 7,
+            useNativeDriver: true,
+          })
+        ]).start();
       }, delay);
     }
   };
@@ -1355,7 +1418,7 @@ export default function ProductComparisonScreen() {
   const submitRating = async () => {
     if (overallRating === 0) {
               showRatingToast(TOAST_MESSAGES.RATINGS.ratingRequired, 'error');
-        return;
+      return;
     }
 
     setIsSubmittingRating(true);
@@ -1363,7 +1426,7 @@ export default function ProductComparisonScreen() {
     try {
       const productId = selectedProductForDetails?.id || comparisonData?.mainProduct?.id;
       const isNoNameProduct = !!selectedProductForDetails;
-
+      
       if (isEditingRating && existingRating) {
         // Update existing rating
         const updateData = {
@@ -1380,21 +1443,21 @@ export default function ProductComparisonScreen() {
         showRatingToast(TOAST_MESSAGES.RATINGS.ratingUpdated, 'success');
       } else {
         // Create new rating
-        const productRatingData = {
+      const productRatingData = {
           productID: isNoNameProduct ? productId : null,
           brandProductID: isNoNameProduct ? null : productId,
           userID: user?.uid || 'anonymous-user-' + Date.now(),
-          ratingOverall: overallRating,
-          ratingPriceValue: priceValueRating || null,
-          ratingTasteFunction: tasteRating || null,
+        ratingOverall: overallRating,
+        ratingPriceValue: priceValueRating || null,
+        ratingTasteFunction: tasteRating || null,
           ratingSimilarity: isNoNameProduct ? (similarityRating || null) : null,
-          ratingContent: contentRating || null,
-          comment: comment || null,
-          ratedate: new Date(),
-          updatedate: new Date()
-        };
+        ratingContent: contentRating || null,
+        comment: comment || null,
+        ratedate: new Date(),
+        updatedate: new Date()
+      };
 
-        await FirestoreService.addProductRating(productRatingData);
+      await FirestoreService.addProductRating(productRatingData);
         showRatingToast(TOAST_MESSAGES.RATINGS.ratingSaved, 'success');
         
         // 🎯 TRACK ACTION: submit_rating (nur bei neuer Bewertung, nicht bei Update)
@@ -1516,15 +1579,15 @@ export default function ProductComparisonScreen() {
         // New rating
         setExistingRating(null);
         setIsEditingRating(false);
-        setOverallRating(0);
-        setTasteRating(0);
-        setPriceValueRating(0);
-        setContentRating(0);
+    setOverallRating(0);
+    setTasteRating(0);
+    setPriceValueRating(0);
+    setContentRating(0);
         setSimilarityRating(0);
-        setComment('');
+    setComment('');
       }
 
-      setShowRatingModal(true);
+    setShowRatingModal(true);
     } catch (error) {
       console.error('Error checking existing rating:', error);
       // Fallback to new rating
@@ -1541,14 +1604,19 @@ export default function ProductComparisonScreen() {
   };
   
   // Ähnliche Produkte laden (für Markenprodukte ohne NoName-Alternativen)
-  const loadSimilarProducts = async (categoryName: string, excludeProductId: string) => {
+  const loadSimilarProducts = async (categoryName: string, excludeProductId: string, limit: number = 7) => {
     try {
       setSimilarProductsLoading(true);
-
-      console.log('🔍 Excluding product ID:', excludeProductId);
       
-      const products = await FirestoreService.getSimilarProducts(categoryName, excludeProductId, 7);
+      console.log('🔍 Excluding product ID:', excludeProductId, 'Limit:', limit);
+      
+      const products = await FirestoreService.getSimilarProducts(categoryName, excludeProductId, limit);
       setSimilarProducts(products);
+      
+      // 🎨 Animiere Similar Products gestaffelt (schneller)
+      products.forEach((product, index) => {
+        animateProductCard(product.id, 50 + (index * 80)); // Schnellere Sequenz
+      });
 
     } catch (error) {
       console.error('❌ Error loading similar products:', error);
@@ -1573,10 +1641,49 @@ export default function ProductComparisonScreen() {
       const data = await FirestoreService.getProductComparisonData(id, isMarkenProdukt);
       
       if (data) {
-        setComparisonData(data);
-        
-        // Nach dem Laden der Firestore-Daten: OpenFood API aufrufen
-        loadOpenFoodData(data);
+          // 🚀 SOFORTIGE ANZEIGE: Hauptprodukt + korrekter Header sofort
+          setComparisonData(data); // ALLE Daten sofort setzen
+          setLoading(false); // UI SOFORT anzeigen!
+          
+          // 🎨 HEADER ANIMATION: Sanft einblenden nach kurzer Verzögerung
+          setTimeout(() => {
+            Animated.timing(headerAnimation, {
+              toValue: 1,
+              duration: 400,
+              useNativeDriver: true,
+            }).start();
+          }, 150);
+          
+          // 🎨 PRODUKT ANIMATIONEN: Alle Produkte einzeln animieren
+          // Brand-Produkt sofort animieren
+          animateProductCard(data.mainProduct.id, 100);
+          
+          // NoName-Produkte gestaffelt animieren
+          data.relatedNoNameProducts.forEach((product, index) => {
+            animateProductCard(product.id, 300 + (index * 120));
+          });
+          
+          // 🆕 Für Stufe 3,4,5 Produkte: Lade "Weitere enttarnte Produkte" 
+          if (data.relatedNoNameProducts.length > 0 && data.mainProduct.kategorie?.bezeichnung) {
+            // Berechne wann die letzte NoName-Karte startet
+            const lastNoNameCardDelay = 300 + ((data.relatedNoNameProducts.length - 1) * 120);
+            
+            // Header direkt nach letzter Karte (nur +120ms)
+            setTimeout(() => {
+              // ✨ Header sofort animieren
+              Animated.timing(weitereHeaderAnimation, {
+                toValue: 1,
+                duration: 300, // Schnellere Animation
+                useNativeDriver: true,
+              }).start();
+              
+              // Lade Similar Products sofort
+              loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id, 4);
+            }, lastNoNameCardDelay + 60);
+          }
+          
+          // OpenFood API im Hintergrund laden
+          setTimeout(() => loadOpenFoodData(data), 400);
       }
     } catch (err) {
       console.error('Error reloading product comparison:', err);
@@ -1596,6 +1703,26 @@ export default function ProductComparisonScreen() {
   // OpenFood API Daten
   const [openFoodData, setOpenFoodData] = useState<Map<string, OpenFoodProduct | null>>(new Map());
   const [openFoodLoading, setOpenFoodLoading] = useState(false);
+  
+  // 🚀 PERFORMANCE: Memoized Ersparnis-Berechnungen (verhindert Re-Renders)
+  const savingsDataCache = useMemo(() => {
+    if (!comparisonData?.mainProduct || !comparisonData?.relatedNoNameProducts) {
+      return new Map();
+    }
+    
+    const cache = new Map();
+    comparisonData.relatedNoNameProducts.forEach(noNameProduct => {
+      const savingsData = getSavingsData(comparisonData.mainProduct, noNameProduct);
+      const displayData = getSavingsDisplay(comparisonData.mainProduct, noNameProduct, colors);
+      cache.set(noNameProduct.id, { savingsData, displayData });
+    });
+    
+    if (__DEV__) {
+      console.log(`🚀 Ersparnis-Cache erstellt für ${cache.size} Produkte`);
+    }
+    
+    return cache;
+  }, [comparisonData?.mainProduct, comparisonData?.relatedNoNameProducts, colors]);
   
   // Aktuell ausgewähltes Produkt für Details Modal
   const [selectedProductForDetails, setSelectedProductForDetails] = useState<ProductWithDetails | MarkenProduktWithDetails | null>(null);
@@ -1760,7 +1887,7 @@ export default function ProductComparisonScreen() {
       }
     }, [comparisonData?.mainProduct?.id, user?.uid])
   );
-  
+
   // Alle NoName-Produkte standardmäßig auswählen wenn Daten geladen sind
   useEffect(() => {
     if (comparisonData?.relatedNoNameProducts) {
@@ -1836,36 +1963,38 @@ export default function ProductComparisonScreen() {
           <Animated.View style={{
             transform: [{ scale: headerButtonAnimation }]
           }}>
-            <IconSymbol name="arrow.left.arrow.right" size={24} color="white" />
+          <IconSymbol name="arrow.left.arrow.right" size={24} color="white" />
           </Animated.View>
           {selectedProducts.size > 0 && (
             <Animated.View style={{
               position: 'absolute',
-              top: 4,
-              right: -2,
-              backgroundColor: colors.warning,
+              top: 2,
+              right: -4,
+              backgroundColor: colors.error,
               borderRadius: 10,
               minWidth: 20,
               height: 20,
               justifyContent: 'center',
               alignItems: 'center',
-              paddingHorizontal: 4,
-              transform: [{ scale: headerButtonAnimation }]
+               transform: [{ scale: headerButtonAnimation }]
             }}>
-              <ThemedText style={{
-                color: 'white',
-                fontSize: 12,
-                fontWeight: 'bold',
-                textAlign: 'center',
-              }}>
-                {selectedProducts.size}
+                <ThemedText style={{
+                  color: 'white',
+                  fontSize: 12,
+                  fontWeight: 'bold',
+                  textAlign: 'center',
+                  textAlignVertical: 'center',
+                  lineHeight: 15, // Gleich der fontSize für perfekte Zentrierung
+                  includeFontPadding: false, // Android-spezifisch: entfernt extra Padding
+                }}>
+                  {selectedProducts.size}
               </ThemedText>
             </Animated.View>
           )}
         </TouchableOpacity>
       ) : undefined,
     });
-  }, [navigation, router, colors.primary, colors.warning, selectedProducts]);
+  }, [navigation, router, colors.primary, colors.error, selectedProducts]);
 
 
   // 🚫 KEIN lokaler Achievement-Handler mehr!
@@ -1882,6 +2011,10 @@ export default function ProductComparisonScreen() {
       try {
         setLoading(true);
         setError(null);
+        
+        // 🎨 Reset Header Animations
+        headerAnimation.setValue(0);
+        weitereHeaderAnimation.setValue(0);
         
 
         
@@ -1908,26 +2041,56 @@ export default function ProductComparisonScreen() {
         const data = await FirestoreService.getProductComparisonData(id, isMarkenProdukt);
         
         if (data) {
-          setComparisonData(data);
+          // 🚀 SOFORTIGE ANZEIGE: Hauptprodukt + korrekter Header sofort
+          setComparisonData(data); // ALLE Daten sofort setzen
+          setLoading(false); // UI SOFORT anzeigen!
           
-
+          // 🎨 HEADER ANIMATION: Sanft einblenden nach kurzer Verzögerung
+          setTimeout(() => {
+            Animated.timing(headerAnimation, {
+              toValue: 1,
+              duration: 400,
+              useNativeDriver: true,
+            }).start();
+          }, 150);
           
-          // Wenn es ein Markenprodukt ist und keine NoName-Alternativen hat, lade ähnliche Produkte
-          if (isMarkenProdukt && data.relatedNoNameProducts.length === 0 && data.mainProduct.kategorie?.bezeichnung) {
-            loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id);
-          }
-          
-          // ✨ Triggere sanfte Animationen für Produktkarten
+          // 🎨 PRODUKT ANIMATIONEN: Alle Produkte einzeln animieren
           // Brand-Produkt sofort animieren
           animateProductCard(data.mainProduct.id, 100);
           
           // NoName-Produkte gestaffelt animieren
           data.relatedNoNameProducts.forEach((product, index) => {
-            animateProductCard(product.id, 200 + (index * 150));
+            animateProductCard(product.id, 300 + (index * 120));
           });
           
-          // Nach dem Laden der Firestore-Daten: OpenFood API aufrufen
-          loadOpenFoodData(data);
+          // Wenn es ein Markenprodukt ist und keine NoName-Alternativen hat, lade ähnliche Produkte
+          if (isMarkenProdukt && data.relatedNoNameProducts.length === 0 && data.mainProduct.kategorie?.bezeichnung) {
+            setTimeout(() => {
+            loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id);
+            }, 400);
+          }
+          
+          // 🆕 Für Stufe 3,4,5 Produkte: Lade "Weitere enttarnte Produkte" 
+          if (data.relatedNoNameProducts.length > 0 && data.mainProduct.kategorie?.bezeichnung) {
+            // Berechne wann die letzte NoName-Karte startet
+            const lastNoNameCardDelay = 300 + ((data.relatedNoNameProducts.length - 1) * 120);
+            
+            // Header direkt nach letzter Karte (nur +120ms)
+            setTimeout(() => {
+              // ✨ Header sofort animieren
+              Animated.timing(weitereHeaderAnimation, {
+                toValue: 1,
+                duration: 300, // Schnellere Animation
+                useNativeDriver: true,
+              }).start();
+              
+              // Lade Similar Products sofort
+              loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id, 4);
+            }, lastNoNameCardDelay + 120);
+          }
+          
+          // OpenFood API im Hintergrund laden
+          setTimeout(() => loadOpenFoodData(data), 400);
           
           // Track Achievement: view_comparison
           if (user?.uid) {
@@ -2234,7 +2397,8 @@ export default function ProductComparisonScreen() {
             styles.productCard, 
             { 
               backgroundColor: colors.cardBackground,
-              opacity: productAnimations[comparisonData.mainProduct.id] || 0 // ✨ Animation für Hauptprodukt
+              opacity: productAnimations[comparisonData.mainProduct.id] || 0, // ✨ Animation für Hauptprodukt
+              transform: [{ scale: productAnimations[`${comparisonData.mainProduct.id}_scale`] || 0.8 }]
             }
           ]}
         >
@@ -2254,41 +2418,6 @@ export default function ProductComparisonScreen() {
               </View>
             )}
             <View style={styles.spacer} />
-            <TouchableOpacity style={[styles.actionIconButton, { backgroundColor: colors.background }]} onPress={async () => {
-              if (comparisonData?.mainProduct) {
-                // Intelligente Typ-Erkennung
-                let correctType: 'markenprodukt' | 'noname' = type === 'brand' ? 'markenprodukt' : 'noname';
-                
-                // SICHERHEITSCHECK: Falls URL-Parameter falsch ist
-                if (correctType === 'noname') {
-                  const markenCheck = await getDoc(doc(db, 'markenProdukte', comparisonData.mainProduct.id));
-                  if (markenCheck.exists()) {
-                    correctType = 'markenprodukt';
-                    console.log('🔧 FAVORIT-KORREKTUR: Typ korrigiert zu markenprodukt');
-                  }
-                }
-                
-                console.log('🔍 HAUPTPRODUKT FAVORIT:', {
-                  urlType: type,
-                  correctType: correctType,
-                  productId: comparisonData.mainProduct.id,
-                  productName: comparisonData.mainProduct.name
-                });
-                // Animate heart before action
-                animateButtonPress('main-product-heart');
-                handleToggleFavorite(comparisonData.mainProduct, correctType);
-              }
-            }}>
-              <Animated.View style={{
-                transform: [{ scale: buttonAnimations['main-product-heart'] || new Animated.Value(1) }]
-              }}>
-                <IconSymbol 
-                  name={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? "heart.fill" : "heart"} 
-                  size={24} 
-                  color={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? colors.error : colors.icon} 
-                />
-              </Animated.View>
-            </TouchableOpacity>
                 </View>
 
           {/* Product Row */}
@@ -2316,42 +2445,19 @@ export default function ProductComparisonScreen() {
               <View style={styles.brandRow}>
                 {/* Marke ist in hersteller gespeichert */}
                 {comparisonData.mainProduct.hersteller?.bild && (
-                  <Image 
+                        <Image 
                     source={{ uri: comparisonData.mainProduct.hersteller.bild }}
-                    style={styles.brandImage}
-                    resizeMode="contain"
-                  />
-                )}
-                <ThemedText style={[styles.brandText, { color: colors.primary }]}>
-                  {comparisonData.mainProduct.hersteller?.name || 'Markenprodukt'}
-                </ThemedText>
+                          style={styles.brandImage}
+                          resizeMode="contain"
+                        />
+                      )}
+                      <ThemedText style={[styles.brandText, { color: colors.primary }]}>
+                  {comparisonData.mainProduct.marke?.name || comparisonData.mainProduct.hersteller?.herstellername || comparisonData.mainProduct.hersteller?.name || 'Markenprodukt'}
+                      </ThemedText>
                 </View>
               <ThemedText style={styles.productTitle}>
                 {comparisonData.mainProduct.name}
               </ThemedText>
-                              <TouchableOpacity 
-                  style={styles.ratingRow}
-                  onPress={async () => {
-                    // Show ratings VIEW when clicking stars for main product
-                    console.log('🎯 Opening ratings for MAIN product:', comparisonData.mainProduct.name);
-                    setSelectedProductForDetails(null); // null means main product
-                    setShowRatingsView(true); // Modal SOFORT öffnen!
-                    loadProductRatings(comparisonData.mainProduct); // Parallel laden (ohne await!)
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.ratingRow}>
-                    <StarRatingDisplay 
-                      rating={comparisonData.mainProduct.averageRatingOverall || 0}
-                      colors={colors}
-                      size={16}
-                      valueStyle={[styles.ratingValue, { color: colors.warning }]}
-                    />
-                    <ThemedText style={[styles.reviewsText, { color: colors.icon, marginLeft: 6, lineHeight: 16, includeFontPadding: false, height: 16 }]}>
-                      ({comparisonData.mainProduct.ratingCount || 0})
-                    </ThemedText>
-                  </View>
-                </TouchableOpacity>
 
             </View>
 
@@ -2366,58 +2472,134 @@ export default function ProductComparisonScreen() {
             </View>
           </View>
 
-          {/* Details and Cart Button Row */}
-          <View style={styles.actionButtonsRow}>
-          <TouchableOpacity 
-              style={[styles.detailsButton, { borderColor: colors.primary }]}
+
+          {/* Horizontal Divider */}
+          <View style={[styles.horizontalDivider, { backgroundColor: colors.border }]} />
+
+          {/* Ratings and Cart Button Row */}
+          <View style={styles.ratingsCartRowDirect}>
+            <TouchableOpacity 
+              style={styles.ratingsSection}
               onPress={() => {
                 setSelectedProductForDetails(comparisonData.mainProduct);
-                setShowProductDetails(true);
+                setShowRatingsView(true);
+                loadProductRatings(comparisonData.mainProduct);
               }}
-          >
-              <IconSymbol name="info.circle" size={18} color={colors.primary} />
-              <ThemedText style={[styles.detailsText, { color: colors.primary }]}>
-              Details
-            </ThemedText>
+              activeOpacity={0.7}
+            >
+              <View style={[styles.ratingCircle, { backgroundColor: getRatingCircleColor(comparisonData.mainProduct.averageRatingOverall || 0) }]}>
+                <ThemedText style={styles.ratingCircleText}>
+                  {(comparisonData.mainProduct.averageRatingOverall || 0).toFixed(1)}
+                </ThemedText>
+              </View>
+              <View style={styles.ratingsContent}>
+                <ThemedText style={[styles.ratingsText, { color: colors.icon }]}>
+                  Bewertungen
+                </ThemedText>
+                <View style={styles.starsContainer}>
+                  <StarRatingDisplay 
+                    rating={comparisonData.mainProduct.averageRatingOverall || 0}
+                    colors={colors}
+                    size={16}
+                    showValue={false}
+                  />
+                  <ThemedText style={[styles.ratingsCount, { color: colors.icon }]}>
+                    ({comparisonData.mainProduct.ratingCount || 0})
+                  </ThemedText>
+                </View>
+              </View>
             </TouchableOpacity>
+            
+            {/* Favorite Heart Button */}
             <TouchableOpacity 
-              style={[styles.cartButton, { 
-                backgroundColor: isInCart ? colors.success : colors.primary 
+              style={[styles.cartButtonGray, { backgroundColor: colors.background, marginRight: 12 }]} 
+              onPress={async () => {
+                if (comparisonData?.mainProduct) {
+                  // Intelligente Typ-Erkennung
+                  let correctType: 'markenprodukt' | 'noname' = type === 'brand' ? 'markenprodukt' : 'noname';
+                  
+                  // SICHERHEITSCHECK: Falls URL-Parameter falsch ist
+                  if (correctType === 'noname') {
+                    const markenCheck = await getDoc(doc(db, 'markenProdukte', comparisonData.mainProduct.id));
+                    if (markenCheck.exists()) {
+                      correctType = 'markenprodukt';
+                      console.log('🔧 FAVORIT-KORREKTUR: Typ korrigiert zu markenprodukt');
+                    }
+                  }
+                  
+                  // Animate heart before action
+                  animateButtonPress('main-product-heart');
+                  handleToggleFavorite(comparisonData.mainProduct, correctType);
+                }
+              }}
+            >
+              <Animated.View style={{
+                transform: [{ scale: buttonAnimations['main-product-heart'] || new Animated.Value(1) }]
+              }}>
+                <IconSymbol 
+                  name={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? "heart.fill" : "heart"} 
+                  size={20} 
+                  color={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? colors.error : colors.icon} 
+                />
+              </Animated.View>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.cartButtonGray, { 
+                backgroundColor: isInCart ? colors.success : colors.background 
               }]}
               onPress={handleAddToCart}
               disabled={isAddingToCart}
             >
               {isAddingToCart ? (
-                <ActivityIndicator size="small" color="white" />
+                <ActivityIndicator size="small" color={isInCart ? "white" : colors.icon} />
               ) : (
                 <Animated.View style={{
                   transform: [{ scale: buttonAnimations['main-cart-button'] || new Animated.Value(1) }]
                 }}>
                   <IconSymbol 
-                    name={isInCart ? "checkmark.circle.fill" : "cart.badge.plus"} 
-                    size={24} 
-                    color="white" 
+                    name={isInCart ? "checkmark" : "plus"} 
+                    size={20} 
+                    color={isInCart ? "white" : colors.icon}
                   />
                 </Animated.View>
-              )}
+                )}
             </TouchableOpacity>
-        </View>
+          </View>
+
+          {/* Details Button */}
+          <TouchableOpacity 
+            style={[styles.detailsButtonDirect, { backgroundColor: colors.primary }]}
+            onPress={() => {
+              setSelectedProductForDetails(comparisonData.mainProduct);
+              setShowProductDetails(true);
+            }}
+          >
+            <IconSymbol name="info.circle" size={16} color="white" />
+            <ThemedText style={[styles.detailsTextDirect, { color: "white" }]}>
+              Details
+            </ThemedText>
+          </TouchableOpacity>
         
 
         </Animated.View>
 
         {/* Alternatives Section */}
         <View style={styles.alternativesContainer}>
-          <ThemedText style={styles.alternativesTitle}>
+          <Animated.View style={{ opacity: headerAnimation, alignItems: 'center' }}>
+            <ThemedText style={[styles.alternativesTitle, { textAlign: 'center' }]}>
             {comparisonData.relatedNoNameProducts.length > 0 
-              ? 'NoName Alternativen vom gleichen Hersteller'
+                ? 'NoName Alternativen vom gleichen Hersteller'
               : 'Enttarnte Produkte'
             }
           </ThemedText>
+          </Animated.View>
           {comparisonData.relatedNoNameProducts.length === 0 && (
-            <ThemedText style={[styles.alternativesSubtitle, { color: colors.icon }]}>
+            <Animated.View style={{ opacity: headerAnimation, alignItems: 'center' }}>
+              <ThemedText style={[styles.alternativesSubtitle, { color: colors.icon, textAlign: 'center' }]}>
               Entdecke andere Produkte mit Stufe 3, 4 oder 5
             </ThemedText>
+            </Animated.View>
           )}
 
           {/* NoName-Alternativen oder ähnliche Produkte */}
@@ -2431,9 +2613,10 @@ export default function ProductComparisonScreen() {
                 style={[
                   {
                     opacity: productAnimations[noNameProduct.id] || 0, // ✨ Einblend-Animation
-                    transform: [{ 
-                      scale: cardAnimations[`card-${noNameProduct.id}`] || new Animated.Value(1) 
-                    }] // ✨ Card-Selection-Animation
+                    transform: [
+                      { scale: productAnimations[`${noNameProduct.id}_scale`] || 0.8 }, // ✨ Einblend-Scale
+                      { scale: cardAnimations[`card-${noNameProduct.id}`] || new Animated.Value(1) } // ✨ Selection-Animation
+                    ]
                   }
                 ]}
               >
@@ -2505,30 +2688,11 @@ export default function ProductComparisonScreen() {
                       <Animated.View style={{
                         transform: [{ scale: buttonAnimations[`selection-${noNameProduct.id}`] || new Animated.Value(1) }]
                       }}>
-                        <IconSymbol 
-                          name={isSelected ? "checkmark.circle.fill" : "circle"} 
+                      <IconSymbol 
+                        name={isSelected ? "checkmark.circle.fill" : "circle"} 
                           size={24} 
-                          color={isSelected ? colors.primary : colors.icon} 
-                        />
-                      </Animated.View>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={[styles.actionIconButton, { backgroundColor: colors.background }]}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        // Animate heart before action
-                        animateButtonPress(`noname-heart-${noNameProduct.id}`);
-                        handleToggleFavorite(noNameProduct, 'noname');
-                      }}
-                    >
-                      <Animated.View style={{
-                        transform: [{ scale: buttonAnimations[`noname-heart-${noNameProduct.id}`] || new Animated.Value(1) }]
-                      }}>
-                        <IconSymbol 
-                          name={isLocalFavorite(noNameProduct.id, 'noname') ? "heart.fill" : "heart"} 
-                          size={24} 
-                          color={isLocalFavorite(noNameProduct.id, 'noname') ? colors.error : colors.icon} 
-                        />
+                        color={isSelected ? colors.primary : colors.icon} 
+                      />
                       </Animated.View>
                     </TouchableOpacity>
                 </View>
@@ -2556,36 +2720,14 @@ export default function ProductComparisonScreen() {
 
               {/* Product Info */}
                   <View style={styles.productInfo}>
-                    <ThemedText style={[styles.brandText, { color: colors.primary }]}>
-                      {noNameProduct.handelsmarke?.bezeichnung || 'NoName-Produkt'}
-                  </ThemedText>
+                    <View style={styles.brandRow}>
+                      <ThemedText style={[styles.brandText, { color: colors.primary }]}>
+                        {noNameProduct.handelsmarke?.bezeichnung || 'NoName-Produkt'}
+                      </ThemedText>
+                    </View>
                     <ThemedText style={styles.productTitle}>
                       {noNameProduct.name}
-                  </ThemedText>
-                                          <TouchableOpacity 
-                        style={styles.ratingRow}
-                        onPress={async () => {
-                          // Show ratings VIEW when clicking stars for NoName product
-                          console.log('🎯 Opening ratings for NONAME product:', noNameProduct.name);
-                          setSelectedProductForDetails(noNameProduct);
-                          setShowRatingsView(true); // Modal SOFORT öffnen!
-                          loadProductRatings(noNameProduct); // Parallel laden (ohne await!)
-                        }}
-                        activeOpacity={0.7}
-                      >
-                        <View style={styles.ratingRow}>
-                          <StarRatingDisplay 
-                            rating={noNameProduct.averageRatingOverall || 0}
-                            colors={colors}
-                            size={16}
-                            valueStyle={[styles.ratingValue, { color: colors.warning }]}
-                          />
-                          <ThemedText style={[styles.reviewsText, { color: colors.icon, marginLeft: 6, lineHeight: 16, includeFontPadding: false, height: 16 }]}>
-                            ({noNameProduct.ratingCount || 0})
-                          </ThemedText>
-                        </View>
-                      </TouchableOpacity>
-
+                    </ThemedText>
                   </View>
 
                   {/* Price Section */}
@@ -2598,7 +2740,13 @@ export default function ProductComparisonScreen() {
                   </ThemedText>
                     <View style={styles.discountRow}>
                       {(() => {
-                        const savingsDisplay = getSavingsDisplay(comparisonData.mainProduct, noNameProduct, colors);
+                        // 🚀 PERFORMANCE: Nutze gecachte Ersparnis-Berechnung
+                        const cachedData = savingsDataCache.get(noNameProduct.id);
+                        const savingsDisplay = cachedData?.displayData || { 
+                          text: '±0%', 
+                          color: colors.icon, 
+                          icon: 'equal' 
+                        };
                         return (
                           <>
                             <IconSymbol name={savingsDisplay.icon} size={14} color={savingsDisplay.color} />
@@ -2613,21 +2761,65 @@ export default function ProductComparisonScreen() {
                 </View>
 
 
+          {/* Horizontal Divider */}
+          <View style={[styles.horizontalDivider, { backgroundColor: colors.border }]} />
 
-              {/* Details and Cart Button Row */}
-              <View style={styles.actionButtonsRow}>
-              <TouchableOpacity 
-                  style={[styles.detailsButton, { borderColor: colors.primary }]}
+
+              {/* Ratings and Cart Button Row */}
+              <View style={styles.ratingsCartRowDirect}>
+                <TouchableOpacity 
+                  style={styles.ratingsSection}
                   onPress={() => {
                     setSelectedProductForDetails(noNameProduct);
-                    setShowProductDetails(true);
+                    setShowRatingsView(true);
+                    loadProductRatings(noNameProduct);
                   }}
-              >
-                  <IconSymbol name="info.circle" size={18} color={colors.primary} />
-                  <ThemedText style={[styles.detailsText, { color: colors.primary }]}>
-                  Details
-                </ThemedText>
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.ratingCircle, { backgroundColor: getRatingCircleColor(noNameProduct.averageRatingOverall || 0) }]}>
+                    <ThemedText style={styles.ratingCircleText}>
+                      {(noNameProduct.averageRatingOverall || 0).toFixed(1)}
+                    </ThemedText>
+                  </View>
+                  <View style={styles.ratingsContent}>
+                    <ThemedText style={[styles.ratingsText, { color: colors.icon }]}>
+                      Bewertungen
+                    </ThemedText>
+                    <View style={styles.starsContainer}>
+                      <StarRatingDisplay 
+                        rating={noNameProduct.averageRatingOverall || 0}
+                        colors={colors}
+                        size={16}
+                        showValue={false}
+                      />
+                      <ThemedText style={[styles.ratingsCount, { color: colors.icon }]}>
+                        ({noNameProduct.ratingCount || 0})
+                      </ThemedText>
+                    </View>
+                  </View>
                 </TouchableOpacity>
+                
+                {/* Favorite Heart Button */}
+                <TouchableOpacity 
+                  style={[styles.cartButtonGray, { backgroundColor: colors.background, marginRight: 12 }]}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    // Animate heart before action
+                    animateButtonPress(`noname-heart-${noNameProduct.id}`);
+                    handleToggleFavorite(noNameProduct, 'noname');
+                  }}
+                >
+                  <Animated.View style={{
+                    transform: [{ scale: buttonAnimations[`noname-heart-${noNameProduct.id}`] || new Animated.Value(1) }]
+                  }}>
+                    <IconSymbol 
+                      name={isLocalFavorite(noNameProduct.id, 'noname') ? "heart.fill" : "heart"} 
+                      size={20} 
+                      color={isLocalFavorite(noNameProduct.id, 'noname') ? colors.error : colors.icon} 
+                    />
+                  </Animated.View>
+                </TouchableOpacity>
+                
                 <NoNameCartButton 
                   productId={noNameProduct.id}
                   productName={noNameProduct.produktName || noNameProduct.name || 'NoName Produkt'}
@@ -2637,29 +2829,48 @@ export default function ProductComparisonScreen() {
                   buttonAnimations={buttonAnimations}
                 />
               </View>
+
+             
+              {/* Details Button */}
+              <TouchableOpacity 
+                style={[styles.detailsButtonDirect, { backgroundColor: colors.primary }]}
+                onPress={() => {
+                  setSelectedProductForDetails(noNameProduct);
+                  setShowProductDetails(true);
+                }}
+              >
+                <IconSymbol name="info.circle" size={16} color="white" />
+                <ThemedText style={[styles.detailsTextDirect, { color: "white" }]}>
+                  Details
+                </ThemedText>
+              </TouchableOpacity>
               </TouchableOpacity>
               </Animated.View>
           );
         })
           ) : null}
-        
-        {/* Ähnliche Produkte für Markenprodukte ohne NoName-Alternativen */}
-        {comparisonData.relatedNoNameProducts.length === 0 && (
-          <View style={{ marginTop: 16 }}>
-            {similarProductsLoading ? (
-              [...Array(3)].map((_, index) => (
-                <View key={index} style={[styles.similarProductItem, { backgroundColor: colors.cardBackground }]}>
-                  <View style={[styles.similarProductImagePlaceholder, { backgroundColor: colors.border }]} />
-                  <View style={styles.similarProductContent}>
-                    <View style={[styles.skeletonLine, { backgroundColor: colors.border, width: '80%', height: 14 }]} />
-                    <View style={[styles.skeletonLine, { backgroundColor: colors.border, width: '60%', height: 12, marginTop: 4 }]} />
-            </View>
-                </View>
-              ))
-            ) : similarProducts.length > 0 ? (
-              similarProducts.map((product) => (
-                <TouchableOpacity 
+          
+          {/* 🆕 Weitere enttarnte Produkte für Stufe 3,4,5 */}
+          {comparisonData.relatedNoNameProducts.length > 0 && similarProducts.length > 0 && (
+            <View style={{ marginTop: 6 }}>
+              <Animated.View style={{ opacity: weitereHeaderAnimation, marginBottom: 12, alignItems: 'center' }}>
+                <ThemedText style={[styles.alternativesTitle, { textAlign: 'center' }]}>
+                  Weitere enttarnte Produkte
+                </ThemedText>
+                <ThemedText style={[styles.alternativesSubtitle, { color: colors.icon, textAlign: 'center' }]}>
+                  Entdecke andere Produkte mit Stufe 3, 4 oder 5
+                </ThemedText>
+              </Animated.View>
+              
+              {similarProducts.map((product) => (
+                <Animated.View 
                   key={product.id}
+                  style={{
+                    opacity: productAnimations[product.id] || 0,
+                    transform: [{ scale: productAnimations[`${product.id}_scale`] || 0.8 }]
+                  }}
+                >
+                <TouchableOpacity 
                   style={[styles.similarProductItem, { backgroundColor: colors.cardBackground }]}
                   onPress={() => router.push(`/product-comparison/${product.id}?type=noname` as any)}
                 >
@@ -2685,17 +2896,225 @@ export default function ProductComparisonScreen() {
                     <ThemedText style={[styles.similarProductBrand, { color: colors.icon }]} numberOfLines={1}>
                       {product.handelsmarke?.bezeichnung || 'NoName'}
                     </ThemedText>
-                    <ThemedText style={[styles.similarProductPrice, { color: colors.primary }]}>
-                      {product.preis ? `${product.preis.toFixed(2)} €` : 'Preis n.v.'}
-                    </ThemedText>
+                    <View style={styles.similarProductBottomRow}>
+                      {product.discounter && (
+                        <View style={styles.similarProductMarket}>
+                          <ImageWithShimmer
+                            source={{ uri: product.discounter.bild }}
+                            style={styles.similarProductMarketLogo}
+                            fallbackIcon="house.fill"
+                            fallbackIconSize={12}
+                            resizeMode="contain"
+                          />
+                          <ThemedText style={[styles.similarProductMarketText, { color: colors.icon }]}>
+                            {product.discounter.name}
+                          </ThemedText>
+                        </View>
+                      )}
+                    </View>
                   </View>
                   <View style={styles.similarProductRight}>
                     <View style={[styles.stufeBadgeSmall, { backgroundColor: getStufenColor(parseInt(product.stufe || '3')) }]}>
                       <IconSymbol name="chart.bar" size={8} color="white" />
                       <ThemedText style={styles.stufeBadgeTextSmall}>{product.stufe}</ThemedText>
                     </View>
+                    <ThemedText style={[styles.similarProductPrice, { color: colors.primary }]}>
+                      {product.preis ? `${product.preis.toFixed(2)} €` : 'Preis n.v.'}
+                    </ThemedText>
                   </View>
+                  <View style={styles.similarProductChevron}>
+                        <IconSymbol name="chevron.right" size={16} color={colors.icon} />
+                      </View>
                 </TouchableOpacity>
+                </Animated.View>
+              ))}
+            </View>
+          )}
+        
+        {/* Ähnliche Produkte für Markenprodukte ohne NoName-Alternativen */}
+        {comparisonData.relatedNoNameProducts.length === 0 && (
+          <View style={{ marginTop: 16 }}>
+            {similarProductsLoading ? (
+              [...Array(3)].map((_, index) => (
+                <View key={index} style={[styles.similarProductItem, { backgroundColor: colors.cardBackground }]}>
+                  <View style={[styles.similarProductImagePlaceholder, { backgroundColor: colors.border }]} />
+                  <View style={styles.similarProductContent}>
+                    <View style={[styles.skeletonLine, { backgroundColor: colors.border, width: '80%', height: 14 }]} />
+                    <View style={[styles.skeletonLine, { backgroundColor: colors.border, width: '60%', height: 12, marginTop: 4 }]} />
+            </View>
+                </View>
+              ))
+            ) : similarProducts.length > 0 ? (
+              similarProducts.map((product) => (
+                <Animated.View 
+                  key={product.id}
+                  style={{
+                    opacity: productAnimations[product.id] || 0,
+                    transform: [{ 
+                      scale: productAnimations[`${product.id}_scale`] || 0.8 
+                    }]
+                  }}
+                >
+                  <TouchableOpacity
+                    style={[
+                      styles.productCard, 
+                      { 
+                        backgroundColor: colors.cardBackground,
+                        borderWidth: 2,
+                        borderColor: 'transparent',
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.1,
+                        shadowRadius: 4,
+                        elevation: 3,
+                      }
+                    ]}
+                    onPress={() => router.push(`/product-comparison/${product.id}?type=noname` as any)}
+                    activeOpacity={0.7}
+                  >
+                    {/* Chips Row */}
+                    <View style={styles.chipsRow}>
+                      <View style={[styles.marketChip, { backgroundColor: product.discounter?.color || colors.primary }]}>
+                        <IconSymbol name="house.fill" size={12} color="white" />
+                        <ThemedText style={styles.chipText}>
+                          {product.discounter?.name || 'Unbekannt'}
+                        </ThemedText>
+                      </View>
+                      {product.stufe && (
+                        <View style={[styles.stageChip, { backgroundColor: getStufenColor(product.stufe) }]}>
+                          <IconSymbol name="chart.bar" size={10} color="white" />
+                          <ThemedText style={styles.chipText}>
+                            {product.stufe}
+                          </ThemedText>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Product Row */}
+                    <View style={styles.productRow}>
+                      {/* Product Image */}
+                      <TouchableOpacity 
+                        style={styles.productImageContainer}
+                        onPress={() => product.bild && openImageViewer(product.bild)}
+                        disabled={!product.bild}
+                      >
+                        {product.bild ? (
+                          <Image 
+                            source={{ uri: product.bild }}
+                            style={styles.productImage}
+                          />
+                        ) : (
+                          <View style={[styles.productImagePlaceholder, { backgroundColor: colors.border }]}>
+                            <IconSymbol name="photo" size={24} color={colors.icon} />
+                          </View>
+                        )}
+                      </TouchableOpacity>
+
+                      {/* Product Info */}
+                      <View style={styles.productInfo}>
+                        <View style={styles.brandRow}>
+                          <ThemedText style={[styles.brandText, { color: colors.primary }]}>
+                            {product.handelsmarke?.bezeichnung || 'NoName-Produkt'}
+                          </ThemedText>
+                        </View>
+                        <ThemedText style={styles.productTitle}>
+                          {product.name}
+                        </ThemedText>
+                      </View>
+
+                      {/* Price Section */}
+                      <View style={styles.priceSection}>
+                        <ThemedText style={[styles.mainPrice, { color: colors.icon }]}>
+                          {formatPrice(product.preis)}
+                        </ThemedText>
+                        <ThemedText style={[styles.mainWeight, { color: colors.icon }]}>
+                          {getPackageInfo(product.packSize, product.packTypInfo)}
+                        </ThemedText>
+                      </View>
+                    </View>
+
+                    {/* Horizontal Divider */}
+                    <View style={[styles.horizontalDivider, { backgroundColor: colors.border }]} />
+
+                    {/* Ratings and Cart Button Row */}
+                    <View style={styles.ratingsCartRowDirect}>
+                      <TouchableOpacity 
+                        style={styles.ratingsSection}
+                        onPress={() => {
+                          setSelectedProductForDetails(product);
+                          setShowRatingsView(true);
+                          loadProductRatings(product);
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.ratingCircle, { backgroundColor: getRatingCircleColor(product.averageRatingOverall || 0) }]}>
+                          <ThemedText style={styles.ratingCircleText}>
+                            {(product.averageRatingOverall || 0).toFixed(1)}
+                          </ThemedText>
+                        </View>
+                        <View style={styles.ratingsContent}>
+                          <ThemedText style={[styles.ratingsText, { color: colors.icon }]}>
+                            Bewertungen
+                          </ThemedText>
+                          <View style={styles.starsContainer}>
+                            <StarRatingDisplay 
+                              rating={product.averageRatingOverall || 0}
+                              colors={colors}
+                              size={16}
+                              showValue={false}
+                            />
+                            <ThemedText style={[styles.ratingsCount, { color: colors.icon }]}>
+                              ({product.ratingCount || 0})
+                            </ThemedText>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                      
+                      {/* Favorite Heart Button */}
+                      <TouchableOpacity 
+                        style={[styles.cartButtonGray, { backgroundColor: colors.background, marginRight: 12 }]}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          animateButtonPress(`stufe12-heart-${product.id}`);
+                          handleToggleFavorite(product, 'noname');
+                        }}
+                      >
+                        <Animated.View style={{
+                          transform: [{ scale: buttonAnimations[`stufe12-heart-${product.id}`] || new Animated.Value(1) }]
+                        }}>
+                          <IconSymbol 
+                            name={isLocalFavorite(product.id, 'noname') ? "heart.fill" : "heart"} 
+                            size={20} 
+                            color={isLocalFavorite(product.id, 'noname') ? colors.error : colors.icon} 
+                          />
+                        </Animated.View>
+                      </TouchableOpacity>
+                      
+                      <NoNameCartButton 
+                        productId={product.id}
+                        productName={product.produktName || product.name || 'NoName Produkt'}
+                        user={user}
+                        colors={colors}
+                        animateButtonPress={animateButtonPress}
+                        buttonAnimations={buttonAnimations}
+                      />
+                    </View>
+
+                    {/* Details Button */}
+                    <TouchableOpacity 
+                      style={[styles.detailsButtonDirect, { backgroundColor: colors.primary }]}
+                      onPress={() => {
+                        setSelectedProductForDetails(product);
+                        setShowProductDetails(true);
+                      }}
+                    >
+                      <IconSymbol name="info.circle" size={16} color="white" />
+                      <ThemedText style={[styles.detailsTextDirect, { color: "white" }]}>
+                        Details
+                      </ThemedText>
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                </Animated.View>
               ))
             ) : (
               <View style={styles.emptyState}>
@@ -3092,7 +3511,7 @@ export default function ProductComparisonScreen() {
             </View>
           </View>
           
-                    <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
             <View style={styles.ratingForm}>
               <ThemedText style={styles.ratingFormTitle}>Deine Gesamtbewertung</ThemedText>
               <StarRating 
@@ -3102,7 +3521,7 @@ export default function ProductComparisonScreen() {
               />
 
               <ThemedText style={styles.ratingFormTitle}>Detail-Bewertung nach Kriterien (optional)</ThemedText>
-
+              
               <View style={styles.criterionRating}>
                 <View style={styles.criterionRow}>
                   <ThemedText style={styles.criterionLabelCompact}>Geschmack/Wirkung</ThemedText>
@@ -3188,8 +3607,8 @@ export default function ProductComparisonScreen() {
                     {isEditingRating ? 'Bewertung aktualisieren' : 'Bewertung speichern'}
                   </ThemedText>
                 )}
-              </TouchableOpacity>
-            </View>
+                  </TouchableOpacity>
+              </View>
           </ScrollView>
         </View>
       </Modal>
@@ -3280,40 +3699,40 @@ export default function ProductComparisonScreen() {
               </>
             ) : (
               <>
-                {/* Overall Rating Card */}
-                <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
-                  <View style={styles.ratingOverallSection}>
-                    <View style={styles.ratingCircle}>
-                      <ThemedText style={styles.ratingCircleNumber}>
+            {/* Overall Rating Card */}
+            <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
+              <View style={styles.ratingOverallSection}>
+                <View style={[styles.ratingCircleLarge, { backgroundColor: getRatingCircleColor(ratingStats?.averageOverall || 0) }]}>
+                  <ThemedText style={styles.ratingCircleNumber}>
                         {(ratingStats?.averageOverall || 0).toFixed(1)}
-                      </ThemedText>
-                    </View>
-                    <View style={styles.ratingDetails}>
-                      <ThemedText style={styles.ratingTitle}>Allgemeine Bewertung</ThemedText>
-                      <View style={styles.starsRow}>
+                  </ThemedText>
+                </View>
+                <View style={styles.ratingDetails}>
+                  <ThemedText style={styles.ratingTitle}>Allgemeine Bewertung</ThemedText>
+                  <View style={styles.starsRow}>
                         <StarRatingDisplay 
                           rating={ratingStats?.averageOverall || 0}
                           colors={colors}
                           size={20}
                           showValue={false}
                         />
-                      </View>
-                      <ThemedText style={[styles.ratingsCount, { color: colors.icon }]}>
-                        Basierend auf {ratingStats?.totalCount || 0} Bewertungen
-                      </ThemedText>
-                    </View>
                   </View>
+                  <ThemedText style={[styles.ratingsCount, { color: colors.icon }]}>
+                        Basierend auf {ratingStats?.totalCount || 0} Bewertungen
+                  </ThemedText>
                 </View>
+              </View>
+            </View>
               </>
             )}
 
             {/* Detailed Ratings Card */}
             {!ratingsLoading && ratingStats && (
-              <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
+            <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
                 <ThemedText style={[styles.infoLabel, { flexShrink: 0 }]}>Kriterien-Bewertungen</ThemedText>
-                
-                <View style={styles.criteriaRatings}>
-                  <View style={styles.criteriaRow}>
+              
+              <View style={styles.criteriaRatings}>
+                <View style={styles.criteriaRow}>
                     <ThemedText style={styles.criteriaLabel}>Qualität & Geschmack</ThemedText>
                     <View style={styles.criterionRightSide}>
                       <StarRatingDisplay 
@@ -3323,10 +3742,10 @@ export default function ProductComparisonScreen() {
                         valueStyle={[styles.criteriaValue, { color: colors.icon }]}
                       />
                     </View>
-                  </View>
+              </View>
 
-                  <View style={styles.criteriaRow}>
-                    <ThemedText style={styles.criteriaLabel}>Preis-Leistung</ThemedText>
+                <View style={styles.criteriaRow}>
+                  <ThemedText style={styles.criteriaLabel}>Preis-Leistung</ThemedText>
                     <View style={styles.criterionRightSide}>
                       <StarRatingDisplay 
                         rating={ratingStats.averagePrice || 0}
@@ -3335,10 +3754,10 @@ export default function ProductComparisonScreen() {
                         valueStyle={[styles.criteriaValue, { color: colors.icon }]}
                       />
                     </View>
-                  </View>
-                  
-                  <View style={styles.criteriaRow}>
-                    <ThemedText style={styles.criteriaLabel}>Inhaltsstoffe</ThemedText>
+                </View>
+                
+                <View style={styles.criteriaRow}>
+                  <ThemedText style={styles.criteriaLabel}>Inhaltsstoffe</ThemedText>
                     <View style={styles.criterionRightSide}>
                       <StarRatingDisplay 
                         rating={ratingStats.averageContent || 0}
@@ -3347,11 +3766,11 @@ export default function ProductComparisonScreen() {
                         valueStyle={[styles.criteriaValue, { color: colors.icon }]}
                       />
                     </View>
-                  </View>
-                  
+                </View>
+                
                   {/* Only show similarity for NoName products */}
                   {selectedProductForDetails && (
-                    <View style={styles.criteriaRow}>
+                <View style={styles.criteriaRow}>
                       <ThemedText style={styles.criteriaLabel}>Ähnlichkeit zu Marke</ThemedText>
                       <View style={styles.criterionRightSide}>
                         <StarRatingDisplay 
@@ -3360,10 +3779,10 @@ export default function ProductComparisonScreen() {
                           size={14}
                           valueStyle={[styles.criteriaValue, { color: colors.icon }]}
                         />
-                      </View>
-                    </View>
-                  )}
                 </View>
+              </View>
+                  )}
+            </View>
               </View>
             )}
 
@@ -3390,8 +3809,8 @@ export default function ProductComparisonScreen() {
                 <View style={[styles.commentCountBadge, { backgroundColor: colors.primary + '20' }]}>
                   <ThemedText style={[styles.commentCountText, { color: colors.primary }]}>
                     {ratingStats?.commentsCount || 0}
-                  </ThemedText>
-                </View>
+                </ThemedText>
+              </View>
               </View>
               
               {!ratingsLoading && productRatings.length > 0 ? (
@@ -3694,7 +4113,7 @@ const styles = StyleSheet.create({
   // Product Row
   productRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'flex-start', // Alle Items oben ausrichten
     marginBottom: 12,
     gap: 10,
   },
@@ -3705,14 +4124,13 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: 'rgba(0,0,0,0.05)',
-    justifyContent: 'center',
+     justifyContent: 'center',
     alignItems: 'center',
   },
   productImage: {
     width: '100%',
     height: '100%',
-    resizeMode: 'cover',
+    resizeMode: 'contain', // Verhindert Abschneiden
   },
   productImagePlaceholder: {
     width: 80,
@@ -3725,7 +4143,8 @@ const styles = StyleSheet.create({
   // Product Info
   productInfo: {
     flex: 1,
-    paddingTop: 2,
+    paddingTop: 0, // Entferne padding um Text ganz oben zu haben
+    justifyContent: 'flex-start', // Stelle sicher, dass Content oben bleibt
   },
   brandRow: {
     flexDirection: 'row',
@@ -3746,7 +4165,8 @@ const styles = StyleSheet.create({
   productTitle: {
     fontSize: 16,
     fontFamily: 'Nunito_700Bold',
-    marginBottom: 6,
+    marginBottom: 0, // Kein Abstand nach unten
+    marginTop: 0, // Kein Abstand nach oben
     lineHeight: 20,
   },
   priceRow: {
@@ -3807,8 +4227,9 @@ const styles = StyleSheet.create({
   // Price Section (Right)
   priceSection: {
     alignItems: 'flex-end',
-    paddingTop: 2,
+    paddingTop: 0, // Entferne padding für bessere Ausrichtung
     minWidth: 80,
+    justifyContent: 'flex-start', // Preis-Content auch oben halten
   },
   mainPrice: {
     fontSize: 16, // Large - reduziert von 20
@@ -3820,25 +4241,122 @@ const styles = StyleSheet.create({
     
   },
 
-  // Action Buttons Row
+  // Direct Layout (ohne Box)
+  ratingsCartRowDirect: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 0,
+    marginBottom: 8,
+  },
+  ratingsSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
+  ratingCircle: {
+    width: 44, // Optimale Größe zwischen Cart Button und zu klein
+    height: 44,
+    borderRadius: 22, // Halbe Breite für perfekten Kreis
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ratingCircleText: {
+    fontSize: 14, // Passend für 32px Kreis
+    fontFamily: 'Nunito_700Bold',
+    color: 'white',
+  },
+  ratingsContent: {
+    flex: 1,
+    gap: 0, // Kein gap
+  },
+  starsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4, // Abstand zwischen Sternen und Anzahl
+    marginTop: -3, // 3px näher zum "Bewertungen" Text
+  },
+  ratingsText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+      // Kein zusätzlicher Abstand - gap regelt das
+  },
+  ratingsCount: {
+    fontSize: 12,
+    fontFamily: 'Nunito_400Regular',
+    
+  },
+
+  // Details Button direkt (ohne Box)
+  detailsButtonDirect: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 6,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  detailsTextDirect: {
+    fontSize: 13,
+    fontFamily: 'Nunito_500Medium',
+  },
+
+  // Legacy Details Button inside Box (keep for compatibility)
+  detailsButtonInBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
+  },
+  detailsTextInBox: {
+    fontSize: 13,
+    fontFamily: 'Nunito_500Medium',
+  },
+
+  // Legacy Details Button (keep for compatibility)
+  detailsButtonNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 6,
+    marginTop: 2,
+  },
+  detailsTextNew: {
+    fontSize: 13,
+    fontFamily: 'Nunito_500Medium',
+  },
+
+  // Legacy Action Buttons Row (keep for compatibility)
   actionButtonsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginTop: 3, // Reduziert von 12 auf 5px (60% weniger)
+    marginTop: 3,
   },
   detailsButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,     // Erhöht von 1 auf 8 (viel höher)
+    paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
     backgroundColor: 'transparent',
     gap: 6,
-    height: 44,             // Erhöht von 30 auf 44 (konsistent mit actionIconButton)
+    height: 44,
   },
   detailsText: {
     fontSize: 14,
@@ -3851,6 +4369,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  cartButtonGray: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,       // Runder Kreis wie Favorites Button
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',    // Gleicher Schatten wie actionIconButton
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,          // Android Schatten
+  },
 
   // Alternatives Section
   alternativesContainer: {
@@ -3862,6 +4392,7 @@ const styles = StyleSheet.create({
     marginBottom: 0, // Reduziert von 6 auf 3px
     marginTop: 12,   // Reduziert von 32 auf 16px für weniger Abstand
     marginLeft: 0,
+    
   },
 
 
@@ -3906,6 +4437,13 @@ const styles = StyleSheet.create({
     marginVertical: 8,
     opacity: 0.3,
   },
+  horizontalDivider: {
+    height: 1,
+    marginVertical: 4,
+    borderRadius: 1,
+    opacity: 0.5,
+    marginBottom: 12,
+  },
 
   // Bottom Sheet Styles
   bottomSheetContainer: {
@@ -3941,6 +4479,7 @@ const styles = StyleSheet.create({
   bottomSheetTitle: {
     fontSize: 16, // Large - wichtige Überschriften
     fontFamily: 'Nunito_700Bold',
+    
   },
   bottomSheetSubtitle: {
     fontSize: 16,
@@ -4247,13 +4786,13 @@ const styles = StyleSheet.create({
     gap: 16,
     marginBottom: 16,
   },
-  ratingCircle: {
+  ratingCircleLarge: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#6B7280',
     justifyContent: 'center',
     alignItems: 'center',
+    // backgroundColor wird dynamisch durch getRatingCircleColor() gesetzt
   },
   ratingCircleNumber: {
     fontSize: 16, // Large - reduziert von 24
@@ -5128,10 +5667,38 @@ const styles = StyleSheet.create({
   similarProductPrice: {
     fontSize: 12,
     fontFamily: 'Nunito_600SemiBold',
-    lineHeight: 14,
+    lineHeight: 20,
+    marginTop: 2,
   },
   similarProductRight: {
     alignItems: 'flex-end',
+    gap: 0,
+  },
+  similarProductChevron: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 20,
+    height: 50,
+    marginLeft: 6,
+  },
+  similarProductBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 0,
+  },
+  similarProductMarket: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  similarProductMarketLogo: {
+    width: 16,
+    height: 16,
+    borderRadius: 2,
+  },
+  similarProductMarketText: {
+    fontSize: 11,
+    fontFamily: 'Nunito_400Regular',
   },
   stufeBadgeSmall: {
     flexDirection: 'row',

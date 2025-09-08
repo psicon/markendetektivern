@@ -12,15 +12,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Animated,
+    Dimensions,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -305,18 +305,18 @@ export default function AchievementsScreen() {
             end={{ x: 0, y: 0 }}
             style={styles.gradientCard}
           >
-            <View style={styles.savingsContent}>
+            <TouchableOpacity onPress={() => router.push('/purchase-history' as any)} style={styles.savingsContent}>
               <View style={styles.savingsLeft}>
                 <ThemedText style={styles.savingsLabel}>Deine Gesamtersparnis</ThemedText>
                 <ThemedText style={styles.savingsAmount}>{`€ ${currentSavings.toFixed(2)}`}</ThemedText>
               </View>
               <View style={styles.savingsRight}>
-                <TouchableOpacity style={styles.productsBadge} onPress={() => router.push('/purchase-history' as any)}>
+                <View style={styles.productsBadge}>
                   <IconSymbol name="number" size={14} color={colors.warning} />
                   <ThemedText style={styles.productsBadgeText}>{`${purchasedProducts} gekaufte Produkte`}</ThemedText>
-                </TouchableOpacity>
+                </View>
               </View>
-            </View>
+            </TouchableOpacity>
             
             {/* Shimmer Effect */}
             <Animated.View 

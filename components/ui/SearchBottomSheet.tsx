@@ -4,18 +4,18 @@ import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    Keyboard,
-    PanResponder,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  Keyboard,
+  PanResponder,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconSymbol } from './IconSymbol';
@@ -446,6 +446,13 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
                     }}
                     activeOpacity={0.6}
                   >
+                    {/* Sponsored Badge - nur für erstes echtes Produkt */}
+                    {index === 0 && item.isRealProduct && (
+                      <View style={styles.searchSponsoredBadge}>
+                        <Text style={styles.searchSponsoredText}>Sponsored</Text>
+                      </View>
+                    )}
+                    
                     {/* Echtes Produktbild oder Emoji-Fallback */}
                     {item.isRealProduct && item.productImage ? (
                       <ImageWithShimmer
@@ -781,6 +788,24 @@ const styles = StyleSheet.create({
   quickActionText: {
     fontSize: 13,
     fontFamily: 'Nunito_600SemiBold',
+  },
+  
+  // Sponsored Badge für SearchSheet - extra kompakt
+  searchSponsoredBadge: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.49)',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 3,
+    zIndex: 3,
+  },
+  searchSponsoredText: {
+    fontSize: 7,
+    fontFamily: 'Nunito_600SemiBold',
+    color: 'rgba(255,255,255,0.95)',
+    letterSpacing: 0.1,
   },
 });
 

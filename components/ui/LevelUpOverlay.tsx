@@ -6,13 +6,13 @@ import { useRouter } from 'expo-router';
 import LottieView from 'lottie-react-native';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    Animated,
-    Dimensions,
-    Modal,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Animated,
+  Dimensions,
+  Modal,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { IconSymbol } from './IconSymbol';
@@ -31,47 +31,7 @@ interface LevelUpOverlayProps {
   onClose: () => void;
 }
 
-// Lokale Level-Animation basierend auf Level-ID (keine Firebase-Abhängigkeit)
-const getLevelLottieSource = (levelId: number) => {
-  // Lottie loading - reduced logging
-  
-  try {
-    // Direkte Zuordnung basierend auf Level-ID
-    switch (levelId) {
-      case 1:  return require('@/assets/lottie/level-1.json');   // Erste Schritte
-      case 2:  return require('@/assets/lottie/level-2.json');   // Konfetti
-      case 3:  return require('@/assets/lottie/level-3.json');   // Badge Pulse
-      case 4:  return require('@/assets/lottie/level-4.json');   // Sparkles
-      case 5:  return require('@/assets/lottie/level-5.json');   // Wave Effect
-      case 6:  return require('@/assets/lottie/level-6.json');   // Medal Spin
-      case 7:  return require('@/assets/lottie/level-7.json');   // Burst
-      case 8:  return require('@/assets/lottie/level-8.json');   // Crown Shine
-      case 9:  return require('@/assets/lottie/level-9.json');   // King Sparkle
-      case 10: return require('@/assets/lottie/level-10.json');  // Fireworks
-      
-      default: 
-        // Für höhere Level: Recycle die besten Animationen (statisch)
-        const cycleLevel = ((levelId - 1) % 10) + 1;
-        console.log(`🔄 Level ${levelId} -> Verwende Level ${cycleLevel} Animation`);
-        switch (cycleLevel) {
-          case 1: return require('@/assets/lottie/level-1.json');
-          case 2: return require('@/assets/lottie/level-2.json');
-          case 3: return require('@/assets/lottie/level-3.json');
-          case 4: return require('@/assets/lottie/level-4.json');
-          case 5: return require('@/assets/lottie/level-5.json');
-          case 6: return require('@/assets/lottie/level-6.json');
-          case 7: return require('@/assets/lottie/level-7.json');
-          case 8: return require('@/assets/lottie/level-8.json');
-          case 9: return require('@/assets/lottie/level-9.json');
-          case 10: return require('@/assets/lottie/level-10.json');
-          default: return require('@/assets/lottie/level-10.json'); // Ultimate Fallback
-        }
-    }
-  } catch (error) {
-    console.log(`⚠️ Level ${levelId} Lottie loading failed:`, error);
-    return require('@/assets/lottie/level-1.json'); // Fallback
-  }
-};
+
 
 export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
   visible,
@@ -86,6 +46,9 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
+  const categoryShimmerAnim = useRef(new Animated.Value(0)).current;
+  const categoryFadeAnim = useRef(new Animated.Value(0)).current;
+  const foregroundLottieOpacity = useRef(new Animated.Value(0)).current;
   const confettiRef = useRef<any>(null);
   const [showContent, setShowContent] = useState(false);
   const [levels, setLevels] = useState<Level[]>([]);
@@ -128,7 +91,57 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
       
       setShowContent(true);
       
-      // Start animations
+      // Reset alle Animationen bevor wir starten
+      scaleAnim.setValue(0);
+      fadeAnim.setValue(0);
+      rotateAnim.setValue(0);
+      categoryShimmerAnim.setValue(0);
+      categoryFadeAnim.setValue(0);
+      foregroundLottieOpacity.setValue(0);
+      
+      // Lottie ÜBER Kategorie (1x Animation dann ausblenden)
+      if (unlockedCategory) {
+        // Lottie sofort einblenden und animieren
+        Animated.sequence([
+          Animated.timing(foregroundLottieOpacity, {
+            toValue: 0.9,
+            duration: 300,
+            useNativeDriver: true
+          }),
+          Animated.delay(2000), // 2 Sekunden Lottie-Animation
+          Animated.timing(foregroundLottieOpacity, {
+            toValue: 0,
+            duration: 500,
+            useNativeDriver: true
+          })
+        ]).start(() => {
+          // Nach Lottie-Ausblendung: Kategorie soft einblenden
+          Animated.parallel([
+            Animated.timing(categoryFadeAnim, {
+              toValue: 1,
+              duration: 800,
+              useNativeDriver: true
+            }),
+            // Kategorie-Shimmer (kontinuierlich, kein Drehen!)
+            Animated.loop(
+              Animated.sequence([
+                Animated.timing(categoryShimmerAnim, {
+                  toValue: 1,
+                  duration: 1200,
+                  useNativeDriver: true
+                }),
+                Animated.timing(categoryShimmerAnim, {
+                  toValue: 0,
+                  duration: 1200,
+                  useNativeDriver: true
+                })
+              ])
+            )
+          ]).start();
+        });
+      }
+
+      // Start main content animations
       Animated.parallel([
         Animated.spring(scaleAnim, {
           toValue: 1,
@@ -151,30 +164,6 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
         setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light), 400);
       });
 
-      // Rotate animation for the badge - nur 1x wackeln für 2 Sekunden
-      Animated.sequence([
-        Animated.timing(rotateAnim, {
-          toValue: 1,
-          duration: 500,
-          useNativeDriver: true,
-        }),
-        Animated.timing(rotateAnim, {
-          toValue: -1,
-          duration: 500,
-          useNativeDriver: true,
-        }),
-        Animated.timing(rotateAnim, {
-          toValue: 1,
-          duration: 500,
-          useNativeDriver: true,
-        }),
-        Animated.timing(rotateAnim, {
-          toValue: 0,
-          duration: 500,
-          useNativeDriver: true,
-        }),
-      ]).start();
-
       // KEIN Auto-close - User muss manuell schließen!
       // const timer = setTimeout(() => {
       //   handleClose();
@@ -182,10 +171,13 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
 
       // return () => clearTimeout(timer);
     } else {
-      // Reset animations
+      // Reset all animations
       scaleAnim.setValue(0);
       fadeAnim.setValue(0);
       rotateAnim.setValue(0);
+      categoryShimmerAnim.setValue(0);
+      categoryFadeAnim.setValue(0);
+      foregroundLottieOpacity.setValue(0);
       setShowContent(false);
     }
   }, [visible]);
@@ -235,7 +227,18 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
     outputRange: ['-5deg', '5deg'],
   });
 
-  const getLevelGradient = () => {
+  // Animationen für Kategorie (nur Shimmer, kein Drehen)
+  const categoryShimmerOpacity = categoryShimmerAnim.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.8, 1.0, 0.8],
+  });
+
+  const categoryShimmerScale = categoryShimmerAnim.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [1.0, 1.05, 1.0],
+  });
+
+  const getLevelGradient = (): [string, string] => {
     const baseColor = levelInfo.color;
     switch(newLevel) {
       case 1: return [baseColor, '#9E6B50'];
@@ -278,6 +281,8 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
           explosionSpeed={350}
         />
 
+
+
         <Animated.View 
           style={[
             styles.contentCard,
@@ -303,50 +308,71 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
               <IconSymbol name="xmark" size={16} color="rgba(255,255,255,0.9)" />
             </TouchableOpacity>
 
-            {/* Große Lottie Animation (Icon oben entfernt) */}
-            <View style={styles.lottieContainer}>
-              <LottieView
-                source={getLevelLottieSource(newLevel)}
-                autoPlay
-                loop={true}
-                style={styles.lottieAnimationResponsive}
-                onAnimationFinish={() => {
-                  console.log(`✨ Level ${newLevel} Lottie-Animation wiederholt`);
-                }}
-              />
-            </View>
-
             {/* Title */}
             <Text style={styles.levelTitle}>{levelInfo.name}!</Text>
             <Text style={styles.levelDescription}>{levelInfo.description}</Text>
 
-            {/* Reward Section */}
-            <View style={styles.rewardSection}>
-              <Text style={styles.rewardLabel}>BELOHNUNG</Text>
-              
-              {/* Spezielle Kategorie-Freischaltung Anzeige */}
+            {/* HAUPTINHALT: Kategorie-Freischaltung oder Standard-Belohnung */}
+            <View style={styles.mainContentSection}>
               {unlockedCategory ? (
                 <View style={styles.categoryUnlockSection}>
-                  <Text style={styles.categoryUnlockTitle}>NEUE KATEGORIE FREIGESCHALTET!</Text>
-                  <View style={styles.categoryImageContainer}>
-                    <Animated.Image 
-                      source={{ uri: unlockedCategory.imageUrl }}
+                  <View style={styles.categoryRevealContainer}>
+                    {/* Lottie ÜBER alles (1x Animation, dann ausblenden) */}
+                    <Animated.View 
                       style={[
-                        styles.categoryImage,
-                        { transform: [{ scale: scaleAnim }] }
+                        styles.foregroundLottieContainer,
+                        { opacity: foregroundLottieOpacity }
                       ]}
-                    />
-                  </View>
-                  <Text style={styles.categoryName}>{unlockedCategory.name}</Text>
-                  <View style={styles.rewardBox}>
+                      pointerEvents="none"
+                    >
+                      <LottieView
+                        source={require('@/assets/lottie/lvlup.json')}
+                        autoPlay
+                        loop={false}
+                        style={styles.foregroundLottie}
+                      />
+                    </Animated.View>
+
+                    {/* Alles zeitgleich einblenden (Titel + Kategorie-Bild + Name) */}
+                    <Animated.View 
+                      style={[
+                        styles.categoryContentContainer, 
+                        { opacity: categoryFadeAnim }
+                      ]}
+                    >
+                      <Text style={styles.categoryUnlockTitle}>NEUE KATEGORIE FREIGESCHALTET!</Text>
+                      
+                      <View style={styles.categoryImageContainer}>
+                        <Animated.Image 
+                          source={{ uri: unlockedCategory.imageUrl }}
+                          style={[
+                            styles.categoryImage,
+                            { 
+                              transform: [
+                                { scale: categoryShimmerScale }
+                              ],
+                              opacity: categoryShimmerOpacity
+                            }
+                          ]}
+                        />
+                      </View>
+                      
+                      <Text style={styles.categoryName}>{unlockedCategory.name}</Text>
+                      <View style={styles.rewardBox}>
                     <IconSymbol name="sparkles" size={18} color="white" />
                     <Text style={styles.rewardText}>Jetzt in Stöbern verfügbar!</Text>
                   </View>
+                    </Animated.View>
+                  </View>
+                  
+                 
                 </View>
               ) : (
-                <View style={styles.rewardBox}>
-                  <IconSymbol name="gift" size={18} color="white" />
-                  <Text style={styles.rewardText}>{levelInfo.reward}</Text>
+                <View style={styles.standardRewardSection}>
+                  <View style={styles.rewardBox}>
+                    <IconSymbol name="gift" size={18} color="white" />
+                    <Text style={styles.rewardText}>{levelInfo.reward}</Text>
+                  </View>
                 </View>
               )}
             </View>
@@ -416,7 +442,8 @@ const styles = StyleSheet.create({
   },
   contentCard: {
     width: SCREEN_WIDTH * 0.85,
-    maxWidth: 350,
+    maxWidth: 340,
+    maxHeight: SCREEN_HEIGHT * 0.75,
     borderRadius: 24,
     overflow: 'hidden',
     elevation: 10,
@@ -424,9 +451,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.3,
     shadowRadius: 20,
+    zIndex: 2,
   },
   gradientBackground: {
-    padding: 24,
+    padding: 20,
     alignItems: 'center',
   },
   closeButton: {
@@ -443,7 +471,7 @@ const styles = StyleSheet.create({
   },
   levelBadge: {
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   levelIconContainer: {
     width: 80,
@@ -467,39 +495,34 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: 'white',
     marginBottom: 8,
+    marginTop: 8,
     textAlign: 'center',
   },
   levelDescription: {
     fontSize: 15,
     color: 'rgba(255,255,255,0.9)',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
     paddingHorizontal: 16,
   },
-  lottieContainer: {
+  
+  // Hauptinhalt Section (kompakt für kleine Screens)
+  mainContentSection: {
     width: '100%',
-    height: Math.min(SCREEN_WIDTH * 0.7, 220) + 20,
-    marginVertical: 20,
-    justifyContent: 'center',
     alignItems: 'center',
+    marginVertical: 12,
+    zIndex: 2,
   },
-  lottieAnimation: {
-    width: 180,
-    height: 180,
+  standardRewardSection: {
+    alignItems: 'center',
+    paddingVertical: 16,
   },
-  lottieAnimationLarge: {
-    width: 200,
-    height: 200,
-  },
-  lottieAnimationResponsive: {
-    width: Math.min(SCREEN_WIDTH * 0.6, 220),
-    height: Math.min(SCREEN_WIDTH * 0.6, 220),
-  },
+  
   levelComparison: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 16,
+    marginVertical: 12,
   },
   oldLevelContainer: {
     alignItems: 'center',
@@ -523,16 +546,9 @@ const styles = StyleSheet.create({
   },
   rewardSection: {
     width: '100%',
-    marginBottom: 20,
-  },
-  rewardLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.7)',
-    letterSpacing: 1,
     marginBottom: 8,
-    textAlign: 'center',
   },
+
   rewardBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -546,12 +562,12 @@ const styles = StyleSheet.create({
   rewardText: {
     fontSize: 14,
     fontWeight: '600',
-    color: 'white',
+    color: 'rgba(255,255,255,0.9)',
   },
   progressInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 12,
   },
   progressText: {
     fontSize: 13,
@@ -593,39 +609,73 @@ const styles = StyleSheet.create({
   categoryUnlockTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#FFD700',
+    color: 'white',
     letterSpacing: 0.5,
-    marginBottom: 16,
+    marginBottom: 12,
     textAlign: 'center',
   },
+  // Kategorie Reveal Container (für Lottie + Kategorie Overlay)
+  categoryRevealContainer: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    
+  },
+  
+  // Lottie ÜBER kompletten Category-Content
+  foregroundLottieContainer: {
+    position: 'absolute',
+    top: -20,
+    left: -20,
+    right: -20,
+    bottom: -50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 3,
+  },
+  foregroundLottie: {
+    width: 290,
+    height: 290,
+  },
+  
+  // Container für alles was zeitgleich eingeblendet wird
+  categoryContentContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  
   categoryImageContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 115, // 15% größer als 100px
+    height: 115,
+    borderRadius: 57.5, // Rund bleiben
     backgroundColor: 'rgba(255,255,255,0.2)',
     padding: 4,
-    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 10,
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
   },
   categoryImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 56,
+    borderRadius: 53.5, // Angepasst für 115px Container
     borderWidth: 3,
     borderColor: 'rgba(255,255,255,0.9)',
   },
   categoryName: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: 'white',
-    marginBottom: 16,
+    marginBottom: 10,
+    marginTop: 8,
     textAlign: 'center',
     textShadowColor: 'rgba(0,0,0,0.3)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
+
 });

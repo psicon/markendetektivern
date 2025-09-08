@@ -131,6 +131,15 @@ export default function NoNameDetailScreen() {
       }),
     ]).start();
   };
+
+  // Get rating circle color based on rating value
+  const getRatingCircleColor = (rating: number) => {
+    if (rating >= 4.5) return colors.primary; // Primary grün bei 4.5-5
+    if (rating >= 4) return '#4CAF50'; // Leicht grün bei 4-4.5  
+    if (rating >= 3) return '#FFC107'; // Gelb bei 3-4
+    if (rating >= 2) return '#FF9800'; // Orange bei 2-3
+    return '#F44336'; // Rot bei 1-2
+  };
   
   // Handle favorite toggle
   const handleToggleFavorite = async () => {
@@ -714,24 +723,6 @@ export default function NoNameDetailScreen() {
 
             <View style={styles.spacer} />
 
-            {/* Action Icons */}
-            <View style={styles.topActionIcons}>
-              <TouchableOpacity 
-                style={[styles.actionIconButton, { backgroundColor: colors.background }]}
-                onPress={handleToggleFavorite}
-                disabled={favoriteLoading}
-              >
-                <Animated.View style={{
-                  transform: [{ scale: heartAnimation }]
-                }}>
-                  <IconSymbol 
-                    name={isFavorite ? "heart.fill" : "heart"} 
-                    size={24} 
-                    color={isFavorite ? colors.error : colors.icon} 
-                  />
-                </Animated.View>
-              </TouchableOpacity>
-            </View>
           </View>
 
           {/* Product Row */}
@@ -769,28 +760,6 @@ export default function NoNameDetailScreen() {
               <ThemedText style={styles.productTitle}>
                 {product.name}
               </ThemedText>
-              <TouchableOpacity 
-                style={styles.ratingRow}
-                onPress={async () => {
-                  // Show ratings VIEW (not input) when clicking stars
-                  console.log('🎯 Opening ratings for NoName product:', product.name);
-                  setShowRatingsView(true); // Modal SOFORT öffnen!
-                  loadProductRatings(product); // Parallel laden (ohne await!)
-                }}
-                activeOpacity={0.7}
-              >
-                <View style={styles.ratingRow}>
-                  <StarRatingDisplay 
-                    rating={product.averageRatingOverall || 0}
-                    colors={colors}
-                    size={16}
-                    valueStyle={[styles.ratingValue, { color: colors.warning }]}
-                  />
-                  <ThemedText style={[styles.reviewsText, { color: colors.icon, marginLeft: 6, lineHeight: 16, includeFontPadding: false, height: 16 }]}>
-                    ({product.ratingCount || 0})
-                  </ThemedText>
-                </View>
-              </TouchableOpacity>
 
 
             </View>
@@ -806,39 +775,95 @@ export default function NoNameDetailScreen() {
             </View>
           </View>
 
-          {/* Details and Cart Button Row */}
-          <View style={styles.actionButtonsRow}>
+          {/* Horizontal Divider */}
+          <View style={[styles.horizontalDivider, { backgroundColor: colors.border }]} />
+
+          {/* Ratings and Cart Button Row */}
+          <View style={styles.ratingsCartRowDirect}>
             <TouchableOpacity 
-              style={[styles.detailsButton, { borderColor: colors.primary }]}
-              onPress={() => setShowProductDetails(true)}
+              style={styles.ratingsSection}
+              onPress={() => {
+                console.log('🎯 Opening ratings for NoName product:', product.name);
+                setShowRatingsView(true);
+                loadProductRatings(product);
+              }}
+              activeOpacity={0.7}
             >
-              <IconSymbol name="info.circle" size={18} color={colors.primary} />
-              <ThemedText style={[styles.detailsText, { color: colors.primary }]}>
-                Details
-              </ThemedText>
+              <View style={[styles.ratingCircle, { backgroundColor: getRatingCircleColor(product.averageRatingOverall || 0) }]}>
+                <ThemedText style={styles.ratingCircleText}>
+                  {(product.averageRatingOverall || 0).toFixed(1)}
+                </ThemedText>
+              </View>
+              <View style={styles.ratingsContent}>
+                <ThemedText style={[styles.ratingsText, { color: colors.icon }]}>
+                  Bewertungen
+                </ThemedText>
+                <View style={styles.starsContainer}>
+                  <StarRatingDisplay 
+                    rating={product.averageRatingOverall || 0}
+                    colors={colors}
+                    size={16}
+                    showValue={false}
+                  />
+                  <ThemedText style={[styles.ratingsCount, { color: colors.icon }]}>
+                    ({product.ratingCount || 0})
+                  </ThemedText>
+                </View>
+              </View>
             </TouchableOpacity>
+            
+            {/* Favorite Heart Button */}
             <TouchableOpacity 
-              style={[styles.cartButton, { 
-                backgroundColor: isInCart ? colors.success : colors.primary 
+              style={[styles.cartButtonGray, { backgroundColor: colors.background, marginRight: 12 }]}
+              onPress={() => {
+                animateButtonPress(heartAnimation);
+                handleToggleFavorite();
+              }}
+            >
+              <Animated.View style={{
+                transform: [{ scale: heartAnimation }]
+              }}>
+                <IconSymbol 
+                  name={isFavorite ? "heart.fill" : "heart"} 
+                  size={20} 
+                  color={isFavorite ? colors.error : colors.icon} 
+                />
+              </Animated.View>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.cartButtonGray, { 
+                backgroundColor: isInCart ? colors.success : colors.background 
               }]}
               onPress={handleAddToCart}
               disabled={isAddingToCart}
             >
               {isAddingToCart ? (
-                <ActivityIndicator size="small" color="white" />
+                <ActivityIndicator size="small" color={isInCart ? "white" : colors.icon} />
               ) : (
                 <Animated.View style={{
                   transform: [{ scale: cartAnimation }]
                 }}>
                   <IconSymbol 
-                    name={isInCart ? "checkmark.circle.fill" : "cart.badge.plus"} 
-                    size={24} 
-                    color="white" 
+                    name={isInCart ? "checkmark" : "plus"} 
+                    size={20} 
+                    color={isInCart ? "white" : colors.icon} 
                   />
                 </Animated.View>
               )}
             </TouchableOpacity>
           </View>
+
+          {/* Details Button */}
+          <TouchableOpacity 
+            style={[styles.detailsButtonDirect, { backgroundColor: colors.primary }]}
+            onPress={() => setShowProductDetails(true)}
+          >
+            <IconSymbol name="info.circle" size={16} color="white" />
+            <ThemedText style={[styles.detailsTextDirect, { color: "white" }]}>
+              Details
+            </ThemedText>
+          </TouchableOpacity>
           
           {/* Lokaler Toast entfernt – zentrale Toast-Library übernimmt */}
 
@@ -1295,7 +1320,7 @@ export default function NoNameDetailScreen() {
               <>
                 {/* Overall Rating Display */}
                 <View style={[styles.overallRatingCard, { backgroundColor: colors.cardBackground }]}>
-                  <View style={styles.ratingCircle}>
+                  <View style={[styles.ratingCircleLarge, { backgroundColor: getRatingCircleColor(ratingStats?.averageOverall || 0) }]}>
                     <ThemedText style={styles.ratingNumber}>
                       {(ratingStats?.averageOverall || 0).toFixed(1)}
                     </ThemedText>
@@ -1902,6 +1927,85 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  
+  // New Styles from product-comparison
+  horizontalDivider: {
+    height: 1,
+    marginVertical: 4,
+    borderRadius: 1,
+    opacity: 0.5,
+    marginBottom: 12,
+  },
+  ratingsCartRowDirect: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 0,
+    marginBottom: 8,
+  },
+  ratingsSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
+  ratingCircle: {
+    width: 44, // Etwas größer für bessere Lesbarkeit in der Karte
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ratingCircleText: {
+    fontSize: 14,
+    fontFamily: 'Nunito_700Bold',
+    color: 'white',
+  },
+  ratingsContent: {
+    flex: 1,
+    gap: 0,
+  },
+  starsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: -3,
+  },
+  ratingsText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+  },
+  ratingsCount: {
+    fontSize: 12,
+    fontFamily: 'Nunito_400Regular',
+  },
+  cartButtonGray: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  detailsButtonDirect: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 6,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  detailsTextDirect: {
+    fontSize: 13,
+    fontFamily: 'Nunito_500Medium',
+  },
 
 
   ratingButton: {
@@ -2143,18 +2247,19 @@ const styles = StyleSheet.create({
     elevation: 2,
     gap: 16,
   },
-  ratingCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#6B7280',
+  ratingCircleLarge: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     justifyContent: 'center',
     alignItems: 'center',
+    // backgroundColor wird dynamisch durch getRatingCircleColor() gesetzt
   },
   ratingNumber: {
     fontSize: 24,
     fontFamily: 'Nunito_700Bold',
     color: 'white',
+    lineHeight: 30,
   },
   ratingInfo: {
     flex: 1,

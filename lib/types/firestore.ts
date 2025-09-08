@@ -27,6 +27,9 @@ export interface Produkte {
   averageRatingPriceValue: number;
   averageRatingSimilarity: number;
   averageRatingTasteFunction: number;
+  // 🚀 NEUE FELDER: Serverseitige Ersparnis-Berechnung
+  ersparnis?: number; // Ersparnis in Euro gegenüber Markenprodukt
+  ersparnisProz?: number; // Ersparnis in Prozent gegenüber Markenprodukt
 }
 
 export interface MarkenProdukte {

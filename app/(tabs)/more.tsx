@@ -12,18 +12,18 @@ import { LinearGradient } from 'expo-linear-gradient';
 // @ts-ignore
 import React, { useEffect, useState } from 'react';
 import {
-  Alert,
-  Linking,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  Share,
-  StatusBar,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View
+    Alert,
+    Linking,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    Share,
+    StatusBar,
+    StyleSheet,
+    Switch,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { version as packageVersion } from '../../package.json';
 
@@ -166,7 +166,7 @@ export default function MoreScreen() {
             style={styles.savingsCardGradient}
           >
             <View style={styles.savingsCardContent}>
-              <TouchableOpacity onPress={() => router.push('/achievements' as any)}>
+              <TouchableOpacity onPress={() => router.push('/purchase-history' as any)}>
                 <ThemedText style={styles.savingsCardLabel}>Deine Gesamtersparnis</ThemedText>
                 <ThemedText style={styles.savingsCardAmount}>€ {totalSavings.toFixed(2)}</ThemedText>
               </TouchableOpacity>

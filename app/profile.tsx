@@ -423,7 +423,7 @@ export default function ProfileScreen() {
           style={styles.savingsGradient}
         >
           <View style={styles.savingsContent}>
-            <TouchableOpacity onPress={() => router.push('/achievements' as any)}>
+            <TouchableOpacity onPress={() => router.push('/purchase-history' as any)}>
               <Text style={styles.savingsLabel}>Deine Gesamtersparnis</Text>
               <Text style={styles.savingsAmount}>€ {totalSavings.toFixed(2)}</Text>
             </TouchableOpacity>

@@ -176,58 +176,48 @@ class FavoritesService {
   async getFavoritesWithProductData(userId: string): Promise<any[]> {
     try {
       const favorites = await this.getUserFavorites(userId);
-      const productsWithData: any[] = [];
-
-      for (const favorite of favorites) {
+      
+      // 🚀 PERFORMANCE FIX: Parallele Verarbeitung aller Favoriten!
+      console.time('⚡ Parallele Favoriten-Verarbeitung');
+      
+      const processedFavorites = await Promise.all(favorites.map(async (favorite) => {
         try {
           let productData: any = null;
           
           if (favorite.productType === 'markenprodukt') {
             // Echte Markenprodukte aus markenProdukte Collection
-            const productDoc = await getDoc(doc(db, 'markenProdukte', favorite.productId));
+            const [productDoc, herstellerDoc] = await Promise.all([
+              getDoc(doc(db, 'markenProdukte', favorite.productId)),
+              // Preload hersteller parallel if available
+              null // Will be loaded conditionally below
+            ]);
+            
             if (productDoc.exists()) {
               const rawData = productDoc.data();
               
-              // Ersparnis berechnen
-              let savings = 0;
-              if (rawData.relatedProdukteIDs?.length > 0) {
-                for (const noNameId of rawData.relatedProdukteIDs.slice(0, 3)) {
-                  try {
-                    const noNameDoc = await getDoc(doc(db, 'produkte', noNameId));
-                    if (noNameDoc.exists() && noNameDoc.data().preis < rawData.preis) {
-                      const potentialSaving = rawData.preis - noNameDoc.data().preis;
-                      if (potentialSaving > savings) {
-                        savings = potentialSaving;
-                      }
-                    }
-                  } catch (err) {
-                    // Ignore loading errors for individual NoName products
-                  }
-                }
-              }
+              // 🚀 PERFORMANCE: Parallele Ersparnis-Berechnung + Hersteller-Laden
+              const [savingsResult, herstellerResult] = await Promise.all([
+                // Ersparnis parallel berechnen
+                this.calculateSavingsParallel(rawData),
+                // Hersteller parallel laden
+                rawData.hersteller ? getDoc(rawData.hersteller).catch(() => null) : Promise.resolve(null)
+              ]);
               
-              // MARKE laden (aus hersteller Collection) - wie im Einkaufszettel
+              // Hersteller-Daten verarbeiten  
               let hersteller = null;
-              try {
-                if (rawData.hersteller) {
-                  const herstellerDoc = await getDoc(rawData.hersteller);
-                  if (herstellerDoc.exists()) {
-                    const herstellerData = herstellerDoc.data();
-                    hersteller = {
-                      name: herstellerData.name, // ✅ KORREKT: name statt bezeichnung
-                      bild: herstellerData.bild
-                    };
-                  }
-                }
-              } catch (err) {
-                console.warn('Error loading hersteller:', err);
+              if (herstellerResult?.exists()) {
+                const herstellerData = herstellerResult.data();
+                hersteller = {
+                  name: herstellerData.name, // ✅ KORREKT: name statt bezeichnung
+                  bild: herstellerData.bild
+                };
               }
               
               productData = {
                 ...rawData,
                 id: productDoc.id,
                 type: 'markenprodukt',
-                savings,
+                savings: savingsResult,
                 hersteller, // EXAKT wie im Einkaufszettel: hersteller.name + hersteller.bild
                 discounter: null
               };
@@ -241,39 +231,20 @@ class FavoritesService {
               
               const rawData = markenProduktDoc.data();
               
-              // Ersparnis berechnen
-              let savings = 0;
-              if (rawData.relatedProdukteIDs?.length > 0) {
-                for (const noNameId of rawData.relatedProdukteIDs.slice(0, 3)) {
-                  try {
-                    const noNameDoc = await getDoc(doc(db, 'produkte', noNameId));
-                    if (noNameDoc.exists() && noNameDoc.data().preis < rawData.preis) {
-                      const potentialSaving = rawData.preis - noNameDoc.data().preis;
-                      if (potentialSaving > savings) {
-                        savings = potentialSaving;
-                      }
-                    }
-                  } catch (err) {
-                    // Ignore
-                  }
-                }
-              }
+              // 🚀 PERFORMANCE: Parallele Ersparnis-Berechnung + Hersteller-Laden (Migration)
+              const [savings, herstellerDoc] = await Promise.all([
+                this.calculateSavingsParallel(rawData),
+                rawData.hersteller ? getDoc(rawData.hersteller).catch(() => null) : Promise.resolve(null)
+              ]);
               
-              // MARKE laden (aus hersteller Collection) - wie im Einkaufszettel
+              // Hersteller-Daten verarbeiten
               let hersteller = null;
-              try {
-                if (rawData.hersteller) {
-                  const herstellerDoc = await getDoc(rawData.hersteller);
-                  if (herstellerDoc.exists()) {
-                    const herstellerData = herstellerDoc.data();
-                    hersteller = {
-                      name: herstellerData.name, // ✅ KORREKT: name statt bezeichnung
-                      bild: herstellerData.bild
-                    };
-                  }
-                }
-              } catch (err) {
-                console.warn('Error loading hersteller in migration:', err);
+              if (herstellerDoc?.exists()) {
+                const herstellerData = herstellerDoc.data();
+                hersteller = {
+                  name: herstellerData.name, // ✅ KORREKT: name statt bezeichnung
+                  bild: herstellerData.bild
+                };
               }
               
               productData = {
@@ -328,16 +299,16 @@ class FavoritesService {
           }
 
           if (productData) {
-            productsWithData.push({
+            return {
               ...productData,
               addedAt: favorite.addedAt
-            });
+            };
           }
         } catch (productError) {
           console.warn('Fehler beim Laden von Produkt:', favorite.productId, productError);
           // Fallback nur wenn wirklich nötig
           if (favorite.productData) {
-            productsWithData.push({
+            return {
               id: favorite.productId,
               name: favorite.productData.name || 'Unbekanntes Produkt',
               preis: favorite.productData.preis || 0,
@@ -347,12 +318,19 @@ class FavoritesService {
               discounter: null,
               savings: 0,
               addedAt: favorite.addedAt
-            });
+            };
           }
         }
-      }
-
-      return productsWithData;
+        return null; // Kein Product gefunden
+      }));
+      
+      // Filter out null results und sammle Ergebnisse
+      const validFavorites = processedFavorites.filter(item => item !== null);
+      
+      console.timeEnd('⚡ Parallele Favoriten-Verarbeitung');
+      console.log(`🚀 ${validFavorites.length} von ${favorites.length} Favoriten erfolgreich geladen`);
+      
+      return validFavorites;
     } catch (error) {
       console.error('❌ Error loading favorites with product data:', error);
       return []; // Return leeres Array statt throw
@@ -412,6 +390,48 @@ class FavoritesService {
       // Bei Fehler: Leere Liste zurückgeben
       callback([]);
     });
+  }
+  
+  /**
+   * 🚀 PERFORMANCE: Parallele Ersparnis-Berechnung für Markenprodukte
+   */
+  private async calculateSavingsParallel(rawData: any): Promise<number> {
+    if (!rawData.relatedProdukteIDs?.length) {
+      return 0;
+    }
+    
+    try {
+      // Alle NoName-Produkte parallel laden (max 3 für Performance)
+      const noNameDocs = await Promise.all(
+        rawData.relatedProdukteIDs.slice(0, 3).map(noNameId => 
+          getDoc(doc(db, 'produkte', noNameId)).catch(() => null)
+        )
+      );
+      
+      // Beste Ersparnis finden
+      let maxSavings = 0;
+      for (const noNameDoc of noNameDocs) {
+        if (noNameDoc?.exists()) {
+          const noNameData = noNameDoc.data();
+          
+          // 🚀 Nutze serverseitige ersparnis falls verfügbar
+          if (noNameData.ersparnis !== undefined) {
+            maxSavings = Math.max(maxSavings, parseFloat(String(noNameData.ersparnis || 0)));
+          } else {
+            // Fallback: Client-side Berechnung
+            if (noNameData.preis < rawData.preis) {
+              const potentialSaving = rawData.preis - noNameData.preis;
+              maxSavings = Math.max(maxSavings, potentialSaving);
+            }
+          }
+        }
+      }
+      
+      return maxSavings;
+    } catch (error) {
+      console.warn('Error calculating savings parallel:', error);
+      return 0;
+    }
   }
 }
 

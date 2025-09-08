@@ -589,6 +589,14 @@ export default function HomeScreen() {
                         <IconSymbol name="photo" size={24} color={colors.icon} />
                       </View>
                     )}
+                    
+                    {/* Sponsored Badge - nur für erstes Produkt */}
+                    {index === 0 && (
+                      <View style={styles.sponsoredBadge}>
+                        <ThemedText style={styles.sponsoredText}>Sponsored</ThemedText>
+                      </View>
+                    )}
+                    
                     <View style={[styles.levelBadge, { backgroundColor: getStufenColor(parseInt(product.stufe) || 1) }]}>
                       <IconSymbol name="chart.bar" size={10} color="white" />
                       <ThemedText style={styles.levelBadgeText}>Stufe {product.stufe}</ThemedText>
@@ -1131,5 +1139,23 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_400Regular',
     marginTop: 8,
     textAlign: 'center',
+  },
+  
+  // Sponsored Badge - unauffällig oben links
+  sponsoredBadge: {
+    position: 'absolute',
+    top: 5,
+    left: 5,
+    backgroundColor: 'rgba(0, 0, 0, 0.49)',
+    paddingHorizontal: 6,
+    paddingVertical: 0,
+    borderRadius: 10,
+    zIndex: 2,
+  },
+  sponsoredText: {
+    fontSize: 9,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255,255,255,0.9)',
+    letterSpacing: 0.1,
   },
 });

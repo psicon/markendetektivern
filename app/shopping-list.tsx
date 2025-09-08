@@ -15,33 +15,71 @@ import { FirestoreService } from '@/lib/services/firestore';
 import { showBulkConvertSuccessToast, showBulkPurchasedToast, showConvertSuccessToast, showInfoToast, showPurchasedToast } from '@/lib/services/ui/toast';
 import { updateUserStats } from '@/lib/services/userProfile';
 import {
-    Einkaufswagen,
-    FirestoreDocument,
-    MarkenProdukte,
-    ProductToConvert,
-    Produkte
+  Einkaufswagen,
+  FirestoreDocument,
+  MarkenProdukte,
+  ProductToConvert,
+  Produkte
 } from '@/lib/types/firestore';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Dimensions,
-    Modal,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width } = Dimensions.get('window');
+
+// 🚀 HELPER: Optimierte Ersparnis-Berechnung (nutzt serverseitige Felder wenn verfügbar)
+const getSavingsData = (brandProduct: any, noNameProduct: any): { savingsEur: number; savingsPercent: number } => {
+  // 🚀 OPTIMIERUNG: Nutze serverseitige Berechnung falls vorhanden
+  if (noNameProduct.ersparnis !== undefined && noNameProduct.ersparnisProz !== undefined) {
+    if (__DEV__ && Math.random() < 0.05) { // Nur 5% der Shopping-List Aufrufe loggen
+      console.log(`💰 Einkaufszettel: Using server-calculated savings: €${noNameProduct.ersparnis}, ${noNameProduct.ersparnisProz}%`);
+    }
+    return {
+      savingsEur: parseFloat(String(noNameProduct.ersparnis || 0)),
+      savingsPercent: parseInt(String(noNameProduct.ersparnisProz || 0))
+    };
+  }
+  
+  // 🔄 FALLBACK: Client-side Berechnung (für noch nicht berechnete oder Stufe 1,2)
+  if (__DEV__ && Math.random() < 0.05) {
+    console.log('🔄 Einkaufszettel: Calculating savings client-side (Firestore fields missing)');
+  }
+  
+  if (!brandProduct.preis || !noNameProduct.preis || !brandProduct.packSize || !noNameProduct.packSize) {
+    return { savingsEur: 0, savingsPercent: 0 };
+  }
+  
+  // Preis pro Einheit (Gramm/Milliliter) - wie alte calculateSavings Logik
+  const brandPricePerUnit = brandProduct.preis / brandProduct.packSize;
+  const noNamePricePerUnit = noNameProduct.preis / noNameProduct.packSize;
+  
+  // Ersparnis in Prozent
+  const savingsPercent = ((brandPricePerUnit - noNamePricePerUnit) / brandPricePerUnit) * 100;
+  
+  // Ersparnis in Euro (basiert auf NoName packSize - konsistent mit alter Logik)
+  const savingsEur = Math.max(0, (brandPricePerUnit - noNamePricePerUnit) * noNameProduct.packSize);
+  
+  return {
+    savingsEur: Math.round(savingsEur * 100) / 100,
+    savingsPercent: Math.max(0, Math.round(savingsPercent))
+  };
+};
 
 // Einfacher Shopping List Skeleton
 const ShoppingListSkeleton = () => {
@@ -191,14 +229,15 @@ export default function ShoppingListScreen() {
       const items = await FirestoreService.getShoppingCartItems(user.uid);
       setShoppingCartItems(items);
       
-      // Separate and load brand and noname products with alternatives
-      const brandItems = [];
-      const noNameItems = [];
-      let potentialSavings = 0;
-      let actualSavings = 0;
+      // 🚀 PERFORMANCE FIX: Parallele Verarbeitung aller Items!
+      console.time('⚡ Parallele Einkaufszettel-Verarbeitung');
+      
+      // Separiere Custom Items (keine DB-Calls nötig)
+      const customBrandItems = [];
+      const customNoNameItems = [];
+      const dbItems = [];
       
       for (const item of items) {
-        // Handle custom items (freitext)
         if (item.customItem) {
           const customItemData = {
             id: item.id,
@@ -221,131 +260,153 @@ export default function ShoppingListScreen() {
           };
           
           if (item.customItem.type === 'brand') {
-            brandItems.push(customItemData);
+            customBrandItems.push(customItemData);
           } else {
-            noNameItems.push(customItemData);
+            customNoNameItems.push(customItemData);
           }
-          continue;
+        } else {
+          dbItems.push(item);
         }
-        if (item.markenProdukt) {
-          // Load brand product details and alternatives
-          const productData = await FirestoreService.getDocumentByReference<MarkenProdukte>(item.markenProdukt);
-          if (productData) {
-            // Populate hersteller (brand) information
-            let herstellerData = null;
-            if (productData.hersteller) {
-              try {
-                herstellerData = await FirestoreService.getDocumentByReference(productData.hersteller, 'hersteller');
-              } catch (error) {
-                console.error('Error loading hersteller for brand product:', error);
+      }
+      
+      // 🚀 PARALLELE VERARBEITUNG: Alle DB-Items parallel laden
+      const processedItems = await Promise.all(dbItems.map(async (item) => {
+        try {
+          if (item.markenProdukt) {
+            // Brand Product Parallel Loading
+            const [productData, alternatives] = await Promise.all([
+              FirestoreService.getDocumentByReference<MarkenProdukte>(item.markenProdukt),
+              FirestoreService.getNoNameAlternatives(item.markenProdukt.id, userProfile?.favoriteMarket)
+            ]);
+            
+            if (productData) {
+              // Load hersteller parallel zu alternatives (schon geladen)
+              let herstellerData = null;
+              if (productData.hersteller) {
+                try {
+                  herstellerData = await FirestoreService.getDocumentByReference(productData.hersteller);
+                } catch (error) {
+                  console.error('Error loading hersteller for brand product:', error);
+                }
               }
-            }
-
-            // Get NoName alternatives
-            const alternatives = await FirestoreService.getNoNameAlternatives(
-              item.markenProdukt.id,
-              userProfile?.favoriteMarket
-            );
-            
-            // Calculate potential savings with best alternative
-            let bestAlternative = null;
-            let maxSavings = 0;
-            
-            for (const alt of alternatives) {
-              const savings = FirestoreService.calculateSavings(
-                alt.preis,
-                alt.packSize,
-                productData.preis,
-                productData.packSize
-              );
-              if (savings.amount > maxSavings) {
-                maxSavings = savings.amount;
-                bestAlternative = alt;
+              
+              // Calculate potential savings with best alternative
+              let bestAlternative = null;
+              let maxSavings = 0;
+              
+              for (const alt of alternatives) {
+                // 🚀 OPTIMIERUNG: Nutze serverseitige Ersparnis falls verfügbar
+                const savingsData = getSavingsData(productData, alt);
+                if (savingsData.savingsEur > maxSavings) {
+                  maxSavings = savingsData.savingsEur;
+                  bestAlternative = alt;
+                }
               }
+              
+              return {
+                type: 'brand',
+                data: {
+                  ...item,
+                  product: {
+                    ...productData,
+                    hersteller: herstellerData
+                  },
+                  alternatives,
+                  bestAlternative,
+                  potentialSavings: maxSavings
+                },
+                potentialSavings: maxSavings,
+                actualSavings: 0,
+                bestAlternative
+              };
             }
-            
-            potentialSavings += maxSavings;
-            
-            brandItems.push({
-              ...item,
-              product: {
-                ...productData,
-                hersteller: herstellerData
-              },
-              alternatives,
-              bestAlternative,
-              potentialSavings: maxSavings
-            });
+          } else if (item.handelsmarkenProdukt) {
+            // NoName Product Parallel Loading
+            const productData = await FirestoreService.getDocumentByReference<Produkte>(item.handelsmarkenProdukt);
+            if (productData) {
+              // Alle NoName References parallel laden
+              const [handelsmarkeData, discounterData, markenProdukt] = await Promise.all([
+                productData.handelsmarke ? 
+                  FirestoreService.getDocumentByReference(productData.handelsmarke).catch(() => null) : 
+                  Promise.resolve(null),
+                productData.discounter ? 
+                  FirestoreService.getDocumentByReference(productData.discounter).catch(() => null) : 
+                  Promise.resolve(null),
+                productData.markenProdukt ? 
+                  FirestoreService.getDocumentByReference<MarkenProdukte>(productData.markenProdukt).catch(() => null) : 
+                  Promise.resolve(null)
+              ]);
+              
+              // Fix discounter ID preservation
+              let finalDiscounterData = discounterData;
+              if (discounterData && productData.discounter) {
+                finalDiscounterData = {
+                  ...discounterData,
+                  id: productData.discounter.id
+                };
+              }
+              
+              // Calculate actual savings
+              let savings = 0;
+              if (markenProdukt) {
+                const savingsData = getSavingsData(markenProdukt, productData);
+                savings = savingsData.savingsEur;
+              }
+              
+              return {
+                type: 'noname',
+                data: {
+                  ...item,
+                  product: {
+                    ...productData,
+                    handelsmarke: handelsmarkeData,
+                    discounter: finalDiscounterData
+                  },
+                  savings
+                },
+                potentialSavings: 0,
+                actualSavings: savings
+              };
+            }
+          }
+          return null;
+        } catch (error) {
+          console.error('Error processing item:', error);
+          return null;
+        }
+      }));
+      
+      // Ergebnisse sammeln und State setzen
+      const brandItems = [...customBrandItems];
+      const noNameItems = [...customNoNameItems];
+      let potentialSavings = 0;
+      let actualSavings = 0;
+      const newSelectedConversions = [];
+      
+      for (const result of processedItems) {
+        if (result) {
+          if (result.type === 'brand') {
+            brandItems.push(result.data as any); // Type assertion for mixed array
+            potentialSavings += result.potentialSavings;
             
             // Auto-select best alternative for conversion
-            if (bestAlternative) {
-              setSelectedConversions(prev => [...prev, {
-                einkaufswagenRef: item.id,
-                markenProduktRef: item.markenProdukt.id,
-                produktRef: bestAlternative.id
-              }]);
+            if (result.bestAlternative && result.data.markenProdukt) {
+              newSelectedConversions.push({
+                einkaufswagenRef: result.data.id,
+                markenProduktRef: result.data.markenProdukt.id,
+                produktRef: result.bestAlternative.id
+              });
             }
-          }
-        } else if (item.handelsmarkenProdukt) {
-          // Load noname product details
-          const productData = await FirestoreService.getDocumentByReference<Produkte>(item.handelsmarkenProdukt);
-          if (productData) {
-            // Populate handelsmarke information
-            let handelsmarkeData = null;
-            if (productData.handelsmarke) {
-              try {
-                handelsmarkeData = await FirestoreService.getDocumentByReference(productData.handelsmarke);
-              } catch (error) {
-                console.error('Error loading handelsmarke for noname product:', error);
-              }
-            }
-
-            // Populate discounter information
-            let discounterData = null;
-            if (productData.discounter) {
-              try {
-                const originalId = productData.discounter.id;
-                discounterData = await FirestoreService.getDocumentByReference(productData.discounter);
-                // Preserve the original ID for matching
-                if (discounterData) {
-                  discounterData = {
-                    ...discounterData,
-                    id: originalId
-                  };
-                }
-              } catch (error) {
-                console.error('Error loading discounter for noname product:', error);
-              }
-            }
-
-            // Calculate actual savings if there's a related brand product
-            let savings = 0;
-            if (productData.markenProdukt) {
-              const markenProdukt = await FirestoreService.getDocumentByReference<MarkenProdukte>(productData.markenProdukt);
-              if (markenProdukt) {
-                const savingsCalc = FirestoreService.calculateSavings(
-                  productData.preis,
-                  productData.packSize,
-                  markenProdukt.preis,
-                  markenProdukt.packSize
-                );
-                savings = savingsCalc.amount;
-                actualSavings += savings;
-              }
-            }
-            
-            noNameItems.push({
-              ...item,
-              product: {
-                ...productData,
-                handelsmarke: handelsmarkeData,
-                discounter: discounterData
-              },
-              savings
-            });
+          } else if (result.type === 'noname') {
+            noNameItems.push(result.data as any); // Type assertion for mixed array
+            actualSavings += result.actualSavings;
           }
         }
       }
+      
+      // Batch State Updates
+      setSelectedConversions(newSelectedConversions);
+      console.timeEnd('⚡ Parallele Einkaufszettel-Verarbeitung');
       
       setBrandProducts(brandItems);
       setNoNameProducts(noNameItems);
@@ -479,81 +540,20 @@ export default function ShoppingListScreen() {
       
       const result = await FirestoreService.convertToNoName(user.uid, conversions);
       
-      // Remove from selected conversions
-      setSelectedConversions(prev => 
-        prev.filter(conv => conv.einkaufswagenRef !== einkaufswagenRef)
-      );
-      
-      // Optimized: Update local state without reloading
+      // Calculate savings for toast before reloading
       const brandItem = brandProducts.find(item => item.id === einkaufswagenRef);
-      if (brandItem && result.newItems.length > 0) {
-        // Remove from brand products
-        setBrandProducts(prev => prev.filter(item => item.id !== einkaufswagenRef));
-        
-        // Calculate savings locally
-        const newItem = result.newItems[0];
-        const savingsAmount = brandItem.potentialSavings || 0;
-        
-        // Load complete product data with discounter info for proper display
-        const loadCompleteNoNameItem = async () => {
-          try {
-            if (newItem.handelsmarkenProdukt) {
-              const productData = await FirestoreService.getDocumentByReference<Produkte>(newItem.handelsmarkenProdukt);
-              
-              if (productData) {
-                // Load discounter data for market display
-                let discounterData = null;
-                if (productData.discounter) {
-                  try {
-                    const originalId = productData.discounter.id;
-                    discounterData = await FirestoreService.getDocumentByReference(productData.discounter);
-                    if (discounterData) {
-                      discounterData = {
-                        ...discounterData,
-                        id: originalId
-                      };
-                    }
-                  } catch (error) {
-                    console.error('Error loading discounter for converted product:', error);
-                  }
-                }
-                
-                // Create complete NoName item with all market data
-                const completeNoNameItem = {
-                  ...newItem,
-                  product: {
-                    ...productData,
-                    discounter: discounterData
-                  },
-                  savings: savingsAmount
-                };
-                
-                setNoNameProducts(prev => [...prev, completeNoNameItem]);
-                console.log(`💰 Single conversion with market data: ${productData.name || 'NoName'} saves €${savingsAmount.toFixed(2)}`);
-              }
-            }
-          } catch (error) {
-            console.error('Error loading complete NoName item:', error);
-            // Fallback to basic item without market data
-            const basicNoNameItem = {
-              id: newItem.id,
-              product: newItem.product,
-              savings: savingsAmount
-            };
-            setNoNameProducts(prev => [...prev, basicNoNameItem]);
-          }
-        };
-        
-        // Load complete data in background
-        loadCompleteNoNameItem();
-        
-        // Success toast with savings amount
-        showConvertSuccessToast(savingsAmount);
-      } else {
-        // Fallback if something went wrong
-        showInfoToast(TOAST_MESSAGES.SHOPPING.convertedSimple, 'success');
-        loadShoppingCart();
-      }
+      const savingsAmount = brandItem?.potentialSavings || 0;
+      
+      // 🚀 FIX: Erst Daten laden, dann Tab wechseln (verhindert Tab-Sprung-zurück)
+      await loadShoppingCart();
+      
+      // ✅ FIX: Tab-Wechsel nach Daten-Laden (mit kleiner Verzögerung für Stabilität)
+      setTimeout(() => {
+        handleTabChange('noname');
+      }, 100);
+      
+      // Success toast with savings amount
+      showConvertSuccessToast(savingsAmount);
       
       // Track Achievement: convert_product
       await achievementService.trackAction(user.uid, 'convert_product');
@@ -593,80 +593,16 @@ export default function ShoppingListScreen() {
               const result = await FirestoreService.convertToNoName(user.uid, selectedConversions);
               await FirestoreService.updateUserTotalSavings(user.uid, totalPotentialSavings);
               
-              // Update local state without reload
-              const convertedIds = selectedConversions.map(conv => conv.einkaufswagenRef);
+              // 🚀 FIX: Erst Daten laden, dann Tab wechseln (verhindert Tab-Sprung-zurück)
+              await loadShoppingCart();
               
-              // Get brand items that were converted
-              const convertedBrandItems = brandProducts.filter(item => convertedIds.includes(item.id));
-              
-              // Remove converted brand products
-              setBrandProducts(prev => prev.filter(item => !convertedIds.includes(item.id)));
-              
-              // Add new NoName items with complete market data
-              const loadCompleteItems = async () => {
-                const newNoNameItems = await Promise.all(
-                  result.newItems.map(async (newItem, index) => {
-                    const brandItem = convertedBrandItems[index];
-                    const savingsAmount = brandItem?.potentialSavings || 0;
-                    
-                    // Load complete product data with discounter info
-                    if (newItem.handelsmarkenProdukt) {
-                      try {
-                        const productData = await FirestoreService.getDocumentByReference<Produkte>(newItem.handelsmarkenProdukt);
-                        
-                        if (productData) {
-                          // Load discounter data for market display
-                          let discounterData = null;
-                          if (productData.discounter) {
-                            try {
-                              const originalId = productData.discounter.id;
-                              discounterData = await FirestoreService.getDocumentByReference(productData.discounter);
-                              if (discounterData) {
-                                discounterData = {
-                                  ...discounterData,
-                                  id: originalId
-                                };
-                              }
-                            } catch (error) {
-                              console.error('Error loading discounter for bulk converted product:', error);
-                            }
-                          }
-                          
-                          return {
-                            ...newItem,
-                            product: {
-                              ...productData,
-                              discounter: discounterData
-                            },
-                            savings: savingsAmount
-                          };
-                        }
-                      } catch (error) {
-                        console.error('Error loading complete data for bulk converted item:', error);
-                      }
-                    }
-                    
-                    // Fallback to basic item without market data
-                    return {
-                      id: newItem.id,
-                      product: newItem.product,
-                      savings: savingsAmount
-                    };
-                  })
-                );
-                
-                setNoNameProducts(prev => [...prev, ...newNoNameItems]);
-                console.log(`💰 Bulk conversion completed with market data for ${newNoNameItems.length} items`);
-              };
-              
-              // Load complete data in background
-              loadCompleteItems();
+              // ✅ FIX: Tab-Wechsel nach Daten-Laden (mit kleiner Verzögerung für Stabilität)
+              setTimeout(() => {
+                handleTabChange('noname');
+              }, 100);
               
               // Gamified success message - spezielle Konvertierung-Toast
               showBulkConvertSuccessToast(totalPotentialSavings);
-              
-              setSelectedConversions([]);
-              setExpandedItems([]);
               
               // Track Achievement: convert_product (einmal pro umgewandeltem Produkt)
               for (let i = 0; i < selectedConversions.length; i++) {
@@ -1198,8 +1134,8 @@ export default function ShoppingListScreen() {
               </View>
             </View>
           </LinearGradient>
-          )}
-        </View>
+      )}
+    </View>
 
         <PagerView 
           ref={pagerRef}
@@ -1362,7 +1298,7 @@ export default function ShoppingListScreen() {
                               <IconSymbol name="trash" size={20} color="white" />
                             )}
         </TouchableOpacity>
-    </View>
+      </View>
                       </TouchableOpacity>
                       
                       {/* NoName Alternatives */}
@@ -1373,12 +1309,12 @@ export default function ShoppingListScreen() {
                           </Text>
                           {item.alternatives.map((alt: any) => {
                             const isSelected = selectedConversion?.produktRef === alt.id;
-                            const savings = FirestoreService.calculateSavings(
-                              alt.preis,
-                              alt.packSize,
-                              item.product.preis,
-                              item.product.packSize
-  );
+                            // 🚀 OPTIMIERUNG: Nutze serverseitige Ersparnis falls verfügbar
+                            const savingsData = getSavingsData(item.product, alt);
+                            const savings = { 
+                              amount: savingsData.savingsEur, 
+                              percent: savingsData.savingsPercent 
+                            };
 
   return (
         <TouchableOpacity

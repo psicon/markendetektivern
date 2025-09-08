@@ -2,7 +2,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
-import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
+import { LoadingFooterSkeleton, ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -13,6 +13,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
     Animated,
     Dimensions,
+    FlatList,
     Platform,
     ScrollView,
     StyleSheet,
@@ -81,13 +82,21 @@ export default function PurchaseHistoryScreen() {
   const insets = useSafeAreaInsets();
   const { user, userProfile } = useAuth();
   const { 
-    purchases: purchasedProducts, 
     brandPurchases, 
-    noNamePurchases, 
-    loading, 
-    error, 
-    totalCount, 
-    totalSavings 
+    noNamePurchases,
+    brandLoading,
+    brandLoadingMore,
+    brandHasMore,
+    noNameLoading,
+    noNameLoadingMore,
+    noNameHasMore,
+    error,
+    totalBrandCount,
+    totalNoNameCount,
+    totalSavings,
+    loadBrandPurchases,
+    loadNoNamePurchases,
+    refreshData
   } = usePurchaseHistory();
 
   // UI State
@@ -121,24 +130,26 @@ export default function PurchaseHistoryScreen() {
 
   // Update loading state based on real data
   useEffect(() => {
-    if (!loading && !hasLoadedOnce) {
+    const isLoading = brandLoading || noNameLoading;
+    if (!isLoading && !hasLoadedOnce) {
       setHasLoadedOnce(true);
     }
-    if (initialLoading && !loading) {
+    if (initialLoading && !isLoading) {
       setInitialLoading(false);
     }
-  }, [loading, hasLoadedOnce, initialLoading]);
+  }, [brandLoading, noNameLoading, hasLoadedOnce, initialLoading]);
 
   // Extract available markets from purchased products
   useEffect(() => {
-    const markets = purchasedProducts
+    const allPurchases = [...brandPurchases, ...noNamePurchases];
+    const markets = allPurchases
       .filter(item => item.discounter)
       .map(item => item.discounter)
       .filter((market, index, self) => 
         index === self.findIndex(m => m.id === market.id)
       );
     setAvailableMarkets(markets);
-  }, [purchasedProducts]);
+  }, [brandPurchases, noNamePurchases]);
 
   // Tab Functions (EXAKT wie Favoriten)
   const handleTabChange = (tabIndex: number) => {
@@ -170,12 +181,8 @@ export default function PurchaseHistoryScreen() {
 
   // Render Product Card (EXAKT wie Favoriten)
   const renderProductCard = (item: any, index: number) => {
-    // Eindeutige Key basierend auf ID + Index + purchasedAt für Duplikat-Vermeidung
-    const uniqueKey = `${item.id}_${index}_${item.purchasedAt?.getTime() || 'unknown'}`;
-    
     return (
       <TouchableOpacity
-        key={uniqueKey}
         style={[styles.productCard, { backgroundColor: colors.cardBackground }]}
         onPress={() => {
           // Navigation zur Produktseite - KORREKTE LOGIK basierend auf Stufe
@@ -304,8 +311,8 @@ export default function PurchaseHistoryScreen() {
   }
 
   const currentData = getCurrentPurchases();
-  const brandCount = brandPurchases.length;
-  const noNameCount = noNamePurchases.length;
+  const brandCount = totalBrandCount;  // Use total count from server
+  const noNameCount = totalNoNameCount; // Use total count from server
 
   return (
     <ThemedView style={styles.container}>
@@ -350,7 +357,7 @@ export default function PurchaseHistoryScreen() {
       </View>
 
       {/* Content */}
-      {totalCount === 0 && hasLoadedOnce ? (
+      {(totalBrandCount + totalNoNameCount) === 0 && hasLoadedOnce ? (
         <View style={styles.centerContent}>
           <IconSymbol name="clock.badge.xmark" size={64} color={colors.icon} />
           <ThemedText style={[styles.emptyTitle, { color: colors.text }]}>
@@ -369,24 +376,46 @@ export default function PurchaseHistoryScreen() {
         >
           {/* Marken Tab */}
           <View key="brands" style={styles.tabPage}>
-            <ScrollView
-              style={styles.scrollView}
+            <FlatList
+              data={brandPurchases}
+              keyExtractor={(item, index) => `${item.id}_${index}_${item.purchasedAt?.getTime() || 'unknown'}`}
+              renderItem={({ item, index }) => renderProductCard(item, index)}
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
-            >
-              {brandPurchases.map(renderProductCard)}
-            </ScrollView>
+              onEndReached={() => {
+                if (brandHasMore && !brandLoadingMore && activeTab === 0) {
+                  loadBrandPurchases(false);
+                }
+              }}
+              onEndReachedThreshold={0.5}
+              ListFooterComponent={() =>
+                brandLoadingMore && activeTab === 0 ? (
+                  <LoadingFooterSkeleton />
+                ) : null
+              }
+            />
           </View>
 
           {/* NoNames Tab */}
           <View key="nonames" style={styles.tabPage}>
-            <ScrollView
-              style={styles.scrollView}
+            <FlatList
+              data={noNamePurchases}
+              keyExtractor={(item, index) => `${item.id}_${index}_${item.purchasedAt?.getTime() || 'unknown'}`}
+              renderItem={({ item, index }) => renderProductCard(item, index)}
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
-            >
-              {noNamePurchases.map(renderProductCard)}
-            </ScrollView>
+              onEndReached={() => {
+                if (noNameHasMore && !noNameLoadingMore && activeTab === 1) {
+                  loadNoNamePurchases(false);
+                }
+              }}
+              onEndReachedThreshold={0.5}
+              ListFooterComponent={() =>
+                noNameLoadingMore && activeTab === 1 ? (
+                  <LoadingFooterSkeleton />
+                ) : null
+              }
+            />
           </View>
         </PagerView>
       )}
@@ -394,9 +423,9 @@ export default function PurchaseHistoryScreen() {
       {/* Action Bar */}
       <View style={[styles.actionBar, { backgroundColor: colors.cardBackground, borderTopColor: colors.border }]}>
         <View style={styles.actionBarContent}>
-          <ThemedText style={[styles.actionBarText, { color: colors.text }]}>
-            {currentData.length} von {totalCount} Käufen
-          </ThemedText>
+                      <ThemedText style={[styles.actionBarText, { color: colors.text }]}>
+              {currentData.length} von {activeTab === 0 ? totalBrandCount : totalNoNameCount} Käufen
+            </ThemedText>
           <View style={styles.actionBarRight}>
             <ThemedText style={[styles.actionBarSubText, { color: colors.icon }]}>
               Chronologisch sortiert
