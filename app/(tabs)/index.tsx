@@ -208,7 +208,7 @@ export default function HomeScreen() {
     };
 
     loadData();
-  }, [userProfile]);
+  }, [userProfile?.stats?.currentLevel, userProfile?.level]); // 🎯 NUR bei Level-Änderung neu laden!
 
   // Helper function to format price
   const formatPrice = (price: number) => {

@@ -415,6 +415,41 @@ export default function AchievementsScreen() {
           </LinearGradient>
         </Animated.View>
 
+        {/* Bestenlisten Button */}
+        <Animated.View style={[
+          styles.levelListCard, 
+          { 
+            opacity: fadeAnim,
+            backgroundColor: colors.cardBackground,
+            marginBottom: 16,
+          }
+        ]}>
+          <TouchableOpacity 
+            style={styles.levelListContent}
+            onPress={() => router.push('/leaderboard' as any)}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.levelListIcon, { backgroundColor: colors.primary }]}>
+              <IconSymbol name="trophy" size={20} color="white" />
+            </View>
+            
+            <View style={styles.levelListInfo}>
+              <View style={styles.levelListHeader}>
+                <ThemedText style={[styles.levelListName, { color: colors.text }]}>
+                  Bestenlisten
+                </ThemedText>
+              </View>
+              <ThemedText style={styles.levelListDescription}>
+                <Text>Vergleiche dich mit anderen Sparfüchsen! 🏆</Text>
+              </ThemedText>
+            </View>
+
+            <View style={styles.levelStatus}>
+              <IconSymbol name="chevron.right" size={24} color={colors.icon} />
+            </View>
+          </TouchableOpacity>
+        </Animated.View>
+
         {/* Streak Display - nutze levelListCard wie andere Level auch */}
         {currentStreak > 0 && (
           <Animated.View style={[

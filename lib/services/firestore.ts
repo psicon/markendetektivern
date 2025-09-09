@@ -2366,6 +2366,11 @@ export class FirestoreService {
       await updateDoc(userRef, {
         totalSavings: increment(amount)
       });
+      
+      // 📊 Update Leaderboard with savings
+      const leaderboardService = (await import('./leaderboardService')).default;
+      await leaderboardService.updateUserStats(userId, 0, amount);
+      
       console.log(`✅ Updated user total savings by €${amount.toFixed(2)}`);
     } catch (error) {
       console.error('Error updating user savings:', error);

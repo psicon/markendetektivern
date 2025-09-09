@@ -15,19 +15,19 @@ import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  FlatList,
-  Image,
-  Modal,
-  PanResponder,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Animated,
+    Dimensions,
+    FlatList,
+    Image,
+    Modal,
+    PanResponder,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -317,7 +317,7 @@ export default function SearchResultsScreen() {
     } catch (error) {
       console.error('Error loading filter options:', error);
     }
-  }, [userProfile]);
+  }, [userProfile?.stats?.currentLevel, userProfile?.level]); // 🎯 NUR bei Level-Änderung neu laden!
 
 
 
@@ -437,7 +437,7 @@ export default function SearchResultsScreen() {
     if (userProfile) {
       loadFilterOptions();
     }
-  }, [userProfile]);
+  }, [userProfile?.stats?.currentLevel, userProfile?.level]); // 🎯 NUR bei Level-Änderung neu laden!
 
   // Tab titles with FILTERED result counts
   const getTabTitle = (tabId: string) => {

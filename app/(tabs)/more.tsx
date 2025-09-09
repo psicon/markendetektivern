@@ -99,6 +99,10 @@ export default function MoreScreen() {
     );
   };
 
+  const handleLeaderboard = () => {
+    router.push('/leaderboard' as any);
+  };
+
 
 
   const handleShareApp = () => {
@@ -233,6 +237,14 @@ export default function MoreScreen() {
             <TouchableOpacity style={styles.menuItem} onPress={handleFavoriteProducts}>
               <IconSymbol name="heart" size={24} color={colors.secondary} />
               <ThemedText style={[styles.menuItemText, { color: colors.text }]}>Deine Lieblingsprodukte</ThemedText>
+              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+            </TouchableOpacity>
+            
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            
+            <TouchableOpacity style={styles.menuItem} onPress={handleLeaderboard}>
+              <IconSymbol name="trophy" size={24} color={colors.secondary} />
+              <ThemedText style={[styles.menuItemText, { color: colors.text }]}>Bestenlisten</ThemedText>
               <IconSymbol name="chevron.right" size={14} color={colors.icon} />
             </TouchableOpacity>
             

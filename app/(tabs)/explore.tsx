@@ -827,7 +827,7 @@ export default function ExploreScreen() {
     };
 
     loadFilterOptions();
-  }, [userProfile]); // Reload wenn sich User-Level ändert
+  }, [userProfile?.stats?.currentLevel, userProfile?.level]); // 🎯 NUR bei Level-Änderung neu laden!
 
   // Load NoName Products when tab becomes active or filters change
   useEffect(() => {

@@ -27,6 +27,7 @@ import {
     UserStats
 } from '../types/achievements';
 import { categoryAccessService } from './categoryAccessService';
+import leaderboardService from './leaderboardService';
 import { showDailyCapToast, showDedupeWindowToast, showOneTimeRestrictionToast, showWeeklyCapToast } from './ui/antiAbuseToast';
 
 class AchievementService {
@@ -1086,6 +1087,9 @@ class AchievementService {
       }
       
       console.log(`💰 ${points} Punkte für ${action} vergeben`);
+      
+      // 📊 Update Leaderboard with points
+      await leaderboardService.updateUserStats(userId, points, 0);
       
       // Trigger Points Toast notification
       if (AchievementService.onPointsEarned) {

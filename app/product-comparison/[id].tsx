@@ -1978,16 +1978,16 @@ export default function ProductComparisonScreen() {
               alignItems: 'center',
                transform: [{ scale: headerButtonAnimation }]
             }}>
-                <ThemedText style={{
-                  color: 'white',
-                  fontSize: 12,
-                  fontWeight: 'bold',
-                  textAlign: 'center',
+              <ThemedText style={{
+                color: 'white',
+                fontSize: 12,
+                fontWeight: 'bold',
+                textAlign: 'center',
                   textAlignVertical: 'center',
                   lineHeight: 15, // Gleich der fontSize für perfekte Zentrierung
                   includeFontPadding: false, // Android-spezifisch: entfernt extra Padding
-                }}>
-                  {selectedProducts.size}
+              }}>
+                {selectedProducts.size}
               </ThemedText>
             </Animated.View>
           )}
@@ -2478,7 +2478,7 @@ export default function ProductComparisonScreen() {
 
           {/* Ratings and Cart Button Row */}
           <View style={styles.ratingsCartRowDirect}>
-            <TouchableOpacity 
+          <TouchableOpacity 
               style={styles.ratingsSection}
               onPress={() => {
                 setSelectedProductForDetails(comparisonData.mainProduct);
@@ -2490,7 +2490,7 @@ export default function ProductComparisonScreen() {
               <View style={[styles.ratingCircle, { backgroundColor: getRatingCircleColor(comparisonData.mainProduct.averageRatingOverall || 0) }]}>
                 <ThemedText style={styles.ratingCircleText}>
                   {(comparisonData.mainProduct.averageRatingOverall || 0).toFixed(1)}
-                </ThemedText>
+            </ThemedText>
               </View>
               <View style={styles.ratingsContent}>
                 <ThemedText style={[styles.ratingsText, { color: colors.icon }]}>
@@ -2564,8 +2564,8 @@ export default function ProductComparisonScreen() {
                   />
                 </Animated.View>
                 )}
-            </TouchableOpacity>
-          </View>
+          </TouchableOpacity>
+        </View>
 
           {/* Details Button */}
           <TouchableOpacity 
@@ -2721,13 +2721,13 @@ export default function ProductComparisonScreen() {
               {/* Product Info */}
                   <View style={styles.productInfo}>
                     <View style={styles.brandRow}>
-                      <ThemedText style={[styles.brandText, { color: colors.primary }]}>
-                        {noNameProduct.handelsmarke?.bezeichnung || 'NoName-Produkt'}
-                      </ThemedText>
+                    <ThemedText style={[styles.brandText, { color: colors.primary }]}>
+                      {noNameProduct.handelsmarke?.bezeichnung || 'NoName-Produkt'}
+                  </ThemedText>
                     </View>
                     <ThemedText style={styles.productTitle}>
                       {noNameProduct.name}
-                    </ThemedText>
+                  </ThemedText>
                   </View>
 
                   {/* Price Section */}
@@ -2767,7 +2767,7 @@ export default function ProductComparisonScreen() {
 
               {/* Ratings and Cart Button Row */}
               <View style={styles.ratingsCartRowDirect}>
-                <TouchableOpacity 
+              <TouchableOpacity 
                   style={styles.ratingsSection}
                   onPress={() => {
                     setSelectedProductForDetails(noNameProduct);
@@ -2779,7 +2779,7 @@ export default function ProductComparisonScreen() {
                   <View style={[styles.ratingCircle, { backgroundColor: getRatingCircleColor(noNameProduct.averageRatingOverall || 0) }]}>
                     <ThemedText style={styles.ratingCircleText}>
                       {(noNameProduct.averageRatingOverall || 0).toFixed(1)}
-                    </ThemedText>
+                </ThemedText>
                   </View>
                   <View style={styles.ratingsContent}>
                     <ThemedText style={[styles.ratingsText, { color: colors.icon }]}>
@@ -2849,7 +2849,7 @@ export default function ProductComparisonScreen() {
           );
         })
           ) : null}
-          
+        
           {/* 🆕 Weitere enttarnte Produkte für Stufe 3,4,5 */}
           {comparisonData.relatedNoNameProducts.length > 0 && similarProducts.length > 0 && (
             <View style={{ marginTop: 6 }}>
@@ -2908,7 +2908,7 @@ export default function ProductComparisonScreen() {
                           />
                           <ThemedText style={[styles.similarProductMarketText, { color: colors.icon }]}>
                             {product.discounter.name}
-                          </ThemedText>
+                    </ThemedText>
                         </View>
                       )}
                     </View>
@@ -2924,7 +2924,7 @@ export default function ProductComparisonScreen() {
                   </View>
                   <View style={styles.similarProductChevron}>
                         <IconSymbol name="chevron.right" size={16} color={colors.icon} />
-                      </View>
+                  </View>
                 </TouchableOpacity>
                 </Animated.View>
               ))}
@@ -4124,7 +4124,7 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 12,
     overflow: 'hidden',
-     justifyContent: 'center',
+    justifyContent: 'center',
     alignItems: 'center',
   },
   productImage: {

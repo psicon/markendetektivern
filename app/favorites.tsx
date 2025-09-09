@@ -1,5 +1,6 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import BatchActionLoader from '@/components/ui/BatchActionLoader';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
@@ -16,15 +17,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  Animated,
-  Dimensions,
-  Modal,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    Animated,
+    Dimensions,
+    Modal,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
 
@@ -84,6 +85,19 @@ export default function FavoritesScreen() {
   const [activeTab, setActiveTab] = useState<'brand' | 'noname'>('brand');
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [isAddingToCart, setIsAddingToCart] = useState(false);
+  
+  // Batch Action Loader States
+  const [batchLoaderState, setBatchLoaderState] = useState<{
+    visible: boolean;
+    processedItems: number;
+    totalItems: number;
+    currentItem: string;
+  }>({
+    visible: false,
+    processedItems: 0,
+    totalItems: 0,
+    currentItem: ''
+  });
   const [refreshing, setRefreshing] = useState(false);
   const [brandFavorites, setBrandFavorites] = useState<any[]>([]);
   const [noNameFavorites, setNoNameFavorites] = useState<any[]>([]);
@@ -362,18 +376,34 @@ export default function FavoritesScreen() {
     if (!user?.uid || selectedProducts.length === 0) return;
 
     setIsAddingToCart(true);
+    const selectedFavorites = getFilteredFavorites().filter(p => selectedProducts.includes(p.id));
+    
+    // Show batch loader
+    setBatchLoaderState({
+      visible: true,
+      processedItems: 0,
+      totalItems: selectedFavorites.length,
+      currentItem: ''
+    });
     
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      
-      const selectedFavorites = getFilteredFavorites().filter(p => selectedProducts.includes(p.id));
       let successCount = 0;
       let errorCount = 0;
 
-      for (const product of selectedFavorites) {
+      for (let i = 0; i < selectedFavorites.length; i++) {
+        const product = selectedFavorites[i];
+        const productName = product.name || product.produktName || 'Unbekanntes Produkt';
+        
+        // Update current item
+        setBatchLoaderState(prev => ({
+          ...prev,
+          currentItem: productName,
+          processedItems: i
+        }));
+        
         try {
           const isBrand = product.type === 'markenprodukt';
-          const productName = product.name || product.produktName || 'Unbekanntes Produkt';
           await FirestoreService.addToShoppingCart(user.uid, product.id, productName, isBrand);
           successCount++;
         } catch (error) {
@@ -381,6 +411,16 @@ export default function FavoritesScreen() {
           errorCount++;
         }
       }
+
+      // Final update
+      setBatchLoaderState(prev => ({
+        ...prev,
+        processedItems: selectedFavorites.length,
+        currentItem: 'Abgeschlossen!'
+      }));
+      
+      // Wait a moment to show completion
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       setSelectedProducts([]);
 
@@ -401,6 +441,12 @@ export default function FavoritesScreen() {
       console.error('Error in bulk add to cart:', error);
       showInfoToast(TOAST_MESSAGES.SHOPPING.bulkAddError, 'error');
     } finally {
+      setBatchLoaderState({
+        visible: false,
+        processedItems: 0,
+        totalItems: 0,
+        currentItem: ''
+      });
       setIsAddingToCart(false);
     }
   };
@@ -902,6 +948,19 @@ export default function FavoritesScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* Batch Action Loader */}
+      <BatchActionLoader
+        visible={batchLoaderState.visible}
+        title="Zum Einkaufszettel hinzufügen"
+        subtitle="Deine Lieblingsprodukte werden hinzugefügt"
+        icon="cart.badge.plus"
+        gradient={['#4CAF50', '#2E7D32']}
+        progress={batchLoaderState.totalItems > 0 ? batchLoaderState.processedItems / batchLoaderState.totalItems : 0}
+        currentItem={batchLoaderState.currentItem}
+        totalItems={batchLoaderState.totalItems}
+        processedItems={batchLoaderState.processedItems}
+      />
 
       {/* Lokaler Toast entfernt – zentrale Toast-Library übernimmt */}
     </ThemedView>

@@ -29,7 +29,7 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
   useEffect(() => {
     const currentLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
     analyticsService.setUserLevel(currentLevel);
-  }, [userProfile]);
+  }, [userProfile?.stats?.currentLevel, userProfile?.level]); // 🎯 NUR bei Level-Änderung neu laden!
 
   // Automatisches Screen-Tracking bei Navigation
   useFocusEffect(

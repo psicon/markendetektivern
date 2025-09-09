@@ -1,5 +1,6 @@
 import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import leaderboardService from './leaderboardService';
 
 export interface UserProfile {
   uid?: string; // Optional für Kompatibilität
@@ -162,6 +163,9 @@ export const updateUserStats = async (uid: string, stats: {
     
     if (stats.savingsToAdd) {
       updates.totalSavings = (currentData.totalSavings || 0) + stats.savingsToAdd;
+      
+      // 📊 Update Leaderboard with savings
+      await leaderboardService.updateUserStats(uid, 0, stats.savingsToAdd);
     }
     
     if (stats.productsToAdd) {

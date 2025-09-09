@@ -1,4 +1,5 @@
 import { AddCustomItemModal } from '@/components/ui/AddCustomItemModal';
+import BatchActionLoader from '@/components/ui/BatchActionLoader';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
@@ -184,6 +185,31 @@ export default function ShoppingListScreen() {
   
   // Loading States für Button-Aktionen
   const [loadingItems, setLoadingItems] = useState<Set<string>>(new Set());
+  
+  // Batch Action Loader States
+  const [purchaseLoaderState, setPurchaseLoaderState] = useState<{
+    visible: boolean;
+    processedItems: number;
+    totalItems: number;
+    currentItem: string;
+  }>({
+    visible: false,
+    processedItems: 0,
+    totalItems: 0,
+    currentItem: ''
+  });
+  
+  const [convertLoaderState, setConvertLoaderState] = useState<{
+    visible: boolean;
+    processedItems: number;
+    totalItems: number;
+    currentItem: string;
+  }>({
+    visible: false,
+    processedItems: 0,
+    totalItems: 0,
+    currentItem: ''
+  });
   const [deletingItems, setDeletingItems] = useState<Set<string>>(new Set());
   const [convertingItems, setConvertingItems] = useState<Set<string>>(new Set());
   
@@ -433,10 +459,9 @@ export default function ShoppingListScreen() {
   
   useEffect(() => {
     if (brandProducts.length > 0 || noNameProducts.length > 0) {
-
       loadFilterOptions();
     }
-  }, [brandProducts, noNameProducts]);
+  }, [brandProducts.length, noNameProducts.length, activeTab]); // 🎯 Nur bei Längen-Änderung oder Tab-Wechsel
   
   const handleTabChange = (tab: 'brand' | 'noname') => {
     const pageIndex = tab === 'brand' ? 0 : 1;
@@ -589,9 +614,64 @@ export default function ShoppingListScreen() {
           text: 'Umwandeln',
           onPress: async () => {
             setIsConverting(true);
+            
+            // Show batch loader
+            setConvertLoaderState({
+              visible: true,
+              processedItems: 0,
+              totalItems: selectedConversions.length,
+              currentItem: ''
+            });
+            
             try {
-              const result = await FirestoreService.convertToNoName(user.uid, selectedConversions);
-              await FirestoreService.updateUserTotalSavings(user.uid, totalPotentialSavings);
+              // Process conversions with progress tracking
+              for (let i = 0; i < selectedConversions.length; i++) {
+                const conversion = selectedConversions[i];
+                
+                // Find product name for display
+                const brandProduct = brandProducts.find(p => 
+                  p.einkaufswagenRef === conversion.einkaufswagenRef
+                );
+                const productName = brandProduct?.product?.name || 'Produkt';
+                
+                // Update current item
+                setConvertLoaderState(prev => ({
+                  ...prev,
+                  currentItem: productName,
+                  processedItems: i
+                }));
+                
+                // Small delay to show progress
+                await new Promise(resolve => setTimeout(resolve, 50));
+              }
+              
+              // Execute actual conversion
+              setConvertLoaderState(prev => ({
+                ...prev,
+                currentItem: 'Umwandlung wird verarbeitet...',
+                processedItems: selectedConversions.length
+              }));
+              
+              const result = await FirestoreService.convertToNoName(user!.uid, selectedConversions);
+              await FirestoreService.updateUserTotalSavings(user!.uid, totalPotentialSavings);
+              
+              // Final completion message
+              setConvertLoaderState(prev => ({
+                ...prev,
+                currentItem: 'Abgeschlossen!',
+                processedItems: selectedConversions.length
+              }));
+              
+              // Brief completion display
+              await new Promise(resolve => setTimeout(resolve, 200));
+              
+              // ✅ Loader sofort schließen BEVOR weitere Aktionen
+              setConvertLoaderState({
+                visible: false,
+                processedItems: 0,
+                totalItems: 0,
+                currentItem: ''
+              });
               
               // 🚀 FIX: Erst Daten laden, dann Tab wechseln (verhindert Tab-Sprung-zurück)
               await loadShoppingCart();
@@ -606,12 +686,19 @@ export default function ShoppingListScreen() {
               
               // Track Achievement: convert_product (einmal pro umgewandeltem Produkt)
               for (let i = 0; i < selectedConversions.length; i++) {
-                await achievementService.trackAction(user.uid, 'convert_product');
+                await achievementService.trackAction(user!.uid, 'convert_product');
               }
             } catch (error) {
               console.error('Error converting products:', error);
               showInfoToast(TOAST_MESSAGES.SHOPPING.bulkConvertError, 'error');
             } finally {
+              // Sicherheitshalber Loader schließen (falls nicht bereits geschlossen)
+              setConvertLoaderState({
+                visible: false,
+                processedItems: 0,
+                totalItems: 0,
+                currentItem: ''
+              });
               setIsConverting(false);
             }
           }
@@ -832,6 +919,14 @@ export default function ShoppingListScreen() {
     };
 
     const executeMarkAllAsPurchased = async (dbProductCount: number, customItemCount: number, totalSavings: number) => {
+      // Show batch loader
+      setPurchaseLoaderState({
+        visible: true,
+        processedItems: 0,
+        totalItems: dbProductCount + customItemCount,
+        currentItem: 'Wird verarbeitet...'
+      });
+      
       try {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         
@@ -862,8 +957,22 @@ export default function ShoppingListScreen() {
           );
         }
         
+        // Show processing message
+        setPurchaseLoaderState(prev => ({
+          ...prev,
+          currentItem: 'Alle Produkte werden verarbeitet...',
+          processedItems: Math.floor(totalCount * 0.3)
+        }));
+        
         // Execute all operations in parallel
         await Promise.all(promises);
+        
+        // Update progress
+        setPurchaseLoaderState(prev => ({
+          ...prev,
+          currentItem: 'Ersparnis wird gespeichert...',
+          processedItems: Math.floor(totalCount * 0.7)
+        }));
         
         // Update user's total savings and product count (only for DB products)
         if (totalSavings > 0 || dbProductCount > 0) {
@@ -871,8 +980,6 @@ export default function ShoppingListScreen() {
             savingsToAdd: totalSavings,
             productsToAdd: dbProductCount
           });
-          
-          // Profile wird automatisch über Achievement-Callback aktualisiert
         }
         
         // Clear all NoName products locally (both DB and custom)
@@ -881,21 +988,27 @@ export default function ShoppingListScreen() {
         
         // Track Achievement: complete_shopping (only for DB products)
         if (dbProductCount > 0) {
+          setPurchaseLoaderState(prev => ({
+            ...prev,
+            currentItem: 'Achievement wird getrackt...',
+            processedItems: totalCount
+          }));
+          
           await achievementService.trackAction(user.uid, 'complete_shopping', {
             productCount: dbProductCount,
             totalSavings
           });
         }
         
-        // Gamified success toast
-        let successMessage = '';
-        if (dbProductCount > 0 && customItemCount > 0) {
-          successMessage = `🏆 Fantastic! Alle ${totalCount} Einträge erledigt! (${dbProductCount} Produkte, €${totalSavings.toFixed(2)} gespart + ${customItemCount} Freitext-Einträge)`;
-        } else if (dbProductCount > 0) {
-          successMessage = `🏆 Wow! Alle ${dbProductCount} Produkte als gekauft markiert! Du hast €${totalSavings.toFixed(2)} gespart!`;
-        } else {
-          successMessage = `📝 Alle ${customItemCount} Freitext-Einträge erledigt!`;
-        }
+        // Final completion
+        setPurchaseLoaderState(prev => ({
+          ...prev,
+          currentItem: 'Abgeschlossen!',
+          processedItems: totalCount
+        }));
+        
+        // Brief completion display
+        await new Promise(resolve => setTimeout(resolve, 200));
         
         // Verwende Bulk-Purchased-Toast mit intelligenter Message-Auswahl
         showBulkPurchasedToast(dbProductCount, customItemCount, totalSavings);
@@ -903,6 +1016,13 @@ export default function ShoppingListScreen() {
       } catch (error) {
         console.error('Error marking all as purchased:', error);
         showInfoToast(TOAST_MESSAGES.SHOPPING.bulkPurchaseError, 'error');
+      } finally {
+        setPurchaseLoaderState({
+          visible: false,
+          processedItems: 0,
+          totalItems: 0,
+          currentItem: ''
+        });
       }
     };
 
@@ -1879,6 +1999,31 @@ export default function ShoppingListScreen() {
         onClose={() => setShowLevelUpOverlay(false)}
       />
       
+      {/* Batch Action Loaders */}
+      <BatchActionLoader
+        visible={convertLoaderState.visible}
+        title="Produkte umwandeln"
+        subtitle="Markenprodukte werden zu NoNames"
+        icon="arrow.triangle.2.circlepath"
+        gradient={['#FF9800', '#F57C00']}
+        progress={convertLoaderState.totalItems > 0 ? convertLoaderState.processedItems / convertLoaderState.totalItems : 0}
+        currentItem={convertLoaderState.currentItem}
+        totalItems={convertLoaderState.totalItems}
+        processedItems={convertLoaderState.processedItems}
+      />
+      
+      <BatchActionLoader
+        visible={purchaseLoaderState.visible}
+        title="Als gekauft markieren"
+        subtitle="NoName-Produkte werden abgehakt"
+        icon="checkmark.circle.fill"
+        gradient={['#4CAF50', '#2E7D32']}
+        progress={purchaseLoaderState.totalItems > 0 ? purchaseLoaderState.processedItems / purchaseLoaderState.totalItems : 0}
+        currentItem={purchaseLoaderState.currentItem}
+        totalItems={purchaseLoaderState.totalItems}
+        processedItems={purchaseLoaderState.processedItems}
+      />
+
       {/* Lokale CartToast-Instanz entfernt – zentrale Toast-Library übernimmt */}
 
         {/* Custom Item Modal */}
