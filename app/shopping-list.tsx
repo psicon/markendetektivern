@@ -663,7 +663,7 @@ export default function ShoppingListScreen() {
               }));
               
               // Brief completion display
-              await new Promise(resolve => setTimeout(resolve, 200));
+              await new Promise(resolve => setTimeout(resolve, 100));
               
               // ✅ Loader sofort schließen BEVOR weitere Aktionen
               setConvertLoaderState({
@@ -1008,7 +1008,7 @@ export default function ShoppingListScreen() {
         }));
         
         // Brief completion display
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 100));
         
         // Verwende Bulk-Purchased-Toast mit intelligenter Message-Auswahl
         showBulkPurchasedToast(dbProductCount, customItemCount, totalSavings);
