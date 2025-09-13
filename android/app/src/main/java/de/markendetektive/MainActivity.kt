@@ -1,4 +1,4 @@
-package com.patze1411.markendetektivern
+package de.markendetektive
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

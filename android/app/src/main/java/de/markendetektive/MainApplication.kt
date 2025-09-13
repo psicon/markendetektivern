@@ -1,4 +1,4 @@
-package com.patze1411.markendetektivern
+package de.markendetektive
 
 import android.app.Application
 import android.content.res.Configuration
