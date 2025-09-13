@@ -6,6 +6,7 @@ import { LoadingFooterSkeleton, ShimmerSkeleton } from '@/components/ui/ShimmerS
 import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { usePurchaseHistory } from '@/lib/hooks/usePurchaseHistory';
 import { useNavigation, useRouter } from 'expo-router';
@@ -81,6 +82,7 @@ export default function PurchaseHistoryScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
   const { user, userProfile } = useAuth();
+  const analytics = useAnalytics();
   const { 
     brandPurchases, 
     noNamePurchases,
@@ -111,6 +113,13 @@ export default function PurchaseHistoryScreen() {
 
   // Tab State
   const [activeTab, setActiveTab] = useState(0);
+  
+  // 🎯 Journey-Tracking für Purchase History
+  useEffect(() => {
+    analytics.startJourney('repurchase', 'purchase_history', {
+      initialTab: activeTab
+    });
+  }, []); // Nur einmal beim Mount
   const [tabIndicatorPosition] = useState(new Animated.Value(0));
   const pagerRef = useRef<PagerView>(null);
 
@@ -185,6 +194,20 @@ export default function PurchaseHistoryScreen() {
       <TouchableOpacity
         style={[styles.productCard, { backgroundColor: colors.cardBackground }]}
         onPress={() => {
+          // 🎯 Track Product View (Repurchase)
+          const productName = item.name || item.productName || 'Produkt';
+          analytics.trackProductView(
+            item.id,
+            item.type === 'markenprodukt' ? 'brand' : 'noname',
+            productName,
+            'purchase_history',
+            { 
+              repurchase: true,
+              position: index,
+              originalPurchaseDate: item.purchasedAt
+            }
+          );
+          
           // Navigation zur Produktseite - KORREKTE LOGIK basierend auf Stufe
           if (item.type === 'markenprodukt') {
             // Markenprodukte: Immer zu product-comparison

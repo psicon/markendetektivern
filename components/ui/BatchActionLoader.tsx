@@ -1,7 +1,8 @@
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { overlayManager } from '@/lib/services/overlayManager';
 import { LinearGradient } from 'expo-linear-gradient';
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
     ActivityIndicator,
     Animated,
@@ -43,6 +44,11 @@ const BatchActionLoader: React.FC<BatchActionLoaderProps> = ({
   
   const scaleValue = React.useRef(new Animated.Value(0.8)).current;
   const progressValue = React.useRef(new Animated.Value(0)).current;
+
+  // Registriere Batch-Aktion beim OverlayManager
+  useEffect(() => {
+    overlayManager.setBatchActionActive(visible);
+  }, [visible]);
 
   React.useEffect(() => {
     if (visible) {

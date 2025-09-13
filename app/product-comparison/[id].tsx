@@ -10,6 +10,7 @@ import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { TOAST_MESSAGES, interpolateMessage } from '@/constants/ToastMessages';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { ingredientSynonyms } from '@/lib/data/ingredientSynonyms';
 import { db } from '@/lib/firebase';
@@ -291,11 +292,18 @@ const NoNameCartButton = ({
     setIsLoading(true);
     
     try {
+      // 🎯 Track Add-to-Cart wird von FirestoreService automatisch gemacht
+      
       await FirestoreService.addToShoppingCart(
         user.uid,
         productId,
         productName,
-        false // NoName product
+        false, // NoName product
+        'comparison', // Source
+        { 
+          screenName: 'product_comparison',
+          fromMainProduct: true
+        }
       );
       setIsInCart(true);
       const message = interpolateMessage(TOAST_MESSAGES.SHOPPING.addedToCart, { productName });
@@ -1158,6 +1166,7 @@ export default function ProductComparisonScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const { user } = useAuth();
+  const analytics = useAnalytics();
   const { toggleFavorite, isLocalFavorite } = useFavorites();
   
   // Toast states mit Prioritäten - SEPARATE für verschiedene Aktionen
@@ -1396,12 +1405,20 @@ export default function ProductComparisonScreen() {
       
       console.log('Adding to cart:', { productId, productName, isMarke });
       
-      // Add to cart
+      // 🎯 Track Add-to-Cart wird von FirestoreService automatisch gemacht
+      
+      // Add to cart with source attribution
       await FirestoreService.addToShoppingCart(
         user.uid,
         productId,
         productName,
-        isMarke
+        isMarke,
+        'comparison', // Source
+        { 
+          screenName: 'product_comparison',
+          comparedWith: comparisonData?.relatedNoNameProducts?.length || 0,
+          fromProductType: type
+        }
       );
       setIsInCart(true);
       const message = interpolateMessage(TOAST_MESSAGES.SHOPPING.addedToCart, { productName });
@@ -1425,7 +1442,10 @@ export default function ProductComparisonScreen() {
 
     try {
       const productId = selectedProductForDetails?.id || comparisonData?.mainProduct?.id;
-      const isNoNameProduct = !!selectedProductForDetails;
+      // 🔧 FIX: Prüfe ob es ein NoName-Produkt ist basierend auf der 'stufe' Eigenschaft
+      // NoName-Produkte haben eine 'stufe', Markenprodukte nicht
+      const currentProduct = selectedProductForDetails || comparisonData?.mainProduct;
+      const isNoNameProduct = currentProduct && 'stufe' in currentProduct;
       
       if (isEditingRating && existingRating) {
         // Update existing rating
@@ -1498,10 +1518,19 @@ export default function ProductComparisonScreen() {
       // Reload comparison data to show updated ratings
       await loadComparisonData();
       
+      // 🔄 WICHTIG: Ratings auch explizit neu laden (wie bei NoName)
+      if (comparisonData?.mainProduct) {
+        await loadProductRatings(comparisonData.mainProduct);
+      }
+      
       // Delayed reload for Cloud Function (3-5 seconds backup)
       setTimeout(async () => {
         console.log('🔄 Delayed backup reload for Cloud Function updates');
         await loadComparisonData();
+        // Ratings auch im Backup neu laden
+        if (comparisonData?.mainProduct) {
+          await loadProductRatings(comparisonData.mainProduct);
+        }
       }, 4000);
       
     } catch (error) {
@@ -1558,7 +1587,8 @@ export default function ProductComparisonScreen() {
 
     try {
       // Check if user has already rated this product
-      const isNoNameProduct = !!selectedProductForDetails;
+      // 🔧 FIX: Prüfe ob es ein NoName-Produkt ist basierend auf der 'stufe' Eigenschaft
+      const isNoNameProduct = currentProduct && 'stufe' in currentProduct;
       const existing = await FirestoreService.getUserRatingForProduct(
         user.uid, 
         currentProduct.id, 
@@ -3559,7 +3589,8 @@ export default function ProductComparisonScreen() {
               </View>
 
               {/* Ähnlichkeit nur für NoName-Produkte */}
-              {selectedProductForDetails && (
+              {((selectedProductForDetails || comparisonData?.mainProduct) && 
+                'stufe' in (selectedProductForDetails || comparisonData?.mainProduct || {})) && (
                 <View style={styles.criterionRating}>
                   <View style={styles.criterionRow}>
                     <ThemedText style={styles.criterionLabelCompact}>Ähnlichkeit zum Markenprodukt</ThemedText>
@@ -3769,7 +3800,8 @@ export default function ProductComparisonScreen() {
                 </View>
                 
                   {/* Only show similarity for NoName products */}
-                  {selectedProductForDetails && (
+                  {((selectedProductForDetails || (showRatingsView && comparisonData?.mainProduct)) && 
+                    'stufe' in (selectedProductForDetails || comparisonData?.mainProduct || {})) && (
                 <View style={styles.criteriaRow}>
                       <ThemedText style={styles.criteriaLabel}>Ähnlichkeit zu Marke</ThemedText>
                       <View style={styles.criterionRightSide}>

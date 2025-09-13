@@ -8,6 +8,7 @@ import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { TOAST_MESSAGES } from '@/constants/ToastMessages';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useTheme } from '@/lib/contexts/ThemeContext';
 import achievementService from '@/lib/services/achievementService';
@@ -146,6 +147,7 @@ export default function ShoppingListScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { user, userProfile } = useAuth();
+  const analytics = useAnalytics();
   const insets = useSafeAreaInsets();
   
   const [activeTab, setActiveTab] = useState<'brand' | 'noname'>('brand');
@@ -221,6 +223,14 @@ export default function ShoppingListScreen() {
     showInfoToast(message, type);
   };
 
+  // Helper ganz oben in der Datei
+const safeCall = (fn?: (...a: any[]) => any, ...args: any[]) => {
+  try { fn?.(...args); } catch (e) { if (__DEV__) console.warn('non-critical error', e); }
+};
+const safeAsync = async (p: Promise<any>) => {
+  try { await p; } catch (e) { if (__DEV__) console.warn('non-critical async error', e); }
+};
+
   // Header konfigurieren
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -256,7 +266,7 @@ export default function ShoppingListScreen() {
       setShoppingCartItems(items);
       
       // 🚀 PERFORMANCE FIX: Parallele Verarbeitung aller Items!
-      console.time('⚡ Parallele Einkaufszettel-Verarbeitung');
+      if (__DEV__ && typeof console.time === 'function') console.time('⚡ Parallele Einkaufszettel-Verarbeitung');
       
       // Separiere Custom Items (keine DB-Calls nötig)
       const customBrandItems = [];
@@ -432,7 +442,7 @@ export default function ShoppingListScreen() {
       
       // Batch State Updates
       setSelectedConversions(newSelectedConversions);
-      console.timeEnd('⚡ Parallele Einkaufszettel-Verarbeitung');
+      if (__DEV__ && typeof console.timeEnd === 'function') console.timeEnd('⚡ Parallele Einkaufszettel-Verarbeitung');
       
       setBrandProducts(brandItems);
       setNoNameProducts(noNameItems);
@@ -442,9 +452,12 @@ export default function ShoppingListScreen() {
 
       console.log(`💰 Potential savings: €${potentialSavings.toFixed(2)}, Actual savings: €${actualSavings.toFixed(2)}`);
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading shopping cart:', error);
-      showInfoToast(TOAST_MESSAGES.SHOPPING.loadError, 'error');
+      showInfoToast(
+        TOAST_MESSAGES.SHOPPING.loadError + " " + (error?.message ? error.message.toString() : String(error)),
+        'error'
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -598,13 +611,14 @@ export default function ShoppingListScreen() {
   
   // Convert selected brand products to NoName
   const handleConvertSelected = async () => {
+    if (!user?.uid) return;
     if (selectedConversions.length === 0) {
       showInfoToast(TOAST_MESSAGES.SHOPPING.selectFirstPrompt, 'info');
       return;
     }
-    
+  
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    
+  
     Alert.alert(
       'In NoNames umwandeln?',
       `${selectedConversions.length} Produkt${selectedConversions.length > 1 ? 'e' : ''} umwandeln und €${totalPotentialSavings.toFixed(2)} sparen?`,
@@ -614,91 +628,81 @@ export default function ShoppingListScreen() {
           text: 'Umwandeln',
           onPress: async () => {
             setIsConverting(true);
-            
-            // Show batch loader
             setConvertLoaderState({
               visible: true,
               processedItems: 0,
               totalItems: selectedConversions.length,
               currentItem: ''
             });
-            
+  
             try {
-              // Process conversions with progress tracking
+              // UI-Progress (nur Anzeige)
               for (let i = 0; i < selectedConversions.length; i++) {
-                const conversion = selectedConversions[i];
-                
-                // Find product name for display
-                const brandProduct = brandProducts.find(p => 
-                  p.einkaufswagenRef === conversion.einkaufswagenRef
-                );
-                const productName = brandProduct?.product?.name || 'Produkt';
-                
-                // Update current item
+                const c = selectedConversions[i];
+                const bp = brandProducts.find(p => p.id === c.einkaufswagenRef); // <-- FIX
+                const name = bp?.product?.name || bp?.name || 'Produkt';
                 setConvertLoaderState(prev => ({
                   ...prev,
-                  currentItem: productName,
+                  currentItem: name,
                   processedItems: i
                 }));
-                
-                // Small delay to show progress
-                await new Promise(resolve => setTimeout(resolve, 50));
+                await new Promise(res => setTimeout(res, 40));
               }
-              
-              // Execute actual conversion
+  
+              // eigentliche Umwandlung
               setConvertLoaderState(prev => ({
                 ...prev,
                 currentItem: 'Umwandlung wird verarbeitet...',
                 processedItems: selectedConversions.length
               }));
-              
-              const result = await FirestoreService.convertToNoName(user!.uid, selectedConversions);
-              await FirestoreService.updateUserTotalSavings(user!.uid, totalPotentialSavings);
-              
-              // Final completion message
+  
+              await FirestoreService.convertToNoName(user.uid, selectedConversions);
+              await FirestoreService.updateUserTotalSavings(user.uid, totalPotentialSavings);
+  
+              // Side-Effects: dürfen NIE den Erfolg kippen
+              const sideEffects: Promise<any>[] = [];
+              for (const c of selectedConversions) {
+                const bp = brandProducts.find(p => p.id === c.einkaufswagenRef); // <-- FIX
+                if (bp) {
+                  const { savingsEur, savingsPercent } = getSavingsData(
+                    bp.product,
+                    { preis: bp.product?.preis ?? 0, packSize: bp.product?.packSize ?? 1 }
+                  );
+                  sideEffects.push(Promise.resolve(
+                    analytics?.trackProductConversion?.(
+                      c.markenProduktRef,
+                      c.produktRef,
+                      savingsEur,
+                      savingsPercent
+                    )
+                  ));
+                }
+                sideEffects.push(Promise.resolve(
+                  achievementService?.trackAction?.(user.uid, 'convert_product')
+                ));
+              }
+              await Promise.allSettled(sideEffects); // <-- wirft nicht
+  
+              // Abschluss & UI
               setConvertLoaderState(prev => ({
                 ...prev,
                 currentItem: 'Abgeschlossen!',
                 processedItems: selectedConversions.length
               }));
-              
-              // Brief completion display
-              await new Promise(resolve => setTimeout(resolve, 100));
-              
-              // ✅ Loader sofort schließen BEVOR weitere Aktionen
-              setConvertLoaderState({
-                visible: false,
-                processedItems: 0,
-                totalItems: 0,
-                currentItem: ''
-              });
-              
-              // 🚀 FIX: Erst Daten laden, dann Tab wechseln (verhindert Tab-Sprung-zurück)
+              await new Promise(res => setTimeout(res, 80));
+  
+              setConvertLoaderState({ visible: false, processedItems: 0, totalItems: 0, currentItem: '' });
+  
               await loadShoppingCart();
-              
-              // ✅ FIX: Tab-Wechsel nach Daten-Laden (mit kleiner Verzögerung für Stabilität)
-              setTimeout(() => {
-                handleTabChange('noname');
-              }, 100);
-              
-              // Gamified success message - spezielle Konvertierung-Toast
+              setTimeout(() => handleTabChange('noname'), 100);
+  
               showBulkConvertSuccessToast(totalPotentialSavings);
-              
-              // Track Achievement: convert_product (einmal pro umgewandeltem Produkt)
-              for (let i = 0; i < selectedConversions.length; i++) {
-                await achievementService.trackAction(user!.uid, 'convert_product');
-              }
             } catch (error) {
-              console.error('Error converting products:', error);
+              console.error('[convert] bulk error', error);
               showInfoToast(TOAST_MESSAGES.SHOPPING.bulkConvertError, 'error');
             } finally {
-              // Sicherheitshalber Loader schließen (falls nicht bereits geschlossen)
-              setConvertLoaderState({
-                visible: false,
-                processedItems: 0,
-                totalItems: 0,
-                currentItem: ''
-              });
+              // falls irgendwo ein früher return passiert ist
+              setConvertLoaderState({ visible: false, processedItems: 0, totalItems: 0, currentItem: '' });
               setIsConverting(false);
             }
           }
@@ -706,6 +710,7 @@ export default function ShoppingListScreen() {
       ]
     );
   };
+  
   
   // Filter Functions
   const getActiveFiltersCount = () => {
@@ -1009,6 +1014,28 @@ export default function ShoppingListScreen() {
         
         // Brief completion display
         await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // 📊 Track Purchase Completed Event
+        if (dbProductCount > 0) {
+          // Sammle Source-Informationen aus den gekauften Produkten
+          const sourceMix = dbNoNameProducts
+            .map(item => item.source || 'unknown')
+            .filter((source, index, arr) => arr.indexOf(source) === index); // Unique sources
+          
+          const productIds = dbNoNameProducts.map(item => item.id);
+          
+          // 🎯 Track Purchase (korrekte Parameter)
+          // Purchase-with-Journey wird durch Legacy Purchase Event abgedeckt
+          
+          // Legacy Purchase Event
+          analytics.trackPurchaseCompleted(
+            totalCount,
+            totalSavings,
+            dbProductCount,
+            0, // Keine Brand-Produkte im NoName-Tab
+            sourceMix
+          );
+        }
         
         // Verwende Bulk-Purchased-Toast mit intelligenter Message-Auswahl
         showBulkPurchasedToast(dbProductCount, customItemCount, totalSavings);

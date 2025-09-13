@@ -1904,14 +1904,19 @@ export class FirestoreService {
     userId: string,
     productId: string,
     productName: string,
-    isMarke: boolean
+    isMarke: boolean,
+    source?: 'search' | 'scan' | 'browse' | 'favorites' | 'repurchase' | 'comparison',
+    sourceMetadata?: any
   ): Promise<string> {
     try {
       const userRef = doc(db, 'users', userId);
       const data: any = {
         gekauft: false,
         timestamp: serverTimestamp(),
-        name: productName
+        name: productName,
+        // 📊 Source Attribution (optional)
+        ...(source && { source }),
+        ...(sourceMetadata && { sourceMetadata })
       };
 
       if (isMarke) {
@@ -1921,6 +1926,23 @@ export class FirestoreService {
       }
 
       const docRef = await addDoc(collection(userRef, 'einkaufswagen'), data);
+      
+      // 📊 Track Add-to-Cart Event mit Source
+      if (source) {
+        const { analyticsService } = await import('./analyticsService');
+        await analyticsService.trackAddToCart(
+          productId, 
+          productName, 
+          isMarke, 
+          source, 
+          userId, 
+          {
+            screen_name: sourceMetadata?.screenName || 'unknown',
+            ...sourceMetadata
+          }
+        );
+      }
+      
       console.log('✅ Added to shopping cart:', docRef.id);
       return docRef.id;
     } catch (error) {

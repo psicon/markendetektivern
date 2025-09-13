@@ -36,11 +36,12 @@ class AchievementService {
   private levels: Level[] = [];
   private gameActions: GameActionsConfig | null = null;
   private streakConfig: StreakConfig | null = null;
-  private isInitialized = false;
+  public isInitialized = false;
   private initializationPromise: Promise<void> | null = null;
   private profileRefreshCallback: (() => Promise<void>) | null = null;
   private lastConfigLoad: number = 0;
   private configCacheDuration = 5 * 60 * 1000; // 5 Minuten Cache
+  private loggedLevelUnlocks = new Set<string>(); // Verhindert doppelte Level-Unlock-Logs
 
   // Static Callbacks für UI-Integration
   static onAchievementUnlock: ((achievement: Achievement) => void) | null = null;
@@ -100,18 +101,37 @@ class AchievementService {
   }
 
   /**
+   * Reset für neue Authentifizierung
+   */
+  resetForNewAuth(): void {
+    console.log('🔄 RESET: Kompletter Gamification-Reset für neue Auth...');
+    this.isInitialized = false;
+    this.initializationPromise = null;
+    this.achievements = [];
+    this.levels = [];
+    this.gameActions = null;
+    this.streakConfig = null;
+    this.lastConfigLoad = 0;
+    this.loggedLevelUnlocks.clear();
+    console.log('✅ RESET: Alle Caches und States zurückgesetzt');
+  }
+
+  /**
    * Initialisiert das Achievement-System und lädt alle Achievements
    */
   async initialize(): Promise<void> {
     // Return existing initialization if in progress
     if (this.initializationPromise) {
+      console.log('⚠️ Achievement-System: Initialization bereits im Gange - warte...');
       return this.initializationPromise;
     }
     
     if (this.isInitialized) {
+      console.log('✅ Achievement-System: Bereits initialisiert - überspringe');
       return Promise.resolve();
     }
 
+    console.log('🔄 Achievement-System: Starte neue Initialisierung...');
     // Create initialization promise
     this.initializationPromise = this._doInitialize();
     return this.initializationPromise;

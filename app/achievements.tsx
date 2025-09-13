@@ -1,15 +1,20 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import AchievementUnlockOverlay from '@/components/ui/AchievementUnlockOverlay';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import LevelUpOverlay from '@/components/ui/LevelUpOverlay';
 import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useAchievements } from '@/lib/hooks/useAchievements';
 import { achievementService } from '@/lib/services/achievementService';
+import { overlayManager } from '@/lib/services/overlayManager';
 import { Level } from '@/lib/types/achievements';
+import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
+import LottieView from 'lottie-react-native';
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -111,6 +116,14 @@ export default function AchievementsScreen() {
   const [levels, setLevels] = useState<Level[]>([]);
   const [levelsLoading, setLevelsLoading] = useState(true);
   const [showInfoSheet, setShowInfoSheet] = useState(false);
+  
+  // Overlay States
+  const [showLevelUpOverlay, setShowLevelUpOverlay] = useState(false);
+  const [levelUpData, setLevelUpData] = useState<{ newLevel: number; oldLevel: number } | null>(null);
+  const [showAchievementUnlock, setShowAchievementUnlock] = useState({
+    visible: false,
+    achievement: null as any
+  });
 
   // Lade Levels aus Firebase
   useEffect(() => {
@@ -274,6 +287,55 @@ export default function AchievementsScreen() {
     return ['#2196F3', '#1976D2']; // Blue
   };
 
+  // 🎬 Achievement Lottie Source Helper (wie in AchievementUnlockOverlay)
+  const getAchievementLottieSource = (achievement: any) => {
+    try {
+      // Intelligente Zuordnung basierend auf Action-Type (mit vorhandenen Files)
+      switch (achievement.trigger?.action) {
+        case 'first_action_any':
+          return require('@/assets/lottie/rocket.json');
+         
+        case 'daily_streak':
+          if (achievement.trigger.target >= 7) {
+            return require('@/assets/lottie/streak-fire.json');
+          }
+          return require('@/assets/lottie/streak-bonus.json');
+          
+        case 'scan_product':
+          return require('@/assets/lottie/scanner-line.json');  
+        case 'view_comparison': 
+          return require('@/assets/lottie/comparison.json');
+        case 'complete_shopping':
+          return require('@/assets/lottie/task.json');
+        case 'search_product':
+          return require('@/assets/lottie/search.json');
+        case 'submit_rating':
+          return require('@/assets/lottie/ratingsthumbsup.json');
+        case 'create_list':
+          return require('@/assets/lottie/task.json');
+        case 'convert_product':
+          return require('@/assets/lottie/swap.json');
+        case 'share_app':
+          return require('@/assets/lottie/review.json');
+        case 'submit_product':
+          return require('@/assets/lottie/favorites.json');
+        case 'save_product':
+          return require('@/assets/lottie/favorites2.json');
+        case 'mission_daily_done':
+          return require('@/assets/lottie/mission-daily.json');
+        case 'mission_weekly_done':
+          return require('@/assets/lottie/mission-weekly.json');
+        case 'savings_total':
+          return require('@/assets/lottie/savings.json');
+        default:
+          return require('@/assets/lottie/confetti.json');
+      }
+    } catch (error) {
+      console.log(`⚠️ Achievement Lottie loading failed, using fallback`);
+      return require('@/assets/lottie/confetti.json');
+    }
+  };
+
 
 
   // Zeige Loading wenn Levels noch nicht geladen sind
@@ -375,30 +437,44 @@ export default function AchievementsScreen() {
               </ThemedText>
             </View>
 
-            {/* Progress Section */}
+            {/* Progress Section (elegant überarbeitet) */}
             {nextLevel && (
-            <View style={styles.progressSection}>
-                <ThemedText style={styles.progressLabel}>{`Fortschritt zu Level ${nextLevel.id} (${nextLevel.name}):`}</ThemedText>
-                
-                {/* Zeige Ersparnis NUR wenn erforderlich */}
-                {nextLevel.savingsRequired > 0 && (
-                  <>
-              <View style={styles.progressRow}>
-                <ThemedText style={styles.progressText}>
-                        {`€ ${currentSavings.toFixed(2)} / ${nextLevel.savingsRequired}€`}
+            <View style={styles.levelProgressSection}>
+                <ThemedText style={styles.levelProgressTitle}>
+                  {`Fortschritt zu Level ${nextLevel.id} (${nextLevel.name})`}
                 </ThemedText>
+                
+                {/* Ersparnis Progress (wenn erforderlich) */}
+                {nextLevel.savingsRequired > 0 && (
+                  <View style={styles.levelProgressItem}>
+                    <View style={styles.levelProgressHeader}>
+                      <View style={styles.levelProgressLabelRow}>
+                        <IconSymbol name="eurosign.circle.fill" size={14} color="white" />
+                        <ThemedText style={styles.levelProgressLabel}>Ersparnis</ThemedText>
               </View>
+                      <ThemedText style={styles.levelProgressCounter}>
+                        {`€${currentSavings.toFixed(2)} / €${nextLevel.savingsRequired}`}
+                      </ThemedText>
+                    </View>
                     <ProgressBar progress={currentSavings} maxProgress={nextLevel.savingsRequired} color="white" />
-                  </>
+                  </View>
                 )}
               
-              <View style={styles.pointsRow}>
-                  <ThemedText style={styles.progressLabel}>Punkte:</ThemedText>
-                  <ThemedText style={styles.progressText}>{`${currentPoints} / ${nextLevel.pointsRequired} Pkte.`}</ThemedText>
+                {/* Punkte Progress */}
+                <View style={styles.levelProgressItem}>
+                  <View style={styles.levelProgressHeader}>
+                    <View style={styles.levelProgressLabelRow}>
+                      <IconSymbol name="star.fill" size={14} color="white" />
+                      <ThemedText style={styles.levelProgressLabel}>Punkte</ThemedText>
               </View>
-                <ProgressBar progress={currentPoints} maxProgress={nextLevel.pointsRequired} color="white" />
-              
-              <ThemedText style={styles.remainingText}>
+                    <ThemedText style={styles.levelProgressCounter}>
+                      {`${currentPoints} / ${nextLevel.pointsRequired}`}
+                    </ThemedText>
+                  </View>
+                  <ProgressBar progress={currentPoints} maxProgress={nextLevel.pointsRequired} color="white" />
+                </View>
+                
+                <ThemedText style={styles.levelRemainingText}>
                   {nextLevel.savingsRequired > 0 
                     ? `Noch €${Math.max(0, nextLevel.savingsRequired - currentSavings).toFixed(2)} & ${Math.max(0, nextLevel.pointsRequired - currentPoints)} Punkte zum nächsten Level`
                     : `Noch ${Math.max(0, nextLevel.pointsRequired - currentPoints)} Punkte zum nächsten Level`
@@ -491,21 +567,37 @@ export default function AchievementsScreen() {
         <ThemedText style={styles.sectionTitle}>Alle Level</ThemedText>
         
         {levelsWithStatus.map((level, index) => (
-          <Animated.View 
+          <TouchableOpacity
             key={level.id} 
+            onPress={() => {
+              if (level.isUnlocked) {
+                // 🎉 Zeige Level-Up Overlay für erreichte Level
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                
+                // Verwende OverlayManager um Konflikte zu vermeiden
+                overlayManager.showOverlay(() => {
+                  setLevelUpData({ newLevel: level.id, oldLevel: level.id - 1 });
+                  setShowLevelUpOverlay(true);
+                });
+              }
+            }}
+            activeOpacity={level.isUnlocked ? 0.7 : 1}
+            disabled={!level.isUnlocked}
+          >
+            <Animated.View 
             style={[
               styles.levelListCard,
               { backgroundColor: colors.cardBackground },
-              level.isActive && { borderColor: level.color, borderWidth: 2 },
-              level.isUnlocked && !level.isActive && { 
-                borderColor: colors.success + '40', 
-                borderWidth: 1,
-                backgroundColor: colors.success + '08'
-              },
-              !level.isUnlocked && level.hasNewCategory && {
-                opacity: 0.95 // Besserer Kontrast für goldene Level
-              },
-              !level.isUnlocked && !level.hasNewCategory && { opacity: 0.75 } // Besserer Kontrast
+                level.isActive && { borderColor: level.color, borderWidth: 2 },
+                level.isUnlocked && !level.isActive && { 
+                  borderColor: colors.success + '40', 
+                  borderWidth: 1,
+                  backgroundColor: colors.success + '08'
+                },
+                !level.isUnlocked && level.hasNewCategory && {
+                  opacity: 0.95 // Besserer Kontrast für goldene Level
+                },
+                !level.isUnlocked && !level.hasNewCategory && { opacity: 0.75 } // Besserer Kontrast
             ]}
           >
             <View style={styles.levelListContent}>
@@ -583,6 +675,7 @@ export default function AchievementsScreen() {
               </View>
             </View>
           </Animated.View>
+          </TouchableOpacity>
         ))}
 
         {/* STREAK-ANZEIGE ENTFERNT - War die Ursache für den Crash */}
@@ -596,90 +689,138 @@ export default function AchievementsScreen() {
           </View>
         ) : (
           processedAchievements.map((achievement, index) => (
-          <View 
+          <TouchableOpacity
             key={achievement.id}
+            onPress={() => {
+              if (achievement.isCompleted) {
+                // 🏆 Zeige Achievement Unlock Overlay für erreichte Achievements
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                
+                // Verwende OverlayManager um Konflikte zu vermeiden
+                overlayManager.showOverlay(() => {
+                  setShowAchievementUnlock({
+                    visible: true,
+                    achievement: achievement
+                  });
+                });
+              }
+            }}
+            activeOpacity={achievement.isCompleted ? 0.7 : 1}
+            disabled={!achievement.isCompleted}
+          >
+            <Animated.View 
             style={[
               styles.achievementCard,
               { backgroundColor: colors.cardBackground },
-              index === 0 && styles.firstAchievementCard,
-              index === processedAchievements.length - 1 && styles.lastAchievementCard,
-              achievement.isCompleted && { borderColor: colors.success, borderWidth: 2 }
+                achievement.isCompleted && styles.completedAchievementCard,
             ]}
           >
             <View style={styles.achievementContent}>
-              <View style={[
-                styles.achievementIcon, 
-                { backgroundColor: achievement.isCompleted ? colors.warning : achievement.color }
-              ]}>
-                <IconSymbol 
-                  name={achievement.icon as any} 
-                  size={20} 
-                  color={achievement.isCompleted ? '#FFD700' : 'white'} 
-                />
+              {/* 🎬 LOTTIE-ICON (größer) + Schwierigkeit darunter */}
+              <View style={styles.achievementIconSection}>
+                <View style={[
+                  styles.achievementIconLarge, 
+                  { 
+                    backgroundColor: achievement.isCompleted ? '#FFD700' : achievement.color,
+                    borderWidth: achievement.isCompleted ? 3 : 0,
+                    borderColor: '#FFA500'
+                  }
+                ]}>
+                  {achievement.isCompleted ? (
+                    <LottieView
+                      source={getAchievementLottieSource(achievement)}
+                      style={{ width: 36, height: 36 }}
+                      autoPlay={true}
+                      loop={true}
+                      speed={0.8}
+                    />
+                  ) : (
+                    <IconSymbol 
+                      name={achievement.icon as any} 
+                      size={28} 
+                      color="white" 
+                    />
+                  )}
+                </View>
+                
+                {/* Schwierigkeitsanzeige unter dem Icon */}
+                <View style={[styles.difficultyChip, { 
+                  backgroundColor: achievement.points <= 10 ? '#2196F3' : 
+                                 achievement.points <= 20 ? '#4CAF50' : 
+                                 achievement.points <= 25 ? '#FF9800' : '#F44336'
+                }]}>
+                  <ThemedText style={styles.difficultyChipText}>
+                    {achievement.points <= 10 ? 'Einfach' : 
+                     achievement.points <= 20 ? 'Mittel' : 
+                     achievement.points <= 25 ? 'Schwer' : 'Meister'}
+                  </ThemedText>
+                </View>
               </View>
               
               <View style={styles.achievementInfo}>
                 <View style={styles.achievementHeader}>
                   <View style={styles.achievementTitleRow}>
-                  <ThemedText style={styles.achievementName}>{achievement.name}</ThemedText>
-                    {/* Schwierigkeitsanzeige */}
-                    <View style={styles.difficultyIndicator}>
-                      {achievement.points <= 10 && (
-                        <ThemedText style={[styles.difficultyText, { color: '#4A90E2' }]}>EINFACH</ThemedText>
-                      )}
-                      {achievement.points > 10 && achievement.points <= 20 && (
-                        <ThemedText style={[styles.difficultyText, { color: '#7ED321' }]}>MITTEL</ThemedText>
-                      )}
-                      {achievement.points > 20 && achievement.points <= 25 && (
-                        <ThemedText style={[styles.difficultyText, { color: '#F5A623' }]}>SCHWER</ThemedText>
-                      )}
-                      {achievement.points > 25 && (
-                        <ThemedText style={[styles.difficultyText, { color: '#D0021B' }]}>MEISTER</ThemedText>
-                      )}
-                    </View>
-                  </View>
-                  <View style={[styles.pointsBadge, { backgroundColor: achievement.color }]}>
-                    <ThemedText style={[styles.pointsBadgeText, { 
-                      color: achievement.isCompleted ? 'white' : 'rgba(0,0,0,0.7)' 
-                    }]}>
-                      + {achievement.points} Punkte
+                    <ThemedText style={[
+                      styles.levelListName, // 🎯 Gleiche Schriftgröße wie Level-Cards
+                      achievement.isCompleted && { color: colors.text, fontFamily: 'Nunito_700Bold' },
+                      !achievement.isCompleted && { opacity: 0.4, fontFamily: 'Nunito' } // 🎯 Grau wie nicht erreichte Level
+                    ]}>
+                      {achievement.name}
                     </ThemedText>
+                    
+                    {/* Punkte Badge (einheitliche Farben) */}
+                    <View style={[styles.pointsChip, { 
+                      backgroundColor: achievement.points <= 10 ? '#2196F3' : 
+                                     achievement.points <= 20 ? '#4CAF50' : 
+                                     achievement.points <= 25 ? '#FF9800' : '#F44336'
+                    }]}>
+                      <IconSymbol name="star.fill" size={12} color="white" />
+                      <ThemedText style={styles.pointsChipText}>
+                        {achievement.points} Punkte
+                      </ThemedText>
+                    </View>
                   </View>
                 </View>
                 
-                <ThemedText style={styles.achievementDescription}>
+                <ThemedText style={[
+                  styles.levelListDescription, // 🎯 Gleiche Schriftgröße wie Level-Cards
+                  achievement.isCompleted && { color: colors.success + 'AA' },
+                  !achievement.isCompleted && { opacity: 0.6 } // 🎯 Grau wie nicht erreichte Level-Beschreibungen
+                ]}>
                   {achievement.description}
                 </ThemedText>
                 
-                {!achievement.isCompleted && (
-                  <>
-                    <View style={styles.achievementProgressBar}>
+                {/* Progress Section (elegant integriert) */}
+                <View style={styles.achievementProgressSection}>
+                  {achievement.isCompleted ? (
+                    <View style={styles.completedIndicator}>
+                      <IconSymbol name="checkmark.circle.fill" size={18} color="#4CAF50" />
+                      <ThemedText style={styles.completedText}>Abgeschlossen!</ThemedText>
+                    </View>
+                  ) : (
+                    <View style={styles.progressContainer}>
+                      <View style={styles.progressHeader}>
+                        <ThemedText style={[styles.progressLabel, { color: colors.text }]}>
+                          Fortschritt
+                        </ThemedText>
+                        <ThemedText style={[styles.progressCounter, { color: colors.text }]}>
+                          {`${achievement.progress}/${achievement.maxProgress}`}
+                        </ThemedText>
+                      </View>
+                      <View style={styles.progressBarContainer}>
                       <ProgressBar 
-                        progress={achievement.progress} 
+                          progress={Math.max(achievement.progress, 0.02)} 
                         maxProgress={achievement.maxProgress} 
                         color={achievement.color} 
                       />
                     </View>
-                    <View style={styles.progressTextRow}>
-                      <ThemedText style={styles.progressValue}>
-                        {`${achievement.progress}/${achievement.maxProgress}`}
-                      </ThemedText>
                     </View>
-                  </>
                 )}
-                
-                {achievement.isCompleted && (
-                  <View style={styles.completedBadge}>
-                    <IconSymbol name="trophy.fill" size={28} color="#FFD700" />
                   </View>
-                )}
               </View>
             </View>
-            
-            {index < processedAchievements.length - 1 && (
-              <View style={[styles.divider, { backgroundColor: colors.border }]} />
-            )}
-          </View>
+          </Animated.View>
+          </TouchableOpacity>
         ))
         )}
       </ScrollView>
@@ -710,9 +851,9 @@ export default function AchievementsScreen() {
                   Sammle Punkte und schalte Kategorien frei
                 </ThemedText>
               </View>
+              </View>
             </View>
-          </View>
-          
+            
           <ScrollView 
             style={styles.bottomSheetContent}
             showsVerticalScrollIndicator={false}
@@ -729,7 +870,7 @@ export default function AchievementsScreen() {
               <ThemedText style={[styles.welcomeText, { color: colors.text }]}>
                 Das Ziel: <Text style={[styles.welcomeHighlight, { color: colors.primary }]}>Geld sparen, Spaß haben und Punkte sammeln</Text>, während du uns nebenbei hilfst, geheime Infos über Produkte zu sammeln und Licht ins Dunkel der Hersteller- und Markenverstrickungen zu bringen.
               </ThemedText>
-            </View>
+          </View>
 
             {/* Level System Explanation */}
             <View style={styles.infoSection}>
@@ -839,9 +980,31 @@ export default function AchievementsScreen() {
                 So wird verhindert, dass jemand zu schnell durch die Level rast!
               </ThemedText>
             </View>
-          </ScrollView>
+      </ScrollView>
         </View>
       </Modal>
+
+      {/* Level-Up Overlay */}
+      {showLevelUpOverlay && levelUpData && (
+        <LevelUpOverlay
+          visible={showLevelUpOverlay}
+          newLevel={levelUpData.newLevel}
+          oldLevel={levelUpData.oldLevel}
+          onClose={() => {
+            setShowLevelUpOverlay(false);
+            setLevelUpData(null);
+          }}
+        />
+      )}
+
+      {/* Achievement Unlock Overlay */}
+      {showAchievementUnlock.visible && showAchievementUnlock.achievement && (
+        <AchievementUnlockOverlay
+          visible={showAchievementUnlock.visible}
+          achievement={showAchievementUnlock.achievement}
+          onClose={() => setShowAchievementUnlock({ visible: false, achievement: null })}
+        />
+      )}
     </ThemedView>
   );
 }
@@ -856,6 +1019,55 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     paddingBottom: 50,
+  },
+
+  // Level Progress Styles (schöner integriert)
+  levelProgressSection: {
+    marginTop: 4,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.2)',
+  },
+  levelProgressTitle: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+    fontFamily: 'Nunito_600SemiBold',
+  },
+  levelProgressItem: {
+    marginBottom: 6,
+  },
+  levelProgressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  levelProgressLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  levelProgressLabel: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '500',
+    opacity: 1,
+  },
+  levelProgressCounter: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: 'Nunito_700Bold',
+  },
+  levelRemainingText: {
+    color: 'white',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 8,
+        fontFamily: 'Nunito_700Bold',
+    lineHeight: 16,
   },
 
   // Savings Card
@@ -1256,6 +1468,137 @@ const styles = StyleSheet.create({
   bottomSheetContent: {
     flex: 1,
     paddingHorizontal: 20,
+  },
+
+  // Achievement-spezifische Styles (Gamification Best Practice)
+  achievementCard: {
+    marginBottom: 16,
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  completedAchievementCard: {
+    borderWidth: 2,
+    borderColor: '#4CAF50',
+    backgroundColor: 'rgba(76, 175, 80, 0.05)',
+  },
+  achievementContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  achievementIconSection: {
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  achievementIconLarge: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  achievementInfo: {
+    flex: 1,
+  },
+  achievementHeader: {
+    marginBottom: 4,
+  },
+  achievementTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  achievementTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    flex: 1,
+    marginRight: 8, 
+  },
+  pointsChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  pointsChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'white',
+    fontFamily: 'Nunito_700Bold',
+  },
+  difficultyChip: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  difficultyChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    fontFamily: 'Nunito_600SemiBold',
+    color: 'white',
+  },
+  achievementDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  achievementProgressSection: {
+    marginTop: 8,
+  },
+  progressContainer: {
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.08)',
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  progressLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    opacity: 0.9,
+    fontFamily: 'Nunito_600SemiBold',
+  },
+  progressCounter: {
+    fontSize: 12,
+    fontWeight: '600',
+    opacity: 0.9,
+    fontFamily: 'Nunito_600SemiBold',
+  },
+  progressBarContainer: {
+    // Keine extra margin, direkt in Container
+  },
+  completedIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  completedText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4CAF50',
+    fontFamily: 'Nunito_600SemiBold',
   },
 
   // Welcome Card Styles

@@ -2,6 +2,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { useFocusEffect, usePathname } from 'expo-router';
 import React, { createContext, useCallback, useContext, useEffect, useRef } from 'react';
 import { analyticsService } from '../services/analyticsService';
+import journeyTrackingService from '../services/journeyTrackingService';
 
 interface AnalyticsContextType {
   // High-level tracking functions
@@ -11,6 +12,25 @@ interface AnalyticsContextType {
   trackConversion: (type: 'add_to_cart' | 'mark_purchased' | 'add_to_favorites', productId: string, additionalData?: any) => void;
   trackMotivation: (signalType: string, strength: number, context?: any) => void;
   trackCustomEvent: (eventName: string, eventData?: any) => void;
+  
+  // 🛒 SHOPPING JOURNEY
+  trackAddToCart: (productId: string, productName: string, isMarke: boolean, source: 'search' | 'scan' | 'browse' | 'favorites' | 'repurchase' | 'comparison', additionalData?: any) => void;
+  trackRemoveFromCart: (productId: string, reason: 'manual_delete' | 'conversion_to_noname' | 'purchase_completed', timeInCartMs?: number) => void;
+  trackPurchaseCompleted: (itemsCount: number, totalSavings: number, noNameItems: number, brandItems: number, sourceMix: string[]) => void;
+  trackProductConversion: (fromProductId: string, toProductId: string, savingsAmount: number, savingsPercent: number) => void;
+  
+  // 💡 MOTIVATION ANALYSIS
+  trackSortChanged: (sortBy: 'name' | 'price' | 'savings', screenName: string, additionalData?: any) => void;
+  trackFilterChanged: (filterType: 'market' | 'category' | 'price' | 'bio' | 'vegan' | 'ingredients' | 'nutrition' | 'allergen', filterValue: string, action: 'added' | 'removed', screenName: string) => void;
+  trackSavingsWidgetClicked: (widgetType: 'total_savings' | 'potential_savings' | 'comparison_savings', savingsAmount: number, screenName: string) => void;
+  
+  // 🎯 JOURNEY TRACKING
+  startJourney: (discoveryMethod: 'search' | 'browse' | 'scan' | 'favorites' | 'repurchase', screenName: string, activeFilters?: any) => void;
+  updateJourneyFilters: (filters: any) => void;
+  trackProductViewWithJourney: (productId: string, productType: 'brand' | 'noname', productName: string, position?: number) => void;
+  trackAddToCartWithJourney: (productId: string, productName: string, isMarke: boolean) => void;
+  trackAddToFavoritesWithJourney: (productId: string, productName: string) => void;
+  trackPurchaseWithJourney: (productIds: string[], totalSavings: number) => void;
 }
 
 const AnalyticsContext = createContext<AnalyticsContextType | undefined>(undefined);
@@ -31,7 +51,7 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
     analyticsService.setUserLevel(currentLevel);
   }, [userProfile?.stats?.currentLevel, userProfile?.level]); // 🎯 NUR bei Level-Änderung neu laden!
 
-  // Automatisches Screen-Tracking bei Navigation
+  // Automatisches Screen-Tracking bei Navigation + Journey-Management
   useFocusEffect(
     useCallback(() => {
       const screenName = pathname.replace(/^\//, '').replace(/\//g, '_') || 'home';
@@ -50,6 +70,9 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
 
       // Track neuen Screen-View
       analyticsService.trackScreenView(screenName, user?.uid);
+      
+      // 🎯 Journey-Management bei Screen-Wechsel
+      journeyTrackingService.onScreenChange(screenName);
       
       // Update Refs für nächsten Screen-Wechsel
       lastScreenRef.current = screenName;
@@ -113,13 +136,134 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
     }, user?.uid);
   }, [user?.uid]);
 
+  // 🛒 SHOPPING JOURNEY FUNCTIONS
+  const trackAddToCart = useCallback((
+    productId: string, 
+    productName: string, 
+    isMarke: boolean, 
+    source: 'search' | 'scan' | 'browse' | 'favorites' | 'repurchase' | 'comparison',
+    additionalData?: any
+  ) => {
+    analyticsService.trackAddToCart(productId, productName, isMarke, source, user?.uid, additionalData);
+  }, [user?.uid]);
+
+  const trackRemoveFromCart = useCallback((
+    productId: string, 
+    reason: 'manual_delete' | 'conversion_to_noname' | 'purchase_completed',
+    timeInCartMs?: number
+  ) => {
+    analyticsService.trackRemoveFromCart(productId, reason, timeInCartMs, user?.uid);
+  }, [user?.uid]);
+
+  const trackPurchaseCompleted = useCallback((
+    itemsCount: number,
+    totalSavings: number,
+    noNameItems: number,
+    brandItems: number,
+    sourceMix: string[]
+  ) => {
+    analyticsService.trackPurchaseCompleted(itemsCount, totalSavings, noNameItems, brandItems, sourceMix, user?.uid);
+  }, [user?.uid]);
+
+  const trackProductConversion = useCallback((
+    fromProductId: string,
+    toProductId: string,
+    savingsAmount: number,
+    savingsPercent: number
+  ) => {
+    analyticsService.trackProductConversion(fromProductId, toProductId, savingsAmount, savingsPercent, user?.uid);
+  }, [user?.uid]);
+
+  // 💡 MOTIVATION ANALYSIS FUNCTIONS
+  const trackSortChanged = useCallback((
+    sortBy: 'name' | 'price' | 'savings',
+    screenName: string,
+    additionalData?: any
+  ) => {
+    analyticsService.trackSortChanged(sortBy, screenName, user?.uid, additionalData);
+  }, [user?.uid]);
+
+  const trackFilterChanged = useCallback((
+    filterType: 'market' | 'category' | 'price' | 'bio' | 'vegan' | 'ingredients' | 'nutrition' | 'allergen',
+    filterValue: string,
+    action: 'added' | 'removed',
+    screenName: string
+  ) => {
+    analyticsService.trackFilterChanged(filterType, filterValue, action, screenName, user?.uid);
+  }, [user?.uid]);
+
+  const trackSavingsWidgetClicked = useCallback((
+    widgetType: 'total_savings' | 'potential_savings' | 'comparison_savings',
+    savingsAmount: number,
+    screenName: string
+  ) => {
+    analyticsService.trackSavingsWidgetClicked(widgetType, savingsAmount, screenName, user?.uid);
+  }, [user?.uid]);
+
+  // 🎯 JOURNEY TRACKING FUNCTIONS
+  const startJourney = useCallback((
+    discoveryMethod: 'search' | 'browse' | 'scan' | 'favorites' | 'repurchase',
+    screenName: string,
+    activeFilters?: any
+  ) => {
+    journeyTrackingService.startJourney(discoveryMethod, screenName, activeFilters);
+  }, []);
+
+  const updateJourneyFilters = useCallback((filters: any) => {
+    journeyTrackingService.updateFilters(filters);
+  }, []);
+
+  const trackProductViewWithJourney = useCallback((
+    productId: string,
+    productType: 'brand' | 'noname',
+    productName: string,
+    position?: number
+  ) => {
+    journeyTrackingService.trackProductView(productId, productType, productName, position);
+  }, []);
+
+  const trackAddToCartWithJourney = useCallback((
+    productId: string,
+    productName: string,
+    isMarke: boolean
+  ) => {
+    journeyTrackingService.trackAddToCart(productId, productName, isMarke, user?.uid);
+  }, [user?.uid]);
+
+  const trackAddToFavoritesWithJourney = useCallback((
+    productId: string,
+    productName: string
+  ) => {
+    journeyTrackingService.trackAddToFavorites(productId, productName, user?.uid);
+  }, [user?.uid]);
+
+  const trackPurchaseWithJourney = useCallback((
+    productIds: string[],
+    totalSavings: number
+  ) => {
+    journeyTrackingService.trackPurchase(productIds, totalSavings, user?.uid);
+  }, [user?.uid]);
+
   const contextValue: AnalyticsContextType = {
     trackProductView,
     trackSearch,
     trackFilter,
     trackConversion,
     trackMotivation,
-    trackCustomEvent
+    trackCustomEvent,
+    trackAddToCart,
+    trackRemoveFromCart,
+    trackPurchaseCompleted,
+    trackProductConversion,
+    trackSortChanged,
+    trackFilterChanged,
+    trackSavingsWidgetClicked,
+    startJourney,
+    updateJourneyFilters,
+    trackProductViewWithJourney,
+    trackAddToCartWithJourney,
+    trackAddToFavoritesWithJourney,
+    trackPurchaseWithJourney
   };
 
   return (

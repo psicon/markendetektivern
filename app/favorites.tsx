@@ -9,6 +9,7 @@ import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { TOAST_MESSAGES } from '@/constants/ToastMessages';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import { FirestoreService } from '@/lib/services/firestore';
 import { showCartAddedToast, showFavoriteRemovedToast, showInfoToast } from '@/lib/services/ui/toast';
@@ -73,6 +74,7 @@ export default function FavoritesScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { user, userProfile } = useAuth();
+  const analytics = useAnalytics();
 
   const { 
     favoritesWithData, 
@@ -117,6 +119,13 @@ export default function FavoritesScreen() {
   // WICHTIG: Initial loading state um "Noch keine Favoriten" zu vermeiden
   const [initialLoading, setInitialLoading] = useState(true);
   const hasLoadedOnce = useRef(false);
+  
+  // 🎯 Journey-Tracking für Favorites
+  useEffect(() => {
+    analytics.startJourney('favorites', 'favorites', {
+      initialTab: activeTab
+    });
+  }, []); // Nur einmal beim Mount
   
   // Toasts laufen jetzt global über zentrale Toast-Library
 
@@ -404,7 +413,21 @@ export default function FavoritesScreen() {
         
         try {
           const isBrand = product.type === 'markenprodukt';
-          await FirestoreService.addToShoppingCart(user.uid, product.id, productName, isBrand);
+          
+          // 🎯 Track Add-to-Cart wird von FirestoreService automatisch gemacht
+          
+          await FirestoreService.addToShoppingCart(
+            user.uid, 
+            product.id, 
+            productName, 
+            isBrand,
+            'favorites', // Source
+            { 
+              screenName: 'favorites',
+              bulkAction: true,
+              batchSize: selectedFavorites.length
+            }
+          );
           successCount++;
         } catch (error) {
           console.error('Error adding to cart:', product.id, error);

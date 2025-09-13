@@ -5,6 +5,7 @@ import {
     setLevelUpHandler,
     setPointsEarnedHandler
 } from '@/lib/services/achievementService';
+import { overlayManager } from '@/lib/services/overlayManager';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
 import { showPointsToast, showStreakToast as showStreakToastNew } from '@/lib/services/ui/toast';
 import { Achievement } from '@/lib/types/achievements';
@@ -69,22 +70,25 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   const achievementHandler = useCallback((achievement: Achievement) => {
     console.log('🏆 Achievement Unlock UI triggered:', achievement.name);
     
-    // Verwende aktuellen State über Setter-Function
-    setAchievementData(prev => {
-      setPendingLevelUp(currentPending => {
-        const hasLevelUpPending = currentPending !== null;
+    // Verwende OverlayManager um Konflikte zu vermeiden
+    overlayManager.showOverlay(() => {
+      // Verwende aktuellen State über Setter-Function
+      setAchievementData(prev => {
+        setPendingLevelUp(currentPending => {
+          const hasLevelUpPending = currentPending !== null;
+          
+          // Level-Up wird erst nach manuellem Achievement-Close angezeigt
+          // Kein Auto-Close mehr!
+          
+          return currentPending; // Unchanged
+        });
         
-        // Level-Up wird erst nach manuellem Achievement-Close angezeigt
-        // Kein Auto-Close mehr!
-        
-        return currentPending; // Unchanged
+        return {
+          visible: true,
+          achievement: achievement,
+          autoHide: false  // Nie auto-hide - immer manuell
+        };
       });
-      
-      return {
-        visible: true,
-        achievement: achievement,
-        autoHide: false  // Nie auto-hide - immer manuell
-      };
     });
   }, []);
 
@@ -103,21 +107,24 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     
     const newLevelData = { visible: true, newLevel, oldLevel, unlockedCategory };
     
-    // Prüfe ob bereits ein Achievement angezeigt wird - verwende aktuellen State
-    setAchievementData(currentAchievement => {
-      if (currentAchievement.visible) {
-        console.log('🏆 Achievement aktiv - Level-Up wird in Queue gestellt');
-        setPendingLevelUp(newLevelData);
-        
-        // KEIN Auto-Close mehr! User muss Achievement manuell schließen
-        // Level-Up wird erst nach manuellem Achievement-Close gezeigt
-        
-        return currentAchievement; // Unverändert, kein autoHide
-      } else {
-        // Kein Achievement aktiv - Level-Up direkt anzeigen
-        setLevelUpData(newLevelData);
-        return currentAchievement; // Unchanged
-      }
+    // Verwende OverlayManager um Konflikte zu vermeiden
+    overlayManager.showOverlay(() => {
+      // Prüfe ob bereits ein Achievement angezeigt wird - verwende aktuellen State
+      setAchievementData(currentAchievement => {
+        if (currentAchievement.visible) {
+          console.log('🏆 Achievement aktiv - Level-Up wird in Queue gestellt');
+          setPendingLevelUp(newLevelData);
+          
+          // KEIN Auto-Close mehr! User muss Achievement manuell schließen
+          // Level-Up wird erst nach manuellem Achievement-Close gezeigt
+          
+          return currentAchievement; // Unverändert, kein autoHide
+        } else {
+          // Kein Achievement aktiv - Level-Up direkt anzeigen
+          setLevelUpData(newLevelData);
+          return currentAchievement; // Unchanged
+        }
+      });
     });
   }, []);
 

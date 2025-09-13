@@ -679,3 +679,5 @@ const styles = StyleSheet.create({
   },
 
 });
+
+export default LevelUpOverlay;

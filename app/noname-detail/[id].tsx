@@ -9,6 +9,7 @@ import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { TOAST_MESSAGES, interpolateMessage } from '@/constants/ToastMessages';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { db } from '@/lib/firebase';
 import { useFavoriteStatus } from '@/lib/hooks/useFavorites';
@@ -97,6 +98,7 @@ export default function NoNameDetailScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { user } = useAuth();
+  const analytics = useAnalytics();
   
   // Favorites Hook
   const { isFavorite, loading: favoriteLoading, toggleFavorite } = useFavoriteStatus(id || '', 'noname');
@@ -211,14 +213,21 @@ export default function NoNameDetailScreen() {
     setIsAddingToCart(true);
     
     try {
+      // 🎯 Track Add-to-Cart wird von FirestoreService automatisch gemacht
+      const productName = product.name || 'NoName Produkt';
+      
       await FirestoreService.addToShoppingCart(
         user.uid,
         product.id,
-        product.produktName || product.name || 'NoName Produkt',
-        false // NoName product
+        productName,
+        false, // NoName product
+        'browse', // Source (Stufe 1,2 wird meist über Stöbern gefunden)
+        { 
+          screenName: 'noname_detail',
+          productStufe: product.stufe
+        }
       );
       setIsInCart(true);
-      const productName = product.produktName || product.name || 'NoName Produkt';
       const message = interpolateMessage(TOAST_MESSAGES.SHOPPING.addedToCart, { productName });
       showCartAddedToast(message, () => router.push('/shopping-list' as any));
     } catch (error) {
@@ -1161,7 +1170,7 @@ export default function NoNameDetailScreen() {
                   <ThemedText style={styles.infoLabel}>Zutaten:</ThemedText>
                   <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
                     {(() => {
-                      const ean = product.EANs?.[0] || product.ean;
+                      const ean = product.EANs?.[0] || product.EAN;
                       if (!ean) return 'Keine Daten verfügbar';
                       // GENAU wie im Original - verwende OpenFoodService.formatIngredients
                       const ingredients = OpenFoodService.formatIngredients(openFoodData);
@@ -1172,7 +1181,7 @@ export default function NoNameDetailScreen() {
 
                 {/* Scores Row - wie im Original */}
                 {(() => {
-                  const ean = product.EANs?.[0] || product.ean;
+                  const ean = product.EANs?.[0] || product.EAN;
                   const hasAnyScore = openFoodData?.nutriscore_grade || 
                                      openFoodData?.ecoscore_grade || 
                                      openFoodData?.nova_group;
@@ -1222,7 +1231,7 @@ export default function NoNameDetailScreen() {
               </View>
               <View style={styles.infoGrid}>
                 {(() => {
-                  if (!product.EANs?.[0] && !product.ean) {
+                  if (!product.EANs?.[0] && !product.EAN) {
                     return (
                       <View style={styles.infoRow}>
                         <ThemedText style={[styles.infoValue, { color: colors.icon }]}>

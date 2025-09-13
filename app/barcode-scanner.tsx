@@ -1,27 +1,29 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import HybridBarcodeScanner from '@/components/ui/HybridBarcodeScanner';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { achievementService } from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import scanHistoryService, { ScanHistoryItem } from '@/lib/services/scanHistoryService';
+import { isExpoGo, platformLog } from '@/lib/utils/platform';
+import { CameraType, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
 import { getDoc } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, InteractionManager, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import HybridBarcodeScanner from '@/components/ui/HybridBarcodeScanner';
-import { CameraType, useCameraPermissions } from 'expo-camera';
-import { isExpoGo, platformLog } from '@/lib/utils/platform';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function BarcodeScannerScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { user } = useAuth();
+  const analytics = useAnalytics();
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
@@ -403,6 +405,12 @@ export default function BarcodeScannerScreen() {
     
     setScanned(true);
     console.log(`📱 SINGLE EAN scan: ${data} (Type: ${type})`);
+    
+    // 🎯 Start Scan-Journey
+    analytics.startJourney('scan', 'barcode_scanner', {
+      ean: data,
+      scanMethod: 'camera'
+    });
     
     // 📳 SCAN DETECTED HAPTIC FEEDBACK
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

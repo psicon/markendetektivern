@@ -7,6 +7,7 @@ import { ListItemSkeleton, LoadingFooterSkeleton } from '@/components/ui/Shimmer
 import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { FirestoreService } from '@/lib/services/firestore';
@@ -23,7 +24,16 @@ export default function ExploreScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const params = useLocalSearchParams();
   const { userProfile } = useAuth();
+  const analytics = useAnalytics();
   const [activeTab, setActiveTab] = useState('märkte');
+  
+  // 🎯 Journey-Tracking für Explore
+  useEffect(() => {
+    // Starte Journey beim Betreten der Explore-Seite
+    analytics.startJourney('browse', 'explore', {
+      initialTab: activeTab
+    });
+  }, []); // Nur einmal beim Mount
   
   // 🎯 OPTIMIERTE Animation für Swipe-Navigation
   const translateX = useRef(new Animated.Value(0)).current;
@@ -228,21 +238,61 @@ export default function ExploreScreen() {
 
   // Helper functions for multi-select filters
   const toggleCategoryFilter = (categoryId: string) => {
+    const isAdding = !noNameFilters.categoryFilters.includes(categoryId);
+    
     setNoNameFilters(prev => ({
       ...prev,
       categoryFilters: prev.categoryFilters.includes(categoryId)
         ? prev.categoryFilters.filter(id => id !== categoryId)
         : [...prev.categoryFilters, categoryId]
     }));
+    
+    // 📊 Track Filter Change
+    const category = categoriesData.find(c => c.id === categoryId);
+    if (category) {
+      analytics.trackFilterChanged(
+        'category',
+        category.bezeichnung,
+        isAdding ? 'added' : 'removed',
+        'explore_nonames'
+      );
+      
+      // 🎯 Update Journey with new filters
+      analytics.updateJourneyFilters({
+        markets: noNameFilters.discounterFilters,
+        categories: noNameFilters.categoryFilters,
+        stufe: noNameFilters.stufeFilters
+      });
+    }
   };
 
   const toggleDiscounterFilter = (discounterId: string) => {
+    const isAdding = !noNameFilters.discounterFilters.includes(discounterId);
+    
     setNoNameFilters(prev => ({
       ...prev,
       discounterFilters: prev.discounterFilters.includes(discounterId)
         ? prev.discounterFilters.filter(id => id !== discounterId)
         : [...prev.discounterFilters, discounterId]
     }));
+    
+    // 📊 Track Filter Change
+    const market = discounter.find(d => d.id === discounterId);
+    if (market) {
+      analytics.trackFilterChanged(
+        'market',
+        market.name,
+        isAdding ? 'added' : 'removed',
+        'explore_nonames'
+      );
+      
+      // 🎯 Update Journey with new filters
+      analytics.updateJourneyFilters({
+        markets: noNameFilters.discounterFilters,
+        categories: noNameFilters.categoryFilters,
+        stufe: noNameFilters.stufeFilters
+      });
+    }
   };
 
   const toggleStufeFilter = (stufe: number) => {
@@ -298,12 +348,25 @@ export default function ExploreScreen() {
 
   // Helper functions for Markenprodukte filters
   const toggleMarkenproduktCategoryFilter = (categoryId: string) => {
+    const isAdding = !markenproduktFilters.categoryFilters.includes(categoryId);
+    
     setMarkenproduktFilters(prev => ({
       ...prev,
       categoryFilters: prev.categoryFilters.includes(categoryId)
         ? prev.categoryFilters.filter(id => id !== categoryId)
         : [...prev.categoryFilters, categoryId]
     }));
+    
+    // 📊 Track Filter Change
+    const category = categoriesData.find(c => c.id === categoryId);
+    if (category) {
+      analytics.trackFilterChanged(
+        'category',
+        category.bezeichnung,
+        isAdding ? 'added' : 'removed',
+        'explore_markenprodukte'
+      );
+    }
   };
 
 
@@ -556,8 +619,16 @@ export default function ExploreScreen() {
     }
   };
 
+  // Verhindere mehrfache Initialisierung
+  const hasInitialized = useRef(false);
+
   // Load markets data
   useEffect(() => {
+    // Verhindere mehrfache Ausführung bei schnellen userProfile-Updates
+    if (hasInitialized.current) {
+      console.log('⚠️ Explore: Markets/Categories bereits geladen - überspringe');
+      return;
+    }
     const loadMarkets = async () => {
       try {
         setMarketsLoading(true);
@@ -680,6 +751,7 @@ export default function ExploreScreen() {
 
     loadMarkets();
     loadCategories();
+    hasInitialized.current = true; // Markiere als initialisiert
   }, [userProfile?.stats?.currentLevel, userProfile?.level]); // Nur bei Level-Änderung, nicht bei jedem Profile-Update
 
 
@@ -1204,6 +1276,14 @@ export default function ExploreScreen() {
                       index < noNameProducts.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 0.5 }
                     ]}
                     onPress={() => {
+                      // 🎯 Track Product View mit Journey-Context
+                      analytics.trackProductViewWithJourney(
+                        product.id,
+                        'noname',
+                        product.name || product.produktName || 'NoName Produkt',
+                        index
+                      );
+                      
                       const stufe = parseInt(product.stufe) || 1;
                       if (stufe <= 2) {
                         // Stufe 1 und 2: Zur speziellen NoName-Detailseite

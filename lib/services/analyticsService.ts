@@ -335,6 +335,157 @@ class AnalyticsService {
     }, userId);
   }
 
+  // 🛒 SHOPPING CART JOURNEY
+  async trackAddToCart(
+    productId: string, 
+    productName: string, 
+    isMarke: boolean, 
+    source: 'search' | 'scan' | 'browse' | 'favorites' | 'repurchase' | 'comparison',
+    userId?: string, 
+    additionalData?: any
+  ) {
+    // 📊 Detailliertes Logging
+    console.log(`🛒 Add-to-Cart: ${productName.substring(0, 30)}... (${isMarke ? 'Brand' : 'NoName'}) via ${source}`);
+    
+    await this.trackEvent({
+      event_name: 'add_to_cart',
+      event_category: 'conversion',
+      screen_name: additionalData?.screen_name || 'unknown',
+      product_id: productId,
+      product_type: isMarke ? 'brand' : 'noname',
+      source_method: source,
+      ...additionalData
+    }, userId);
+  }
+
+  async trackRemoveFromCart(
+    productId: string, 
+    reason: 'manual_delete' | 'conversion_to_noname' | 'purchase_completed',
+    timeInCartMs?: number,
+    userId?: string
+  ) {
+    await this.trackEvent({
+      event_name: 'remove_from_cart',
+      event_category: 'user_action',
+      product_id: productId,
+      removal_reason: reason,
+      time_in_cart_ms: timeInCartMs,
+    }, userId);
+  }
+
+  async trackPurchaseCompleted(
+    itemsCount: number,
+    totalSavings: number,
+    noNameItems: number,
+    brandItems: number,
+    sourceMix: string[],
+    userId?: string
+  ) {
+    // 📊 Detailliertes Logging
+    console.log(`💰 Purchase: ${itemsCount} Produkte, €${totalSavings.toFixed(2)} gespart (Sources: ${sourceMix.join(', ')})`);
+    
+    await this.trackEvent({
+      event_name: 'purchase_completed',
+      event_category: 'conversion',
+      items_count: itemsCount,
+      total_savings: totalSavings,
+      noname_items: noNameItems,
+      brand_items: brandItems,
+      source_methods: sourceMix,
+    }, userId);
+  }
+
+  // 🔄 CONVERSION TRACKING
+  async trackProductConversion(
+    fromProductId: string,
+    toProductId: string,
+    savingsAmount: number,
+    savingsPercent: number,
+    userId?: string
+  ) {
+    await this.trackEvent({
+      event_name: 'product_converted',
+      event_category: 'conversion',
+      from_product_id: fromProductId,
+      to_product_id: toProductId,
+      savings_abs: savingsAmount,
+      savings_pct: savingsPercent,
+    }, userId);
+  }
+
+  // 💡 MOTIVATION ANALYSIS - ENHANCED
+  async trackSortChanged(
+    sortBy: 'name' | 'price' | 'savings',
+    screenName: string,
+    userId?: string,
+    additionalData?: any
+  ) {
+    await this.trackEvent({
+      event_name: 'sort_changed',
+      event_category: 'user_action',
+      screen_name: screenName,
+      sort_by: sortBy,
+      motivation_signal: sortBy === 'price' ? 'price' : (sortBy === 'savings' ? 'savings' : 'content'),
+      ...additionalData
+    }, userId);
+  }
+
+  async trackFilterChanged(
+    filterType: 'market' | 'category' | 'price' | 'bio' | 'vegan' | 'ingredients' | 'nutrition' | 'allergen',
+    filterValue: string,
+    action: 'added' | 'removed',
+    screenName: string,
+    userId?: string
+  ) {
+    const motivationSignal = this.getMotivationFromFilter(filterType, filterValue);
+    
+    // 📊 Detailliertes Logging für bessere Debugging
+    console.log(`📊 Filter ${action}: ${filterType}="${filterValue}" auf ${screenName} (Motivation: ${motivationSignal})`);
+    
+    await this.trackEvent({
+      event_name: 'filter_changed',
+      event_category: 'user_action',
+      screen_name: screenName,
+      filter_type: filterType,
+      filter_value: filterValue,
+      filter_action: action,
+      motivation_signal: motivationSignal,
+    }, userId);
+  }
+
+  async trackSavingsWidgetClicked(
+    widgetType: 'total_savings' | 'potential_savings' | 'comparison_savings',
+    savingsAmount: number,
+    screenName: string,
+    userId?: string
+  ) {
+    await this.trackEvent({
+      event_name: 'savings_widget_clicked',
+      event_category: 'user_action',
+      screen_name: screenName,
+      widget_type: widgetType,
+      savings_amount: savingsAmount,
+      motivation_signal: 'savings',
+    }, userId);
+  }
+
+  // Helper: Motivation aus Filter ableiten
+  private getMotivationFromFilter(filterType: string, filterValue: string): string {
+    if (filterType === 'price' || filterValue.toLowerCase().includes('günstig')) {
+      return 'price';
+    } else if (filterType === 'bio' || filterType === 'vegan' || filterType === 'ingredients' || filterType === 'nutrition' || filterType === 'allergen') {
+      return 'content';
+    } else if (filterValue.toLowerCase().includes('bio') || filterValue.toLowerCase().includes('vegan') || filterValue.toLowerCase().includes('gluten')) {
+      return 'content';
+    } else if (filterType === 'market') {
+      return 'market_loyalty';
+    } else if (filterType === 'category') {
+      return 'content';
+    } else {
+      return 'exploration';
+    }
+  }
+
   async trackProductTabView(productId: string, tabName: string, dwellTimeMs: number, userId?: string) {
     await this.trackEvent({
       event_name: 'product_tab_viewed',

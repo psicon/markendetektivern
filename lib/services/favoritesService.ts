@@ -178,7 +178,8 @@ class FavoritesService {
       const favorites = await this.getUserFavorites(userId);
       
       // 🚀 PERFORMANCE FIX: Parallele Verarbeitung aller Favoriten!
-      console.time('⚡ Parallele Favoriten-Verarbeitung');
+       if (__DEV__ && typeof console.time === 'function') console.time('⚡ Parallele Favoriten-Verarbeitung');
+
       
       const processedFavorites = await Promise.all(favorites.map(async (favorite) => {
         try {
@@ -327,7 +328,7 @@ class FavoritesService {
       // Filter out null results und sammle Ergebnisse
       const validFavorites = processedFavorites.filter(item => item !== null);
       
-      console.timeEnd('⚡ Parallele Favoriten-Verarbeitung');
+      if (__DEV__ && typeof console.timeEnd === 'function') console.timeEnd('⚡ Parallele Favoriten-Verarbeitung');
       console.log(`🚀 ${validFavorites.length} von ${favorites.length} Favoriten erfolgreich geladen`);
       
       return validFavorites;

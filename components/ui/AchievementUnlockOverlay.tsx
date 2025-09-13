@@ -4,13 +4,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import LottieView from 'lottie-react-native';
 import React, { useCallback, useEffect, useRef } from 'react';
 import {
-  Animated,
-  Dimensions,
-  Modal,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Animated,
+    Dimensions,
+    Modal,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { IconSymbol } from './IconSymbol';
@@ -378,3 +378,5 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
 });
+
+export default AchievementUnlockOverlay;

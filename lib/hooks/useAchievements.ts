@@ -32,8 +32,11 @@ export function useAchievements() {
       setLoading(true);
       setError(null);
 
-      // Initialisiere Achievement Service
-      await achievementService.initialize();
+      // Achievement Service sollte bereits durch AuthContext initialisiert sein
+      // Falls nicht, initialisiere es hier
+      if (!achievementService.isInitialized) {
+        await achievementService.initialize();
+      }
 
       // Lade alle Achievements
       const allAchievements = await achievementService.getAllAchievements();

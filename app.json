@@ -8,6 +8,9 @@
     "scheme": "markendetektivern",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "router": {
+      "lazy": false
+    },
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -19,7 +22,9 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "de.markendetektive"
+      "bundleIdentifier": "de.markendetektive",
+      "buildNumber": "900",
+      "appleTeamId": "MZD2N2F887"
     },
     "android": {
       "adaptiveIcon": {
@@ -45,7 +50,7 @@
     },
     "plugins": [
       "expo-router",
-
+      "expo-dev-client",
       [
         "expo-location",
         {

@@ -136,10 +136,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsAnonymous(user?.isAnonymous || false);
       
       if (user?.uid) {
-        // 🔄 KOMPLETTER GAMIFICATION RELOAD nach Authentifizierung
-        console.log('🚀 Starte kompletten Gamification-Reload nach Authentifizierung...');
+        // 🔄 EINMALIGE GAMIFICATION INITIALISIERUNG nach Authentifizierung
+        console.log('🚀 Starte Gamification-Initialisierung nach Authentifizierung...');
         try {
-          // Reset Achievement Service komplett
+          // Reset Achievement Service komplett (nur bei User-Wechsel)
           achievementService.resetForNewAuth();
           
           // Neu-Initialisierung mit authentifizierten User

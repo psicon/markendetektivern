@@ -39,6 +39,15 @@ export default function SearchResultsScreen() {
   const { user, userProfile } = useAuth();
   const analytics = useAnalytics();
   
+  // 🎯 Journey-Tracking für Search
+  useEffect(() => {
+    if (searchQuery) {
+      analytics.startJourney('search', 'search_results', {
+        searchQuery: searchQuery
+      });
+    }
+  }, []); // Nur einmal beim Mount
+  
   // Search States  
   const [searchQuery, setSearchQuery] = useState(params.query as string || '');
   const [activeTab, setActiveTab] = useState<'nonames' | 'markenprodukte'>('nonames');
@@ -606,7 +615,15 @@ export default function SearchResultsScreen() {
             index < results.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 0.5 }
           ]}
           onPress={() => {
-            // GA4 Event: Product clicked from search
+            // 🎯 Track Product View mit Journey-Context
+            analytics.trackProductViewWithJourney(
+              item.objectID,
+              isNoName ? 'noname' : 'brand',
+              item.name || item.produktName || 'Produkt',
+              index
+            );
+            
+            // Legacy GA4 Event (kann später entfernt werden)
             analytics.trackProductView(item.objectID, isNoName ? 'noname' : 'brand', {
               source: 'search_results',
               search_query: searchQuery,
