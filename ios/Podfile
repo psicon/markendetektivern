@@ -13,9 +13,15 @@ install! 'cocoapods',
 
 prepare_react_native_project!
 
-target 'markendetektivern' do
+# Specify the Xcode project
+project 'MarkenDetektive.xcodeproj'
+
+target 'MarkenDetektive' do
   use_expo_modules!
   use_frameworks! :linkage => :static  # Fix für gRPC-Core.modulemap Problem
+  
+  # 🔧 MODULAR HEADERS FIX für Firebase Swift Pods
+  use_modular_headers!
   
   # 🔧 DEPENDENCY VERSION FIXES für GoogleSignIn + Vision Camera Konflikt
   pod 'GTMSessionFetcher/Core', '~> 3.3'  # Version die beide Libraries akzeptieren

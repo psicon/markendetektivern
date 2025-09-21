@@ -41,14 +41,20 @@ export default function SearchResultsScreen() {
   
   // 🎯 Journey-Tracking für Search
   useEffect(() => {
-    if (searchQuery) {
-      analytics.startJourney('search', 'search_results', {
-        searchQuery: searchQuery
-      });
-    }
-  }, []); // Nur einmal beim Mount
+    const searchQuery = params.query as string || '';
+    
+    // Starte Journey wenn noch keine läuft (z.B. wenn App neu geöffnet wurde)
+    // Dies wird von AnalyticsProvider gehandhabt, aber wir müssen die searchQuery setzen
+    analytics.updateJourneyFilters({
+      searchQuery
+    }, {
+      action: 'added',
+      filterType: 'search',
+      filterValue: searchQuery
+    });
+  }, [params.query, analytics]);
   
-  // Search States  
+  // Search States
   const [searchQuery, setSearchQuery] = useState(params.query as string || '');
   const [activeTab, setActiveTab] = useState<'nonames' | 'markenprodukte'>('nonames');
   
@@ -338,30 +344,155 @@ export default function SearchResultsScreen() {
       return;
     }
     
+    const isAdding = !noNameFilters.categoryFilters.includes(categoryId);
+    
     setNoNameFilters(prev => ({
       ...prev,
       categoryFilters: prev.categoryFilters.includes(categoryId)
         ? prev.categoryFilters.filter(id => id !== categoryId)
         : [...prev.categoryFilters, categoryId]
     }));
+    
+    // Track Filter Change und Update Journey
+    if (category) {
+      analytics.trackFilterChanged(
+        'category',
+        category.bezeichnung,
+        isAdding ? 'added' : 'removed',
+        'search_results'
+      );
+      
+      // Update Journey mit allen aktuellen Filtern
+      const updatedCategories = isAdding 
+        ? [...noNameFilters.categoryFilters, categoryId]
+        : noNameFilters.categoryFilters.filter(id => id !== categoryId);
+        
+      analytics.updateJourneyFilters({
+        searchQuery,
+        markets: noNameFilters.discounterFilters.map(id => {
+          const marketData = discounter.find(d => d.id === id);
+          return {
+            id,
+            name: marketData?.name || 'Unbekannt',
+            docRef: `discounter/${id}`
+          };
+        }),
+        categories: updatedCategories.map(id => {
+          const categoryData = kategorien.find(c => c.id === id);
+          return {
+            id,
+            name: categoryData?.bezeichnung || 'Unbekannt',
+            docRef: `kategorien/${id}`
+          };
+        }),
+        stufe: noNameFilters.stufeFilters
+      }, {
+        action: isAdding ? 'added' : 'removed',
+        filterType: 'category',
+        filterValue: category.bezeichnung
+      });
+    }
   };
 
   const toggleDiscounterFilter = (discounterId: string) => {
+    const isAdding = !noNameFilters.discounterFilters.includes(discounterId);
+    const market = discounter.find(d => d.id === discounterId);
+    
     setNoNameFilters(prev => ({
       ...prev,
       discounterFilters: prev.discounterFilters.includes(discounterId)
         ? prev.discounterFilters.filter(id => id !== discounterId)
         : [...prev.discounterFilters, discounterId]
     }));
+    
+    // Track Filter Change und Update Journey
+    if (market) {
+      analytics.trackFilterChanged(
+        'market',
+        market.name,
+        isAdding ? 'added' : 'removed',
+        'search_results'
+      );
+      
+      // Update Journey mit allen aktuellen Filtern
+      const updatedMarkets = isAdding 
+        ? [...noNameFilters.discounterFilters, discounterId]
+        : noNameFilters.discounterFilters.filter(id => id !== discounterId);
+        
+      analytics.updateJourneyFilters({
+        searchQuery,
+        markets: updatedMarkets.map(id => {
+          const marketData = discounter.find(d => d.id === id);
+          return {
+            id,
+            name: marketData?.name || 'Unbekannt',
+            docRef: `discounter/${id}`
+          };
+        }),
+        categories: noNameFilters.categoryFilters.map(id => {
+          const categoryData = kategorien.find(c => c.id === id);
+          return {
+            id,
+            name: categoryData?.bezeichnung || 'Unbekannt',
+            docRef: `kategorien/${id}`
+          };
+        }),
+        stufe: noNameFilters.stufeFilters
+      }, {
+        action: isAdding ? 'added' : 'removed',
+        filterType: 'market',
+        filterValue: market.name
+      });
+    }
   };
 
   const toggleStufeFilter = (stufe: number) => {
+    const isAdding = !noNameFilters.stufeFilters.includes(stufe);
+    
     setNoNameFilters(prev => ({
       ...prev,
       stufeFilters: prev.stufeFilters.includes(stufe)
         ? prev.stufeFilters.filter(s => s !== stufe)
         : [...prev.stufeFilters, stufe]
     }));
+    
+    // Track Filter Change und Update Journey
+    analytics.trackFilterChanged(
+      'price', // Stufe ist ein Preis-Filter
+      `Stufe ${stufe}`,
+      isAdding ? 'added' : 'removed',
+      'search_results'
+    );
+    
+    // Update Journey mit allen aktuellen Filtern
+    const updatedStufe = isAdding 
+      ? [...noNameFilters.stufeFilters, stufe]
+      : noNameFilters.stufeFilters.filter(s => s !== stufe);
+      
+    analytics.updateJourneyFilters({
+      searchQuery,
+      markets: noNameFilters.discounterFilters.map(id => {
+        const marketData = discounter.find(d => d.id === id);
+        return {
+          id,
+          name: marketData?.name || 'Unbekannt',
+          docRef: `discounter/${id}`
+        };
+      }),
+      categories: noNameFilters.categoryFilters.map(id => {
+        const categoryData = kategorien.find(c => c.id === id);
+        return {
+          id,
+          name: categoryData?.bezeichnung || 'Unbekannt',
+          docRef: `kategorien/${id}`
+        };
+      }),
+      stufe: updatedStufe
+    }, {
+      action: isAdding ? 'added' : 'removed',
+      filterType: 'price',
+      filterValue: `Stufe ${stufe}`
+    });
   };
 
   // Markenprodukte Filter functions
@@ -427,7 +558,8 @@ export default function SearchResultsScreen() {
       );
     }
     
-    return filtered.sort((a, b) => a.name.localeCompare(b.name, 'de'));
+    // KEINE Sortierung - behalte Algolia Relevanz-Reihenfolge
+    return filtered;
   }, [markenData, markenSearchQuery]);
 
 
@@ -523,8 +655,8 @@ export default function SearchResultsScreen() {
       }
     }
 
-    // Sortierung - Default by name (KEINE price sortierung wie in explore.tsx)
-    filtered.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de'));
+    // KEINE Sortierung - behalte Algolia Relevanz-Reihenfolge
+    // filtered.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de'));
 
     return filtered;
   };
@@ -756,7 +888,7 @@ export default function SearchResultsScreen() {
           </View>
           
           {/* Such-Button WEISS - SearchBottomSheet Stil */}
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.searchButton, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}
             onPress={() => {
               analytics.trackCustomEvent('search_button_clicked', {
@@ -776,7 +908,7 @@ export default function SearchResultsScreen() {
             )}
           </TouchableOpacity>
         </View>
-        
+
 
 
         {/* Tab Navigation - Wie explore.tsx ohne horizontale Margins */}

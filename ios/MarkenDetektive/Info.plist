@@ -40,10 +40,6 @@
     </array>
     <key>CFBundleVersion</key>
     <string>900</string>
-    <key>GADApplicationIdentifier</key>
-    <string>ca-app-pub-3940256099942544~1458002511</string>
-    <key>GADDelayAppMeasurementInit</key>
-    <false/>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>
@@ -71,8 +67,6 @@
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
     </array>
-    <key>NSUserTrackingUsageDescription</key>
-    <string>Diese App verwendet Ihre Werbe-ID, um Ihnen personalisierte Anzeigen zu zeigen und die App-Performance zu verbessern.</string>
     <key>UILaunchStoryboardName</key>
     <string>SplashScreen</string>
     <key>UIRequiredDeviceCapabilities</key>

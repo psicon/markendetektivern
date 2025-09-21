@@ -115,11 +115,7 @@ export default function PurchaseHistoryScreen() {
   const [activeTab, setActiveTab] = useState(0);
   
   // 🎯 Journey-Tracking für Purchase History
-  useEffect(() => {
-    analytics.startJourney('repurchase', 'purchase_history', {
-      initialTab: activeTab
-    });
-  }, []); // Nur einmal beim Mount
+  // Journey läuft bereits - keine neue starten! // Nur einmal beim Mount
   const [tabIndicatorPosition] = useState(new Animated.Value(0));
   const pagerRef = useRef<PagerView>(null);
 

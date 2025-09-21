@@ -26,16 +26,16 @@ import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from '
 import { doc, getDoc } from 'firebase/firestore';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Animated,
+    Dimensions,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -241,7 +241,10 @@ const NoNameCartButton = ({
   user, 
   colors,
   animateButtonPress,
-  buttonAnimations
+  buttonAnimations,
+  priceInfo,
+  comparisonContext, // NEU: Kontext der Vergleichsansicht
+  analytics // NEU: Analytics von außen übergeben
 }: {
   productId: string;
   productName: string;
@@ -249,6 +252,17 @@ const NoNameCartButton = ({
   colors: any;
   animateButtonPress: (buttonId: string) => void;
   buttonAnimations: {[key: string]: Animated.Value};
+  priceInfo?: {
+    price: number;
+    savings: number;
+    comparedProducts?: any[];
+  };
+  comparisonContext?: { // NEU
+    mainProductId: string;
+    mainProductName: string;
+    mainProductType: 'brand' | 'noname';
+  };
+  analytics?: any; // NEU: Analytics
 }) => {
   const router = useRouter();
   const [isInCart, setIsInCart] = useState(false);
@@ -294,6 +308,22 @@ const NoNameCartButton = ({
     try {
       // 🎯 Track Add-to-Cart wird von FirestoreService automatisch gemacht
       
+      // Track comparison end - NoName product was selected
+      if (analytics?.trackComparisonEnd && comparisonContext) {
+        analytics.trackComparisonEnd(
+          comparisonContext.mainProductId,
+          productId, // Das ausgewählte NoName Produkt
+          undefined // Kein abandonment - Produkt wurde ausgewählt
+        );
+      }
+      
+      // Preis-Info für Tracking - verwende die übergebene priceInfo oder Defaults
+      const trackingPriceInfo = priceInfo || {
+        price: 0,
+        savings: 0,
+        comparedProducts: []
+      };
+      
       await FirestoreService.addToShoppingCart(
         user.uid,
         productId,
@@ -303,7 +333,9 @@ const NoNameCartButton = ({
         { 
           screenName: 'product_comparison',
           fromMainProduct: true
-        }
+        },
+        trackingPriceInfo,
+        comparisonContext // NEU: Übergebe Vergleichskontext
       );
       setIsInCart(true);
       const message = interpolateMessage(TOAST_MESSAGES.SHOPPING.addedToCart, { productName });
@@ -1407,6 +1439,31 @@ export default function ProductComparisonScreen() {
       
       // 🎯 Track Add-to-Cart wird von FirestoreService automatisch gemacht
       
+      // Preis-Info für Tracking
+      const currentProduct = comparisonData.mainProduct;
+      const priceInfo = {
+        price: currentProduct.preis || 0,
+        savings: 0, // Markenprodukt hat keine Ersparnis
+        comparedProducts: comparisonData.relatedNoNameProducts?.map(p => ({
+          productId: p.id,
+          productName: p.name || p.produktName,
+          price: p.preis || 0,
+          savings: savingsDataCache.get(p.id)?.savingsData?.savingsEur || 0
+        })) || []
+      };
+      
+      // Track comparison end - product was selected
+      if (analytics.trackComparisonEnd && comparisonData) {
+        const mainProduct = comparisonData.markenprodukt || comparisonData.noNameProduct;
+        if (mainProduct && mainProduct.id) {
+          analytics.trackComparisonEnd(
+            mainProduct.id,
+            productId, // Das ausgewählte Produkt (in diesem Fall das Hauptprodukt)
+            undefined // Kein abandonment - Produkt wurde ausgewählt
+          );
+        }
+      }
+      
       // Add to cart with source attribution
       await FirestoreService.addToShoppingCart(
         user.uid,
@@ -1418,7 +1475,8 @@ export default function ProductComparisonScreen() {
           screenName: 'product_comparison',
           comparedWith: comparisonData?.relatedNoNameProducts?.length || 0,
           fromProductType: type
-        }
+        },
+        priceInfo
       );
       setIsInCart(true);
       const message = interpolateMessage(TOAST_MESSAGES.SHOPPING.addedToCart, { productName });
@@ -1675,6 +1733,27 @@ export default function ProductComparisonScreen() {
           setComparisonData(data); // ALLE Daten sofort setzen
           setLoading(false); // UI SOFORT anzeigen!
           
+          // 📊 Tracke Produktvergleich (auch beim Reload)
+          if (analytics.trackProductComparison) {
+            const mainProduct = data.markenprodukt || data.noNameProduct;
+            if (mainProduct && mainProduct.id && data.relatedNoNameProducts) {
+              const comparedProducts = data.relatedNoNameProducts.map(p => ({
+                productId: p.id,
+                productName: p.name || p.produktName || 'NoName Produkt',
+                productType: 'noname' as const,
+                price: p.preis || 0,
+                savings: p.ersparnis || 0
+              }));
+              
+              analytics.trackProductComparison(
+                mainProduct.id,
+                mainProduct.name || mainProduct.produktName || 'Produkt',
+                isMarkenProdukt ? 'brand' : 'noname',
+                comparedProducts
+              );
+            }
+          }
+          
           // 🎨 HEADER ANIMATION: Sanft einblenden nach kurzer Verzögerung
           setTimeout(() => {
             Animated.timing(headerAnimation, {
@@ -1909,6 +1988,23 @@ export default function ProductComparisonScreen() {
     }
   }, [comparisonData?.mainProduct?.id, user?.uid]);
 
+  // Track comparison end when leaving screen
+  useEffect(() => {
+    return () => {
+      // Cleanup: Track comparison end when component unmounts
+      if (comparisonData && analytics.trackComparisonEnd) {
+        const mainProduct = comparisonData.markenprodukt || comparisonData.noNameProduct;
+        if (mainProduct && mainProduct.id) {
+          analytics.trackComparisonEnd(
+            mainProduct.id,
+            undefined, // No product selected if just leaving
+            'app_closed'
+          );
+        }
+      }
+    };
+  }, [comparisonData]);
+
   // Refresh cart status when screen comes back into focus
   useFocusEffect(
     useCallback(() => {
@@ -2074,6 +2170,27 @@ export default function ProductComparisonScreen() {
           // 🚀 SOFORTIGE ANZEIGE: Hauptprodukt + korrekter Header sofort
           setComparisonData(data); // ALLE Daten sofort setzen
           setLoading(false); // UI SOFORT anzeigen!
+          
+          // 📊 Tracke Produktvergleich
+          if (analytics.trackProductComparison) {
+            const mainProduct = data.markenprodukt || data.noNameProduct;
+            if (mainProduct && mainProduct.id && data.relatedNoNameProducts) {
+              const comparedProducts = data.relatedNoNameProducts.map(p => ({
+                productId: p.id,
+                productName: p.name || p.produktName || 'NoName Produkt',
+                productType: 'noname' as const,
+                price: p.preis || 0,
+                savings: p.ersparnis || 0
+              }));
+              
+              analytics.trackProductComparison(
+                mainProduct.id,
+                mainProduct.name || mainProduct.produktName || 'Produkt',
+                isMarkenProdukt ? 'brand' : 'noname',
+                comparedProducts
+              );
+            }
+          }
           
           // 🎨 HEADER ANIMATION: Sanft einblenden nach kurzer Verzögerung
           setTimeout(() => {
@@ -2857,6 +2974,22 @@ export default function ProductComparisonScreen() {
                   colors={colors}
                   animateButtonPress={animateButtonPress}
                   buttonAnimations={buttonAnimations}
+                  analytics={analytics}
+                  priceInfo={{
+                    price: noNameProduct.preis || 0,
+                    savings: savingsDataCache.get(noNameProduct.id)?.savingsData?.savingsEur || 0,
+                    comparedProducts: comparisonData.relatedNoNameProducts?.map(p => ({
+                      productId: p.id,
+                      productName: p.name || p.produktName,
+                      price: p.preis || 0,
+                      savings: savingsDataCache.get(p.id)?.savingsData?.savingsEur || 0
+                    })) || []
+                  }}
+                  comparisonContext={{ // NEU: Hauptprodukt-Kontext
+                    mainProductId: comparisonData.markenprodukt?.id || id,
+                    mainProductName: comparisonData.markenprodukt?.name || comparisonData.markenprodukt?.produktName || 'Markenprodukt',
+                    mainProductType: 'brand'
+                  }}
                 />
               </View>
 
@@ -3127,6 +3260,17 @@ export default function ProductComparisonScreen() {
                         colors={colors}
                         animateButtonPress={animateButtonPress}
                         buttonAnimations={buttonAnimations}
+                        analytics={analytics}
+                        priceInfo={{
+                          price: product.preis || 0,
+                          savings: 0, // Similar products haben keine direkten Ersparnisse
+                          comparedProducts: []
+                        }}
+                        comparisonContext={{ // NEU: Hauptprodukt-Kontext
+                          mainProductId: comparisonData.markenprodukt?.id || id,
+                          mainProductName: comparisonData.markenprodukt?.name || comparisonData.markenprodukt?.produktName || 'Markenprodukt',
+                          mainProductType: 'brand'
+                        }}
                       />
                     </View>
 

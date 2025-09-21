@@ -80,6 +80,8 @@ export class FirestoreService {
       priceMax?: number;
       markeFilter?: string; // hersteller_new ID
       sortBy?: string; // 'name' | 'created_at' | 'preis'
+      allergenFilters?: Record<string, boolean>; // Neue Allergen-Filter
+      nutritionFilters?: Record<string, { min?: number; max?: number }>; // Neue Nährwert-Filter
     }
   ): Promise<{
     products: (FirestoreDocument<Produkte> & {
@@ -101,9 +103,9 @@ export class FirestoreService {
       
       // Check if we have complex filters (not just category)
       const hasComplexFilters = (filters?.discounterFilters && filters.discounterFilters.length > 0) || 
-                               (filters?.stufeFilters && filters.stufeFilters.length > 0) || 
-                               filters?.priceMin !== undefined || 
-                               filters?.priceMax !== undefined;
+                        (filters?.stufeFilters && filters.stufeFilters.length > 0) || 
+                        filters?.priceMin !== undefined || 
+                        filters?.priceMax !== undefined;
       
       // Sortierung möglich bei category-only Filtern (braucht composite index)
       const canSort = !hasComplexFilters;
@@ -206,7 +208,49 @@ export class FirestoreService {
         return productWithDetails;
       });
       
-      const products = await Promise.all(productPromises);
+      let products = await Promise.all(productPromises);
+      
+      // Client-Side Filtering für Allergene und Nährwerte
+      if (filters?.allergenFilters || filters?.nutritionFilters) {
+        products = products.filter(product => {
+          const moreInfo = (product as any).moreInformation;
+          
+          // Produkte ohne moreInformation werden nicht gefiltert (durchgelassen)
+          if (!moreInfo) return true;
+          
+          // Prüfe Allergene
+          if (filters.allergenFilters) {
+            for (const [allergen, shouldExclude] of Object.entries(filters.allergenFilters)) {
+              if (shouldExclude && moreInfo[allergen] === true) {
+                return false; // Produkt enthält ein ausgeschlossenes Allergen
+              }
+            }
+          }
+          
+          // Prüfe Nährwerte
+          if (filters.nutritionFilters) {
+            for (const [nutritionKey, range] of Object.entries(filters.nutritionFilters)) {
+              if (!range || (range.min === undefined && range.max === undefined)) continue;
+              
+              const valueStr = moreInfo[nutritionKey];
+              // Wenn kein Wert vorhanden, Produkt durchlassen
+              if (!valueStr) return true;
+              
+              // Extrahiere Zahl aus String wie "87 kcal" oder "<0,1 g"
+              const match = valueStr.match(/[<>]?\s*(\d+(?:,\d+)?)/);
+              if (!match) return true; // Bei ungültigem Format durchlassen
+              
+              const value = parseFloat(match[1].replace(',', '.'));
+              
+              if (range.min !== undefined && value < range.min) return false;
+              if (range.max !== undefined && value > range.max) return false;
+            }
+          }
+          
+          return true;
+        });
+      }
+      
       const newLastDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
       const hasMore = querySnapshot.docs.length === pageSize;
 
@@ -325,6 +369,8 @@ export class FirestoreService {
       priceMin?: number;
       priceMax?: number;
       sortBy?: string; // 'name' | 'created_at' | 'preis'
+      allergenFilters?: Record<string, boolean>; // Neue Allergen-Filter
+      nutritionFilters?: Record<string, { min?: number; max?: number }>; // Neue Nährwert-Filter
     }
   ): Promise<{
     products: (FirestoreDocument<any> & {
@@ -345,7 +391,7 @@ export class FirestoreService {
       
       // Check if we have complex filters (preis macht composite indexes schwierig)
       const hasComplexFilters = filters?.priceMin !== undefined || 
-                               filters?.priceMax !== undefined;
+                        filters?.priceMax !== undefined;
       
       // Sortierung möglich bei category/hersteller-only Filtern (braucht composite index)
       const canSort = !hasComplexFilters;
@@ -417,7 +463,49 @@ export class FirestoreService {
         return productWithDetails;
       });
       
-      const products = await Promise.all(productPromises);
+      let products = await Promise.all(productPromises);
+      
+      // Client-Side Filtering für Allergene und Nährwerte (gleiche Logik wie bei NoName)
+      if (filters?.allergenFilters || filters?.nutritionFilters) {
+        products = products.filter(product => {
+          const moreInfo = (product as any).moreInformation;
+          
+          // Produkte ohne moreInformation werden nicht gefiltert (durchgelassen)
+          if (!moreInfo) return true;
+          
+          // Prüfe Allergene
+          if (filters.allergenFilters) {
+            for (const [allergen, shouldExclude] of Object.entries(filters.allergenFilters)) {
+              if (shouldExclude && moreInfo[allergen] === true) {
+                return false; // Produkt enthält ein ausgeschlossenes Allergen
+              }
+            }
+          }
+          
+          // Prüfe Nährwerte
+          if (filters.nutritionFilters) {
+            for (const [nutritionKey, range] of Object.entries(filters.nutritionFilters)) {
+              if (!range || (range.min === undefined && range.max === undefined)) continue;
+              
+              const valueStr = moreInfo[nutritionKey];
+              // Wenn kein Wert vorhanden, Produkt durchlassen
+              if (!valueStr) return true;
+              
+              // Extrahiere Zahl aus String wie "87 kcal" oder "<0,1 g"
+              const match = valueStr.match(/[<>]?\s*(\d+(?:,\d+)?)/);
+              if (!match) return true; // Bei ungültigem Format durchlassen
+              
+              const value = parseFloat(match[1].replace(',', '.'));
+              
+              if (range.min !== undefined && value < range.min) return false;
+              if (range.max !== undefined && value > range.max) return false;
+            }
+          }
+          
+          return true;
+        });
+      }
+      
       const newLastDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
       const hasMore = querySnapshot.docs.length === pageSize;
 
@@ -1906,14 +1994,41 @@ export class FirestoreService {
     productName: string,
     isMarke: boolean,
     source?: 'search' | 'scan' | 'browse' | 'favorites' | 'repurchase' | 'comparison',
-    sourceMetadata?: any
+    sourceMetadata?: any,
+    priceInfo?: {
+      price: number;
+      savings: number;
+      comparedProducts?: {
+        productId: string;
+        productName: string;
+        price: number;
+        savings: number;
+      }[];
+    },
+    comparisonContext?: { // NEU: Kontext wenn aus Vergleich hinzugefügt
+      mainProductId: string;
+      mainProductName: string;
+      mainProductType: 'brand' | 'noname';
+    }
   ): Promise<string> {
     try {
       const userRef = doc(db, 'users', userId);
+      
+      // Hole aktuelle Journey-ID
+      const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
+      const currentJourneyId = journeyTrackingService.getCurrentJourneyId();
+      
       const data: any = {
         gekauft: false,
         timestamp: serverTimestamp(),
         name: productName,
+        // 🎯 Journey-ID für späteres Tracking speichern!
+        journeyId: currentJourneyId,
+        // 💰 Preis-Snapshot zum Zeitpunkt des Hinzufügens
+        ...(priceInfo && {
+          priceAtTime: priceInfo.price,
+          savingsAtTime: priceInfo.savings
+        }),
         // 📊 Source Attribution (optional)
         ...(source && { source }),
         ...(sourceMetadata && { sourceMetadata })
@@ -1927,9 +2042,12 @@ export class FirestoreService {
 
       const docRef = await addDoc(collection(userRef, 'einkaufswagen'), data);
       
-      // 📊 Track Add-to-Cart Event mit Source
+      // 📊 Track Add-to-Cart Event mit Source UND Journey-Context
       if (source) {
         const { analyticsService } = await import('./analyticsService');
+        const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
+        
+        // Track mit normaler Analytics
         await analyticsService.trackAddToCart(
           productId, 
           productName, 
@@ -1941,6 +2059,9 @@ export class FirestoreService {
             ...sourceMetadata
           }
         );
+        
+        // Track mit Journey-Context für Firestore inkl. Preis-Info und Vergleichskontext
+        journeyTrackingService.trackAddToCart(productId, productName, isMarke, userId, priceInfo, comparisonContext);
       }
       
       console.log('✅ Added to shopping cart:', docRef.id);
@@ -1995,7 +2116,38 @@ export class FirestoreService {
   static async removeFromShoppingCart(userId: string, itemId: string): Promise<void> {
     try {
       const userRef = doc(db, 'users', userId);
-      await deleteDoc(doc(userRef, 'einkaufswagen', itemId));
+      const cartItemRef = doc(userRef, 'einkaufswagen', itemId);
+      
+      // Lade Produktdaten vor dem Löschen für Journey-Tracking
+      const cartItemDoc = await getDoc(cartItemRef);
+      if (cartItemDoc.exists()) {
+        const cartData = cartItemDoc.data();
+        const productData = cartData.product;
+        
+        if (productData) {
+          // Track mit Journey
+          const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
+          journeyTrackingService.trackRemoveFromCart(
+            productData.id,
+            productData.name || productData.produktName || 'Unbekannt',
+            cartData.isMarkenProdukt ? 'brand' : 'noname',
+            userId
+          );
+        }
+        
+        // Update Original-Journey wenn vorhanden
+        if (cartData.journeyId) {
+          const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
+          await journeyTrackingService.updateOriginalJourney(cartData.journeyId, {
+            type: 'removed',
+            productId: cartData.markenProdukt?.id || cartData.handelsmarkenProdukt?.id,
+            timestamp: Date.now(),
+            laterUpdate: true
+          }, userId);
+        }
+      }
+      
+      await deleteDoc(cartItemRef);
       console.log('✅ Removed from shopping cart:', itemId);
     } catch (error) {
       console.error('Error removing from shopping cart:', error);
@@ -2026,6 +2178,24 @@ export class FirestoreService {
       await updateDoc(cartItemRef, {
         gekauft: true
       });
+      
+      // 4. Update Original-Journey wenn vorhanden
+      if (cartData.journeyId) {
+        // Hole aktuelle Preis-Informationen
+        const productData = cartData.markenProdukt || cartData.handelsmarkenProdukt;
+        const finalPrice = cartData.priceAtTime || productData?.preis || 0;
+        const finalSavings = cartData.savingsAtTime || 0;
+        
+        const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
+        await journeyTrackingService.updateOriginalJourney(cartData.journeyId, {
+          type: 'purchase',
+          productId: productData?.id,
+          timestamp: Date.now(),
+          laterUpdate: true,
+          finalPrice: finalPrice,
+          finalSavings: finalSavings
+        }, userId);
+      }
       
       console.log('✅ Marked as purchased and added to history:', itemId);
     } catch (error) {
@@ -2200,7 +2370,35 @@ export class FirestoreService {
       const idMapping: { [oldId: string]: string } = {};
       const newItems: any[] = [];
       
-      // First get product details for names and prices
+      // First get ALL product details for tracking
+      const detailPromises = conversions.map(async (conversion) => {
+        const [markenDoc, noNameDoc] = await Promise.all([
+          getDoc(doc(db, 'markenProdukte', conversion.markenProduktRef)),
+          getDoc(doc(db, 'produkte', conversion.produktRef))
+        ]);
+        
+        const noNameData = noNameDoc.exists() ? noNameDoc.data() : null;
+        const markenData = markenDoc.exists() ? markenDoc.data() : null;
+        
+        // Hole Discounter-Info
+        let discounterData = null;
+        if (noNameData?.discounter) {
+          const discounterDoc = await getDoc(noNameData.discounter);
+          discounterData = discounterDoc.exists() ? discounterDoc.data() : null;
+        }
+        
+        return {
+          fromProduct: markenData,
+          toProduct: { ...noNameData, discounter: discounterData }
+        };
+      });
+      const trackingDetails = await Promise.all(detailPromises);
+      
+      // 🎯 Track Conversion mit Journey und Details
+      const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
+      journeyTrackingService.trackProductConversion(conversions, trackingDetails, userId);
+      
+      // Get product details for cart items
       const productPromises = conversions.map(async (conversion) => {
         const produktDoc = await getDoc(doc(db, 'produkte', conversion.produktRef));
         return produktDoc.exists() ? { id: conversion.produktRef, ...produktDoc.data() } : null;

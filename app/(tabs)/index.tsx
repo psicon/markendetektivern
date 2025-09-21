@@ -10,6 +10,7 @@ import { CategorySkeleton, NewsCardSkeleton, ProductCardSkeleton } from '@/compo
 import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { achievementService } from '@/lib/services/achievementService';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
@@ -31,6 +32,10 @@ export default function HomeScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const { top: insetTop } = useSafeAreaInsets();
   const { user, userProfile } = useAuth();
+  const analytics = useAnalytics();
+  
+  // 🎯 Journey-Tracking für Startseite
+  // Journey wird NICHT hier gestartet - nur einmal beim App-Start in AnalyticsProvider!
   // Reduziere den oberen Safe Area Abstand um 35%
   const reducedTopInset = insetTop * 0.65;
   const headerPaddingTop = reducedTopInset + 56;
@@ -565,6 +570,14 @@ export default function HomeScreen() {
                   key={product.id} 
                 style={[styles.productCard, { backgroundColor: colors.cardBackground }]}
                   onPress={() => {
+                    // 🎯 Track Product View mit Journey-Context
+                    analytics.trackProductViewWithJourney(
+                      product.id,
+                      'noname',
+                      product.name || product.produktName || 'NoName Produkt',
+                      index
+                    );
+                    
                     const stufe = parseInt(product.stufe) || 1;
                     if (stufe <= 2) {
                       // Stufe 1 und 2: Zur speziellen NoName-Detailseite

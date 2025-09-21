@@ -163,7 +163,9 @@ export default function NoNameDetailScreen() {
         packSize: product.packSize,
         bild: product.bild,
         type: 'noname',
-        category: product.kategorie?.bezeichnung
+        category: product.kategorie?.bezeichnung,
+        ersparnis: product.ersparnis || 0,  // Wichtig für Tracking!
+        savings: product.ersparnis || 0     // Alternative Property
       });
 
       // Konsistente Favoriten-Toasts (wie bei Stufe 3+)
@@ -216,6 +218,14 @@ export default function NoNameDetailScreen() {
       // 🎯 Track Add-to-Cart wird von FirestoreService automatisch gemacht
       const productName = product.name || 'NoName Produkt';
       
+      // Berechne Ersparnis für Stufe 1,2 Produkte
+      const ersparnis = product.ersparnis || 0;
+      const priceInfo = {
+        price: product.preis || 0,
+        savings: ersparnis,
+        comparedProducts: [] // Keine Vergleichsprodukte bei direktem Add
+      };
+      
       await FirestoreService.addToShoppingCart(
         user.uid,
         product.id,
@@ -225,7 +235,8 @@ export default function NoNameDetailScreen() {
         { 
           screenName: 'noname_detail',
           productStufe: product.stufe
-        }
+        },
+        priceInfo
       );
       setIsInCart(true);
       const message = interpolateMessage(TOAST_MESSAGES.SHOPPING.addedToCart, { productName });

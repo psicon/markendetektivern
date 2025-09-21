@@ -17,28 +17,28 @@ import { FirestoreService } from '@/lib/services/firestore';
 import { showBulkConvertSuccessToast, showBulkPurchasedToast, showConvertSuccessToast, showInfoToast, showPurchasedToast } from '@/lib/services/ui/toast';
 import { updateUserStats } from '@/lib/services/userProfile';
 import {
-  Einkaufswagen,
-  FirestoreDocument,
-  MarkenProdukte,
-  ProductToConvert,
-  Produkte
+    Einkaufswagen,
+    FirestoreDocument,
+    MarkenProdukte,
+    ProductToConvert,
+    Produkte
 } from '@/lib/types/firestore';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  Modal,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    Modal,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -924,6 +924,10 @@ const safeAsync = async (p: Promise<any>) => {
     };
 
     const executeMarkAllAsPurchased = async (dbProductCount: number, customItemCount: number, totalSavings: number) => {
+      // Process DB products and custom items separately - MUSS VOR dem try-Block sein!
+      const dbNoNameProducts = noNameProducts.filter(item => !item.isCustom);
+      const customItems = noNameProducts.filter(item => item.isCustom);
+      
       // Show batch loader
       setPurchaseLoaderState({
         visible: true,
@@ -937,10 +941,6 @@ const safeAsync = async (p: Promise<any>) => {
         
         const totalCount = dbProductCount + customItemCount;
         console.log(`📊 Bulk update: ${dbProductCount} DB products, ${customItemCount} custom items, €${totalSavings.toFixed(2)} savings`);
-        
-        // Process DB products and custom items separately
-        const dbNoNameProducts = noNameProducts.filter(item => !item.isCustom);
-        const customItems = noNameProducts.filter(item => item.isCustom);
         
         const promises = [];
         
@@ -1022,8 +1022,6 @@ const safeAsync = async (p: Promise<any>) => {
             .map(item => item.source || 'unknown')
             .filter((source, index, arr) => arr.indexOf(source) === index); // Unique sources
           
-          const productIds = dbNoNameProducts.map(item => item.id);
-          
           // 🎯 Track Purchase (korrekte Parameter)
           // Purchase-with-Journey wird durch Legacy Purchase Event abgedeckt
           
@@ -1036,6 +1034,18 @@ const safeAsync = async (p: Promise<any>) => {
             sourceMix
           );
         }
+        
+        // Track Purchase mit Journey-Context - mit vollständigen Produktdaten
+        const purchasedProducts = dbNoNameProducts
+          .filter(item => item.product?.id || item.id) // Filter undefined IDs
+          .map(item => ({
+            productId: item.product?.id || item.id,
+            productName: item.product?.name || item.product?.produktName || 'Unbekannt',
+            productType: 'noname' as 'brand' | 'noname'
+          }));
+        
+        console.log('🔍 Debug purchasedProducts:', purchasedProducts);
+        analytics.trackPurchaseWithJourney(purchasedProducts, totalSavings);
         
         // Verwende Bulk-Purchased-Toast mit intelligenter Message-Auswahl
         showBulkPurchasedToast(dbProductCount, customItemCount, totalSavings);

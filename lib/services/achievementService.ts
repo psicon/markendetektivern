@@ -42,6 +42,7 @@ class AchievementService {
   private lastConfigLoad: number = 0;
   private configCacheDuration = 5 * 60 * 1000; // 5 Minuten Cache
   private loggedLevelUnlocks = new Set<string>(); // Verhindert doppelte Level-Unlock-Logs
+  private categoryRewardsEnhanced = false; // Verhindert mehrfache Category-Enhancement
 
   // Static Callbacks für UI-Integration
   static onAchievementUnlock: ((achievement: Achievement) => void) | null = null;
@@ -75,6 +76,7 @@ class AchievementService {
     this.gameActions = null;
     this.streakConfig = null;
     this.lastConfigLoad = 0;
+    this.categoryRewardsEnhanced = false;
     
     console.log('✅ RESET: Alle Caches und States zurückgesetzt');
   }
@@ -112,6 +114,7 @@ class AchievementService {
     this.gameActions = null;
     this.streakConfig = null;
     this.lastConfigLoad = 0;
+    this.categoryRewardsEnhanced = false;
     this.loggedLevelUnlocks.clear();
     console.log('✅ RESET: Alle Caches und States zurückgesetzt');
   }
@@ -265,6 +268,11 @@ class AchievementService {
    * Erweitert Level-Rewards mit dynamischen Kategorie-Namen
    */
   private async enhanceLevelRewardsWithCategories(): Promise<void> {
+    // Bereits erweitert? Dann skip
+    if (this.categoryRewardsEnhanced) {
+      return;
+    }
+    
     try {
       // Für jedes Level prüfen ob eine Kategorie freigeschaltet wird
       for (const level of this.levels) {
@@ -284,6 +292,10 @@ class AchievementService {
           console.log(`📦 Level ${level.id} schaltet "${unlockedCategory.bezeichnung}" frei`);
         }
       }
+      
+      // Markiere als erweitert
+      this.categoryRewardsEnhanced = true;
+      
     } catch (error) {
       console.error('❌ Fehler beim Erweitern der Level-Rewards:', error);
       // Nicht kritisch - verwende Standard-Rewards

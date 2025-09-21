@@ -8,8 +8,8 @@ import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { TOAST_MESSAGES } from '@/constants/ToastMessages';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { useAuth } from '@/lib/contexts/AuthContext';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
+import { useAuth } from '@/lib/contexts/AuthContext';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import { FirestoreService } from '@/lib/services/firestore';
 import { showCartAddedToast, showFavoriteRemovedToast, showInfoToast } from '@/lib/services/ui/toast';
@@ -121,11 +121,7 @@ export default function FavoritesScreen() {
   const hasLoadedOnce = useRef(false);
   
   // 🎯 Journey-Tracking für Favorites
-  useEffect(() => {
-    analytics.startJourney('favorites', 'favorites', {
-      initialTab: activeTab
-    });
-  }, []); // Nur einmal beim Mount
+  // Journey läuft bereits - keine neue starten! // Nur einmal beim Mount
   
   // Toasts laufen jetzt global über zentrale Toast-Library
 
@@ -416,6 +412,13 @@ export default function FavoritesScreen() {
           
           // 🎯 Track Add-to-Cart wird von FirestoreService automatisch gemacht
           
+          // Preis-Info für Tracking
+          const priceInfo = {
+            price: product.preis || product.price || 0,
+            savings: product.ersparnis || product.savings || 0,
+            comparedProducts: []
+          };
+          
           await FirestoreService.addToShoppingCart(
             user.uid, 
             product.id, 
@@ -426,7 +429,8 @@ export default function FavoritesScreen() {
               screenName: 'favorites',
               bulkAction: true,
               batchSize: selectedFavorites.length
-            }
+            },
+            priceInfo
           );
           successCount++;
         } catch (error) {

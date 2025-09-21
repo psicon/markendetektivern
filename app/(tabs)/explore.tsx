@@ -1,8 +1,10 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { AllergenFilterChips } from '@/components/ui/AllergenFilterChips';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { LockedCategoryModal } from '@/components/ui/LockedCategoryModal';
+import { NutritionRangeFilter } from '@/components/ui/NutritionRangeFilter';
 import { ListItemSkeleton, LoadingFooterSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
@@ -10,11 +12,13 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
+// Keine ExtendedFirestoreService mehr nötig
 import { FirestoreService } from '@/lib/services/firestore';
+import { AllergenFilters, ExtendedMarkenproduktFilters, ExtendedNoNameFilters, NutritionFilters } from '@/lib/types/filters';
 import { Discounter, FirestoreDocument, Handelsmarken, Kategorien, Produkte } from '@/lib/types/firestore';
 import { router, useLocalSearchParams } from 'expo-router';
 import type { SymbolViewProps } from 'expo-symbols';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, FlatList, Modal, PanResponder, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -28,12 +32,48 @@ export default function ExploreScreen() {
   const [activeTab, setActiveTab] = useState('märkte');
   
   // 🎯 Journey-Tracking für Explore
+  // ENTFERNT! Explore startet KEINE eigene Journey mehr.
+  // Journeys werden nur auf Hauptscreens (Home) oder bei spezifischen Actions (Search, Scan) gestartet
+  
+  // Verarbeite Navigation-Parameter von der Startseite
   useEffect(() => {
-    // Starte Journey beim Betreten der Explore-Seite
-    analytics.startJourney('browse', 'explore', {
-      initialTab: activeTab
-    });
-  }, []); // Nur einmal beim Mount
+    if (params.tab === 'nonames' && params.categoryFilter) {
+      setActiveTab('nonames');
+      setNoNameFilters(prev => ({
+        ...prev,
+        categoryFilters: [params.categoryFilter as string]
+      }));
+      
+      // Update Journey mit Kategorie-Filter - nur einmal!
+      analytics.updateJourneyFilters({
+        categories: [params.categoryFilter as string]
+      }, {
+        action: 'added',
+        filterType: 'category',
+        filterValue: params.categoryName as string || params.categoryFilter as string
+      });
+    }
+  }, [params.tab, params.categoryFilter, params.categoryName]); // Spezifische Dependencies!
+
+  // Journey wird NICHT hier gestartet - nur einmal beim App-Start in AnalyticsProvider!
+  
+  // Track Tab-Wechsel - WICHTIG: Nur zwischen Produkt-Tabs tracken
+  const prevActiveTab = useRef(activeTab);
+  useEffect(() => {
+    if (prevActiveTab.current !== activeTab) {
+      // Nur tracken wenn zwischen NoName und Markenprodukte gewechselt wird
+      const productTabs = ['nonames', 'markenprodukte'];
+      const wasProductTab = productTabs.includes(prevActiveTab.current);
+      const isProductTab = productTabs.includes(activeTab);
+      
+      if (wasProductTab && isProductTab) {
+        // Tab-Wechsel tracken, aber Journey NICHT beenden!
+        console.log(`📊 Tab-Wechsel: ${prevActiveTab.current} → ${activeTab}`);
+      }
+      
+      prevActiveTab.current = activeTab;
+    }
+  }, [activeTab]);
   
   // 🎯 OPTIMIERTE Animation für Swipe-Navigation
   const translateX = useRef(new Animated.Value(0)).current;
@@ -77,17 +117,12 @@ export default function ExploreScreen() {
 
   // NoName Filter States - Multi-Select
   const [showNoNameFilterModal, setShowNoNameFilterModal] = useState(false);
-  const [noNameFilters, setNoNameFilters] = useState<{
-    categoryFilters: string[];
-    discounterFilters: string[];
-    stufeFilters: number[];
-    priceMin?: number;
-    priceMax?: number;
-    markeFilter?: string;
-  }>({
+  const [noNameFilters, setNoNameFilters] = useState<ExtendedNoNameFilters>({
     categoryFilters: [],
     discounterFilters: [],
-    stufeFilters: []
+    stufeFilters: [],
+    allergenFilters: {},
+    nutritionFilters: {}
   });
   
   // Filter Options Data
@@ -105,14 +140,11 @@ export default function ExploreScreen() {
 
   // Markenprodukte Filter States
   const [showMarkenproduktFilterModal, setShowMarkenproduktFilterModal] = useState(false);
-  const [markenproduktFilters, setMarkenproduktFilters] = useState<{
-    categoryFilters: string[];
-    herstellerFilters: string[];
-    priceMin?: number;
-    priceMax?: number;
-  }>({
+  const [markenproduktFilters, setMarkenproduktFilters] = useState<ExtendedMarkenproduktFilters>({
     categoryFilters: [],
-    herstellerFilters: []
+    herstellerFilters: [],
+    allergenFilters: {},
+    nutritionFilters: {}
   });
 
   // Marken-Suche States
@@ -257,11 +289,33 @@ export default function ExploreScreen() {
         'explore_nonames'
       );
       
-      // 🎯 Update Journey with new filters
+      // 🎯 Update Journey with UPDATED filters (korrekte Werte!)
+      const updatedCategories = isAdding 
+        ? [...noNameFilters.categoryFilters, categoryId]
+        : noNameFilters.categoryFilters.filter(id => id !== categoryId);
+        
       analytics.updateJourneyFilters({
-        markets: noNameFilters.discounterFilters,
-        categories: noNameFilters.categoryFilters,
+        markets: noNameFilters.discounterFilters.map(id => {
+          const marketData = discounter.find(d => d.id === id);
+          return {
+            id,
+            name: marketData?.name || 'Unbekannt',
+            docRef: `discounter/${id}`
+          };
+        }),
+        categories: updatedCategories.map(id => {
+          const categoryData = categoriesData.find(c => c.id === id);
+          return {
+            id,
+            name: categoryData?.bezeichnung || 'Unbekannt',
+            docRef: `kategorien/${id}`
+          };
+        }),
         stufe: noNameFilters.stufeFilters
+      }, {
+        action: isAdding ? 'added' : 'removed',
+        filterType: 'category',
+        filterValue: category.bezeichnung
       });
     }
   };
@@ -286,31 +340,188 @@ export default function ExploreScreen() {
         'explore_nonames'
       );
       
-      // 🎯 Update Journey with new filters
+      // 🎯 Update Journey with UPDATED filters (korrekte Werte!)
+      const updatedMarkets = isAdding 
+        ? [...noNameFilters.discounterFilters, discounterId]
+        : noNameFilters.discounterFilters.filter(id => id !== discounterId);
+        
       analytics.updateJourneyFilters({
-        markets: noNameFilters.discounterFilters,
-        categories: noNameFilters.categoryFilters,
+        markets: updatedMarkets.map(id => {
+          const marketData = discounter.find(d => d.id === id);
+          return {
+            id,
+            name: marketData?.name || 'Unbekannt',
+            docRef: `discounter/${id}`
+          };
+        }),
+        categories: noNameFilters.categoryFilters.map(id => {
+          const categoryData = categoriesData.find(c => c.id === id);
+          return {
+            id,
+            name: categoryData?.bezeichnung || 'Unbekannt',
+            docRef: `kategorien/${id}`
+          };
+        }),
         stufe: noNameFilters.stufeFilters
+      }, {
+        action: isAdding ? 'added' : 'removed',
+        filterType: 'market',
+        filterValue: market.name
       });
     }
   };
 
   const toggleStufeFilter = (stufe: number) => {
+    const isAdding = !noNameFilters.stufeFilters.includes(stufe);
+    
     setNoNameFilters(prev => ({
       ...prev,
       stufeFilters: prev.stufeFilters.includes(stufe)
         ? prev.stufeFilters.filter(s => s !== stufe)
         : [...prev.stufeFilters, stufe]
     }));
+    
+    // 📊 Track Stufe Filter Change
+    analytics.trackFilterChanged(
+      'price', // Stufe ist eine Art Preis-Filter (höhere Stufe = höherer Preis)
+      `stufe_${stufe}`,
+      isAdding ? 'added' : 'removed',
+      'explore_nonames',
+      {
+        stufe_level: stufe,
+        total_stufe_filters: noNameFilters.stufeFilters.length + (isAdding ? 1 : -1)
+      }
+    );
+    
+    // 🎯 Update Journey with new filters
+    const updatedFilters = {
+      markets: noNameFilters.discounterFilters,
+      categories: noNameFilters.categoryFilters,
+      stufe: isAdding 
+        ? [...noNameFilters.stufeFilters, stufe]
+        : noNameFilters.stufeFilters.filter(s => s !== stufe),
+      allergens: Object.entries(noNameFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
+      nutrition: Object.entries(noNameFilters.nutritionFilters || {}).filter(([_, v]) => v && (v.min !== undefined || v.max !== undefined)).map(([k, _]) => k)
+    };
+    
+    analytics.updateJourneyFilters(updatedFilters, {
+      action: isAdding ? 'added' : 'removed',
+      filterType: 'stufe',
+      filterValue: `stufe_${stufe}`
+    });
+    analytics.checkFilterComplexityOverload();
   };
 
   const clearAllFilters = () => {
+    // Track Filter-Clearing für Journey-Analyse
+    analytics.trackFilterCleared();
+    
     setNoNameFilters({
       categoryFilters: [],
       discounterFilters: [],
-      stufeFilters: []
+      stufeFilters: [],
+      allergenFilters: {},
+      nutritionFilters: {}
     });
   };
+  
+  // Neue Filter-Handler für Allergene
+  const toggleAllergenFilter = (allergen: keyof AllergenFilters) => {
+    const isAdding = !(noNameFilters.allergenFilters || {})[allergen];
+    
+    setNoNameFilters(prev => ({
+      ...prev,
+      allergenFilters: {
+        ...(prev.allergenFilters || {}),
+        [allergen]: isAdding
+      }
+    }));
+
+    // 📊 Track Allergen Filter Change
+    analytics.trackFilterChanged(
+      'allergen',
+      allergen.replace('allergens_', ''),
+      isAdding ? 'added' : 'removed',
+      'explore_nonames',
+      {
+        allergen_type: allergen,
+        total_allergen_filters: Object.values(noNameFilters.allergenFilters || {}).filter(Boolean).length + (isAdding ? 1 : -1)
+      }
+    );
+    
+    // 🎯 Update Journey with new filters
+    const updatedFilters = {
+      markets: noNameFilters.discounterFilters,
+      categories: noNameFilters.categoryFilters,
+      stufe: noNameFilters.stufeFilters,
+      allergens: Object.entries({...(noNameFilters.allergenFilters || {}), [allergen]: isAdding}).filter(([_, v]) => v).map(([k, _]) => k)
+    };
+    
+    analytics.updateJourneyFilters(updatedFilters);
+    
+    // Check für Filter-Komplexitäts-Überlastung
+    analytics.checkFilterComplexityOverload();
+  };
+  
+  // Neue Filter-Handler für Nährwerte
+  const updateNutritionFilter = useCallback((filters: NutritionFilters) => {
+    // Finde Änderungen für Analytics
+    const oldFilters = noNameFilters.nutritionFilters;
+    const newFilters = filters;
+    
+    // Tracke jede Änderung einzeln
+    Object.entries(newFilters).forEach(([key, newRange]) => {
+      const oldRange = oldFilters[key as keyof NutritionFilters];
+      const hasOldRange = oldRange && (oldRange.min !== undefined || oldRange.max !== undefined);
+      const hasNewRange = newRange && (newRange.min !== undefined || newRange.max !== undefined);
+      
+      if (!hasOldRange && hasNewRange) {
+        // Neuer Filter hinzugefügt
+        analytics.trackFilterChanged(
+          'nutrition_range',
+          key,
+          'added',
+          'explore_nonames',
+          {
+            nutrition_type: key,
+            min_value: newRange.min,
+            max_value: newRange.max,
+            range_size: newRange.max && newRange.min ? newRange.max - newRange.min : undefined
+          }
+        );
+      } else if (hasOldRange && !hasNewRange) {
+        // Filter entfernt
+        analytics.trackFilterChanged(
+          'nutrition_range',
+          key,
+          'removed',
+          'explore_nonames',
+          {
+            nutrition_type: key
+          }
+        );
+      }
+    });
+    
+    setNoNameFilters(prev => ({
+      ...prev,
+      nutritionFilters: filters
+    }));
+    
+    // 🎯 Update Journey with new filters
+    const updatedFilters = {
+      markets: noNameFilters.discounterFilters,
+      categories: noNameFilters.categoryFilters,
+      stufe: noNameFilters.stufeFilters,
+      allergens: Object.entries(noNameFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
+      nutrition: Object.entries(filters || {}).filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined)).map(([k, _]) => k)
+    };
+    
+    analytics.updateJourneyFilters(updatedFilters);
+    
+    // Check für Filter-Komplexitäts-Überlastung
+    analytics.checkFilterComplexityOverload();
+  }, [noNameFilters, analytics]); // Dependencies!
   
   // Automatisch verfügbare Kategorien als Filter hinzufügen
   const getAvailableCategoriesFilter = () => {
@@ -372,20 +583,141 @@ export default function ExploreScreen() {
 
 
   const toggleMarkenproduktHerstellerFilter = (herstellerId: string) => {
+    const isAdding = !markenproduktFilters.herstellerFilters.includes(herstellerId);
+    
     setMarkenproduktFilters(prev => ({
       ...prev,
       herstellerFilters: prev.herstellerFilters.includes(herstellerId)
         ? prev.herstellerFilters.filter(id => id !== herstellerId)
         : [...prev.herstellerFilters, herstellerId]
     }));
+    
+    // 📊 Track Hersteller Filter Change
+    const hersteller = markenData.find(h => h.id === herstellerId);
+    if (hersteller) {
+      analytics.trackFilterChanged(
+        'market', // Hersteller ist ähnlich wie Markt-Filter
+        hersteller.name || herstellerId,
+        isAdding ? 'added' : 'removed',
+        'explore_markenprodukte',
+        {
+          hersteller_id: herstellerId,
+          total_hersteller_filters: markenproduktFilters.herstellerFilters.length + (isAdding ? 1 : -1)
+        }
+      );
+    }
+    
+    // 🎯 Update Journey with new filters
+    const updatedFilters = {
+      categories: markenproduktFilters.categoryFilters,
+      hersteller: isAdding 
+        ? [...markenproduktFilters.herstellerFilters, herstellerId]
+        : markenproduktFilters.herstellerFilters.filter(id => id !== herstellerId),
+      allergens: Object.entries(markenproduktFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
+      nutrition: Object.entries(markenproduktFilters.nutritionFilters || {}).filter(([_, v]) => v && (v.min !== undefined || v.max !== undefined)).map(([k, _]) => k)
+    };
+    
+    analytics.updateJourneyFilters(updatedFilters);
+    analytics.checkFilterComplexityOverload();
   };
 
   const clearAllMarkenproduktFilters = () => {
+    // Track Filter-Clearing für Journey-Analyse
+    analytics.trackFilterCleared();
+    
     setMarkenproduktFilters({
       categoryFilters: [],
-      herstellerFilters: []
+      herstellerFilters: [],
+      allergenFilters: {},
+      nutritionFilters: {}
     });
   };
+  
+  // Neue Filter-Handler für Markenprodukte Allergene
+  const toggleMarkenproduktAllergenFilter = (allergen: keyof AllergenFilters) => {
+    const isAdding = !(markenproduktFilters.allergenFilters || {})[allergen];
+    
+    setMarkenproduktFilters(prev => ({
+      ...prev,
+      allergenFilters: {
+        ...(prev.allergenFilters || {}),
+        [allergen]: isAdding
+      }
+    }));
+
+    // 📊 Track Allergen Filter Change
+    analytics.trackFilterChanged(
+      'allergen',
+      allergen.replace('allergens_', ''),
+      isAdding ? 'added' : 'removed',
+      'explore_markenprodukte',
+      {
+        allergen_type: allergen,
+        total_allergen_filters: Object.values(markenproduktFilters.allergenFilters || {}).filter(Boolean).length + (isAdding ? 1 : -1)
+      }
+    );
+    
+    // 🎯 Update Journey with new filters
+    analytics.updateJourneyFilters({
+      categories: markenproduktFilters.categoryFilters,
+      hersteller: markenproduktFilters.herstellerFilters,
+      allergens: Object.entries({...(markenproduktFilters.allergenFilters || {}), [allergen]: isAdding}).filter(([_, v]) => v).map(([k, _]) => k)
+    });
+  };
+  
+  // Neue Filter-Handler für Markenprodukte Nährwerte
+  const updateMarkenproduktNutritionFilter = useCallback((filters: NutritionFilters) => {
+    // Finde Änderungen für Analytics
+    const oldFilters = markenproduktFilters.nutritionFilters;
+    const newFilters = filters;
+    
+    // Tracke jede Änderung einzeln
+    Object.entries(newFilters).forEach(([key, newRange]) => {
+      const oldRange = oldFilters[key as keyof NutritionFilters];
+      const hasOldRange = oldRange && (oldRange.min !== undefined || oldRange.max !== undefined);
+      const hasNewRange = newRange && (newRange.min !== undefined || newRange.max !== undefined);
+      
+      if (!hasOldRange && hasNewRange) {
+        // Neuer Filter hinzugefügt
+        analytics.trackFilterChanged(
+          'nutrition_range',
+          key,
+          'added',
+          'explore_markenprodukte',
+          {
+            nutrition_type: key,
+            min_value: newRange.min,
+            max_value: newRange.max,
+            range_size: newRange.max && newRange.min ? newRange.max - newRange.min : undefined
+          }
+        );
+      } else if (hasOldRange && !hasNewRange) {
+        // Filter entfernt
+        analytics.trackFilterChanged(
+          'nutrition_range',
+          key,
+          'removed',
+          'explore_markenprodukte',
+          {
+            nutrition_type: key
+          }
+        );
+      }
+    });
+    
+    setMarkenproduktFilters(prev => ({
+      ...prev,
+      nutritionFilters: filters
+    }));
+    
+    // 🎯 Update Journey with new filters
+    analytics.updateJourneyFilters({
+      categories: markenproduktFilters.categoryFilters,
+      hersteller: markenproduktFilters.herstellerFilters,
+      allergens: Object.entries(markenproduktFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
+      nutrition: Object.entries(filters || {}).filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined)).map(([k, _]) => k)
+    });
+  }, [markenproduktFilters, analytics]); // Dependencies!
 
   // Filtered and sorted Marken for search
   const filteredAndSortedMarken = useMemo(() => {
@@ -418,6 +750,21 @@ export default function ExploreScreen() {
     if (filters.stufeFilters?.length > 0) count += filters.stufeFilters.length;
     if (filters.herstellerFilters?.length > 0) count += filters.herstellerFilters.length;
     if (filters.priceMin !== undefined || filters.priceMax !== undefined) count += 1;
+    
+    // Zähle Allergen-Filter
+    if (filters.allergenFilters) {
+      count += Object.values(filters.allergenFilters).filter(v => v === true).length;
+    }
+    
+    // Zähle Nährwert-Filter
+    if (filters.nutritionFilters) {
+      const nutritionKeys = ['calories', 'saturatedFat', 'sugar', 'protein', 'carbohydrates', 'totalFat'] as const;
+      count += nutritionKeys.filter(key => {
+        const filter = filters.nutritionFilters[key];
+        return filter && (filter.min !== undefined || filter.max !== undefined);
+      }).length;
+    }
+    
     return count;
   };
 
@@ -447,6 +794,9 @@ export default function ExploreScreen() {
       duration: 150, // 200→150: snappier
       useNativeDriver: true,
     }).start(() => {
+      // Track Tab-Switch für Abbruch-Analyse
+      analytics.trackTabSwitched(activeTab, newTab);
+      
       // Tab wechseln
       setActiveTab(newTab);
       
@@ -513,22 +863,24 @@ export default function ExploreScreen() {
   const loadNoNameProducts = async (reset: boolean = false) => {
     if (noNameLoading || (!noNameHasMore && !reset)) return;
     
-
-
     try {
       setNoNameLoading(true);
       setNoNameError(null);
 
-      // Validiere Filter vor der Abfrage (synchron)
-      const validatedFilters = validateFiltersSync({
-        ...noNameFilters,
-        sortBy: 'name' // Explizit nach Namen sortieren
-      });
-      
+      // Nutze die normale FirestoreService mit erweiterten Filtern
       const result = await FirestoreService.getNoNameProductsPaginated(
         20, // Page size
         reset ? null : noNameLastDoc,
-        validatedFilters // Validierte Filter anwenden
+        {
+          categoryFilters: noNameFilters.categoryFilters,
+          discounterFilters: noNameFilters.discounterFilters,
+          stufeFilters: noNameFilters.stufeFilters,
+          priceMin: noNameFilters.priceMin,
+          priceMax: noNameFilters.priceMax,
+          allergenFilters: noNameFilters.allergenFilters,
+          nutritionFilters: noNameFilters.nutritionFilters,
+          sortBy: 'name'
+        }
       );
 
       if (reset) {
@@ -557,22 +909,23 @@ export default function ExploreScreen() {
   const loadMarkenprodukte = async (reset: boolean = false) => {
     if (markenproduktLoading || (!markenproduktHasMore && !reset)) return;
     
-
-
     try {
       setMarkenproduktLoading(true);
       setMarkenproduktError(null);
 
-      // Validiere Filter vor der Abfrage (synchron)
-      const validatedFilters = validateFiltersSync({
-        ...markenproduktFilters,
-        sortBy: 'name' // Explizit nach Namen sortieren
-      });
-      
+      // Nutze die normale FirestoreService mit erweiterten Filtern
       const result = await FirestoreService.getMarkenproduktePaginated(
         20, // Page size
         reset ? null : markenproduktLastDoc,
-        validatedFilters // Validierte Filter anwenden
+        {
+          categoryFilters: markenproduktFilters.categoryFilters,
+          herstellerFilters: markenproduktFilters.herstellerFilters,
+          priceMin: markenproduktFilters.priceMin,
+          priceMax: markenproduktFilters.priceMax,
+          allergenFilters: markenproduktFilters.allergenFilters,
+          nutritionFilters: markenproduktFilters.nutritionFilters,
+          sortBy: 'name'
+        }
       );
 
       if (reset) {
@@ -1241,7 +1594,6 @@ export default function ExploreScreen() {
           </View>
         );
       case 'nonames':
-        console.log('🔍 Rendering NoName products:', noNameProducts.length, 'Error:', noNameError);
         return noNameError ? (
           <View style={styles.contentSection}>
             <View style={styles.errorState}>
@@ -1417,7 +1769,17 @@ export default function ExploreScreen() {
                     styles.productListItem,
                     index < markenprodukte.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 0.5 }
                   ]}
-                  onPress={() => router.push(`/product-comparison/${product.id}?type=brand` as any)}
+                  onPress={() => {
+                    // 🎯 Track Product View mit Journey-Context
+                    analytics.trackProductViewWithJourney(
+                      product.id,
+                      'brand',
+                      product.name || product.produktName || 'Markenprodukt',
+                      index
+                    );
+                    
+                    router.push(`/product-comparison/${product.id}?type=brand` as any);
+                  }}
                 >
                   <View style={styles.productLogo}>
                     {product.bild && product.bild.trim() !== '' && !failedImages.has(`markenprodukt-${product.id}`) ? (
@@ -1807,35 +2169,26 @@ export default function ExploreScreen() {
               </View>
             </View>
 
-                        {/* TODO: Marke Filter - temporär deaktiviert wegen Firestore Komplexität */}
-            {/* <View style={styles.filterSection}>
-              <ThemedText style={[styles.filterSectionTitle, { color: colors.text }]}>Marke</ThemedText>
-              <TouchableOpacity 
-                style={[styles.filterOption, { borderBottomColor: colors.border }]}
-                onPress={() => setNoNameFilters(prev => ({ ...prev, markeFilter: undefined }))}
-              >
-                <ThemedText style={[styles.filterOptionText, { color: colors.text }]}>
-                  Alle Marken
-                </ThemedText>
-                {!noNameFilters.markeFilter && (
-                  <IconSymbol name="checkmark" size={20} color={colors.primary} />
-                )}
-              </TouchableOpacity>
-              {markenData.slice(0, 20).map((marke) => (
-                <TouchableOpacity 
-                  key={marke.id}
-                  style={[styles.filterOption, { borderBottomColor: colors.border }]}
-                  onPress={() => setNoNameFilters(prev => ({ ...prev, markeFilter: marke.id }))}
-                >
-                  <ThemedText style={[styles.filterOptionText, { color: colors.text }]}>
-                    {marke.name}
-                  </ThemedText>
-                  {noNameFilters.markeFilter === marke.id && (
-                    <IconSymbol name="checkmark" size={20} color={colors.primary} />
-                  )}
-      </TouchableOpacity>
-              ))}
-            </View> */}
+                        {/* Allergene Filter */}
+            <View style={styles.filterSection}>
+              <AllergenFilterChips
+                selectedAllergens={noNameFilters.allergenFilters || {}}
+                onToggleAllergen={toggleAllergenFilter}
+              />
+            </View>
+
+            {/* Nährwerte Filter */}
+            <View style={styles.filterSection}>
+              <NutritionRangeFilter
+                nutritionFilters={noNameFilters.nutritionFilters || {}}
+                onUpdateFilter={(filters) => {
+                  setNoNameFilters(prev => ({
+                    ...prev,
+                    nutritionFilters: filters
+                  }));
+                }}
+              />
+            </View>
       </ScrollView>
         </View>
       </Modal>
@@ -2014,6 +2367,26 @@ export default function ExploreScreen() {
               </View>
             </View>
 
+            {/* Allergene Filter */}
+            <View style={styles.filterSection}>
+              <AllergenFilterChips
+                selectedAllergens={markenproduktFilters.allergenFilters || {}}
+                onToggleAllergen={toggleMarkenproduktAllergenFilter}
+              />
+            </View>
+
+            {/* Nährwerte Filter */}
+            <View style={styles.filterSection}>
+              <NutritionRangeFilter
+                nutritionFilters={markenproduktFilters.nutritionFilters || {}}
+                onUpdateFilter={(filters) => {
+                  setMarkenproduktFilters(prev => ({
+                    ...prev,
+                    nutritionFilters: filters
+                  }));
+                }}
+              />
+            </View>
 
           </ScrollView>
         </View>

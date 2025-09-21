@@ -25,6 +25,9 @@ export default function BarcodeScannerScreen() {
   const { user } = useAuth();
   const analytics = useAnalytics();
   const insets = useSafeAreaInsets();
+  
+  // 🎯 Journey-Tracking für Scanner
+  // Journey läuft bereits - keine neue starten!
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [facing, setFacing] = useState<CameraType>('back');
@@ -406,10 +409,11 @@ export default function BarcodeScannerScreen() {
     setScanned(true);
     console.log(`📱 SINGLE EAN scan: ${data} (Type: ${type})`);
     
-    // 🎯 Start Scan-Journey
-    analytics.startJourney('scan', 'barcode_scanner', {
+    // 🎯 Update Journey mit Scan-Details
+    analytics.updateJourneyFilters({
       ean: data,
-      scanMethod: 'camera'
+      scanMethod: 'camera',
+      scannedAt: new Date().toISOString()
     });
     
     // 📳 SCAN DETECTED HAPTIC FEEDBACK

@@ -129,6 +129,20 @@ export function useFavorites() {
           productId,
           productType
         });
+        
+        // 🎯 Track zu Journey
+        const productName = productData?.name || productData?.produktName || 'Unbekanntes Produkt';
+        const journeyProductType = productType === 'markenprodukt' ? 'brand' : 'noname';
+        
+        // Preis-Info extrahieren
+        const priceInfo = {
+          price: productData?.preis || productData?.price || 0,
+          savings: productData?.ersparnis || productData?.savings || 0
+        };
+        
+        // Importiere und nutze journeyTrackingService direkt
+        const journeyTrackingService = (await import('../services/journeyTrackingService')).default;
+        journeyTrackingService.trackAddToFavorites(productId, productName, journeyProductType, user.uid, priceInfo);
       }
       
       console.log(`✅ Toggled favorite: ${productId} - now: ${isNowFavorite}`);
