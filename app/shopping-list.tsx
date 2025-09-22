@@ -946,9 +946,43 @@ const safeAsync = async (p: Promise<any>) => {
         
         // Mark DB products as purchased (creates purchase history)
         if (dbNoNameProducts.length > 0) {
+          // WICHTIG: Sammle alle Produkt-Infos für EINE Bulk-Journey-Update
+          const productsForJourneyTracking = dbNoNameProducts.map(item => {
+            // Debug: Log das Item um zu sehen, was wir haben
+            console.log('🔍 Debug Item für Bulk Purchase:', {
+              itemId: item.id,
+              hasProduct: !!item.product,
+              productId: item.product?.id,
+              handelsmarkenProdukt: item.handelsmarkenProdukt,
+              productName: item.product?.name || item.product?.produktName || item.name
+            });
+            
+            return {
+              productId: item.product?.id || (item.handelsmarkenProdukt && typeof item.handelsmarkenProdukt === 'object' && 'id' in item.handelsmarkenProdukt ? item.handelsmarkenProdukt.id : '') || '',
+              productName: item.product?.name || item.product?.produktName || item.name || 'Unbekannt',
+              productType: (item.isMarkenProdukt ? 'brand' : 'noname') as 'brand' | 'noname',
+              finalPrice: item.product?.preis || 0,
+              finalSavings: item.savings || 0,
+              journeyId: item.journeyId // Falls vorhanden
+            };
+          });
+          
+          // Tracke alle Purchases in EINER Operation
+          const journeyTrackingService = await import('@/lib/services/journeyTrackingService').then(m => m.default);
+          if (productsForJourneyTracking.length > 0 && productsForJourneyTracking[0].journeyId) {
+            // Bulk-Update für die Journey
+            await journeyTrackingService.trackBulkPurchaseInSpecificJourney(
+              productsForJourneyTracking[0].journeyId, // Alle sollten gleiche Journey haben
+              productsForJourneyTracking,
+              totalSavings,
+              user.uid
+            );
+          }
+          
+          // Dann die einzelnen Firestore-Updates (ohne Journey-Tracking)
           promises.push(
             ...dbNoNameProducts.map(item => 
-              FirestoreService.markAsPurchased(user.uid, item.id)
+              FirestoreService.markAsPurchasedWithoutTracking(user.uid, item.id)
             )
           );
         }
@@ -1035,17 +1069,9 @@ const safeAsync = async (p: Promise<any>) => {
           );
         }
         
-        // Track Purchase mit Journey-Context - mit vollständigen Produktdaten
-        const purchasedProducts = dbNoNameProducts
-          .filter(item => item.product?.id || item.id) // Filter undefined IDs
-          .map(item => ({
-            productId: item.product?.id || item.id,
-            productName: item.product?.name || item.product?.produktName || 'Unbekannt',
-            productType: 'noname' as 'brand' | 'noname'
-          }));
-        
-        console.log('🔍 Debug purchasedProducts:', purchasedProducts);
-        analytics.trackPurchaseWithJourney(purchasedProducts, totalSavings);
+        // ENTFERNT: Doppeltes Tracking! 
+        // Das Journey-Tracking passiert bereits in FirestoreService.markAsPurchased
+        // für jedes einzelne Produkt mit der korrekten Original-Journey
         
         // Verwende Bulk-Purchased-Toast mit intelligenter Message-Auswahl
         showBulkPurchasedToast(dbProductCount, customItemCount, totalSavings);

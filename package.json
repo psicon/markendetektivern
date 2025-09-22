@@ -20,6 +20,7 @@
     "@invertase/react-native-apple-authentication": "^2.4.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/datetimepicker": "8.4.1",
+    "@react-native-community/slider": "4.5.6",
     "@react-native-firebase/analytics": "^23.2.2",
     "@react-native-firebase/app": "^23.2.2",
     "@react-native-firebase/firestore": "^23.0.0",
@@ -33,6 +34,7 @@
     "expo-blur": "~14.1.5",
     "expo-camera": "^16.1.11",
     "expo-constants": "~17.1.7",
+    "expo-dev-client": "~5.2.4",
     "expo-font": "~13.3.2",
     "expo-haptics": "~14.1.4",
     "expo-image": "~2.4.0",
@@ -62,8 +64,7 @@
     "react-native-store-review": "^0.4.3",
     "react-native-svg": "^15.12.1",
     "react-native-web": "~0.20.0",
-    "react-native-webview": "13.13.5",
-    "expo-dev-client": "~5.2.4"
+    "react-native-webview": "13.13.5"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

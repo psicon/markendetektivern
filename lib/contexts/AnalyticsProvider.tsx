@@ -358,7 +358,21 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
         selectedProductId,
         abandonmentReason as any
       );
-    }, [])
+    }, []),
+    
+    // NEU: Einkaufszettel Actions
+    trackRemoveFromCartWithJourney: useCallback((
+      productId: string,
+      productName: string,
+      productType: 'brand' | 'noname'
+    ) => {
+      journeyTrackingService.trackRemoveFromCart(
+        productId,
+        productName,
+        productType,
+        user?.uid
+      );
+    }, [user?.uid])
   };
 
   return (

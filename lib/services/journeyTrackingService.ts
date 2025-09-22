@@ -1,6 +1,7 @@
 import { db } from '@/lib/firebase';
 import { addDoc, collection, doc, DocumentReference, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { analyticsService } from './analyticsService';
+import { AnonymousLocationService } from './anonymousLocationService';
 
 export interface JourneyContext {
   journeyId: string;
@@ -9,6 +10,15 @@ export interface JourneyContext {
   // Discovery Context
   discoveryMethod: 'search' | 'browse' | 'scan' | 'favorites' | 'repurchase' | 'category' | 'comparison';
   screenName: string;
+  
+  // NEU: Location-Daten (ohne Permission)
+  location?: {
+    lat: number;
+    lon: number;
+    city: string;
+    geohash5: string;
+    source: 'ip' | 'fallback';
+  };
   
   // Filter Context (wenn über browse/search)
   activeFilters?: {
@@ -75,7 +85,7 @@ export interface JourneyContext {
     
     // NEU: Discovery Context - wie wurde das Produkt gefunden
     discoveryContext: {
-      method: 'browse' | 'search' | 'scan' | 'category' | 'favorites' | 'repurchase' | 'comparison';
+      method: 'browse' | 'search' | 'scan' | 'category' | 'favorites' | 'repurchase' | 'comparison' | 'conversion_source' | 'conversion_result';
       searchQuery?: string;
       activeFiltersSnapshot?: any; // Filter zum Zeitpunkt der Entdeckung
       comparedWithProducts?: { // Bei Vergleichsansicht
@@ -83,19 +93,23 @@ export interface JourneyContext {
         productName: string;
         productType: 'brand' | 'noname';
       }[];
+      // NEU: Bei Conversion-Result
+      fromProductId?: string;
+      fromProductName?: string;
+      market?: string;
     };
     
     // NEU: Alle Aktionen die mit diesem Produkt passiert sind
     actions?: {
       timestamp: number;
       type: 'viewed' | 'addedToCart' | 'removedFromCart' | 'addedToFavorites' | 
-            'removedFromFavorites' | 'purchased' | 'converted' | 'compared';
+        'removedFromFavorites' | 'purchased' | 'converted' | 'compared' | 'converted_from';
       
-      // Produkt-Details
+      // Produkt-Details (nur bei Cross-Product Actions wie Conversion)
       productId?: string;
       productName?: string;
       productType?: 'brand' | 'noname';
-      productRef?: DocumentReference; // NEU: Echte Firestore Referenz
+      productRef?: DocumentReference;
       
       fromScreen?: string;
       fromFilters?: any;
@@ -111,12 +125,9 @@ export interface JourneyContext {
       }[];
       
       // NEU: Motivation für diese spezifische Action
-      motivationSignals?: {
-        priceMotivation: number;     // 0-1: Wie sehr war Preis ein Faktor?
-        brandMotivation: number;     // 0-1: Wie sehr war Marke ein Faktor?
-        contentMotivation: number;   // 0-1: Wie sehr waren Inhaltsstoffe ein Faktor?
-        savingsMotivation: number;   // 0-1: Wie sehr war Ersparnis ein Faktor?
-        reason?: string;             // Erklärender Text
+      motivation?: {
+        primary: 'price' | 'brand' | 'content' | 'savings' | 'exploration';
+        confidence: number; // 0-1: Wie sicher sind wir?
       };
       
       // NEU: Bei Aktionen aus Vergleichsansicht - welches Produkt war Kontext?
@@ -136,20 +147,14 @@ export interface JourneyContext {
       toProductName?: string;
       toProductRef?: DocumentReference;
       market?: string;
+      marketId?: string;
+      fromProductPrice?: number;
+      toProductPrice?: number;
       // Für View-Actions
       viewDuration?: number; // Sekunden auf der Produktseite
     }[];
     
-    // NEU: Finaler Status dieses Produkts
-    finalStatus?: {
-      wasAddedToCart: boolean;
-      wasAddedToFavorites: boolean;
-      wasPurchased: boolean;
-      wasConverted: boolean;
-      finalPrice?: number;
-      finalSavings?: number;
-      totalInteractions: number; // Anzahl aller Interaktionen
-    };
+    // ENTFERNT: finalStatus - kann aus actions[] abgeleitet werden
     
     // NEU: Comparison Result (falls es eine Vergleichsansicht war)
     comparisonResult?: {
@@ -162,58 +167,7 @@ export interface JourneyContext {
     };
   }[];
   
-  // Actions - NEU: Arrays für mehrere Produkte pro Journey
-  addedToCart?: {
-    productId: string;
-    productName: string;
-    productType: 'noname' | 'brand';
-    timestamp: number;
-    fromFilters: any;
-    // NEU: Preis-Snapshot zum Zeitpunkt der Aktion
-    priceAtTime: number;
-    savingsAtTime: number;
-    comparedProducts?: {
-      productId: string;
-      productName: string;
-      price: number;
-      savings: number;
-    }[];
-    savingsRank?: number; // 1 = höchste Ersparnis unter verglichenen Produkten
-    // NEU: Spätere Aktion (Kauf/Löschung)
-    laterAction?: {
-      type: 'purchase' | 'removed';
-      timestamp: number;
-      finalPrice?: number;
-      finalSavings?: number;
-    };
-  }[];
-  addedToFavorites?: {
-    productId: string;
-    productName: string;
-    productType: 'noname' | 'brand';
-    timestamp: number;
-    fromFilters: any;
-    priceAtTime: number;
-    savingsAtTime: number;
-    // NEU: Spätere Aktion (Kauf/Löschung aus Favoriten)
-    laterAction?: {
-      type: 'purchase' | 'removed';
-      timestamp: number;
-      finalPrice?: number;
-      finalSavings?: number;
-    };
-  }[];
-  purchased?: {
-    products: {
-      productId: string;
-      productName: string;
-      productType: 'noname' | 'brand';
-      finalPrice: number;
-      finalSavings: number;
-    }[];
-    timestamp: number;
-    totalSavings: number;
-  };
+  // ENTFERNT: Alte Arrays - alles ist jetzt in viewedProducts[].actions
   
   // NEU: Markenprodukt zu NoName Converted (mit Details)
   converted?: {
@@ -251,6 +205,7 @@ class JourneyTrackingService {
   private journeyTimeout: NodeJS.Timeout | null = null;
   private backgroundTimeout: NodeJS.Timeout | null = null;
   private readonly JOURNEY_SESSION_KEY = 'active_journey_id';
+  private isLoadingJourney: boolean = false; // NEU: Verhindert Race Conditions
 
   static getInstance(): JourneyTrackingService {
     if (!JourneyTrackingService.instance) {
@@ -267,95 +222,68 @@ class JourneyTrackingService {
   }
 
   /**
-   * Aktualisiert eine (eventuell alte) Journey mit späteren Aktionen
+   * Updated nur den Status einer Journey in Firestore
    */
-  async updateOriginalJourney(journeyId: string, update: {
-    type: 'purchase' | 'removed';
-    productId: string;
-    timestamp: number;
-    laterUpdate: boolean;
-    finalPrice?: number;
-    finalSavings?: number;
-  }, userId: string): Promise<void> {
+  private async updateJourneyStatus(status: string, userId: string): Promise<void> {
+    if (!this.currentJourney || !this.currentJourney.firestoreDocId) return;
+    
     try {
-      const { query, where, getDocs, updateDoc, arrayUnion, getDoc } = await import('firebase/firestore');
-      
-      // Finde die Journey
+      const { doc, updateDoc, serverTimestamp, collection } = await import('firebase/firestore');
       const userJourneysRef = collection(db, 'users', userId, 'journeys');
-      const q = query(userJourneysRef, where('journeyId', '==', journeyId));
-      const snapshot = await getDocs(q);
+      const docRef = doc(userJourneysRef, this.currentJourney.firestoreDocId);
       
-      if (!snapshot.empty) {
-        const journeyDoc = snapshot.docs[0];
-        const journeyData = journeyDoc.data();
-        
-        // Erstelle das Update-Objekt für laterUpdates
-        const updateData: any = {
-          lastUpdated: serverTimestamp(),
-          laterUpdates: arrayUnion(update)
-        };
-        
-        // Finde und update das spezifische Produkt in addedToCart
-        if (journeyData.addedToCart && Array.isArray(journeyData.addedToCart)) {
-          const updatedCart = journeyData.addedToCart.map((item: any) => {
-            if (item.productId === update.productId) {
-              // Füge die späteren Aktionen direkt zum Produkt hinzu
-              return {
-                ...item,
-                laterAction: {
-                  type: update.type,
-                  timestamp: update.timestamp,
-                  ...(update.type === 'purchase' && {
-                    finalPrice: update.finalPrice,
-                    finalSavings: update.finalSavings
-                  })
-                }
-              };
-            }
-            return item;
-          });
-          updateData.addedToCart = updatedCart;
-        }
-        
-        // Finde und update das spezifische Produkt in addedToFavorites
-        if (journeyData.addedToFavorites && Array.isArray(journeyData.addedToFavorites)) {
-          const updatedFavorites = journeyData.addedToFavorites.map((item: any) => {
-            if (item.productId === update.productId) {
-              return {
-                ...item,
-                laterAction: {
-                  type: update.type,
-                  timestamp: update.timestamp,
-                  ...(update.type === 'purchase' && {
-                    finalPrice: update.finalPrice,
-                    finalSavings: update.finalSavings
-                  })
-                }
-              };
-            }
-            return item;
-          });
-          updateData.addedToFavorites = updatedFavorites;
-        }
-        
-        // Update Status basierend auf Aktion
-        if (update.type === 'purchase') {
-          updateData.finalStatus = 'purchased_later';
-          updateData.purchasedLaterAt = serverTimestamp();
-        }
-        
-        await updateDoc(journeyDoc.ref, updateData);
-        console.log(`📝 Original Journey ${journeyId} updated with ${update.type} for product ${update.productId}`);
-      }
+      await updateDoc(docRef, {
+        status: status,
+        lastUpdated: serverTimestamp()
+      });
+      
+      console.log(`📝 Journey Status updated to: ${status}`);
     } catch (error) {
-      console.error('❌ Error updating original journey:', error);
+      console.error('❌ Error updating journey status:', error);
     }
   }
+
+  /**
+   * Fügt Location-Daten zur aktuellen Journey hinzu (asynchron)
+   */
+  private async addLocationToJourney(userId?: string): Promise<void> {
+    if (!this.currentJourney) return;
+
+    try {
+      const location = await AnonymousLocationService.getLocation();
+      
+      if (location) {
+        this.currentJourney.location = location;
+        
+        console.log(`📍 Location: ${location.city} (${location.geohash5}) via ${location.source}`);
+
+        // Persistiere Journey-Update mit Location
+        if (userId) {
+          this.persistJourneyToFirestore(userId);
+        }
+      } else {
+        console.log('📍 No location available for journey');
+      }
+    } catch (error) {
+      console.error('❌ Error adding location to journey:', error);
+      // Fehler wird ignoriert - Journey funktioniert auch ohne Location
+    }
+  }
+
+  // ENTFERNT: updateOriginalJourney - alles wird direkt in viewedProducts[].actions getrackt
 
   /**
    * Lädt aktive Journey aus Firestore (für Session-Fortsetzung)
    */
   async loadActiveJourney(userId: string): Promise<void> {
+    // Verhindere Race Conditions
+    if (this.isLoadingJourney) {
+      console.log('⏳ Journey wird bereits geladen - überspringe');
+      return;
+    }
+    
+    this.isLoadingJourney = true;
+    
     try {
       // Suche nach aktiver Journey
       const { getDocs, query, where, orderBy, limit, Timestamp } = await import('firebase/firestore');
@@ -384,10 +312,17 @@ class JourneyTrackingService {
           addedToCart: data.addedToCart || [],
           addedToFavorites: data.addedToFavorites,
           purchased: data.purchased,
+          converted: data.converted || [], // NEU: Lade converted Array
+          location: data.location, // NEU: Location-Daten laden
           abandoned: data.abandoned,
           persistedToFirestore: true,
           firestoreDocId: journeyDoc.id
         };
+        
+        // Stelle sicher, dass alle Arrays initialisiert sind (für ältere Journeys)
+        if (!this.currentJourney.viewedProducts) this.currentJourney.viewedProducts = [];
+        if (!this.currentJourney.converted) this.currentJourney.converted = [];
+        if (!this.currentJourney.filterHistory) this.currentJourney.filterHistory = [];
         
         console.log(`🔄 Journey wiederhergestellt: ${this.currentJourney.journeyId}`);
         
@@ -407,6 +342,8 @@ class JourneyTrackingService {
       console.error('❌ Error loading active journey:', error);
       // Bei Fehler auch neue Journey starten
       this.startJourney('browse', 'app_start', undefined, userId);
+    } finally {
+      this.isLoadingJourney = false;
     }
   }
 
@@ -432,9 +369,24 @@ class JourneyTrackingService {
       startTime: Date.now(),
       discoveryMethod,
       screenName,
-      activeFilters,
-      viewedProducts: []
+      activeFilters: (() => {
+        // Entferne undefined values aus activeFilters
+        const clean: any = {};
+        if (activeFilters) {
+          Object.keys(activeFilters).forEach(key => {
+            if (activeFilters[key] !== undefined) {
+              clean[key] = activeFilters[key];
+            }
+          });
+        }
+        return clean;
+      })(),
+      viewedProducts: [],
+      converted: [] // NEU: Initialisiere converted Array
     };
+
+    // NEU: Location asynchron hinzufügen (non-blocking)
+    this.addLocationToJourney(userId);
 
     console.log(`🎯 Journey Started: ${discoveryMethod} auf ${screenName}`, {
       filters: activeFilters,
@@ -448,7 +400,7 @@ class JourneyTrackingService {
     }
     this.journeyTimeout = setTimeout(() => {
       this.completeJourney('timeout', userId);
-    }, 30 * 60 * 1000);
+    }, 120 * 60 * 1000); // 2 Stunden statt 30 Minuten
     
     // WICHTIG: Persistiere Journey direkt beim Start!
     if (userId) {
@@ -467,7 +419,23 @@ class JourneyTrackingService {
       return;
     }
 
-    this.currentJourney.activeFilters = filters;
+    // WICHTIG: Entferne undefined values aus filters
+    const cleanFilters: any = {};
+    if (filters) {
+      Object.keys(filters).forEach(key => {
+        if (filters[key] !== undefined) {
+          cleanFilters[key] = filters[key];
+        }
+      });
+    }
+    this.currentJourney.activeFilters = cleanFilters;
+    
+    // Debug: Zeige was in activeFilters gespeichert wird
+    console.log('🔍 DEBUG updateFilters - activeFilters gesetzt:', {
+      keys: Object.keys(cleanFilters),
+      hasNutritionDetails: !!cleanFilters.nutritionDetails,
+      nutritionDetails: cleanFilters.nutritionDetails
+    });
     
     // Berechne Filter-Metriken
     this.currentJourney.filterMetrics = this.calculateFilterMetrics(filters);
@@ -479,7 +447,7 @@ class JourneyTrackingService {
         this.currentJourney.filterHistory = [];
       }
       this.currentJourney.filterHistory.push({
-        timestamp: Date.now(),
+        timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
         action: filterChange.action,
         filterType: filterChange.filterType,
         filterValue: filterChange.filterValue,
@@ -514,22 +482,19 @@ class JourneyTrackingService {
       this.startJourney('browse', 'unknown', undefined, userId);
     }
 
-    // Prüfe ob Produkt schon viewed wurde
-    let existingProduct = this.currentJourney!.viewedProducts.find(p => p.productId === productId);
-    
-    if (!existingProduct) {
-      // Neues Produkt - erstelle vollständigen Eintrag
+    // IMMER neuen Eintrag erstellen - jeder View ist ein separater Eintrag
+    // Dies ermöglicht es, das gleiche Produkt mehrmals in einer Journey zu tracken
       const newProduct: any = {
         productId,
         productType,
         productName,
-        timestamp: Date.now(),
+        timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
         fromScreen: this.currentJourney!.screenName,
         discoveryContext: {
           method: this.currentJourney!.discoveryMethod
         },
         actions: [{
-          timestamp: Date.now(),
+          timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
           type: 'viewed' as const,
           // NEU: Produkt-Details direkt in der Action
           productId: productId,
@@ -538,15 +503,9 @@ class JourneyTrackingService {
           productRef: doc(db, productType === 'brand' ? 'markenProdukte' : 'produkte', productId),
           fromScreen: this.currentJourney!.screenName,
           fromFilters: JSON.parse(JSON.stringify(this.currentJourney!.activeFilters || {})),
-          motivationSignals: this.calculateActionMotivation({ type: 'viewed' }, this.currentJourney!.activeFilters)
+          motivation: this.calculateActionMotivation({ type: 'viewed' }, this.currentJourney!.activeFilters)
         }],
-        finalStatus: {
-          wasAddedToCart: false,
-          wasAddedToFavorites: false,
-          wasPurchased: false,
-          wasConverted: false,
-          totalInteractions: 1
-        }
+        // finalStatus wird aus actions[] abgeleitet
       };
       
       // Optional fields
@@ -562,24 +521,6 @@ class JourneyTrackingService {
         newProduct.discoveryContext.activeFiltersSnapshot = JSON.parse(JSON.stringify(this.currentJourney!.activeFilters));
       }
       this.currentJourney!.viewedProducts.push(newProduct);
-      existingProduct = newProduct;
-    } else {
-      // Produkt wurde schon mal angesehen - füge weitere View-Action hinzu
-      if (!existingProduct.actions) existingProduct.actions = [];
-      existingProduct.actions.push({
-        timestamp: Date.now(),
-        type: 'viewed',
-        // NEU: Produkt-Details direkt in der Action
-        productId: productId,
-        productName: productName,
-        productType: productType,
-        productRef: doc(db, productType === 'brand' ? 'markenProdukte' : 'produkte', productId),
-        fromScreen: this.currentJourney!.screenName,
-        fromFilters: JSON.parse(JSON.stringify(this.currentJourney!.activeFilters || {})),
-        motivationSignals: this.calculateActionMotivation({ type: 'viewed' }, this.currentJourney!.activeFilters)
-      });
-      existingProduct.finalStatus!.totalInteractions = (existingProduct.finalStatus!.totalInteractions || 0) + 1;
-    }
 
     console.log(`👁️ Product View: ${productName.substring(0, 30)}... (Journey: ${this.currentJourney!.discoveryMethod})`);
 
@@ -618,7 +559,7 @@ class JourneyTrackingService {
     if (mainProduct) {
       if (!mainProduct.actions) mainProduct.actions = [];
       mainProduct.actions.push({
-        timestamp: Date.now(),
+        timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
         type: 'compared',
         // NEU: Produkt-Details direkt in der Action
         productId: mainProductId,
@@ -630,7 +571,7 @@ class JourneyTrackingService {
           ...p,
           productRef: doc(db, p.productType === 'brand' ? 'markenProdukte' : 'produkte', p.productId)
         })),
-        motivationSignals: this.calculateActionMotivation({
+        motivation: this.calculateActionMotivation({
           type: 'compared',
           comparedProducts: comparedProducts
         }, this.currentJourney!.activeFilters)
@@ -728,26 +669,7 @@ class JourneyTrackingService {
       if (!this.currentJourney) return;
     }
 
-    // Initialisiere Array wenn noch nicht vorhanden
-    if (!this.currentJourney.addedToCart) {
-      this.currentJourney.addedToCart = [];
-    }
-
-    // Füge neues Produkt hinzu mit Preis-Snapshot
-    const cartItem = {
-      productId,
-      productName,
-      productType: (isMarke ? 'brand' : 'noname') as 'brand' | 'noname',
-      timestamp: Date.now(),
-      fromFilters: JSON.parse(JSON.stringify(this.currentJourney.activeFilters || {})),
-      priceAtTime: priceInfo?.price || 0,
-      savingsAtTime: priceInfo?.savings || 0,
-      comparedProducts: priceInfo?.comparedProducts,
-      // NEU: Tracke ob höchste/niedrigste Ersparnis gewählt wurde
-      savingsRank: this.calculateSavingsRank(priceInfo?.savings || 0, priceInfo?.comparedProducts)
-    };
-    
-    this.currentJourney.addedToCart.push(cartItem);
+    // ENTFERNT: Alte addedToCart Array - alles ist jetzt in viewedProducts[].actions
     
     // NEU: Update auch viewedProducts mit der Aktion
     let viewedProduct = this.currentJourney.viewedProducts.find(p => p.productId === productId);
@@ -758,21 +680,15 @@ class JourneyTrackingService {
         productId,
         productType: (isMarke ? 'brand' : 'noname') as 'brand' | 'noname',
         productName,
-        timestamp: Date.now(),
+        timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
         fromScreen: this.currentJourney.screenName,
         discoveryContext: {
           method: this.currentJourney.discoveryMethod,
-          searchQuery: this.currentJourney.activeFilters?.searchQuery,
+          ...(this.currentJourney.activeFilters?.searchQuery && { searchQuery: this.currentJourney.activeFilters.searchQuery }),
           activeFiltersSnapshot: JSON.parse(JSON.stringify(this.currentJourney.activeFilters || {}))
         },
         actions: [],
-        finalStatus: {
-          wasAddedToCart: false,
-          wasAddedToFavorites: false,
-          wasPurchased: false,
-          wasConverted: false,
-          totalInteractions: 0
-        }
+        // finalStatus wird aus actions[] abgeleitet
       };
       this.currentJourney.viewedProducts.push(viewedProduct);
     }
@@ -780,18 +696,18 @@ class JourneyTrackingService {
     // Füge die AddToCart Aktion hinzu
     if (!viewedProduct.actions) viewedProduct.actions = [];
     const action: any = {
-      timestamp: Date.now(),
+          timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
       type: 'addedToCart',
       // NEU: Produkt-Details direkt in der Action
       productId: productId,
       productName: productName,
       productType: isMarke ? 'brand' : 'noname',
       productRef: doc(db, isMarke ? 'markenProdukte' : 'produkte', productId),
-      fromFilters: cartItem.fromFilters,
+      fromFilters: JSON.parse(JSON.stringify(this.currentJourney.activeFilters || {})),
       price: priceInfo?.price,
       savings: priceInfo?.savings,
       comparedProducts: priceInfo?.comparedProducts,
-      motivationSignals: this.calculateActionMotivation({
+      motivation: this.calculateActionMotivation({
         type: 'addedToCart',
         price: priceInfo?.price,
         savings: priceInfo?.savings,
@@ -818,13 +734,13 @@ class JourneyTrackingService {
     }
     
     viewedProduct.actions.push(action);
-    viewedProduct.finalStatus!.wasAddedToCart = true;
-    viewedProduct.finalStatus!.totalInteractions = (viewedProduct.finalStatus!.totalInteractions || 0) + 1;
+    // finalStatus wird aus actions[] abgeleitet
 
     console.log(`🛒 Add-to-Cart mit Journey: ${productName.substring(0, 30)}...`, {
       discoveryMethod: this.currentJourney.discoveryMethod,
       activeFilters: this.currentJourney.activeFilters,
-      totalInCart: this.currentJourney.addedToCart.length,
+      totalInCart: this.currentJourney.viewedProducts.reduce((count, p) => 
+        count + (this.getFinalStatusFromActions(p.actions).wasAddedToCart ? 1 : 0), 0),
       journeyDuration: Date.now() - this.currentJourney.startTime
     });
 
@@ -839,7 +755,8 @@ class JourneyTrackingService {
         journey_id: this.currentJourney.journeyId,
         discovery_filters: this.currentJourney.activeFilters,
         products_viewed_before: this.currentJourney.viewedProducts.length,
-        products_in_cart: this.currentJourney.addedToCart.length,
+        products_in_cart: this.currentJourney.viewedProducts.reduce((count, p) => 
+          count + (this.getFinalStatusFromActions(p.actions).wasAddedToCart ? 1 : 0), 0),
         journey_duration_ms: Date.now() - this.currentJourney.startTime,
         screen_name: this.currentJourney.screenName
       }
@@ -877,19 +794,7 @@ class JourneyTrackingService {
     }
 
     // Initialisiere Array wenn noch nicht vorhanden
-    if (!this.currentJourney.addedToFavorites) {
-      this.currentJourney.addedToFavorites = [];
-    }
-
-    this.currentJourney.addedToFavorites.push({
-      productId,
-      productName,
-      productType,
-      timestamp: Date.now(),
-      fromFilters: JSON.parse(JSON.stringify(this.currentJourney.activeFilters || {})),
-      priceAtTime: priceInfo?.price || 0,
-      savingsAtTime: priceInfo?.savings || 0
-    });
+    // ENTFERNT: Alte addedToFavorites Array - alles ist jetzt in viewedProducts[].actions
     
     // NEU: Update auch viewedProducts mit der Aktion
     let viewedProduct = this.currentJourney.viewedProducts.find(p => p.productId === productId);
@@ -900,21 +805,15 @@ class JourneyTrackingService {
         productId,
         productType,
         productName,
-        timestamp: Date.now(),
+        timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
         fromScreen: this.currentJourney.screenName,
         discoveryContext: {
           method: this.currentJourney.discoveryMethod,
-          searchQuery: this.currentJourney.activeFilters?.searchQuery,
+          ...(this.currentJourney.activeFilters?.searchQuery && { searchQuery: this.currentJourney.activeFilters.searchQuery }),
           activeFiltersSnapshot: JSON.parse(JSON.stringify(this.currentJourney.activeFilters || {}))
         },
         actions: [],
-        finalStatus: {
-          wasAddedToCart: false,
-          wasAddedToFavorites: false,
-          wasPurchased: false,
-          wasConverted: false,
-          totalInteractions: 0
-        }
+        // finalStatus wird aus actions[] abgeleitet
       };
       this.currentJourney.viewedProducts.push(viewedProduct);
     }
@@ -922,7 +821,7 @@ class JourneyTrackingService {
     // Füge die AddToFavorites Aktion hinzu
     if (!viewedProduct.actions) viewedProduct.actions = [];
     const action: any = {
-      timestamp: Date.now(),
+          timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
       type: 'addedToFavorites',
       // NEU: Produkt-Details direkt in der Action
       productId: productId,
@@ -932,7 +831,7 @@ class JourneyTrackingService {
       fromFilters: JSON.parse(JSON.stringify(this.currentJourney.activeFilters || {})),
       price: priceInfo?.price,
       savings: priceInfo?.savings,
-      motivationSignals: this.calculateActionMotivation({
+      motivation: this.calculateActionMotivation({
         type: 'addedToFavorites',
         price: priceInfo?.price,
         savings: priceInfo?.savings
@@ -958,12 +857,13 @@ class JourneyTrackingService {
     }
     
     viewedProduct.actions.push(action);
-    viewedProduct.finalStatus!.wasAddedToFavorites = true;
+    // finalStatus wird aus actions[] abgeleitet
 
     console.log(`❤️ Add-to-Favorites mit Journey: ${productName.substring(0, 30)}...`, {
       discoveryMethod: this.currentJourney.discoveryMethod,
       activeFilters: this.currentJourney.activeFilters,
-      totalFavorites: this.currentJourney.addedToFavorites.length
+      totalFavorites: this.currentJourney.viewedProducts.reduce((count, p) => 
+        count + (this.getFinalStatusFromActions(p.actions).wasAddedToFavorites ? 1 : 0), 0)
     });
 
     // Track zu GA4
@@ -1017,43 +917,43 @@ class JourneyTrackingService {
       if (!this.currentJourney) return;
     }
 
-    this.currentJourney.purchased = {
-      products: products.map(p => ({
-        productId: p.productId,
-        productName: p.productName,
-        productType: p.productType,
-        finalPrice: p.finalPrice || 0,
-        finalSavings: p.finalSavings || 0
-      })),
-      timestamp: Date.now(),
-      totalSavings
-    };
+    // ENTFERNT: Alte purchased Object - alles ist jetzt in viewedProducts[].actions
     
-    // NEU: Update auch viewedProducts mit der Purchase-Aktion
+    // NEU: Update viewedProducts mit der Purchase-Aktion (ROBUST)
     products.forEach(product => {
-      const viewedProduct = this.currentJourney!.viewedProducts.find(p => p.productId === product.productId);
-      if (viewedProduct) {
-        if (!viewedProduct.actions) viewedProduct.actions = [];
-        viewedProduct.actions.push({
-          timestamp: Date.now(),
-          type: 'purchased',
-          // NEU: Produkt-Details direkt in der Action
+      let viewedProduct = this.currentJourney!.viewedProducts.find(p => p.productId === product.productId);
+      
+      // Falls Produkt noch nicht in viewedProducts, füge es hinzu
+      if (!viewedProduct) {
+        viewedProduct = {
           productId: product.productId,
           productName: product.productName,
           productType: product.productType,
-          productRef: doc(db, product.productType === 'brand' ? 'markenProdukte' : 'produkte', product.productId),
-          price: product.finalPrice,
-          savings: product.finalSavings,
-          motivationSignals: this.calculateActionMotivation({
-            type: 'purchased',
-            price: product.finalPrice,
-            savings: product.finalSavings
-          }, this.currentJourney!.activeFilters)
-        });
-        viewedProduct.finalStatus!.wasPurchased = true;
-        viewedProduct.finalStatus!.finalPrice = product.finalPrice;
-        viewedProduct.finalStatus!.finalSavings = product.finalSavings;
+          timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
+          discoveryContext: {
+            method: 'repurchase' // Aus Einkaufszettel
+          },
+          actions: []
+        };
+        this.currentJourney!.viewedProducts.push(viewedProduct);
       }
+      
+      if (!viewedProduct.actions) viewedProduct.actions = [];
+      viewedProduct.actions.push({
+        timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
+        type: 'purchased',
+        productId: product.productId,
+        productName: product.productName,
+        productType: product.productType,
+        productRef: doc(db, product.productType === 'brand' ? 'markenProdukte' : 'produkte', product.productId),
+        price: product.finalPrice,
+        savings: product.finalSavings,
+        motivation: this.calculateActionMotivation({
+          type: 'purchased',
+          price: product.finalPrice,
+          savings: product.finalSavings
+        }, this.currentJourney!.activeFilters)
+      });
     });
 
     console.log(`💰 Purchase mit Journey: ${products.length} Produkte, €${totalSavings.toFixed(2)}`, {
@@ -1076,67 +976,89 @@ class JourneyTrackingService {
       conversion_rate: products.length / Math.max(1, this.currentJourney.viewedProducts.length)
     }, userId);
 
-    // Journey nach Purchase abschließen
-    this.completeJourney('purchase');
+    // ENTFERNT: Journey sollte NICHT nach Purchase beendet werden!
+    // User kann weiter einkaufen, umwandeln, etc.
+    // this.completeJourney('purchase');
   }
 
 
   /**
-   * Berechnet Motivation Signals für eine spezifische Action
+   * Berechnet finalStatus aus actions[] (ersetzt das redundante finalStatus Feld)
+   */
+  private getFinalStatusFromActions(actions?: any[]): {
+    wasAddedToCart: boolean;
+    wasAddedToFavorites: boolean;
+    wasPurchased: boolean;
+    wasConverted: boolean;
+    wasRemovedFromCart: boolean;
+    totalInteractions: number;
+  } {
+    if (!actions || actions.length === 0) {
+      return {
+        wasAddedToCart: false,
+        wasAddedToFavorites: false,
+        wasPurchased: false,
+        wasConverted: false,
+        wasRemovedFromCart: false,
+        totalInteractions: 0
+      };
+    }
+
+    return {
+      wasAddedToCart: actions.some(a => a.type === 'addedToCart'),
+      wasAddedToFavorites: actions.some(a => a.type === 'addedToFavorites'),
+      wasPurchased: actions.some(a => a.type === 'purchased'),
+      wasConverted: actions.some(a => a.type === 'converted'),
+      wasRemovedFromCart: actions.some(a => a.type === 'removedFromCart'),
+      totalInteractions: actions.length
+    };
+  }
+
+  /**
+   * Berechnet vereinfachte Motivation für eine spezifische Action
    */
   private calculateActionMotivation(
     action: { type: string; price?: number; savings?: number; comparedProducts?: any[] },
     filters?: JourneyContext['activeFilters']
-  ): any {
-    const motivation = {
-      priceMotivation: 0,
-      brandMotivation: 0,
-      contentMotivation: 0,
-      savingsMotivation: 0,
-      reason: ''
+  ): { primary: string; confidence: number } {
+    
+    // Nur bei wichtigen Actions berechnen
+    if (!['addedToCart', 'purchased', 'converted'].includes(action.type)) {
+      return { primary: 'exploration', confidence: 0.5 };
+    }
+
+    let scores = {
+      price: 0,
+      savings: 0,
+      content: 0,
+      brand: 0
     };
 
-    // Preis-Motivation
-    if (filters?.sortBy === 'price' || filters?.priceRange) {
-      motivation.priceMotivation += 0.3;
-    }
-    if (action.savings && action.savings > 0) {
-      motivation.savingsMotivation = Math.min(action.savings / 5, 1); // Normalisiert auf 0-1
-      motivation.priceMotivation += 0.2;
-    }
-    if (action.comparedProducts?.length) {
-      // Wurde das günstigste Produkt gewählt?
-      const prices = action.comparedProducts.map(p => p.price || 0);
-      const minPrice = Math.min(...prices);
-      if (action.price && action.price <= minPrice * 1.1) {
-        motivation.priceMotivation += 0.3;
-        motivation.reason = 'Günstigstes Produkt gewählt';
-      }
-    }
-
-    // Content-Motivation (Allergene, Nährwerte)
-    if (filters?.allergens && Object.keys(filters.allergens).length > 0) {
-      motivation.contentMotivation += 0.5;
-    }
-    if (filters?.nutrition && Object.keys(filters.nutrition).length > 0) {
-      motivation.contentMotivation += 0.5;
-    }
-
-    // Brand-Motivation
+    // Preis-Signale
+    if (filters?.sortBy === 'price') scores.price += 0.5;
+    if (action.savings && action.savings > 1) scores.savings += 0.8;
+    
+    // Content-Signale (Allergene, Nährwerte)
+    if (filters?.allergens && Object.keys(filters.allergens).length > 0) scores.content += 0.7;
+    if (filters?.nutrition && Object.keys(filters.nutrition).length > 0) scores.content += 0.3;
+    
+    // Brand-Signale
     if (filters?.searchQuery) {
-      // Marken-Keywords in Suche?
-      const brandKeywords = ['milka', 'nutella', 'coca', 'haribo', 'ferrero'];
-      const searchLower = filters.searchQuery.toLowerCase();
-      if (brandKeywords.some(brand => searchLower.includes(brand))) {
-        motivation.brandMotivation = 0.8;
+       const brandKeywords = ['milka', 'nutella', 'coca', 'haribo', 'ferrero'];
+      if (brandKeywords.some(brand => filters.searchQuery!.toLowerCase().includes(brand))) {
+        scores.brand += 0.8;
       }
     }
 
-    // Normalisiere alle Werte auf 0-1
-    motivation.priceMotivation = Math.min(motivation.priceMotivation, 1);
-    motivation.contentMotivation = Math.min(motivation.contentMotivation, 1);
+    // Finde höchsten Score
+    const maxScore = Math.max(scores.price, scores.savings, scores.content, scores.brand);
+    if (maxScore === 0) return { primary: 'exploration', confidence: 0.3 };
 
-    return motivation;
+    const primary = Object.keys(scores).find(key => scores[key as keyof typeof scores] === maxScore) as string;
+    return {
+      primary: primary === 'price' || primary === 'savings' ? 'price' : primary,
+      confidence: Math.min(maxScore, 1)
+    };
   }
 
   /**
@@ -1253,6 +1175,34 @@ class JourneyTrackingService {
 
     const duration = Date.now() - this.currentJourney.startTime;
     
+    // WICHTIG: Prüfe ob noch Produkte im Einkaufszettel sind
+    const hasItemsInCart = this.currentJourney.viewedProducts.some(p => {
+      const status = this.getFinalStatusFromActions(p.actions);
+      return status.wasAddedToCart && !status.wasPurchased && !status.wasRemovedFromCart;
+    });
+    
+    // Wenn Timeout UND noch Produkte im Einkaufszettel → Journey NICHT beenden!
+    if (reason === 'timeout' && hasItemsInCart) {
+      console.log(`⏸️ Journey Timeout ABER ${this.currentJourney.viewedProducts.filter(p => {
+        const status = this.getFinalStatusFromActions(p.actions);
+        return status.wasAddedToCart && !status.wasPurchased && !status.wasRemovedFromCart;
+      }).length} Produkte noch im Einkaufszettel - Journey bleibt aktiv!`);
+      
+      // Restart Timeout für weitere 2 Stunden
+      if (this.journeyTimeout) {
+        clearTimeout(this.journeyTimeout);
+      }
+      this.journeyTimeout = setTimeout(() => {
+        this.completeJourney('timeout', userId);
+      }, 120 * 60 * 1000); // Weitere 2 Stunden
+      
+      // Journey als "inactive_with_cart" markieren aber NICHT beenden
+      if (userId) {
+        this.updateJourneyStatus('inactive_with_cart', userId);
+      }
+      return; // WICHTIG: Hier abbrechen, Journey nicht beenden!
+    }
+    
     // Wenn Timeout und Filter aktiv → als Abbruch markieren
     if (reason === 'timeout' && this.currentJourney.filterMetrics?.totalActiveFilters > 0) {
       this.trackJourneyAbandonment('filter_timeout', {
@@ -1264,9 +1214,9 @@ class JourneyTrackingService {
     
     console.log(`🏁 Journey Completed: ${reason} nach ${Math.round(duration/1000)}s`, {
       viewedProducts: this.currentJourney.viewedProducts.length,
-      addedToCart: !!this.currentJourney.addedToCart,
-      addedToFavorites: !!this.currentJourney.addedToFavorites,
-      purchased: !!this.currentJourney.purchased,
+      addedToCart: this.currentJourney.viewedProducts.some(p => this.getFinalStatusFromActions(p.actions).wasAddedToCart),
+      addedToFavorites: this.currentJourney.viewedProducts.some(p => this.getFinalStatusFromActions(p.actions).wasAddedToFavorites),
+      purchased: this.currentJourney.viewedProducts.some(p => this.getFinalStatusFromActions(p.actions).wasPurchased),
       abandoned: !!this.currentJourney.abandoned,
       filterMetrics: this.currentJourney.filterMetrics
     });
@@ -1303,7 +1253,7 @@ class JourneyTrackingService {
 
     this.currentJourney.abandoned = {
       reason,
-      timestamp: Date.now(),
+          timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
       context
     };
 
@@ -1355,6 +1305,7 @@ class JourneyTrackingService {
       console.error('❌ No userId provided for journey persistence!');
       return;
     }
+    
 
     try {
       // Bereite Journey-Daten vor und entferne undefined Werte
@@ -1376,10 +1327,19 @@ class JourneyTrackingService {
         discoveryMethod: journey.discoveryMethod,
         screenName: journey.screenName,
         
+        // NEU: Location-Daten (nur wenn vorhanden)
+        ...(journey.location && { location: journey.location }),
+        
         // Filter Context
         activeFilters: cleanActiveFilters,
         filterMetrics: journey.filterMetrics || {},
-        filterHistory: journey.filterHistory || [],
+        filterHistory: (journey.filterHistory || []).map(hist => ({
+          timestamp: hist.timestamp || Date.now(),
+          action: hist.action || 'added',
+          filterType: hist.filterType || '',
+          filterValue: hist.filterValue || '',
+          filtersSnapshot: hist.filtersSnapshot || {}
+        })),
         
         // Product Interactions - Clean undefined values
         viewedProducts: (journey.viewedProducts || []).map(product => {
@@ -1389,12 +1349,33 @@ class JourneyTrackingService {
             productName: product.productName,
             timestamp: product.timestamp,
             fromScreen: product.fromScreen,
-            discoveryContext: {
-              method: product.discoveryContext?.method || 'browse',
-              ...(product.discoveryContext?.searchQuery && { searchQuery: product.discoveryContext.searchQuery }),
-              ...(product.discoveryContext?.activeFiltersSnapshot && { activeFiltersSnapshot: product.discoveryContext.activeFiltersSnapshot }),
-              ...(product.discoveryContext?.comparedWithProducts && { comparedWithProducts: product.discoveryContext.comparedWithProducts })
-            }
+            discoveryContext: (() => {
+              const dc: any = {
+                method: product.discoveryContext?.method || 'browse'
+              };
+              
+              // NUR hinzufügen wenn WIRKLICH definiert (nicht undefined)
+              if (product.discoveryContext?.searchQuery !== undefined && product.discoveryContext?.searchQuery !== null) {
+                dc.searchQuery = product.discoveryContext.searchQuery;
+              }
+              if (product.discoveryContext?.activeFiltersSnapshot !== undefined && product.discoveryContext?.activeFiltersSnapshot !== null) {
+                dc.activeFiltersSnapshot = product.discoveryContext.activeFiltersSnapshot;
+              }
+              if (product.discoveryContext?.comparedWithProducts !== undefined && product.discoveryContext?.comparedWithProducts !== null) {
+                dc.comparedWithProducts = product.discoveryContext.comparedWithProducts;
+              }
+              if (product.discoveryContext?.fromProductId !== undefined && product.discoveryContext?.fromProductId !== null) {
+                dc.fromProductId = product.discoveryContext.fromProductId;
+              }
+              if (product.discoveryContext?.fromProductName !== undefined && product.discoveryContext?.fromProductName !== null) {
+                dc.fromProductName = product.discoveryContext.fromProductName;
+              }
+              if (product.discoveryContext?.market !== undefined && product.discoveryContext?.market !== null) {
+                dc.market = product.discoveryContext.market;
+              }
+              
+              return dc;
+            })()
           };
           
           // Optional fields - nur wenn definiert und nicht null
@@ -1402,64 +1383,40 @@ class JourneyTrackingService {
             cleanProduct.position = product.position;
           }
           
-          // Clean actions array
+          // Clean actions array - ONLY ESSENTIAL FIELDS!
           if (product.actions && product.actions.length > 0) {
             cleanProduct.actions = product.actions.map(action => {
               const cleanAction: any = {
-                timestamp: action.timestamp,
-                type: action.type
+                timestamp: action.timestamp || Date.now(),
+                type: action.type || 'viewed'
               };
               
-              // NEU: Produkt-Details in der Action
-              if (action.productId) cleanAction.productId = action.productId;
-              if (action.productName) cleanAction.productName = action.productName;
-              if (action.productType) cleanAction.productType = action.productType;
-              if (action.productRef) cleanAction.productRef = action.productRef;
+              // ONLY add fields that are NOT undefined
+              const safeFields = ['productId', 'productName', 'productType', 'fromScreen', 'price', 'savings', 'market'];
+              safeFields.forEach(field => {
+                if (action[field] !== undefined && action[field] !== null) {
+                  cleanAction[field] = action[field];
+                }
+              });
               
-              // NEU: Motivation Signals
-              if (action.motivationSignals) {
-                cleanAction.motivationSignals = action.motivationSignals;
+              // Handle motivation safely
+              if (action.motivation && typeof action.motivation === 'object') {
+                cleanAction.motivation = {
+                  primary: action.motivation.primary || 'exploration',
+                  confidence: action.motivation.confidence || 0.5
+                };
               }
               
-              // Optional action fields
-              if (action.fromScreen) cleanAction.fromScreen = action.fromScreen;
-              if (action.fromFilters) cleanAction.fromFilters = action.fromFilters;
-              if (action.price !== undefined) cleanAction.price = action.price;
-              if (action.savings !== undefined) cleanAction.savings = action.savings;
-              if (action.comparedProducts) cleanAction.comparedProducts = action.comparedProducts;
-              
-              // Clean comparisonContext if present
-              if (action.comparisonContext) {
-                cleanAction.comparisonContext = {};
-                if (action.comparisonContext.mainProductId) {
-                  cleanAction.comparisonContext.mainProductId = action.comparisonContext.mainProductId;
-                }
-                if (action.comparisonContext.mainProductName) {
-                  cleanAction.comparisonContext.mainProductName = action.comparisonContext.mainProductName;
-                }
-                if (action.comparisonContext.mainProductType) {
-                  cleanAction.comparisonContext.mainProductType = action.comparisonContext.mainProductType;
-                }
-                if (action.comparisonContext.actionProduct) {
-                  cleanAction.comparisonContext.actionProduct = action.comparisonContext.actionProduct;
-                }
+              // Handle DocumentReference fields safely
+              if (action.productRef && typeof action.productRef === 'object') {
+                cleanAction.productRef = action.productRef;
               }
-              
-      // Conversion fields
-      if (action.toProductId) cleanAction.toProductId = action.toProductId;
-      if (action.toProductName) cleanAction.toProductName = action.toProductName;
-      if ((action as any).toProductRef) cleanAction.toProductRef = (action as any).toProductRef;
-              if (action.market) cleanAction.market = action.market;
-              if (action.viewDuration !== undefined) cleanAction.viewDuration = action.viewDuration;
               
               return cleanAction;
             });
           }
           
-          // Final status
-          if (product.finalStatus) {
-            cleanProduct.finalStatus = product.finalStatus;
-          }
+          // ENTFERNT: finalStatus wird aus actions[] abgeleitet
           
           // NEU: Comparison Result
           if (product.comparisonResult) {
@@ -1470,41 +1427,27 @@ class JourneyTrackingService {
         }),
         viewedProductsCount: journey.viewedProducts.length,
         
-      // Conversions - Clean undefined values from arrays
-      addedToCart: (journey.addedToCart || []).map(item => {
-        const cleanItem: any = {
-          productId: item.productId,
-          productName: item.productName,
-          productType: item.productType,
-          timestamp: item.timestamp,
-          fromFilters: item.fromFilters || {},
-          priceAtTime: item.priceAtTime || 0,
-          savingsAtTime: item.savingsAtTime || 0
-        };
-        if (item.comparedProducts) cleanItem.comparedProducts = item.comparedProducts;
-        if (item.savingsRank !== undefined) cleanItem.savingsRank = item.savingsRank;
-        if (item.laterAction) cleanItem.laterAction = item.laterAction;
-        return cleanItem;
-        }),
-        addedToCartCount: journey.addedToCart?.length || 0,
+      // ENTFERNT: Alte Arrays - alles ist jetzt in viewedProducts[].actions
         
         // Converted (Markenprodukt zu NoName)
-        converted: journey.converted || [],
+        converted: (journey.converted || []).map(conv => ({
+          timestamp: conv.timestamp,
+          products: (conv.products || []).map(prod => ({
+            fromProductId: prod.fromProductId || '',
+            fromProductName: prod.fromProductName || '',
+            fromProductPrice: prod.fromProductPrice || 0,
+            toProductId: prod.toProductId || '',
+            toProductName: prod.toProductName || '',
+            toProductPrice: prod.toProductPrice || 0,
+            savings: prod.savings || 0,
+            market: prod.market || '',
+            marketId: typeof prod.marketId === 'string' ? prod.marketId : (prod.marketId?.id || '')
+          })),
+          totalSavings: conv.totalSavings || 0,
+          fromFilters: conv.fromFilters || {}
+        })),
         convertedCount: journey.converted?.length || 0,
-      addedToFavorites: (journey.addedToFavorites || []).map(item => {
-        const cleanItem: any = {
-          productId: item.productId,
-          productName: item.productName,
-          productType: item.productType,
-          timestamp: item.timestamp,
-          fromFilters: item.fromFilters || {},
-          priceAtTime: item.priceAtTime || 0,
-          savingsAtTime: item.savingsAtTime || 0
-        };
-        if (item.laterAction) cleanItem.laterAction = item.laterAction;
-        return cleanItem;
-      }),
-      addedToFavoritesCount: journey.addedToFavorites?.length || 0,
+      // ENTFERNT: Alte addedToFavorites Array
       
       // Motivations-Signale
       motivationSignals: journey.motivationSignals || {
@@ -1516,15 +1459,12 @@ class JourneyTrackingService {
       },
         
         // Status
-        status: journey.purchased ? 'purchased' : 
-                (journey.addedToCart && journey.addedToCart.length > 0) ? 'in_cart' :
+        status: journey.viewedProducts.some(p => this.getFinalStatusFromActions(p.actions).wasPurchased) ? 'purchased' : 
+                journey.viewedProducts.some(p => this.getFinalStatusFromActions(p.actions).wasAddedToCart) ? 'in_cart' :
                 journey.abandoned ? 'abandoned' : 'active'
       };
       
       // Nur hinzufügen wenn nicht null
-      if (journey.purchased) {
-        journeyData.purchased = journey.purchased;
-      }
       if (journey.abandoned) {
         journeyData.abandoned = journey.abandoned;
       }
@@ -1550,8 +1490,12 @@ class JourneyTrackingService {
         console.log(`💾 Journey updated in Firestore: ${journey.firestoreDocId}`);
       }
       
-    } catch (error) {
+    } catch (error) { 
       console.error('❌ Error persisting journey to Firestore:', error);
+
+    
+      
+      throw error;
     }
   }
 
@@ -1590,7 +1534,7 @@ class JourneyTrackingService {
     // WICHTIG: Journey läuft IMMER weiter während der gesamten App-Session!
     // Journeys werden NUR beendet bei:
     // 1. Explizitem Journey-Ende (z.B. Purchase)
-    // 2. Timeout (30 Minuten)
+    // 2. Timeout (2 Stunden)
     // 3. App wird geschlossen
     
     if (this.currentJourney) {
@@ -1602,10 +1546,79 @@ class JourneyTrackingService {
       if (userId) {
         this.persistJourneyToFirestore(userId);
       }
+    } else if (!this.isLoadingJourney) {
+      // Journey noch nicht geladen UND nicht gerade am Laden - starte neue
+      console.log('⏳ Journey noch nicht aktiv - starte neue...');
+      this.startJourney('browse', screenName, undefined, userId);
     } else {
-      // Journey noch nicht geladen - warte kurz
-      console.log('⏳ Journey noch nicht aktiv - warte auf Initialisierung...');
-      // Keine Aktion nötig, loadActiveJourney startet automatisch eine neue Journey
+      console.log('⏳ Journey wird geladen - warte...');
+    }
+  }
+
+  /**
+   * Trackt das Löschen von Produkten aus dem Einkaufszettel (ROBUSTE VERSION)
+   */
+  trackRemoveFromCart(
+    productId: string,
+    productName: string,
+    productType: 'brand' | 'noname',
+    userId?: string
+  ): void {
+    if (!this.currentJourney) {
+      console.warn('⚠️ Remove-from-Cart ohne aktive Journey - starte neue!');
+      this.startJourney('repurchase', 'shopping-list', undefined, userId);
+      if (!this.currentJourney) return;
+    }
+
+    // NEU: Finde oder erstelle viewedProduct Eintrag
+    let viewedProduct = this.currentJourney.viewedProducts.find(p => p.productId === productId);
+    
+    if (!viewedProduct) {
+      // Falls Produkt noch nicht in viewedProducts, füge es hinzu
+      viewedProduct = {
+        productId,
+        productName,
+        productType,
+        timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
+        discoveryContext: {
+          method: 'repurchase', // Aus Einkaufszettel
+          fromScreen: 'shopping-list'
+        },
+        actions: []
+      };
+      this.currentJourney.viewedProducts.push(viewedProduct);
+    }
+
+    if (!viewedProduct.actions) viewedProduct.actions = [];
+    viewedProduct.actions.push({
+          timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
+      type: 'removedFromCart',
+      productId: productId,
+      productName: productName,
+      productType: productType,
+      productRef: doc(db, productType === 'brand' ? 'markenProdukte' : 'produkte', productId),
+      motivation: this.calculateActionMotivation({
+        type: 'removedFromCart'
+      }, this.currentJourney.activeFilters)
+    });
+    
+    console.log(`🗑️ Removed from Cart: ${productName.substring(0, 30)}...`, {
+      productType,
+      journeyDuration: Date.now() - this.currentJourney.startTime
+    });
+
+    // Track zu GA4
+    analyticsService.trackEvent({
+      event_name: 'remove_from_cart',
+      user_id: userId,
+      product_id: productId,
+      product_name: productName,
+      product_type: productType
+    }, userId);
+
+    // Persistiere zu Firestore
+    if (userId) {
+      this.persistJourneyToFirestore(userId);
     }
   }
 
@@ -1613,9 +1626,16 @@ class JourneyTrackingService {
    * Trackt wenn Markenprodukte zu NoName umgewandelt werden
    */
   trackProductConversion(conversions: any[], productDetails: any[], userId?: string): void {
-    if (!this.currentJourney || !userId) {
-      console.warn('⚠️ Product-Conversion ohne aktive Journey oder User!');
+    if (!userId) {
+      console.warn('⚠️ Product-Conversion ohne User!');
       return;
+    }
+    
+    // NEU: Wenn keine Journey aktiv, starte eine neue
+    if (!this.currentJourney) {
+      console.warn('⚠️ Product-Conversion ohne aktive Journey - starte neue!');
+      this.startJourney('repurchase', 'shopping-list', undefined, userId);
+      if (!this.currentJourney) return;
     }
 
     // Track Conversion Event mit Details
@@ -1629,30 +1649,96 @@ class JourneyTrackingService {
       const savings = (details?.fromProduct?.preis || 0) - (details?.toProduct?.preis || 0);
       const market = details?.toProduct?.discounter?.name || 'Unbekannt';
       
-      // NEU: Update viewedProducts mit der Conversion-Aktion
-      const viewedProduct = this.currentJourney!.viewedProducts.find(p => p.productId === fromProductId);
-      if (viewedProduct) {
-        if (!viewedProduct.actions) viewedProduct.actions = [];
-        viewedProduct.actions.push({
-          timestamp: Date.now(),
+      // NEU: Update viewedProducts mit der Conversion-Aktion (ROBUST)
+      let viewedProduct = this.currentJourney!.viewedProducts.find(p => p.productId === fromProductId);
+      
+      // Falls Produkt noch nicht in viewedProducts, füge es hinzu
+      if (!viewedProduct) {
+          viewedProduct = {
+            productId: fromProductId,
+            productName: details?.fromProduct?.name || 'Markenprodukt',
+            productType: 'brand',
+            timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
+            discoveryContext: {
+              method: 'conversion_source' // Quelle für Conversion (aus Einkaufszettel)
+            },
+            actions: []
+          };
+        this.currentJourney!.viewedProducts.push(viewedProduct);
+      }
+      
+      if (!viewedProduct.actions) viewedProduct.actions = [];
+      viewedProduct.actions.push({
+        timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
+        type: 'converted',
+        productId: fromProductId,
+        productName: details?.fromProduct?.name || 'Markenprodukt',
+        productType: 'brand', // Conversion ist immer von Marke zu NoName
+        productRef: doc(db, 'markenProdukte', fromProductId),
+        toProductId: toProductId,
+        toProductName: details?.toProduct?.name || 'NoName Produkt',
+        toProductRef: doc(db, 'produkte', toProductId),
+        market: market,
+        marketId: (() => {
+          const discounter = details?.toProduct?.discounter;
+          if (!discounter) return '';
+          if (typeof discounter === 'string') return discounter;
+          if (discounter.id) return String(discounter.id);
+          if (discounter.name) return String(discounter.name);
+          if (discounter.path) return String(discounter.path);
+          return '';
+        })(),
+        fromProductPrice: details?.fromProduct?.preis || 0,
+        toProductPrice: details?.toProduct?.preis || 0,
+        savings: savings,
+        motivation: this.calculateActionMotivation({
           type: 'converted',
-          // NEU: Produkt-Details direkt in der Action
-          productId: fromProductId,
-          productName: details?.fromProduct?.name || 'Markenprodukt',
-          productType: 'brand', // Conversion ist immer von Marke zu NoName
-          productRef: doc(db, 'markenProdukte', fromProductId),
-          toProductId: toProductId,
-          toProductName: details?.toProduct?.name || 'NoName Produkt',
-          toProductRef: doc(db, 'produkte', toProductId), // NEU: Referenz zum NoName Produkt
+          savings: savings
+        }, this.currentJourney!.activeFilters)
+      });
+      
+      // NEU: Füge auch das neue NoName Produkt zu viewedProducts hinzu
+      // mit klarer Markierung dass es aus einer Conversion stammt
+      const convertedProduct = {
+        productId: toProductId,
+        productName: details?.toProduct?.name || 'NoName Produkt',
+        productType: 'noname' as const,
+        timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
+        fromScreen: this.currentJourney!.screenName, // WICHTIG: fromScreen ist REQUIRED!
+        discoveryContext: {
+          method: 'conversion_result' as const, // Klare Markierung: Ergebnis einer Conversion
+          fromProductId: fromProductId,
+          fromProductName: details?.fromProduct?.name || 'Markenprodukt',
+          market: market
+        },
+        actions: [{
+          timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
+          type: 'converted_from' as const, // Neue Action-Type für konvertierte Produkte
+          productId: toProductId,
+          productName: details?.toProduct?.name || 'NoName Produkt',
+          productType: 'noname' as const,
+          productRef: doc(db, 'produkte', toProductId),
+          fromProductId: fromProductId,
+          fromProductName: details?.fromProduct?.name || 'Markenprodukt',
+          fromProductRef: doc(db, 'markenProdukte', fromProductId),
           market: market,
+          marketId: (() => {
+          const discounter = details?.toProduct?.discounter;
+          if (!discounter) return '';
+          if (typeof discounter === 'string') return discounter;
+          if (discounter.id) return String(discounter.id);
+          if (discounter.name) return String(discounter.name);
+          if (discounter.path) return String(discounter.path);
+          return '';
+        })(),
           savings: savings,
-          motivationSignals: this.calculateActionMotivation({
+          motivation: this.calculateActionMotivation({
             type: 'converted',
             savings: savings
           }, this.currentJourney!.activeFilters)
-        });
-        viewedProduct.finalStatus!.wasConverted = true;
-      }
+        }]
+      };
+      this.currentJourney!.viewedProducts.push(convertedProduct);
       
       return {
         fromProductId: fromProductId,
@@ -1663,14 +1749,27 @@ class JourneyTrackingService {
         toProductPrice: details?.toProduct?.preis || 0,
         savings: savings,
         market: market,
-        marketId: details?.toProduct?.discounter?.id || ''
+        marketId: (() => {
+          const discounter = details?.toProduct?.discounter;
+          if (!discounter) return '';
+          if (typeof discounter === 'string') return discounter;
+          if (discounter.id) return String(discounter.id);
+          if (discounter.name) return String(discounter.name);
+          if (discounter.path) return String(discounter.path);
+          return '';
+        })()
       };
     });
     
     const totalSavings = convertedProducts.reduce((sum, p) => sum + p.savings, 0);
     
+    // Stelle sicher, dass converted Array existiert (für ältere Journeys)
+    if (!this.currentJourney.converted) {
+      this.currentJourney.converted = [];
+    }
+    
     this.currentJourney.converted.push({
-      timestamp: Date.now(),
+          timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
       products: convertedProducts,
       totalSavings: totalSavings,
       fromFilters: JSON.parse(JSON.stringify(this.currentJourney.activeFilters || {}))
@@ -1698,51 +1797,272 @@ class JourneyTrackingService {
     this.persistJourneyToFirestore(userId);
   }
 
+  // ENTFERNT: Doppelte Methode - siehe robuste Version oben
+
   /**
-   * Trackt wenn ein Produkt aus dem Warenkorb gelöscht wird
+   * NEU: Trackt Purchase in einer SPEZIFISCHEN Journey (aus Einkaufszettel)
    */
-  trackRemoveFromCart(
+  async trackPurchaseInSpecificJourney(
+    journeyId: string,
+    products: { 
+      productId: string; 
+      productName: string; 
+      productType: 'brand' | 'noname';
+      finalPrice?: number;
+      finalSavings?: number;
+    }[],
+    totalSavings: number,
+    userId: string
+  ): Promise<void> {
+    
+    try {
+      const { query, where, getDocs, updateDoc, collection } = await import('firebase/firestore');
+      
+      // Finde die spezifische Journey
+      const userJourneysRef = collection(db, 'users', userId, 'journeys');
+      const q = query(userJourneysRef, where('journeyId', '==', journeyId));
+      const snapshot = await getDocs(q);
+      
+      if (!snapshot.empty) {
+        const journeyDoc = snapshot.docs[0];
+        const journeyData = journeyDoc.data() as JourneyContext;
+        
+        // Update viewedProducts mit Purchase Actions
+        const updatedViewedProducts = [...(journeyData.viewedProducts || [])];
+        
+        products.forEach(product => {
+          let viewedProduct = updatedViewedProducts.find(p => p.productId === product.productId);
+          
+          if (!viewedProduct) {
+            // Produkt war nicht in der Journey - füge es hinzu
+            viewedProduct = {
+              productId: product.productId,
+              productName: product.productName,
+              productType: product.productType,
+              timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
+              discoveryContext: {
+                method: 'repurchase',
+                fromScreen: 'shopping-list'
+              },
+              actions: []
+            };
+            updatedViewedProducts.push(viewedProduct);
+          }
+          
+          if (!viewedProduct.actions) viewedProduct.actions = [];
+          // SICHERE Action mit guaranteed Werten
+          const safeAction: any = {
+            timestamp: Date.now(),
+            type: 'purchased'
+          };
+          
+          // NUR definierte Werte hinzufügen
+          if (product.productId) safeAction.productId = product.productId;
+          if (product.productName) safeAction.productName = product.productName;
+          if (product.productType) safeAction.productType = product.productType;
+          if (product.finalPrice !== undefined) safeAction.price = product.finalPrice;
+          if (product.finalSavings !== undefined) safeAction.savings = product.finalSavings;
+          if (product.productId) {
+            safeAction.productRef = doc(db, product.productType === 'brand' ? 'markenProdukte' : 'produkte', product.productId);
+          }
+          safeAction.motivation = { primary: 'price', confidence: 0.8 };
+          
+          viewedProduct.actions.push(safeAction);
+        });
+        
+        // Update die Journey in Firestore
+        await updateDoc(journeyDoc.ref, {
+          viewedProducts: updatedViewedProducts,
+          lastUpdated: serverTimestamp()
+          // ENTFERNT: finalStatus und completedAt - Journey soll weiterlaufen!
+        });
+        
+        console.log(`💰 Purchase in Original Journey ${journeyId} tracked: ${products.length} Produkte`, {
+          productIds: products.map(p => p.productId),
+          updatedProductsCount: updatedViewedProducts.length,
+          actionsAdded: products.length
+        });
+      } else {
+        console.warn(`⚠️ Journey ${journeyId} nicht gefunden - verwende normale trackPurchase`);
+        // Fallback zu normaler trackPurchase
+        this.trackPurchase(products, totalSavings, userId);
+      }
+    } catch (error) {
+      console.error('❌ Error tracking purchase in specific journey:', error);
+      // Fallback zu normaler trackPurchase
+      this.trackPurchase(products, totalSavings, userId);
+    }
+  }
+
+  /**
+   * NEU: Trackt BULK Purchase in einer SPEZIFISCHEN Journey (vermeidet Race Conditions)
+   */
+  async trackBulkPurchaseInSpecificJourney(
+    journeyId: string,
+    products: {
+      productId: string;
+      productName: string;
+      productType: 'brand' | 'noname';
+      finalPrice?: number;
+      finalSavings?: number;
+    }[],
+    totalSavings: number,
+    userId: string
+  ): Promise<void> {
+    try {
+      const { query, where, getDocs, updateDoc, collection } = await import('firebase/firestore');
+      
+      // Finde die spezifische Journey
+      const userJourneysRef = collection(db, 'users', userId, 'journeys');
+      const q = query(userJourneysRef, where('journeyId', '==', journeyId));
+      const snapshot = await getDocs(q);
+      
+      if (!snapshot.empty) {
+        const journeyDoc = snapshot.docs[0];
+        const journeyData = journeyDoc.data() as JourneyContext;
+        
+        // Update alle Produkte in EINER Operation
+        const updatedViewedProducts = [...(journeyData.viewedProducts || [])];
+        
+        products.forEach(product => {
+          let viewedProduct = updatedViewedProducts.find(p => p.productId === product.productId);
+          
+          if (!viewedProduct) {
+            // Produkt war nicht in der Journey - füge es hinzu
+            viewedProduct = {
+              productId: product.productId,
+              productName: product.productName,
+              productType: product.productType,
+              timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
+              discoveryContext: {
+                method: 'repurchase',
+                fromScreen: 'shopping-list'
+              },
+              actions: []
+            };
+            updatedViewedProducts.push(viewedProduct);
+          }
+          
+          if (!viewedProduct.actions) viewedProduct.actions = [];
+          // SICHERE Action mit guaranteed Werten
+          const safeAction: any = {
+            timestamp: Date.now(),
+            type: 'purchased'
+          };
+          
+          // NUR definierte Werte hinzufügen
+          if (product.productId) safeAction.productId = product.productId;
+          if (product.productName) safeAction.productName = product.productName;
+          if (product.productType) safeAction.productType = product.productType;
+          if (product.finalPrice !== undefined) safeAction.price = product.finalPrice;
+          if (product.finalSavings !== undefined) safeAction.savings = product.finalSavings;
+          if (product.productId) {
+            safeAction.productRef = doc(db, product.productType === 'brand' ? 'markenProdukte' : 'produkte', product.productId);
+          }
+          safeAction.motivation = { primary: 'price', confidence: 0.8 };
+          
+          viewedProduct.actions.push(safeAction);
+        });
+        
+        // EINE Update-Operation für alle Produkte
+        await updateDoc(journeyDoc.ref, {
+          viewedProducts: updatedViewedProducts,
+          lastUpdated: serverTimestamp()
+        });
+        
+        console.log(`💰 BULK Purchase in Original Journey ${journeyId} tracked: ${products.length} Produkte`, {
+          productIds: products.map(p => p.productId),
+          updatedProductsCount: updatedViewedProducts.length,
+          actionsAdded: products.length
+        });
+      } else {
+        console.warn(`⚠️ Journey ${journeyId} nicht gefunden - verwende normale trackPurchase`);
+        this.trackPurchase(products, totalSavings, userId);
+      }
+    } catch (error) {
+      console.error('❌ Error tracking bulk purchase in specific journey:', error);
+      this.trackPurchase(products, totalSavings, userId);
+    }
+  }
+
+  /**
+   * NEU: Trackt Remove in einer SPEZIFISCHEN Journey (aus Einkaufszettel)
+   */
+  async trackRemoveInSpecificJourney(
+    journeyId: string,
     productId: string,
     productName: string,
-    productType: 'noname' | 'brand',
-    userId?: string
-  ): void {
-    if (!this.currentJourney) return;
-    
-    // NEU: Update viewedProducts mit der Remove-Aktion
-    const viewedProduct = this.currentJourney.viewedProducts.find(p => p.productId === productId);
-    if (viewedProduct) {
-      if (!viewedProduct.actions) viewedProduct.actions = [];
-      viewedProduct.actions.push({
-        timestamp: Date.now(),
-        type: 'removedFromCart',
-        // NEU: Produkt-Details direkt in der Action
-        productId: productId,
-        productName: productName,
-        productType: productType,
-        productRef: doc(db, productType === 'brand' ? 'markenProdukte' : 'produkte', productId),
-        motivationSignals: this.calculateActionMotivation({
+    productType: 'brand' | 'noname',
+    userId: string
+  ): Promise<void> {
+    try {
+      const { query, where, getDocs, updateDoc, collection } = await import('firebase/firestore');
+      
+      // Finde die spezifische Journey
+      const userJourneysRef = collection(db, 'users', userId, 'journeys');
+      const q = query(userJourneysRef, where('journeyId', '==', journeyId));
+      const snapshot = await getDocs(q);
+      
+      if (!snapshot.empty) {
+        const journeyDoc = snapshot.docs[0];
+        const journeyData = journeyDoc.data() as JourneyContext;
+        
+        // Update viewedProducts mit Remove Action
+        const updatedViewedProducts = [...(journeyData.viewedProducts || [])];
+        
+        let viewedProduct = updatedViewedProducts.find(p => p.productId === productId);
+        
+        if (!viewedProduct) {
+          // Produkt war nicht in der Journey - füge es hinzu
+          viewedProduct = {
+            productId,
+            productName,
+            productType,
+            timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
+            discoveryContext: {
+              method: 'repurchase',
+              fromScreen: 'shopping-list'
+            },
+            actions: []
+          };
+          updatedViewedProducts.push(viewedProduct);
+        }
+        
+        if (!viewedProduct.actions) viewedProduct.actions = [];
+        // SICHERE Action mit guaranteed Werten
+        const safeAction: any = {
+          timestamp: Date.now(),
           type: 'removedFromCart'
-        }, this.currentJourney.activeFilters)
-      });
-      viewedProduct.finalStatus!.wasAddedToCart = false; // Reset Status
+        };
+        
+        // NUR definierte Werte hinzufügen
+        if (productId) safeAction.productId = productId;
+        if (productName) safeAction.productName = productName;
+        if (productType) safeAction.productType = productType;
+        if (productId) {
+          safeAction.productRef = doc(db, productType === 'brand' ? 'markenProdukte' : 'produkte', productId);
+        }
+        safeAction.motivation = { primary: 'exploration', confidence: 0.5 };
+        
+        viewedProduct.actions.push(safeAction);
+        
+        // Update die Journey in Firestore
+        await updateDoc(journeyDoc.ref, {
+          viewedProducts: updatedViewedProducts,
+          lastUpdated: serverTimestamp()
+        });
+        
+        console.log(`🗑️ Remove from Cart in Original Journey ${journeyId} tracked: ${productName}`);
+      } else {
+        console.warn(`⚠️ Journey ${journeyId} nicht gefunden - verwende normale trackRemoveFromCart`);
+        // Fallback zu normaler trackRemoveFromCart
+        this.trackRemoveFromCart(productId, productName, productType, userId);
+      }
+    } catch (error) {
+      console.error('❌ Error tracking remove in specific journey:', error);
+      // Fallback zu normaler trackRemoveFromCart
+      this.trackRemoveFromCart(productId, productName, productType, userId);
     }
-    
-    console.log(`🗑️ Removed from Cart: ${productName.substring(0, 30)}...`, {
-      productType,
-      journeyId: this.currentJourney.journeyId
-    });
-    
-    // Track zu GA4
-    analyticsService.trackEvent({
-      event_name: 'remove_from_cart',
-      event_category: 'conversion',
-      product_id: productId,
-      product_name: productName,
-      product_type: productType,
-      journey_id: this.currentJourney.journeyId,
-      discovery_method: this.currentJourney.discoveryMethod
-    }, userId);
   }
 
   /**
@@ -1820,6 +2140,7 @@ class JourneyTrackingService {
       }, userId);
     }
   }
+
 }
 
 export default JourneyTrackingService.getInstance();

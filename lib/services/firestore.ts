@@ -2127,24 +2127,28 @@ export class FirestoreService {
         if (productData) {
           // Track mit Journey
           const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
-          journeyTrackingService.trackRemoveFromCart(
-            productData.id,
-            productData.name || productData.produktName || 'Unbekannt',
-            cartData.isMarkenProdukt ? 'brand' : 'noname',
-            userId
-          );
+          
+          // NEU: Verwende die gespeicherte journeyId!
+          if (cartData.journeyId) {
+            await journeyTrackingService.trackRemoveInSpecificJourney(
+              cartData.journeyId,
+              productData.id,
+              productData.name || productData.produktName || 'Unbekannt',
+              cartData.isMarkenProdukt ? 'brand' : 'noname',
+              userId
+            );
+          } else {
+            // Fallback: Normale trackRemoveFromCart wenn keine journeyId
+            journeyTrackingService.trackRemoveFromCart(
+              productData.id,
+              productData.name || productData.produktName || 'Unbekannt',
+              cartData.isMarkenProdukt ? 'brand' : 'noname',
+              userId
+            );
+          }
         }
         
-        // Update Original-Journey wenn vorhanden
-        if (cartData.journeyId) {
-          const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
-          await journeyTrackingService.updateOriginalJourney(cartData.journeyId, {
-            type: 'removed',
-            productId: cartData.markenProdukt?.id || cartData.handelsmarkenProdukt?.id,
-            timestamp: Date.now(),
-            laterUpdate: true
-          }, userId);
-        }
+        // ENTFERNT: laterUpdates - Tracking passiert direkt in aktueller Journey
       }
       
       await deleteDoc(cartItemRef);
@@ -2179,22 +2183,65 @@ export class FirestoreService {
         gekauft: true
       });
       
-      // 4. Update Original-Journey wenn vorhanden
-      if (cartData.journeyId) {
-        // Hole aktuelle Preis-Informationen
-        const productData = cartData.markenProdukt || cartData.handelsmarkenProdukt;
-        const finalPrice = cartData.priceAtTime || productData?.preis || 0;
-        const finalSavings = cartData.savingsAtTime || 0;
-        
+      // 4. Track Purchase in der ORIGINAL Journey (nicht neue!)
+      // Hole die richtigen Produktdaten aus dem cartData
+      let productId: string = '';
+      let productName: string = '';
+      let productType: 'brand' | 'noname' = 'noname';
+      let finalPrice: number = 0;
+      let finalSavings: number = 0;
+
+      if (cartData.markenProdukt) {
+        // Markenprodukt
+        const productRef = cartData.markenProdukt;
+        productId = productRef.id || '';
+        productType = 'brand';
+        // Name aus cartData oder aus dem geladenen Produktdaten
+        productName = cartData.name || 'Markenprodukt';
+        finalPrice = cartData.priceAtTime || 0;
+        finalSavings = cartData.savingsAtTime || 0;
+      } else if (cartData.handelsmarkenProdukt) {
+        // NoName Produkt
+        const productRef = cartData.handelsmarkenProdukt;
+        productId = productRef.id || '';
+        productType = 'noname';
+        // Name aus cartData
+        productName = cartData.name || 'NoName Produkt';
+        finalPrice = cartData.priceAtTime || 0;
+        finalSavings = cartData.savingsAtTime || 0;
+      }
+
+      if (productId) {
         const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
-        await journeyTrackingService.updateOriginalJourney(cartData.journeyId, {
-          type: 'purchase',
-          productId: productData?.id,
-          timestamp: Date.now(),
-          laterUpdate: true,
-          finalPrice: finalPrice,
-          finalSavings: finalSavings
-        }, userId);
+        
+        
+        // NEU: Verwende die gespeicherte journeyId!
+        if (cartData.journeyId) {
+          await journeyTrackingService.trackPurchaseInSpecificJourney(
+            cartData.journeyId,
+            [{
+              productId: productId,
+              productName: productName,
+              productType: productType,
+              finalPrice: finalPrice,
+              finalSavings: finalSavings
+            }],
+            finalSavings,
+            userId
+          );
+        } else {
+          // Fallback: Normale trackPurchase wenn keine journeyId
+          console.warn('⚠️ Keine journeyId im cartData - verwende normale trackPurchase');
+          journeyTrackingService.trackPurchase([{
+            productId: productId,
+            productName: productName,
+            productType: productType,
+            finalPrice: finalPrice,
+            finalSavings: finalSavings
+          }], finalSavings, userId);
+        }
+      } else {
+        console.error('❌ Keine productId gefunden für Journey-Tracking!', cartData);
       }
       
       console.log('✅ Marked as purchased and added to history:', itemId);
@@ -2204,6 +2251,39 @@ export class FirestoreService {
     }
   }
   
+  /**
+   * Markiert ein Produkt als gekauft OHNE Journey-Tracking (für Bulk-Operations)
+   */
+  static async markAsPurchasedWithoutTracking(userId: string, itemId: string): Promise<void> {
+    try {
+      const userRef = doc(db, 'users', userId);
+      const cartItemRef = doc(userRef, 'einkaufswagen', itemId);
+      
+      // 1. Lade Einkaufszettel-Item
+      const cartItemDoc = await getDoc(cartItemRef);
+      if (!cartItemDoc.exists()) {
+        throw new Error('Einkaufszettel-Item nicht gefunden');
+      }
+      
+      const cartData = cartItemDoc.data();
+      
+      // 2. Erstelle Kaufhistorie-Eintrag
+      await this.createPurchaseHistoryEntry(userId, cartData);
+      
+      // 3. Markiere im Einkaufszettel als gekauft
+      await updateDoc(cartItemRef, {
+        gekauft: true
+      });
+      
+      // KEIN Journey-Tracking hier! Das passiert im Bulk
+      
+      console.log('✅ Marked as purchased (without tracking):', itemId);
+    } catch (error) {
+      console.error('Error marking as purchased:', error);
+      throw error;
+    }
+  }
+
   /**
    * Erstellt einen Kaufhistorie-Eintrag mit vollständigen Produktdaten
    */
@@ -2372,13 +2452,15 @@ export class FirestoreService {
       
       // First get ALL product details for tracking
       const detailPromises = conversions.map(async (conversion) => {
-        const [markenDoc, noNameDoc] = await Promise.all([
+        const [markenDoc, noNameDoc, cartDoc] = await Promise.all([
           getDoc(doc(db, 'markenProdukte', conversion.markenProduktRef)),
-          getDoc(doc(db, 'produkte', conversion.produktRef))
+          getDoc(doc(db, 'produkte', conversion.produktRef)),
+          getDoc(doc(userRef, 'einkaufswagen', conversion.einkaufswagenRef))
         ]);
         
         const noNameData = noNameDoc.exists() ? noNameDoc.data() : null;
         const markenData = markenDoc.exists() ? markenDoc.data() : null;
+        const cartData = cartDoc.exists() ? cartDoc.data() : null;
         
         // Hole Discounter-Info
         let discounterData = null;
@@ -2389,7 +2471,8 @@ export class FirestoreService {
         
         return {
           fromProduct: markenData,
-          toProduct: { ...noNameData, discounter: discounterData }
+          toProduct: { ...noNameData, discounter: discounterData },
+          originalJourneyId: cartData?.journeyId // NEU: Original Journey ID
         };
       });
       const trackingDetails = await Promise.all(detailPromises);
@@ -2405,6 +2488,9 @@ export class FirestoreService {
       });
       const productDetails = await Promise.all(productPromises);
       
+      // NEU: Journey ID für Tracking holen
+      const currentJourneyId = journeyTrackingService.getCurrentJourneyId();
+      
       conversions.forEach((conversion, index) => {
         // Lösche alten Eintrag
         batch.delete(doc(userRef, 'einkaufswagen', conversion.einkaufswagenRef));
@@ -2412,12 +2498,15 @@ export class FirestoreService {
         // Füge neuen NoName Eintrag hinzu
         const newDoc = doc(collection(userRef, 'einkaufswagen'));
         const productData = productDetails[index];
+        const trackingDetail = trackingDetails[index];
         
         const newCartItem = {
           handelsmarkenProdukt: doc(db, 'produkte', conversion.produktRef),
           gekauft: false,
           timestamp: serverTimestamp(),
-          name: productData?.name || 'NoName Produkt'
+          name: productData?.name || 'NoName Produkt',
+          // NEU: Journey ID speichern für späteres Tracking!
+          journeyId: currentJourneyId || trackingDetail?.originalJourneyId // Verwende original Journey
         };
         
         batch.set(newDoc, newCartItem);

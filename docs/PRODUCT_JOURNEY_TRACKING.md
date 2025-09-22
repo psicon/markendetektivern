@@ -46,13 +46,10 @@ viewedProducts: {
       savings?: number;
       comparedProducts?: any[];
       
-      // NEU: Motivation für diese Action
-      motivationSignals?: {
-        priceMotivation: number;     // 0-1
-        brandMotivation: number;     // 0-1
-        contentMotivation: number;   // 0-1
-        savingsMotivation: number;   // 0-1
-        reason?: string;
+      // NEU: Vereinfachte Motivation (nur bei wichtigen Actions)
+      motivation?: {
+        primary: 'price' | 'brand' | 'content' | 'savings' | 'exploration';
+        confidence: number; // 0-1: Wie sicher sind wir?
       };
       
       // NEU: Bei Aktionen aus Vergleichsansicht - welches Produkt war Kontext?
@@ -75,16 +72,12 @@ viewedProducts: {
       viewDuration?: number;
     }[];
   
-  // NEU: Finaler Status
-  finalStatus?: {
-    wasAddedToCart: boolean;
-    wasAddedToFavorites: boolean;
-    wasPurchased: boolean;
-    wasConverted: boolean;
-    finalPrice?: number;
-    finalSavings?: number;
-    totalInteractions: number; // Anzahl aller Interaktionen
-  };
+  // ENTFERNT: finalStatus - wird aus actions[] abgeleitet
+  // getFinalStatus() = {
+  //   wasAddedToCart: actions.some(a => a.type === 'addedToCart'),
+  //   wasPurchased: actions.some(a => a.type === 'purchased'),
+  //   totalInteractions: actions.length
+  // }
   
   // NEU: Comparison Result (falls Vergleichsansicht)
   comparisonResult?: {

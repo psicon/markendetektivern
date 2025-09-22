@@ -4,7 +4,7 @@ import { AllergenFilterChips } from '@/components/ui/AllergenFilterChips';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { LockedCategoryModal } from '@/components/ui/LockedCategoryModal';
-import { NutritionRangeFilter } from '@/components/ui/NutritionRangeFilter';
+import { NutritionSliderFilter } from '@/components/ui/NutritionSliderFilter';
 import { ListItemSkeleton, LoadingFooterSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
@@ -35,25 +35,33 @@ export default function ExploreScreen() {
   // ENTFERNT! Explore startet KEINE eigene Journey mehr.
   // Journeys werden nur auf Hauptscreens (Home) oder bei spezifischen Actions (Search, Scan) gestartet
   
-  // Verarbeite Navigation-Parameter von der Startseite
+  // Verarbeite Navigation-Parameter von der Startseite - NACH Kategorie-Loading!
   useEffect(() => {
-    if (params.tab === 'nonames' && params.categoryFilter) {
-      setActiveTab('nonames');
-      setNoNameFilters(prev => ({
-        ...prev,
-        categoryFilters: [params.categoryFilter as string]
-      }));
+    // WICHTIG: Warte bis Kategorien geladen sind!
+    if (params.tab === 'nonames' && params.categoryFilter && kategorien.length > 0) {
+      // Prüfe ob Kategorie verfügbar ist
+      const category = kategorien.find(k => k.id === params.categoryFilter);
       
-      // Update Journey mit Kategorie-Filter - nur einmal!
-      analytics.updateJourneyFilters({
-        categories: [params.categoryFilter as string]
-      }, {
-        action: 'added',
-        filterType: 'category',
-        filterValue: params.categoryName as string || params.categoryFilter as string
-      });
+      if (category && !category.isLocked) {
+        setActiveTab('nonames');
+        setNoNameFilters(prev => ({
+          ...prev,
+          categoryFilters: [params.categoryFilter as string]
+        }));
+        
+        // Update Journey mit Kategorie-Filter - nur einmal!
+        analytics.updateJourneyFilters({
+          categories: [params.categoryFilter as string]
+        }, {
+          action: 'added',
+          filterType: 'category',
+          filterValue: params.categoryName as string || params.categoryFilter as string
+        });
+      } else {
+        console.warn('🔒 Kategorie nicht verfügbar oder gesperrt:', params.categoryFilter);
+      }
     }
-  }, [params.tab, params.categoryFilter, params.categoryName]); // Spezifische Dependencies!
+  }, [params.tab, params.categoryFilter, params.categoryName, kategorien]); // WICHTIG: kategorien als Dependency!
 
   // Journey wird NICHT hier gestartet - nur einmal beim App-Start in AnalyticsProvider!
   
@@ -508,19 +516,38 @@ export default function ExploreScreen() {
       nutritionFilters: filters
     }));
     
-    // 🎯 Update Journey with new filters
+    // 🎯 Update Journey with new filters (MIT DETAILLIERTEN WERTEN!)
+    // WICHTIG: Verwende die AKTUELLEN Filter-States!
+    const currentNoNameFilters = {
+      ...noNameFilters,
+      nutritionFilters: filters // Die neuen Nutrition-Filter!
+    };
+    
     const updatedFilters = {
-      markets: noNameFilters.discounterFilters,
-      categories: noNameFilters.categoryFilters,
-      stufe: noNameFilters.stufeFilters,
-      allergens: Object.entries(noNameFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
-      nutrition: Object.entries(filters || {}).filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined)).map(([k, _]) => k)
+      markets: currentNoNameFilters.discounterFilters,
+      categories: currentNoNameFilters.categoryFilters,
+      stufe: currentNoNameFilters.stufeFilters,
+      allergens: Object.entries(currentNoNameFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
+      nutrition: Object.entries(filters || {}).filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined)).map(([k, _]) => k),
+      // NEU: Detaillierte Nutrition-Werte für Analytics
+      nutritionDetails: Object.fromEntries(
+        Object.entries(filters || {})
+          .filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined))
+          .map(([key, range]) => [key, {
+            min: range?.min,
+            max: range?.max,
+            type: range?.min !== undefined ? 'minimum' : 'maximum'
+          }])
+      )
     };
     
     analytics.updateJourneyFilters(updatedFilters);
     
     // Check für Filter-Komplexitäts-Überlastung
     analytics.checkFilterComplexityOverload();
+    
+    // WICHTIG: Lade Produkte neu mit neuen Nutrition-Filtern!
+    loadNoNameProducts(true); // Reset und neu laden
   }, [noNameFilters, analytics]); // Dependencies!
   
   // Automatisch verfügbare Kategorien als Filter hinzufügen
@@ -531,6 +558,12 @@ export default function ExploreScreen() {
   
   // Synchrone Filter-Validation (keine async Calls)  
   const validateFiltersSync = (filters: any) => {
+    // WICHTIG: Nur validieren wenn Kategorien geladen sind!
+    if (kategorien.length === 0) {
+      console.log('⏳ Kategorien noch nicht geladen - überspringe Validation');
+      return filters; // Filter unverändert zurückgeben
+    }
+    
     // IMMER auf verfügbare Kategorien beschränken
     const availableCategoryIds = getAvailableCategoriesFilter();
     
@@ -553,7 +586,12 @@ export default function ExploreScreen() {
     return {
       ...filters,
       categoryFilters: finalCategoryFilters, // Immer nur verfügbare Kategorien
-      sortBy: filters.sortBy || 'name' // Sortierung beibehalten
+      sortBy: filters.sortBy || 'name', // Sortierung beibehalten
+      // WICHTIG: Alle anderen Filter beibehalten!
+      discounterFilters: filters.discounterFilters || [],
+      stufeFilters: filters.stufeFilters || [],
+      allergenFilters: filters.allergenFilters || {},
+      nutritionFilters: filters.nutritionFilters || {} // NEU: Nutrition-Filter beibehalten!
     };
   };
 
@@ -710,13 +748,32 @@ export default function ExploreScreen() {
       nutritionFilters: filters
     }));
     
-    // 🎯 Update Journey with new filters
+    // 🎯 Update Journey with new filters (MIT DETAILLIERTEN WERTEN!)
+    // WICHTIG: Verwende die AKTUELLEN Filter-States!
+    const currentMarkenproduktFilters = {
+      ...markenproduktFilters,
+      nutritionFilters: filters // Die neuen Nutrition-Filter!
+    };
+    
     analytics.updateJourneyFilters({
-      categories: markenproduktFilters.categoryFilters,
-      hersteller: markenproduktFilters.herstellerFilters,
-      allergens: Object.entries(markenproduktFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
-      nutrition: Object.entries(filters || {}).filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined)).map(([k, _]) => k)
+      categories: currentMarkenproduktFilters.categoryFilters,
+      hersteller: currentMarkenproduktFilters.herstellerFilters,
+      allergens: Object.entries(currentMarkenproduktFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
+      nutrition: Object.entries(filters || {}).filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined)).map(([k, _]) => k),
+      // NEU: Detaillierte Nutrition-Werte für Analytics
+      nutritionDetails: Object.fromEntries(
+        Object.entries(filters || {})
+          .filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined))
+          .map(([key, range]) => [key, {
+            min: range?.min,
+            max: range?.max,
+            type: range?.min !== undefined ? 'minimum' : 'maximum'
+          }])
+      )
     });
+    
+    // WICHTIG: Lade Markenprodukte neu mit neuen Nutrition-Filtern!
+    loadMarkenprodukte(true); // Reset und neu laden
   }, [markenproduktFilters, analytics]); // Dependencies!
 
   // Filtered and sorted Marken for search
@@ -867,6 +924,14 @@ export default function ExploreScreen() {
       setNoNameLoading(true);
       setNoNameError(null);
 
+      // Debug: Zeige aktive Filter
+      console.log('🔍 DEBUG loadNoNameProducts - Filter:', {
+        categoryFilters: noNameFilters.categoryFilters?.length || 0,
+        nutritionFilters: Object.keys(noNameFilters.nutritionFilters || {}).length,
+        allergenFilters: Object.keys(noNameFilters.allergenFilters || {}).length,
+        nutritionDetails: noNameFilters.nutritionFilters
+      });
+      
       // Nutze die normale FirestoreService mit erweiterten Filtern
       const result = await FirestoreService.getNoNameProductsPaginated(
         20, // Page size
@@ -2179,13 +2244,29 @@ export default function ExploreScreen() {
 
             {/* Nährwerte Filter */}
             <View style={styles.filterSection}>
-              <NutritionRangeFilter
+              <NutritionSliderFilter
                 nutritionFilters={noNameFilters.nutritionFilters || {}}
                 onUpdateFilter={(filters) => {
                   setNoNameFilters(prev => ({
                     ...prev,
                     nutritionFilters: filters
                   }));
+                  // Journey-Update passiert automatisch im useEffect
+                }}
+                onFilterChanged={(filterType, filterValue, action) => {
+                  // Erweiterte Tracking-Daten für Nutrition-Filter
+                  const nutritionFilter = noNameFilters.nutritionFilters?.[filterType];
+                  const additionalData = {
+                    nutrition_type: filterType,
+                    min_value: nutritionFilter?.min,
+                    max_value: nutritionFilter?.max,
+                    filter_range: nutritionFilter?.max && nutritionFilter?.min 
+                      ? nutritionFilter.max - nutritionFilter.min 
+                      : undefined,
+                    filter_direction: nutritionFilter?.min !== undefined ? 'minimum' : 'maximum'
+                  };
+                  
+                  analytics.trackFilterChanged('nutrition_range', filterValue, action, 'explore', additionalData);
                 }}
               />
             </View>
@@ -2377,13 +2458,29 @@ export default function ExploreScreen() {
 
             {/* Nährwerte Filter */}
             <View style={styles.filterSection}>
-              <NutritionRangeFilter
+              <NutritionSliderFilter
                 nutritionFilters={markenproduktFilters.nutritionFilters || {}}
                 onUpdateFilter={(filters) => {
                   setMarkenproduktFilters(prev => ({
                     ...prev,
                     nutritionFilters: filters
                   }));
+                  // Journey-Update passiert automatisch im useEffect
+                }}
+                onFilterChanged={(filterType, filterValue, action) => {
+                  // Erweiterte Tracking-Daten für Nutrition-Filter
+                  const nutritionFilter = markenproduktFilters.nutritionFilters?.[filterType];
+                  const additionalData = {
+                    nutrition_type: filterType,
+                    min_value: nutritionFilter?.min,
+                    max_value: nutritionFilter?.max,
+                    filter_range: nutritionFilter?.max && nutritionFilter?.min 
+                      ? nutritionFilter.max - nutritionFilter.min 
+                      : undefined,
+                    filter_direction: nutritionFilter?.min !== undefined ? 'minimum' : 'maximum'
+                  };
+                  
+                  analytics.trackFilterChanged('nutrition_range', filterValue, action, 'explore', additionalData);
                 }}
               />
             </View>
