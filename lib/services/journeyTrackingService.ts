@@ -222,6 +222,25 @@ class JourneyTrackingService {
   }
 
   /**
+   * Holt den Index eines Produkts in viewedProducts (für eindeutige Zuordnung)
+   * NACH einer Add-to-Cart Action
+   */
+  getViewedProductIndexAfterAction(productId: string): number | null {
+    if (!this.currentJourney?.viewedProducts) return null;
+    
+    // Finde den LETZTEN Index (neueste Interaktion) mit addedToCart Action
+    for (let i = this.currentJourney.viewedProducts.length - 1; i >= 0; i--) {
+      const product = this.currentJourney.viewedProducts[i];
+      if (product.productId === productId && 
+          product.actions?.some(a => a.type === 'addedToCart')) {
+        return i;
+      }
+    }
+    
+    return null;
+  }
+
+  /**
    * Updated nur den Status einer Journey in Firestore
    */
   private async updateJourneyStatus(status: string, userId: string): Promise<void> {
@@ -661,12 +680,12 @@ class JourneyTrackingService {
       mainProductName: string;
       mainProductType: 'brand' | 'noname';
     }
-  ): void {
+  ): number | null {
     if (!this.currentJourney) {
       console.warn('⚠️ Add-to-Cart ohne aktive Journey!');
       // Starte Fallback-Journey für isolierte Add-to-Cart Actions
       this.startJourney('browse', 'unknown', undefined, userId);
-      if (!this.currentJourney) return;
+      if (!this.currentJourney) return null;
     }
 
     // ENTFERNT: Alte addedToCart Array - alles ist jetzt in viewedProducts[].actions
@@ -766,6 +785,13 @@ class JourneyTrackingService {
     if (userId) {
       this.persistJourneyToFirestore(userId);
     }
+    
+    // WICHTIG: Return den Index für Einkaufszettel-Speicherung
+    const productIndex = this.currentJourney.viewedProducts.findIndex(p => 
+      p.productId === productId && p.actions?.some(a => a.type === 'addedToCart')
+    );
+    
+    return productIndex >= 0 ? productIndex : null;
   }
 
   /**
@@ -1831,7 +1857,18 @@ class JourneyTrackingService {
         const updatedViewedProducts = [...(journeyData.viewedProducts || [])];
         
         products.forEach(product => {
-          let viewedProduct = updatedViewedProducts.find(p => p.productId === product.productId);
+          // NEU: Verwende Index wenn verfügbar, sonst Fallback zu find()
+          let viewedProduct = null;
+          
+          if (product.viewedProductIndex !== undefined && product.viewedProductIndex !== null) {
+            // DIREKTE Zuordnung via Index!
+            viewedProduct = updatedViewedProducts[product.viewedProductIndex];
+            console.log(`🎯 Single Purchase using INDEX ${product.viewedProductIndex} for ${product.productName}`);
+          } else {
+            // Fallback: Suche wie bisher
+            viewedProduct = updatedViewedProducts.find(p => p.productId === product.productId);
+            console.log(`⚠️ Single Purchase using FIND for ${product.productName} (no index available)`);
+          }
           
           if (!viewedProduct) {
             // Produkt war nicht in der Journey - füge es hinzu
@@ -1905,6 +1942,7 @@ class JourneyTrackingService {
       productType: 'brand' | 'noname';
       finalPrice?: number;
       finalSavings?: number;
+      viewedProductIndex?: number; // NEU: Index für eindeutige Zuordnung
     }[],
     totalSavings: number,
     userId: string
@@ -1924,8 +1962,37 @@ class JourneyTrackingService {
         // Update alle Produkte in EINER Operation
         const updatedViewedProducts = [...(journeyData.viewedProducts || [])];
         
+        console.log(`🔍 DEBUG Bulk Purchase - Ursprüngliche viewedProducts:`, {
+          totalProducts: updatedViewedProducts.length,
+          productIds: updatedViewedProducts.map(p => p.productId),
+          actionsPerProduct: updatedViewedProducts.map(p => ({
+            id: p.productId,
+            actionsCount: p.actions?.length || 0,
+            actions: p.actions?.map(a => a.type) || []
+          }))
+        });
+        
         products.forEach(product => {
-          let viewedProduct = updatedViewedProducts.find(p => p.productId === product.productId);
+          // NEU: Verwende Index wenn verfügbar, sonst Fallback zu find()
+          let viewedProduct = null;
+          
+          if (product.viewedProductIndex !== undefined && product.viewedProductIndex !== null) {
+            // DIREKTE Zuordnung via Index!
+            viewedProduct = updatedViewedProducts[product.viewedProductIndex];
+            console.log(`🎯 Using INDEX ${product.viewedProductIndex} for ${product.productName}`);
+          } else {
+            // Fallback: Suche wie bisher
+            viewedProduct = updatedViewedProducts.find(p => p.productId === product.productId);
+            console.log(`⚠️ Using FIND for ${product.productName} (no index available)`);
+          }
+          
+          console.log(`🔍 DEBUG Bulk Purchase für ${product.productName}:`, {
+            productId: product.productId,
+            useIndex: product.viewedProductIndex,
+            foundExisting: !!viewedProduct,
+            existingActionsCount: viewedProduct?.actions?.length || 0,
+            existingActions: viewedProduct?.actions?.map(a => a.type) || []
+          });
           
           if (!viewedProduct) {
             // Produkt war nicht in der Journey - füge es hinzu
@@ -1944,6 +2011,12 @@ class JourneyTrackingService {
           }
           
           if (!viewedProduct.actions) viewedProduct.actions = [];
+          
+          console.log(`🔍 BEFORE adding purchased action:`, {
+            actionsCount: viewedProduct.actions.length,
+            actions: viewedProduct.actions.map(a => a.type)
+          });
+          
           // SICHERE Action mit guaranteed Werten
           const safeAction: any = {
             timestamp: Date.now(),
@@ -1962,6 +2035,21 @@ class JourneyTrackingService {
           safeAction.motivation = { primary: 'price', confidence: 0.8 };
           
           viewedProduct.actions.push(safeAction);
+          
+          console.log(`🔍 AFTER adding purchased action:`, {
+            actionsCount: viewedProduct.actions.length,
+            actions: viewedProduct.actions.map(a => a.type),
+            lastAction: viewedProduct.actions[viewedProduct.actions.length - 1]?.type
+          });
+        });
+        
+        console.log(`🔍 DEBUG Final updatedViewedProducts vor Firestore:`, {
+          totalProducts: updatedViewedProducts.length,
+          actionsPerProduct: updatedViewedProducts.map(p => ({
+            id: p.productId,
+            actionsCount: p.actions?.length || 0,
+            actions: p.actions?.map(a => a.type) || []
+          }))
         });
         
         // EINE Update-Operation für alle Produkte
@@ -1993,7 +2081,8 @@ class JourneyTrackingService {
     productId: string,
     productName: string,
     productType: 'brand' | 'noname',
-    userId: string
+    userId: string,
+    viewedProductIndex?: number // NEU: Index für eindeutige Zuordnung
   ): Promise<void> {
     try {
       const { query, where, getDocs, updateDoc, collection } = await import('firebase/firestore');
@@ -2010,7 +2099,18 @@ class JourneyTrackingService {
         // Update viewedProducts mit Remove Action
         const updatedViewedProducts = [...(journeyData.viewedProducts || [])];
         
-        let viewedProduct = updatedViewedProducts.find(p => p.productId === productId);
+        // NEU: Verwende Index wenn verfügbar, sonst Fallback zu find()
+        let viewedProduct = null;
+        
+        if (viewedProductIndex !== undefined && viewedProductIndex !== null) {
+          // DIREKTE Zuordnung via Index!
+          viewedProduct = updatedViewedProducts[viewedProductIndex];
+          console.log(`🎯 Remove using INDEX ${viewedProductIndex} for ${productName}`);
+        } else {
+          // Fallback: Suche wie bisher
+          viewedProduct = updatedViewedProducts.find(p => p.productId === productId);
+          console.log(`⚠️ Remove using FIND for ${productName} (no index available)`);
+        }
         
         if (!viewedProduct) {
           // Produkt war nicht in der Journey - füge es hinzu

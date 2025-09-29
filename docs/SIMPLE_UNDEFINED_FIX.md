@@ -28,3 +28,7 @@ marketId: (details?.toProduct?.discounter?.id || details?.toProduct?.discounter 
 - undefined wird an der Quelle behoben
 
 **KISS Prinzip: Keep It Simple, Stupid!**
+
+
+
+

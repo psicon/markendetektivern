@@ -23,7 +23,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "904",
+      "buildNumber": "905",
       "appleTeamId": "MZD2N2F887"
     },
     "android": {

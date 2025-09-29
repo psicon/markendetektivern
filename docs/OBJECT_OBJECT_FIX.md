@@ -31,3 +31,5 @@ Firestore DocumentReference Objekte haben interne Properties die undefined sein 
 Robuste Extraktion von String-Werten aus DocumentReference Objekten mit mehreren Fallbacks.
 
 **ENDLICH! Das war der Grund für ALLE undefined Fehler bei Conversions!**
+
+

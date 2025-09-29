@@ -51,11 +51,15 @@ export default function ExploreScreen() {
         
         // Update Journey mit Kategorie-Filter - nur einmal!
         analytics.updateJourneyFilters({
-          categories: [params.categoryFilter as string]
+          categories: [{
+            docRef: `kategorien/${category.id}`,
+            id: category.id,
+            name: category.name
+          }]
         }, {
           action: 'added',
           filterType: 'category',
-          filterValue: params.categoryName as string || params.categoryFilter as string
+          filterValue: category.name
         });
       } else {
         console.warn('🔒 Kategorie nicht verfügbar oder gesperrt:', params.categoryFilter);
@@ -404,7 +408,14 @@ export default function ExploreScreen() {
     // 🎯 Update Journey with new filters
     const updatedFilters = {
       markets: noNameFilters.discounterFilters,
-      categories: noNameFilters.categoryFilters,
+      categories: noNameFilters.categoryFilters.map(id => {
+        const categoryData = categoriesData.find(c => c.id === id);
+        return {
+          docRef: `kategorien/${id}`,
+          id: id,
+          name: categoryData?.name || 'Unbekannt'
+        };
+      }),
       stufe: isAdding 
         ? [...noNameFilters.stufeFilters, stufe]
         : noNameFilters.stufeFilters.filter(s => s !== stufe),
@@ -460,7 +471,14 @@ export default function ExploreScreen() {
     // 🎯 Update Journey with new filters
     const updatedFilters = {
       markets: noNameFilters.discounterFilters,
-      categories: noNameFilters.categoryFilters,
+      categories: noNameFilters.categoryFilters.map(id => {
+        const categoryData = categoriesData.find(c => c.id === id);
+        return {
+          docRef: `kategorien/${id}`,
+          id: id,
+          name: categoryData?.name || 'Unbekannt'
+        };
+      }),
       stufe: noNameFilters.stufeFilters,
       allergens: Object.entries({...(noNameFilters.allergenFilters || {}), [allergen]: isAdding}).filter(([_, v]) => v).map(([k, _]) => k)
     };
@@ -525,7 +543,14 @@ export default function ExploreScreen() {
     
     const updatedFilters = {
       markets: currentNoNameFilters.discounterFilters,
-      categories: currentNoNameFilters.categoryFilters,
+      categories: currentNoNameFilters.categoryFilters.map(id => {
+        const categoryData = categoriesData.find(c => c.id === id);
+        return {
+          docRef: `kategorien/${id}`,
+          id: id,
+          name: categoryData?.name || 'Unbekannt'
+        };
+      }),
       stufe: currentNoNameFilters.stufeFilters,
       allergens: Object.entries(currentNoNameFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
       nutrition: Object.entries(filters || {}).filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined)).map(([k, _]) => k),
@@ -647,7 +672,14 @@ export default function ExploreScreen() {
     
     // 🎯 Update Journey with new filters
     const updatedFilters = {
-      categories: markenproduktFilters.categoryFilters,
+      categories: markenproduktFilters.categoryFilters.map(id => {
+        const categoryData = categoriesData.find(c => c.id === id);
+        return {
+          docRef: `kategorien/${id}`,
+          id: id,
+          name: categoryData?.name || 'Unbekannt'
+        };
+      }),
       hersteller: isAdding 
         ? [...markenproduktFilters.herstellerFilters, herstellerId]
         : markenproduktFilters.herstellerFilters.filter(id => id !== herstellerId),
@@ -697,7 +729,14 @@ export default function ExploreScreen() {
     
     // 🎯 Update Journey with new filters
     analytics.updateJourneyFilters({
-      categories: markenproduktFilters.categoryFilters,
+      categories: markenproduktFilters.categoryFilters.map(id => {
+        const categoryData = categoriesData.find(c => c.id === id);
+        return {
+          docRef: `kategorien/${id}`,
+          id: id,
+          name: categoryData?.name || 'Unbekannt'
+        };
+      }),
       hersteller: markenproduktFilters.herstellerFilters,
       allergens: Object.entries({...(markenproduktFilters.allergenFilters || {}), [allergen]: isAdding}).filter(([_, v]) => v).map(([k, _]) => k)
     });
@@ -756,7 +795,14 @@ export default function ExploreScreen() {
     };
     
     analytics.updateJourneyFilters({
-      categories: currentMarkenproduktFilters.categoryFilters,
+      categories: currentMarkenproduktFilters.categoryFilters.map(id => {
+        const categoryData = categoriesData.find(c => c.id === id);
+        return {
+          docRef: `kategorien/${id}`,
+          id: id,
+          name: categoryData?.name || 'Unbekannt'
+        };
+      }),
       hersteller: currentMarkenproduktFilters.herstellerFilters,
       allergens: Object.entries(currentMarkenproduktFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
       nutrition: Object.entries(filters || {}).filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined)).map(([k, _]) => k),

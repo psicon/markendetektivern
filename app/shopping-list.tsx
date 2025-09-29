@@ -963,17 +963,30 @@ const safeAsync = async (p: Promise<any>) => {
               productType: (item.isMarkenProdukt ? 'brand' : 'noname') as 'brand' | 'noname',
               finalPrice: item.product?.preis || 0,
               finalSavings: item.savings || 0,
-              journeyId: item.journeyId // Falls vorhanden
+              journeyId: item.journeyId, // Falls vorhanden
+              viewedProductIndex: item.viewedProductIndex // NEU: Index für eindeutige Zuordnung
             };
           });
           
           // Tracke alle Purchases in EINER Operation
           const journeyTrackingService = await import('@/lib/services/journeyTrackingService').then(m => m.default);
           if (productsForJourneyTracking.length > 0 && productsForJourneyTracking[0].journeyId) {
+            // NEU: Hole Indices für alle Produkte
+            const productsWithIndices = productsForJourneyTracking.map(product => ({
+              ...product,
+              viewedProductIndex: journeyTrackingService.getViewedProductIndexAfterAction(product.productId)
+            }));
+            
+            console.log('🔍 DEBUG Bulk Purchase - Products with Indices:', productsWithIndices.map(p => ({
+              name: p.productName,
+              id: p.productId,
+              index: p.viewedProductIndex
+            })));
+            
             // Bulk-Update für die Journey
             await journeyTrackingService.trackBulkPurchaseInSpecificJourney(
               productsForJourneyTracking[0].journeyId, // Alle sollten gleiche Journey haben
-              productsForJourneyTracking,
+              productsWithIndices,
               totalSavings,
               user.uid
             );

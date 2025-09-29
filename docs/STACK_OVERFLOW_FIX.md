@@ -36,3 +36,5 @@ private removeUndefinedValues(obj: any, seen = new WeakSet()): any {
 - DocumentReferences bleiben intakt
 - Zirkuläre Referenzen werden sicher behandelt
 - undefined Werte werden trotzdem eliminiert
+
+

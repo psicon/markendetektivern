@@ -2060,8 +2060,16 @@ export class FirestoreService {
           }
         );
         
-        // Track mit Journey-Context für Firestore inkl. Preis-Info und Vergleichskontext
-        journeyTrackingService.trackAddToCart(productId, productName, isMarke, userId, priceInfo, comparisonContext);
+        // Track mit Journey-Context und hole Index zurück
+        const viewedProductIndex = journeyTrackingService.trackAddToCart(productId, productName, isMarke, userId, priceInfo, comparisonContext);
+        
+        // WICHTIG: Speichere Index im Einkaufszettel für spätere Zuordnung
+        if (viewedProductIndex !== null) {
+          await updateDoc(docRef, {
+            viewedProductIndex: viewedProductIndex
+          });
+          console.log(`📍 ViewedProduct Index ${viewedProductIndex} gespeichert für ${productName}`);
+        }
       }
       
       console.log('✅ Added to shopping cart:', docRef.id);
@@ -2164,15 +2172,16 @@ export class FirestoreService {
           // Track mit Journey
           const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
           
-          // NEU: Verwende die gespeicherte journeyId!
+          // NEU: Verwende die gespeicherte journeyId UND Index!
           if (cartData.journeyId) {
-            console.log('🎯 Tracking Remove in Specific Journey:', cartData.journeyId);
+            console.log('🎯 Tracking Remove in Specific Journey:', cartData.journeyId, 'Index:', cartData.viewedProductIndex);
             await journeyTrackingService.trackRemoveInSpecificJourney(
               cartData.journeyId,
               productId,
               productName,
               productType,
-              userId
+              userId,
+              cartData.viewedProductIndex // NEU: Index für eindeutige Zuordnung
             );
           } else {
             // Fallback: Normale trackRemoveFromCart wenn keine journeyId
@@ -2258,6 +2267,8 @@ export class FirestoreService {
       if (productId) {
         const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
         
+        // NEU: Hole den aktuellen Index für dieses Produkt
+        const viewedProductIndex = journeyTrackingService.getViewedProductIndexAfterAction(productId);
         
         // NEU: Verwende die gespeicherte journeyId!
         if (cartData.journeyId) {
@@ -2268,11 +2279,15 @@ export class FirestoreService {
               productName: productName,
               productType: productType,
               finalPrice: finalPrice,
-              finalSavings: finalSavings
+              finalSavings: finalSavings,
+              viewedProductIndex: viewedProductIndex // NEU: Index für eindeutige Zuordnung
             }],
             finalSavings,
             userId
           );
+          
+          // WICHTIG: Warte bis Journey-Update abgeschlossen ist!
+          await new Promise(resolve => setTimeout(resolve, 100));
         } else {
           // Fallback: Normale trackPurchase wenn keine journeyId
           console.warn('⚠️ Keine journeyId im cartData - verwende normale trackPurchase');
@@ -2516,7 +2531,8 @@ export class FirestoreService {
         return {
           fromProduct: markenData,
           toProduct: { ...noNameData, discounter: discounterData },
-          originalJourneyId: cartData?.journeyId // NEU: Original Journey ID
+          originalJourneyId: cartData?.journeyId, // NEU: Original Journey ID
+          originalViewedProductIndex: cartData?.viewedProductIndex // NEU: Original Index
         };
       });
       const trackingDetails = await Promise.all(detailPromises);
@@ -2550,7 +2566,8 @@ export class FirestoreService {
           timestamp: serverTimestamp(),
           name: productData?.name || 'NoName Produkt',
           // NEU: Journey ID speichern für späteres Tracking!
-          journeyId: currentJourneyId || trackingDetail?.originalJourneyId // Verwende original Journey
+          journeyId: currentJourneyId || trackingDetail?.originalJourneyId,
+          viewedProductIndex: trackingDetail?.originalViewedProductIndex // NEU: Index übertragen
         };
         
         batch.set(newDoc, newCartItem);

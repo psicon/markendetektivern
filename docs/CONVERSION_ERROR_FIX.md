@@ -41,3 +41,5 @@ this.currentJourney = {
 - Keine `undefined` Fehler mehr bei Conversions
 - Das `converted` Array wird korrekt initialisiert und persistiert
 - Conversion-Tracking funktioniert vollständig
+
+

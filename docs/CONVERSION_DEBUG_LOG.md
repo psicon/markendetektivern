@@ -34,3 +34,7 @@ Das Problem liegt wahrscheinlich in:
 1. Debug-Logs auswerten
 2. Exakte undefined-Quelle identifizieren
 3. Gezielter Fix
+
+
+
+

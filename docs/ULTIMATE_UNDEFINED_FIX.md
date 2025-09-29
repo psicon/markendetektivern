@@ -69,3 +69,5 @@ await updateDoc(docRef, cleanedJourneyData);
 
 ## Garantie
 Diese Lösung eliminiert **ALLE** undefined Werte rekursiv aus dem gesamten Objekt vor dem Firestore-Write. Es kann keine undefined Fehler mehr geben!
+
+

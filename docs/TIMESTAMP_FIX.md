@@ -26,3 +26,5 @@ Firestore kann `serverTimestamp()` nur für direkte Dokument-Felder auflösen, n
 Falls Server-Timestamps in Arrays benötigt werden, müsste man:
 1. Arrays als Sub-Collections implementieren
 2. Oder einen Cloud Function Trigger verwenden, der nach dem Schreiben die Timestamps aktualisiert
+
+

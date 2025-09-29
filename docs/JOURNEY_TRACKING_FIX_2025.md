@@ -89,3 +89,5 @@ Alle Tracking-Methoden sind jetzt robust:
 2. **Vollständige Conversion-Details** für Analyse
 3. **Robustes Tracking** ohne Crashes
 4. **Single Source of Truth** - alles in `viewedProducts[].actions`
+
+
