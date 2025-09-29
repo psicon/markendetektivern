@@ -2052,7 +2052,12 @@ class JourneyTrackingService {
           lastUpdated: serverTimestamp()
         });
         
-        console.log(`🗑️ Remove from Cart in Original Journey ${journeyId} tracked: ${productName}`);
+        console.log(`🗑️ Remove from Cart in Original Journey ${journeyId} tracked: ${productName}`, {
+          productId,
+          productType,
+          actionsAdded: 1,
+          updatedProductsCount: updatedViewedProducts.length
+        });
       } else {
         console.warn(`⚠️ Journey ${journeyId} nicht gefunden - verwende normale trackRemoveFromCart`);
         // Fallback zu normaler trackRemoveFromCart

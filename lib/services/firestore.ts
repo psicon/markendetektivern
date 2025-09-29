@@ -2122,30 +2122,74 @@ export class FirestoreService {
       const cartItemDoc = await getDoc(cartItemRef);
       if (cartItemDoc.exists()) {
         const cartData = cartItemDoc.data();
-        const productData = cartData.product;
         
-        if (productData) {
+        // KORRIGIERT: Hole Produktdaten aus der richtigen Quelle
+        let productData = null;
+        let productId = '';
+        let productName = '';
+        let productType: 'brand' | 'noname' = 'noname';
+        
+        if (cartData.markenProdukt) {
+          // Markenprodukt
+          productData = cartData.markenProdukt;
+          productId = productData.id || '';
+          productName = cartData.name || 'Markenprodukt';
+          productType = 'brand';
+        } else if (cartData.handelsmarkenProdukt) {
+          // NoName Produkt - DocumentReference!
+          productData = cartData.handelsmarkenProdukt;
+          productId = productData.id || ''; // DocumentReference.id
+          productName = cartData.name || 'NoName Produkt';
+          productType = 'noname';
+        }
+        
+        // EINFACHER FALLBACK: Wenn immer noch keine Daten, direkt aus cartData
+        if (!productId && cartData.name) {
+          productId = cartData.handelsmarkenProdukt?.id || cartData.markenProdukt?.id || 'unknown';
+          productName = cartData.name;
+          productType = cartData.markenProdukt ? 'brand' : 'noname';
+          productData = cartData.handelsmarkenProdukt || cartData.markenProdukt;
+        }
+        
+        console.log('🔍 DEBUG removeFromShoppingCart:', {
+          hasProductData: !!productData,
+          hasJourneyId: !!cartData.journeyId,
+          journeyId: cartData.journeyId,
+          productId: productId,
+          productName: productName,
+          productType: productType
+        });
+        
+        if (productData && productId) {
           // Track mit Journey
           const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
           
           // NEU: Verwende die gespeicherte journeyId!
           if (cartData.journeyId) {
+            console.log('🎯 Tracking Remove in Specific Journey:', cartData.journeyId);
             await journeyTrackingService.trackRemoveInSpecificJourney(
               cartData.journeyId,
-              productData.id,
-              productData.name || productData.produktName || 'Unbekannt',
-              cartData.isMarkenProdukt ? 'brand' : 'noname',
+              productId,
+              productName,
+              productType,
               userId
             );
           } else {
             // Fallback: Normale trackRemoveFromCart wenn keine journeyId
+            console.warn('⚠️ Keine journeyId - verwende normale trackRemoveFromCart');
             journeyTrackingService.trackRemoveFromCart(
-              productData.id,
-              productData.name || productData.produktName || 'Unbekannt',
-              cartData.isMarkenProdukt ? 'brand' : 'noname',
+              productId,
+              productName,
+              productType,
               userId
             );
           }
+        } else {
+          console.error('❌ Keine productData für Journey-Tracking!', { 
+            hasProductData: !!productData, 
+            hasProductId: !!productId,
+            cartData: cartData 
+          });
         }
         
         // ENTFERNT: laterUpdates - Tracking passiert direkt in aktueller Journey
