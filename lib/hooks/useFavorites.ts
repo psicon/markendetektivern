@@ -83,10 +83,12 @@ export function useFavorites() {
     try {
       await favoritesService.addToFavorites(user.uid, productId, productType, productData);
       
-      // Track Achievement: save_product
-      await achievementService.trackAction(user.uid, 'save_product', {
+      // 🚀 PERFORMANCE: Achievement Non-Blocking
+      achievementService.trackAction(user.uid, 'save_product', {
         productId,
         productType
+      }).catch(error => {
+        console.error('❌ Save Product Achievement Tracking Fehler:', error);
       });
       
       console.log(`✅ Added to favorites: ${productId}`);
@@ -124,10 +126,12 @@ export function useFavorites() {
       const isNowFavorite = await favoritesService.toggleFavorite(user.uid, productId, productType, productData);
       
       if (isNowFavorite) {
-        // Track Achievement nur beim Hinzufügen
-        await achievementService.trackAction(user.uid, 'save_product', {
+        // 🚀 PERFORMANCE: Achievement Non-Blocking nur beim Hinzufügen
+        achievementService.trackAction(user.uid, 'save_product', {
           productId,
           productType
+        }).catch(error => {
+          console.error('❌ Save Product Achievement Tracking Fehler:', error);
         });
         
         // 🎯 Track zu Journey
@@ -235,10 +239,12 @@ export function useFavoriteStatus(productId: string, productType: 'markenprodukt
       setIsFav(isNowFavorite);
       
       if (isNowFavorite) {
-        // Track Achievement
-        await achievementService.trackAction(user.uid, 'save_product', {
+        // 🚀 PERFORMANCE: Achievement Non-Blocking
+        achievementService.trackAction(user.uid, 'save_product', {
           productId,
           productType
+        }).catch(error => {
+          console.error('❌ Save Product Achievement Tracking Fehler:', error);
         });
       }
       

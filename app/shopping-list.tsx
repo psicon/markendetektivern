@@ -593,8 +593,10 @@ const safeAsync = async (p: Promise<any>) => {
       // Success toast with savings amount
       showConvertSuccessToast(savingsAmount);
       
-      // Track Achievement: convert_product
-      await achievementService.trackAction(user.uid, 'convert_product');
+      // 🚀 PERFORMANCE: Achievement Non-Blocking
+      achievementService.trackAction(user.uid, 'convert_product').catch(error => {
+        console.error('❌ Convert Achievement Tracking Fehler:', error);
+      });
       
     } catch (error) {
       console.error('Error converting single product:', error);
@@ -983,13 +985,7 @@ const safeAsync = async (p: Promise<any>) => {
               index: p.viewedProductIndex
             })));
             
-            // Bulk-Update für die Journey
-            await journeyTrackingService.trackBulkPurchaseInSpecificJourney(
-              productsForJourneyTracking[0].journeyId, // Alle sollten gleiche Journey haben
-              productsWithIndices,
-              totalSavings,
-              user.uid
-            );
+            // Journey-Tracking wird später mit Achievement kombiniert
           }
           
           // Dann die einzelnen Firestore-Updates (ohne Journey-Tracking)
@@ -1046,10 +1042,34 @@ const safeAsync = async (p: Promise<any>) => {
             processedItems: totalCount
           }));
           
-          await achievementService.trackAction(user.uid, 'complete_shopping', {
-            productCount: dbProductCount,
-            totalSavings
-          });
+          // 🚀 PERFORMANCE: Journey + Achievement Sequential Non-Blocking
+          if (productsForJourneyTracking.length > 0 && productsForJourneyTracking[0].journeyId && productsWithIndices) {
+            // Journey-Update DANN Achievement - Sequential aber Non-Blocking
+            journeyTrackingService.trackBulkPurchaseInSpecificJourney(
+              productsForJourneyTracking[0].journeyId,
+              productsWithIndices,
+              totalSavings,
+              user.uid
+            ).then(() => {
+              // Achievement NACH Journey-Update (vermeidet Race Conditions)
+              return achievementService.trackAction(user.uid, 'complete_shopping', {
+                productCount: dbProductCount,
+                totalSavings
+              });
+            }).catch(error => {
+              console.error('❌ Sequential Tracking Fehler:', error);
+            });
+          } else {
+            // Nur Achievement wenn keine Journey
+            achievementService.trackAction(user.uid, 'complete_shopping', {
+              productCount: dbProductCount,
+              totalSavings
+            }).catch(error => {
+              console.error('❌ Achievement Tracking Fehler:', error);
+            });
+          }
+          
+          // UI ist sofort frei, Tracking läuft im Hintergrund
         }
         
         // Final completion
@@ -1059,8 +1079,7 @@ const safeAsync = async (p: Promise<any>) => {
           processedItems: totalCount
         }));
         
-        // Brief completion display
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // 🚀 PERFORMANCE: Künstliches Delay entfernt
         
         // 📊 Track Purchase Completed Event
         if (dbProductCount > 0) {
@@ -1142,9 +1161,12 @@ const safeAsync = async (p: Promise<any>) => {
           currentLevel: (userProfile as any)?.stats?.currentLevel || userProfile?.level || 'unknown'
         });
         
-        await achievementService.trackAction(user.uid, 'complete_shopping', {
+        // 🚀 PERFORMANCE: Achievement Non-Blocking
+        achievementService.trackAction(user.uid, 'complete_shopping', {
           productCount: 1,
           totalSavings: savings || 0
+        }).catch(error => {
+          console.error('❌ Achievement Tracking Fehler:', error);
         });
         
         // Motivational message based on savings

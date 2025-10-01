@@ -15,19 +15,19 @@ import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    FlatList,
-    Image,
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  FlatList,
+  Image,
     Modal,
-    PanResponder,
+  PanResponder,
     Platform,
     ScrollView,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
-    View
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -224,18 +224,17 @@ export default function SearchResultsScreen() {
       
       // 🎯 TRACK ACTION: search_product (für Gamification)
       if (user?.uid) {
-        try {
-          // Track Achievement Action
-          await achievementService.trackAction(user.uid, 'search_product', {
-            searchTerm: query.trim(),
-            resultsFound: populatedNoName.length + populatedMarken.length,
-            noNameResults: populatedNoName.length,
-            markenResults: populatedMarken.length
-          });
+        // 🚀 PERFORMANCE: Achievement Non-Blocking
+        achievementService.trackAction(user.uid, 'search_product', {
+          searchTerm: query.trim(),
+          resultsFound: populatedNoName.length + populatedMarken.length,
+          noNameResults: populatedNoName.length,
+          markenResults: populatedMarken.length
+        }).then(() => {
           console.log('✅ Action tracked: search_product');
-        } catch (trackError) {
-          console.error('Error tracking search_product action:', trackError);
-        }
+        }).catch(error => {
+          console.error('❌ Search Achievement Tracking Fehler:', error);
+        });
       }
       
     } catch (error) {

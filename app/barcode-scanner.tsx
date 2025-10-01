@@ -202,18 +202,17 @@ export default function BarcodeScannerScreen() {
             price: product.preis
           });
           
-          // 🎯 TRACK ACTION: scan_product
-          try {
-            await achievementService.trackAction(user.uid, 'scan_product', {
-              productId: product.id,
-              productName: product.name,
-              ean: ean,
-              productType: 'noname'
-            });
+          // 🚀 PERFORMANCE: TRACK ACTION Non-Blocking
+          achievementService.trackAction(user.uid, 'scan_product', {
+            productId: product.id,
+            productName: product.name,
+            ean: ean,
+            productType: 'noname'
+          }).then(() => {
             console.log('✅ Action tracked: scan_product (NoName)');
-          } catch (error) {
-            console.error('Error tracking scan_product action:', error);
-          }
+          }).catch(error => {
+            console.error('❌ Scan Achievement Tracking Fehler:', error);
+          });
         }
         
         // 🎉 SUCCESS HAPTIC FEEDBACK
@@ -266,18 +265,17 @@ export default function BarcodeScannerScreen() {
             price: product.preis
           });
           
-          // 🎯 TRACK ACTION: scan_product
-          try {
-            await achievementService.trackAction(user.uid, 'scan_product', {
-              productId: product.id,
-              productName: product.name,
-              ean: ean,
-              productType: 'markenprodukt'
-            });
+          // 🚀 PERFORMANCE: TRACK ACTION Non-Blocking
+          achievementService.trackAction(user.uid, 'scan_product', {
+            productId: product.id,
+            productName: product.name,
+            ean: ean,
+            productType: 'markenprodukt'
+          }).then(() => {
             console.log('✅ Action tracked: scan_product (Markenprodukt)');
-          } catch (error) {
-            console.error('Error tracking scan_product action:', error);
-          }
+          }).catch(error => {
+            console.error('❌ Scan Achievement Tracking Fehler:', error);
+          });
         }
         
         // 🎉 SUCCESS HAPTIC FEEDBACK

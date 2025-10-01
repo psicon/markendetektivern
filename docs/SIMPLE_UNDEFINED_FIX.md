@@ -31,4 +31,3 @@ marketId: (details?.toProduct?.discounter?.id || details?.toProduct?.discounter 
 
 
 
-

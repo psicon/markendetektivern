@@ -2272,7 +2272,8 @@ export class FirestoreService {
         
         // NEU: Verwende die gespeicherte journeyId!
         if (cartData.journeyId) {
-          await journeyTrackingService.trackPurchaseInSpecificJourney(
+          // 🚀 PERFORMANCE: Sequential Non-Blocking - UI ist sofort frei!
+          journeyTrackingService.trackPurchaseInSpecificJourney(
             cartData.journeyId,
             [{
               productId: productId,
@@ -2284,10 +2285,9 @@ export class FirestoreService {
             }],
             finalSavings,
             userId
-          );
-          
-          // WICHTIG: Warte bis Journey-Update abgeschlossen ist!
-          await new Promise(resolve => setTimeout(resolve, 100));
+          ).catch(error => {
+            console.error('❌ Journey-Tracking Fehler:', error);
+          });
         } else {
           // Fallback: Normale trackPurchase wenn keine journeyId
           console.warn('⚠️ Keine journeyId im cartData - verwende normale trackPurchase');

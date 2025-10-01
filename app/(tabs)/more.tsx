@@ -124,6 +124,34 @@ export default function MoreScreen() {
     Linking.openURL('https://www.markendetektive.de/kontakt/');
   };
 
+  const handleResetOnboarding = async () => {
+    Alert.alert(
+      'Onboarding zurücksetzen',
+      'Dies wird das Onboarding zurücksetzen und beim nächsten App-Start erneut anzeigen. Fortfahren?',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Zurücksetzen',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { OnboardingService } = await import('@/lib/services/onboardingService');
+              await OnboardingService.resetOnboarding();
+              Alert.alert(
+                'Erfolgreich',
+                'Onboarding wurde zurückgesetzt. Starten Sie die App neu, um das Onboarding zu sehen.',
+                [{ text: 'OK' }]
+              );
+            } catch (error) {
+              console.error('Error resetting onboarding:', error);
+              Alert.alert('Fehler', 'Onboarding konnte nicht zurückgesetzt werden.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
   // Real data from user profile
   const totalSavings = userProfile?.totalSavings || 0;
   const productCount = userProfile?.productsSaved || 0;
@@ -372,11 +400,22 @@ export default function MoreScreen() {
             
             <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
             
-            <TouchableOpacity style={styles.menuItemLast} onPress={handleContact}>
+            <TouchableOpacity style={styles.menuItem} onPress={handleContact}>
               <IconSymbol name="envelope" size={24} color={colors.secondary} />
               <Text style={[styles.menuItemText, { color: colors.text }]}>Kontakt</Text>
               <IconSymbol name="chevron.right" size={14} color={colors.icon} />
             </TouchableOpacity>
+            
+            {__DEV__ && (
+              <>
+                <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+                <TouchableOpacity style={styles.menuItemLast} onPress={handleResetOnboarding}>
+                  <IconSymbol name="arrow.clockwise" size={24} color={colors.secondary} />
+                  <Text style={[styles.menuItemText, { color: colors.text }]}>Onboarding zurücksetzen (DEV)</Text>
+                  <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </View>
 

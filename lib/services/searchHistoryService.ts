@@ -1,17 +1,17 @@
 import {
-    addDoc,
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    limit,
-    onSnapshot,
-    orderBy,
-    query,
-    serverTimestamp,
-    updateDoc,
-    where,
-    writeBatch
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+  writeBatch
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { FirestoreDocument, Kategorien, Produkte } from '../types/firestore';
