@@ -76,9 +76,15 @@ export class OnboardingTrackingService {
         this.currentResult.completedSteps.push(stepNumber - 1);
       }
       
-      // Merge step data
+      // Merge step data (filtere undefined values raus)
       if (stepData) {
-        Object.assign(this.currentResult, stepData);
+        const cleanData: any = {};
+        Object.keys(stepData).forEach(key => {
+          if (stepData[key] !== undefined) {
+            cleanData[key] = stepData[key];
+          }
+        });
+        Object.assign(this.currentResult, cleanData);
       }
       
       // Speichere Update

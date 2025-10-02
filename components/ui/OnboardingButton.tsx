@@ -54,18 +54,28 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     backgroundColor: Colors.light.tint,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 4,
   },
   secondaryButton: {
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: Colors.light.tabIconDefault,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
   },
   buttonDisabled: {
     opacity: 0.5,
   },
   buttonText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'Nunito_600SemiBold',
   },
   primaryButtonText: {
     color: 'white',
