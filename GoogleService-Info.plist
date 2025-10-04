@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>139509881339-8m7rjqtur27arme7utiuptqmjbllofbu.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.139509881339-8m7rjqtur27arme7utiuptqmjbllofbu</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>139509881339-0oqhihq65i4un43skr4bssldd1g1os25.apps.googleusercontent.com</string>
+	<key>API_KEY</key>
+	<string>AIzaSyDZ6xtYoJcu1mJvFQpsV3aC2Qgs3UipZR8</string>
+	<key>GCM_SENDER_ID</key>
+	<string>139509881339</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>de.markendetektive</string>
+	<key>PROJECT_ID</key>
+	<string>markendetektive-895f7</string>
+	<key>STORAGE_BUCKET</key>
+	<string>markendetektive-895f7.appspot.com</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<true/>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:139509881339:ios:406df96f740e3f6fd6135e</string>
+</dict>
+</plist>

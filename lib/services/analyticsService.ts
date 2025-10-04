@@ -4,9 +4,20 @@ import { isExpoGo } from '../utils/platform';
 
 // Firebase Analytics (nur außerhalb Expo Go)
 let analytics: any = null;
+let analyticsInitialized = false;
+
+// Initialisiere Analytics sofort
 if (!isExpoGo()) {
   try {
     analytics = require('@react-native-firebase/analytics').default;
+    
+    // Wichtig: Analytics explizit aktivieren!
+    analytics().setAnalyticsCollectionEnabled(true).then(() => {
+      console.log('✅ GA4 Analytics Collection aktiviert');
+      analyticsInitialized = true;
+    }).catch((error: any) => {
+      console.error('❌ GA4 Analytics Aktivierung fehlgeschlagen:', error);
+    });
   } catch (error) {
     console.warn('⚠️ Firebase Analytics nicht verfügbar:', error);
   }
@@ -531,6 +542,61 @@ class AnalyticsService {
       journey_step: this.getJourneyStep(conversionType),
       ...additionalData
     }, userId);
+    
+    // NEU: Standard E-Commerce Events für GA4
+    if (analytics) {
+      try {
+        switch(conversionType) {
+          case 'add_to_favorites':
+            // Standard GA4 Event für Wishlist
+            await analytics().logEvent('add_to_wishlist', {
+              currency: 'EUR',
+              value: additionalData?.price || 0,
+              items: [{
+                item_id: productId,
+                item_name: additionalData?.productName || 'Unknown',
+                item_category: additionalData?.category || 'uncategorized',
+                price: additionalData?.price || 0,
+                quantity: 1
+              }]
+            });
+            break;
+            
+          case 'add_to_cart':
+            // Standard GA4 E-Commerce Event
+            await analytics().logEvent('add_to_cart', {
+              currency: 'EUR',
+              value: additionalData?.price || 0,
+              items: [{
+                item_id: productId,
+                item_name: additionalData?.productName || 'Unknown',
+                item_category: additionalData?.category || 'uncategorized',
+                item_brand: additionalData?.brand || 'noname',
+                price: additionalData?.price || 0,
+                quantity: 1
+              }]
+            });
+            break;
+            
+          case 'mark_purchased':
+            // Standard GA4 Purchase Event
+            await analytics().logEvent('purchase', {
+              transaction_id: additionalData?.transactionId || `purchase_${Date.now()}`,
+              currency: 'EUR',
+              value: additionalData?.totalValue || 0,
+              items: additionalData?.items || [{
+                item_id: productId,
+                item_name: additionalData?.productName || 'Unknown',
+                price: additionalData?.price || 0,
+                quantity: 1
+              }]
+            });
+            break;
+        }
+      } catch (error) {
+        console.warn('GA4 E-Commerce Event Error:', error);
+      }
+    }
   }
 
   // MOTIVATION-SPECIFIC SIGNALS

@@ -1,8 +1,12 @@
 import { useAuth } from '@/lib/contexts/AuthContext';
+import Constants from 'expo-constants';
 import { useFocusEffect, usePathname } from 'expo-router';
 import React, { createContext, useCallback, useContext, useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
+import { version as appVersion } from '../../package.json';
 import { analyticsService } from '../services/analyticsService';
 import journeyTrackingService from '../services/journeyTrackingService';
+import { isExpoGo } from '../utils/platform';
 
 interface AnalyticsContextType {
   // High-level tracking functions
@@ -57,6 +61,27 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
     const currentLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
     analyticsService.setUserLevel(currentLevel);
   }, [userProfile?.stats?.currentLevel, userProfile?.level]); // 🎯 NUR bei Level-Änderung neu laden!
+
+  // Set App Version and Build Number als User Properties für GA4
+  useEffect(() => {
+    if (!isExpoGo()) {
+      // Firebase Analytics importieren
+      const analytics = require('@react-native-firebase/analytics').default;
+      
+      const buildNumber = Constants.expoConfig?.ios?.buildNumber || Constants.expoConfig?.android?.versionCode || 'unknown';
+      const environment = __DEV__ ? 'development' : 'production';
+      
+      // User Properties setzen (persistent für alle Events)
+      analytics().setUserProperties({
+        app_version: appVersion,
+        build_number: buildNumber,
+        environment: environment,
+        platform: Platform.OS
+      });
+      
+      console.log(`📊 GA4 User Properties gesetzt:`, { appVersion, buildNumber, environment });
+    }
+  }, []); // Nur einmal beim App-Start
 
   // Lade aktive Journey beim Start (Session-Fortsetzung)
   useEffect(() => {

@@ -1,0 +1,130 @@
+{
+  "project_info": {
+    "project_number": "139509881339",
+    "project_id": "markendetektive-895f7",
+    "storage_bucket": "markendetektive-895f7.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:139509881339:android:701e5a9e4a543ee8d6135e",
+        "android_client_info": {
+          "package_name": "de.markendetektive"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "139509881339-3uoqvpmigs7p0jm8h6p941v3eeofd4vb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "de.markendetektive",
+            "certificate_hash": "0e2b4527b53037ae6e0bd8b7256103f1fa2bf8b9"
+          }
+        },
+        {
+          "client_id": "139509881339-629h7ah5r600058fe0gv9mfbnnro06kn.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "de.markendetektive",
+            "certificate_hash": "cf1e6dc2593c34afe1c7155b33fe83018a0ace51"
+          }
+        },
+        {
+          "client_id": "139509881339-h8ief6hmf22i77k4bcb6h4psilqna86v.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "de.markendetektive",
+            "certificate_hash": "9bbb3186b2189ef16d8f272bdab59362c395cbb4"
+          }
+        },
+        {
+          "client_id": "139509881339-qdfvg77gbspd86gu0v1j8mmek6fd2ok8.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "de.markendetektive",
+            "certificate_hash": "72481f317693600396a8ffaca56a1ba0838b87db"
+          }
+        },
+        {
+          "client_id": "139509881339-8r18hd499h6615f4ebos35ihbqqqvjvs.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCXwvZF7Z2rzgbn2WjQilnf0WPjdRSqFJ8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "116578206230045763009",
+              "client_type": 3
+            },
+            {
+              "client_id": "139509881339-8m7rjqtur27arme7utiuptqmjbllofbu.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "de.markendetektive"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:139509881339:android:ed0921bf279ad92cd6135e",
+        "android_client_info": {
+          "package_name": "de.psicon.markengeheimnisse"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "139509881339-0oqhihq65i4un43skr4bssldd1g1os25.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "de.psicon.markengeheimnisse",
+            "certificate_hash": "72481f317693600396a8ffaca56a1ba0838b87db"
+          }
+        },
+        {
+          "client_id": "139509881339-ujfib6ldp6ckfj4256dc7kusg2js8hcs.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "de.psicon.markengeheimnisse",
+            "certificate_hash": "9bbb3186b2189ef16d8f272bdab59362c395cbb4"
+          }
+        },
+        {
+          "client_id": "139509881339-8r18hd499h6615f4ebos35ihbqqqvjvs.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCXwvZF7Z2rzgbn2WjQilnf0WPjdRSqFJ8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "116578206230045763009",
+              "client_type": 3
+            },
+            {
+              "client_id": "139509881339-8m7rjqtur27arme7utiuptqmjbllofbu.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "de.markendetektive"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

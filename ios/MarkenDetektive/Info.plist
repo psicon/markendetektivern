@@ -34,12 +34,18 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
+          <string>com.googleusercontent.apps.139509881339-8m7rjqtur27arme7utiuptqmjbllofbu</string>
+        </array>
+      </dict>
+      <dict>
+        <key>CFBundleURLSchemes</key>
+        <array>
           <string>exp+markendetektive</string>
         </array>
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>916</string>
+    <string>923</string>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>

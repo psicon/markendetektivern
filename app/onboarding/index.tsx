@@ -6,6 +6,7 @@ import { router } from 'expo-router';
 import LottieView from 'lottie-react-native';
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
@@ -70,6 +71,7 @@ export default function OnboardingScreen() {
   // ALLE useState IMMER (keine conditionals!)
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState('');
   const [country, setCountry] = useState<'DE' | 'AT' | 'CH'>('DE');
   const [markets, setMarkets] = useState<any[]>([]);
   const [selectedMarkets, setSelectedMarkets] = useState<any[]>([]);
@@ -357,6 +359,10 @@ export default function OnboardingScreen() {
   };
 
   const skipOnboarding = async () => {
+    // Zeige sofort Ladebildschirm
+    setIsLoading(true);
+    setLoadingStatus('Käufe werden wiederhergestellt...');
+    
     // Fade out animation für Skip vom Hero Screen
     if (currentStep === 1) {
       Animated.timing(backgroundOpacity, {
@@ -402,53 +408,37 @@ export default function OnboardingScreen() {
     }
     
     const AsyncStorage = await import('@react-native-async-storage/async-storage');
-    await AsyncStorage.default.setItem('onboarding_v1_skipped', 'true'); // GEÄNDERT: skipped statt completed
+    await AsyncStorage.default.setItem('onboarding_v1_skipped', 'true');
     
-    // WICHTIG: Käufe wiederherstellen und Premium Status prüfen!
-    console.log('🔄 Stelle Käufe wieder her und prüfe Premium Status (Skip)...');
-    
-    // Erst Käufe wiederherstellen
+    // WICHTIG: Warte auf Premium-Wiederherstellung bevor Navigation!
     try {
       const { revenueCatService } = await import('@/lib/services/revenueCatService');
       await revenueCatService.restorePurchases();
-      console.log('✅ Käufe wiederhergestellt (Skip)');
-    } catch (e) {
-      console.log('⚠️ Konnte Käufe nicht wiederherstellen (Skip):', e);
-    }
-    
-    // Dann Premium Status direkt von RevenueCat abfragen
-    const { revenueCatService } = await import('@/lib/services/revenueCatService');
-    const currentPremiumStatus = await revenueCatService.isPremium();
-    
-    console.log('🛒 Premium Status beim Skip:', currentPremiumStatus);
-    
-    // Remote Config prüfen
-    const shouldShowPaywall = await remoteConfigService.shouldShowOnboardingPaywall();
-    
-    console.log('🛒 Skip Paywall Entscheidung:', { 
-      shouldShowPaywall, 
-      isPremium: currentPremiumStatus,
-      willShowPaywall: shouldShowPaywall && !currentPremiumStatus 
-    });
-    
-    // NUR Paywall zeigen wenn Remote Config JA sagt UND User KEIN Premium hat
-    if (shouldShowPaywall && !currentPremiumStatus) {
-      console.log('🛒 Zeige Paywall nach Skip (User hat kein Premium)');
-      try {
-        const paywallResult = await presentPaywall('onboarding');
-        console.log('🛒 Skip Paywall result:', paywallResult.result);
-      } catch (error) {
-        console.error('❌ Skip Paywall error:', error);
+      const currentPremiumStatus = await revenueCatService.isPremium();
+      console.log('🛒 Premium Status nach Wiederherstellung:', currentPremiumStatus);
+      
+      // Remote Config prüfen
+      const shouldShowPaywall = await remoteConfigService.shouldShowOnboardingPaywall();
+      
+      // Jetzt navigieren
+      router.replace('/(tabs)');
+      
+      // NUR Paywall zeigen wenn nötig
+      if (shouldShowPaywall && !currentPremiumStatus) {
+        setTimeout(async () => {
+          try {
+            const paywallResult = await presentPaywall('onboarding');
+            console.log('🛒 Paywall result:', paywallResult.result);
+          } catch (error) {
+            console.error('❌ Paywall error:', error);
+          }
+        }, 1000);
       }
-    } else {
-      if (currentPremiumStatus) {
-        console.log('✅ User hat Premium - keine Paywall nach Skip!');
-      } else {
-        console.log('🛒 Remote Config: Paywall nach Skip deaktiviert');
-      }
+    } catch (error) {
+      console.error('❌ Premium restore error:', error);
+      // Trotzdem navigieren
+      router.replace('/(tabs)');
     }
-    
-    router.replace('/(tabs)');
   };
 
   const completeOnboarding = async () => {
@@ -574,6 +564,20 @@ export default function OnboardingScreen() {
       <Text style={styles.progressText}>{currentStep - 1} von 8</Text>
     </View>
   );
+
+  // Loading Screen
+  if (isLoading) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colorScheme === 'dark' ? Colors.dark.background : Colors.light.background }]}>
+        <View style={styles.loadingContent}>
+          <ActivityIndicator size="large" color={colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint} />
+          <Text style={[styles.loadingMessage, { color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text, marginTop: 20 }]}>
+            {loadingStatus || 'Käufe werden wiederhergestellt...'}
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // Step 1: Hero
   if (currentStep === 1) {
