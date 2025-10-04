@@ -3,7 +3,7 @@ import Constants from 'expo-constants';
 import { useFocusEffect, usePathname } from 'expo-router';
 import React, { createContext, useCallback, useContext, useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
-import { version as appVersion } from '../../package.json';
+// Version wird aus Constants gelesen, nicht aus package.json
 import { analyticsService } from '../services/analyticsService';
 import journeyTrackingService from '../services/journeyTrackingService';
 import { isExpoGo } from '../utils/platform';
@@ -72,6 +72,7 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
       const environment = __DEV__ ? 'development' : 'production';
       
       // User Properties setzen (persistent für alle Events)
+      const appVersion = Constants.expoConfig?.version || '1.0.0';
       analytics().setUserProperties({
         app_version: appVersion,
         build_number: buildNumber,

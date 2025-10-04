@@ -12,6 +12,7 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as WebBrowser from 'expo-web-browser';
 // @ts-ignore
+import Constants from 'expo-constants';
 import React, { useEffect, useState } from 'react';
 import {
   Alert,
@@ -27,7 +28,6 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { version as packageVersion } from '../../package.json';
 
 const dailyTips = [
   "Vergleiche immer die Zutaten: Oft sind No-Name Produkte vom selben Hersteller mit identischen Zutaten!",
@@ -63,8 +63,10 @@ export default function MoreScreen() {
   const [currentTipIndex, setCurrentTipIndex] = useState(0);
 
   useEffect(() => {
-    // Get app version from package.json
-    setAppVersion(packageVersion || '1.0.0');
+    // Get app version from app.json via Constants
+    const version = Constants.expoConfig?.version || '1.0.0';
+    const buildNumber = Constants.expoConfig?.ios?.buildNumber || '0';
+    setAppVersion(`${version}.${buildNumber}`);
     
     // Prüfe ob Onboarding übersprungen wurde
     const checkOnboardingStatus = async () => {
