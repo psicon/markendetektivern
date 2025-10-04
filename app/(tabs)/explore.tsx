@@ -11,6 +11,7 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
 // Keine ExtendedFirestoreService mehr nötig
 import { FirestoreService } from '@/lib/services/firestore';
@@ -28,6 +29,7 @@ export default function ExploreScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const params = useLocalSearchParams();
   const { userProfile } = useAuth();
+  const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
   const [activeTab, setActiveTab] = useState('märkte');
   
@@ -1162,7 +1164,7 @@ export default function ExploreScreen() {
         const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
         
         // Lade Kategorien mit Access-Information
-        const categoriesWithAccess = await categoryAccessService.getAllCategoriesWithAccess(userLevel);
+        const categoriesWithAccess = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
         
         // Zeige ALLE Kategorien, auch gesperrte (wie auf Startseite)
         setCategoriesData(categoriesWithAccess);
@@ -1232,7 +1234,7 @@ export default function ExploreScreen() {
       // Prüfe ob Kategorie verfügbar ist
       const checkCategoryAccess = async () => {
         const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
-        const isAvailable = await categoryAccessService.isCategoryAvailable(params.categoryFilter as string, userLevel);
+        const isAvailable = await categoryAccessService.isCategoryAvailable(params.categoryFilter as string, userLevel, isPremium);
         
         if (!isAvailable) {
           // Kategorie ist gesperrt - zeige Hinweis und navigiere zurück
@@ -1351,7 +1353,7 @@ export default function ExploreScreen() {
         const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
         
         const [kategorienWithAccess, markenData] = await Promise.all([
-          categoryAccessService.getAllCategoriesWithAccess(userLevel),
+          categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium),
           FirestoreService.getMarken()
         ]);
         setKategorien(kategorienWithAccess);
@@ -1917,7 +1919,7 @@ export default function ExploreScreen() {
                       {product.name}
                     </ThemedText>
                     <ThemedText style={styles.productSubtitle}>
-                      {product.hersteller?.name || 'Unbekannte Marke'}
+                      {product.marke?.name || product.hersteller?.name || product.hersteller?.herstellername || 'Unbekannte Marke'}
                     </ThemedText>
                   </View>
 

@@ -10,6 +10,7 @@ import { TOAST_MESSAGES } from '@/constants/ToastMessages';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { useTheme } from '@/lib/contexts/ThemeContext';
 import achievementService from '@/lib/services/achievementService';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
@@ -147,6 +148,7 @@ export default function ShoppingListScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { user, userProfile } = useAuth();
+  const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
   const insets = useSafeAreaInsets();
   
@@ -805,7 +807,7 @@ const safeAsync = async (p: Promise<any>) => {
         try {
           // User Level für Kategorie-Zugriff
           const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
-          const categoriesWithAccess = await categoryAccessService.getAllCategoriesWithAccess(userLevel);
+          const categoriesWithAccess = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
           
           // Zeige nur verfügbare Kategorien
           const availableCategories = categoriesWithAccess.filter(cat => !cat.isLocked);
@@ -820,7 +822,7 @@ const safeAsync = async (p: Promise<any>) => {
         const filteredCategories = [];
         
         for (const cat of categoriesArray) {
-          const isAvailable = await categoryAccessService.isCategoryAvailable(cat.id, userLevel);
+          const isAvailable = await categoryAccessService.isCategoryAvailable(cat.id, userLevel, isPremium);
           if (isAvailable) {
             filteredCategories.push(cat);
           }
@@ -946,10 +948,17 @@ const safeAsync = async (p: Promise<any>) => {
         
         const promises = [];
         
+        // WICHTIG: productsForJourneyTracking UND productsWithIndices AUSSERHALB des if-Blocks definieren
+        let productsForJourneyTracking: any[] = [];
+        let productsWithIndices: any[] = [];
+        
+        // Journey Tracking Service AUCH außerhalb importieren!
+        const journeyTrackingService = await import('@/lib/services/journeyTrackingService').then(m => m.default);
+        
         // Mark DB products as purchased (creates purchase history)
         if (dbNoNameProducts.length > 0) {
-          // WICHTIG: Sammle alle Produkt-Infos für EINE Bulk-Journey-Update
-          const productsForJourneyTracking = dbNoNameProducts.map(item => {
+          // Sammle alle Produkt-Infos für EINE Bulk-Journey-Update
+          productsForJourneyTracking = dbNoNameProducts.map(item => {
             // Debug: Log das Item um zu sehen, was wir haben
             console.log('🔍 Debug Item für Bulk Purchase:', {
               itemId: item.id,
@@ -971,10 +980,9 @@ const safeAsync = async (p: Promise<any>) => {
           });
           
           // Tracke alle Purchases in EINER Operation
-          const journeyTrackingService = await import('@/lib/services/journeyTrackingService').then(m => m.default);
           if (productsForJourneyTracking.length > 0 && productsForJourneyTracking[0].journeyId) {
             // NEU: Hole Indices für alle Produkte
-            const productsWithIndices = productsForJourneyTracking.map(product => ({
+            productsWithIndices = productsForJourneyTracking.map(product => ({
               ...product,
               viewedProductIndex: journeyTrackingService.getViewedProductIndexAfterAction(product.productId)
             }));

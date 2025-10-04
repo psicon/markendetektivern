@@ -2,6 +2,29 @@ import { TOAST_MESSAGES, formatTimeLeft, interpolateMessage } from '@/constants/
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { showInfoToast } from './toast';
 
+// Action-Namen für benutzerfreundliche Anzeige
+const ACTION_DISPLAY_NAMES: { [key: string]: string } = {
+  'scan_product': 'Produkt scannen',
+  'compare_products': 'Produkte vergleichen',
+  'add_to_cart': 'Zum Einkaufszettel hinzufügen',
+  'purchase_product': 'Produkt kaufen',
+  'rate_product': 'Produkt bewerten',
+  'search_products': 'Produkte suchen',
+  'view_product': 'Produkt ansehen',
+  'share_product': 'Produkt teilen',
+  'complete_shopping': 'Einkauf abschließen',
+  'daily_login': 'Täglicher Login',
+  'weekly_login': 'Wöchentlicher Login',
+  'first_scan': 'Erster Scan',
+  'first_purchase': 'Erster Kauf',
+  'streak_bonus': 'Streak Bonus'
+};
+
+// Fallback für unbekannte Actions
+const getActionDisplayName = (action: string): string => {
+  return ACTION_DISPLAY_NAMES[action] || action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+};
+
 /**
  * Helper: Generate action-specific storage keys  
  */
@@ -78,7 +101,13 @@ export const showDedupeWindowToast = async (action: string, remainingSeconds: nu
   }
   
   const timeLeft = formatTimeLeft(remainingSeconds);
-  const message = interpolateMessage(TOAST_MESSAGES.ANTI_ABUSE.dedupeWindow, { timeLeft });
+  const actionName = getActionDisplayName(action);
+  
+  // Spezifische Nachricht mit Action-Name
+  const message = interpolateMessage(TOAST_MESSAGES.ANTI_ABUSE.dedupeWindowSpecific, {
+    actionName,
+    timeLeft
+  });
   
   showInfoToast(message, 'ANTI_ABUSE');
   
@@ -88,16 +117,25 @@ export const showDedupeWindowToast = async (action: string, remainingSeconds: nu
 /**
  * Show daily cap toast (nur 1x pro Tag pro Action)
  */
-export const showDailyCapToast = async (action: string): Promise<void> => {
+export const showDailyCapToast = async (action: string, limit?: number): Promise<void> => {
   const storageKey = getStorageKey(STORAGE_TYPES.DAILY_CAP_SHOWN, action);
   if (await wasShownToday(storageKey)) {
     return; // Bereits heute gezeigt für diese Action
   }
   
-  showInfoToast(
-    TOAST_MESSAGES.ANTI_ABUSE.dailyCapReached,
-    'ANTI_ABUSE'
-  );
+  const actionName = getActionDisplayName(action);
+  
+  if (limit) {
+    // Spezifische Nachricht mit Action-Name und Limit
+    const message = interpolateMessage(TOAST_MESSAGES.ANTI_ABUSE.dailyCapReachedSpecific, {
+      actionName,
+      limit: limit.toString()
+    });
+    showInfoToast(message, 'ANTI_ABUSE');
+  } else {
+    // Fallback zur generischen Nachricht
+    showInfoToast(TOAST_MESSAGES.ANTI_ABUSE.dailyCapReached, 'ANTI_ABUSE');
+  }
   
   await markShownToday(storageKey);
 };
@@ -105,16 +143,25 @@ export const showDailyCapToast = async (action: string): Promise<void> => {
 /**
  * Show weekly cap toast (nur 1x pro Tag pro Action)
  */
-export const showWeeklyCapToast = async (action: string): Promise<void> => {
+export const showWeeklyCapToast = async (action: string, limit?: number): Promise<void> => {
   const storageKey = getStorageKey(STORAGE_TYPES.WEEKLY_CAP_SHOWN, action);
   if (await wasShownToday(storageKey)) {
     return; // Bereits heute gezeigt für diese Action
   }
   
-  showInfoToast(
-    TOAST_MESSAGES.ANTI_ABUSE.weeklyCapReached,
-    'ANTI_ABUSE'
-  );
+  const actionName = getActionDisplayName(action);
+  
+  if (limit) {
+    // Spezifische Nachricht mit Action-Name und Limit
+    const message = interpolateMessage(TOAST_MESSAGES.ANTI_ABUSE.weeklyCapReachedSpecific, {
+      actionName,
+      limit: limit.toString()
+    });
+    showInfoToast(message, 'ANTI_ABUSE');
+  } else {
+    // Fallback zur generischen Nachricht
+    showInfoToast(TOAST_MESSAGES.ANTI_ABUSE.weeklyCapReached, 'ANTI_ABUSE');
+  }
   
   await markShownToday(storageKey);
 };

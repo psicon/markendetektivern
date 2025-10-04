@@ -24,10 +24,11 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    // Log error only in development
-    if (__DEV__) {
-      console.error('ErrorBoundary caught an error:', error, errorInfo);
-    }
+    // IMMER loggen - auch in Production für TestFlight!
+    console.error('🚨 ErrorBoundary caught an error:', error);
+    console.error('📍 Component Stack:', errorInfo.componentStack);
+    console.error('💥 Error Message:', error.message);
+    console.error('📋 Error Stack:', error.stack);
     
     // In production, you could send this to a crash reporting service
     // Example: Sentry.captureException(error, { contexts: { react: errorInfo } });
@@ -35,14 +36,17 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
-      return <ErrorFallback onReset={() => this.setState({ hasError: false, error: undefined })} />;
+      return <ErrorFallback 
+        error={this.state.error} 
+        onReset={() => this.setState({ hasError: false, error: undefined })} 
+      />;
     }
 
     return this.props.children;
   }
 }
 
-const ErrorFallback: React.FC<{ onReset: () => void }> = ({ onReset }) => {
+const ErrorFallback: React.FC<{ error?: Error; onReset: () => void }> = ({ error, onReset }) => {
   // Use Appearance API directly instead of hooks since we're outside ThemeProvider
   const colorScheme = Appearance.getColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -63,6 +67,30 @@ const ErrorFallback: React.FC<{ onReset: () => void }> = ({ onReset }) => {
         <Text style={[styles.message, { color: colors.icon }]}>
           Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut.
         </Text>
+        
+        {/* FEHLER-DETAILS FÜR TESTFLIGHT */}
+        {error && (
+          <View style={[styles.errorDetails, { backgroundColor: colors.border }]}>
+            <Text style={[styles.errorLabel, { color: colors.text }]}>Fehler:</Text>
+            <Text style={[styles.errorText, { color: colors.text }]}>{error.message || 'Unbekannter Fehler'}</Text>
+            
+            <Text style={[styles.errorLabel, { color: colors.text }]}>Typ:</Text>
+            <Text style={[styles.errorText, { color: colors.text }]}>{error.name || 'Unknown'}</Text>
+            
+            {error.stack && (
+              <>
+                <Text style={[styles.errorLabel, { color: colors.text }]}>Ort:</Text>
+                <Text style={[styles.errorText, { color: colors.text }]} numberOfLines={5}>
+                  {error.stack.split('\n').slice(0, 3).join('\n')}
+                </Text>
+              </>
+            )}
+            
+            <Text style={[styles.errorHint, { color: colors.text }]}>
+              📸 Bitte Screenshot an Entwickler senden!
+            </Text>
+          </View>
+        )}
         
         <TouchableOpacity 
           style={[styles.button, { backgroundColor: colors.primary }]}
@@ -111,5 +139,28 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontFamily: 'Nunito_600SemiBold',
+  },
+  errorDetails: {
+    marginTop: 20,
+    padding: 15,
+    borderRadius: 8,
+    width: '100%',
+  },
+  errorLabel: {
+    fontSize: 14,
+    fontFamily: 'Nunito_600SemiBold',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  errorText: {
+    fontSize: 13,
+    fontFamily: 'Nunito_400Regular',
+    marginBottom: 8,
+  },
+  errorHint: {
+    fontSize: 14,
+    fontFamily: 'Nunito_600SemiBold',
+    marginTop: 12,
+    textAlign: 'center',
   },
 });

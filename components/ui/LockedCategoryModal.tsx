@@ -1,5 +1,6 @@
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { LinearGradient } from 'expo-linear-gradient';
 import LottieView from 'lottie-react-native';
 import React, { useEffect, useRef } from 'react';
@@ -38,6 +39,7 @@ export const LockedCategoryModal: React.FC<LockedCategoryModalProps> = ({
 }) => {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const { presentPaywall, isPremium } = useRevenueCat();
   
   const levelsToGo = requiredLevel - currentLevel;
   
@@ -183,12 +185,36 @@ export const LockedCategoryModal: React.FC<LockedCategoryModalProps> = ({
             
             {/* Premium Button */}
             <TouchableOpacity 
-              style={styles.premiumButtonContainer}
-              onPress={() => {
-                // TODO: Premium-Funktionalität implementieren
-                console.log('Premium-Freischaltung für Kategorie:', categoryName);
-                onClose(); // Temporär - später durch Premium-Flow ersetzen
+              style={[
+                styles.premiumButtonContainer,
+                isPremium && { opacity: 0.6 }
+              ]}
+              onPress={async () => {
+                if (isPremium) {
+                  console.log('🛒 User ist bereits Premium');
+                  return;
+                }
+                
+                console.log('🛒 Premium-Freischaltung für Kategorie:', categoryName);
+                
+                try {
+                  // RevenueCat Paywall anzeigen
+                  const result = await presentPaywall('category_unlock');
+                  console.log('🛒 Premium Paywall result:', result.result);
+                  
+                  if (result.result === 'purchased') {
+                    // Bei erfolgreichem Kauf Modal schließen
+                    onClose();
+                    console.log('✅ Premium gekauft - Kategorie freigeschaltet:', categoryName);
+                  }
+                  // Bei cancelled oder error bleibt Modal offen
+                  
+                } catch (error) {
+                  console.error('❌ Premium Paywall error:', error);
+                  // Modal bleibt offen bei Fehlern
+                }
               }}
+              disabled={isPremium}
             >
               <LinearGradient
                 colors={['#FFD700', '#FFA000']}
@@ -199,7 +225,7 @@ export const LockedCategoryModal: React.FC<LockedCategoryModalProps> = ({
                 <View style={styles.premiumButtonContent}>
                   <IconSymbol name="crown.fill" size={18} color="#8B4513" />
                   <Text style={styles.premiumButtonText}>
-                    Jetzt sofort freischalten
+                    {isPremium ? 'Bereits Premium' : 'Mit Premium sofort freischalten'}
                   </Text>
                 </View>
                 

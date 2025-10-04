@@ -1,4 +1,5 @@
 import { Colors } from '@/constants/Colors';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, ViewStyle } from 'react-native';
 
@@ -20,6 +21,8 @@ export const OnboardingButton: React.FC<OnboardingButtonProps> = ({
   style
 }) => {
   const isPrimary = variant === 'primary';
+  const colorScheme = useColorScheme();
+  const styles = createStyles(colorScheme);
   
   return (
     <TouchableOpacity
@@ -43,7 +46,7 @@ export const OnboardingButton: React.FC<OnboardingButtonProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
   button: {
     paddingVertical: 16,
     paddingHorizontal: 24,
@@ -53,7 +56,7 @@ const styles = StyleSheet.create({
     minHeight: 52,
   },
   primaryButton: {
-    backgroundColor: Colors.light.tint,
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
@@ -63,7 +66,7 @@ const styles = StyleSheet.create({
   secondaryButton: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: Colors.light.tabIconDefault,
+    borderColor: colorScheme === 'dark' ? Colors.dark.text : Colors.light.tabIconDefault,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
@@ -81,7 +84,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   secondaryButtonText: {
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
   },
   buttonTextDisabled: {
     opacity: 0.7,

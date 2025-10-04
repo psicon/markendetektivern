@@ -30,4 +30,5 @@ export const auth = initializeAuth(app, {
 export const storage = getStorage(app);
 
 export default app;
+export { app };
 

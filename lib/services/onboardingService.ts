@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ONBOARDING_COMPLETED_KEY = 'onboarding_v1_completed';
+const ONBOARDING_SKIPPED_KEY = 'onboarding_v1_skipped';
 const ONBOARDING_PROGRESS_KEY = 'onboarding_v1_progress';
 
 export interface OnboardingProgress {
@@ -17,6 +18,35 @@ export class OnboardingService {
     try {
       const completed = await AsyncStorage.getItem(ONBOARDING_COMPLETED_KEY);
       return completed === 'true';
+    } catch (error) {
+      console.error('Error checking onboarding status:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Prüft ob Onboarding übersprungen wurde
+   */
+  static async isOnboardingSkipped(): Promise<boolean> {
+    try {
+      const skipped = await AsyncStorage.getItem(ONBOARDING_SKIPPED_KEY);
+      return skipped === 'true';
+    } catch (error) {
+      console.error('Error checking onboarding skip status:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Prüft ob User das Onboarding hinter sich hat (completed ODER skipped)
+   */
+  static async hasPassedOnboarding(): Promise<boolean> {
+    try {
+      const [completed, skipped] = await Promise.all([
+        this.isOnboardingCompleted(),
+        this.isOnboardingSkipped()
+      ]);
+      return completed || skipped;
     } catch (error) {
       console.error('Error checking onboarding status:', error);
       return false;

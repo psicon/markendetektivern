@@ -1041,7 +1041,7 @@ class AchievementService {
         const dailyDocs = await getDocs(dailyQuery);
         if (dailyDocs.size >= actionConfig.antiAbuse.dailyCap) {
           console.log(`⚠️ Daily cap erreicht für ${action} (${actionConfig.antiAbuse.dailyCap})`);
-          await showDailyCapToast(action);
+          await showDailyCapToast(action, actionConfig.antiAbuse.dailyCap);
           return;
         }
       }
@@ -1062,7 +1062,7 @@ class AchievementService {
         const weeklyDocs = await getDocs(weeklyQuery);
         if (weeklyDocs.size >= actionConfig.antiAbuse.weeklyCap) {
           console.log(`⚠️ Weekly cap erreicht für ${action} (${actionConfig.antiAbuse.weeklyCap})`);
-          await showWeeklyCapToast(action);
+          await showWeeklyCapToast(action, actionConfig.antiAbuse.weeklyCap);
           return;
         }
       }

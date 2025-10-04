@@ -9,25 +9,27 @@ import { getStackScreenHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { achievementService } from '@/lib/services/achievementService';
 import { AlgoliaSearchResult, AlgoliaService } from '@/lib/services/algolia';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
+import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  FlatList,
-  Image,
+    ActivityIndicator,
+    Animated,
+    Dimensions,
+    FlatList,
+    Image,
     Modal,
-  PanResponder,
+    PanResponder,
     Platform,
     ScrollView,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -37,6 +39,7 @@ export default function SearchResultsScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const params = useLocalSearchParams();
   const { user, userProfile } = useAuth();
+  const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
   
   // 🎯 Journey-Tracking für Search
@@ -57,6 +60,9 @@ export default function SearchResultsScreen() {
   // Search States
   const [searchQuery, setSearchQuery] = useState(params.query as string || '');
   const [activeTab, setActiveTab] = useState<'nonames' | 'markenprodukte'>('nonames');
+  
+  // Minimum Zeichen Warnung
+  const [showMinCharWarning, setShowMinCharWarning] = useState(false);
   
 
   
@@ -151,6 +157,30 @@ export default function SearchResultsScreen() {
     }
     
     return result;
+  };
+  
+  // Validierung für Mindestzeichen
+  const validateAndSearch = async (query: string) => {
+    const trimmedQuery = query.trim();
+    
+    if (trimmedQuery.length < 3) {
+      // Zeige Warnung
+      setShowMinCharWarning(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      
+      // Verstecke Warnung nach 3 Sekunden
+      setTimeout(() => {
+        setShowMinCharWarning(false);
+      }, 3000);
+      
+      return;
+    }
+    
+    // Verstecke Warnung falls sichtbar
+    setShowMinCharWarning(false);
+    
+    // Starte Suche
+    await performSearch(trimmedQuery);
   };
   
   // Search function - load ALL results and populate from Algolia
@@ -320,7 +350,7 @@ export default function SearchResultsScreen() {
       const userLevel = (userProfile as any)?.stats?.currentLevel || (userProfile as any)?.level || 1;
       
       const [kategorienWithAccess, discounterData, markenDataRaw] = await Promise.all([
-        categoryAccessService.getAllCategoriesWithAccess(userLevel),
+        categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium),
         import('@/lib/services/firestore').then(m => m.FirestoreService.getDiscounter()),
         import('@/lib/services/firestore').then(m => m.FirestoreService.getMarken())
       ]);
@@ -803,7 +833,7 @@ export default function SearchResultsScreen() {
             <ThemedText style={styles.productSubtitle}>
               {isNoName 
                 ? (item.handelsmarke?.bezeichnung || 'Unbekannte Handelsmarke')
-                : (item.hersteller?.name || 'Unbekannte Marke')
+                : (item.marke?.name || item.hersteller?.name || item.hersteller?.herstellername || 'Unbekannte Marke')
               }
             </ThemedText>
             {isNoName && item.discounter && (
@@ -866,8 +896,19 @@ export default function SearchResultsScreen() {
       <ThemedView style={styles.container} {...panResponder.panHandlers}>
         {/* Search Section - SearchBottomSheet komplett übernehmen */}
         <View style={styles.searchSection}>
-          <View style={[styles.searchFieldContainer, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-            <IconSymbol name="magnifyingglass" size={20} color={colors.icon} />
+          <View style={[
+            styles.searchFieldContainer, 
+            { 
+              backgroundColor: colors.cardBackground, 
+              borderColor: showMinCharWarning ? '#ff3b30' : colors.border,
+              borderWidth: showMinCharWarning ? 2 : 1
+            }
+          ]}>
+            <IconSymbol 
+              name="magnifyingglass" 
+              size={20} 
+              color={showMinCharWarning ? '#ff3b30' : colors.icon} 
+            />
             <TextInput
               ref={searchInputRef}
               style={[styles.searchField, { color: colors.text }]}
@@ -875,7 +916,7 @@ export default function SearchResultsScreen() {
               placeholderTextColor={colors.icon}
               value={searchQuery}
               onChangeText={setSearchQuery}
-              onSubmitEditing={() => performSearch(searchQuery)}
+              onSubmitEditing={() => validateAndSearch(searchQuery)}
               returnKeyType="search"
               autoFocus={false}
             />
@@ -895,7 +936,7 @@ export default function SearchResultsScreen() {
                 search_query: searchQuery,
                 active_tab: activeTab
               });
-              performSearch(searchQuery);
+              validateAndSearch(searchQuery);
             }}
             disabled={loading}
             activeOpacity={0.7}
@@ -907,6 +948,16 @@ export default function SearchResultsScreen() {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* Minimum Zeichen Warnung */}
+        {showMinCharWarning && (
+          <View style={[styles.warningContainer, { backgroundColor: '#ff3b30' + '15' }]}>
+            <IconSymbol name="exclamationmark.triangle.fill" size={16} color="#ff3b30" />
+            <ThemedText style={[styles.warningText, { color: '#ff3b30' }]}>
+              Mindestens 3 Zeichen für die Suche eingeben
+            </ThemedText>
+          </View>
+        )}
 
 
 
@@ -1818,5 +1869,22 @@ const styles = StyleSheet.create({
   moreMarkenTextCompact: {
     fontSize: 12,
     fontFamily: 'Nunito_500Medium',
+  },
+  warningContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 15,
+    marginTop: 8,
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#ff3b30',
+  },
+  warningText: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontFamily: 'Nunito_500Medium',
+    flex: 1,
   },
 });

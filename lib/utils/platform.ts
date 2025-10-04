@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 /**
@@ -5,24 +6,21 @@ import { Platform } from 'react-native';
  */
 export const isExpoGo = (): boolean => {
   try {
-    // Check if native modules are available (Production/Development Build)
-    if (Platform.OS === 'ios') {
-      const { NativeModules } = require('react-native');
-      // Wenn unser natives Module verfügbar ist = Production Build
-      if (NativeModules.AVFoundationBarcodeScanner) {
-        return false; // Production Build
-      }
+    // KORREKTE Expo Go Erkennung mit Constants
+    if (Constants.appOwnership === 'expo') {
+      return true; // Echtes Expo Go
     }
     
-    // Check for Expo Go specific globals
+    // Check for Expo Go specific globals (zusätzliche Sicherheit)
     if ((global as any).expo || (global as any).__expo) {
       return true; // Expo Go
     }
     
-    // Default: In Development ohne native Module = wahrscheinlich Expo Go
-    return __DEV__;
+    // TestFlight und Production Builds sind NICHT Expo Go
+    return false;
   } catch (error) {
-    return true; // Safe fallback zu Expo Go
+    console.error('Error detecting Expo Go:', error);
+    return false; // Safe fallback zu Production Build
   }
 };
 

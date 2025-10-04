@@ -642,7 +642,7 @@ export class FirestoreService {
   static async getSimilarProducts(
     categoryName: string, // Einfach der Kategorie-Name
     excludeProductId: string,
-    limitCount: number = 7
+    limitCount: number = 3
   ): Promise<(FirestoreDocument<Produkte> & {
     discounter?: Discounter;
     handelsmarke?: Handelsmarken;
@@ -2131,6 +2131,14 @@ export class FirestoreService {
       if (cartItemDoc.exists()) {
         const cartData = cartItemDoc.data();
         
+        // ZUERST prüfen ob es ein Custom Item ist!
+        if (cartData.customItem) {
+          console.log('🛒 Custom Item - kein Journey-Tracking nötig');
+          await deleteDoc(cartItemRef);
+          console.log('✅ Custom item removed from shopping cart:', itemId);
+          return; // Früh beenden für Custom Items
+        }
+        
         // KORRIGIERT: Hole Produktdaten aus der richtigen Quelle
         let productData = null;
         let productId = '';
@@ -2194,9 +2202,10 @@ export class FirestoreService {
             );
           }
         } else {
-          console.error('❌ Keine productData für Journey-Tracking!', { 
+          console.warn('⚠️ Kein Journey-Tracking möglich:', { 
             hasProductData: !!productData, 
             hasProductId: !!productId,
+            isCustomItem: !!cartData.customItem,
             cartData: cartData 
           });
         }

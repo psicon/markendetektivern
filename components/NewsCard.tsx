@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   title: {
-    fontSize: 18,
+    fontSize: 16,
     fontFamily: 'Nunito_700Bold',
     lineHeight: 24,
     marginBottom: 8,

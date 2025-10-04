@@ -26,7 +26,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { OnboardingButton } from '@/components/ui/OnboardingButton';
 import { Colors } from '@/constants/Colors';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
+import { remoteConfigService } from '@/lib/services/remoteConfigService';
 
 const { width } = Dimensions.get('window');
 
@@ -58,6 +61,11 @@ const PRIORITIES = [
 
 export default function OnboardingScreen() {
   const { signInAnonymously } = useAuth();
+  const { presentPaywallIfNeeded, presentPaywall, isPremium, refreshPremiumStatus } = useRevenueCat();
+  const colorScheme = useColorScheme();
+  
+  // Dynamic styles based on color scheme - MUSS VOR useState sein!
+  const styles = createStyles(colorScheme);
   
   // ALLE useState IMMER (keine conditionals!)
   const [currentStep, setCurrentStep] = useState(1);
@@ -77,6 +85,42 @@ export default function OnboardingScreen() {
   const [backgroundOpacity] = useState(new Animated.Value(1)); // Für Background Fade
   const [sessionId] = useState(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`); // Persistente Session-ID
   const confettiRef = useRef<ConfettiCannon>(null); // Für Konfetti-Effekt
+
+  // Premium Check beim Onboarding Start
+  useEffect(() => {
+    const initializeAndCheckPremium = async () => {
+      console.log('🚀 Onboarding gestartet - initialisiere RevenueCat...');
+      
+      try {
+        // Stelle sicher dass RevenueCat initialisiert ist
+        const { revenueCatService } = await import('@/lib/services/revenueCatService');
+        
+        // Warte bis RevenueCat ready ist
+        let retries = 0;
+        while (!revenueCatService.isInitialized && retries < 20) {
+          console.log('⏳ Warte auf RevenueCat Initialisierung...', retries);
+          await new Promise(resolve => setTimeout(resolve, 100));
+          retries++;
+        }
+        
+        // Käufe wiederherstellen
+        console.log('🔄 Stelle Käufe wieder her...');
+        await revenueCatService.restorePurchases();
+        
+        // Premium Status prüfen
+        const isPremiumNow = await revenueCatService.isPremium();
+        console.log('✅ Onboarding Premium Check:', isPremiumNow ? 'PREMIUM AKTIV' : 'Kein Premium');
+        
+        // UI aktualisieren
+        await refreshPremiumStatus();
+        
+      } catch (error) {
+        console.error('❌ Fehler beim Premium Check:', error);
+      }
+    };
+    
+    initializeAndCheckPremium();
+  }, []);
 
   // ALLE useEffects IMMER (keine conditionals!)
   useEffect(() => {
@@ -357,6 +401,53 @@ export default function OnboardingScreen() {
       console.error('❌ Skip tracking error:', error);
     }
     
+    const AsyncStorage = await import('@react-native-async-storage/async-storage');
+    await AsyncStorage.default.setItem('onboarding_v1_skipped', 'true'); // GEÄNDERT: skipped statt completed
+    
+    // WICHTIG: Käufe wiederherstellen und Premium Status prüfen!
+    console.log('🔄 Stelle Käufe wieder her und prüfe Premium Status (Skip)...');
+    
+    // Erst Käufe wiederherstellen
+    try {
+      const { revenueCatService } = await import('@/lib/services/revenueCatService');
+      await revenueCatService.restorePurchases();
+      console.log('✅ Käufe wiederhergestellt (Skip)');
+    } catch (e) {
+      console.log('⚠️ Konnte Käufe nicht wiederherstellen (Skip):', e);
+    }
+    
+    // Dann Premium Status direkt von RevenueCat abfragen
+    const { revenueCatService } = await import('@/lib/services/revenueCatService');
+    const currentPremiumStatus = await revenueCatService.isPremium();
+    
+    console.log('🛒 Premium Status beim Skip:', currentPremiumStatus);
+    
+    // Remote Config prüfen
+    const shouldShowPaywall = await remoteConfigService.shouldShowOnboardingPaywall();
+    
+    console.log('🛒 Skip Paywall Entscheidung:', { 
+      shouldShowPaywall, 
+      isPremium: currentPremiumStatus,
+      willShowPaywall: shouldShowPaywall && !currentPremiumStatus 
+    });
+    
+    // NUR Paywall zeigen wenn Remote Config JA sagt UND User KEIN Premium hat
+    if (shouldShowPaywall && !currentPremiumStatus) {
+      console.log('🛒 Zeige Paywall nach Skip (User hat kein Premium)');
+      try {
+        const paywallResult = await presentPaywall('onboarding');
+        console.log('🛒 Skip Paywall result:', paywallResult.result);
+      } catch (error) {
+        console.error('❌ Skip Paywall error:', error);
+      }
+    } else {
+      if (currentPremiumStatus) {
+        console.log('✅ User hat Premium - keine Paywall nach Skip!');
+      } else {
+        console.log('🛒 Remote Config: Paywall nach Skip deaktiviert');
+      }
+    }
+    
     router.replace('/(tabs)');
   };
 
@@ -416,11 +507,60 @@ export default function OnboardingScreen() {
       await AsyncStorage.default.setItem('onboarding_v1_completed', 'true');
       
       console.log('✅ Onboarding completed with session:', sessionId);
+      
+      // WICHTIG: Premium Status DIREKT von RevenueCat abfragen!
+      console.log('🔄 Prüfe Premium Status direkt bei RevenueCat...');
+      
+      // Erst Käufe wiederherstellen
+      try {
+        const { revenueCatService } = await import('@/lib/services/revenueCatService');
+        await revenueCatService.restorePurchases();
+        console.log('✅ Käufe wiederhergestellt');
+      } catch (e) {
+        console.log('⚠️ Konnte Käufe nicht wiederherstellen:', e);
+      }
+      
+      // Dann direkt Premium Status prüfen
+      const { revenueCatService } = await import('@/lib/services/revenueCatService');
+      const currentPremiumStatus = await revenueCatService.isPremium();
+      
+      console.log('🛒 Premium Status von RevenueCat:', currentPremiumStatus);
+      
+      // Remote Config prüfen für Paywall
+      const shouldShowPaywall = await remoteConfigService.shouldShowOnboardingPaywall();
+      
+      console.log('🛒 Paywall Entscheidung:', { 
+        shouldShowPaywall, 
+        isPremium: currentPremiumStatus,
+        willShowPaywall: shouldShowPaywall && !currentPremiumStatus 
+      });
+      
+      // NUR Paywall zeigen wenn Remote Config JA sagt UND User KEIN Premium hat
+      if (shouldShowPaywall && !currentPremiumStatus) {
+        console.log('🛒 Zeige Onboarding Paywall (User hat kein Premium)');
+        try {
+          const paywallResult = await presentPaywall('onboarding');
+          console.log('🛒 Paywall result:', paywallResult.result);
+        } catch (error) {
+          console.error('❌ Paywall error:', error);
+          // App soll trotzdem weiterlaufen
+        }
+      } else {
+        if (currentPremiumStatus) {
+          console.log('✅ User hat bereits Premium - keine Paywall!');
+        } else {
+          console.log('🛒 Remote Config: Paywall deaktiviert');
+        }
+      }
+      
+      // Zur App navigieren
       router.replace('/(tabs)');
       
     } catch (error) {
       console.error('❌ Onboarding error:', error);
       Alert.alert('Fehler', 'Onboarding konnte nicht abgeschlossen werden');
+      // Fallback zur App auch bei Fehlern
+      router.replace('/(tabs)');
     } finally {
       setIsLoading(false);
     }
@@ -536,6 +676,7 @@ export default function OnboardingScreen() {
                 >
                   Deutschland
                 </Text>
+                {country === 'DE' && <Text style={styles.checkmark}>✓</Text>}
               </TouchableOpacity>
               
               {/* Schweiz & Österreich - Nebenauswahl (Schweiz links) */}
@@ -553,6 +694,7 @@ export default function OnboardingScreen() {
                   >
                     Schweiz
                   </Text>
+                  {country === 'CH' && <Text style={styles.checkmark}>✓</Text>}
                 </TouchableOpacity>
                 
                 <TouchableOpacity
@@ -568,6 +710,7 @@ export default function OnboardingScreen() {
                   >
                     Österreich
                   </Text>
+                  {country === 'AT' && <Text style={styles.checkmark}>✓</Text>}
                 </TouchableOpacity>
               </View>
             </View>
@@ -625,7 +768,7 @@ export default function OnboardingScreen() {
           
 
           <View style={styles.mainContent}>
-            <Text style={styles.stepTitle}>Wo kaufst du ein?</Text>
+            <Text style={styles.stepTitle}>Wo kaufst du am liebsten ein?</Text>
             <Text style={styles.subtitle}>Wähle 1-3 Märkte aus</Text>
             <Text style={styles.counter}>{selectedMarkets.length}/3 ausgewählt</Text>
             
@@ -664,7 +807,7 @@ export default function OnboardingScreen() {
                     )}
                     <Text 
                       style={[
-                        styles.optionText, 
+                        styles.marketText, 
                         isSelected && styles.optionTextSelected,
                         isDisabled && styles.optionTextDisabled
                       ]}
@@ -686,7 +829,7 @@ export default function OnboardingScreen() {
                   value={marketOther}
                   onChangeText={setMarketOther}
                   maxLength={50}
-                  placeholderTextColor={Colors.light.text + '80'}
+                  placeholderTextColor={colorScheme === 'dark' ? Colors.dark.text + '80' : Colors.light.text + '80'}
                 />
               </View>
             )}
@@ -762,7 +905,7 @@ export default function OnboardingScreen() {
                   value={acquisitionOther}
                   onChangeText={setAcquisitionOther}
                   maxLength={50}
-                  placeholderTextColor={Colors.light.text + '80'}
+                  placeholderTextColor={colorScheme === 'dark' ? Colors.dark.text + '80' : Colors.light.text + '80'}
                 />
               </View>
             )}
@@ -774,7 +917,6 @@ export default function OnboardingScreen() {
               onPress={nextStep}
               disabled={acquisitionSource === 'sonstiges' && acquisitionOther.trim() === ''}
             />
-            <OnboardingButton title="Überspringen" onPress={nextStep} variant="secondary" />
           </View>
         </Animated.View>
       </SafeAreaView>
@@ -816,8 +958,8 @@ export default function OnboardingScreen() {
               maximumValue={500}
               value={budget}
               onValueChange={(value) => setBudget(Math.round(value))}
-              minimumTrackTintColor={Colors.light.tint}
-              maximumTrackTintColor={Colors.light.tabIconDefault}
+              minimumTrackTintColor={colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint}
+              maximumTrackTintColor={colorScheme === 'dark' ? Colors.dark.border : Colors.light.tabIconDefault}
               step={5}
             />
             
@@ -914,7 +1056,7 @@ export default function OnboardingScreen() {
                   value={prioritiesOther}
                   onChangeText={setPrioritiesOther}
                   maxLength={50}
-                  placeholderTextColor={Colors.light.text + '80'}
+                  placeholderTextColor={colorScheme === 'dark' ? Colors.dark.text + '80' : Colors.light.text + '80'}
                 />
               </View>
             )}
@@ -1100,10 +1242,10 @@ export default function OnboardingScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa', // Hellerer, freundlicherer Hintergrund
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.background : '#f8f9fa',
   },
   content: {
     flex: 1,
@@ -1123,9 +1265,9 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: Colors.light.tint, // Primary Green
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
     borderRadius: 3,
-    shadowColor: Colors.light.tint,
+    shadowColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.3,
     shadowRadius: 2,
@@ -1134,7 +1276,7 @@ const styles = StyleSheet.create({
   progressText: {
     fontSize: 12,
     fontFamily: 'Nunito_400Regular',
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     opacity: 0.6,
   },
   backButton: {
@@ -1310,8 +1452,8 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: 'bold',
     fontFamily: 'Nunito_700Bold',
-    color: '#1a1a1a',
-    marginBottom: 30,
+    color: colorScheme === 'dark' ? Colors.dark.text : '#1a1a1a',
+    marginBottom: 10,
     textAlign: 'center',
     lineHeight: 32,
   },
@@ -1326,14 +1468,14 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     fontFamily: 'Nunito_600SemiBold',
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     textAlign: 'center',
     marginBottom: 8,
   },
   authSubtitle: {
     fontSize: 14,
     fontFamily: 'Nunito_400Regular',
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     opacity: 0.7,
     textAlign: 'center',
     lineHeight: 20,
@@ -1342,7 +1484,7 @@ const styles = StyleSheet.create({
   authInfoText: {
     fontSize: 12,
     fontFamily: 'Nunito_400Regular',
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     textAlign: 'center',
     opacity: 0.5,
     marginTop: 12,
@@ -1352,30 +1494,30 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   countryMain: {
-    padding: 32, // Größer als normale Cards
-    borderRadius: 18,
-    backgroundColor: 'white',
+    padding: 32,
+    borderRadius: 16,
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : 'white',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: Colors.light.tabIconDefault + '60',
-    minHeight: 140, // Deutlich höher
+    borderColor: colorScheme === 'dark' ? Colors.dark.border : Colors.light.tabIconDefault + '60',
+    minHeight: 140,
     justifyContent: 'center',
     marginHorizontal: 6,
     marginBottom: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   countryMainFlag: {
     fontSize: 32, // Größere Flagge
     marginBottom: 12,
   },
   countryMainText: {
-    fontSize: 18, // Größerer Text
+    fontSize: 18,
     fontFamily: 'Nunito_700Bold',
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     textAlign: 'center',
   },
   countrySecondary: {
@@ -1386,16 +1528,16 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
     borderRadius: 16,
-    backgroundColor: 'white',
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : 'white',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: Colors.light.tabIconDefault + '60',
-    minHeight: 100, // Kleiner als Main
+    borderColor: colorScheme === 'dark' ? Colors.dark.border : Colors.light.tabIconDefault + '60',
+    minHeight: 100,
     justifyContent: 'center',
     margin: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
@@ -1406,48 +1548,21 @@ const styles = StyleSheet.create({
   countrySmallText: {
     fontSize: 14,
     fontFamily: 'Nunito_600SemiBold',
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     textAlign: 'center',
   },
-  option: {
-    flex: 1,
-    padding: 28, // 22 → 28 (+25% größer)
-    borderRadius: 16,
-    backgroundColor: 'white',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: Colors.light.tabIconDefault + '60',
-    minHeight: 124, // 99 → 124 (+25% größer)
-    justifyContent: 'center',
-    margin: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
   optionSelected: {
-    backgroundColor: Colors.light.tint + '15',
-    borderColor: Colors.light.tint,
-    borderWidth: 2, // Gleiche Breite wie unselected
-    shadowColor: Colors.light.tint,
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.tint + '15' : Colors.light.tint + '15',
+    borderColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
+    borderWidth: 2,
+    shadowColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
     shadowOpacity: 0.3,
   },
   optionDisabled: {
     opacity: 0.3,
   },
-  optionIcon: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-  optionText: {
-    fontSize: 15,
-    fontFamily: 'Nunito_600SemiBold',
-    color: Colors.light.text,
-    textAlign: 'center',
-  },
   optionTextSelected: {
-    color: Colors.light.tint,
+    color: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
     fontFamily: 'Nunito_700Bold',
   },
   optionTextDisabled: {
@@ -1456,17 +1571,17 @@ const styles = StyleSheet.create({
   marketOption: {
     flex: 1,
     margin: 6,
-    padding: 17, // 20 → 17 (-15% für alle anderen Cards)
+    padding: 17,
     borderRadius: 16,
-    backgroundColor: 'white',
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : 'white',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: Colors.light.tabIconDefault + '60',
-    minHeight: 110, // 130 → 110 (-15% für alle anderen Cards)
+    borderColor: colorScheme === 'dark' ? Colors.dark.border : Colors.light.tabIconDefault + '60',
+    minHeight: 110,
     justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
@@ -1484,22 +1599,43 @@ const styles = StyleSheet.create({
   marketText: {
     fontSize: 15,
     fontFamily: 'Nunito_600SemiBold',
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     textAlign: 'center',
   },
+  checkmark: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
+    color: 'white',
+    fontSize: 12,
+    fontFamily: 'Nunito_700Bold',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    textAlign: 'center',
+    lineHeight: 20,
+    overflow: 'hidden',
+  },
   textInputContainer: {
-    marginTop: 20,
+    marginTop: 24, // Mehr Abstand oben
+    marginBottom: 24, // Mehr Abstand zum Button
   },
   textInput: {
     height: 48,
-    borderRadius: 12,
-    backgroundColor: Colors.light.tabIconDefault,
+    borderRadius: 18,
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : 'white',
     paddingHorizontal: 16,
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: 'Nunito_400Regular',
-    color: Colors.light.text,
-    borderWidth: 2,
-    borderColor: Colors.light.tint + '40',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+    borderWidth: 1,
+    borderColor: colorScheme === 'dark' ? Colors.dark.border : '#00000010',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   budgetContainer: {
     alignItems: 'center',
@@ -1509,13 +1645,13 @@ const styles = StyleSheet.create({
     fontSize: 48,
     fontWeight: 'bold',
     fontFamily: 'Nunito_700Bold',
-    color: Colors.light.tint,
+    color: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
     marginBottom: 8,
   },
   budgetLabel: {
     fontSize: 16,
     fontFamily: 'Nunito_400Regular',
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     opacity: 0.7,
   },
   slider: {
@@ -1531,7 +1667,7 @@ const styles = StyleSheet.create({
   sliderLabel: {
     fontSize: 12,
     fontFamily: 'Nunito_400Regular',
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     opacity: 0.6,
   },
   counter: {
@@ -1754,7 +1890,7 @@ const styles = StyleSheet.create({
   // Neue Savings Page Styles
   savingsContainer: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.background : '#f8f9fa',
   },
   savingsContent: {
     flex: 1,
@@ -1776,11 +1912,15 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     marginBottom: 16,
+    backgroundColor: colorScheme === 'dark' ? '#333333' : 'transparent', // Hellgrau nur im Dark Mode
+    borderRadius: 12,
   },
   sandyLoaderLottie: {
     width: 100,
     height: 100,
     marginBottom: 20,
+    backgroundColor: colorScheme === 'dark' ? '#333333' : 'transparent', // Hellgrau nur im Dark Mode
+    borderRadius: 12,
   },
   savingsHeroIcon: {
     fontSize: 48,
@@ -1789,51 +1929,51 @@ const styles = StyleSheet.create({
   savingsHeroTitle: {
     fontSize: 26,
     fontFamily: 'Nunito_700Bold',
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     textAlign: 'center',
     marginBottom: 6,
   },
   savingsHeroSubtitle: {
     fontSize: 15,
     fontFamily: 'Nunito_400Regular',
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     opacity: 0.7,
     textAlign: 'center',
   },
   
   // Jahresersparnis - Hauptfokus
   yearlyHighlight: {
-    backgroundColor: 'white',
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : 'white',
     borderRadius: 18,
     padding: 24,
-    marginBottom: 20, // Mehr Platz für Schatten
-    marginHorizontal: 4, // Seitlicher Platz für Schatten
+    marginBottom: 20,
+    marginHorizontal: 4,
     alignItems: 'center',
-    shadowColor: Colors.light.tint,
-    shadowOffset: { width: 0, height: 4 }, // Weniger extremer Schatten
-    shadowOpacity: 0.12,
+    shadowColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: colorScheme === 'dark' ? 0.2 : 0.12,
     shadowRadius: 8,
     elevation: 6,
     borderWidth: 2,
-    borderColor: Colors.light.tint + '20',
+    borderColor: colorScheme === 'dark' ? Colors.dark.tint + '20' : Colors.light.tint + '20',
   },
   yearlyLabel: {
     fontSize: 17,
     fontFamily: 'Nunito_600SemiBold',
-    color: Colors.light.tint,
+    color: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
     marginBottom: 8,
     textAlign: 'center',
   },
   yearlyAmount: {
     fontSize: 44,
     fontFamily: 'Nunito_700Bold',
-    color: Colors.light.tint,
+    color: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
     marginBottom: 6,
   },
   yearlySubtext: {
     fontSize: 15,
     fontFamily: 'Nunito_500Medium',
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     textAlign: 'center',
     opacity: 0.8,
   },
@@ -1847,31 +1987,31 @@ const styles = StyleSheet.create({
   },
   monthlyCard: {
     flex: 1,
-    backgroundColor: 'white',
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : 'white',
     borderRadius: 14,
     padding: 16,
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 }, // Subtilerer Schatten
-    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.08,
     shadowRadius: 4,
     elevation: 3,
   },
   monthlyAmount: {
     fontSize: 22,
     fontFamily: 'Nunito_700Bold',
-    color: Colors.light.tint,
+    color: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
     marginBottom: 3,
   },
   monthlyLabel: {
     fontSize: 13,
     fontFamily: 'Nunito_500Medium',
-    color: Colors.light.text,
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     opacity: 0.7,
   },
   monthlySeparator: {
     width: 2,
-    backgroundColor: Colors.light.tabIconDefault + '30',
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.border : Colors.light.tabIconDefault + '30',
     marginVertical: 8,
   },
   
@@ -1943,5 +2083,60 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: 'Nunito_600SemiBold',
     color: Colors.light.tint,
+  },
+  
+  // Fehlende Basis-Styles
+  title: {
+    fontSize: 24,
+    fontFamily: 'Nunito_700Bold',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+    marginBottom: 10,
+    textAlign: 'center',
+    lineHeight: 32,
+  },
+  mainContent: {
+    flex: 1,
+  },
+  loadingContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingIcon: {
+    fontSize: 64,
+    marginBottom: 24,
+  },
+  loadingMessageContainer: {
+    marginVertical: 40,
+    alignItems: 'center',
+  },
+  loadingMessage: {
+    fontSize: 16,
+    fontFamily: 'Nunito_500Medium',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+    textAlign: 'center',
+    opacity: 0.8,
+  },
+  loadingBarContainer: {
+    width: '80%',
+    height: 6,
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.border : '#e0e0e0',
+    borderRadius: 3,
+    marginTop: 20,
+    overflow: 'hidden',
+  },
+  loadingBar: {
+    height: '100%',
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
+    borderRadius: 3,
+  },
+  completionContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  completionIcon: {
+    fontSize: 64,
+    marginBottom: 24,
   },
 });

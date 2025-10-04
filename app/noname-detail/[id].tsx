@@ -93,7 +93,7 @@ const StarRating = ({
 };
 
 export default function NoNameDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, source, sourceProduct } = useLocalSearchParams<{ id: string; source?: string; sourceProduct?: string }>();
   const navigation = useNavigation();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -630,7 +630,7 @@ export default function NoNameDetailScreen() {
 
       console.log('🔍 Excluding product ID:', excludeProductId);
       
-      const products = await FirestoreService.getSimilarProducts(categoryRef, excludeProductId, 7);
+      const products = await FirestoreService.getSimilarProducts(categoryRef, excludeProductId, 3);
       setSimilarProducts(products);
 
       
@@ -694,6 +694,38 @@ export default function NoNameDetailScreen() {
     <>
     <ThemedView style={styles.container}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        
+        {/* Navigation Context Header */}
+        {source && sourceProduct && (
+          <Animated.View 
+            style={[
+              styles.navigationContext,
+              { 
+                backgroundColor: colors.cardBackground + 'F5',
+                borderBottomColor: colors.border
+              }
+            ]}
+            entering={undefined}
+          >
+            <TouchableOpacity 
+              style={styles.navigationContextContent}
+              onPress={() => router.back()}
+              activeOpacity={0.7}
+            >
+              <IconSymbol 
+                name="chevron.left" 
+                size={16} 
+                color={colors.primary} 
+              />
+              <ThemedText style={[styles.navigationContextText, { color: colors.text + 'CC' }]}>
+                Gefunden über
+              </ThemedText>
+              <ThemedText style={[styles.navigationContextProduct, { color: colors.primary }]} numberOfLines={1}>
+                {decodeURIComponent(sourceProduct as string)}
+              </ThemedText>
+            </TouchableOpacity>
+          </Animated.View>
+        )}
         
         {/* Main Product Card - Same style as product comparison */}
         <Animated.View 
@@ -923,7 +955,7 @@ export default function NoNameDetailScreen() {
                       style={[styles.similarProductItem, { backgroundColor: colors.cardBackground }]}
                       onPress={() => {
                         // Navigation zu Produktvergleich (Stufe 3,4,5)
-                        router.push(`/product-comparison/${product.id}?type=noname` as any);
+                        router.push(`/product-comparison/${product.id}?type=noname&source=noname&sourceProduct=${encodeURIComponent(product.produktName || product.name || 'NoName Produkt')}` as any);
                       }}
                     >
                     {/* Produktbild */}
@@ -1739,6 +1771,29 @@ export default function NoNameDetailScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  navigationContext: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderRadius: 12,
+    marginHorizontal: 16,
+    marginTop: 8,
+  },
+  navigationContextContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  navigationContextText: {
+    fontSize: 14,
+    fontFamily: 'Nunito_400Regular',
+  },
+  navigationContextProduct: {
+    fontSize: 14,
+    fontFamily: 'Nunito_600SemiBold',
     flex: 1,
   },
   scrollView: {

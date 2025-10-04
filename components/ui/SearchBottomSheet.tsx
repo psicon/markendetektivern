@@ -4,18 +4,18 @@ import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    Keyboard,
-    PanResponder,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  Keyboard,
+  PanResponder,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconSymbol } from './IconSymbol';
@@ -49,6 +49,12 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
   const backdropAnim = useRef(new Animated.Value(0)).current;
   const contentScale = useRef(new Animated.Value(0.98)).current;
   const panY = useRef(new Animated.Value(0)).current;
+  
+  // Loading State für bessere UX
+  const [isSearching, setIsSearching] = useState(false);
+  
+  // Minimum Zeichen Warnung
+  const [showMinCharWarning, setShowMinCharWarning] = useState(false);
   
   const [recentSearches, setRecentSearches] = useState<SearchHistoryItem[]>([]);
   const [popularSearches, setPopularSearches] = useState<PopularSearch[]>([]);
@@ -191,29 +197,70 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
     });
   }, [onClose]);
   
-  const handleSearchTerm = useCallback((term: string) => {
+  // Validierung für Mindestzeichen
+  const validateAndSearch = useCallback(async (term: string) => {
+    const trimmedTerm = term.trim();
+    
+    if (trimmedTerm.length < 3) {
+      // Zeige Warnung
+      setShowMinCharWarning(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      
+      // Verstecke Warnung nach 3 Sekunden
+      setTimeout(() => {
+        setShowMinCharWarning(false);
+      }, 3000);
+      
+      return;
+    }
+    
+    // Verstecke Warnung falls sichtbar
+    setShowMinCharWarning(false);
+    
+    // Starte Suche
+    await handleSearchTerm(trimmedTerm);
+  }, []);
+  
+  const handleSearchTerm = useCallback(async (term: string) => {
+    if (isSearching) return; // Verhindere mehrfache Aufrufe
+    
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
-    // Tastatur schließen vor dem Navigieren
+    // Tastatur schließen
     Keyboard.dismiss();
     
-    // Schließe Sheet schnell und suche (für bessere UX beim Suchen)
-    Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(backdropAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      onClose();
-      onSearch(term);
-    });
-  }, [onSearch, onClose]);
+    // Zeige Loading State
+    setIsSearching(true);
+    
+    try {
+      // Starte Navigation (async)
+      await onSearch(term);
+      
+      // Warte kurz für bessere UX
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Schließe Sheet erst NACH erfolgreicher Navigation
+      Animated.parallel([
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(backdropAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        onClose();
+        setIsSearching(false);
+      });
+      
+    } catch (error) {
+      console.error('Search navigation failed:', error);
+      setIsSearching(false);
+    }
+  }, [onSearch, onClose, isSearching]);
   
   const handleDeleteSearchItem = async (itemId: string) => {
     if (!user?.uid || !itemId) return;
@@ -296,54 +343,94 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
           
           {/* Search Bar - 1:1 wie Startseite */}
           <View style={styles.searchSection}>
-            <View style={[styles.searchFieldContainer, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-              <IconSymbol name="magnifyingglass" size={20} color={colors.icon} />
+            <View style={[
+              styles.searchFieldContainer, 
+              { 
+                backgroundColor: colors.cardBackground, 
+                borderColor: showMinCharWarning ? '#ff3b30' : colors.border,
+                borderWidth: showMinCharWarning ? 2 : 1
+              }
+            ]}>
+              <IconSymbol 
+                name="magnifyingglass" 
+                size={20} 
+                color={showMinCharWarning ? '#ff3b30' : colors.icon} 
+              />
                           <TextInput
               ref={searchInputRef}
               style={[styles.searchField, { color: colors.text }]}
-              placeholder="Produkte suchen ..."
+              placeholder={isSearching ? "Suche läuft..." : "Produkte suchen ..."}
               placeholderTextColor={colors.icon}
               value={searchText}
               onChangeText={setSearchText}
               returnKeyType="search"
+              editable={!isSearching}
               onSubmitEditing={(e) => {
                 const term = e.nativeEvent.text.trim();
-                if (term) {
-                  handleSearchTerm(term);
+                if (term && !isSearching) {
+                  validateAndSearch(term);
                 }
               }}
             />
-              {searchText.length > 0 && (
+              {isSearching ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : searchText.length > 0 ? (
                 <TouchableOpacity onPress={() => setSearchText('')}>
                   <IconSymbol name="xmark.circle.fill" size={18} color={colors.icon + '80'} />
                 </TouchableOpacity>
-              )}
+              ) : null}
             </View>
             
             {/* Search Button - 1:1 wie Scanbutton */}
             <TouchableOpacity 
-              style={[styles.searchButton, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}
+              style={[
+                styles.searchButton, 
+                { 
+                  backgroundColor: colors.cardBackground, 
+                  borderColor: colors.border,
+                  opacity: isSearching ? 0.6 : 1
+                }
+              ]}
               onPress={() => {
                 const term = searchText.trim();
-                if (term) {
-                  handleSearchTerm(term);
+                if (term && !isSearching) {
+                  validateAndSearch(term);
                 }
               }}
+              disabled={isSearching}
             >
-              <IconSymbol name="magnifyingglass" size={20} color={colors.primary} />
+              {isSearching ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <IconSymbol name="magnifyingglass" size={20} color={colors.primary} />
+              )}
             </TouchableOpacity>
           </View>
+          
+          {/* Minimum Zeichen Warnung */}
+          {showMinCharWarning && (
+            <Animated.View 
+              style={[styles.warningContainer, { backgroundColor: '#ff3b30' + '15' }]}
+              entering={undefined}
+            >
+              <IconSymbol name="exclamationmark.triangle.fill" size={16} color="#ff3b30" />
+              <Text style={[styles.warningText, { color: '#ff3b30' }]}>
+                Mindestens 3 Zeichen für die Suche eingeben
+              </Text>
+            </Animated.View>
+          )}
         </View>
         
         {/* Content */}
         <ScrollView
-          style={styles.content}
+          style={[styles.content, { opacity: isSearching ? 0.5 : 1 }]}
           contentContainerStyle={[
             styles.contentContainer,
             { paddingBottom: insetBottom + 20 }
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          scrollEnabled={!isSearching}
         >
           {/* Letzte Suchen - Laden dynamisch */}
           <View style={styles.section}>
@@ -378,8 +465,8 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
                   <TouchableOpacity
                     key={item.id}
                     style={[styles.recentChip, { backgroundColor: colors.cardBackground }]}
-                    onPress={() => handleSearchTerm(item.searchTerm)}
-                    activeOpacity={0.6}
+                    onPress={() => !isSearching && handleSearchTerm(item.searchTerm)}
+                    activeOpacity={isSearching ? 1 : 0.6}
                   >
                     <IconSymbol name="clock" size={14} color={colors.icon} />
                     <Text style={[styles.recentChipText, { color: colors.text }]} numberOfLines={1}>
@@ -441,7 +528,9 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
                         router.push(`/product-comparison/${item.id}?type=noname` as any);
                       } else {
                         // Normale Suche
-                        handleSearchTerm(item.term);
+                        if (!isSearching) {
+                          handleSearchTerm(item.term);
+                        }
                       }
                     }}
                     activeOpacity={0.6}
@@ -533,6 +622,18 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
                 </TouchableOpacity>
               </View>
         </ScrollView>
+        
+        {/* Loading Overlay */}
+        {isSearching && (
+          <View style={styles.loadingOverlay}>
+            <View style={[styles.loadingCard, { backgroundColor: colors.cardBackground }]}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={[styles.loadingText, { color: colors.text }]}>
+                Suche gestartet...
+              </Text>
+            </View>
+          </View>
+        )}
       </Animated.View>
     </>
   );
@@ -806,6 +907,50 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_600SemiBold',
     color: 'rgba(255,255,255,0.95)',
     letterSpacing: 0.1,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    zIndex: 1000,
+  },
+  loadingCard: {
+    padding: 24,
+    borderRadius: 16,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    fontFamily: 'Nunito_600SemiBold',
+    textAlign: 'center',
+  },
+  warningContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 20,
+    marginTop: 8,
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#ff3b30',
+  },
+  warningText: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontFamily: 'Nunito_500Medium',
+    flex: 1,
   },
 });
 

@@ -12,6 +12,7 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { achievementService } from '@/lib/services/achievementService';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { FirestoreService } from '@/lib/services/firestore';
@@ -32,6 +33,7 @@ export default function HomeScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const { top: insetTop } = useSafeAreaInsets();
   const { user, userProfile } = useAuth();
+  const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
   
   // 🎯 Journey-Tracking für Startseite
@@ -77,16 +79,26 @@ export default function HomeScreen() {
 
   // Icon-Mapping für Kategorien
   // Handle Search Function
-  const handleSearch = async (term: string) => {
-    if (!term || term.trim().length === 0) return;
+  const handleSearch = async (term: string): Promise<void> => {
+    const trimmedTerm = term.trim();
+    
+    // Minimum 3 Zeichen Validierung (Fallback, falls UI-Validierung umgangen wird)
+    if (!trimmedTerm || trimmedTerm.length < 3) {
+      console.warn('Search term too short:', trimmedTerm);
+      return;
+    }
     
     // Speichere in History
     if (user?.uid) {
-      await searchHistoryService.saveSearchTerm(user.uid, term);
+      await searchHistoryService.saveSearchTerm(user.uid, trimmedTerm);
     }
     
     // Navigiere zu Suchergebnissen
-    router.push(`/search-results?query=${encodeURIComponent(term)}` as any);
+    return new Promise((resolve) => {
+      router.push(`/search-results?query=${encodeURIComponent(trimmedTerm)}` as any);
+      // Kurze Verzögerung für Navigation
+      setTimeout(resolve, 100);
+    });
   };
 
   const getCategoryIcon = (bezeichnung: string): SymbolViewProps['name'] => {
@@ -162,6 +174,13 @@ export default function HomeScreen() {
 
   // Load data from Firestore
   useEffect(() => {
+    // Remote Config hier initialisieren (nach App-Start)
+    import('@/lib/services/remoteConfigService').then(module => {
+      module.remoteConfigService.initialize().catch(error => {
+        console.error('❌ Remote Config init failed:', error);
+      });
+    });
+    
     const loadData = async () => {
       try {
         setLoading(true);
@@ -173,7 +192,7 @@ export default function HomeScreen() {
         
         // Lade Kategorien und Produkte parallel
         const [kategorienWithAccess, produkteData] = await Promise.all([
-          categoryAccessService.getAllCategoriesWithAccess(userLevel),
+          categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium),
           FirestoreService.getLatestEnttarnteProdukte(10)
         ]);
         
@@ -213,7 +232,7 @@ export default function HomeScreen() {
     };
 
     loadData();
-  }, [userProfile?.stats?.currentLevel, userProfile?.level]); // 🎯 NUR bei Level-Änderung neu laden!
+  }, [userProfile?.stats?.currentLevel, userProfile?.level, isPremium]); // 🎯 Bei Level-Änderung oder Premium-Status neu laden!
 
   // Helper function to format price
   const formatPrice = (price: number) => {
@@ -807,7 +826,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingTop: 16, // Etwas Abstand, damit Kategorien initial nicht vom Schatten überlagert werden
-    paddingBottom: Platform.OS === 'ios' ? 120 : 20, // Platz für TabBar
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20, // Reduziert von 120 auf 40 (67% weniger)
   },
   searchSection: {
     flexDirection: 'row',
@@ -969,12 +988,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   section: {
-    marginBottom: 11, // Reduziert von 20 auf 19 (5% weniger)
+    marginBottom: 12, // Konsistenter kleiner Abstand wie zwischen Cards
   },
   sectionTitle: {
     fontSize: 18,
     fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 4,
+    marginBottom: 5, // 20% mehr als vorher (4 → 5)
     paddingHorizontal: 10,
   },
   productCard: {
@@ -1051,13 +1070,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   productTitle: {
-    fontSize: 14, // Reduziert von 16 auf 14 (2 Größen kleiner)
+    fontSize: 15, // Reduziert von 16 auf 14 (2 Größen kleiner)
     fontFamily: 'Nunito_700Bold',
     lineHeight: 16, // Angepasst von 18 auf 16
     textAlignVertical: 'bottom',
   },
   productBrand: {
-    fontSize: 12,
+    fontSize: 13,
     opacity: 0.7,
     flex: 2, // Nimmt 2/3 der verfügbaren Breite
     lineHeight: 14,

@@ -629,7 +629,7 @@ const styles = StyleSheet.create({
   },
   savingsCard: {
     marginHorizontal: 16,
-    marginBottom: 25,
+    marginBottom: 12, // Reduziert von 25 auf 12 für konsistente Abstände
     borderRadius: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -681,7 +681,7 @@ const styles = StyleSheet.create({
   },
   menuSection: {
     marginHorizontal: 16,
-    marginBottom: 20,
+    marginBottom: 12, // Reduziert von 20 auf 12 für konsistente Abstände
   },
   menuItem: {
     minHeight: 50,
@@ -715,7 +715,7 @@ const styles = StyleSheet.create({
   },
   logoutButton: {
     marginHorizontal: 16,
-    marginBottom: 20,
+    marginBottom: 12, // Reduziert von 20 auf 12 für konsistente Abstände
     borderRadius: 16,
     padding: 14,
     alignItems: 'center',
@@ -751,11 +751,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: 'Nunito_500Medium',
     color: 'rgba(255,255,255,0.9)',
-    marginBottom: 16,
+    marginBottom: 12, // Reduziert von 16 auf 12
     textAlign: 'center',
   },
   featureList: {
-    marginBottom: 20,
+    marginBottom: 12, // Reduziert von 20 auf 12
   },
   featureItem: {
     fontSize: 14,
@@ -779,7 +779,7 @@ const styles = StyleSheet.create({
   // Neue Styles für subtile upgrade CTA
   upgradeCard: {
     marginHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 12, // Reduziert von 16 auf 12 für konsistente Abstände
     borderRadius: 12,
     borderWidth: 1,
     overflow: 'hidden',

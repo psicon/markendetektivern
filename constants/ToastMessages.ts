@@ -259,7 +259,12 @@ export const TOAST_MESSAGES = {
     oneTimeRestriction: '⚠️ Diese Action kann nur einmal ausgeführt werden',
     dedupeWindow: '⏳ Bitte warte {timeLeft} bevor du diese Action wiederholst um wieder Punkte zu erhalten',
     dailyCapReached: '📅 Tageslimit fürs Punkte sammeln erreicht! Du kannst diese Action heute nicht mehr ausführen',
-    weeklyCapReached: '📊 Wochenlimit fürs Punkte sammeln erreicht! Du kannst diese Action diese Woche nicht mehr ausführen'
+    weeklyCapReached: '📊 Wochenlimit fürs Punkte sammeln erreicht! Du kannst diese Action diese Woche nicht mehr ausführen',
+    
+    // Spezifische Action-Nachrichten
+    dailyCapReachedSpecific: '📅 Die Action "{actionName}" gibt dir heute keine Punkte mehr, da du das Tageslimit von {limit} überschritten hast.',
+    weeklyCapReachedSpecific: '📊 Die Action "{actionName}" gibt dir diese Woche keine Punkte mehr, da du das Wochenlimit von {limit} überschritten hast.',
+    dedupeWindowSpecific: '⏳ Die Action "{actionName}" gibt dir erst in {timeLeft} wieder Punkte, um Spam zu vermeiden.'
   }
 } as const;
 

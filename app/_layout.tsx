@@ -13,8 +13,10 @@ import { SplashScreen } from '@/components/ui/SplashScreen';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { AnalyticsProvider } from '@/lib/contexts/AnalyticsProvider';
 import { AuthProvider } from '@/lib/contexts/AuthContext';
+import { RevenueCatProvider } from '@/lib/contexts/RevenueCatProvider';
 import { ThemeProvider } from '@/lib/contexts/ThemeContext';
-import React, { useState } from 'react';
+import { testFlightLogger } from '@/lib/utils/testflightLogger';
+import React, { useEffect, useState } from 'react';
 
 // Komponente die sowohl FontLoader als auch Navigation mit Theme verwaltet
 function ThemedApp() {
@@ -28,8 +30,9 @@ function ThemedApp() {
   return (
     <FontLoader>
       <AuthProvider>
-        <AnalyticsProvider>
-          <GamificationProvider>
+        <RevenueCatProvider>
+          <AnalyticsProvider>
+            <GamificationProvider>
             <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
               <Stack>
                 <Stack.Screen name="index" options={{ headerShown: false }} />
@@ -65,14 +68,21 @@ function ThemedApp() {
                 gutter={10}
               />
             </NavigationThemeProvider>
-          </GamificationProvider>
-        </AnalyticsProvider>
+            </GamificationProvider>
+          </AnalyticsProvider>
+        </RevenueCatProvider>
       </AuthProvider>
     </FontLoader>
   );
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    // Aktiviere TestFlight Logger
+    testFlightLogger.enable();
+    console.log('🚀 App gestartet - TestFlight Logger aktiviert');
+  }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>

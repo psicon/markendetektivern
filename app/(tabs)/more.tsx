@@ -4,40 +4,80 @@ import { LevelBadge } from '@/components/ui/LevelBadge';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { useTheme } from '@/lib/contexts/ThemeContext';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
 import { useRouter } from 'expo-router';
 // @ts-ignore
 import { LinearGradient } from 'expo-linear-gradient';
+import * as WebBrowser from 'expo-web-browser';
 // @ts-ignore
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
-    Linking,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    Share,
-    StatusBar,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View
+  Alert,
+  Linking,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  Share,
+  StatusBar,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { version as packageVersion } from '../../package.json';
+
+const dailyTips = [
+  "Vergleiche immer die Zutaten: Oft sind No-Name Produkte vom selben Hersteller mit identischen Zutaten!",
+  "Achte auf die Herstellerangabe: Viele Markenprodukte werden in denselben Fabriken wie No-Name Artikel produziert.",
+  "Nutze den Scanner bei jedem Einkauf: So entdeckst du versteckte Alternativen direkt im Supermarkt.",
+  "Prüfe die Nährwerte: No-Name Produkte haben oft bessere Werte als teure Markenprodukte und somit bessere Qualität.",
+  "Kaufe saisonale Produkte: No-Name Artikel sind auch zu Weihnachten, Ostern, etc. besonders günstig.",
+  "Vergleiche Grundpreise: Der Kilopreis zeigt dir die wahren Ersparnisse zwischen Marke und No-Name.",
+  "Teste verschiedene Märkte: Jede Kette hat eigene No-Name Perlen mit unterschiedlichen Stärken.",
+  "Achte auf Aktionen: No-Name Produkte in Kombination mit Rabatten ergeben maximale Ersparnisse.",
+  "Lies Kundenbewertungen: Viele No-Name Artikel übertreffen Markenprodukte in Geschmack und Qualität.",
+  "Plane deine Einkäufe: Mit der Einkaufsliste und No-Name Alternativen sparst du bis zu 200€ monatlich.",
+  "Nutze die Stufen: Stufe 4-5 bedeutet oft identisches Produkt zum halben Preis!",
+  "Schaue nach Aktionen: Manche No-Name-Produkte sind zeitlich begrenzt besonders günstig",
+  "Dokumentiere deine Ersparnis: Du wirst staunen wie schnell sich das summiert!",
+  "Teile deine Erfolge: Zeig Freunden wie viel du schon gespart hast",
+  "Erreiche höhere Level: Mit jedem Level schaltest du neue Features und Belohnungen frei",
+  "Nutze alle Features: Einkaufszettel, Favoriten, Scanner - alles bringt Punkte und Ersparnis",
+  "Sammle täglich Punkte: Login, scannen, stöbern - jede Aktion bringt dich weiter",
+  "Markenprodukte sind nicht immer besser: Oft sind No-Name-Produkte genau so gut oder besser!",
+  "Laut Stiftung Warentest sind No-Name-Produkte genau so gut oder besser!"
+];
 
 export default function MoreScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { user, userProfile, logout } = useAuth();
   const { isDarkMode, toggleDarkMode, themeMode, setThemeMode } = useTheme();
+  const { presentPaywall, isPremium, refreshPremiumStatus, restorePurchases } = useRevenueCat();
   const router = useRouter();
   const [appVersion, setAppVersion] = useState('1.0.0');
+  const [showOnboardingButton, setShowOnboardingButton] = useState(false);
+  const [currentTipIndex, setCurrentTipIndex] = useState(0);
 
   useEffect(() => {
     // Get app version from package.json
     setAppVersion(packageVersion || '1.0.0');
+    
+    // Prüfe ob Onboarding übersprungen wurde
+    const checkOnboardingStatus = async () => {
+      const { OnboardingService } = await import('@/lib/services/onboardingService');
+      const isSkipped = await OnboardingService.isOnboardingSkipped();
+      setShowOnboardingButton(isSkipped);
+    };
+    
+    checkOnboardingStatus();
+    
+    // Rotiere Tipps täglich
+    const today = new Date().getDate();
+    setCurrentTipIndex(today % dailyTips.length);
   }, []);
 
   const handleDarkModeToggle = (value: boolean) => {
@@ -47,13 +87,46 @@ export default function MoreScreen() {
 
 
 
-  const handleMoreTips = () => {
-    Linking.openURL('https://www.markendetektive.de/blog/');
+  const handleMoreTips = async () => {
+    try {
+      await WebBrowser.openBrowserAsync('https://www.markendetektive.de/blog/', {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.AUTOMATIC,
+        controlsColor: colors.primary,
+        toolbarColor: colors.background
+      });
+    } catch (error) {
+      // Fallback zu externem Browser
+      Linking.openURL('https://www.markendetektive.de/blog/');
+    }
   };
 
-  const handlePremiumUpgrade = () => {
-    // TODO: Navigate to premium upgrade page
-    console.log('Navigate to premium upgrade');
+  const handlePremiumUpgrade = async () => {
+    console.log('🛒 Premium Upgrade Button geklickt - isPremium:', isPremium);
+    
+    if (isPremium) {
+      console.log('🛒 User ist bereits Premium - keine Paywall nötig');
+      return;
+    }
+    
+    try {
+      console.log('🛒 Zeige RevenueCat Paywall für Profile Upgrade...');
+      
+      // RevenueCat Paywall anzeigen
+      const result = await presentPaywall('profile_upgrade');
+      console.log('🛒 Premium Upgrade Paywall result:', result.result);
+      
+      if (result.result === 'purchased') {
+        console.log('✅ Premium erfolgreich gekauft!');
+        // Premium Status wird automatisch aktualisiert durch RevenueCat Provider
+      } else if (result.result === 'cancelled') {
+        console.log('🛒 Premium Kauf abgebrochen');
+      } else if (result.result === 'error') {
+        console.log('❌ Premium Kauf Fehler');
+      }
+      
+    } catch (error) {
+      console.error('❌ Premium Upgrade Paywall error:', error);
+    }
   };
 
   const handleShoppingCart = () => {
@@ -63,6 +136,18 @@ export default function MoreScreen() {
 
   const handleFavoriteProducts = () => {
     router.push('/favorites' as any);
+  };
+
+  const handleCompleteOnboarding = async () => {
+    try {
+      // Lösche Skip-Flag und navigiere zum Onboarding
+      const { OnboardingService } = await import('@/lib/services/onboardingService');
+      await OnboardingService.resetOnboarding();
+      setShowOnboardingButton(false);
+      router.push('/onboarding');
+    } catch (error) {
+      console.error('Error starting onboarding:', error);
+    }
   };
 
   const handleIdentityDatabase = () => {
@@ -155,7 +240,6 @@ export default function MoreScreen() {
   // Real data from user profile
   const totalSavings = userProfile?.totalSavings || 0;
   const productCount = userProfile?.productsSaved || 0;
-  const isPremium = userProfile?.isPremium || false;
   const level = (userProfile as any)?.stats?.currentLevel || userProfile?.level || 1;
   const currentPoints = (userProfile as any)?.stats?.pointsTotal || (userProfile as any)?.stats?.totalPoints || 0;
 
@@ -224,7 +308,7 @@ export default function MoreScreen() {
                 <ThemedText style={styles.tipTitle}>Tipp des Tages</ThemedText>
               </View>
               <ThemedText style={styles.tipText}>
-                Vergleiche immer die Zutaten: Oft sind No-Name Produkte vom selben Hersteller mit identischen Zutaten!
+                {dailyTips[currentTipIndex]}
               </ThemedText>
               <TouchableOpacity style={styles.moreTipsButton} onPress={handleMoreTips}>
                 <IconSymbol name="arrow.right" size={16} color={colors.secondary} />
@@ -320,6 +404,19 @@ export default function MoreScreen() {
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Mehr</Text>
           
           <View style={[styles.menuGroup, { backgroundColor: colors.cardBackground }]}>
+            {/* Onboarding Button - nur wenn übersprungen */}
+            {showOnboardingButton && (
+              <>
+                <TouchableOpacity style={styles.menuItem} onPress={handleCompleteOnboarding}>
+                  <IconSymbol name="person.crop.circle.badge.plus" size={24} color={colors.primary} />
+                  <ThemedText style={[styles.menuItemText, { color: colors.text }]}>Onboarding abschließen</ThemedText>
+                  <IconSymbol name="chevron.right" size={14} color={colors.icon} />
+                </TouchableOpacity>
+                
+                <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+              </>
+            )}
+            
             {/* Mein Profil / Login Button */}
             <TouchableOpacity 
               style={styles.menuItem} 
@@ -483,16 +580,16 @@ const styles = StyleSheet.create({
   },
   cardContainer: {
     marginHorizontal: 16,
-    marginBottom: 12,
+    marginBottom: 12, // Konsistenter Abstand zwischen Cards
   },
   // Neue Savings Card Styles - ACHIEVEMENTS STIL
   levelBadgeContainer: {
     marginHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 12, // Reduziert von 16 auf 12
   },
   savingsCardContainer: {
     marginHorizontal: 16,
-    marginBottom: 25,
+    marginBottom: 12, // Reduziert von 25 auf 12
     borderRadius: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -609,14 +706,14 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_500Medium',
   },
   sectionContainer: {
-    marginTop: 25,
+    marginTop: 12, // Konsistenter Abstand zwischen Sektionen (reduziert von 25 auf 12)
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '500',
     fontFamily: 'Nunito_500Medium',
     marginLeft: 24,
-    marginBottom: 12,
+    marginBottom: 14, // 20% mehr (12 × 1.2 = 14.4 ≈ 14)
   },
   menuGroup: {
     marginHorizontal: 16,

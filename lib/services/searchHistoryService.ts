@@ -1,17 +1,17 @@
 import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
-  where,
-  writeBatch
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    limit,
+    onSnapshot,
+    orderBy,
+    query,
+    serverTimestamp,
+    updateDoc,
+    where,
+    writeBatch
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { FirestoreDocument, Kategorien, Produkte } from '../types/firestore';
@@ -58,6 +58,28 @@ class SearchHistoryService {
     try {
       const historyRef = collection(db, 'users', userId, 'searchHistory');
       
+      // Prüfe zuerst ob es einen gelöschten Eintrag mit diesem Begriff gibt
+      const deletedQuery = query(
+        historyRef,
+        where('searchTerm', '==', term.trim()),
+        where('deleted', '==', true),
+        limit(1)
+      );
+      
+      const deletedDocs = await getDocs(deletedQuery);
+      
+      if (!deletedDocs.empty) {
+        // Gelöschten Eintrag wiederherstellen
+        const deletedDoc = deletedDocs.docs[0];
+        await updateDoc(doc(db, 'users', userId, 'searchHistory', deletedDoc.id), {
+          deleted: false,
+          timestamp: serverTimestamp(),
+          resultCount: resultCount || 0
+        });
+        console.log('✅ Gelöschten Suchbegriff wiederhergestellt:', term);
+        return;
+      }
+      
       // Prüfe ob der Begriff schon existiert (in den letzten 24h)
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
@@ -66,6 +88,7 @@ class SearchHistoryService {
         historyRef,
         where('searchTerm', '==', term.trim()),
         where('timestamp', '>', yesterday),
+        where('deleted', '!=', true),
         limit(1)
       );
       
@@ -76,7 +99,8 @@ class SearchHistoryService {
         await addDoc(historyRef, {
           searchTerm: term.trim(),
           timestamp: serverTimestamp(),
-          resultCount: resultCount || 0
+          resultCount: resultCount || 0,
+          deleted: false
         });
         
         // Alte Einträge löschen (behalte nur die letzten 20)

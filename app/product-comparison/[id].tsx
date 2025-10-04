@@ -774,7 +774,7 @@ const ProductComparisonContent = ({
           />
           <View style={styles.productHeaderInfo}>
             <ThemedText style={[styles.cardTitle, { color: colors.primary }]}>
-              {comparisonData?.mainProduct?.marke?.name || comparisonData?.mainProduct?.hersteller?.herstellername || comparisonData?.mainProduct?.hersteller?.name || 'Markenprodukt'}
+              {comparisonData?.mainProduct?.marke?.name || comparisonData?.mainProduct?.marke?.herstellername || 'Markenprodukt'}
             </ThemedText>
             <ThemedText style={styles.cardSubtitle}>
 {comparisonData?.mainProduct?.name || 'Unbekanntes Produkt'}
@@ -1692,7 +1692,7 @@ export default function ProductComparisonScreen() {
   };
   
   // Ähnliche Produkte laden (für Markenprodukte ohne NoName-Alternativen)
-  const loadSimilarProducts = async (categoryName: string, excludeProductId: string, limit: number = 7) => {
+  const loadSimilarProducts = async (categoryName: string, excludeProductId: string, limit: number = 3) => {
     try {
       setSimilarProductsLoading(true);
       
@@ -1772,8 +1772,8 @@ export default function ProductComparisonScreen() {
             animateProductCard(product.id, 300 + (index * 120));
           });
           
-          // 🆕 Für Stufe 3,4,5 Produkte: Lade "Weitere enttarnte Produkte" 
-          if (data.relatedNoNameProducts.length > 0 && data.mainProduct.kategorie?.bezeichnung) {
+          // 🆕 Für Stufe 3,4,5 Produkte: Lade "Weitere enttarnte Produkte" NUR bei genau 1 NoName-Produkt
+          if (data.relatedNoNameProducts.length === 1 && data.mainProduct.kategorie?.bezeichnung) {
             // Berechne wann die letzte NoName-Karte startet
             const lastNoNameCardDelay = 300 + ((data.relatedNoNameProducts.length - 1) * 120);
             
@@ -1786,8 +1786,8 @@ export default function ProductComparisonScreen() {
                 useNativeDriver: true,
               }).start();
               
-              // Lade Similar Products sofort
-              loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id, 4);
+              // Lade Similar Products sofort (nur 3 für weniger Reads)
+              loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id, 3);
             }, lastNoNameCardDelay + 60);
           }
           
@@ -2213,12 +2213,12 @@ export default function ProductComparisonScreen() {
           // Wenn es ein Markenprodukt ist und keine NoName-Alternativen hat, lade ähnliche Produkte
           if (isMarkenProdukt && data.relatedNoNameProducts.length === 0 && data.mainProduct.kategorie?.bezeichnung) {
             setTimeout(() => {
-            loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id);
+            loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id, 3);
             }, 400);
           }
           
-          // 🆕 Für Stufe 3,4,5 Produkte: Lade "Weitere enttarnte Produkte" 
-          if (data.relatedNoNameProducts.length > 0 && data.mainProduct.kategorie?.bezeichnung) {
+          // 🆕 Für Stufe 3,4,5 Produkte: Lade "Weitere enttarnte Produkte" NUR bei genau 1 NoName-Produkt
+          if (data.relatedNoNameProducts.length === 1 && data.mainProduct.kategorie?.bezeichnung) {
             // Berechne wann die letzte NoName-Karte startet
             const lastNoNameCardDelay = 300 + ((data.relatedNoNameProducts.length - 1) * 120);
             
@@ -2231,8 +2231,8 @@ export default function ProductComparisonScreen() {
                 useNativeDriver: true,
               }).start();
               
-              // Lade Similar Products sofort
-              loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id, 4);
+              // Lade Similar Products sofort (nur 3 für weniger Reads)
+              loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id, 3);
             }, lastNoNameCardDelay + 120);
           }
           
@@ -2590,16 +2590,16 @@ export default function ProductComparisonScreen() {
             {/* Product Info */}
           <View style={styles.productInfo}>
               <View style={styles.brandRow}>
-                {/* Marke ist in hersteller gespeichert */}
-                {comparisonData.mainProduct.hersteller?.bild && (
+                {/* KORRIGIERT: Logo und Name von der MARKE nehmen (hersteller Feld = Marke) */}
+                {comparisonData.mainProduct.marke?.bild && (
                         <Image 
-                    source={{ uri: comparisonData.mainProduct.hersteller.bild }}
+                    source={{ uri: comparisonData.mainProduct.marke.bild }}
                           style={styles.brandImage}
                           resizeMode="contain"
                         />
                       )}
                       <ThemedText style={[styles.brandText, { color: colors.primary }]}>
-                  {comparisonData.mainProduct.marke?.name || comparisonData.mainProduct.hersteller?.herstellername || comparisonData.mainProduct.hersteller?.name || 'Markenprodukt'}
+                  {comparisonData.mainProduct.marke?.name || comparisonData.mainProduct.marke?.herstellername || 'Markenprodukt'}
                       </ThemedText>
                 </View>
               <ThemedText style={styles.productTitle}>
@@ -2732,7 +2732,11 @@ export default function ProductComparisonScreen() {
         </Animated.View>
 
         {/* Alternatives Section */}
-        <View style={styles.alternativesContainer}>
+        <View style={[
+          styles.alternativesContainer,
+          // Extra Margin wenn mehr als 1 NoName-Produkt (da keine "Weitere enttarnte Produkte" angezeigt werden)
+          comparisonData.relatedNoNameProducts.length > 1 ? { marginBottom: 100 } : {}
+        ]}>
           <Animated.View style={{ opacity: headerAnimation, alignItems: 'center' }}>
             <ThemedText style={[styles.alternativesTitle, { textAlign: 'center' }]}>
             {comparisonData.relatedNoNameProducts.length > 0 
@@ -3333,7 +3337,7 @@ export default function ProductComparisonScreen() {
                       return (selectedProductForDetails as ProductWithDetails).handelsmarke?.bezeichnung || 'NoName-Produkt';
                     }
                     // Bei Markenprodukten: Marke anzeigen  
-                    return selectedProductForDetails?.marke?.name || selectedProductForDetails?.hersteller?.herstellername || selectedProductForDetails?.hersteller?.name || 'Markenprodukt';
+                    return selectedProductForDetails?.marke?.name || selectedProductForDetails?.marke?.herstellername || 'Markenprodukt';
                   })()}
                 </ThemedText>
                 <ThemedText style={[styles.bottomSheetSubtitle, { color: colors.primary }]}>
@@ -4079,7 +4083,7 @@ export default function ProductComparisonScreen() {
               <View style={styles.titleSection}>
                 <ThemedText style={styles.modalTitle}>Produktvergleich</ThemedText>
                 <ThemedText style={[styles.modalSubtitle, { color: colors.primary }]}>
-                  {comparisonData?.mainProduct?.marke?.name || comparisonData?.mainProduct?.hersteller?.herstellername || comparisonData?.mainProduct?.hersteller?.name || 'Marke'} vs. {Array.from(selectedProducts).map(id => {
+                  {comparisonData?.mainProduct?.marke?.name || comparisonData?.mainProduct?.marke?.herstellername || 'Marke'} vs. {Array.from(selectedProducts).map(id => {
                     const product = comparisonData?.relatedNoNameProducts?.find((p: any) => p.id === id);
                     return product?.handelsmarke?.bezeichnung || product?.discounter?.name || 'NoName';
                   }).join(' vs. ')}

@@ -25,13 +25,15 @@ class CategoryAccessService {
 
   /**
    * Lädt alle Kategorien mit Access-Informationen
+   * @param userLevel - Aktuelles User-Level
+   * @param isPremium - Premium-Status (Premium-User haben Zugang zu allen Kategorien)
    */
-  async getAllCategoriesWithAccess(userLevel: number): Promise<CategoryWithAccess[]> {
+  async getAllCategoriesWithAccess(userLevel: number, isPremium: boolean = false): Promise<CategoryWithAccess[]> {
     const now = Date.now();
     
     // Cache verwenden wenn noch gültig
     if (this.cachedCategories.length > 0 && now - this.lastCacheTime < this.cacheDuration) {
-      return this.mapCategoriesWithAccess(this.cachedCategories, userLevel);
+      return this.mapCategoriesWithAccess(this.cachedCategories, userLevel, isPremium);
     }
 
     try {
@@ -48,7 +50,7 @@ class CategoryAccessService {
         categories.push({
           id: doc.id,
           ...data,
-          isLocked: userLevel < getsFreeAtLevel,
+          isLocked: isPremium ? false : userLevel < getsFreeAtLevel, // Premium-User haben Zugang zu allem
           requiredLevel: getsFreeAtLevel,
           unlocksAtLevel: getsFreeAtLevel > 0 ? getsFreeAtLevel : undefined
         });
@@ -61,7 +63,7 @@ class CategoryAccessService {
       this.cachedCategories = categories;
       this.lastCacheTime = now;
       
-      return this.mapCategoriesWithAccess(categories, userLevel);
+      return this.mapCategoriesWithAccess(categories, userLevel, isPremium);
     } catch (error) {
       console.error('❌ Fehler beim Laden der Kategorien mit Access:', error);
       return [];
@@ -71,24 +73,24 @@ class CategoryAccessService {
   /**
    * Gibt nur die für den User verfügbaren Kategorien zurück
    */
-  async getAvailableCategories(userLevel: number): Promise<CategoryWithAccess[]> {
-    const allCategories = await this.getAllCategoriesWithAccess(userLevel);
+  async getAvailableCategories(userLevel: number, isPremium: boolean = false): Promise<CategoryWithAccess[]> {
+    const allCategories = await this.getAllCategoriesWithAccess(userLevel, isPremium);
     return allCategories.filter(cat => !cat.isLocked);
   }
 
   /**
    * Gibt nur die gesperrten Kategorien zurück
    */
-  async getLockedCategories(userLevel: number): Promise<CategoryWithAccess[]> {
-    const allCategories = await this.getAllCategoriesWithAccess(userLevel);
+  async getLockedCategories(userLevel: number, isPremium: boolean = false): Promise<CategoryWithAccess[]> {
+    const allCategories = await this.getAllCategoriesWithAccess(userLevel, isPremium);
     return allCategories.filter(cat => cat.isLocked);
   }
 
   /**
    * Prüft ob eine spezifische Kategorie verfügbar ist
    */
-  async isCategoryAvailable(categoryId: string, userLevel: number): Promise<boolean> {
-    const allCategories = await this.getAllCategoriesWithAccess(userLevel);
+  async isCategoryAvailable(categoryId: string, userLevel: number, isPremium: boolean = false): Promise<boolean> {
+    const allCategories = await this.getAllCategoriesWithAccess(userLevel, isPremium);
     const category = allCategories.find(cat => cat.id === categoryId);
     return category ? !category.isLocked : true; // Default: verfügbar wenn nicht gefunden
   }
@@ -125,20 +127,20 @@ class CategoryAccessService {
   /**
    * Gibt alle Kategorien zurück die in zukünftigen Levels freigeschaltet werden
    */
-  async getUpcomingCategories(currentLevel: number): Promise<CategoryWithAccess[]> {
-    const allCategories = await this.getAllCategoriesWithAccess(currentLevel);
+  async getUpcomingCategories(currentLevel: number, isPremium: boolean = false): Promise<CategoryWithAccess[]> {
+    const allCategories = await this.getAllCategoriesWithAccess(currentLevel, isPremium);
     return allCategories
       .filter(cat => cat.isLocked && cat.requiredLevel > currentLevel)
       .sort((a, b) => a.requiredLevel - b.requiredLevel);
   }
 
   /**
-   * Hilfsfunktion um Access-Status basierend auf User-Level zu mappen
+   * Hilfsfunktion um Access-Status basierend auf User-Level und Premium-Status zu mappen
    */
-  private mapCategoriesWithAccess(categories: CategoryWithAccess[], userLevel: number): CategoryWithAccess[] {
+  private mapCategoriesWithAccess(categories: CategoryWithAccess[], userLevel: number, isPremium: boolean = false): CategoryWithAccess[] {
     return categories.map(cat => ({
       ...cat,
-      isLocked: userLevel < cat.requiredLevel
+      isLocked: isPremium ? false : userLevel < cat.requiredLevel // Premium-User haben Zugang zu allem
     }));
   }
 
