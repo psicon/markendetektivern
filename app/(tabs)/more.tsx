@@ -338,28 +338,6 @@ export default function MoreScreen() {
           <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>Nützliches</ThemedText>
           
           <View style={[styles.menuGroup, { backgroundColor: colors.cardBackground }]}>
-            {/* GA4 Debug Button - In Development UND TestFlight */}
-            {(
-              <>
-                <TouchableOpacity 
-                  style={styles.menuItem} 
-                  onPress={async () => {
-                    const { ga4DebugService } = await import('@/lib/services/ga4DebugService');
-                    const success = await ga4DebugService.testGA4Connection();
-                    Alert.alert(
-                      'GA4 Test', 
-                      success ? '✅ GA4 funktioniert! Check GA4 Live-View.' : '❌ GA4 Test fehlgeschlagen.'
-                    );
-                  }}
-                >
-                  <IconSymbol name="chart.bar" size={24} color="#10B981" />
-                  <ThemedText style={[styles.menuItemText, { color: colors.text }]}>GA4 Analytics Test</ThemedText>
-                  <IconSymbol name="chevron.right" size={14} color={colors.icon} />
-                </TouchableOpacity>
-                
-                <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
-              </>
-            )}
             
             <TouchableOpacity style={styles.menuItem} onPress={handleShoppingCart}>
               <IconSymbol name="cart" size={24} color={colors.secondary} />
