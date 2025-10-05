@@ -1,4 +1,5 @@
 import { ThemedText } from '@/components/ThemedText';
+import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { LocationPicker } from '@/components/ui/LocationPicker';
 import { MarketSelector } from '@/components/ui/MarketSelector';
@@ -7,20 +8,24 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { Discounter, FirestoreDocument } from '@/lib/types/firestore';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import React, { useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  ImageBackground,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -32,11 +37,26 @@ export default function RegisterScreen() {
   const { signUp, signInWithGoogle, signInWithApple } = useAuth();
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
+  const screenHeight = Dimensions.get('window').height;
+  const isSmallDevice = screenHeight < 700;
+  
+  // Image loading state and animation
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const fadeAnim = useState(new Animated.Value(0))[0];
+
+  const handleImageLoad = () => {
+    setImageLoaded(true);
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+  };
   
   // Prüfe ob wir von innerhalb der App kommen (z.B. anonymous user upgrade)
   const canGoBack = params.from === 'app';
 
-  // Helper function to get country flag emoji (copied from explore.tsx)
+  // Helper function to get country flag emoji
   const getCountryFlag = (country: string): string => {
     const flagMap: {[key: string]: string} = {
       'Deutschland': '🇩🇪',
@@ -94,59 +114,68 @@ export default function RegisterScreen() {
     }
   };
 
+  const openTermsOfService = async () => {
+    try {
+      await WebBrowser.openBrowserAsync('https://www.apple.com/legal/internet-services/itunes/dev/stdeula/');
+    } catch (error) {
+      console.error('Error opening Terms of Service:', error);
+    }
+  };
 
+  const openPrivacyPolicy = async () => {
+    try {
+      await WebBrowser.openBrowserAsync('https://www.markendetektive.de/datenschutzerklaerung-haftungsausschluss/');
+    } catch (error) {
+      console.error('Error opening Privacy Policy:', error);
+    }
+  };
 
   const handleRegister = async () => {
     // Reset validation errors
-    const errors: {[key: string]: boolean} = {};
+    setValidationErrors({});
     
-    // Check required fields
+    // Validate required fields
+    const errors: {[key: string]: boolean} = {};
     if (!formData.username.trim()) errors.username = true;
     if (!formData.email.trim()) errors.email = true;
     if (!formData.password) errors.password = true;
-    if (!formData.confirmPassword) errors.confirmPassword = true;
-    if (!formData.favoriteMarket) errors.favoriteMarket = true; // Lieblingsmarkt ist Pflichtfeld!
     if (!acceptTerms) errors.terms = true;
     
-    // Set validation errors
-    setValidationErrors(errors);
-    
-    // If there are any errors, show alert and return
     if (Object.keys(errors).length > 0) {
-      Alert.alert('Fehler', 'Bitte fülle alle Pflichtfelder aus.');
-      // Scroll to top to show the error fields
-      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+      setValidationErrors(errors);
+      Alert.alert('Pflichtfelder', 'Bitte fülle alle Pflichtfelder aus und akzeptiere die Nutzungsbedingungen.');
       return;
     }
-
+    
     if (formData.password !== formData.confirmPassword) {
-      setValidationErrors({ confirmPassword: true });
       Alert.alert('Fehler', 'Die Passwörter stimmen nicht überein.');
       return;
     }
 
     if (formData.password.length < 6) {
-      setValidationErrors({ password: true });
-      Alert.alert('Fehler', 'Das Passwort muss mindestens 6 Zeichen lang sein.');
+      Alert.alert('Passwort zu kurz', 'Das Passwort muss mindestens 6 Zeichen lang sein.');
       return;
     }
 
-    setLoading(true);
-
     try {
-      await signUp(formData.email, formData.password, formData.username, {
-        realName: formData.realName,
-        birthDate: formData.birthDate,
-        gender: formData.gender,
-        location: formData.location,
-        favoriteMarket: formData.favoriteMarket?.id,
-        favoriteMarketName: formData.favoriteMarket?.name
-      });
-      Alert.alert('Erfolg', 'Account erfolgreich erstellt!', [
-        { text: 'OK', onPress: () => router.replace('/(tabs)') }
-      ]);
+      setLoading(true);
+      
+      await signUp(
+        formData.email, 
+        formData.password, 
+        formData.username,
+        {
+          realName: formData.realName || undefined,
+          birthDate: formData.birthDate || undefined,
+          gender: formData.gender || undefined,
+          location: formData.location || undefined,
+          favoriteMarket: formData.favoriteMarket?.id || undefined,
+          favoriteMarketName: formData.favoriteMarket?.name || undefined
+        }
+      );
+      
+      router.replace('/(tabs)');
     } catch (error: any) {
-      // Verhindere React Error Logs in Production
       if (__DEV__) {
         console.error('Registration error:', error);
       }
@@ -210,6 +239,18 @@ export default function RegisterScreen() {
   const handleAppleSignIn = async () => {
     try {
       setLoading(true);
+      // Check if running in Expo Go
+      if (__DEV__ && Platform.OS === 'ios') {
+        const Constants = require('expo-constants').default;
+        if (Constants.appOwnership === 'expo') {
+          Alert.alert(
+            'Nicht verfügbar in Expo Go',
+            'Apple Sign-In funktioniert nur in der TestFlight oder App Store Version. Bitte nutze Email/Passwort für die Entwicklung.',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+      }
       await signInWithApple();
       router.replace('/(tabs)');
     } catch (error: any) {
@@ -221,510 +262,383 @@ export default function RegisterScreen() {
   };
 
   return (
-    <KeyboardAvoidingView 
-      style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView 
-        ref={scrollViewRef}
-        style={styles.scrollView} 
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
-          {canGoBack && (
-            <TouchableOpacity 
-              style={styles.backButtonWithText}
-              onPress={() => router.back()}
+    <>
+      <Stack.Screen options={{ headerShown: false }} />
+      <View style={styles.container}>
+        {/* Static background while image loads */}
+        <View style={[styles.background, { backgroundColor: colorScheme === 'dark' ? '#000000' : '#f5f5f5' }]} />
+        
+        {/* Animated ImageBackground */}
+        <Animated.View style={[styles.imageContainer, { opacity: fadeAnim }]}>
+          <ImageBackground 
+            source={require('@/assets/images/table-optimized.jpg')}
+            style={styles.background}
+            blurRadius={2}
+            onLoad={handleImageLoad}
+          />
+        
+        {/* Dynamic gradient overlay based on theme */}
+        <LinearGradient
+          colors={
+            colorScheme === 'dark' 
+              ? ['rgba(0,0,0,0.2)', 'rgba(0,0,0,0.5)', 'rgba(0,0,0,0.85)', 'rgba(0,0,0,0.98)']
+              : ['rgba(0,0,0,0.2)', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.9)']
+          }
+          locations={[0, 0.3, 0.7, 1]}
+          style={[styles.overlay, { paddingTop: insets.top + 20 }]}
+        >
+          {/* Back Button */}
+          <TouchableOpacity 
+            style={styles.backButtonWithText}
+            onPress={() => router.back()}
+          >
+            <IconSymbol name="chevron.left" size={20} color="white" />
+            <ThemedText style={styles.backButtonText}>Zurück</ThemedText>
+          </TouchableOpacity>
+
+          {/* Logo */}
+          <View style={[styles.logoContainer, isSmallDevice && styles.logoContainerSmall]}>
+            <CustomIcon 
+              name="iconBlack" 
+              size={isSmallDevice ? 48 : 64} 
+              color="white"
+              style={styles.logoIcon}
+            />
+            <ThemedText style={[styles.logoText, isSmallDevice && styles.logoTextSmall]}>MarkenDetektive</ThemedText>
+          </View>
+
+          <KeyboardAvoidingView 
+            style={styles.keyboardView}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            <ScrollView 
+              ref={scrollViewRef}
+              style={styles.scrollView}
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
             >
-              <IconSymbol name="chevron.left" size={20} color={colors.text} />
-              <ThemedText style={[styles.backButtonText, { color: colors.text }]}>Zurück</ThemedText>
-            </TouchableOpacity>
-          )}
-        </View>
+              {/* Title */}
+              <View style={styles.titleSection}>
+                <ThemedText style={[styles.title, isSmallDevice && styles.titleSmall]}>
+                  Jetzt registrieren
+                </ThemedText>
+                <ThemedText style={[styles.subtitle, isSmallDevice && styles.subtitleSmall]}>
+                  und herausfinden, wer dahintersteckt.
+                </ThemedText>
+              </View>
 
-        <View style={styles.content}>
-          <View style={styles.titleContainer}>
-            <ThemedText style={styles.title}>Jetzt registrieren</ThemedText>
-            <ThemedText style={styles.subtitle}>
-              und herausfinden, wer dahintersteckt.
-            </ThemedText>
-          </View>
-
-          {/* Social Login Buttons First - Best Practice! */}
-          <View style={styles.socialSection}>
-            {Platform.OS === 'ios' && (
-              <TouchableOpacity 
-                style={[styles.socialButton, styles.appleButton]}
-                onPress={handleAppleSignIn}
-                disabled={loading}
-              >
-                <IconSymbol name="apple.logo" size={20} color="white" />
-                <ThemedText style={styles.appleButtonText}>Mit Apple registrieren</ThemedText>
-              </TouchableOpacity>
-            )}
-            
-            {Platform.OS === 'android' && (
-              <TouchableOpacity 
-                style={[styles.socialButton, styles.googleButton]}
-                onPress={handleGoogleSignIn}
-                disabled={loading}
-              >
-                <View style={styles.googleIconContainer}>
-                  <IconSymbol name="g.circle.fill" size={20} color="#4285f4" />
-                </View>
-                <ThemedText style={styles.googleButtonText}>Mit Google registrieren</ThemedText>
-              </TouchableOpacity>
-            )}
-
-            {/* Or Divider */}
-            <View style={styles.dividerContainer}>
-              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-              <ThemedText style={[styles.dividerText, { color: colors.icon }]}>oder mit E-Mail Adresse registrieren:</ThemedText>
-              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-            </View>
-          </View>
-
-          {/* Form */}
-          <View style={styles.form}>
-            {/* Username with Clear Button */}
-            <View style={styles.inputContainer}>
-              <ThemedText style={styles.label}>Anzeigename *</ThemedText>
-              <View style={[styles.inputWithClearContainer, { 
-                borderColor: validationErrors.username ? '#FF3B30' : colors.border, 
-                backgroundColor: colors.cardBackground,
-                borderWidth: validationErrors.username ? 2 : 1
-              }]}>
-                <TextInput
-                  style={[styles.inputWithClear, { color: colors.text }]}
-                  placeholder="Dein Anzeigename"
-                  placeholderTextColor={colors.icon}
-                  value={formData.username}
-                  onChangeText={(text) => {
-                    setFormData(prev => ({ ...prev, username: text }));
-                    if (validationErrors.username) {
-                      setValidationErrors(prev => ({ ...prev, username: false }));
-                    }
-                  }}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                {formData.username.length > 0 && (
-                  <TouchableOpacity
-                    onPress={() => setFormData(prev => ({ ...prev, username: '' }))}
-                    style={styles.clearButton}
+              {/* Social Login Buttons */}
+              <View style={styles.socialSection}>
+                {Platform.OS === 'ios' && (
+                  <TouchableOpacity 
+                    style={[styles.socialButton, styles.appleButton]}
+                    onPress={handleAppleSignIn}
+                    disabled={loading}
                   >
-                    <IconSymbol name="xmark.circle.fill" size={20} color={colors.icon} />
+                    <IconSymbol name="apple.logo" size={20} color="white" />
+                    <ThemedText style={styles.appleButtonText}>Mit Apple registrieren</ThemedText>
+                  </TouchableOpacity>
+                )}
+                
+                {Platform.OS === 'android' && (
+                  <TouchableOpacity 
+                    style={styles.socialButton}
+                    onPress={handleGoogleSignIn}
+                    disabled={loading}
+                  >
+                    <View style={styles.googleIconContainer}>
+                      <Text style={styles.googleIcon}>G</Text>
+                    </View>
+                    <ThemedText style={styles.socialButtonText}>Mit Google registrieren</ThemedText>
                   </TouchableOpacity>
                 )}
               </View>
-              {validationErrors.username ? (
-                <ThemedText style={[styles.errorText, { color: '#FF3B30' }]}>
-                  Pflichtfeld - bitte ausfüllen
-                </ThemedText>
-              ) : (
-                <ThemedText style={[styles.helperText, { color: colors.icon }]}>
-                  Wird für Kommentare und Bewertungen verwendet
-                </ThemedText>
-              )}
-            </View>
 
-            {/* Real Name with Clear Button */}
-            <View style={styles.inputContainer}>
-              <ThemedText style={styles.label}>Richtiger Name</ThemedText>
-              <View style={[styles.inputWithClearContainer, { 
-                borderColor: colors.border, 
-                backgroundColor: colors.cardBackground 
-              }]}>
-                <TextInput
-                  style={[styles.inputWithClear, { color: colors.text }]}
-                  placeholder="Dein vollständiger Name"
-                  placeholderTextColor={colors.icon}
-                  value={formData.realName}
-                  onChangeText={(text) => setFormData(prev => ({ ...prev, realName: text }))}
-                  autoCapitalize="words"
-                  autoCorrect={false}
-                />
-                {formData.realName.length > 0 && (
-                  <TouchableOpacity
-                    onPress={() => setFormData(prev => ({ ...prev, realName: '' }))}
-                    style={styles.clearButton}
-                  >
-                    <IconSymbol name="xmark.circle.fill" size={20} color={colors.icon} />
-                  </TouchableOpacity>
-                )}
-              </View>
-              <ThemedText style={[styles.helperText, { color: colors.icon }]}>
-                Für persönliche Daten und Rechnungen
-              </ThemedText>
-            </View>
+              {/* Divider */}
+              <ThemedText style={styles.orText}>oder mit E-Mail Adresse registrieren:</ThemedText>
 
-            {/* Email */}
-            <View style={styles.inputContainer}>
-              <ThemedText style={styles.label}>E-Mail *</ThemedText>
-              <TextInput
-                style={[styles.input, { 
-                  borderColor: validationErrors.email ? '#FF3B30' : colors.border, 
-                  backgroundColor: colors.cardBackground,
-                  color: colors.text,
-                  borderWidth: validationErrors.email ? 2 : 1
-                }]}
-                placeholder="deine@email.de"
-                placeholderTextColor={colors.icon}
-                value={formData.email}
-                onChangeText={(text) => {
-                  setFormData(prev => ({ ...prev, email: text }));
-                  if (validationErrors.email) {
-                    setValidationErrors(prev => ({ ...prev, email: false }));
-                  }
-                }}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              {validationErrors.email && (
-                <ThemedText style={[styles.errorText, { color: '#FF3B30' }]}>
-                  Pflichtfeld - bitte ausfüllen
-                </ThemedText>
-              )}
-            </View>
-
-            {/* Password */}
-            <View style={styles.inputContainer}>
-              <ThemedText style={styles.label}>Passwort *</ThemedText>
-              <View style={styles.passwordContainer}>
-                <TextInput
-                  style={[styles.passwordInput, { 
-                    borderColor: validationErrors.password ? '#FF3B30' : colors.border, 
-                    backgroundColor: colors.cardBackground,
-                    color: colors.text,
-                    borderWidth: validationErrors.password ? 2 : 1
-                  }]}
-                  placeholder="Mindestens 6 Zeichen"
-                  placeholderTextColor={colors.icon}
-                  value={formData.password}
-                  onChangeText={(text) => {
-                    setFormData(prev => ({ ...prev, password: text }));
-                    if (validationErrors.password) {
-                      setValidationErrors(prev => ({ ...prev, password: false }));
-                    }
-                  }}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <TouchableOpacity
-                  style={styles.eyeButton}
-                  onPress={() => setShowPassword(!showPassword)}
-                >
-                  <IconSymbol 
-                    name={showPassword ? "eye.slash" : "eye"} 
-                    size={20} 
-                    color={colors.icon} 
-                  />
-                </TouchableOpacity>
-              </View>
-              {validationErrors.password && (
-                <ThemedText style={[styles.errorText, { color: '#FF3B30' }]}>
-                  Pflichtfeld - mindestens 6 Zeichen
-                </ThemedText>
-              )}
-            </View>
-
-            {/* Confirm Password */}
-            <View style={styles.inputContainer}>
-              <ThemedText style={styles.label}>Passwort bestätigen *</ThemedText>
-              <View style={styles.passwordContainer}>
-                <TextInput
-                  style={[styles.passwordInput, { 
-                    borderColor: validationErrors.confirmPassword ? '#FF3B30' : colors.border, 
-                    backgroundColor: colors.cardBackground,
-                    color: colors.text,
-                    borderWidth: validationErrors.confirmPassword ? 2 : 1
-                  }]}
-                  placeholder="Passwort wiederholen"
-                  placeholderTextColor={colors.icon}
-                  value={formData.confirmPassword}
-                  onChangeText={(text) => {
-                    setFormData(prev => ({ ...prev, confirmPassword: text }));
-                    if (validationErrors.confirmPassword) {
-                      setValidationErrors(prev => ({ ...prev, confirmPassword: false }));
-                    }
-                  }}
-                  secureTextEntry={!showConfirmPassword}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <TouchableOpacity
-                  style={styles.eyeButton}
-                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                >
-                  <IconSymbol 
-                    name={showConfirmPassword ? "eye.slash" : "eye"} 
-                    size={20} 
-                    color={colors.icon} 
-                  />
-                </TouchableOpacity>
-              </View>
-              {validationErrors.confirmPassword && (
-                <ThemedText style={[styles.errorText, { color: '#FF3B30' }]}>
-                  Passwörter stimmen nicht überein
-                </ThemedText>
-              )}
-            </View>
-
-            {/* Optional Section Header */}
-            <View style={styles.sectionHeader}>
-              <ThemedText style={styles.sectionTitle}>Optionale Informationen</ThemedText>
-              <ThemedText style={[styles.sectionSubtitle, { color: colors.icon }]}>
-                Du kannst diese auch später in deinem Profil hinzufügen
-              </ThemedText>
-            </View>
-
-            {/* Birth Date */}
-            <TouchableOpacity 
-              style={styles.inputContainer}
-              onPress={() => setShowDatePicker(true)}
-            >
-              <ThemedText style={styles.label}>Geburtsdatum</ThemedText>
-              <View style={[styles.selectInput, { 
-                borderColor: colors.border, 
-                backgroundColor: colors.cardBackground 
-              }]}>
-                <Text style={[styles.selectText, { 
-                  color: formData.birthDate ? colors.text : colors.icon
-                }]}>
-                  {formData.birthDate 
-                    ? formData.birthDate.toLocaleDateString('de-DE')
-                    : 'Datum auswählen'}
-                </Text>
-                <IconSymbol name="calendar" size={20} color={colors.icon} />
-              </View>
-            </TouchableOpacity>
-
-            {/* Gender */}
-            <View style={styles.inputContainer}>
-              <ThemedText style={styles.label}>Geschlecht</ThemedText>
-              <View style={styles.genderContainer}>
-                {['Männlich', 'Weiblich', 'Divers'].map((option) => (
-                  <TouchableOpacity
-                    key={option}
+              {/* Form Fields */}
+              <View style={styles.formContainer}>
+                {/* Username */}
+                <View style={styles.inputContainer}>
+                  <ThemedText style={styles.label}>Anzeigename *</ThemedText>
+                  <TextInput
                     style={[
-                      styles.genderOption,
-                      { 
-                        backgroundColor: formData.gender === option 
-                          ? colors.primary 
-                          : colors.cardBackground,
-                        borderColor: formData.gender === option 
-                          ? colors.primary 
-                          : colors.border,
-                      }
+                      styles.input, 
+                      validationErrors.username && styles.inputError,
+                      isSmallDevice && styles.inputSmall
                     ]}
-                    onPress={() => setFormData(prev => ({ ...prev, gender: option }))}
-                  >
-                    <Text style={[
-                      styles.genderText,
-                      { 
-                        color: formData.gender === option 
-                          ? '#FFFFFF' 
-                          : colors.text 
+                    placeholder="Dein Anzeigename"
+                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    value={formData.username}
+                    onChangeText={(text) => {
+                      setFormData(prev => ({ ...prev, username: text }));
+                      if (validationErrors.username) {
+                        setValidationErrors(prev => ({ ...prev, username: false }));
                       }
-                    ]}>
-                      {option}
-                    </Text>
+                    }}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <ThemedText style={styles.fieldHelp}>
+                    Wird für Kommentare und Bewertungen verwendet
+                  </ThemedText>
+                </View>
+
+                {/* Real Name */}
+                <View style={styles.inputContainer}>
+                  <ThemedText style={styles.label}>Richtiger Name</ThemedText>
+                  <TextInput
+                    style={[styles.input, isSmallDevice && styles.inputSmall]}
+                    placeholder="Dein vollständiger Name"
+                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    value={formData.realName}
+                    onChangeText={(text) => setFormData(prev => ({ ...prev, realName: text }))}
+                    autoCapitalize="words"
+                  />
+                  <ThemedText style={styles.fieldHelp}>
+                    Für persönliche Daten und Rechnungen
+                  </ThemedText>
+                </View>
+
+                {/* Email */}
+                <View style={styles.inputContainer}>
+                  <ThemedText style={styles.label}>E-Mail *</ThemedText>
+                  <TextInput
+                    style={[
+                      styles.input, 
+                      validationErrors.email && styles.inputError,
+                      isSmallDevice && styles.inputSmall
+                    ]}
+                    placeholder="deine@email.de"
+                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    value={formData.email}
+                    onChangeText={(text) => {
+                      setFormData(prev => ({ ...prev, email: text }));
+                      if (validationErrors.email) {
+                        setValidationErrors(prev => ({ ...prev, email: false }));
+                      }
+                    }}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+
+                {/* Password */}
+                <View style={styles.inputContainer}>
+                  <ThemedText style={styles.label}>Passwort *</ThemedText>
+                  <View style={styles.passwordContainer}>
+                    <TextInput
+                      style={[
+                        styles.passwordInput, 
+                        validationErrors.password && styles.inputError,
+                        isSmallDevice && styles.inputSmall
+                      ]}
+                      placeholder="Mindestens 6 Zeichen"
+                      placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                      value={formData.password}
+                      onChangeText={(text) => {
+                        setFormData(prev => ({ ...prev, password: text }));
+                        if (validationErrors.password) {
+                          setValidationErrors(prev => ({ ...prev, password: false }));
+                        }
+                      }}
+                      secureTextEntry={!showPassword}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <TouchableOpacity
+                      style={styles.eyeButton}
+                      onPress={() => setShowPassword(!showPassword)}
+                    >
+                      <IconSymbol 
+                        name={showPassword ? "eye.slash" : "eye"} 
+                        size={20} 
+                        color="rgba(255, 255, 255, 0.7)" 
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Confirm Password */}
+                <View style={styles.inputContainer}>
+                  <ThemedText style={styles.label}>Passwort bestätigen</ThemedText>
+                  <View style={styles.passwordContainer}>
+                    <TextInput
+                      style={[styles.passwordInput, isSmallDevice && styles.inputSmall]}
+                      placeholder="Passwort wiederholen"
+                      placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                      value={formData.confirmPassword}
+                      onChangeText={(text) => setFormData(prev => ({ ...prev, confirmPassword: text }))}
+                      secureTextEntry={!showConfirmPassword}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <TouchableOpacity
+                      style={styles.eyeButton}
+                      onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                    >
+                      <IconSymbol 
+                        name={showConfirmPassword ? "eye.slash" : "eye"} 
+                        size={20} 
+                        color="rgba(255, 255, 255, 0.7)" 
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Birth Date */}
+                <View style={styles.inputContainer}>
+                  <ThemedText style={styles.label}>Geburtsdatum</ThemedText>
+                  <TouchableOpacity 
+                    style={[styles.input, isSmallDevice && styles.inputSmall]}
+                    onPress={() => setShowDatePicker(true)}
+                  >
+                    <ThemedText style={styles.selectText}>
+                      {formData.birthDate 
+                        ? formData.birthDate.toLocaleDateString('de-DE')
+                        : 'Datum auswählen'
+                      }
+                    </ThemedText>
+                    <IconSymbol name="calendar" size={20} color="rgba(255, 255, 255, 0.7)" />
                   </TouchableOpacity>
-                ))}
+                </View>
+
+                {/* Gender */}
+                <View style={styles.inputContainer}>
+                  <ThemedText style={styles.label}>Geschlecht</ThemedText>
+                  <View style={styles.genderContainer}>
+                    {['Männlich', 'Weiblich', 'Divers'].map((gender) => (
+                      <TouchableOpacity
+                        key={gender}
+                        style={[
+                          styles.genderButton,
+                          formData.gender === gender && styles.genderButtonActive
+                        ]}
+                        onPress={() => setFormData(prev => ({ ...prev, gender }))}
+                      >
+                        <ThemedText style={[
+                          styles.genderButtonText,
+                          formData.gender === gender && styles.genderButtonTextActive
+                        ]}>
+                          {gender}
+                        </ThemedText>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                {/* Location */}
+                <View style={styles.inputContainer}>
+                  <ThemedText style={styles.label}>Standort</ThemedText>
+                  <TouchableOpacity 
+                    style={[styles.input, isSmallDevice && styles.inputSmall]}
+                    onPress={() => setShowLocationPicker(true)}
+                  >
+                    <ThemedText style={styles.selectText}>
+                      {formData.location || 'Standort wählen'}
+                    </ThemedText>
+                    <IconSymbol name="location" size={20} color="rgba(255, 255, 255, 0.7)" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Favorite Market */}
+                <View style={styles.inputContainer}>
+                  <ThemedText style={styles.label}>Lieblingsmarkt</ThemedText>
+                  <TouchableOpacity 
+                    style={[styles.input, isSmallDevice && styles.inputSmall]}
+                    onPress={() => setShowMarketSelector(true)}
+                  >
+                    <ThemedText style={styles.selectText}>
+                      {formData.favoriteMarket 
+                        ? `${getCountryFlag(formData.favoriteMarket.land)} ${formData.favoriteMarket.name}`
+                        : 'Markt auswählen'
+                      }
+                    </ThemedText>
+                    <IconSymbol name="storefront" size={20} color="rgba(255, 255, 255, 0.7)" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Terms */}
+                <TouchableOpacity 
+                  style={styles.termsContainer}
+                  onPress={() => setAcceptTerms(!acceptTerms)}
+                >
+                  <View style={[styles.checkbox, acceptTerms && styles.checkboxActive]}>
+                    {acceptTerms && <IconSymbol name="checkmark" size={16} color="white" />}
+                  </View>
+                  <ThemedText style={[styles.termsText, validationErrors.terms && styles.termsTextError]}>
+                    Ich stimme den{' '}
+                    <ThemedText 
+                      style={styles.termsLink}
+                      onPress={openTermsOfService}
+                    >
+                      Nutzungsbedingungen
+                    </ThemedText>
+                    {' '}und der{' '}
+                    <ThemedText 
+                      style={styles.termsLink}
+                      onPress={openPrivacyPolicy}
+                    >
+                      Datenschutzerklärung
+                    </ThemedText>
+                    {' '}zu
+                  </ThemedText>
+                </TouchableOpacity>
+
+                {/* Register Button */}
+                <TouchableOpacity 
+                  style={[styles.registerButton, { backgroundColor: colors.primary }, loading && { opacity: 0.7 }]}
+                  onPress={handleRegister}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="white" />
+                  ) : (
+                    <>
+                      <IconSymbol name="person.badge.plus" size={20} color="white" />
+                      <ThemedText style={styles.registerButtonText}>Registrieren</ThemedText>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                {/* Login Link */}
+                <View style={styles.loginSection}>
+                  <ThemedText style={styles.loginText}>Schon registriert?</ThemedText>
+                  <TouchableOpacity onPress={() => router.replace('/auth/login')}>
+                    <ThemedText style={[styles.loginLink, { color: colors.primary }]}>Anmelden!</ThemedText>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </LinearGradient>
+        </Animated.View>
+      </View>
 
-            {/* Location */}
-            {/* Favorite Market Field - REQUIRED */}
-            <TouchableOpacity 
-              style={styles.inputContainer}
-              onPress={() => {
-                setShowMarketSelector(true);
-                // Clear validation error when user starts interacting
-                if (validationErrors.favoriteMarket) {
-                  setValidationErrors(prev => ({ ...prev, favoriteMarket: false }));
-                }
-              }}
-            >
-              <ThemedText style={styles.label}>Lieblingsmarkt *</ThemedText>
-              <View style={[styles.selectInput, { 
-                borderColor: validationErrors.favoriteMarket ? '#ff3b30' : colors.border,
-                borderWidth: validationErrors.favoriteMarket ? 2 : 1,
-                backgroundColor: colors.cardBackground 
-              }]}>
-                <Text style={[styles.selectText, { 
-                  color: formData.favoriteMarket ? colors.text : colors.icon
-                }]}>
-                  {formData.favoriteMarket ? 
-                    `${formData.favoriteMarket.name} ${getCountryFlag(formData.favoriteMarket.land)} ${normalizeCountry(formData.favoriteMarket.land)}` : 
-                    'Markt auswählen'
-                  }
-                </Text>
-                <IconSymbol name="storefront" size={20} color={colors.icon} />
-              </View>
-              {validationErrors.favoriteMarket && (
-                <ThemedText style={[styles.errorText, { color: '#ff3b30' }]}>
-                  Bitte wähle deinen Lieblingsmarkt aus
-                </ThemedText>
-              )}
-              <ThemedText style={[styles.helperText, { color: colors.icon }]}>
-                Wo kaufst du am häufigsten ein?
-              </ThemedText>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.inputContainer}
-              onPress={() => setShowLocationPicker(true)}
-            >
-              <ThemedText style={styles.label}>Einkaufsort</ThemedText>
-              <View style={[styles.selectInput, { 
-                borderColor: colors.border, 
-                backgroundColor: colors.cardBackground 
-              }]}>
-                <Text style={[styles.selectText, { 
-                  color: formData.location ? colors.text : colors.icon
-                }]}>
-                  {formData.location || 'Standort auswählen'}
-                </Text>
-                <IconSymbol name="location.fill" size={20} color={colors.icon} />
-              </View>
-              <ThemedText style={[styles.helperText, { color: colors.icon }]}>
-                Hilft uns, lokale Angebote und Märkte zu finden
-              </ThemedText>
-            </TouchableOpacity>
-
-            {/* Terms Checkbox */}
-            <TouchableOpacity 
-              style={styles.checkboxContainer}
-              onPress={() => {
-                setAcceptTerms(!acceptTerms);
-                if (validationErrors.terms) {
-                  setValidationErrors(prev => ({ ...prev, terms: false }));
-                }
-              }}
-            >
-              <View style={[
-                styles.checkbox, 
-                { 
-                  borderColor: validationErrors.terms ? '#FF3B30' : colors.border,
-                  borderWidth: validationErrors.terms ? 2 : 2
-                },
-                acceptTerms && { backgroundColor: colors.primary, borderColor: colors.primary }
-              ]}>
-                {acceptTerms && (
-                  <IconSymbol name="checkmark" size={14} color="white" />
-                )}
-              </View>
-              <ThemedText style={[
-                styles.checkboxText,
-                validationErrors.terms && { color: '#FF3B30' }
-              ]}>
-                Ich akzeptiere AGB und Nutzungsbestimmungen *
-              </ThemedText>
-            </TouchableOpacity>
-            {validationErrors.terms && (
-              <ThemedText style={[styles.errorText, { color: '#FF3B30', marginTop: -10, marginBottom: 10 }]}>
-                Bitte akzeptiere die AGB und Nutzungsbestimmungen
-              </ThemedText>
-            )}
-
-            {/* Register Button */}
-            <TouchableOpacity 
-              style={[
-                styles.registerButton, 
-                { backgroundColor: colors.primary },
-                loading && { opacity: 0.7 }
-              ]}
-              onPress={handleRegister}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <ThemedText style={styles.registerButtonText}>Benutzer erstellen</ThemedText>
-              )}
-            </TouchableOpacity>
-
-            
-            
-            {/* Bottom Spacing */}
-            <View style={{ height: 40 }} />
-          </View>
-        </View>
-      </ScrollView>
-
-      {/* Native Date Picker */}
-      {showDatePicker && Platform.OS === 'android' && (
+      {/* Date Picker Modal */}
+      {showDatePicker && (
         <DateTimePicker
-          value={formData.birthDate || new Date(2000, 0, 1)}
+          value={formData.birthDate || new Date()}
           mode="date"
-          display="default"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
           onChange={onDateChange}
           maximumDate={new Date()}
+          minimumDate={new Date(1900, 0, 1)}
         />
-      )}
-      
-      {/* iOS Date Picker Modal */}
-      {showDatePicker && Platform.OS === 'ios' && (
-        <Modal
-          animationType="slide"
-          transparent={true}
-          visible={showDatePicker}
-          onRequestClose={() => setShowDatePicker(false)}
-        >
-          <View style={styles.datePickerModal}>
-            <TouchableOpacity 
-              style={styles.datePickerBackdrop}
-              activeOpacity={1}
-              onPress={() => setShowDatePicker(false)}
-            />
-            <View style={[styles.datePickerContainer, { 
-              backgroundColor: colorScheme === 'dark' ? '#1c1c1e' : '#ffffff' 
-            }]}>
-              <View style={styles.datePickerHeader}>
-                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                  <Text style={[styles.datePickerButton, { color: colors.primary }]}>
-                    Abbrechen
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                  <Text style={[styles.datePickerButton, { color: colors.primary }]}>
-                    Fertig
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              <DateTimePicker
-                value={formData.birthDate || new Date(2000, 0, 1)}
-                mode="date"
-                display="spinner"
-                onChange={(event, selectedDate) => {
-                  if (selectedDate) {
-                    setFormData(prev => ({ ...prev, birthDate: selectedDate }));
-                  }
-                }}
-                maximumDate={new Date()}
-                textColor={colorScheme === 'dark' ? '#FFFFFF' : '#000000'}
-                locale="de_DE"
-              />
-            </View>
-          </View>
-        </Modal>
       )}
 
       {/* Location Picker Modal */}
       <LocationPicker
         visible={showLocationPicker}
         onClose={() => setShowLocationPicker(false)}
-        onSelect={(locationData) => {
-          setFormData(prev => ({ ...prev, location: locationData.address }));
+        onSelect={(location) => {
+          setFormData(prev => ({ ...prev, location: location.address || location.city || '' }));
           setShowLocationPicker(false);
         }}
         currentLocation={formData.location}
-        placeholder="Einkaufsort oder Stadt suchen..."
       />
 
       {/* Market Selector Modal */}
@@ -733,12 +647,13 @@ export default function RegisterScreen() {
         onClose={() => setShowMarketSelector(false)}
         onSelect={(market) => {
           setFormData(prev => ({ ...prev, favoriteMarket: market }));
+          setShowMarketSelector(false);
           console.log(`✅ Favorite market selected: ${market.name} (${market.land})`);
         }}
         selectedMarketId={formData.favoriteMarket?.id}
         title="Lieblingsmarkt wählen"
       />
-    </KeyboardAvoidingView>
+    </>
   );
 }
 
@@ -746,247 +661,101 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  background: {
+    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  imageContainer: {
+    flex: 1,
+  },
+  overlay: {
+    flex: 1,
+    paddingHorizontal: 24,
+  },
+  keyboardView: {
+    flex: 1,
+  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingBottom: 10,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: -10,
+    paddingBottom: 40,
   },
   backButtonWithText: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
     paddingHorizontal: 12,
-    marginLeft: -12,
     borderRadius: 20,
     gap: 6,
+    zIndex: 10,
   },
   backButtonText: {
     fontSize: 16,
     fontFamily: 'Nunito_500Medium',
+    color: 'white',
   },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
+  logoContainer: {
+    alignItems: 'center',
+    marginTop: 30,
+    gap: 5,
+    marginBottom: 20,
   },
-  titleContainer: {
-    marginBottom: 30,
+  logoIcon: {
+    marginBottom: 4,
   },
-  title: {
+  logoText: {
     fontSize: 28,
     fontFamily: 'Nunito_700Bold',
+    color: 'white',
+    textAlign: 'center',
+    lineHeight: 32,
+  },
+  titleSection: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  title: {
+    fontSize: 26,
+    fontFamily: 'Nunito_700Bold',
+    color: 'white',
+    textAlign: 'center',
     marginBottom: 8,
-    lineHeight: 36,
   },
   subtitle: {
     fontSize: 16,
     fontFamily: 'Nunito_400Regular',
-    opacity: 0.7,
-    lineHeight: 22,
+    color: 'rgba(255, 255, 255, 0.8)',
+    textAlign: 'center',
   },
   socialSection: {
-    marginBottom: 30,
-    gap: 16,
+    marginBottom: 16,
+    gap: 12,
   },
   socialButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 14,
-    paddingHorizontal: 20,
     borderRadius: 12,
+    backgroundColor: 'white',
     gap: 12,
-    borderWidth: 1,
   },
   appleButton: {
     backgroundColor: '#000',
-    borderColor: '#000',
   },
   appleButtonText: {
+    fontSize: 16,
+    fontFamily: 'Nunito_600SemiBold',
     color: 'white',
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  googleButton: {
-    backgroundColor: 'white',
-    borderColor: '#dadce0',
-  },
-  googleIconContainer: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    overflow: 'hidden',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  googleButtonText: {
-    color: '#3c4043',
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  dividerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 8,
-    gap: 16,
-  },
-  dividerLine: {
-    flex: 1,
-    marginBottom: 20,
-    marginTop: 20,
-    height: 1,
-  },
-  dividerText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-    marginBottom: 20,
-    marginTop: 20,
-  },
-  form: {
-    gap: 20,
-  },
-  inputContainer: {
-    // marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 8,
-  },
-  helperText: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    marginTop: 4,
-  },
-  errorText: {
-    fontSize: 12,
-    fontFamily: 'Nunito_500Medium',
-    marginTop: 4,
-  },
-  input: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    fontSize: 16,
-    fontFamily: 'Nunito_400Regular',
-  },
-  inputWithClearContainer: {
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingRight: 8,
-  },
-  inputWithClear: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    fontSize: 16,
-    fontFamily: 'Nunito_400Regular',
-  },
-  clearButton: {
-    width: 28,
-    height: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  passwordContainer: {
-    position: 'relative',
-  },
-  passwordInput: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    paddingRight: 50,
-    fontSize: 16,
-    fontFamily: 'Nunito_400Regular',
-  },
-  eyeButton: {
-    position: 'absolute',
-    right: 16,
-    top: 18,
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 10,
-    gap: 12,
-  },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderWidth: 2,
-    borderRadius: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-    flex: 1,
-  },
-  registerButton: {
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 20,
-    marginBottom: 40,
-  },
-  registerButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  socialSection: {
-    width: '100%',
-    alignItems: 'center',
-    marginTop: 30,
-    gap: 16,
-  },
-  orText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-    opacity: 0.7,
-    marginBottom: 4,
-  },
-  socialButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: 'white',
-    gap: 12,
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
-  },
-  socialButtonDark: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: '#000',
-    gap: 12,
   },
   googleIconContainer: {
     width: 20,
@@ -995,7 +764,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 4,
   },
   googleIcon: {
     fontSize: 14,
@@ -1008,76 +776,186 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_600SemiBold',
     color: '#333',
   },
-  socialButtonTextDark: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    color: 'white',
-  },
-  sectionHeader: {
-    marginTop: 20,
-    marginBottom: 10,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 4,
-  },
-  sectionSubtitle: {
+  orText: {
     fontSize: 14,
     fontFamily: 'Nunito_400Regular',
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+    marginBottom: 20,
   },
-  selectInput: {
+  formContainer: {
+    gap: 16,
+  },
+  inputContainer: {
+    width: '100%',
+  },
+  label: {
+    fontSize: 14,
+    fontFamily: 'Nunito_600SemiBold',
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginBottom: 8,
+  },
+  input: {
     borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 16,
+    fontSize: 16,
+    color: 'white',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  inputError: {
+    borderColor: '#FF3B30',
+    borderWidth: 2,
+  },
+  passwordContainer: {
+    position: 'relative',
+  },
+  passwordInput: {
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingRight: 50,
+    fontSize: 16,
+    color: 'white',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 16,
+    top: 18,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fieldHelp: {
+    fontSize: 12,
+    fontFamily: 'Nunito_400Regular',
+    color: 'rgba(255, 255, 255, 0.6)',
+    marginTop: 4,
   },
   selectText: {
     fontSize: 16,
     fontFamily: 'Nunito_400Regular',
-    flex: 1,
+    color: 'rgba(255, 255, 255, 0.8)',
   },
   genderContainer: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
   },
-  genderOption: {
+  genderButton: {
     flex: 1,
-    borderWidth: 1,
-    borderRadius: 12,
     paddingVertical: 12,
-    justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
   },
-  genderText: {
+  genderButtonActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.6)',
+  },
+  genderButtonText: {
     fontSize: 14,
     fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255, 255, 255, 0.7)',
   },
-  datePickerModal: {
-    flex: 1,
-    justifyContent: 'flex-end',
+  genderButtonTextActive: {
+    color: 'white',
   },
-  datePickerBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  datePickerContainer: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: 20,
-  },
-  datePickerHeader: {
+  termsContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e5ea',
+    alignItems: 'flex-start',
+    marginTop: 8,
+    gap: 8,
   },
-  datePickerButton: {
-    fontSize: 17,
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+    borderRadius: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  checkboxActive: {
+    backgroundColor: '#00C853',
+    borderColor: '#00C853',
+  },
+  termsText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: 'Nunito_400Regular',
+    color: 'rgba(255, 255, 255, 0.8)',
+    lineHeight: 18,
+  },
+  termsTextError: {
+    color: '#FF3B30',
+  },
+  termsLink: {
+    textDecorationLine: 'underline',
+    fontFamily: 'Nunito_500Medium',
+    color: 'white',
+    fontSize: 13,
+  },
+  registerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 12,
+    marginTop: 20,
+    gap: 12,
+  },
+  registerButtonText: {
+    color: 'white',
+    fontSize: 16,
     fontFamily: 'Nunito_600SemiBold',
   },
+  loginSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    marginTop: 16,
+  },
+  loginText: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  loginLink: {
+    fontSize: 14,
+    fontFamily: 'Nunito_600SemiBold',
+  },
+  // Small device styles
+  logoContainerSmall: {
+    marginTop: 20,
+    gap: 3,
+    marginBottom: 15,
+  },
+  logoTextSmall: {
+    fontSize: 24,
+  },
+  titleSmall: {
+    fontSize: 22,
+    marginBottom: 6,
+  },
+  subtitleSmall: {
+    fontSize: 14,
+  },
+  inputSmall: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  }
 });

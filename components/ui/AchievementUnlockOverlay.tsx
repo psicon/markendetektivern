@@ -17,6 +17,9 @@ import { IconSymbol } from './IconSymbol';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+// Responsive Breakpoints
+const isSmallDevice = SCREEN_HEIGHT < 700;
+
 interface AchievementUnlockOverlayProps {
   visible: boolean;
   achievement: Achievement | null;
@@ -255,9 +258,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   gradientBackground: {
-    paddingTop: 40,
-    paddingBottom: 24,
-    paddingHorizontal: 24,
+    paddingTop: isSmallDevice ? 30 : 40,
+    paddingBottom: isSmallDevice ? 16 : 24,
+    paddingHorizontal: isSmallDevice ? 16 : 24,
     alignItems: 'center',
   },
   closeButton: {
@@ -287,8 +290,8 @@ const styles = StyleSheet.create({
   },
   lottieContainer: {
     width: '100%',
-    height: Math.min(SCREEN_WIDTH * 0.65, 240) + 20,
-    marginVertical: 20,
+    height: isSmallDevice ? 120 : Math.min(SCREEN_WIDTH * 0.65, 240) + 20,
+    marginVertical: isSmallDevice ? 10 : 20,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -304,27 +307,31 @@ const styles = StyleSheet.create({
     width: Math.min(SCREEN_WIDTH * 0.65, 240),
     height: Math.min(SCREEN_WIDTH * 0.65, 240),
   },
+  lottieAnimationSmall: {
+    width: 100,
+    height: 100,
+  },
   achievementTitle: {
-    fontSize: 16,
+    fontSize: isSmallDevice ? 14 : 16,
     fontWeight: '600',
     color: 'white',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: isSmallDevice ? 4 : 8,
   },
   achievementName: {
-    fontSize: 22,
+    fontSize: isSmallDevice ? 18 : 22,
     fontWeight: '800',
     color: 'white',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: isSmallDevice ? 4 : 8,
   },
   achievementDescription: {
-    fontSize: 14,
+    fontSize: isSmallDevice ? 12 : 14,
     color: 'rgba(255,255,255,0.9)',
     textAlign: 'center',
-    marginBottom: 24,
-    paddingHorizontal: 16,
-    lineHeight: 18,
+    marginBottom: isSmallDevice ? 16 : 24,
+    paddingHorizontal: isSmallDevice ? 8 : 16,
+    lineHeight: isSmallDevice ? 16 : 18,
   },
   pointsSection: {
     width: '100%',

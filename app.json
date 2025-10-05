@@ -2,7 +2,7 @@
   "expo": {
     "name": "MarkenDetektive",
     "slug": "markendetektive",
-    "version": "5.0.8.17",
+    "version": "4.5.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "markendetektivern",
@@ -23,7 +23,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "923",
+      "buildNumber": "926",
       "appleTeamId": "MZD2N2F887",
       "googleServicesFile": "./GoogleService-Info.plist"
     },

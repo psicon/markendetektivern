@@ -72,6 +72,8 @@ export default function OnboardingScreen() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('');
+  const [premiumStatusChecked, setPremiumStatusChecked] = useState(false);
+  const [isPremiumUser, setIsPremiumUser] = useState(false);
   const [country, setCountry] = useState<'DE' | 'AT' | 'CH'>('DE');
   const [markets, setMarkets] = useState<any[]>([]);
   const [selectedMarkets, setSelectedMarkets] = useState<any[]>([]);
@@ -82,7 +84,7 @@ export default function OnboardingScreen() {
   const [priorities, setPriorities] = useState<string[]>([]);
   const [prioritiesOther, setPrioritiesOther] = useState('');
   const [loadingProgress] = useState(new Animated.Value(0));
-  const [loadingMessage, setLoadingMessage] = useState('🕵️ Die Detektive beginnen ihre Recherche...');
+  const [loadingMessage, setLoadingMessage] = useState('🕵️ Die MarkenDetektive beginnen ihre Recherche...');
   const [slideAnimation] = useState(new Animated.Value(1)); // Für Slide-Animationen
   const [backgroundOpacity] = useState(new Animated.Value(1)); // Für Background Fade
   const [sessionId] = useState(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`); // Persistente Session-ID
@@ -113,11 +115,16 @@ export default function OnboardingScreen() {
         const isPremiumNow = await revenueCatService.isPremium();
         console.log('✅ Onboarding Premium Check:', isPremiumNow ? 'PREMIUM AKTIV' : 'Kein Premium');
         
+        // Status speichern für späteren Gebrauch
+        setIsPremiumUser(isPremiumNow);
+        setPremiumStatusChecked(true);
+        
         // UI aktualisieren
         await refreshPremiumStatus();
         
       } catch (error) {
         console.error('❌ Fehler beim Premium Check:', error);
+        setPremiumStatusChecked(true); // Auch bei Fehler weitermachen
       }
     };
     
@@ -169,7 +176,7 @@ export default function OnboardingScreen() {
 
       // Loading Messages
       const messages = [
-        '🕵️ Die Detektive beginnen ihre Recherche...',
+        '🕵️ Die MarkenDetektive beginnen ihre Recherche...',
         '🔍 Deine Lieblingsprodukte werden analysiert...',
         '💰 Die Buchhaltung errechnet dein Sparpotential...',
         '🎯 Dein persönliches App-Erlebnis wird optimiert...',
@@ -361,7 +368,7 @@ export default function OnboardingScreen() {
   const skipOnboarding = async () => {
     // Zeige sofort Ladebildschirm
     setIsLoading(true);
-    setLoadingStatus('Käufe werden wiederhergestellt...');
+    setLoadingStatus('Lade ersten Start...');
     
     // Fade out animation für Skip vom Hero Screen
     if (currentStep === 1) {
@@ -410,12 +417,20 @@ export default function OnboardingScreen() {
     const AsyncStorage = await import('@react-native-async-storage/async-storage');
     await AsyncStorage.default.setItem('onboarding_v1_skipped', 'true');
     
-    // WICHTIG: Warte auf Premium-Wiederherstellung bevor Navigation!
+    // Verwende bereits gecheckte Premium-Status wenn verfügbar
     try {
-      const { revenueCatService } = await import('@/lib/services/revenueCatService');
-      await revenueCatService.restorePurchases();
-      const currentPremiumStatus = await revenueCatService.isPremium();
-      console.log('🛒 Premium Status nach Wiederherstellung:', currentPremiumStatus);
+      let currentPremiumStatus = isPremiumUser;
+      
+      // Nur neu prüfen wenn noch nicht gecheckt wurde
+      if (!premiumStatusChecked) {
+        setLoadingStatus('Käufe werden wiederhergestellt...');
+        const { revenueCatService } = await import('@/lib/services/revenueCatService');
+        await revenueCatService.restorePurchases();
+        currentPremiumStatus = await revenueCatService.isPremium();
+        console.log('🛒 Premium Status nach Wiederherstellung:', currentPremiumStatus);
+      } else {
+        console.log('🛒 Verwende bereits geprüften Premium Status:', currentPremiumStatus);
+      }
       
       // Remote Config prüfen
       const shouldShowPaywall = await remoteConfigService.shouldShowOnboardingPaywall();
@@ -498,23 +513,28 @@ export default function OnboardingScreen() {
       
       console.log('✅ Onboarding completed with session:', sessionId);
       
-      // WICHTIG: Premium Status DIREKT von RevenueCat abfragen!
-      console.log('🔄 Prüfe Premium Status direkt bei RevenueCat...');
+      // Verwende bereits gecheckte Premium-Status wenn verfügbar
+      let currentPremiumStatus = isPremiumUser;
       
-      // Erst Käufe wiederherstellen
-      try {
-        const { revenueCatService } = await import('@/lib/services/revenueCatService');
-        await revenueCatService.restorePurchases();
-        console.log('✅ Käufe wiederhergestellt');
-      } catch (e) {
-        console.log('⚠️ Konnte Käufe nicht wiederherstellen:', e);
+      // Nur neu prüfen wenn noch nicht gecheckt wurde
+      if (!premiumStatusChecked) {
+        console.log('🔄 Prüfe Premium Status direkt bei RevenueCat...');
+        
+        // Erst Käufe wiederherstellen
+        try {
+          const { revenueCatService } = await import('@/lib/services/revenueCatService');
+          await revenueCatService.restorePurchases();
+          console.log('✅ Käufe wiederhergestellt');
+          
+          // Dann direkt Premium Status prüfen
+          currentPremiumStatus = await revenueCatService.isPremium();
+          console.log('🛒 Premium Status von RevenueCat:', currentPremiumStatus);
+        } catch (e) {
+          console.log('⚠️ Konnte Käufe nicht wiederherstellen:', e);
+        }
+      } else {
+        console.log('🛒 Verwende bereits geprüften Premium Status:', currentPremiumStatus);
       }
-      
-      // Dann direkt Premium Status prüfen
-      const { revenueCatService } = await import('@/lib/services/revenueCatService');
-      const currentPremiumStatus = await revenueCatService.isPremium();
-      
-      console.log('🛒 Premium Status von RevenueCat:', currentPremiumStatus);
       
       // Remote Config prüfen für Paywall
       const shouldShowPaywall = await remoteConfigService.shouldShowOnboardingPaywall();
@@ -652,23 +672,28 @@ export default function OnboardingScreen() {
       <>
         <StatusBar hidden={false} />
         <SafeAreaView style={styles.container}>
-        <Animated.View 
-          style={[
-            styles.content,
-            {
-              transform: [{
-                translateX: slideAnimation, // Direkte Translation: width → 0
-              }],
-            }
-          ]}
-        >
-          {renderProgressBar()}
-          
-
-          <View style={styles.mainContent}>
-            <Text style={styles.stepTitle}>Wähle dein Land</Text>
+          <Animated.View 
+            style={[
+              styles.content,
+              {
+                transform: [{
+                  translateX: slideAnimation, // Direkte Translation: width → 0
+                }],
+              }
+            ]}
+          >
+            {renderProgressBar()}
             
-            <View style={styles.countryLayout}>
+            <ScrollView 
+              style={styles.innerScrollView}
+              contentContainerStyle={styles.innerScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={styles.mainContent}>
+                <Text style={styles.stepTitle}>Wähle dein Land</Text>
+              
+              <View style={styles.countryLayout}>
               {/* Deutschland - Hauptauswahl (volle Breite) */}
               <TouchableOpacity
                 style={[styles.countryMain, country === 'DE' && styles.optionSelected]}
@@ -719,6 +744,7 @@ export default function OnboardingScreen() {
               </View>
             </View>
           </View>
+          </ScrollView>
 
           <View style={styles.authSection}>
             <Text style={styles.authTitle}>Wie möchtest du fortfahren?</Text>
@@ -741,9 +767,7 @@ export default function OnboardingScreen() {
                 variant="secondary" 
               />
               
-              <Text style={styles.authInfoText}>
-                Du kannst später jederzeit ein Konto erstellen
-              </Text>
+             
             </View>
           </View>
         </Animated.View>
@@ -1251,6 +1275,20 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     flex: 1,
     backgroundColor: colorScheme === 'dark' ? Colors.dark.background : '#f8f9fa',
   },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    minHeight: Dimensions.get('window').height - 100,
+  },
+  innerScrollView: {
+    flex: 1,
+  },
+  innerScrollContent: {
+    flexGrow: 1,
+    paddingBottom: 280, // Genug Platz für die fixierten Buttons
+  },
   content: {
     flex: 1,
     paddingHorizontal: 24,
@@ -1465,8 +1503,16 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     flex: 1,
   },
   authSection: {
-    marginTop: 'auto',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.background : '#f8f9fa',
+    paddingHorizontal: 24,
     paddingBottom: 20,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
   },
   authTitle: {
     fontSize: 20,

@@ -2,7 +2,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { Alert } from 'react-native';
 import { db } from '../firebase';
-import { isExpoGo } from '../utils/platform';
 
 const RATING_FLAG_KEY = 'pendingRatingPrompt';
 
@@ -155,19 +154,18 @@ class RatingPromptService {
    */
   async requestStoreReview(): Promise<void> {
     try {
-      if (isExpoGo()) {
-        Alert.alert(
-          'Store Review',
-          'In Production würde jetzt der App Store öffnen',
-          [{ text: 'OK' }]
-        );
-      } else {
-        const StoreReview = require('react-native-store-review');
-        StoreReview.requestReview();
-      }
+      const { Platform, Linking } = require('react-native');
+      
+      // Öffne direkt die Store-Seite
+      const storeUrl = Platform.OS === 'ios' 
+        ? 'https://apps.apple.com/de/app/markendetektive-clever-sparen/id6471081082'
+        : 'https://play.google.com/store/apps/details?id=de.markendetektive';
+      
+      await Linking.openURL(storeUrl);
+      
     } catch (error) {
       console.error('❌ Store review error:', error);
-      Alert.alert('Fehler', 'Bewertung konnte nicht geöffnet werden');
+      Alert.alert('Fehler', 'Store konnte nicht geöffnet werden');
     }
   }
 

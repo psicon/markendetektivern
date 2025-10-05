@@ -982,7 +982,7 @@ export default function ExploreScreen() {
       
       // Nutze die normale FirestoreService mit erweiterten Filtern
       const result = await FirestoreService.getNoNameProductsPaginated(
-        20, // Page size
+        10, // Reduziert von 20 auf 10 - spart 50% Reads!
         reset ? null : noNameLastDoc,
         {
           categoryFilters: noNameFilters.categoryFilters,
@@ -1028,7 +1028,7 @@ export default function ExploreScreen() {
 
       // Nutze die normale FirestoreService mit erweiterten Filtern
       const result = await FirestoreService.getMarkenproduktePaginated(
-        20, // Page size
+        10, // Reduziert von 20 auf 10 - spart 50% Reads!
         reset ? null : markenproduktLastDoc,
         {
           categoryFilters: markenproduktFilters.categoryFilters,

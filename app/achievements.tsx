@@ -17,15 +17,15 @@ import { useNavigation, useRouter } from 'expo-router';
 import LottieView from 'lottie-react-native';
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');

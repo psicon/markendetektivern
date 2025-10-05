@@ -236,7 +236,10 @@ class AnalyticsService {
       // GA4 Upload (Hauptziel für Dashboard)
       await this.uploadToGA4(eventsToUpload);
 
-      console.log(`📤 ${eventsToUpload.length} Events zu GA4 hochgeladen`);
+      // Nur bei vielen Events loggen
+      if (eventsToUpload.length > 10) {
+        console.log(`📤 ${eventsToUpload.length} Events zu GA4 hochgeladen`);
+      }
     } catch (error) {
       console.error('❌ GA4 Upload Error:', error);
       
@@ -296,12 +299,6 @@ class AnalyticsService {
 
         // Event zu GA4 senden
         await analytics().logEvent(event.event_name, ga4Params);
-        
-        console.log(`📊 GA4 Event gesendet: ${event.event_name}`, {
-          screen: event.screen_name,
-          product: event.product_id?.substring(0, 8) || 'none',
-          market: event.market_chain || 'none'
-        });
       }
       
     } catch (error) {

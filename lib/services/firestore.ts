@@ -70,7 +70,7 @@ export class FirestoreService {
    * Holt NoName-Produkte mit Pagination für lazy loading
    */
   static async getNoNameProductsPaginated(
-    pageSize: number = 20,
+    pageSize: number = 10, // Reduziert von 20 auf 10 - spart Reads!
     lastDoc?: any,
     filters?: {
       categoryFilters?: string[];
@@ -361,7 +361,7 @@ export class FirestoreService {
    * Holt Markenprodukte mit Pagination für lazy loading
    */
   static async getMarkenproduktePaginated(
-    pageSize: number = 20,
+    pageSize: number = 10, // Reduziert von 20 auf 10 - spart Reads!
     lastDoc?: any,
     filters?: {
       categoryFilters?: string[];
@@ -527,7 +527,7 @@ export class FirestoreService {
    * Holt Marken mit Pagination für lazy loading (für Marken-Tab)
    */
   static async getMarkenPaginated(
-    pageSize: number = 20,
+    pageSize: number = 10, // Reduziert von 20 auf 10 - spart Reads!
     lastDoc?: any
   ): Promise<{
     marken: FirestoreDocument<any>[];
@@ -657,7 +657,7 @@ export class FirestoreService {
       const q = query(
         produkteRef,
         where('stufe', 'in', ['3', '4', '5']),
-        limit(20) // NUR 20 laden - KLEIN!
+        limit(10) // NUR 10 laden - noch sparsamer!
       );
       
       const querySnapshot = await getDocs(q);

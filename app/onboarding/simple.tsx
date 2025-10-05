@@ -3,16 +3,16 @@ import Slider from '@react-native-community/slider';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
-    Animated,
-    Dimensions,
-    FlatList,
-    Image,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  Alert,
+  Animated,
+  Dimensions,
+  FlatList,
+  Image,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -64,7 +64,7 @@ export default function OnboardingScreen() {
   const [priorities, setPriorities] = useState<string[]>([]);
   const [prioritiesOther, setPrioritiesOther] = useState('');
   const [loadingProgress] = useState(new Animated.Value(0));
-  const [loadingMessage, setLoadingMessage] = useState('🕵️ Die Detektive beginnen ihre Recherche...');
+  const [loadingMessage, setLoadingMessage] = useState('🕵️ Die MarkenDetektive beginnen ihre Recherche...');
 
   // ALLE useEffects IMMER (keine conditionals!)
   useEffect(() => {
@@ -91,7 +91,7 @@ export default function OnboardingScreen() {
 
       // Loading Messages
       const messages = [
-        '🕵️ Die Detektive beginnen ihre Recherche...',
+        '🕵️ Die MarkenDetektive beginnen ihre Recherche...',
         '🔍 Deine Lieblingsprodukte werden analysiert...',
         '💰 Die Buchhaltung errechnet dein Sparpotential...',
         '🎯 Dein persönliches App-Erlebnis wird optimiert...',

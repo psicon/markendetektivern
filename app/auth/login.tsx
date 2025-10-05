@@ -5,19 +5,19 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Dimensions,
-    ImageBackground,
-    Platform,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  ImageBackground,
+  Platform,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -28,6 +28,7 @@ export default function LoginScreen() {
   const { signIn, signInWithGoogle, signInWithApple } = useAuth();
   const insets = useSafeAreaInsets();
   const screenHeight = Dimensions.get('window').height;
+  const isSmallDevice = screenHeight < 700;
 
   // Image loading state and animation
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -136,6 +137,18 @@ export default function LoginScreen() {
   const handleAppleSignIn = async () => {
     try {
       setLoading(true);
+      // Check if running in Expo Go
+      if (__DEV__ && Platform.OS === 'ios') {
+        const Constants = require('expo-constants').default;
+        if (Constants.appOwnership === 'expo') {
+          Alert.alert(
+            'Nicht verfügbar in Expo Go',
+            'Apple Sign-In funktioniert nur in der TestFlight oder App Store Version. Bitte nutze Email/Passwort für die Entwicklung.',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+      }
       await signInWithApple();
       router.replace('/(tabs)');
     } catch (error: any) {
@@ -147,7 +160,9 @@ export default function LoginScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <>
+      <Stack.Screen options={{ headerShown: false }} />
+      <View style={styles.container}>
       {/* Static background while image loads */}
       <View style={[styles.background, { backgroundColor: colorScheme === 'dark' ? '#000000' : '#f5f5f5' }]} />
       
@@ -164,8 +179,8 @@ export default function LoginScreen() {
       <LinearGradient
         colors={
           colorScheme === 'dark' 
-            ? ['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0.95)']
-            : ['transparent', 'rgba(0,0,0,0.2)', 'rgba(0,0,0,0.6)', 'rgba(0,0,0,0.85)']
+            ? ['rgba(0,0,0,0.2)', 'rgba(0,0,0,0.5)', 'rgba(0,0,0,0.85)', 'rgba(0,0,0,0.98)']
+            : ['rgba(0,0,0,0.2)', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.9)']
         }
         locations={[0, 0.3, 0.7, 1]}
         style={[styles.overlay, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}
@@ -180,27 +195,27 @@ export default function LoginScreen() {
         </TouchableOpacity>
 
         {/* Logo */}
-        <View style={styles.logoContainer}>
+        <View style={[styles.logoContainer, isSmallDevice && styles.logoContainerSmall]}>
           <CustomIcon 
             name="iconBlack" 
-            size={64} 
+            size={isSmallDevice ? 48 : 64} 
             color="white"
             style={styles.logoIcon}
           />
-          <ThemedText style={styles.logoText}>MarkenDetektive</ThemedText>
+          <ThemedText style={[styles.logoText, isSmallDevice && styles.logoTextSmall]}>MarkenDetektive</ThemedText>
         </View>
 
-        {/* Content */}
-        <View style={styles.content}>
-          <ThemedText style={styles.subTitle}>Willkommen zurück!</ThemedText>
+        {/* Content - Everything fits on screen */}
+        <View style={[styles.content, isSmallDevice && styles.contentSmall]}>
+          <ThemedText style={[styles.subTitle, isSmallDevice && styles.subTitleSmall]}>Willkommen zurück!</ThemedText>
           
           <View style={styles.authButtons}>
             {/* Form Fields */}
-            <View style={styles.formContainer}>
+            <View style={[styles.formContainer, isSmallDevice && styles.formContainerSmall]}>
               {/* Email Input */}
               <View style={styles.inputContainer}>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, isSmallDevice && styles.inputSmall]}
                   placeholder="E-Mail"
                   placeholderTextColor="rgba(255, 255, 255, 0.7)"
                   value={formData.email}
@@ -215,7 +230,7 @@ export default function LoginScreen() {
               <View style={styles.inputContainer}>
                 <View style={styles.passwordContainer}>
                   <TextInput
-                    style={styles.passwordInput}
+                    style={[styles.passwordInput, isSmallDevice && styles.inputSmall]}
                     placeholder="Passwort"
                     placeholderTextColor="rgba(255, 255, 255, 0.7)"
                     value={formData.password}
@@ -238,7 +253,10 @@ export default function LoginScreen() {
               </View>
 
               {/* Forgot Password */}
-              <TouchableOpacity style={styles.forgotPassword}>
+              <TouchableOpacity 
+                style={styles.forgotPassword}
+                onPress={() => router.push('/auth/forgot-password')}
+              >
                 <ThemedText style={[styles.forgotPasswordText, { color: colors.primary }]}>
                   Passwort vergessen?
                 </ThemedText>
@@ -276,7 +294,7 @@ export default function LoginScreen() {
 
             {/* Apple Sign-In (nur iOS) */}
             {Platform.OS === 'ios' && (
-              <TouchableOpacity style={styles.socialButtonDark} onPress={handleAppleSignIn}>
+              <TouchableOpacity style={[styles.socialButtonDark, isSmallDevice && styles.socialButtonSmall]} onPress={handleAppleSignIn}>
                 <IconSymbol name="apple.logo" size={20} color="white" />
                 <ThemedText style={styles.socialButtonTextDark}>Apple Account</ThemedText>
               </TouchableOpacity>
@@ -293,6 +311,7 @@ export default function LoginScreen() {
       </LinearGradient>
       </Animated.View>
     </View>
+    </>
   );
 }
 
@@ -344,8 +363,8 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     alignItems: 'center',
-    marginTop: 80,
-    gap: 10,
+    marginTop: 40,
+    gap: 5,
   },
   logoIcon: {
     marginBottom: 4,
@@ -367,7 +386,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_600SemiBold',
     color: 'white',
     textAlign: 'center',
-    marginBottom: 40,
+    marginBottom:16,
   },
   authButtons: {
     width: '100%',
@@ -377,6 +396,10 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: 20,
     gap: 16,
+  },
+  formContainerSmall: {
+    marginBottom: 12,
+    gap: 12,
   },
   inputContainer: {
     width: '100%',
@@ -419,10 +442,13 @@ const styles = StyleSheet.create({
   forgotPassword: {
     alignSelf: 'flex-end',
     marginTop: 8,
+    marginBottom: 16,
+    paddingHorizontal: 0,
   },
   forgotPasswordText: {
     fontSize: 14,
-    fontFamily: 'Nunito_500Medium',
+    fontFamily: 'Nunito_600SemiBold',
+    color: 'rgba(255, 255, 255, 0.8)',
   },
   loginButton: {
     flexDirection: 'row',
@@ -431,7 +457,7 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingVertical: 16,
     borderRadius: 12,
-    marginBottom: 20,
+    marginBottom: 16,
     gap: 12,
   },
   loginButtonText: {
@@ -453,7 +479,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 12,
     backgroundColor: 'white',
-    marginBottom: 32,
+    marginBottom: 20,
     gap: 12,
   },
   socialButtonDark: {
@@ -464,7 +490,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 12,
     backgroundColor: '#000',
-    marginBottom: 32,
+    marginBottom: 20,
     gap: 12,
   },
   googleIconContainer: {
@@ -495,7 +521,9 @@ const styles = StyleSheet.create({
   registerSection: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 4,
+    marginTop: 12,
   },
   registerText: {
     fontSize: 14,
@@ -506,4 +534,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Nunito_600SemiBold',
   },
+  logoContainerSmall: {
+    marginTop: 40,
+    gap: 3,
+  },
+  logoTextSmall: {
+    fontSize: 24,
+  },
+  contentSmall: {
+    paddingTop: 1,
+  },
+  subTitleSmall: { 
+    display: 'none',
+  },
+  inputSmall: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  socialButtonSmall: {
+    paddingVertical: 14,
+    marginBottom: 16,
+  }
 });

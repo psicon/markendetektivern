@@ -19,6 +19,9 @@ import { IconSymbol } from './IconSymbol';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+// Responsive Breakpoints  
+const isSmallDevice = SCREEN_HEIGHT < 700;
+
 interface LevelUpOverlayProps {
   visible: boolean;
   newLevel: number;
@@ -443,7 +446,7 @@ const styles = StyleSheet.create({
   contentCard: {
     width: SCREEN_WIDTH * 0.85,
     maxWidth: 340,
-    maxHeight: SCREEN_HEIGHT * 0.75,
+    maxHeight: isSmallDevice ? SCREEN_HEIGHT * 0.85 : SCREEN_HEIGHT * 0.75,
     borderRadius: 24,
     overflow: 'hidden',
     elevation: 10,
