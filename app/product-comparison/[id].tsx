@@ -1,6 +1,7 @@
 import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { BannerAd } from '@/components/ads/BannerAd';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
@@ -12,13 +13,16 @@ import { TOAST_MESSAGES, interpolateMessage } from '@/constants/ToastMessages';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { ingredientSynonyms } from '@/lib/data/ingredientSynonyms';
 import { db } from '@/lib/firebase';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
+import { interstitialAdService } from '@/lib/services/interstitialAdService';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
 import { showAlreadyInCartToast, showCartAddedToast, showFavoriteAddedToast, showFavoriteRemovedToast, showInfoToast, showRatingToast } from '@/lib/services/ui/toast';
+import { updateUserStats } from '@/lib/services/userProfile';
 import { MarkenProduktWithDetails, ProductWithDetails } from '@/lib/types/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
@@ -26,16 +30,16 @@ import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from '
 import { doc, getDoc } from 'firebase/firestore';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -1198,6 +1202,7 @@ export default function ProductComparisonScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const { user } = useAuth();
+  const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
   const { toggleFavorite, isLocalFavorite } = useFavorites();
   
@@ -1541,20 +1546,21 @@ export default function ProductComparisonScreen() {
         // 🎯 TRACK ACTION: submit_rating (nur bei neuer Bewertung, nicht bei Update)
         if (user?.uid) {
           try {
-            // Check minTextLength requirement (20 chars)
+            // Update user rating count - IMMER, nicht nur bei langem Kommentar!
+            await updateUserStats(user.uid, {
+              ratingsToAdd: 1
+            });
+            
+            // Track achievement action
             const textLength = (comment || '').length;
-            if (textLength >= 20) {
-              await achievementService.trackAction(user.uid, 'submit_rating', {
-                productId: productId,
-                productName: isNoNameProduct ? selectedProductForDetails?.name : comparisonData?.mainProduct?.name,
-                productType: isNoNameProduct ? 'noname' : 'markenprodukt',
-                rating: overallRating,
-                commentLength: textLength
-              });
-              console.log('✅ Action tracked: submit_rating');
-            } else {
-              console.log('ℹ️ submit_rating not tracked: comment too short (min 20 chars)');
-            }
+            await achievementService.trackAction(user.uid, 'submit_rating', {
+              productId: productId,
+              productName: isNoNameProduct ? selectedProductForDetails?.name : comparisonData?.mainProduct?.name,
+              productType: isNoNameProduct ? 'noname' : 'markenprodukt',
+              rating: overallRating,
+              commentLength: textLength
+            });
+            console.log('✅ Action tracked: submit_rating');
           } catch (error) {
             console.error('Error tracking submit_rating action:', error);
           }
@@ -1729,6 +1735,8 @@ export default function ProductComparisonScreen() {
       const data = await FirestoreService.getProductComparisonData(id, isMarkenProdukt);
       
       if (data) {
+          // Track product view for interstitial ads
+          interstitialAdService.trackProductView(isPremium);
           // 🚀 SOFORTIGE ANZEIGE: Hauptprodukt + korrekter Header sofort
           setComparisonData(data); // ALLE Daten sofort setzen
           setLoading(false); // UI SOFORT anzeigen!
@@ -2753,6 +2761,17 @@ export default function ProductComparisonScreen() {
             </Animated.View>
           )}
 
+          {/* Banner - nur ohne Premium */}
+          {!isPremium && (
+            <View style={{ marginBottom: 16, marginHorizontal: -20 }}>
+              <BannerAd 
+                style={{ marginHorizontal: 0 }}
+                onAdLoaded={() => console.log('✅ Product Comparison Banner loaded')}
+                onAdFailedToLoad={(error) => console.log('❌ Product Comparison Banner failed:', error)}
+              />
+            </View>
+          )}
+
           {/* NoName-Alternativen oder ähnliche Produkte */}
           {comparisonData.relatedNoNameProducts.length > 0 ? (
             // NoName-Alternativen anzeigen
@@ -3433,77 +3452,59 @@ export default function ProductComparisonScreen() {
               )}
               <View style={styles.infoRow}>
                 <ThemedText style={styles.infoLabel}>Ort:</ThemedText>
+                <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+                  {(() => {
+                    // Verwende die richtige Datenquelle je nach Produkttyp
+                    const isNoNameProduct = selectedProductForDetails?.stufe;
+                    let locationData;
+                    
+                    if (isNoNameProduct) {
+                      // NoName: Verwende hersteller (aus hersteller_new)
+                      locationData = selectedProductForDetails?.hersteller;
+                    } else {
+                      // Markenprodukt: Verwende marke (aus hersteller Collection)
+                      locationData = selectedProductForDetails?.marke || selectedProductForDetails?.hersteller;
+                    }
+                    
+                    if (!locationData) return 'Keine Daten verfügbar';
+                    
+                    const location = locationData.stadt || locationData.plz ? 
+                      `${locationData.stadt || ''} ${locationData.plz ? `(${locationData.plz})` : ''}`.trim() : 
+                      locationData.land;
+                    
+                    return location || 'Keine Daten verfügbar';
+                  })()}
+                </ThemedText>
+              </View>
+              {/* Infos nur für Markenprodukte anzeigen */}
+              {!selectedProductForDetails?.stufe && (
+                <View style={styles.infoRow}>
+                  <ThemedText style={styles.infoLabel}>Infos:</ThemedText>
                   <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
                     {(() => {
-                      const hersteller = comparisonData?.mainProduct.hersteller;
-                      if (!hersteller) return 'Keine Daten verfügbar';
-                      
-                      const location = hersteller.stadt || hersteller.plz ? 
-                        `${hersteller.stadt || ''} ${hersteller.plz ? `(${hersteller.plz})` : ''}`.trim() : 
-                        hersteller.land;
-                      
-                      return location || 'Keine Daten verfügbar';
+                      // Für Markenprodukte: Infos aus der hersteller Collection (die Marken enthält)
+                      const marke = selectedProductForDetails?.marke || selectedProductForDetails?.hersteller;
+                      return marke?.infos || 'Keine weiteren Informationen';
                     })()}
                   </ThemedText>
-              </View>
-              <View style={styles.infoRow}>
-                <ThemedText style={styles.infoLabel}>Infos:</ThemedText>
+                </View>
+              )}
+              {/* Hersteller nur für Markenprodukte anzeigen */}
+              {!selectedProductForDetails?.stufe && (
+                <View style={styles.infoRow}>
+                  <ThemedText style={styles.infoLabel}>Hersteller:</ThemedText>
                   <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                    {comparisonData?.mainProduct.hersteller?.infos || 'Keine weiteren Informationen'}
+                    {(() => {
+                      // Für Markenprodukte: Hersteller aus hersteller_new Collection
+                      const marke = selectedProductForDetails?.marke || selectedProductForDetails?.hersteller;
+                      // herstellerref zeigt auf hersteller_new
+                      return marke?.herstellerref?.name || 
+                             marke?.herstellername || 
+                             'Keine Hersteller-Daten verfügbar';
+                    })()}
                   </ThemedText>
-              </View>
-              {(() => {
-                // Prüfe ob es ein NoName-Produkt ist (hat stufe)
-                const isNoNameProduct = selectedProductForDetails?.stufe;
-                
-                if (isNoNameProduct) {
-                  // NoName-Produkt: Zeige alle Marken des Herstellers
-                  return (
-                    <View style={styles.infoColumn}>
-                      <ThemedText style={styles.infoLabel}>Alle Marken dieses Herstellers:</ThemedText>
-                      <View style={styles.markenList}>
-                        {(() => {
-                          const brands = selectedProductForDetails?.brands;
-                          if (brands && brands.length > 0) {
-                            return brands.map((brand, index) => (
-                              <View key={index} style={styles.markenItem}>
-                                {brand.bild && (
-                                  <Image 
-                                    source={{ uri: brand.bild }}
-                                    style={styles.markenItemImage}
-                                    resizeMode="contain"
-                                  />
-                                )}
-                                <ThemedText style={[styles.markenItemText, { color: colors.icon }]}>
-                                  {brand.name}
-                                </ThemedText>
-                              </View>
-                            ));
-                          }
-                          return (
-                            <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                              Keine weiteren Marken verfügbar
-                            </ThemedText>
-                          );
-                        })()}
-                      </View>
-                    </View>
-                  );
-                } else {
-                  // Markenprodukt: Zeige Hersteller-Informationen
-                  return (
-              <View style={styles.infoRow}>
-                      <ThemedText style={styles.infoLabel}>Hersteller:</ThemedText>
-                      <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                        {selectedProductForDetails?.hersteller?.herstellername || 
-                         selectedProductForDetails?.hersteller?.name ||
-                         selectedProductForDetails?.marke?.herstellername ||
-                         'Keine Hersteller-Daten verfügbar'}
-                      </ThemedText>
-                    </View>
-                  );
-                }
-              })()}
+                </View>
+              )}
               </View>
             </View>
 

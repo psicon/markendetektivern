@@ -7,22 +7,25 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { achievementService } from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
+import { interstitialAdService } from '@/lib/services/interstitialAdService';
 import scanHistoryService, { ScanHistoryItem } from '@/lib/services/scanHistoryService';
 import { isExpoGo, platformLog } from '@/lib/utils/platform';
-import { CameraType, useCameraPermissions } from 'expo-camera';
+import { Camera, CameraType, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
 import { getDoc } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, Image, InteractionManager, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, Image, InteractionManager, Linking, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function BarcodeScannerScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { user } = useAuth();
+  const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
   const insets = useSafeAreaInsets();
   
@@ -44,6 +47,30 @@ export default function BarcodeScannerScreen() {
   const lastScannedTimestampRef = useRef<number>(0);
   const lastScannedEANRef = useRef<string>('');  
   const [isSmallDevice, setIsSmallDevice] = useState(false);
+  // Explizite Kameraberechtigung inkl. Settings-Fallback
+  const ensureCameraPermission = async (): Promise<boolean> => {
+    try {
+      const current = await Camera.getCameraPermissionsAsync();
+      if (current.status === 'granted') return true;
+      if (current.status === 'undetermined') {
+        const requested = await Camera.requestCameraPermissionsAsync();
+        if (requested.status === 'granted') return true;
+      }
+      Alert.alert(
+        'Kamera-Zugriff blockiert',
+        'Bitte erlaube den Zugriff in den Einstellungen > Datenschutz > Kamera.',
+        [
+          { text: 'Abbrechen', style: 'cancel' },
+          { text: 'Einstellungen öffnen', onPress: () => Linking.openSettings() }
+        ]
+      );
+      return false;
+    } catch (e) {
+      console.error('Camera permission error:', e);
+      return false;
+    }
+  };
+
 
   const { width, height } = Dimensions.get('window');
   const scanAreaWidth = width * 0.75; // Kompakter für mehr Platz
@@ -419,6 +446,9 @@ export default function BarcodeScannerScreen() {
     
     // SOFORTIGE Ausführung
     searchProductByEAN(data);
+    
+    // Track scan for interstitial ads
+    interstitialAdService.trackScan(isPremium);
   };
 
   // Validiere EAN-Format
@@ -454,15 +484,15 @@ export default function BarcodeScannerScreen() {
     setFlashEnabled(current => !current);
   };
 
-    // 📱 PERMISSION CHECKS (für Expo Go Path)
+    // 📱 PERMISSION CHECKS (für alle Builds)
   useEffect(() => {
-    if (isExpoGo() && !permission?.granted) {
-      requestPermission();
+    if (!permission?.granted) {
+      ensureCameraPermission();
     }
   }, [permission]);
 
-  // 📱 PERMISSION SCREEN (nur für Expo Go)
-  if (isExpoGo() && !permission) {
+  // 📱 PERMISSION SCREEN (für alle Builds)
+  if (!permission) {
     return (
       <ThemedView style={styles.container}>
         <ThemedText>Kamera-Berechtigung wird geladen...</ThemedText>
@@ -470,7 +500,7 @@ export default function BarcodeScannerScreen() {
     );
   }
 
-  if (isExpoGo() && !permission.granted) {
+  if (!permission.granted) {
     return (
       <ThemedView style={styles.container}>
         {/* Custom Back Button */}
@@ -491,7 +521,7 @@ export default function BarcodeScannerScreen() {
           </ThemedText>
           <TouchableOpacity 
             style={[styles.permissionButton, { backgroundColor: colors.primary }]}
-            onPress={requestPermission}
+            onPress={ensureCameraPermission}
           >
             <ThemedText style={styles.permissionButtonText}>
               Kamera-Zugriff erlauben

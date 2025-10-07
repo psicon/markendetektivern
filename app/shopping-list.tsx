@@ -1,3 +1,4 @@
+import { BannerAd } from '@/components/ads/BannerAd';
 import { AddCustomItemModal } from '@/components/ui/AddCustomItemModal';
 import BatchActionLoader from '@/components/ui/BatchActionLoader';
 import { IconSymbol } from '@/components/ui/IconSymbol';
@@ -1311,7 +1312,7 @@ const safeAsync = async (p: Promise<any>) => {
               transform: [{ translateX: tabIndicatorPosition }]
             }]}
           />
-      </View>
+        </View>
 
         {/* Sticky Summary Bar */}
         {(activeTab === 'brand' ? brandProducts.length > 0 : noNameProducts.length > 0) && (
@@ -1348,7 +1349,7 @@ const safeAsync = async (p: Promise<any>) => {
                   <Text style={styles.summarySubtitle}>
                     Durch gewählte NoName-Produkte
                   </Text>
-                )}
+          )}
         </TouchableOpacity>
               <View style={styles.summaryRight}>
                 <View style={styles.savingsContainer}>
@@ -1361,7 +1362,7 @@ const safeAsync = async (p: Promise<any>) => {
             </View>
           </LinearGradient>
       )}
-    </View>
+      </View>
 
         <PagerView 
           ref={pagerRef}
@@ -1384,6 +1385,17 @@ const safeAsync = async (p: Promise<any>) => {
                 />
               }
             >
+              {/* Banner - nur ohne Premium */}
+              {!isPremium && (
+                <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
+                  <BannerAd 
+                    style={{ marginHorizontal: 0 }}
+                    onAdLoaded={() => console.log('✅ Shopping List Brand Banner loaded')}
+                    onAdFailedToLoad={(error) => console.log('❌ Shopping List Brand Banner failed:', error)}
+                  />
+                </View>
+              )}
+              
               {
               applyFiltersAndSorting(brandProducts).length === 0 ? (
               <View style={styles.emptyState}>
@@ -1394,7 +1406,7 @@ const safeAsync = async (p: Promise<any>) => {
                 <Text style={[styles.emptySubtext, { color: colors.icon }]}>
                   Füge Produkte über den Barcode-Scanner oder die Produktsuche hinzu
                 </Text>
-        </View>
+    </View>
             ) : (
               <View style={styles.productContainer}>
                 {applyFiltersAndSorting(brandProducts).map((item) => {
@@ -1647,6 +1659,17 @@ const safeAsync = async (p: Promise<any>) => {
                 />
               }
             >
+              {/* Banner - nur ohne Premium */}
+              {!isPremium && (
+                <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
+                  <BannerAd 
+                    style={{ marginHorizontal: 0 }}
+                    onAdLoaded={() => console.log('✅ Shopping List NoName Banner loaded')}
+                    onAdFailedToLoad={(error) => console.log('❌ Shopping List NoName Banner failed:', error)}
+                  />
+                </View>
+              )}
+              
               {
             applyFiltersAndSorting(noNameProducts).length === 0 ? (
               <View style={styles.emptyState}>

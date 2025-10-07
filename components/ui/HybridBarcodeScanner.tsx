@@ -1,8 +1,7 @@
+import { BarcodeResult, nativeBarcodeScannerService } from '@/lib/services/scanner/NativeBarcodeScanner';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Platform, View } from 'react-native';
-import { isExpoGo } from '@/lib/utils/platform';
-import { BarcodeResult, nativeBarcodeScannerService } from '@/lib/services/scanner/NativeBarcodeScanner';
 
 export interface HybridScannerProps {
   onBarcodeScanned: (result: { type: string; data: string }) => void;
@@ -30,8 +29,10 @@ export const HybridBarcodeScanner: React.FC<HybridScannerProps> = ({
   const [nativeScannerReady, setNativeScannerReady] = useState(false);
   const [lastTorchState, setLastTorchState] = useState(false);
 
-  // Use Expo Go path or Native path
-  const useExpoGoScanner = isExpoGo();
+  // TEMP: Erzwinge Expo-Camera in allen Builds, da der native Scanner
+  // in TestFlight kein View rendert und weiß bleibt. Damit ist der
+  // Scanner sofort stabil. (Kann später wieder auf native umgestellt werden.)
+  const useExpoGoScanner = true;
 
   // 📱 EXPO GO PATH: expo-camera
   const handleExpoCameraBarcode = useCallback((result: any) => {
@@ -68,6 +69,12 @@ export const HybridBarcodeScanner: React.FC<HybridScannerProps> = ({
   // 🎥 NATIVE SCANNER SETUP
   useEffect(() => {
     if (!useExpoGoScanner && Platform.OS === 'ios') {
+      // Erst Berechtigung prüfen, dann Scanner initialisieren
+      if (!permission?.granted) {
+        requestPermission();
+        return;
+      }
+
       const cleanup = nativeBarcodeScannerService.registerListeners({
         onBarcodeDetected: handleNativeBarcodeResult,
         onCameraReady: handleNativeCameraReady,
@@ -84,7 +91,7 @@ export const HybridBarcodeScanner: React.FC<HybridScannerProps> = ({
 
       return cleanup;
     }
-  }, [useExpoGoScanner, handleNativeBarcodeResult, handleNativeCameraReady, handleNativeError]);
+  }, [useExpoGoScanner, permission?.granted, handleNativeBarcodeResult, handleNativeCameraReady, handleNativeError]);
 
   // 🔍 SCANNING CONTROL
   useEffect(() => {

@@ -13,23 +13,24 @@ import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { achievementService } from '@/lib/services/achievementService';
 import { AlgoliaSearchResult, AlgoliaService } from '@/lib/services/algolia';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
+import { interstitialAdService } from '@/lib/services/interstitialAdService';
 import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    FlatList,
-    Image,
-    Modal,
-    PanResponder,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  FlatList,
+  Image,
+  Modal,
+  PanResponder,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -197,6 +198,9 @@ export default function SearchResultsScreen() {
         search_query: query.trim(),
         active_tab: activeTab
       });
+      
+      // Track search for interstitial ads
+      interstitialAdService.trackSearch(isPremium);
       
       // Load ALL results by setting a high hitsPerPage
       const results = await AlgoliaService.searchAll(query.trim(), 0, 1000);

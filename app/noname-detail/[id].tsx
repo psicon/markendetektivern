@@ -1,6 +1,7 @@
 import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { BannerAd } from '@/components/ads/BannerAd';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { CommentSkeleton, CommentsHeaderSkeleton, ListItemSkeleton, ProductComparisonSkeleton, RatingOverviewSkeleton } from '@/components/ui/ShimmerSkeleton';
@@ -11,12 +12,15 @@ import { TOAST_MESSAGES, interpolateMessage } from '@/constants/ToastMessages';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { db } from '@/lib/firebase';
 import { useFavoriteStatus } from '@/lib/hooks/useFavorites';
 import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
+import { interstitialAdService } from '@/lib/services/interstitialAdService';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
 import { showAlreadyInCartToast, showCartAddedToast, showFavoriteAddedToast, showFavoriteRemovedToast, showInfoToast, showRatingToast } from '@/lib/services/ui/toast';
+import { updateUserStats } from '@/lib/services/userProfile';
 import { ProductWithDetails } from '@/lib/types/firestore';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -98,6 +102,7 @@ export default function NoNameDetailScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { user } = useAuth();
+  const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
   
   // Favorites Hook
@@ -383,20 +388,21 @@ export default function NoNameDetailScreen() {
         // 🎯 TRACK ACTION: submit_rating (nur bei neuer Bewertung, nicht bei Update)
         if (user?.uid) {
           try {
-            // Check minTextLength requirement (20 chars)
+            // Update user rating count - IMMER, nicht nur bei langem Kommentar!
+            await updateUserStats(user.uid, {
+              ratingsToAdd: 1
+            });
+            
+            // Track achievement action
             const textLength = (comment || '').length;
-            if (textLength >= 20) {
-              await achievementService.trackAction(user.uid, 'submit_rating', {
-                productId: product?.id,
-                productName: product?.name,
-                productType: 'noname',
-                rating: overallRating,
-                commentLength: textLength
-              });
-              console.log('✅ Action tracked: submit_rating (NoName)');
-            } else {
-              console.log('ℹ️ submit_rating not tracked: comment too short (min 20 chars)');
-            }
+            await achievementService.trackAction(user.uid, 'submit_rating', {
+              productId: product?.id,
+              productName: product?.name,
+              productType: 'noname',
+              rating: overallRating,
+              commentLength: textLength
+            });
+            console.log('✅ Action tracked: submit_rating (NoName)');
           } catch (error) {
             console.error('Error tracking submit_rating action:', error);
           }
@@ -560,6 +566,9 @@ export default function NoNameDetailScreen() {
         }
 
         setProduct(productData);
+        
+        // Track product view for interstitial ads
+        interstitialAdService.trackProductView(isPremium);
 
         console.log('🏷️ Product kategorie:', productData.kategorie);
 
@@ -921,6 +930,17 @@ export default function NoNameDetailScreen() {
 
           {/* Rating Toast entfernt – zentrale Toast-Library übernimmt */}
         </Animated.View>
+
+        {/* Banner - nur ohne Premium */}
+        {!isPremium && (
+          <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
+            <BannerAd 
+              style={{ marginHorizontal: 0 }}
+              onAdLoaded={() => console.log('✅ NoName Detail Banner loaded')}
+              onAdFailedToLoad={(error) => console.log('❌ NoName Detail Banner failed:', error)}
+            />
+          </View>
+        )}
 
         {/* Ähnliche Produkte Sektion - immer anzeigen wenn Kategorie vorhanden */}
         {product?.kategorie && (

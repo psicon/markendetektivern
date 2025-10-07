@@ -1,5 +1,6 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { BannerAd } from '@/components/ads/BannerAd';
 import { AllergenFilterChips } from '@/components/ui/AllergenFilterChips';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
@@ -95,12 +96,10 @@ export default function ExploreScreen() {
   
   // Firestore State
   const [discounter, setDiscounter] = useState<FirestoreDocument<Discounter>[]>([]);
-  const [productCounts, setProductCounts] = useState<{[key: string]: number}>({});
   const [marketsLoading, setMarketsLoading] = useState(true);
   
   // Categories State
   const [categoriesData, setCategoriesData] = useState<FirestoreDocument<Kategorien>[]>([]);
-  const [categoryProductCounts, setCategoryProductCounts] = useState<{[key: string]: number}>({});
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   
   // Failed images state (für alle Tabs)
@@ -112,8 +111,6 @@ export default function ExploreScreen() {
     category: FirestoreDocument<Kategorien> | null;
   }>({ visible: false, category: null });
   
-  // Animation für sanftes Einblenden der Produktzahlen
-  const [countOpacities, setCountOpacities] = useState<{[key: string]: Animated.Value}>({});
   
   // Filter States
   const [selectedCountry, setSelectedCountry] = useState('Deutschland');
@@ -1070,20 +1067,6 @@ export default function ExploreScreen() {
     }
   }, [activeTab]);
 
-  // Sanfte Animation für Produktzahlen
-  const animateProductCount = (marketId: string) => {
-    if (!countOpacities[marketId]) {
-      const newOpacity = new Animated.Value(0);
-      setCountOpacities(prev => ({ ...prev, [marketId]: newOpacity }));
-      
-      // Sanftes Einblenden über 300ms
-      Animated.timing(newOpacity, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
-    }
-  };
 
   // Verhindere mehrfache Initialisierung
   const hasInitialized = useRef(false);
@@ -1110,42 +1093,6 @@ export default function ExploreScreen() {
         setDiscounter(sortedDiscounter);
         setMarketsLoading(false); // ✅ Märkte sofort anzeigen!
         
-        // Lade Produktanzahl im Hintergrund (nicht blockierend, individuell)
-
-        const startTime = Date.now();
-        
-        // Lade jeden Count individuell und update sofort (nicht blockierend)
-        sortedDiscounter.forEach(async (market, index) => {
-          try {
-            // Kleine Verzögerung zwischen Requests für bessere Performance
-            setTimeout(async () => {
-              try {
-                const count = await FirestoreService.getProductCountByDiscounter(market.id);
-                console.log(`✅ Count for ${market.name}: ${count}`);
-                
-                // Update State sofort für diesen Market
-                setProductCounts(prevCounts => ({
-                  ...prevCounts,
-                  [market.id]: count
-                }));
-                
-                // Triggere Animation für diesen Count
-                setTimeout(() => animateProductCount(market.id), 100);
-                
-              } catch (error) {
-                console.error(`❌ Error counting products for ${market.name}:`, error);
-                // Setze 0 als Fallback
-                setProductCounts(prevCounts => ({
-                  ...prevCounts,
-                  [market.id]: 0
-                }));
-              }
-            }, index * 100); // Gestaffelte Requests (100ms Abstand)
-            
-          } catch (error) {
-            console.error(`❌ Error setting up count loading for ${market.name}:`, error);
-          }
-        });
         
 
         
@@ -1170,42 +1117,6 @@ export default function ExploreScreen() {
         setCategoriesData(categoriesWithAccess);
         setCategoriesLoading(false); // ✅ Kategorien sofort anzeigen!
         
-        // Lade Produktanzahl im Hintergrund (nicht blockierend)
-
-        
-        // Lade jeden Count individuell und update sofort (nicht blockierend)
-        // Für ALLE Kategorien (auch gesperrte) um Wert zu zeigen
-        categoriesWithAccess.forEach(async (category, index) => {
-          try {
-            // Kleine Verzögerung zwischen Requests für bessere Performance
-            setTimeout(async () => {
-              try {
-                const count = await FirestoreService.getProductCountByCategory(category.id);
-                console.log(`✅ Count for ${category.bezeichnung}: ${count}`);
-                
-                // Update State sofort für diese Category
-                setCategoryProductCounts(prevCounts => ({
-                  ...prevCounts,
-                  [category.id]: count
-                }));
-                
-                // Triggere Animation für diesen Count
-                setTimeout(() => animateProductCount(category.id), 100);
-                
-              } catch (error) {
-                console.error(`❌ Error counting products for ${category.bezeichnung}:`, error);
-                // Setze 0 als Fallback
-                setCategoryProductCounts(prevCounts => ({
-                  ...prevCounts,
-                  [category.id]: 0
-                }));
-              }
-            }, index * 100); // Gestaffelte Requests (100ms Abstand)
-            
-          } catch (error) {
-            console.error(`❌ Error setting up count loading for ${category.bezeichnung}:`, error);
-          }
-        });
         
 
         
@@ -1405,13 +1316,13 @@ export default function ExploreScreen() {
   ];
 
   const categories = [
-    { title: 'Alkohol', count: '99 Produkte', icon: '🍷', color: colors.primary },
-    { title: 'Backwaren / Fertigteig', count: '875 Produkte', icon: '🥖', color: colors.primary },
-    { title: 'Butter, Margarine etc.', count: '85 Produkte', icon: '🧈', color: colors.primary },
-    { title: 'Drogerie & Haushalt', count: '464 Produkte', icon: '🧴', color: colors.primary },
-    { title: 'Fertiggerichte', count: '499 Produkte', icon: '🍝', color: colors.primary },
-    { title: 'Festliches', count: '584 Produkte', icon: '🎄', color: colors.primary },
-    { title: 'Fisch, Feinkost & mehr', count: '1556 Produkte', icon: '🐟', color: colors.primary },
+    { title: 'Alkohol', icon: '🍷', color: colors.primary },
+    { title: 'Backwaren / Fertigteig', icon: '🥖', color: colors.primary },
+    { title: 'Butter, Margarine etc.', icon: '🧈', color: colors.primary },
+    { title: 'Drogerie & Haushalt', icon: '🧴', color: colors.primary },
+    { title: 'Fertiggerichte', icon: '🍝', color: colors.primary },
+    { title: 'Festliches', icon: '🎄', color: colors.primary },
+    { title: 'Fisch, Feinkost & mehr', icon: '🐟', color: colors.primary },
   ];
 
 
@@ -1439,6 +1350,17 @@ export default function ExploreScreen() {
       case 'kategorien':
         return (
           <View style={styles.contentSection}>
+            {/* Banner - nur ohne Premium */}
+            {!isPremium && (
+              <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
+                <BannerAd 
+                  style={{ marginHorizontal: 0 }}
+                  onAdLoaded={() => console.log('✅ Explore Kategorien Banner loaded')}
+                  onAdFailedToLoad={(error) => console.log('❌ Explore Kategorien Banner failed:', error)}
+                />
+              </View>
+            )}
+            
             {categoriesLoading ? (
               <View style={[styles.marketListContainer, { backgroundColor: colors.cardBackground }]}>
                 {[1, 2, 3, 4, 5].map((index) => (
@@ -1550,28 +1472,12 @@ export default function ExploreScreen() {
                         </View>
                       )}
                     </View>
-                    <View style={styles.marketContent}>
-                      <ThemedText style={[
-                        styles.marketTitle, 
-                        { color: category.isLocked ? colors.icon : colors.text }
-                      ]}>
-                        {category.bezeichnung}
-                      </ThemedText>
-                      <Animated.View style={{ opacity: countOpacities[category.id] || 1 }}>
-                        <ThemedText style={[
-                          styles.marketCount, 
-                          { 
-                            color: category.isLocked ? colors.icon : colors.text, 
-                            marginTop: -1
-                          }
-                        ]}>
-                          {categoryProductCounts[category.id] !== undefined 
-                            ? `${categoryProductCounts[category.id]} Produkte`
-                            : '... Produkte'
-                          }
-                        </ThemedText>
-                      </Animated.View>
-                    </View>
+                    <ThemedText style={[
+                      styles.categoryTitle, 
+                      { color: category.isLocked ? colors.icon : colors.text }
+                    ]}>
+                      {category.bezeichnung}
+                    </ThemedText>
                                         <View style={styles.productChevron}>
                       <IconSymbol name="chevron.right" size={16} color={colors.icon} />
                     </View>
@@ -1584,6 +1490,17 @@ export default function ExploreScreen() {
       case 'märkte':
         return (
           <View style={styles.contentSection}>
+            {/* Banner - nur ohne Premium */}
+            {!isPremium && (
+              <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
+                <BannerAd 
+                  style={{ marginHorizontal: 0 }}
+                  onAdLoaded={() => console.log('✅ Explore Märkte Banner loaded')}
+                  onAdFailedToLoad={(error) => console.log('❌ Explore Märkte Banner failed:', error)}
+                />
+              </View>
+            )}
+            
             {marketsLoading ? (
               <View style={[styles.marketListContainer, { backgroundColor: colors.cardBackground }]}>
                 {[1, 2, 3, 4, 5].map((index) => (
@@ -1680,19 +1597,8 @@ export default function ExploreScreen() {
                           {getCountryFlag(market.land)}
                         </ThemedText>
                   </View>
-                      {productCounts[market.id] !== undefined ? (
-                        <Animated.View style={{ opacity: countOpacities[market.id] || 0 }}>
-                          <ThemedText style={styles.marketCount}>
-                            {`${productCounts[market.id]} Produkte`}
-                          </ThemedText>
-                        </Animated.View>
-                      ) : (
-                        <ThemedText style={styles.marketCount}>
-                          ... Produkte
-                        </ThemedText>
-                      )}
                       {market.infos && (
-                        <ThemedText style={styles.marketDescription} numberOfLines={2}>
+                        <ThemedText style={styles.marketDescription} numberOfLines={3}>
                           {market.infos}
                         </ThemedText>
                       )}
@@ -1726,6 +1632,20 @@ export default function ExploreScreen() {
           <FlatList
             data={noNameProducts}
             keyExtractor={(item, index) => `${item.id}-${index}`}
+            ListHeaderComponent={() => (
+              <View>
+                {/* Banner - nur ohne Premium */}
+                {!isPremium && (
+                  <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
+                    <BannerAd 
+                      style={{ marginHorizontal: 0 }}
+                      onAdLoaded={() => console.log('✅ Explore NoName Banner loaded')}
+                      onAdFailedToLoad={(error) => console.log('❌ Explore NoName Banner failed:', error)}
+                    />
+                  </View>
+                )}
+              </View>
+            )}
                 renderItem={({ item: product, index }) => (
                   <View 
                     style={[
@@ -1868,6 +1788,20 @@ export default function ExploreScreen() {
           <FlatList
             data={markenprodukte}
             keyExtractor={(item, index) => `${item.id}-${index}`}
+            ListHeaderComponent={() => (
+              <View>
+                {/* Banner - nur ohne Premium */}
+                {!isPremium && (
+                  <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
+                    <BannerAd 
+                      style={{ marginHorizontal: 0 }}
+                      onAdLoaded={() => console.log('✅ Explore Marken Banner loaded')}
+                      onAdFailedToLoad={(error) => console.log('❌ Explore Marken Banner failed:', error)}
+                    />
+                  </View>
+                )}
+              </View>
+            )}
             renderItem={({ item: product, index }) => (
               <View 
                 style={[
@@ -2717,6 +2651,12 @@ const styles = StyleSheet.create({
     lineHeight: 18, // Etwas mehr Line-Height
     marginTop: 2, // Mehr Abstand nach oben
   },
+  categoryTitle: {
+    fontSize: 16,
+    fontFamily: 'Nunito_600SemiBold',
+    flex: 1,
+    textAlign: 'left', // Links ausgerichtet
+  },
   marketFlag: {
     fontSize: 20,
     marginLeft: 8,
@@ -2732,7 +2672,7 @@ const styles = StyleSheet.create({
   marketDescription: {
     fontSize: 12,
     fontFamily: 'Nunito_400Regular',
-    opacity: 0.8,
+    opacity: 0.7,
     lineHeight: 14,
     marginTop: 1, // Symmetrischer Abstand zur Produktzahl
   },

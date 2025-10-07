@@ -6,18 +6,19 @@ import { Colors } from '@/constants/Colors';
 import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useLayoutEffect, useState } from 'react';
 import {
-    Alert,
-    Image,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Alert,
+  Image,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -28,6 +29,7 @@ export default function ProfileScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
   const { user, userProfile, logout, refreshUserProfile, isAnonymous } = useAuth();
+  const { isPremium, presentPaywall } = useRevenueCat();
   const [showAuthModal, setShowAuthModal] = useState(false);
 
 
@@ -69,6 +71,70 @@ export default function ProfileScreen() {
     });
   }, [navigation, colorScheme, router, isAnonymous, setShowAuthModal]);
 
+  const handlePremiumUpgrade = async () => {
+    try {
+      console.log('🛒 Premium Upgrade button pressed');
+      await presentPaywall();
+    } catch (error) {
+      console.error('❌ Premium Upgrade Paywall error:', error);
+    }
+  };
+
+  const deleteUserAccount = async () => {
+    if (!user) {
+      Alert.alert('Fehler', 'Kein Benutzer angemeldet');
+      return;
+    }
+
+    try {
+      console.log('🗑️ Starting account deletion for user:', user.uid);
+      
+      // Nur den Firebase Auth Account löschen
+      // Die Firestore-Daten bleiben erhalten für Statistiken/Analytics
+      const { deleteUser } = await import('firebase/auth');
+      await deleteUser(user);
+      console.log('✅ Firebase Auth account deleted');
+      
+      // Erfolg anzeigen und zur Startseite
+      Alert.alert(
+        'Account gelöscht',
+        'Dein Account wurde erfolgreich gelöscht. Deine Daten bleiben für Statistiken anonymisiert erhalten.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Navigation zur Startseite
+              router.replace('/');
+            }
+          }
+        ]
+      );
+      
+    } catch (error: any) {
+      console.error('❌ Account deletion failed:', error);
+      
+      // Spezifische Fehlerbehandlung
+      if (error.code === 'auth/requires-recent-login') {
+        Alert.alert(
+          'Erneute Anmeldung erforderlich',
+          'Aus Sicherheitsgründen musst du dich erneut anmelden, bevor du deinen Account löschen kannst.',
+          [
+            {
+              text: 'Jetzt anmelden',
+              onPress: () => {
+                logout();
+                router.replace('/auth/login');
+              }
+            },
+            { text: 'Abbrechen', style: 'cancel' }
+          ]
+        );
+      } else {
+        throw error; // Wird vom aufrufenden catch-Block behandelt
+      }
+    }
+  };
+
   // Note: Profile refresh happens automatically via AuthContext when data changes
   // Manual refresh is called after profile edits in edit-profile.tsx
 
@@ -77,8 +143,8 @@ export default function ProfileScreen() {
   const realName = userProfile?.real_name || '';
   const email = userProfile?.email || user?.email || '';
   const photoUrl = userProfile?.photo_url || user?.photoURL || null;
-  const totalSavings = userProfile?.totalSavings || 238.78;
-  const productsSaved = userProfile?.productsSaved || 23;
+  const totalSavings = userProfile?.totalSavings || 0;
+  const productsSaved = userProfile?.productsSaved || 0;
   // Level kommt jetzt aus stats.currentLevel (korrekte Berechnung)
   const level = (userProfile as any)?.stats?.currentLevel || userProfile?.level || 1;
   const favoriteMarket = userProfile?.favoriteMarketName || '';
@@ -151,10 +217,17 @@ export default function ProfileScreen() {
         {
           text: 'Account löschen',
           style: 'destructive',
-          onPress: () => {
-            // TODO: Implement account deletion
-            Alert.alert('Info', 'Account-Löschung wird in Kürze implementiert.');
-          }
+           onPress: async () => {
+             try {
+               await deleteUserAccount();
+             } catch (error) {
+               console.error('❌ Account deletion error:', error);
+               Alert.alert(
+                 'Fehler', 
+                 'Account konnte nicht gelöscht werden. Bitte versuche es später erneut oder kontaktiere den Support.'
+               );
+             }
+           }
         }
       ]
     );
@@ -382,22 +455,21 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* Premium Banner (if not premium) */}
-      {!userProfile?.isPremium && (
+      {/* Premium Banner (if not premium) - wie im Mehr-Tab */}
+      {!isPremium && (
         <TouchableOpacity 
-          style={[styles.premiumBanner, { borderColor: colors.primary }]}
-          onPress={() => router.push('/premium' as any)}
+          style={styles.premiumCard}
+          onPress={handlePremiumUpgrade}
         >
-          <LinearGradient
-            colors={[colors.primary, colors.secondary]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.premiumGradient}
-          >
-            <IconSymbol name="star.fill" size={24} color="white" />
-            <Text style={styles.premiumText}>Jetzt alles sofort freischalten</Text>
-            <IconSymbol name="sparkles" size={24} color="#FFD700" />
-          </LinearGradient>
+          <View style={[styles.premiumCardBorder, { borderColor: colors.secondary }]}>
+            <View style={styles.premiumContent}>
+              <IconSymbol name="crown" size={24} color={colors.secondary} />
+              <Text style={[styles.premiumCardText, { color: colors.text }]}>
+                Jetzt Premium Mitglied werden
+              </Text>
+              <IconSymbol name="star" size={24} color="#F59E0B" />
+            </View>
+          </View>
         </TouchableOpacity>
       )}
 
@@ -426,10 +498,15 @@ export default function ProfileScreen() {
             <TouchableOpacity onPress={() => router.push('/purchase-history' as any)}>
               <Text style={styles.savingsLabel}>Deine Gesamtersparnis</Text>
               <Text style={styles.savingsAmount}>€ {totalSavings.toFixed(2)}</Text>
+              {totalSavings === 0 && (
+                <Text style={styles.emptyStateText}>Starte deine erste Suche und entdecke Ersparnisse!</Text>
+              )}
             </TouchableOpacity>
             <TouchableOpacity style={styles.productsBadge} onPress={() => router.push('/purchase-history' as any)}>
               <IconSymbol name="number" size={14} color={colors.warning} />
-              <Text style={styles.productsText}>{productsSaved} gekaufte Produkte</Text>
+              <Text style={styles.productsText}>
+                {productsSaved === 0 ? 'Noch keine Käufe' : `${productsSaved} gekaufte Produkte`}
+              </Text>
             </TouchableOpacity>
           </View>
         </LinearGradient>
@@ -551,25 +628,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Nunito_600SemiBold',
   },
-  premiumBanner: {
+  premiumCard: {
     marginHorizontal: 16,
     marginBottom: 12,
+  },
+  premiumCardBorder: {
     borderRadius: 16,
     borderWidth: 2,
-    overflow: 'hidden',
+    height: 50,
+    justifyContent: 'center',
   },
-  premiumGradient: {
+  premiumContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 12,
+    paddingHorizontal: 16,
+    gap: 12,
   },
-  premiumText: {
-    color: 'white',
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
+  premiumCardText: {
     flex: 1,
-    marginHorizontal: 12,
+    fontSize: 16,
+    fontWeight: '500',
+    fontFamily: 'Nunito_500Medium',
   },
   levelCard: {
     marginHorizontal: 16,
@@ -678,6 +757,13 @@ const styles = StyleSheet.create({
     color: '#FF9800',
     lineHeight: 14,
     fontFamily: 'Nunito_600SemiBold',
+  },
+  emptyStateText: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 11,
+    fontFamily: 'Nunito_400Regular',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   menuSection: {
     marginHorizontal: 16,

@@ -496,7 +496,7 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
               </Text>
               <View style={styles.trendingBadge}>
                 <IconSymbol name="star.fill" size={12} color="#FFD700" />
-                <Text style={[styles.trendingText]}>Top Rated</Text>
+                <Text style={[styles.trendingText, { color: colors.text }] }>Top Rated</Text>
               </View>
             </View>
             
@@ -535,12 +535,7 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
                     }}
                     activeOpacity={0.6}
                   >
-                    {/* Sponsored Badge - nur für erstes echtes Produkt */}
-                    {index === 0 && item.isRealProduct && (
-                      <View style={styles.searchSponsoredBadge}>
-                        <Text style={styles.searchSponsoredText}>Sponsored</Text>
-                      </View>
-                    )}
+                 
                     
                     {/* Echtes Produktbild oder Emoji-Fallback */}
                     {item.isRealProduct && item.productImage ? (
@@ -869,7 +864,9 @@ const styles = StyleSheet.create({
   },
   trendingText: {
     fontSize: 11,
-    fontFamily: 'Nunito_600SemiBold'
+    fontFamily: 'Nunito_600SemiBold',
+    
+
   },
   quickActions: {
     flexDirection: 'row',

@@ -215,6 +215,46 @@ class JourneyTrackingService {
   }
 
   /**
+   * Entfernt rekursiv alle undefined-Werte aus einem Objekt/Array.
+   * - Bewahrt null (ist in Firestore erlaubt)
+   * - Belässt Firestore FieldValues (z.B. serverTimestamp()) unverändert
+   * - Belässt DocumentReference-Objekte unverändert
+   */
+  private removeUndefinedValues(obj: any): any {
+    if (obj === undefined) return null;
+    if (obj === null) return null;
+
+    // Firestore FieldValue (z.B. serverTimestamp): heuristisch erkennen
+    if (typeof obj === 'object' && obj !== null) {
+      const protoName = Object.prototype.toString.call(obj);
+      // Date unverändert lassen
+      if (obj instanceof Date) return obj;
+      // DocumentReference unverändert lassen (hat id/path Eigenschaften oft)
+      if ((obj as any).path || (obj as any).id && (obj as any).type === 'document') return obj;
+      // Firebase FieldValue wird meist als object mit internen Symbolen repräsentiert → nicht anfassen
+      if (protoName.includes('FieldValue')) return obj;
+    }
+
+    if (Array.isArray(obj)) {
+      return obj
+        .filter((item) => item !== undefined)
+        .map((item) => this.removeUndefinedValues(item));
+    }
+
+    if (typeof obj === 'object') {
+      const cleaned: any = {};
+      for (const [key, value] of Object.entries(obj)) {
+        if (value !== undefined) {
+          cleaned[key] = this.removeUndefinedValues(value);
+        }
+      }
+      return cleaned;
+    }
+
+    return obj;
+  }
+
+  /**
    * Gibt die aktuelle Journey-ID zurück (für Verknüpfung mit Produkten)
    */
   getCurrentJourneyId(): string | null {
@@ -1496,10 +1536,13 @@ class JourneyTrackingService {
       }
 
       const userJourneysRef = collection(db, 'users', userId, 'journeys');
-      
+
+      // Rekursiv alle undefined entfernen
+      const cleanedJourneyData = this.removeUndefinedValues(journeyData);
+
       if (!journey.firestoreDocId) {
         // Neue Journey erstellen
-        const docRef = await addDoc(userJourneysRef, journeyData);
+        const docRef = await addDoc(userJourneysRef, cleanedJourneyData);
         
         // Update currentJourney nur wenn sie noch existiert
         if (this.currentJourney && this.currentJourney.journeyId === journey.journeyId) {
@@ -1511,7 +1554,7 @@ class JourneyTrackingService {
       } else {
         // Bestehende Journey updaten
         const docRef = doc(userJourneysRef, journey.firestoreDocId);
-        await updateDoc(docRef, journeyData);
+        await updateDoc(docRef, cleanedJourneyData);
         
         console.log(`💾 Journey updated in Firestore: ${journey.firestoreDocId}`);
       }
@@ -1544,7 +1587,8 @@ class JourneyTrackingService {
 
       if (journeyToFinalize.firestoreDocId) {
         const docRef = doc(db, 'users', userId, 'journeys', journeyToFinalize.firestoreDocId);
-        await updateDoc(docRef, finalData);
+        const cleanedFinalData = this.removeUndefinedValues(finalData);
+        await updateDoc(docRef, cleanedFinalData);
         
         console.log(`🏁 Journey finalized in Firestore: ${journeyToFinalize.firestoreDocId}`);
       }

@@ -23,9 +23,20 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "926",
+      "buildNumber": "953",
       "appleTeamId": "MZD2N2F887",
-      "googleServicesFile": "./GoogleService-Info.plist"
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "usesAppleSignIn": true,
+      "entitlements": {
+        "com.apple.developer.applesignin": [
+          "Default"
+        ]
+      },
+      "infoPlist": {
+        "NSCameraUsageDescription": "Diese App benötigt Zugriff auf die Kamera, um Barcodes von Produkten zu scannen und Preise zu vergleichen.",
+        "NSLocationWhenInUseUsageDescription": "Diese App benötigt Zugriff auf deinen Standort, um dir lokale Angebote und Märkte in deiner Nähe zu zeigen.",
+        "NSPhotoLibraryUsageDescription": "Diese App benötigt Zugriff auf deine Fotos, um dein Profilbild aus der Galerie auszuwählen."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -43,7 +54,8 @@
         "android.permission.ACCESS_FINE_LOCATION"
       ],
       "package": "de.markendetektive",
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "versionCode": 2
     },
     "web": {
       "bundler": "metro",
@@ -54,12 +66,35 @@
       "expo-router",
       "expo-dev-client",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Diese App benötigt Zugriff auf die Kamera, um Barcodes von Produkten zu scannen und Preise zu vergleichen."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Diese App benötigt Zugriff auf deine Fotos, um dein Profilbild aus der Galerie auszuwählen."
+        }
+      ],
+      [
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "Diese App benötigt Zugriff auf deinen Standort, um dir lokale Angebote zu zeigen."
         }
       ],
-      "@react-native-firebase/app"
+      "@react-native-firebase/app",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "iosAppId": "ca-app-pub-9082891656550991~3669162596",
+          "androidAppId": "ca-app-pub-9082891656550991~6267405772",
+          "delayAppMeasurementInit": true,
+          "optimizeInitialization": false,
+          "optimizeAdLoading": false,
+          "userTrackingUsageDescription": "Diese App verwendet Werbung zur Finanzierung. Ihre Daten werden anonymisiert verarbeitet."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

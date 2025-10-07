@@ -9,13 +9,12 @@ class RemoteConfigService {
   
   // Fallback-Werte für Development/Expo Go
   private fallbackConfig = {
-    showonboardingpaywall: true, // Default: Paywall AN für Testing
+    showonboardingpaywall: false, // Default: Paywall AUS
   };
 
   private constructor() {
-    // Sichere Detection - bei jedem Fehler Fallback verwenden
-    this.isExpoGo = Constants.appOwnership === 'expo' || 
-                    typeof global.indexedDB === 'undefined';
+    // Expo Go zuverlässig erkennen (nur über appOwnership)
+    this.isExpoGo = Constants.appOwnership === 'expo';
     console.log('🔧 Remote Config Service:', this.isExpoGo ? 'Fallback Mode' : 'Native Mode');
   }
 
@@ -108,6 +107,18 @@ class RemoteConfigService {
 
     try {
       const { getBoolean } = await import('firebase/remote-config');
+      
+      // Erst fetchAndActivate aufrufen um sicherzustellen, dass wir die neuesten Werte haben
+      if (this.remoteConfig) {
+        const { fetchAndActivate } = await import('firebase/remote-config');
+        try {
+          await fetchAndActivate(this.remoteConfig);
+          console.log('🔄 Remote Config: Fetched latest values');
+        } catch (fetchError) {
+          console.log('⚠️ Remote Config: Using cached values', fetchError);
+        }
+      }
+      
       const showPaywall = getBoolean(this.remoteConfig, 'showonboardingpaywall');
       console.log('🛒 Remote Config - Show Onboarding Paywall:', showPaywall);
       return showPaywall;

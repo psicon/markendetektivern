@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "markendetektive-895f7",
+  "private_key_id": "58c0a81f46130e1b44c17d3dc6946aafa31f0f84",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDKitRsFvk2gvnx\nPpqZE+MVu76CU6wbDpjvcMyxEEdI19qOR4VxCbJuDIK2z9Um8ozF94jWXAUjJ0RA\nAUzKQfpdZ1oGUahISt0CBugLClr/8MeMLmxe2pa5Tunfy/ySnj8fmd//Xx8gxE0i\nmqPQV7npNm1U2CB8J1Yfynl8xoxGB6d/2JjFu/JFmeXP7ahhE+jPInXVxauLJlQb\nmAHyh8gl5+VAvUbrkXFtG7fEbkxPXqkt2UxelnzfAV91LnwghcEwLkYVS1B1B/YO\nV/mNEKmonCQxgmgtb/UYmhQDcHWZNJz1n8cm0eh7EMj+Z57hOx4vMUPkRcVhLGuR\nBoGxMLK5AgMBAAECggEAFltQq0W16IB4mlpwsijxzfpVQwl9W9c2pmdrELhdRfsd\nksruPdX2LhOPciJqwsvPIiL6pb6uinzRGceK9GBoBFteIohs7N3mm0yr3FweQ1YO\nkLinGalDLd06D4vyqzRwf0p64TNcuj8wzHsJTfwA928cjlr06v9kkEnHMzCvVyNa\nyFqlXdzAMO0lLl+a2nmMkqMep/bWCphqiCd/Fl2FJWKA+ynBkdGdYcryWoWeLgfA\nw9yQp7+d3gUKOLOjwoTpCFP3m7ZV6hP//XQN29BcDEfXpsbbSB8SpopT2+1XeIPd\niHTQgBYl7l5juoR3sIvbQMq/GDjPhB/TvqU/QzYnSQKBgQDyxWS/MqtJbQA/iosu\nsjTdBrBTMU9BtFmw5Si6Z211c60uo+dmQ7zmRdaAj6WK9vmRlGo7B9dsELIDOi1E\nYZtScEkGDDrk5RJLyk+G5ex1hgiO00hb7WUq2d6NANmGNVyYZ5oGCnnFyGMS/SV+\nflZG06ML+E39ZZowcpR3/n3PkwKBgQDVlEDUY8guoDbpdJCmMu08MBL3JaX5rYUv\nDC4Mza6wTVBbrRaKrTz3vwEfg8Wv4DfWbW8w5O1wJ71o6KAYdO4g/iTPXrTG/c7y\nnnv65y/Q4hpGN7TF3QNCpnTy3XXDFrhzGM28aFXw2k1hUttsAsuCnWDIoE+NxWEd\nzPI31A4sAwKBgQDKCrmT3glrbEm+mADJdgpEwGJSekEpv3y9mZnRuG4CR6kjncjg\n9RLq2chw6hutkWmWXNwkEJyaFTLxOKOfu1PWwhgj7l29TV9ysAaLkCLAlDHfG7um\nteVySivLUZ+28AYF2IL48BL0JZc+oGtp4J7RByU0uwu9DafLFjC1xJjT/QKBgH+W\nFrxJ91XTI7qGhbqjBZFE7q9xcBsdC0i1r/S6EjcDmJOLbMHfB2LAWX1oDHoqKXEQ\n4rGEsEqlksLO5IR3paFT8M1oN/n/uNa60jlqTegsiaGUuYrRopb4NTi4DxdBxWIM\nWSrJ8Tz2S+9tveJiMQyP0zdGfP+l/4P74F51cRndAoGBALEiIKcen5CTZW/HcuFc\nl+ShNZOtIFZv2AnsZvbxaNV3/a6VW+ezTdk1hkjOc42W3KnpxdAghFdN1uakaidS\nlF6YtFa9OgQNWtYBtv+Z2aJXQxBr7jtcFiNqnGlVyQX4d066rluYC3ke5hq71JuK\ng5jgi/M39ApL9gIWO/+NuwCj\n-----END PRIVATE KEY-----\n",
+  "client_email": "flutterflowcodemagic@markendetektive-895f7.iam.gserviceaccount.com",
+  "client_id": "105208991758870404204",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/flutterflowcodemagic%40markendetektive-895f7.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

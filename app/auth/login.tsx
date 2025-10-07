@@ -4,6 +4,7 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { isExpoGo } from '@/lib/utils/platform';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import React, { useState } from 'react';
@@ -138,16 +139,13 @@ export default function LoginScreen() {
     try {
       setLoading(true);
       // Check if running in Expo Go
-      if (__DEV__ && Platform.OS === 'ios') {
-        const Constants = require('expo-constants').default;
-        if (Constants.appOwnership === 'expo') {
-          Alert.alert(
-            'Nicht verfügbar in Expo Go',
-            'Apple Sign-In funktioniert nur in der TestFlight oder App Store Version. Bitte nutze Email/Passwort für die Entwicklung.',
-            [{ text: 'OK' }]
-          );
-          return;
-        }
+      if (isExpoGo()) {
+        Alert.alert(
+          'Nicht verfügbar in Expo Go',
+          'Apple Sign-In funktioniert nur in der TestFlight oder App Store Version. Bitte nutze Email/Passwort für die Entwicklung.',
+          [{ text: 'OK' }]
+        );
+        return;
       }
       await signInWithApple();
       router.replace('/(tabs)');

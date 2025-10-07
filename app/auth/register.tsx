@@ -7,6 +7,7 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { Discounter, FirestoreDocument } from '@/lib/types/firestore';
+import { isExpoGo } from '@/lib/utils/platform';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -240,16 +241,13 @@ export default function RegisterScreen() {
     try {
       setLoading(true);
       // Check if running in Expo Go
-      if (__DEV__ && Platform.OS === 'ios') {
-        const Constants = require('expo-constants').default;
-        if (Constants.appOwnership === 'expo') {
-          Alert.alert(
-            'Nicht verfügbar in Expo Go',
-            'Apple Sign-In funktioniert nur in der TestFlight oder App Store Version. Bitte nutze Email/Passwort für die Entwicklung.',
-            [{ text: 'OK' }]
-          );
-          return;
-        }
+      if (isExpoGo()) {
+        Alert.alert(
+          'Nicht verfügbar in Expo Go',
+          'Apple Sign-In funktioniert nur in der TestFlight oder App Store Version. Bitte nutze Email/Passwort für die Entwicklung.',
+          [{ text: 'OK' }]
+        );
+        return;
       }
       await signInWithApple();
       router.replace('/(tabs)');

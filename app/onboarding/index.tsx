@@ -379,6 +379,17 @@ export default function OnboardingScreen() {
       }).start();
     }
     
+    // Auth sollte bereits automatisch erfolgt sein durch AuthContext
+    // Aber sicherheitshalber prüfen ob User existiert
+    const { auth } = await import('@/lib/firebase');
+    if (!auth.currentUser) {
+      try {
+        await signInAnonymously();
+      } catch (error) {
+        console.error('❌ Anonymous sign in failed:', error);
+      }
+    }
+    
     // Speichere Skip/Abandon
     try {
       const { setDoc, doc, serverTimestamp } = await import('firebase/firestore');
@@ -417,43 +428,22 @@ export default function OnboardingScreen() {
     const AsyncStorage = await import('@react-native-async-storage/async-storage');
     await AsyncStorage.default.setItem('onboarding_v1_skipped', 'true');
     
-    // Verwende bereits gecheckte Premium-Status wenn verfügbar
+    // Pending-Paywall-Flag setzen; tatsächliche Präsentation erfolgt sicher in der Home-Seite
     try {
-      let currentPremiumStatus = isPremiumUser;
-      
-      // Nur neu prüfen wenn noch nicht gecheckt wurde
-      if (!premiumStatusChecked) {
-        setLoadingStatus('Käufe werden wiederhergestellt...');
-        const { revenueCatService } = await import('@/lib/services/revenueCatService');
-        await revenueCatService.restorePurchases();
-        currentPremiumStatus = await revenueCatService.isPremium();
-        console.log('🛒 Premium Status nach Wiederherstellung:', currentPremiumStatus);
-      } else {
-        console.log('🛒 Verwende bereits geprüften Premium Status:', currentPremiumStatus);
-      }
-      
-      // Remote Config prüfen
-      const shouldShowPaywall = await remoteConfigService.shouldShowOnboardingPaywall();
-      
-      // Jetzt navigieren
-      router.replace('/(tabs)');
-      
-      // NUR Paywall zeigen wenn nötig
-      if (shouldShowPaywall && !currentPremiumStatus) {
-        setTimeout(async () => {
-          try {
-            const paywallResult = await presentPaywall('onboarding');
-            console.log('🛒 Paywall result:', paywallResult.result);
-          } catch (error) {
-            console.error('❌ Paywall error:', error);
-          }
-        }, 1000);
-      }
-    } catch (error) {
-      console.error('❌ Premium restore error:', error);
-      // Trotzdem navigieren
-      router.replace('/(tabs)');
+      await AsyncStorage.default.setItem('pending_onboarding_paywall', '1');
+    } catch (e) {
+      console.warn('⚠️ Konnte Pending-Paywall-Flag nicht setzen:', e);
     }
+    
+    // WICHTIG: Premium Status Force-Refresh VOR Navigation!
+    try {
+      await refreshPremiumStatus();
+    } catch (error) {
+      console.warn('⚠️ Premium Status Refresh fehlgeschlagen:', error);
+    }
+
+    // Navigation zur App
+    router.replace('/(tabs)');
   };
 
   const completeOnboarding = async () => {
@@ -563,6 +553,13 @@ export default function OnboardingScreen() {
         }
       }
       
+      // WICHTIG: Premium Status Force-Refresh VOR Navigation!
+      try {
+        await refreshPremiumStatus();
+      } catch (error) {
+        console.warn('⚠️ Premium Status Refresh fehlgeschlagen:', error);
+      }
+      
       // Zur App navigieren
       router.replace('/(tabs)');
       
@@ -592,7 +589,7 @@ export default function OnboardingScreen() {
         <View style={styles.loadingContent}>
           <ActivityIndicator size="large" color={colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint} />
           <Text style={[styles.loadingMessage, { color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text, marginTop: 20 }]}>
-            {loadingStatus || 'Käufe werden wiederhergestellt...'}
+            {loadingStatus || 'App wird das erste Mal gestartet...'}
           </Text>
         </View>
       </SafeAreaView>
@@ -1355,6 +1352,7 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
   },
   logoContainer: {
     alignItems: 'center',
+    
   },
   logoWithShadow: {
     shadowColor: '#000',
@@ -1362,13 +1360,14 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     shadowOpacity: 0.6,
     shadowRadius: 8,
     elevation: 8,
+    
   },
   heroBrandTitle: {
-    fontSize: 38,
+    fontSize: 18,
     fontWeight: 'bold',
     fontFamily: 'Nunito_700Bold',
     color: 'white',
-    marginTop: 4,
+    marginTop: 6,
     marginBottom: 8,
     textShadowColor: 'rgba(0, 0, 0, 0.8)', // Stärkerer Schatten
     textShadowOffset: { width: 0, height: 3 },

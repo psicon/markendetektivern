@@ -1,6 +1,7 @@
 import NewsCard from '@/components/NewsCard';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { BannerAd } from '@/components/ads/BannerAd';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
@@ -20,6 +21,7 @@ import searchHistoryService from '@/lib/services/searchHistoryService';
 import WordPressService, { WordPressPost } from '@/lib/services/wordpress';
 import { Level } from '@/lib/types/achievements';
 import { FirestoreDocument, Handelsmarken, Kategorien, Produkte } from '@/lib/types/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { SymbolViewProps } from 'expo-symbols';
@@ -33,7 +35,7 @@ export default function HomeScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const { top: insetTop } = useSafeAreaInsets();
   const { user, userProfile } = useAuth();
-  const { isPremium } = useRevenueCat();
+  const { isPremium, refreshPremiumStatus } = useRevenueCat();
   const analytics = useAnalytics();
   
   // 🎯 Journey-Tracking für Startseite
@@ -71,6 +73,65 @@ export default function HomeScreen() {
   
   // WordPress News State
   const [newsLoading, setNewsLoading] = useState(true);
+  // Sichere Präsentation der Onboarding-Paywall NACH Mount der Home-Seite
+  useEffect(() => {
+    let cancelled = false;
+    const maybePresentPendingOnboardingPaywall = async () => {
+      try {
+        const flag = await AsyncStorage.getItem('pending_onboarding_paywall');
+        if (flag !== '1') return;
+
+        // Flag sofort löschen, um doppelte Präsentation zu vermeiden
+        await AsyncStorage.removeItem('pending_onboarding_paywall');
+        
+        // WICHTIG: Force-Refresh des Premium Status nach Onboarding!
+        await refreshPremiumStatus();
+
+        // Hole Remote Config Entscheidung
+        const { remoteConfigService } = await import('@/lib/services/remoteConfigService');
+        const shouldShow = await remoteConfigService.shouldShowOnboardingPaywall();
+        if (!shouldShow) return;
+
+        // Nur ohne Premium präsentieren
+        if (isPremium) return;
+
+        // Warten bis RevenueCat initialisiert ist (max. 5s)
+        try {
+          const { revenueCatService } = await import('@/lib/services/revenueCatService');
+          let tries = 0;
+          while (!revenueCatService.isInitialized && tries < 25) {
+            await new Promise(r => setTimeout(r, 200));
+            tries++;
+          }
+        } catch {}
+
+        // Kurze Verzögerung, bis Screen vollständig gerendert ist
+        const { InteractionManager } = await import('react-native');
+        await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()));
+
+        if (cancelled) return;
+
+        try {
+          const Haptics = await import('expo-haptics');
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+          const { useRevenueCat } = await import('@/lib/contexts/RevenueCatProvider');
+          // useRevenueCat kann hier nicht genutzt werden (Hook). Daher Service direkt verwenden.
+          const { revenueCatService } = await import('@/lib/services/revenueCatService');
+          await revenueCatService.presentPaywall('onboarding');
+        } catch (e) {
+          console.warn('⚠️ Fehler bei Pending Onboarding Paywall:', e);
+        }
+      } catch (e) {
+        console.warn('⚠️ Fehler bei Pending-Paywall-Check:', e);
+      }
+    };
+
+    maybePresentPendingOnboardingPaywall();
+    return () => {
+      cancelled = true;
+    };
+  }, [isPremium]);
   const [newsPosts, setNewsPosts] = useState<WordPressPost[]>([]);
   const [newsError, setNewsError] = useState<string | null>(null);
   const [newsLoadingMore, setNewsLoadingMore] = useState(false);
@@ -560,6 +621,23 @@ export default function HomeScreen() {
           );
         })()}
 
+        {/* Banner Ad - Nur wenn User kein Premium hat */}
+        {(() => {
+          console.log('🎯 Banner Ad Check:', { isPremium, shouldShowAd: !isPremium });
+          if (!isPremium) {
+            return (
+              <View style={{ marginBottom: 20, marginTop: -8, marginHorizontal: -16 }}>
+                <BannerAd 
+                  style={{ marginHorizontal: 0 }}
+                  onAdLoaded={() => console.log('✅ Home Banner Ad loaded')}
+                  onAdFailedToLoad={(error) => console.log('❌ Home Banner Ad failed:', error)}
+                />
+              </View>
+            );
+          }
+          return null;
+        })()}
+
         {/* Neu für dich enttarnt */}
         <View style={styles.section}>
           <ThemedText style={styles.sectionTitle}>Neu für dich enttarnt</ThemedText>
@@ -623,11 +701,7 @@ export default function HomeScreen() {
                     )}
                     
                     {/* Sponsored Badge - nur für erstes Produkt */}
-                    {index === 0 && (
-                      <View style={styles.sponsoredBadge}>
-                        <ThemedText style={styles.sponsoredText}>Sponsored</ThemedText>
-                      </View>
-                    )}
+                     
                     
                     <View style={[styles.levelBadge, { backgroundColor: getStufenColor(parseInt(product.stufe) || 1) }]}>
                       <IconSymbol name="chart.bar" size={10} color="white" />
@@ -800,7 +874,7 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontFamily: 'Nunito_700Bold',
     lineHeight: 30,
-    marginTop: 2,
+    marginTop: 3,
     flexShrink: 1,
   },
   profileButton: {
@@ -945,6 +1019,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.09,
     shadowRadius: 2,
     elevation: 2,
+  },
+  bannerAd: {
+    marginBottom: 20,
+    marginTop: -8, // Etwas näher an die Level-Karte
+    marginHorizontal: 0, // Volle Breite ohne seitliche Abstände
   },
   levelContent: {
     flexDirection: 'row',

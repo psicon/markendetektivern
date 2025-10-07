@@ -1,9 +1,11 @@
 import { ThemedText } from '@/components/ThemedText';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { LevelBadge } from '@/components/ui/LevelBadge';
+import { SimilarityStagesModal } from '@/components/ui/SimilarityStagesModal';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { usePushNotifications } from '@/lib/contexts/PushNotificationProvider';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { useTheme } from '@/lib/contexts/ThemeContext';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
@@ -57,10 +59,12 @@ export default function MoreScreen() {
   const { user, userProfile, logout } = useAuth();
   const { isDarkMode, toggleDarkMode, themeMode, setThemeMode } = useTheme();
   const { presentPaywall, isPremium, refreshPremiumStatus, restorePurchases } = useRevenueCat();
+  const { isEnabled: pushEnabled, enablePushNotifications, disablePushNotifications, sendTestNotification } = usePushNotifications();
   const router = useRouter();
   const [appVersion, setAppVersion] = useState('1.0.0');
   const [showOnboardingButton, setShowOnboardingButton] = useState(false);
   const [currentTipIndex, setCurrentTipIndex] = useState(0);
+  const [showSimilarityModal, setShowSimilarityModal] = useState(false);
 
   useEffect(() => {
     // Get app version from app.json via Constants
@@ -89,17 +93,9 @@ export default function MoreScreen() {
 
 
 
-  const handleMoreTips = async () => {
-    try {
-      await WebBrowser.openBrowserAsync('https://www.markendetektive.de/blog/', {
-        presentationStyle: WebBrowser.WebBrowserPresentationStyle.AUTOMATIC,
-        controlsColor: colors.primary,
-        toolbarColor: colors.background
-      });
-    } catch (error) {
-      // Fallback zu externem Browser
-      Linking.openURL('https://www.markendetektive.de/blog/');
-    }
+  const handleMoreTips = () => {
+    // Öffne die Tipps & Tricks Seite (gleich wie der Menüpunkt)
+    router.push('/tipps-und-tricks' as any);
   };
 
   const handlePremiumUpgrade = async () => {
@@ -152,17 +148,9 @@ export default function MoreScreen() {
     }
   };
 
-  const handleIdentityDatabase = () => {
-    // TODO: Navigate to identity database
-    console.log('Navigate to identity database');
-  };
 
   const handleTieredSystemInfo = () => {
-    Alert.alert(
-      'Stufensystem erklärt',
-      'Stufe 1-2: Eigenmarken\nStufe 3: Verdächtig ähnlich\nStufe 4: Sehr wahrscheinlich identisch\nStufe 5: Bestätigt identisch',
-      [{ text: 'OK', style: 'default' }]
-    );
+    setShowSimilarityModal(true);
   };
 
   const handleTipsAndTricks = () => {
@@ -170,8 +158,17 @@ export default function MoreScreen() {
     router.push('/tipps-und-tricks' as any);
   };
 
-  const handleNews = () => {
-    Linking.openURL('https://www.markendetektive.de/blog/');
+  const handleNews = async () => {
+    try {
+      await WebBrowser.openBrowserAsync('https://www.markendetektive.de/blog/', {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.AUTOMATIC,
+        controlsColor: colors.primary,
+        toolbarColor: colors.background
+      });
+    } catch (error) {
+      // Fallback zu externem Browser
+      Linking.openURL('https://www.markendetektive.de/blog/');
+    }
   };
 
   const handleSocialMedia = () => {
@@ -179,8 +176,10 @@ export default function MoreScreen() {
       'Social Media',
       'Folge uns auf unseren Social Media Kanälen!',
       [
-        { text: 'Instagram', onPress: () => Linking.openURL('https://instagram.com/markendetektive') },
-        { text: 'Facebook', onPress: () => Linking.openURL('https://facebook.com/markendetektive') },
+        { text: '📸 Instagram', onPress: () => WebBrowser.openBrowserAsync('https://instagram.com/markendetektive') },
+        { text: '👥 Facebook', onPress: () => WebBrowser.openBrowserAsync('https://facebook.com/markendetektive') },
+        { text: '📺 YouTube', onPress: () => WebBrowser.openBrowserAsync('https://www.youtube.com/@markendetektive') },
+        { text: '🎵 TikTok', onPress: () => WebBrowser.openBrowserAsync('https://www.tiktok.com/@markendetektive') },
         { text: 'Abbrechen', style: 'cancel' }
       ]
     );
@@ -199,16 +198,40 @@ export default function MoreScreen() {
     });
   };
 
-  const handlePrivacyPolicy = () => {
-    Linking.openURL('https://www.markendetektive.de/datenschutzerklaerung-haftungsausschluss/');
+  const handlePrivacyPolicy = async () => {
+    try {
+      await WebBrowser.openBrowserAsync('https://www.markendetektive.de/datenschutzerklaerung-haftungsausschluss/', {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.AUTOMATIC,
+        controlsColor: colors.primary,
+        toolbarColor: colors.background
+      });
+    } catch (error) {
+      Linking.openURL('https://www.markendetektive.de/datenschutzerklaerung-haftungsausschluss/');
+    }
   };
 
-  const handleTermsOfService = () => {
-    Linking.openURL('https://www.markendetektive.de/agb/');
+  const handleTermsOfService = async () => {
+    try {
+      await WebBrowser.openBrowserAsync('https://www.markendetektive.de/agb/', {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.AUTOMATIC,
+        controlsColor: colors.primary,
+        toolbarColor: colors.background
+      });
+    } catch (error) {
+      Linking.openURL('https://www.markendetektive.de/agb/');
+    }
   };
 
-  const handleContact = () => {
-    Linking.openURL('https://www.markendetektive.de/kontakt/');
+  const handleContact = async () => {
+    try {
+      await WebBrowser.openBrowserAsync('https://www.markendetektive.de/kontakt/', {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.AUTOMATIC,
+        controlsColor: colors.primary,
+        toolbarColor: colors.background
+      });
+    } catch (error) {
+      Linking.openURL('https://www.markendetektive.de/kontakt/');
+    }
   };
 
   const handleResetOnboarding = async () => {
@@ -365,13 +388,7 @@ export default function MoreScreen() {
             
             <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
             
-            <TouchableOpacity style={styles.menuItem} onPress={handleIdentityDatabase}>
-              <IconSymbol name="doc.text" size={24} color={colors.secondary} />
-              <ThemedText style={[styles.menuItemText, { color: colors.text }]}>Identitätskennzeichen-Datenbank</ThemedText>
-              <IconSymbol name="chevron.right" size={14} color={colors.icon} />
-            </TouchableOpacity>
             
-            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
             
             <TouchableOpacity style={styles.menuItem} onPress={handleTieredSystemInfo}>
               <IconSymbol name="chart.bar" size={24} color={colors.secondary} />
@@ -556,6 +573,12 @@ export default function MoreScreen() {
           </ThemedText>
         </View>
       </ScrollView>
+
+      {/* Similarity Stages Modal */}
+      <SimilarityStagesModal
+        visible={showSimilarityModal}
+        onClose={() => setShowSimilarityModal(false)}
+      />
     </SafeAreaView>
   );
 }

@@ -412,6 +412,13 @@ class AchievementService {
           return true;
         }
         
+        // SPECIAL: savings_total Achievement wird bei JEDER Action geprüft
+        // die potenziell die Ersparnis erhöhen könnte
+        if (a.trigger.action === 'savings_total' && action === 'complete_shopping') {
+          console.log('💰 savings_total Achievement wird bei complete_shopping geprüft');
+          return true;
+        }
+        
         return false;
       });
 
@@ -450,6 +457,20 @@ class AchievementService {
 
       // Update User Stats basierend auf Action
       const updatedStats = await this.updateUserStats(userStats, action, metadata);
+      
+      // Nach complete_shopping wurde totalSavings bereits durch updateUserStats aktualisiert
+      // Wir müssen das aktuelle User-Dokument erneut laden, um die neue totalSavings zu bekommen
+      if (action === 'complete_shopping' && metadata?.totalSavings) {
+        const updatedUserDoc = await getDoc(userRef);
+        if (updatedUserDoc.exists()) {
+          userData = updatedUserDoc.data();
+          updatedStats.totalSavings = userData.totalSavings || 0;
+          console.log(`💰 Updated totalSavings for achievements: €${updatedStats.totalSavings}`);
+        }
+      } else {
+        // Füge totalSavings zu den Stats hinzu für savings_total Achievements
+        updatedStats.totalSavings = userData.totalSavings || 0;
+      }
 
       // Batch für alle Updates
       const batch = writeBatch(db);
@@ -580,6 +601,8 @@ class AchievementService {
         break;
       case 'submit_rating':
         updatedStats.ratingsSubmitted = (updatedStats.ratingsSubmitted || 0) + 1;
+        // Wichtig: ratingsGiven wird bereits durch updateUserStats in userProfile.ts aktualisiert
+        // Das passiert VOR diesem trackAction Call
         break;
       case 'scan_product':
         updatedStats.productsScanned = (updatedStats.productsScanned || 0) + 1;
@@ -822,6 +845,9 @@ class AchievementService {
         return stats.productsSearched || 0;
       case 'save_product':
         return stats.favoritesAdded || 0;
+      case 'savings_total':
+        // Für Ersparnis-Achievements verwenden wir den totalSavings Wert
+        return stats.savingsTotal || stats.totalSavings || 0;
       default:
         return 0;
     }

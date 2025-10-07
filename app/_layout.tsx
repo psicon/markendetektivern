@@ -13,8 +13,11 @@ import { SplashScreen } from '@/components/ui/SplashScreen';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { AnalyticsProvider } from '@/lib/contexts/AnalyticsProvider';
 import { AuthProvider } from '@/lib/contexts/AuthContext';
+import { PushNotificationProvider } from '@/lib/contexts/PushNotificationProvider';
 import { RevenueCatProvider } from '@/lib/contexts/RevenueCatProvider';
 import { ThemeProvider } from '@/lib/contexts/ThemeContext';
+import { adMobService } from '@/lib/services/adMobService';
+import { interstitialAdService } from '@/lib/services/interstitialAdService';
 import { testFlightLogger } from '@/lib/utils/testflightLogger';
 import React, { useEffect, useState } from 'react';
 
@@ -31,9 +34,10 @@ function ThemedApp() {
     <FontLoader>
       <AuthProvider>
         <RevenueCatProvider>
-          <AnalyticsProvider>
-            <GamificationProvider>
-            <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <PushNotificationProvider>
+            <AnalyticsProvider>
+              <GamificationProvider>
+              <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
               <Stack>
                 <Stack.Screen name="index" options={{ headerShown: false }} />
                 <Stack.Screen name="onboarding" options={{ headerShown: false }} />
@@ -65,11 +69,11 @@ function ThemedApp() {
                   pressable: { backgroundColor: 'transparent' },
                   indicator: { marginRight: 0 },
                 }}
-                gutter={10}
               />
             </NavigationThemeProvider>
-            </GamificationProvider>
-          </AnalyticsProvider>
+              </GamificationProvider>
+            </AnalyticsProvider>
+          </PushNotificationProvider>
         </RevenueCatProvider>
       </AuthProvider>
     </FontLoader>
@@ -81,6 +85,12 @@ export default function RootLayout() {
     // Aktiviere TestFlight Logger
     testFlightLogger.enable();
     console.log('🚀 App gestartet - TestFlight Logger aktiviert');
+    
+    // Initialisiere AdMob und Interstitial Ads
+    adMobService.initialize().then(() => {
+      console.log('📱 AdMob initialisiert');
+      interstitialAdService.initialize();
+    });
   }, []);
 
   return (

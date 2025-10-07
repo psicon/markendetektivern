@@ -318,6 +318,7 @@ class RevenueCatService {
       const Purchases = require('react-native-purchases');
       const customerInfo = await Purchases.default.getCustomerInfo();
       
+      
       return {
         activeSubscriptions: customerInfo.activeSubscriptions,
         allPurchasedProductIdentifiers: customerInfo.allPurchasedProductIdentifiers,
@@ -341,32 +342,14 @@ class RevenueCatService {
     try {
       const customerInfo = await this.getCustomerInfo();
       
-      // Prüfe MEHRERE Möglichkeiten für Premium Status
-      // 1. Entitlement "premium" ist aktiv
-      const hasPremiumEntitlement = !!customerInfo.entitlements.active[REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM];
-      
-      // 2. Irgendein aktives Entitlement (falls falsch konfiguriert)
+      // EINFACH: Hat der User IRGENDEIN aktives Entitlement?
       const hasAnyEntitlement = Object.keys(customerInfo.entitlements.active || {}).length > 0;
       
-      // 3. Aktive Subscriptions
-      const hasActiveSubscriptions = customerInfo.activeSubscriptions && customerInfo.activeSubscriptions.length > 0;
+      // ODER: Hat der User aktive Subscriptions?
+      const hasActiveSubscriptions = (customerInfo.activeSubscriptions?.length || 0) > 0;
       
-      // Premium wenn IRGENDEINE Bedingung erfüllt ist
-      const isPremium = hasPremiumEntitlement || hasAnyEntitlement || hasActiveSubscriptions;
-      
-      // Debug Info für TestFlight
-      if (!this.isExpoGo) {
-        console.log('🛒 Premium Check:', {
-          hasPremiumEntitlement,
-          hasAnyEntitlement,
-          hasActiveSubscriptions,
-          activeEntitlements: Object.keys(customerInfo.entitlements.active || {}),
-          activeSubscriptions: customerInfo.activeSubscriptions,
-          isPremium
-        });
-      }
-      
-      return isPremium;
+      // Premium = IRGENDWAS aktiv
+      return hasAnyEntitlement || hasActiveSubscriptions;
 
     } catch (error) {
       console.error('❌ Error checking premium status:', error);
@@ -652,6 +635,129 @@ class RevenueCatService {
   }
 
   /**
+   * Cache invalidieren und frische CustomerInfo holen
+   * WICHTIG: Erzwingt Server-Call, umgeht Cache!
+   */
+  async invalidateCustomerInfoCache(): Promise<void> {
+    if (this.isExpoGo) {
+      console.log('🛒 Mock cache invalidation in Expo Go');
+      return;
+    }
+
+    try {
+      const Purchases = require('react-native-purchases');
+      
+      // Prüfen ob die Methode existiert
+      if (typeof Purchases.default.invalidateCustomerInfoCache === 'function') {
+        // RevenueCat API: invalidateCustomerInfoCache()
+        // Löscht den lokalen Cache und erzwingt beim nächsten Call einen Server-Request
+        await Purchases.default.invalidateCustomerInfoCache();
+        console.log('🗑️ RevenueCat Cache invalidiert - nächster Call geht zum Server');
+      } else {
+        // Fallback: restorePurchases erzwingt auch einen Server-Call
+        console.log('⚠️ invalidateCustomerInfoCache nicht verfügbar - nutze restorePurchases als Fallback');
+        await this.restorePurchases();
+      }
+    } catch (error) {
+      console.error('❌ Error invalidating cache:', error);
+      // Keine Exception werfen - das würde die App crashen
+    }
+  }
+
+  /**
+   * Force-Refresh: Cache löschen UND sofort neue Daten holen
+   * Perfekt für: Nach Kauf, bei Verdacht auf veraltete Daten
+   */
+  async forceRefreshCustomerInfo(): Promise<RevenueCatCustomerInfo> {
+    if (this.isExpoGo) {
+      return this.getMockCustomerInfo(false);
+    }
+
+    try {
+      console.log('🔄 Force-Refresh CustomerInfo...');
+      
+      // 1. Versuche Cache zu invalidieren (optional, kann fehlschlagen)
+      try {
+        await this.invalidateCustomerInfoCache();
+      } catch (error) {
+        console.warn('⚠️ Cache invalidation fehlgeschlagen, fahre fort:', error);
+      }
+      
+      // 2. Sofort neue Daten holen
+      const customerInfo = await this.getCustomerInfo();
+      
+      console.log('✅ Force-Refresh erfolgreich:', {
+        activeSubscriptions: customerInfo.activeSubscriptions?.length || 0,
+        hasPremium: !!customerInfo.entitlements.active[REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM]
+      });
+      
+      return customerInfo;
+    } catch (error) {
+      console.error('❌ Force-Refresh fehlgeschlagen:', error);
+      // Fallback zu normalem getCustomerInfo
+      try {
+        return await this.getCustomerInfo();
+      } catch (fallbackError) {
+        console.error('❌ Auch Fallback fehlgeschlagen:', fallbackError);
+        // Return mock data to prevent crash
+        return this.getMockCustomerInfo(false);
+      }
+    }
+  }
+
+  /**
+   * Smart Premium Check mit Fallback
+   * 1. Schneller Cache-Check
+   * 2. Bei Unsicherheit: Force-Refresh
+   */
+  async isPremiumWithFallback(forceRefresh: boolean = false): Promise<boolean> {
+    try {
+      if (forceRefresh) {
+        const customerInfo = await this.forceRefreshCustomerInfo();
+        return !!customerInfo.entitlements.active[REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM];
+      }
+      
+      // Normaler Check
+      return await this.isPremium();
+    } catch (error) {
+      console.error('❌ Premium check with fallback failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Debug-Funktion: Zeigt alle RevenueCat Details
+   */
+  async debugPremiumStatus(): Promise<void> {
+    console.log('🔍 === RevenueCat Debug Info ===');
+    console.log('Initialized:', this._isInitialized);
+    console.log('Is Expo Go:', this.isExpoGo);
+    console.log('Entitlement Name:', REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM);
+    
+    if (!this._isInitialized) {
+      console.log('❌ RevenueCat nicht initialisiert!');
+      return;
+    }
+    
+    try {
+      const customerInfo = await this.getCustomerInfo();
+      console.log('📊 Customer Info:', {
+        activeSubscriptions: customerInfo.activeSubscriptions,
+        allPurchased: customerInfo.allPurchasedProductIdentifiers,
+        entitlementsActive: customerInfo.entitlements.active,
+        entitlementKeys: Object.keys(customerInfo.entitlements.active || {})
+      });
+      
+      const isPremium = await this.isPremium();
+      console.log('✅ isPremium Result:', isPremium);
+      
+    } catch (error) {
+      console.error('❌ Debug Error:', error);
+    }
+    console.log('🔍 === Ende Debug Info ===');
+  }
+
+  /**
    * Mock Customer Info für Expo Go
    */
   private getMockCustomerInfo(isPremium: boolean): RevenueCatCustomerInfo {
@@ -659,8 +765,8 @@ class RevenueCatService {
       activeSubscriptions: isPremium ? ['premium_monthly'] : [],
       allPurchasedProductIdentifiers: isPremium ? ['premium_monthly'] : [],
       entitlements: {
-        active: isPremium ? { premium: { isActive: true } } : {},
-        all: { premium: { isActive: isPremium } },
+        active: isPremium ? { [REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM]: { isActive: true } } : {},
+        all: { [REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM]: { isActive: isPremium } },
       },
       originalAppUserId: 'mock_user_id',
     };

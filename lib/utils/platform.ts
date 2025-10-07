@@ -6,21 +6,12 @@ import { Platform } from 'react-native';
  */
 export const isExpoGo = (): boolean => {
   try {
-    // KORREKTE Expo Go Erkennung mit Constants
-    if (Constants.appOwnership === 'expo') {
-      return true; // Echtes Expo Go
-    }
-    
-    // Check for Expo Go specific globals (zusätzliche Sicherheit)
-    if ((global as any).expo || (global as any).__expo) {
-      return true; // Expo Go
-    }
-    
-    // TestFlight und Production Builds sind NICHT Expo Go
-    return false;
+    // NUR Expo Go hat appOwnership === 'expo'
+    // TestFlight/Production haben 'standalone' oder undefined
+    return Constants.appOwnership === 'expo';
   } catch (error) {
     console.error('Error detecting Expo Go:', error);
-    return false; // Safe fallback zu Production Build
+    return false;
   }
 };
 
