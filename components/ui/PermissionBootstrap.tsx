@@ -1,9 +1,9 @@
-import React, { useEffect } from 'react';
-import { Platform } from 'react-native';
 import { isExpoGo } from '@/lib/utils/platform';
+import { Camera } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { Camera } from 'expo-camera';
+import React, { useEffect } from 'react';
+import { Platform } from 'react-native';
 
 /**
  * PermissionBootstrap
