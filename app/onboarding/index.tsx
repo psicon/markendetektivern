@@ -13,13 +13,15 @@ import {
   FlatList,
   Image,
   ImageBackground,
+  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
+  ViewStyle
 } from 'react-native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -630,13 +632,12 @@ export default function OnboardingScreen() {
             >
               <View style={styles.heroLogoSection}>
                 <View style={styles.logoContainer}>
-                  <View style={styles.logoWithShadow}>
-                    <CustomIcon 
-                      name="iconBlack" 
-                      size={140} 
-                      color="white"
-                    />
-                  </View>
+                  <CustomIcon 
+                    name="iconBlack" 
+                    size={140} 
+                    color="white"
+                    style={Platform.OS === 'ios' ? styles.logoWithShadow : {}}
+                  />
                   <Text style={styles.heroBrandTitle}>MarkenDetektive</Text>
                   <Text style={styles.heroBrandSubtitle}>NoNames enttarnen, clever sparen!</Text>
                 </View>
@@ -746,7 +747,7 @@ export default function OnboardingScreen() {
           <View style={styles.authSection}>
             <Text style={styles.authTitle}>Wie möchtest du fortfahren?</Text>
             <Text style={styles.authSubtitle}>
-              Erstelle ein Konto für die beste Erfahrung oder fahre ohne Registrierung fort
+            Erstelle ein Konto für das beste App-Erlebnis – oder starte direkt ohne Registrierung.
             </Text>
             
             <View style={styles.buttonContainer}>
@@ -794,8 +795,7 @@ export default function OnboardingScreen() {
 
           <View style={styles.mainContent}>
             <Text style={styles.stepTitle}>Wo kaufst du am liebsten ein?</Text>
-            <Text style={styles.subtitle}>Wähle 1-3 Märkte aus</Text>
-            <Text style={styles.counter}>{selectedMarkets.length}/3 ausgewählt</Text>
+             <Text style={styles.counter}>{selectedMarkets.length}/3 ausgewählt</Text>
             
             <FlatList
               data={markets}
@@ -969,8 +969,8 @@ export default function OnboardingScreen() {
           
 
           <View style={styles.mainContent}>
-            <Text style={styles.stepTitle}>Wieviel gibst du wöchentlich für deinen/euren Einkauf aus?</Text>
-            <Text style={styles.subtitle}>Das hilft uns, dein Sparpotential zu berechnen.</Text>
+            <Text style={styles.stepTitle}>Wieviel gibst du wöchentlich für deinen Einkauf aus?</Text>
+            <Text style={styles.subtitle}>Das hilft uns, dein persönliches Sparpotenzial zu berechnen.</Text>
             
             <View style={styles.budgetContainer}>
               <Text style={styles.budgetValue}>{budget}€</Text>
@@ -982,7 +982,14 @@ export default function OnboardingScreen() {
               minimumValue={25}
               maximumValue={500}
               value={budget}
-              onValueChange={(value) => setBudget(Math.round(value))}
+              onValueChange={(value) => {
+                const roundedValue = Math.round(value);
+                if (roundedValue !== budget) {
+                  // Haptisches Feedback nur bei Änderung
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setBudget(roundedValue);
+                }
+              }}
               minimumTrackTintColor={colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint}
               maximumTrackTintColor={colorScheme === 'dark' ? Colors.dark.border : Colors.light.tabIconDefault}
               step={5}
@@ -1023,7 +1030,7 @@ export default function OnboardingScreen() {
           
 
           <View style={styles.mainContent}>
-            <Text style={styles.stepTitle}>Was ist dir wichtig?</Text>
+            <Text style={styles.stepTitle}>Was ist dir beim Einkauf wichtig?</Text>
             <Text style={styles.subtitle}>Wähle bis zu 3 Aspekte</Text>
             <Text style={styles.counter}>{priorities.length}/3 ausgewählt</Text>
             
@@ -1202,9 +1209,9 @@ export default function OnboardingScreen() {
                   loop={false}
                   style={styles.moneyLottie}
                 />
-                <Text style={styles.savingsHeroTitle}>Dein Sparpotential!</Text>
+                <Text style={styles.savingsHeroTitle}>Dein Sparpotenzial!</Text>
                 <Text style={styles.savingsHeroSubtitle}>
-                  Basierend auf {budget}€ Wocheneinkauf
+                  Basierend auf deinem Wocheneinkauf von {budget}€
                 </Text>
               </View>
 
@@ -1251,8 +1258,8 @@ export default function OnboardingScreen() {
           <Text style={styles.completionIcon}>🎉</Text>
           <Text style={styles.title}>Alles bereit!</Text>
           <Text style={styles.subtitle}>
-            Deine App ist jetzt personalisiert und bereit zum Sparen
-          </Text>
+          Los geht’s – entdecke, wie viel du beim nächsten Einkauf sparen kannst!
+                    </Text>
         </View>
 
         <View style={styles.buttonContainer}>
@@ -1306,11 +1313,17 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     height: '100%',
     backgroundColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
     borderRadius: 3,
-    shadowColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 2,
-    elevation: 2,
+    ...Platform.select({
+      ios: {
+        shadowColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.3,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 0,
+      },
+    }),
   },
   progressText: {
     fontSize: 12,
@@ -1352,16 +1365,18 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
   },
   logoContainer: {
     alignItems: 'center',
-    
   },
-  logoWithShadow: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.6,
-    shadowRadius: 8,
-    elevation: 8,
-    
-  },
+  logoWithShadow: Platform.select({
+    ios: {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.6,
+      shadowRadius: 8,
+    },
+    android: {
+      elevation: 0, // Kein Elevation auf Android - verhindert Abschneiden
+    },
+  }) as ViewStyle,
   heroBrandTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -1412,11 +1427,17 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 60, // Höher nur für Hero
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.3,
+        shadowRadius: 10,
+      },
+      android: {
+        elevation: 0,
+      },
+    }),
   },
   heroPrimaryButtonText: {
     fontSize: 18,
@@ -1427,9 +1448,9 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     textShadowRadius: 4,
   },
   heroSecondaryButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: Platform.OS === 'ios' ? '#FFFFFF26' : '#3d3d3d', // Hex statt rgba
     borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.6)',
+    borderColor: '#FFFFFF99', // Hex statt rgba
     paddingVertical: 16,
     paddingHorizontal: 24,
     borderRadius: 12,
@@ -1484,7 +1505,8 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
   subtitle: {
     fontSize: 17,
     fontFamily: 'Nunito_500Medium',
-    color: '#4a4a4a',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+    opacity: 0.7,
     textAlign: 'center',
     lineHeight: 26,
     paddingHorizontal: 10,
@@ -1545,19 +1567,25 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
   countryMain: {
     padding: 32,
     borderRadius: 16,
-    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : 'white',
+    backgroundColor: colorScheme === 'dark' ? '#2C2C2C' : '#FFFFFF', // Solide Farben
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: colorScheme === 'dark' ? Colors.dark.border : Colors.light.tabIconDefault + '60',
+    borderColor: colorScheme === 'dark' ? '#444444' : '#E0E0E0', // Solide Farben
     minHeight: 140,
     justifyContent: 'center',
     marginHorizontal: 6,
     marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 0, // Kein Schatten auf Android
+      },
+    }),
   },
   countryMainFlag: {
     fontSize: 32, // Größere Flagge
@@ -1577,18 +1605,24 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     flex: 1,
     padding: 20,
     borderRadius: 16,
-    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : 'white',
+    backgroundColor: colorScheme === 'dark' ? '#2C2C2C' : '#FFFFFF', // Solide Farben
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: colorScheme === 'dark' ? Colors.dark.border : Colors.light.tabIconDefault + '60',
+    borderColor: colorScheme === 'dark' ? '#444444' : '#E0E0E0', // Solide Farben
     minHeight: 100,
     justifyContent: 'center',
     margin: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 0, // Kein Schatten auf Android
+      },
+    }),
   },
   countrySmallFlag: {
     fontSize: 24,
@@ -1601,11 +1635,16 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     textAlign: 'center',
   },
   optionSelected: {
-    backgroundColor: colorScheme === 'dark' ? Colors.dark.tint + '15' : Colors.light.tint + '15',
+    backgroundColor: colorScheme === 'dark' ? '#3A5F4F' : '#E8F5E9', // Solide Farben
     borderColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
     borderWidth: 2,
-    shadowColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
-    shadowOpacity: 0.3,
+    ...Platform.select({
+      ios: {
+        shadowColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
+        shadowOpacity: 0.3,
+      },
+      android: {},
+    }),
   },
   optionDisabled: {
     opacity: 0.3,
@@ -1622,17 +1661,23 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     margin: 6,
     padding: 17,
     borderRadius: 16,
-    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : 'white',
+    backgroundColor: colorScheme === 'dark' ? '#2C2C2C' : '#FFFFFF', // Solide Farben
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: colorScheme === 'dark' ? Colors.dark.border : Colors.light.tabIconDefault + '60',
+    borderColor: colorScheme === 'dark' ? '#444444' : '#E0E0E0', // Solide Farben
     minHeight: 110,
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 0, // Kein Schatten auf Android
+      },
+    }),
   },
   marketLogo: {
     width: 50,
@@ -1705,7 +1750,7 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
   },
   slider: {
     width: '100%',
-    height: 40,
+    height: 80,
     marginBottom: 20,
   },
   sliderLabels: {

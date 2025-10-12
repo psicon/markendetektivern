@@ -6,12 +6,12 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useNavigation } from 'expo-router';
 import React, { useLayoutEffect } from 'react';
 import {
-    Dimensions,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View
+  Dimensions,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -82,7 +82,7 @@ export default function TippsUndTricksScreen() {
       description: 'Finde versteckte Schätte beim Einkaufen',
       tips: [
         'Nutze "Stöbern" täglich: Neue Produkte werden ständig hinzugefügt - verpasse keine Deals!',
-        'Filtere nach deinen Lieblings-Märkten: Sieh nur Produkte die du auch wirklich kaufen kannst',
+        'Filtere nach deinen Lieblings-Märkten: Sieh nur Produkte die du auch wirklich in deinem Supermarkt kaufen kannst',
         'Durchstöbere alle Kategorien: Oft findest du Alternativen wo du sie nicht erwartest',
         'Schaue regelmäßig vorbei: Die besten NoName-Funde sind oft zeitlich begrenzt',
         'Nutze die Suchfunktion: Tippe einfach ein was du suchst - wir finden die günstigsten Alternativen'
@@ -94,7 +94,7 @@ export default function TippsUndTricksScreen() {
       title: 'Scanner wie ein Profi nutzen',
       description: 'Maximal sparen durch clever scannen',
       tips: [
-        'Scanne ALLES: Auch bei Produkten wo du denkst "das gibt es sicher nicht" - oft wirst du überrascht!',
+        'Scanne ALLES was dich interessiert: Auch bei Produkten wo du denkst "das gibt es sicher nicht" - oft wirst du überrascht!',
         'Scanne im Gang: Direkt beim Einkaufen - sieh sofort ob es günstigere Alternativen gibt',
         'Scanne zu Hause: Checke deine Vorräte - welche Markenprodukte kannst du ersetzen?',
         'Scanne Freunde ein: Gemeinsam entdeckt ihr mehr Spar-Möglichkeiten',
@@ -111,7 +111,7 @@ export default function TippsUndTricksScreen() {
         'Teste systematisch: Ersetze 1-2 Markenprodukte pro Woche durch NoName-Alternativen',
         'Nutze die Stufen: Stufe 4-5 bedeutet oft identisches Produkt zum halben Preis!',
         'Schaue nach Aktionen: Manche NoName-Produkte sind zeitlich begrenzt besonders günstig',
-        'Dokumentiere deine Ersparnis: Du wirst staunen wie schnell sich das summiert!'
+        'Dokumentiere mit MarkenDetektive deine Ersparnis: Du wirst staunen wie schnell sich das summiert wenn du Produkte als gekauft markierst!'
       ]
     },
     {
@@ -156,11 +156,13 @@ export default function TippsUndTricksScreen() {
   ];
 
   const quickTips = [
-    { emoji: '💰', text: 'Bis zu 200€ pro Monat sparen - 2-Personen-Haushalt' },
-    { emoji: '🔍', text: 'Über 50.000 Produkte zum Stöbern und Entdecken' },
-    { emoji: '⚡', text: 'Täglich neue NoName-Alternativen zu Markenprodukten' },
-    { emoji: '🎯', text: 'Stufe 5 = Identisches Produkt, halber Preis' },
-    { emoji: '📱', text: 'Scanner + Stöbern = Maximale Spar-Power' }
+    { emoji: '🛒', text: 'Füge Produkte dem Einkaufszettel hinzu und markiere sie als gekauft.' },
+    { emoji: '🛒', text: 'Nur gekaufte NoName-Produkte werden in der Ersparnis berücksichtigt.' },
+    { emoji: '💰', text: 'Spare bis zu 200€ pro Monat als 2-Personen-Haushalt' },
+    { emoji: '🔍', text: 'Entdecke über 50.000 Produkte beim Stöbern' },
+    { emoji: '⚡', text: 'Enttarne täglich neue NoName-Alternativen zu Markenprodukten' },
+    { emoji: '🎯', text: 'Stufe 5 = Identisches Produkt, deutlich günstigerer Preis' },
+    { emoji: '📱', text: 'Nutze Barcodescanner und Stöbern für maximale Spar-Power' }
   ];
 
   return (
@@ -207,8 +209,8 @@ export default function TippsUndTricksScreen() {
             <ThemedText style={[styles.ctaTitle, { color: colors.text }]}>Jetzt gleich stöbern!</ThemedText>
           </View>
           <ThemedText style={[styles.ctaText, { color: colors.text }]}>
-            Gehe zu "Stöbern" und entdecke tausende NoName-Alternativen. Jede Minute stöbern spart dir 
-            später Geld beim Einkaufen!
+            Gehe zu "Stöbern" und entdecke tausende NoName-Alternativen. Jede Minute stöbern spart dir beim Einkauf später bares Geld.
+            Füge die Produkte zu deinem Einkaufszettel und markiere sie als gekauft wenn du sie gekauft hast. Nur dann wird deine Ersparnis richtig berechnet!
           </ThemedText>
           <View style={[styles.ctaHighlight, { backgroundColor: colors.primary, borderColor: colors.primary }]}>
             <Text style={styles.ctaHighlightText}>

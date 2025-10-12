@@ -19,26 +19,45 @@ class AdMobService {
 
   async initialize() {
     if (this.initialized || isExpoGo()) {
+      console.log('⏭️ AdMob init skipped:', { 
+        initialized: this.initialized, 
+        isExpoGo: isExpoGo() 
+      });
       return;
     }
 
     try {
-      const MobileAds = require('react-native-google-mobile-ads').default;
+      // Import the module
+      const { default: MobileAds } = require('react-native-google-mobile-ads');
+      
+      console.log('🎯 AdMob module check:', { 
+        platform: Platform.OS,
+        hasMobileAds: !!MobileAds,
+        hasInitializeMethod: typeof MobileAds?.initialize === 'function'
+      });
       
       // Set test devices in dev
-      if (__DEV__) {
+      if (__DEV__ && MobileAds.setRequestConfiguration) {
         await MobileAds.setRequestConfiguration({
           testDeviceIdentifiers: AD_CONFIG.testDeviceIds,
         });
       }
 
-      // Initialize - that's it!
-      await MobileAds.initialize();
+      // Initialize AdMob - mobileAds() returns the initialization promise
+      const initializationStatus = await MobileAds();
+      
       this.initialized = true;
       
-      console.log('✅ AdMob initialized');
+      console.log('✅ AdMob initialized:', { 
+        platform: Platform.OS,
+        status: initializationStatus,
+        bannerAdUnit: this.getAdUnitId('banner')
+      });
     } catch (error) {
-      console.error('❌ AdMob init failed:', error);
+      console.error('❌ AdMob init failed:', { 
+        platform: Platform.OS, 
+        error: error?.message || error 
+      });
     }
   }
 

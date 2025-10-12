@@ -779,7 +779,7 @@ const styles = StyleSheet.create({
   versionContainer: {
     alignItems: 'center',
     marginTop: 25,
-    marginBottom: 25,
+    marginBottom: 115,
   },
   versionText: {
     fontSize: 16,

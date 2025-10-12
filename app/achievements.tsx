@@ -1,6 +1,7 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import AchievementUnlockOverlay from '@/components/ui/AchievementUnlockOverlay';
+import FixedAndroidModal from '@/components/ui/FixedAndroidModal';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import LevelUpOverlay from '@/components/ui/LevelUpOverlay';
 import { Colors } from '@/constants/Colors';
@@ -17,15 +18,15 @@ import { useNavigation, useRouter } from 'expo-router';
 import LottieView from 'lottie-react-native';
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Animated,
+    Dimensions,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -587,12 +588,12 @@ export default function AchievementsScreen() {
             <Animated.View 
             style={[
               styles.levelListCard,
-              { backgroundColor: colors.cardBackground },
+              { backgroundColor: level.isUnlocked ? colors.cardBackground : (colorScheme === 'dark' ? colors.cardBackground : '#F5F5F5') },
                 level.isActive && { borderColor: level.color, borderWidth: 2 },
                 level.isUnlocked && !level.isActive && { 
                   borderColor: colors.success + '40', 
                   borderWidth: 1,
-                  backgroundColor: colors.success + '08'
+                  backgroundColor: colors.cardBackground // Weiß im Light Mode, dunkel im Dark Mode
                 },
                 !level.isUnlocked && level.hasNewCategory && {
                   opacity: 0.95 // Besserer Kontrast für goldene Level
@@ -711,7 +712,7 @@ export default function AchievementsScreen() {
             <Animated.View 
             style={[
               styles.achievementCard,
-              { backgroundColor: colors.cardBackground },
+              { backgroundColor: achievement.isCompleted ? colors.cardBackground : (colorScheme === 'dark' ? colors.cardBackground : '#F5F5F5') },
                 achievement.isCompleted && styles.completedAchievementCard,
             ]}
           >
@@ -826,18 +827,15 @@ export default function AchievementsScreen() {
       </ScrollView>
       
       {/* Info Sheet Modal - Natives iOS Sheet */}
-      <Modal
+      <FixedAndroidModal
         visible={showInfoSheet}
-        animationType="slide"
-        presentationStyle="pageSheet"
         onRequestClose={() => setShowInfoSheet(false)}
+        isBottomSheet={true}
       >
         <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
           {/* Bottom Sheet Header */}
           <View style={styles.bottomSheetHeader}>
-            <View style={styles.handleContainer}>
-              <View style={styles.handle} />
-            </View>
+            
             <View style={styles.headerRow}>
               <TouchableOpacity 
                 style={styles.closeButtonLeft}
@@ -982,7 +980,7 @@ export default function AchievementsScreen() {
             </View>
       </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
 
       {/* Level-Up Overlay */}
       {showLevelUpOverlay && levelUpData && (
@@ -1074,11 +1072,19 @@ const styles = StyleSheet.create({
   savingsCard: {
     marginBottom: 12,
     borderRadius: 16,
+    ...Platform.select({
+      ios: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.09,
     shadowRadius: 2,
-    elevation: 2,
+      },
+      android: {
+        elevation: 0, // Kein Schatten auf Android
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.1)',
+      },
+    }),
     // KEIN overflow hier - Shadow muss sichtbar bleiben
   },
   gradientCard: {
@@ -1143,11 +1149,19 @@ const styles = StyleSheet.create({
   levelCard: {
     marginBottom: 25,
     borderRadius: 16,
+    ...Platform.select({
+      ios: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.09,
     shadowRadius: 2,
-    elevation: 2,
+      },
+      android: {
+        elevation: 0, // Kein Schatten auf Android
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.1)',
+      },
+    }),
   },
   levelHeader: {
     flexDirection: 'row',
@@ -1172,7 +1186,7 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: '600',
-    lineHeight: 14,        // Reduziert von 16
+    lineHeight: 15,        // Reduziert von 16
     marginBottom: 2,       // Weniger Abstand
   },
   levelName: {
@@ -1267,11 +1281,19 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 8,
     marginBottom: 6,
+    ...Platform.select({
+      ios: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
-    elevation: 2,
+      },
+      android: {
+        elevation: 0, // Kein Schatten auf Android
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.1)',
+      },
+    }),
   },
   levelListContent: {
     flexDirection: 'row',
@@ -1434,16 +1456,6 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 16,
   },
-  handleContainer: {
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 2,
-  },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1475,16 +1487,24 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 16,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 3,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 0, // Kein Schatten auf Android
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.1)',
+      },
+    }),
   },
   completedAchievementCard: {
     borderWidth: 2,
     borderColor: '#4CAF50',
-    backgroundColor: 'rgba(76, 175, 80, 0.05)',
+    // backgroundColor entfernt - wird inline auf #FFFFFF gesetzt
   },
   achievementContent: {
     flexDirection: 'row',

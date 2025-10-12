@@ -1,5 +1,6 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import FixedAndroidModal from '@/components/ui/FixedAndroidModal';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { LockedCategoryModal } from '@/components/ui/LockedCategoryModal';
@@ -14,6 +15,7 @@ import { achievementService } from '@/lib/services/achievementService';
 import { AlgoliaSearchResult, AlgoliaService } from '@/lib/services/algolia';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { interstitialAdService } from '@/lib/services/interstitialAdService';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -23,10 +25,9 @@ import {
   Dimensions,
   FlatList,
   Image,
-  Modal,
   PanResponder,
-  Platform,
-  ScrollView,
+    Platform,
+    ScrollView,
   StyleSheet,
   TextInput,
   TouchableOpacity,
@@ -270,6 +271,13 @@ export default function SearchResultsScreen() {
           console.error('❌ Search Achievement Tracking Fehler:', error);
         });
       }
+      
+      // Track search query in journey
+      journeyTrackingService.trackSearchQuery(
+        query.trim(), 
+        populatedNoName.length + populatedMarken.length,
+        user?.uid
+      );
       
     } catch (error) {
       console.error('Search error:', error);
@@ -613,21 +621,23 @@ export default function SearchResultsScreen() {
     }
   }, [userProfile?.stats?.currentLevel, userProfile?.level]); // 🎯 NUR bei Level-Änderung neu laden!
 
-  // Tab titles with FILTERED result counts
-  const getTabTitle = (tabId: string) => {
-    // Berechne gefilterte Counts für beide Tabs
-    const filteredNoName = getFilteredResults('nonames').length;
-    const filteredMarken = getFilteredResults('markenprodukte').length;
-    
+  // Tab titles with FILTERED result counts - OPTIMIERT mit useMemo
+  const getTabTitle = React.useMemo(() => {
+    return (tabId: string) => {
+      // Berechne gefilterte Counts für beide Tabs
+      const filteredNoName = getFilteredResults('nonames').length;
+      const filteredMarken = getFilteredResults('markenprodukte').length;
+      
     switch (tabId) {
       case 'nonames':
-        return `NoName-\nProdukte${filteredNoName > 0 ? ` (${filteredNoName})` : ''}`;
+          return `NoName-\nProdukte${filteredNoName > 0 ? ` (${filteredNoName})` : ''}`;
       case 'markenprodukte':
-        return `Marken-\nProdukte${filteredMarken > 0 ? ` (${filteredMarken})` : ''}`;
+          return `Marken-\nProdukte${filteredMarken > 0 ? ` (${filteredMarken})` : ''}`;
       default:
         return tabId;
     }
-  };
+    };
+  }, [noNameResults, markenproduktResults, noNameFilters, markenproduktFilters, activeTab]);
 
   // Helper für gefilterte Ergebnisse pro Tab - NEUE LOGIK basierend auf activeTab
   const getFilteredResults = (forTab?: string) => {
@@ -655,11 +665,26 @@ export default function SearchResultsScreen() {
       // Apply discounter filters  
       if (filters.discounterFilters.length > 0) {
         filtered = filtered.filter(item => {
-          const discounter = item.discounter as any;
-          const itemMarketId = typeof discounter === 'string'
-            ? discounter.split('/').pop()
-            : discounter?.id || discounter?.name || discounter;
-          return itemMarketId && filters.discounterFilters.includes(itemMarketId);
+          // Algolia liefert discounter als Feld im Result
+          let itemDiscounterId = null;
+          
+          if (item.discounterId) {
+            // Direktes Feld in Algolia
+            itemDiscounterId = item.discounterId;
+          } else if (item.discounter) {
+            // Fallback: discounter Feld parsen
+            const disc = item.discounter;
+            if (typeof disc === 'string') {
+              itemDiscounterId = disc.includes('/') ? disc.split('/').pop() : disc;
+            } else if (disc?.id) {
+              itemDiscounterId = disc.id;
+            } else if (disc?.path) {
+              itemDiscounterId = disc.path.split('/').pop();
+            }
+          }
+          
+          
+          return itemDiscounterId && filters.discounterFilters.includes(itemDiscounterId);
         });
       }
 
@@ -679,10 +704,25 @@ export default function SearchResultsScreen() {
       // Apply hersteller filters
       if (filters.herstellerFilters.length > 0) {
         filtered = filtered.filter(item => {
-          const hersteller = item.hersteller as any;
-          const itemHerstellerId = typeof hersteller === 'string'
-            ? hersteller.split('/').pop()
-            : hersteller?.id || hersteller?.name || hersteller;
+          // Algolia liefert hersteller als Objekt mit objectID (wie bei discounter)
+          let itemHerstellerId = null;
+          
+          if (item.herstellerId) {
+            itemHerstellerId = item.herstellerId;
+          } else if (item.hersteller) {
+            const herst = item.hersteller;
+            if (typeof herst === 'string') {
+              itemHerstellerId = herst.includes('/') ? herst.split('/').pop() : herst;
+            } else if (herst?.objectID) {
+              itemHerstellerId = herst.objectID;
+            } else if (herst?.id) {
+              itemHerstellerId = herst.id;
+            } else if (herst?.path) {
+              itemHerstellerId = herst.path.split('/').pop();
+            }
+          }
+          
+          
           return itemHerstellerId && filters.herstellerFilters.includes(itemHerstellerId);
         });
       }
@@ -1081,11 +1121,10 @@ export default function SearchResultsScreen() {
         )}
         
         {/* Filter Modal - EXAKT wie explore.tsx je nach activeTab */}
-        <Modal
+        <FixedAndroidModal
           visible={showFilterModal}
-          animationType="slide"
-          presentationStyle="pageSheet"
           onRequestClose={() => setShowFilterModal(false)}
+          isBottomSheet={true}
         >
           <View style={[styles.filterModalContainer, { backgroundColor: colors.background }]}>
             <View style={[styles.filterModalHeader, { borderBottomColor: colors.border }]}>
@@ -1445,7 +1484,7 @@ export default function SearchResultsScreen() {
               )}
             </ScrollView>
           </View>
-        </Modal>
+        </FixedAndroidModal>
       </ThemedView>
     </>
   );
@@ -1491,6 +1530,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     fontFamily: 'Nunito_400Regular',
+    ...Platform.select({
+      android: {
+        textAlignVertical: 'center',
+        includeFontPadding: false,
+        paddingVertical: 0,
+      },
+    }),
   },
   searchButton: {
     width: 48,
@@ -1852,6 +1898,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     fontFamily: 'Nunito_400Regular',
+    ...Platform.select({
+      android: {
+        textAlignVertical: 'center',
+        includeFontPadding: false,
+        paddingVertical: 0,
+      },
+    }),
   },
   noResultsText: {
     fontSize: 14,

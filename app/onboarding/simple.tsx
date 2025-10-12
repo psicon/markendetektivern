@@ -3,16 +3,16 @@ import Slider from '@react-native-community/slider';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  Alert,
-  Animated,
-  Dimensions,
-  FlatList,
-  Image,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    Alert,
+    Animated,
+    Dimensions,
+    FlatList,
+    Image,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -844,16 +844,16 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
     borderRadius: 12,
-    backgroundColor: Colors.light.background + 'CC',
+    backgroundColor: '#FFFFFF', // Solider weißer Hintergrund
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: Colors.light.tabIconDefault + '40',
+    borderColor: '#E0E0E0', // Solide Borderfarbe
     minHeight: 80,
     justifyContent: 'center',
     margin: 6,
   },
   optionSelected: {
-    backgroundColor: Colors.light.tint + '20',
+    backgroundColor: '#E8F5E9', // Solide hellgrüne Farbe statt Transparenz
     borderColor: Colors.light.tint,
   },
   optionDisabled: {
@@ -881,10 +881,10 @@ const styles = StyleSheet.create({
     margin: 6,
     padding: 16,
     borderRadius: 12,
-    backgroundColor: Colors.light.background + 'CC',
+    backgroundColor: '#FFFFFF', // Solider weißer Hintergrund
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: Colors.light.tabIconDefault + '40',
+    borderColor: '#E0E0E0', // Solide Borderfarbe
     minHeight: 100,
     justifyContent: 'center',
   },
@@ -900,13 +900,13 @@ const styles = StyleSheet.create({
   textInput: {
     height: 48,
     borderRadius: 12,
-    backgroundColor: Colors.light.tabIconDefault,
+    backgroundColor: '#F5F5F5', // Solide hellgraue Farbe
     paddingHorizontal: 16,
     fontSize: 16,
     fontFamily: 'Nunito_400Regular',
     color: Colors.light.text,
     borderWidth: 2,
-    borderColor: Colors.light.tint + '40',
+    borderColor: '#E0E0E0', // Solide Borderfarbe
   },
   budgetContainer: {
     alignItems: 'center',
@@ -1023,11 +1023,11 @@ const styles = StyleSheet.create({
   savingsHighlight: {
     alignItems: 'center',
     padding: 24,
-    backgroundColor: Colors.light.tint + '10',
+    backgroundColor: '#F0F8F4', // Solide sehr helle grüne Farbe
     borderRadius: 16,
     marginVertical: 24,
     borderWidth: 2,
-    borderColor: Colors.light.tint + '30',
+    borderColor: '#C8E6C9', // Solide hellgrüne Borderfarbe
   },
   savingsAmount: {
     fontSize: 32,

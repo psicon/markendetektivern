@@ -120,6 +120,159 @@ class AchievementService {
   }
 
   /**
+   * Lädt die lokalen Default-Achievements (Fallback wenn Firestore nicht verfügbar)
+   */
+  private loadDefaultAchievements(): void {
+    this.achievements = [
+      {
+        id: 'vQJQu2kerTflnr2s1vTe',
+        name: 'Erste Umwandlung',
+        description: 'Wandle dein erstes Produkt um',
+        points: 5,
+        icon: 'arrow.triangle.swap',
+        type: 'one-time',
+        trigger: {
+          action: 'convert_product',
+          target: 1
+        },
+        isActive: true,
+        sortOrder: 1,
+        color: '#FF9500',
+        lottieAnimation: 'sparkle_short',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      {
+        id: '1wM3SojnifR6mJDci6HX',
+        name: 'Einkaufszettelmaster',
+        description: 'Schließe 5 Einkaufszettel ab',
+        points: 30,
+        icon: 'checkmark.seal',
+        type: 'count',
+        trigger: {
+          action: 'complete_shopping',
+          target: 5
+        },
+        isActive: true,
+        sortOrder: 2,
+        color: '#32D74B',
+        lottieAnimation: 'checkmark_rise',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      {
+        id: 'GbBQ3bLfN8ug5ShQ4odQ',
+        name: 'Vergleichsexperte',
+        description: 'Schaue dir 10 Produktvergleiche an',
+        points: 20,
+        icon: 'chart.bar',
+        type: 'count',
+        trigger: {
+          action: 'view_comparison',
+          target: 10
+        },
+        isActive: true,
+        sortOrder: 3,
+        color: '#5E5CE6',
+        lottieAnimation: 'bar_grow',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      {
+        id: 'DxbuRI4WTW1Nchq7ISqi',
+        name: 'Feedbackgeber',
+        description: 'Bewerte 5 Produkte',
+        points: 15,
+        icon: 'star',
+        type: 'count',
+        trigger: {
+          action: 'submit_rating',
+          target: 5
+        },
+        isActive: true,
+        sortOrder: 4,
+        color: '#FFD60A',
+        lottieAnimation: 'chat_pop',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      {
+        id: 'UcO5xJgps0kUIg8V32li',
+        name: 'Treu bleiben',
+        description: 'Öffne die App an 30 Tagen in Folge',
+        points: 150,
+        icon: 'heart',
+        type: 'streak',
+        trigger: {
+          action: 'daily_streak',
+          target: 30
+        },
+        isActive: true,
+        sortOrder: 5,
+        color: '#FF2D55',
+        lottieAnimation: 'heart_bounce',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      {
+        id: 'LtIGWnXLOnBhZoYArWJQ',
+        name: 'Scanner-Profi',
+        description: 'Scanne 20 Produkte',
+        points: 25,
+        icon: 'barcode.viewfinder',
+        type: 'count',
+        trigger: {
+          action: 'scan_product',
+          target: 20
+        },
+        isActive: true,
+        sortOrder: 6,
+        color: '#007AFF',
+        lottieAnimation: 'scan_line',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      {
+        id: 'qeiJYGXhcxZ6IXexOIAR',
+        name: 'Suchmeister',
+        description: 'Suche 15 Mal nach Produkten',
+        points: 10,
+        icon: 'magnifyingglass',
+        type: 'count',
+        trigger: {
+          action: 'search_product',
+          target: 15
+        },
+        isActive: true,
+        sortOrder: 7,
+        color: '#8E8E93',
+        lottieAnimation: 'search_glow',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      {
+        id: 'KCvFn5YurtpqgLMuNX81',
+        name: 'Sammler',
+        description: 'Füge 10 Produkte zu deinen Favoriten hinzu',
+        points: 10,
+        icon: 'bookmark',
+        type: 'count',
+        trigger: {
+          action: 'save_product',
+          target: 10
+        },
+        isActive: true,
+        sortOrder: 8,
+        color: '#FF375F',
+        lottieAnimation: 'bookmark_drop',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    ];
+    console.log('✅ Lokale Default-Achievements geladen:', this.achievements.length);
+  }
+
+  /**
    * Initialisiert das Achievement-System und lädt alle Achievements
    */
   async initialize(): Promise<void> {
@@ -148,13 +301,27 @@ class AchievementService {
       await this.loadGameConfig();
       
       // Lade Achievements aus Firestore
-      const achievementsSnapshot = await getDocs(collection(db, 'achievements'));
-      
-      if (!achievementsSnapshot.empty) {
-        this.achievements = achievementsSnapshot.docs.map(doc => ({
+      try {
+        const achievementsSnapshot = await getDocs(collection(db, 'achievements'));
+        
+        if (!achievementsSnapshot.empty) {
+          this.achievements = achievementsSnapshot.docs.map(doc => ({
           id: doc.id,
-          ...doc.data()
-        } as Achievement));
+            ...doc.data()
+          } as Achievement));
+          console.log('✅ Achievements aus Firestore geladen:', this.achievements.length);
+        } else {
+          console.log('⚠️ Keine Achievements in Firestore - verwende lokale Defaults');
+          this.loadDefaultAchievements();
+        }
+      } catch (error: any) {
+        if (error.code === 'permission-denied') {
+          console.log('⚠️ Keine Berechtigung für Achievements - verwende lokale Defaults');
+          this.loadDefaultAchievements();
+        } else {
+          console.error('❌ Fehler beim Laden der Achievements:', error);
+          this.loadDefaultAchievements();
+        }
       }
 
       this.isInitialized = true;

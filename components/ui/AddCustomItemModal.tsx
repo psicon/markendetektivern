@@ -6,7 +6,6 @@ import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    Modal,
     ScrollView,
     StyleSheet,
     Text,
@@ -14,6 +13,7 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import FixedAndroidModal from './FixedAndroidModal';
 import { IconSymbol } from './IconSymbol';
 import { MarketSelector } from './MarketSelector';
 
@@ -107,18 +107,14 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
   };
 
   return (
-    <Modal
+    <FixedAndroidModal
       visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
       onRequestClose={onClose}
+      isBottomSheet={true}
     >
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         {/* Header */}
         <View style={[styles.header, { borderBottomColor: colors.border }]}>
-          <View style={styles.handleContainer}>
-            <View style={styles.handle} />
-          </View>
           <View style={styles.headerRow}>
             <TouchableOpacity 
               style={styles.closeButton}
@@ -299,7 +295,7 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
           title="Markt für dieses Produkt wählen"
         />
       </View>
-    </Modal>
+    </FixedAndroidModal>
   );
 };
 
@@ -310,16 +306,6 @@ const styles = StyleSheet.create({
   header: {
     paddingBottom: 16,
     borderBottomWidth: 1,
-  },
-  handleContainer: {
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    backgroundColor: '#DDD',
-    borderRadius: 2,
   },
   headerRow: {
     flexDirection: 'row',

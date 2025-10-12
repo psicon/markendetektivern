@@ -15,6 +15,15 @@ if (!isExpoGo()) {
     analytics().setAnalyticsCollectionEnabled(true).then(() => {
       console.log('✅ GA4 Analytics Collection aktiviert');
       analyticsInitialized = true;
+      
+      // Stelle sicher, dass User Properties gesetzt werden (für bessere Segmentierung)
+      analytics().setUserId(null); // Wird später gesetzt wenn User bekannt
+      
+      // Setze Default-Parameter für alle Events
+      analytics().setDefaultEventParameters({
+        app_version: require('../../app.json').expo.version,
+        platform: require('react-native').Platform.OS,
+      });
     }).catch((error: any) => {
       console.error('❌ GA4 Analytics Aktivierung fehlgeschlagen:', error);
     });

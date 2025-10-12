@@ -4,7 +4,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
-import { Alert, Dimensions, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Dimensions, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { IconSymbol } from './IconSymbol';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -93,8 +93,8 @@ export const AppRatingModal: React.FC<AppRatingModalProps> = ({ visible, onClose
       </View>
 
       {/* Title */}
-      <Text style={styles.title}>Wie findest du MarkenDetektive?</Text>
-      <Text style={styles.subtitle}>Deine Meinung hilft uns, die App zu verbessern!</Text>
+      <Text style={styles.title}>Gefällt dir MarkenDetektive?</Text>
+      <Text style={styles.subtitle}>Deine Meinung hilft uns dabei, die App für dich zu verbessern!</Text>
 
       {/* Rating Buttons */}
       <View style={styles.ratingContainer}>
@@ -118,12 +118,12 @@ export const AppRatingModal: React.FC<AppRatingModalProps> = ({ visible, onClose
       </View>
 
       <Text style={styles.title}>Fantastisch!</Text>
-      <Text style={styles.subtitle}>Würdest du uns im App Store bewerten?</Text>
+      <Text style={styles.subtitle}>Danke, dass du MarkenDetektive nutzt! Magst du uns kurz im App Store bewerten? Damit kannst du dieses Projekt ganz einfach unterstützen!</Text>
 
       <View style={styles.buttonContainer}>
         <TouchableOpacity style={styles.primaryButton} onPress={handleStoreReview}>
           <IconSymbol name="star" size={18} color="#667eea" />
-          <Text style={styles.primaryButtonText}>Im Store bewerten</Text>
+          <Text style={styles.primaryButtonText}>Jetzt bewerten!</Text>
         </TouchableOpacity>
         
         <TouchableOpacity style={styles.secondaryButton} onPress={handleClose}>
@@ -140,7 +140,7 @@ export const AppRatingModal: React.FC<AppRatingModalProps> = ({ visible, onClose
       </View>
 
       <Text style={styles.title}>Was können wir verbessern?</Text>
-      <Text style={styles.subtitle}>Dein Feedback hilft uns, MarkenDetektive besser zu machen!</Text>
+      <Text style={styles.subtitle}>Dein Feedback hilft uns dabei, MarkenDetektive für dich besser zu machen!</Text>
 
       <View style={styles.feedbackContainer}>
         <TextInput
@@ -172,26 +172,32 @@ export const AppRatingModal: React.FC<AppRatingModalProps> = ({ visible, onClose
 
   return (
     <Modal visible={visible} transparent animationType="fade">
-      <View style={styles.overlay}>
-        <View style={styles.modalContainer}>
-          <LinearGradient
-            colors={['#667eea', '#764ba2']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.gradientBackground}
-          >
-            {/* Close Button */}
-            <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
-              <IconSymbol name="xmark" size={16} color="rgba(255,255,255,0.9)" />
-            </TouchableOpacity>
+      <KeyboardAvoidingView 
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      >
+        <View style={[styles.overlay, currentStep === 'feedback' && styles.overlayKeyboard]}>
+          <View style={styles.modalContainer}>
+            <LinearGradient
+              colors={['#667eea', '#764ba2']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.gradientBackground}
+            >
+              {/* Close Button */}
+              <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
+                <IconSymbol name="xmark" size={16} color="rgba(255,255,255,0.9)" />
+              </TouchableOpacity>
 
-            {/* Content based on current step */}
-            {currentStep === 'initial' && renderInitialStep()}
-            {currentStep === 'store' && renderStoreStep()}
-            {currentStep === 'feedback' && renderFeedbackStep()}
-          </LinearGradient>
+              {/* Content based on current step */}
+              {currentStep === 'initial' && renderInitialStep()}
+              {currentStep === 'store' && renderStoreStep()}
+              {currentStep === 'feedback' && renderFeedbackStep()}
+            </LinearGradient>
+          </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
@@ -203,6 +209,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+  },
+  overlayKeyboard: {
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'ios' ? 100 : 50,
   },
   modalContainer: {
     width: SCREEN_WIDTH * 0.85,

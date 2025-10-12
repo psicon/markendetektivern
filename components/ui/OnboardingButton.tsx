@@ -1,7 +1,7 @@
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, ViewStyle } from 'react-native';
+import { Platform, StyleSheet, Text, TouchableOpacity, ViewStyle } from 'react-native';
 
 interface OnboardingButtonProps {
   title: string;
@@ -57,21 +57,35 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
   },
   primaryButton: {
     backgroundColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 6,
+      },
+      android: {
+        elevation: 0, // Kein Schatten auf Android
+        borderWidth: 1,
+        borderColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
+      },
+    }),
   },
   secondaryButton: {
-    backgroundColor: 'transparent',
+    backgroundColor: colorScheme === 'dark' ? '#2C2C2C' : '#FFFFFF', // Solider Hintergrund statt transparent
     borderWidth: 1,
-    borderColor: colorScheme === 'dark' ? Colors.dark.text : Colors.light.tabIconDefault,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 1,
+    borderColor: colorScheme === 'dark' ? '#666666' : '#E0E0E0', // Solide Borderfarbe
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 0, // Kein Schatten auf Android
+      },
+    }),
   },
   buttonDisabled: {
     opacity: 0.5,

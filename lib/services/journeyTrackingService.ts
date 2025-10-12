@@ -197,6 +197,23 @@ export interface JourneyContext {
   // NEU: Firestore-Persistierung
   persistedToFirestore?: boolean;
   firestoreDocId?: string;
+  
+  // NEU: Tracking für gescannte Codes
+  scannedcodes?: Array<{
+    ean: string;
+    timestamp: number;
+    hasResult: boolean;
+    productType?: 'brand' | 'noname'; // nur wenn hasResult true
+    productId?: string; // nur wenn hasResult true
+    productName?: string; // nur wenn hasResult true
+  }>;
+  
+  // NEU: Tracking für Suchbegriffe
+  searchedproducts?: Array<{
+    searchQuery: string;
+    timestamp: number;
+    resultCount?: number;
+  }>;
 }
 
 class JourneyTrackingService {
@@ -1527,7 +1544,15 @@ class JourneyTrackingService {
         // Status
         status: journey.viewedProducts.some(p => this.getFinalStatusFromActions(p.actions).wasPurchased) ? 'purchased' : 
                 journey.viewedProducts.some(p => this.getFinalStatusFromActions(p.actions).wasAddedToCart) ? 'in_cart' :
-                journey.abandoned ? 'abandoned' : 'active'
+                journey.abandoned ? 'abandoned' : 'active',
+                
+        // NEU: Scanned codes und Searched products
+        ...(journey.scannedcodes && journey.scannedcodes.length > 0 && { 
+          scannedcodes: journey.scannedcodes 
+        }),
+        ...(journey.searchedproducts && journey.searchedproducts.length > 0 && { 
+          searchedproducts: journey.searchedproducts 
+        })
       };
       
       // Nur hinzufügen wenn nicht null
@@ -2287,6 +2312,117 @@ class JourneyTrackingService {
         filterChanges: this.currentJourney.filterMetrics.filterChangesCount,
         timeSpentMs: Date.now() - this.currentJourney.startTime
       }, userId);
+    }
+  }
+
+  /**
+   * Trackt einen gescannten Code (mit oder ohne Treffer)
+   */
+  trackScannedCode(
+    ean: string,
+    hasResult: boolean,
+    productInfo?: {
+      productId: string;
+      productName: string;
+      productType: 'brand' | 'noname';
+    },
+    userId?: string
+  ): void {
+    if (!this.currentJourney) {
+      // Starte neue Journey falls keine aktiv
+      this.startJourney('scan', 'barcode-scanner', undefined, userId);
+      if (!this.currentJourney) return;
+    }
+
+    // Initialisiere scannedcodes Array wenn nicht vorhanden
+    if (!this.currentJourney.scannedcodes) {
+      this.currentJourney.scannedcodes = [];
+    }
+
+    // Füge gescannten Code hinzu
+    const scanEntry: any = {
+      ean,
+      timestamp: Date.now(),
+      hasResult
+    };
+
+    // Füge Produktinfo hinzu wenn vorhanden
+    if (hasResult && productInfo) {
+      scanEntry.productType = productInfo.productType;
+      scanEntry.productId = productInfo.productId;
+      scanEntry.productName = productInfo.productName;
+    }
+
+    this.currentJourney.scannedcodes.push(scanEntry);
+
+    console.log(`📱 Tracked scan: ${ean} - ${hasResult ? 'Found' : 'Not found'}`, {
+      productType: productInfo?.productType,
+      totalScans: this.currentJourney.scannedcodes.length
+    });
+
+    // Track zu GA4
+    analyticsService.trackEvent({
+      event_name: hasResult ? 'scan_successful' : 'scan_failed',
+      event_category: 'user_action',
+      journey_id: this.currentJourney.journeyId,
+      ean_code: ean,
+      product_found: hasResult,
+      product_type: productInfo?.productType,
+      product_id: productInfo?.productId,
+      product_name: productInfo?.productName,
+      total_scans_in_journey: this.currentJourney.scannedcodes.length
+    }, userId);
+
+    // Persistiere zu Firestore
+    if (userId) {
+      this.persistJourneyToFirestore(userId);
+    }
+  }
+
+  /**
+   * Trackt einen Suchbegriff
+   */
+  trackSearchQuery(
+    searchQuery: string,
+    resultCount?: number,
+    userId?: string
+  ): void {
+    if (!this.currentJourney) {
+      // Starte neue Journey falls keine aktiv
+      this.startJourney('search', 'search-results', undefined, userId);
+      if (!this.currentJourney) return;
+    }
+
+    // Initialisiere searchedproducts Array wenn nicht vorhanden
+    if (!this.currentJourney.searchedproducts) {
+      this.currentJourney.searchedproducts = [];
+    }
+
+    // Füge Suchbegriff hinzu
+    this.currentJourney.searchedproducts.push({
+      searchQuery,
+      timestamp: Date.now(),
+      resultCount
+    });
+
+    console.log(`🔍 Tracked search: "${searchQuery}"`, {
+      resultCount,
+      totalSearches: this.currentJourney.searchedproducts.length
+    });
+
+    // Track zu GA4
+    analyticsService.trackEvent({
+      event_name: 'search_query_tracked',
+      event_category: 'user_action',
+      journey_id: this.currentJourney.journeyId,
+      search_query: searchQuery,
+      result_count: resultCount,
+      total_searches_in_journey: this.currentJourney.searchedproducts.length
+    }, userId);
+
+    // Persistiere zu Firestore
+    if (userId) {
+      this.persistJourneyToFirestore(userId);
     }
   }
 

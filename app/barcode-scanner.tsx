@@ -1,5 +1,6 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import FixedAndroidModal from '@/components/ui/FixedAndroidModal';
 import HybridBarcodeScanner from '@/components/ui/HybridBarcodeScanner';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
@@ -11,14 +12,16 @@ import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { achievementService } from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import { interstitialAdService } from '@/lib/services/interstitialAdService';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import scanHistoryService, { ScanHistoryItem } from '@/lib/services/scanHistoryService';
+import ScrapedProductsService from '@/lib/services/scrapedProductsService';
 import { isExpoGo, platformLog } from '@/lib/utils/platform';
 import { Camera, CameraType, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
 import { getDoc } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, Image, InteractionManager, Linking, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, Image, InteractionManager, Linking, Platform, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function BarcodeScannerScreen() {
@@ -53,8 +56,11 @@ export default function BarcodeScannerScreen() {
       const current = await Camera.getCameraPermissionsAsync();
       if (current.status === 'granted') return true;
       if (current.status === 'undetermined') {
-        const requested = await Camera.requestCameraPermissionsAsync();
-        if (requested.status === 'granted') return true;
+        const requested = await requestPermission();
+        if (requested.status === 'granted') {
+          // Permission erteilt - Komponente wird automatisch neu gerendert durch requestPermission
+          return true;
+        }
       }
       Alert.alert(
         'Kamera-Zugriff blockiert',
@@ -75,7 +81,7 @@ export default function BarcodeScannerScreen() {
   const { width, height } = Dimensions.get('window');
   const scanAreaWidth = width * 0.75; // Kompakter für mehr Platz
   const scanAreaHeight = scanAreaWidth * 0.45; // Etwas kleiner
-  
+
   // Responsive Layout für kleine Geräte
   useEffect(() => {
     setIsSmallDevice(height < 700); // iPhone SE Detection
@@ -242,6 +248,27 @@ export default function BarcodeScannerScreen() {
           });
         }
         
+        // Track scan in journey
+        journeyTrackingService.trackScannedCode(ean, true, {
+          productId: product.id,
+          productName: product.name,
+          productType: 'noname'
+        }, user?.uid);
+        
+        // GA4 Tracking für NoName-Scan
+        if (analytics.trackEvent) {
+          analytics.trackEvent({
+            event_name: 'scan_successful',
+            event_category: 'user_action',
+            scan_type: 'camera',
+            product_found: true,
+            is_fallback: false,
+            product_type: 'noname',
+            product_id: product.id,
+            product_name: product.name
+          });
+        }
+        
         // 🎉 SUCCESS HAPTIC FEEDBACK
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         
@@ -305,6 +332,27 @@ export default function BarcodeScannerScreen() {
           });
         }
         
+        // Track scan in journey
+        journeyTrackingService.trackScannedCode(ean, true, {
+          productId: product.id,
+          productName: product.name,
+          productType: 'brand'
+        }, user?.uid);
+        
+        // GA4 Tracking für Marken-Scan
+        if (analytics.trackEvent) {
+          analytics.trackEvent({
+            event_name: 'scan_successful',
+            event_category: 'user_action',
+            scan_type: 'camera',
+            product_found: true,
+            is_fallback: false,
+            product_type: 'brand',
+            product_id: product.id,
+            product_name: product.name
+          });
+        }
+        
         // 🎉 SUCCESS HAPTIC FEEDBACK
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         
@@ -318,8 +366,75 @@ export default function BarcodeScannerScreen() {
         return;
       }
       
-      // Produkt nicht gefunden
-      console.log(`❌ No product found for EAN: ${ean}`);
+      // Produkt nicht gefunden in unserer DB - versuche Fallback-Quellen
+      console.log(`❌ No product found in our DB for EAN: ${ean}`);
+      console.log(`🔄 Trying fallback sources...`);
+      
+      // Suche in Fallback-Quellen (scraped_products und OpenFood)
+      const fallbackProduct = await ScrapedProductsService.searchFallbackProduct(ean);
+      
+      if (fallbackProduct) {
+        console.log(`✅ Found fallback product: ${fallbackProduct.displayData.name}`);
+        
+        // Track successful scan (mit Fallback-Info)
+        journeyTrackingService.trackScannedCode(ean, true, {
+          productId: fallbackProduct.displayData.id,
+          productName: fallbackProduct.displayData.name,
+          productType: 'brand' // Fallback-Produkte werden als Markenprodukte behandelt
+        }, user?.uid);
+        
+        // GA4 Tracking für Fallback-Scan
+        if (analytics.trackEvent) {
+          analytics.trackEvent({
+            event_name: 'scan_successful',
+            event_category: 'user_action',
+            scan_type: 'camera',
+            product_found: true,
+            is_fallback: true,
+            fallback_source: fallbackProduct.type,
+            product_id: fallbackProduct.displayData.id,
+            product_name: fallbackProduct.displayData.name,
+            has_price: !!fallbackProduct.displayData.price,
+            has_image: !!fallbackProduct.displayData.imageUrl
+          });
+        }
+        
+        // Visuelles Feedback
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        
+        // Zeige temporär Loading-State während Navigation
+        setScanningLoading(true);
+        
+        // WICHTIG: Fallback-Produkte NICHT zur History hinzufügen
+        // Nur Produkte aus unserer DB werden gespeichert
+        console.log('📝 Skipping history for fallback product');
+        
+        setHasNavigated(true);
+        setIsSearching(false);
+        setScanningLoading(false);
+        
+        // Navigiere zur Produktdetailseite mit Fallback-Daten
+        console.log(`🚀 NAVIGATING to: /product-comparison/${ean}?type=fallback&source=${fallbackProduct.type}`);
+        router.replace(`/product-comparison/${ean}?type=fallback&source=${fallbackProduct.type}`);
+        return;
+      }
+      
+      // Kein Produkt gefunden - auch nicht in Fallback-Quellen
+      console.log(`❌ No product found anywhere for EAN: ${ean}`);
+      
+      // Track failed scan in journey
+      journeyTrackingService.trackScannedCode(ean, false, undefined, user?.uid);
+      
+      // GA4 Tracking für gescheiterten Scan
+      if (analytics.trackEvent) {
+        analytics.trackEvent({
+          event_name: 'scan_failed',
+          event_category: 'user_action',
+          scan_type: 'camera',
+          product_found: false,
+          ean_code: ean
+        });
+      }
       
       // KRITISCHER FIX: hasNavigated auch bei "nicht gefunden" setzen!
       if (hasNavigated) {
@@ -361,10 +476,10 @@ export default function BarcodeScannerScreen() {
                   lastScannedEANRef.current = '';
                 }}]
               );
-            },
           },
-        ]
-      );
+        },
+      ]
+    );
       
     } catch (error) {
       console.error('❌ CRITICAL ERROR searching for product:', error);
@@ -484,12 +599,18 @@ export default function BarcodeScannerScreen() {
     setFlashEnabled(current => !current);
   };
 
-    // 📱 PERMISSION CHECKS (für alle Builds)
+  // 📱 PERMISSION CHECKS (für alle Builds)
   useEffect(() => {
     if (!permission?.granted) {
       ensureCameraPermission();
+    } else {
+      // Permission wurde erteilt - stelle sicher dass Kamera initialisiert wird
+      const timer = setTimeout(() => {
+        setCameraReady(true);
+      }, Platform.OS === 'android' ? 300 : 0); // Android: Kurze Verzögerung für State-Update
+      return () => clearTimeout(timer);
     }
-  }, [permission]);
+  }, [permission?.granted]);
 
   // 📱 PERMISSION SCREEN (für alle Builds)
   if (!permission) {
@@ -518,13 +639,21 @@ export default function BarcodeScannerScreen() {
           </ThemedText>
           <ThemedText style={styles.permissionText}>
             Um Barcodes zu scannen, benötigt die App Zugriff auf deine Kamera.
+            {permission.canAskAgain ? '' : '\n\nBitte erlaube den Zugriff in den Einstellungen.'}
           </ThemedText>
           <TouchableOpacity 
             style={[styles.permissionButton, { backgroundColor: colors.primary }]}
-            onPress={ensureCameraPermission}
+            onPress={async () => {
+              if (permission.canAskAgain) {
+                await ensureCameraPermission();
+              } else {
+                // Direkt zu den Einstellungen
+                Linking.openSettings();
+              }
+            }}
           >
             <ThemedText style={styles.permissionButtonText}>
-              Kamera-Zugriff erlauben
+              {permission.canAskAgain ? 'Kamera-Zugriff erlauben' : 'Einstellungen öffnen'}
             </ThemedText>
           </TouchableOpacity>
         </View>
@@ -536,6 +665,9 @@ export default function BarcodeScannerScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      {Platform.OS === 'android' && (
+        <StatusBar translucent backgroundColor="transparent" />
+      )}
       <View style={styles.cameraContainer}>
         {cameraReady ? (
           <HybridBarcodeScanner
@@ -584,15 +716,22 @@ export default function BarcodeScannerScreen() {
           </View>
           
                               {/* Bottom overlay - Einfaches Layout */}
-          <View style={[styles.overlayBottom, { height: height - topOffset - scanAreaHeight }]}>
+          <View style={[
+            styles.overlayBottom, 
+            { 
+              height: Platform.OS === 'android' 
+                ? height // Auf Android volle Höhe bis ganz unten
+                : height - topOffset - scanAreaHeight 
+            }
+          ]}>
             {/* Instructions und Manual Button oben */}
             <View style={styles.instructionsContent}>
             <View style={styles.instructions}>
               <ThemedText style={styles.instructionTitle}>
                   {scanningLoading ? 'Scanne...' : 'Barcode scannen'}
-                </ThemedText>
+              </ThemedText>
                 {!scanningLoading && (
-                <ThemedText style={styles.instructionText}>
+              <ThemedText style={styles.instructionText}>
                     Halte den Barcode in den Rahmen
                   </ThemedText>
                 )}
@@ -601,8 +740,8 @@ export default function BarcodeScannerScreen() {
                     <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
                     <ThemedText style={styles.scanningText}>
                       Produkt wird erkannt...
-                    </ThemedText>
-                  </View>
+              </ThemedText>
+            </View>
                 )}
               </View>
 
@@ -642,16 +781,23 @@ export default function BarcodeScannerScreen() {
                   </>
                 )}
               </TouchableOpacity>
-            </View>
           </View>
+        </View>
 
           {/* Scanhistorie - ganz unten außerhalb des Overlays */}
           {!scanningLoading && (scanHistory.length > 0 || isLoadingHistory) && (
-            <View style={styles.historyBottomContainer}>
+            <View style={[
+              styles.historyBottomContainer, 
+              { 
+                bottom: Platform.OS === 'android' 
+                  ? insets.bottom + 180 // Android: Höher positionieren wegen erweitertem Overlay
+                  : 100 // iOS: Original Position
+              }
+            ]}>
               <View style={[styles.historySection, isSmallDevice && styles.historyCompact]}>
                 <View style={styles.historyHeader}>
                   <ThemedText style={styles.historyTitle}>Zuletzt gescannt</ThemedText>
-                                      <TouchableOpacity
+          <TouchableOpacity 
                       onPress={() => {
                         if (user?.uid) {
                           scanHistoryService.markAllAsDeleted(user.uid);
@@ -659,7 +805,7 @@ export default function BarcodeScannerScreen() {
                       }}
                     >
                     <ThemedText style={[styles.historyClear, { color: colors.primary }]}>Löschen</ThemedText>
-                  </TouchableOpacity>
+          </TouchableOpacity>
                 </View>
                 
                 <ScrollView
@@ -681,7 +827,7 @@ export default function BarcodeScannerScreen() {
                     ))
                   ) : (
                     scanHistory.map((item) => (
-                      <TouchableOpacity
+          <TouchableOpacity 
                         key={item.id}
                         style={[styles.historyCard, { backgroundColor: colors.cardBackground }]}
                         onPress={() => {
@@ -730,7 +876,7 @@ export default function BarcodeScannerScreen() {
                             {item.productName}
                           </Text>
                         </View>
-                      </TouchableOpacity>
+          </TouchableOpacity>
                     ))
                   )}
                 </ScrollView>
@@ -775,12 +921,10 @@ export default function BarcodeScannerScreen() {
               backgroundColor: flashEnabled ? 'rgba(255,255,255,0.95)' : 'rgba(0,0,0,0.7)',
               borderWidth: flashEnabled ? 2 : 0,
               borderColor: colors.primary,
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.25,
-              shadowRadius: 4,
-              elevation: 5,
-              opacity: cameraReady ? 1 : 0.5, // Visueller Hinweis für deaktiviert
+              ...(Platform.OS === 'ios' 
+                ? { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4 }
+                : { elevation: 0 }),
+              opacity: cameraReady ? 1 : 0.5,
             }]}
             onPress={() => {
               if (!cameraReady) return;
@@ -801,12 +945,10 @@ export default function BarcodeScannerScreen() {
             disabled={!cameraReady}
             style={[styles.controlButton, { 
               backgroundColor: 'rgba(0,0,0,0.7)',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.25,
-              shadowRadius: 4,
-              elevation: 5,
-              opacity: cameraReady ? 1 : 0.5, // Visueller Hinweis für deaktiviert
+              ...(Platform.OS === 'ios' 
+                ? { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4 }
+                : { elevation: 0 }),
+              opacity: cameraReady ? 1 : 0.5,
             }]}
             onPress={() => {
               if (!cameraReady) return;
@@ -820,16 +962,19 @@ export default function BarcodeScannerScreen() {
         </View>
 
       {/* Manual Input Modal */}
-      <Modal
+      <FixedAndroidModal
         visible={showManualInput && !hasNavigated}
-        animationType="slide"
-        presentationStyle="formSheet"
         onRequestClose={() => setShowManualInput(false)}
+        isBottomSheet={true}
       >
-        <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
+        <View style={[styles.modalContainer, { 
+          backgroundColor: colors.background, 
+          paddingBottom: insets.bottom,
+          paddingTop: Platform.OS === 'android' ? insets.top : 0 
+        }]}>
           <View style={styles.modalHeader}>
-            <TouchableOpacity
-              onPress={() => {
+        <TouchableOpacity 
+          onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 setShowManualInput(false);
               }}
@@ -872,7 +1017,7 @@ export default function BarcodeScannerScreen() {
             />
           </View>
         </View>
-      </Modal>
+      </FixedAndroidModal>
     </ThemedView>
   );
 }
@@ -912,18 +1057,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   cameraContainer: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
   },
   camera: {
-    flex: 1,
-    
+    ...StyleSheet.absoluteFillObject,
   },
   overlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
+    bottom: Platform.OS === 'android' ? -100 : 0, // Android: Erweitere über Navigation Bar hinaus
   },
   overlayTop: {
     backgroundColor: 'rgba(0,0,0,0.7)',
@@ -985,10 +1129,11 @@ const styles = StyleSheet.create({
   },
   historyBottomContainer: {
     position: 'absolute',
-    bottom: 80, // 20pt Abstand zum Seitenende
+    bottom: 20,
     left: 0,
     right: 0,
     paddingHorizontal: 20,
+    zIndex: 10, // Über dem Overlay
   },
   instructions: {
     alignItems: 'center',
@@ -1035,6 +1180,15 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(0,0,0,0.6)' : '#333333',
+    ...(Platform.OS === 'ios' ? {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.25,
+      shadowRadius: 4,
+    } : {
+      elevation: 3, // Dezenter Schatten für Android
+    }),
   },
   manualInputButton: {
     flexDirection: 'row',

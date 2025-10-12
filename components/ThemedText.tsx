@@ -1,4 +1,4 @@
-import { StyleSheet, Text, type TextProps } from 'react-native';
+import { Platform, StyleSheet, Text, type TextProps } from 'react-native';
 
 import { useThemeColor } from '@/hooks/useThemeColor';
 
@@ -26,6 +26,7 @@ export function ThemedText({
         type === 'defaultSemiBold' ? styles.defaultSemiBold : undefined,
         type === 'subtitle' ? styles.subtitle : undefined,
         type === 'link' ? styles.link : undefined,
+        Platform.OS === 'android' && styles.androidText,
         style,
       ]}
       {...rest}
@@ -58,5 +59,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#0a7ea4',
     fontFamily: 'Nunito_500Medium',
+  },
+  androidText: {
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
 });

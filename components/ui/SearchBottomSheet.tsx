@@ -9,6 +9,7 @@ import {
   Dimensions,
   Keyboard,
   PanResponder,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -607,7 +608,7 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
                   onPress={() => {
                     handleClose();
                     // Navigation zur Stöbern-Seite mit Kategorien-Tab
-                    router.push('/(tabs)/explore?tab=categories' as any);
+                    router.push('/(tabs)/explore?tab=Kategorien' as any);
                   }}
                 >
                   <IconSymbol name="square.grid.2x2" size={16} color={colors.success} />
@@ -701,6 +702,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Nunito_400Regular',
     paddingVertical: 0,
+    ...Platform.select({
+      android: {
+        textAlignVertical: 'center',
+        includeFontPadding: false,
+      },
+    }),
   },
   // Search Button - 1:1 wie Scanbutton
   searchButton: {

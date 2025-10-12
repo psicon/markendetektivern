@@ -8,11 +8,13 @@ import {
     Animated,
     Dimensions,
     Modal,
+    Platform,
     StyleSheet,
     Text,
     TouchableOpacity,
     View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconSymbol } from './IconSymbol';
 import { ImageWithShimmer } from './ImageWithShimmer';
 
@@ -40,6 +42,7 @@ export const LockedCategoryModal: React.FC<LockedCategoryModalProps> = ({
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { presentPaywall, isPremium } = useRevenueCat();
+  const insets = useSafeAreaInsets();
   
   const levelsToGo = requiredLevel - currentLevel;
   
@@ -75,12 +78,15 @@ export const LockedCategoryModal: React.FC<LockedCategoryModalProps> = ({
   return (
     <Modal
       visible={visible}
-      transparent
+      transparent={Platform.OS === 'ios'}
       animationType="fade"
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <View style={styles.container}>
+      <View style={[
+        styles.container,
+        Platform.OS === 'android' && { paddingBottom: insets.bottom }
+      ]}>
         <TouchableOpacity 
           style={styles.backdrop} 
           activeOpacity={1}

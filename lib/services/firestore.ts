@@ -627,7 +627,7 @@ export class FirestoreService {
         });
       });
       
-      console.log(`✅ Loaded ${marken.length} Marken from 'hersteller' collection:`, marken.slice(0, 5).map(m => m.name));
+      // Silent loading - kein Console.log für bessere Performance
       return marken;
     } catch (error) {
       console.error('Error fetching marken:', error);

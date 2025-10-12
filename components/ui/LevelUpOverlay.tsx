@@ -457,7 +457,7 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   gradientBackground: {
-    padding: 20,
+    padding: isSmallDevice ? 12 : 20,
     alignItems: 'center',
   },
   closeButton: {
@@ -474,7 +474,7 @@ const styles = StyleSheet.create({
   },
   levelBadge: {
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   levelIconContainer: {
     width: 80,
@@ -494,18 +494,18 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   levelTitle: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '800',
     color: 'white',
-    marginBottom: 8,
-    marginTop: 8,
+    marginBottom: 6,
+    marginTop: 6,
     textAlign: 'center',
   },
   levelDescription: {
     fontSize: 15,
     color: 'rgba(255,255,255,0.9)',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
     paddingHorizontal: 16,
   },
   
@@ -513,19 +513,19 @@ const styles = StyleSheet.create({
   mainContentSection: {
     width: '100%',
     alignItems: 'center',
-    marginVertical: 12,
+    marginVertical: 8,
     zIndex: 2,
   },
   standardRewardSection: {
     alignItems: 'center',
-    paddingVertical: 16,
+    paddingVertical: 12,
   },
   
   levelComparison: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 12,
+    marginVertical: 8,
   },
   oldLevelContainer: {
     alignItems: 'center',
@@ -578,12 +578,12 @@ const styles = StyleSheet.create({
   },
   buttonContainer: {
     width: '100%',
-    gap: 10,
+    gap: 8,
   },
   primaryButton: {
     backgroundColor: 'white',
     borderRadius: 12,
-    paddingVertical: 14,
+    paddingVertical: 12,
     alignItems: 'center',
   },
   primaryButtonText: {
@@ -594,7 +594,7 @@ const styles = StyleSheet.create({
   secondaryButton: {
     backgroundColor: 'rgba(255,255,255,0.2)',
     borderRadius: 12,
-    paddingVertical: 14,
+    paddingVertical: 12,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.3)',

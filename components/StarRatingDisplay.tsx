@@ -1,6 +1,6 @@
 import { ThemedText } from '@/components/ThemedText';
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
 interface StarRatingDisplayProps {
   rating: number;
@@ -26,10 +26,47 @@ export const StarRatingDisplay: React.FC<StarRatingDisplayProps> = ({
     const starNumber = index + 1;
     const fillPercentage = Math.min(Math.max(rating - index, 0), 1);
     
+    // Android: Vereinfachte Darstellung - leer, halb oder voll
+    if (Platform.OS === 'android') {
+      let starSymbol = '☆'; // Leer
+      let starColor = colors.border;
+      
+      if (fillPercentage >= 0.75) {
+        // Voll gefüllt
+        starSymbol = '★';
+        starColor = colors.warning;
+      } else if (fillPercentage >= 0.25) {
+        // Halb gefüllt
+        starSymbol = '★';
+        starColor = colors.warning;
+        // Verwende opacity für halbe Sterne
+      }
+      
+      return (
+        <View key={index} style={[styles.starContainer, { width: size, height: size }]}>
+          <Text style={[styles.star, { 
+            fontSize: size, 
+            color: starColor,
+            lineHeight: size,
+            height: size,
+            opacity: fillPercentage >= 0.25 && fillPercentage < 0.75 ? 0.5 : 1
+          }]}>
+            {starSymbol}
+          </Text>
+        </View>
+      );
+    }
+    
+    // iOS: Original präzise Darstellung
     return (
       <View key={index} style={[styles.starContainer, { width: size, height: size }]}>
         {/* Background (empty) star */}
-        <Text style={[styles.star, { fontSize: size, color: colors.border }]}>
+        <Text style={[styles.star, { 
+          fontSize: size, 
+          color: colors.border,
+          lineHeight: size * 1.1,
+          height: size * 1.1
+        }]}>
           ★
         </Text>
         
@@ -47,7 +84,12 @@ export const StarRatingDisplay: React.FC<StarRatingDisplayProps> = ({
             }
           ]}
         >
-          <Text style={[styles.star, { fontSize: size, color: colors.warning }]}>
+          <Text style={[styles.star, { 
+            fontSize: size, 
+            color: colors.warning,
+            lineHeight: size * 1.1,
+            height: size * 1.1
+          }]}>
             ★
           </Text>
         </View>
@@ -74,19 +116,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    height: 16,
   },
   starsContainer: {
     flexDirection: 'row',
     gap: 1,
     alignItems: 'center',
-    height: 16,
   },
   starContainer: {
     position: 'relative',
     justifyContent: 'center',
     alignItems: 'center',
-    height: 16,
   },
   filledStarContainer: {
     justifyContent: 'center',
@@ -95,13 +134,12 @@ const styles = StyleSheet.create({
   star: {
     textAlign: 'center',
     includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   valueText: {
     fontSize: 14,
     fontFamily: 'Nunito_600SemiBold',
     textAlign: 'left',
-    lineHeight: 16,
     includeFontPadding: false,
-    height: 16,
   },
 });

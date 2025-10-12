@@ -3,7 +3,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { adMobService } from '@/lib/services/adMobService';
 import Constants from 'expo-constants';
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
 interface BannerAdProps {
   style?: any;
@@ -51,8 +51,15 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
     );
   }
 
-  const { BannerAd: RNBannerAd, BannerAdSize } = require('react-native-google-mobile-ads');
+  const { BannerAd: RNBannerAd, BannerAdSize, TestIds } = require('react-native-google-mobile-ads');
   const adUnitId = adMobService.getAdUnitId('banner');
+
+  console.log('🎯 BannerAd Render:', { 
+    platform: Platform.OS, 
+    adUnitId, 
+    isReady,
+    isDev: __DEV__ 
+  });
 
   return (
     <View style={[styles.container, style]}>
@@ -66,11 +73,15 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
         size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
         requestOptions={{ requestNonPersonalizedAdsOnly: true }}
         onAdLoaded={() => {
-          console.log('✅ BannerAd: loaded');
+          console.log('✅ BannerAd loaded:', { platform: Platform.OS, adUnitId });
           onAdLoaded?.();
         }}
         onAdFailedToLoad={(error: any) => {
-          console.warn('❌ BannerAd: failed', error);
+          console.error('❌ BannerAd failed:', { 
+            platform: Platform.OS, 
+            adUnitId, 
+            error: error?.message || error 
+          });
           onAdFailedToLoad?.(error);
         }}
       />

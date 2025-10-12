@@ -1,6 +1,7 @@
 import { BannerAd } from '@/components/ads/BannerAd';
 import { AddCustomItemModal } from '@/components/ui/AddCustomItemModal';
 import BatchActionLoader from '@/components/ui/BatchActionLoader';
+import FixedAndroidModal from '@/components/ui/FixedAndroidModal';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
@@ -19,28 +20,27 @@ import { FirestoreService } from '@/lib/services/firestore';
 import { showBulkConvertSuccessToast, showBulkPurchasedToast, showConvertSuccessToast, showInfoToast, showPurchasedToast } from '@/lib/services/ui/toast';
 import { updateUserStats } from '@/lib/services/userProfile';
 import {
-    Einkaufswagen,
-    FirestoreDocument,
-    MarkenProdukte,
-    ProductToConvert,
-    Produkte
+  Einkaufswagen,
+  FirestoreDocument,
+  MarkenProdukte,
+  ProductToConvert,
+  Produkte
 } from '@/lib/types/firestore';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Dimensions,
-    Modal,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1830,7 +1830,10 @@ const safeAsync = async (p: Promise<any>) => {
 
         {/* Bottom Buttons */}
         {activeTab === 'brand' && brandProducts.length > 0 && selectedConversions.length > 0 && (
-          <View style={styles.bottomButtonContainer}>
+          <View style={[
+            styles.bottomButtonContainer,
+            { paddingBottom: Math.max(insets.bottom, 16) }
+          ]}>
         <TouchableOpacity 
               style={[styles.bottomButton, { backgroundColor: colors.primary }]}
               onPress={handleConvertSelected}
@@ -1851,7 +1854,10 @@ const safeAsync = async (p: Promise<any>) => {
       )}
 
         {activeTab === 'noname' && noNameProducts.length > 0 && (
-          <View style={styles.bottomButtonContainer}>
+          <View style={[
+            styles.bottomButtonContainer,
+            { paddingBottom: Math.max(insets.bottom, 16) }
+          ]}>
         <TouchableOpacity 
               style={[styles.bottomButton, { backgroundColor: colors.primary }]}
               onPress={() => handleMarkAllAsPurchased()}
@@ -1880,18 +1886,15 @@ const safeAsync = async (p: Promise<any>) => {
         </TouchableOpacity>
         
         {/* Filter Modal */}
-      <Modal
+      <FixedAndroidModal
           visible={showFilterModal}
-          animationType="slide"
-          presentationStyle="pageSheet"
           onRequestClose={() => setShowFilterModal(false)}
+          isBottomSheet={true}
         >
           <View style={[styles.filterModalContainer, { backgroundColor: colors.background }]}>
             {/* Header */}
             <View style={styles.filterModalHeader}>
-              <View style={styles.handleContainer}>
-                <View style={[styles.handle, { backgroundColor: colors.icon }]} />
-              </View>
+              
               <View style={styles.headerRow}>
               <TouchableOpacity 
                   style={styles.closeButtonLeft}
@@ -1947,7 +1950,7 @@ const safeAsync = async (p: Promise<any>) => {
                       </Text>
                     </TouchableOpacity>
                   ))}
-                </View>
+        </View>
               </View>
               
               {/* Märkte Filter (nur bei NoName Tab) - DEBUG */}
@@ -1988,7 +1991,7 @@ const safeAsync = async (p: Promise<any>) => {
                           </Text>
                         </TouchableOpacity>
                       ))}
-                    </View>
+            </View>
                   )}
                 </View>
               )}
@@ -2005,7 +2008,7 @@ const safeAsync = async (p: Promise<any>) => {
                 ) : (
                   <View style={styles.chipsContainer}>
                     {availableCategories.map((category) => (
-                      <TouchableOpacity 
+            <TouchableOpacity 
                         key={category.id}
                         style={[
                           styles.filterChip,
@@ -2028,28 +2031,25 @@ const safeAsync = async (p: Promise<any>) => {
                         ]}>
                           {category.bezeichnung || category.name}
                         </Text>
-                      </TouchableOpacity>
+            </TouchableOpacity>
                     ))}
-                  </View>
+          </View>
                 )}
-              </View>
+        </View>
             </ScrollView>
         </View>
-      </Modal>
+        </FixedAndroidModal>
 
         {/* Info Bottom Sheet */}
-      <Modal
+      <FixedAndroidModal
           visible={showInfoSheet}
-          animationType="slide"
-          presentationStyle="pageSheet"
           onRequestClose={() => setShowInfoSheet(false)}
+          isBottomSheet={true}
               >
           <View style={[styles.pageSheetContainer, { backgroundColor: colors.background }]}>
             {/* Page Sheet Header */}
             <View style={styles.pageSheetHeader}>
-              <View style={styles.handleContainer}>
-                <View style={[styles.handle, { backgroundColor: colors.icon }]} />
-            </View>
+              
               <View style={styles.headerRow}>
             <TouchableOpacity 
                   style={styles.closeButtonLeft}
@@ -2118,7 +2118,7 @@ const safeAsync = async (p: Promise<any>) => {
                 )}
               </ScrollView>
         </View>
-      </Modal>
+        </FixedAndroidModal>
       
       {/* LEVEL-UP OVERLAY - Spektakuläre Animation mit Confetti */}
       <LevelUpOverlay
@@ -2500,16 +2500,6 @@ const styles = StyleSheet.create({
   },
   pageSheetHeader: {
     paddingBottom: 20,
-  },
-  handleContainer: {
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    opacity: 0.5,
   },
   headerRow: {
     flexDirection: 'row',

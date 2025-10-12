@@ -114,6 +114,23 @@ export interface MarkenProduktWithDetails extends Omit<MarkenProdukte, 'kategori
   id: string;
   kategorie?: Kategorien;
   hersteller?: HerstellerNew;
+  marke?: { bezeichnung: string; id: string; bild: string | null }; // Für Fallback-Produkte
+  zutaten?: string; // Für Fallback-Produkte
+  nutriscore?: string; // Für Fallback-Produkte
+  ecoscore?: string; // Für Fallback-Produkte
+  nova?: string; // Für Fallback-Produkte
+  naehrwerte?: {
+    brennwertKcal: number;
+    fett: number;
+    gesaettigteFettsaeuren: number;
+    kohlenhydrate: number;
+    zucker: number;
+    eiweiss: number;
+    salz: number;
+  };
+  isFallback?: boolean; // Flag für Fallback-Produkte
+  fallbackSource?: string; // 'scraped' oder 'openfood'
+  originalData?: any; // Original Fallback-Daten
 }
 
 // Shopping Cart / Einkaufszettel types

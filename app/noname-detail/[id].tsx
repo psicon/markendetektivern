@@ -2,7 +2,9 @@ import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { BannerAd } from '@/components/ads/BannerAd';
+import FixedAndroidModal from '@/components/ui/FixedAndroidModal';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import ImageViewer from '@/components/ui/ImageViewer';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { CommentSkeleton, CommentsHeaderSkeleton, ListItemSkeleton, ProductComparisonSkeleton, RatingOverviewSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor, getStufenDescription, getStufenTitle } from '@/constants/AppTexts';
@@ -25,7 +27,7 @@ import { ProductWithDetails } from '@/lib/types/firestore';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
 import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
-import { ActivityIndicator, Animated, Image, Modal, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Image, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 
 // ScoreImage Komponente - 1:1 wie im Produktvergleich
 const ScoreImage = ({ type, value }: { type: 'nutri' | 'eco' | 'nova'; value: string | number }) => {
@@ -1068,18 +1070,15 @@ export default function NoNameDetailScreen() {
       </ScrollView>
 
       {/* Product Details Bottom Sheet */}
-      <Modal
+      <FixedAndroidModal
         visible={showProductDetails}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        isBottomSheet={true}
         onRequestClose={() => setShowProductDetails(false)}
       >
         <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
           {/* Bottom Sheet Header */}
           <View style={styles.bottomSheetHeader}>
-            <View style={styles.handleContainer}>
-              <View style={styles.handle} />
-            </View>
+            
             <View style={styles.headerRow}>
               <TouchableOpacity 
                 style={styles.closeButtonLeft}
@@ -1345,21 +1344,18 @@ export default function NoNameDetailScreen() {
             </View>
           </ScrollView>
         </View>
-      </Modal> 
+      </FixedAndroidModal> 
 
       {/* Rating Bottom Sheet - GENAU wie im Produktvergleich */}
-      <Modal
+      <FixedAndroidModal
         visible={showRatingsView}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        isBottomSheet={true}
         onRequestClose={() => setShowRatingsView(false)}
       >
         <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
           {/* Rating Header */}
           <View style={styles.bottomSheetHeader}>
-            <View style={styles.handleContainer}>
-              <View style={styles.handle} />
-            </View>
+            
             <View style={styles.headerRow}>
               <TouchableOpacity 
                 style={styles.closeButtonLeft}
@@ -1564,21 +1560,18 @@ export default function NoNameDetailScreen() {
             </View>
           </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
 
       {/* Stages Info Bottom Sheet - GENAU wie im Produktvergleich */}
-      <Modal
+      <FixedAndroidModal
         visible={showStagesInfo}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        isBottomSheet={true}
         onRequestClose={() => setShowStagesInfo(false)}
       >
         <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
           {/* Bottom Sheet Header */}
           <View style={styles.bottomSheetHeader}>
-            <View style={styles.handleContainer}>
-              <View style={styles.handle} />
-            </View>
+            
             <View style={styles.headerRow}>
               <TouchableOpacity 
                 style={styles.closeButtonLeft}
@@ -1618,21 +1611,18 @@ export default function NoNameDetailScreen() {
             ))}
           </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
 
       {/* Rating Bottom Sheet */}
-      <Modal
+      <FixedAndroidModal
         visible={showRatingModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        isBottomSheet={true}
         onRequestClose={() => setShowRatingModal(false)}
       >
         <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
           {/* Rating Header */}
           <View style={styles.bottomSheetHeader}>
-            <View style={styles.handleContainer}>
-              <View style={styles.handle} />
-            </View>
+            
             <View style={styles.headerRow}>
             <TouchableOpacity 
                 style={styles.closeButtonLeft}
@@ -1751,31 +1741,15 @@ export default function NoNameDetailScreen() {
             </View>
           </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
 
-      {/* Image Viewer Modal */}
-      <Modal
+      {/* Image Viewer */}
+      <ImageViewer
+        images={selectedImage ? [{ uri: selectedImage }] : []}
+        imageIndex={0}
         visible={showImageViewer}
-        animationType="fade"
-        transparent={true}
         onRequestClose={() => setShowImageViewer(false)}
-      >
-        <View style={styles.imageViewerContainer}>
-          <TouchableOpacity 
-            style={styles.imageViewerClose}
-            onPress={() => setShowImageViewer(false)}
-          >
-            <IconSymbol name="xmark" size={24} color="white" />
-          </TouchableOpacity>
-          {selectedImage && (
-            <Image 
-              source={{ uri: selectedImage }}
-              style={styles.fullScreenImage}
-              resizeMode="contain"
-            />
-          )}
-        </View>
-      </Modal>
+      />
       
       {/* Shopping List FAB */}
       <TouchableOpacity 
@@ -2124,16 +2098,6 @@ const styles = StyleSheet.create({
   },
   bottomSheetHeader: {
     paddingBottom: 20,
-  },
-  handleContainer: {
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    backgroundColor: '#D1D5DB',
-    borderRadius: 2,
   },
   headerRow: {
     flexDirection: 'row',
@@ -2774,16 +2738,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 16,
-  },
-  handleContainer: {
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    borderRadius: 2,
   },
   headerRow: {
     flexDirection: 'row',

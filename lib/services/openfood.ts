@@ -28,6 +28,11 @@ export interface OpenFoodProduct {
   ecoscore_grade?: string;        // Eco-Score (a-e)
   nova_group?: number;            // NOVA Score (1-4)
   image_url?: string;             // Produktbild
+  image_front_url?: string;       // Alternatives Produktbild
+  quantity?: string;              // Packungsgröße
+  allergens_tags?: string[];      // Allergene
+  manufacturing_places?: string;  // Herstellungsorte
+  generic_name?: string;          // Generischer Name
   found: boolean;                 // Wurde das Produkt gefunden?
 }
 
@@ -78,6 +83,11 @@ class OpenFoodService {
         ecoscore_grade: result.product.ecoscore_grade?.toUpperCase(),
         nova_group: result.product.nova_group,
         image_url: result.product.image_url,
+        image_front_url: result.product.image_front_url,
+        quantity: result.product.quantity,
+        allergens_tags: result.product.allergens_tags,
+        manufacturing_places: result.product.manufacturing_places,
+        generic_name: result.product.generic_name,
         found: true
       };
 

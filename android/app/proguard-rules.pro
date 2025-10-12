@@ -12,3 +12,19 @@
 -keep class com.facebook.react.turbomodule.** { *; }
 
 # Add any project specific keep options here:
+
+# Firebase
+-keep class com.google.firebase.** { *; }
+-keep class com.google.android.gms.** { *; }
+-keepattributes *Annotation*
+-keepattributes Signature
+
+# RevenueCat
+-keep class com.revenuecat.** { *; }
+
+# React Native Firebase
+-keep class io.invertase.firebase.** { *; }
+-dontwarn io.invertase.firebase.**
+
+# Expo
+-keep class expo.modules.** { *; }

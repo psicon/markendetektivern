@@ -9,16 +9,16 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  ImageBackground,
-  Platform,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    ImageBackground,
+    Platform,
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -236,6 +236,9 @@ export default function LoginScreen() {
                     secureTextEntry={!showPassword}
                     autoCapitalize="none"
                     autoCorrect={false}
+                    returnKeyType="done"
+                    onSubmitEditing={handleLogin}
+                    blurOnSubmit={true}
                   />
                   <TouchableOpacity
                     style={styles.eyeButton}

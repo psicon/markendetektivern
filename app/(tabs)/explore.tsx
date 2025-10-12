@@ -1,11 +1,11 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { BannerAd } from '@/components/ads/BannerAd';
-import { AllergenFilterChips } from '@/components/ui/AllergenFilterChips';
+// import { AllergenFilterChips } from '@/components/ui/AllergenFilterChips'; // TEMPORÄR AUSGEBLENDET
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { LockedCategoryModal } from '@/components/ui/LockedCategoryModal';
-import { NutritionSliderFilter } from '@/components/ui/NutritionSliderFilter';
+// import { NutritionSliderFilter } from '@/components/ui/NutritionSliderFilter'; // TEMPORÄR AUSGEBLENDET
 import { ListItemSkeleton, LoadingFooterSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { getStufenColor } from '@/constants/AppTexts';
 import { Colors } from '@/constants/Colors';
@@ -15,13 +15,14 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
 // Keine ExtendedFirestoreService mehr nötig
+import FixedAndroidModal from '@/components/ui/FixedAndroidModal';
 import { FirestoreService } from '@/lib/services/firestore';
 import { AllergenFilters, ExtendedMarkenproduktFilters, ExtendedNoNameFilters, NutritionFilters } from '@/lib/types/filters';
 import { Discounter, FirestoreDocument, Handelsmarken, Kategorien, Produkte } from '@/lib/types/firestore';
 import { router, useLocalSearchParams } from 'expo-router';
 import type { SymbolViewProps } from 'expo-symbols';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Dimensions, FlatList, Modal, PanResponder, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Dimensions, FlatList, PanResponder, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -1060,12 +1061,7 @@ export default function ExploreScreen() {
     }
   };
 
-  // Load NoName products when tab is selected
-  React.useEffect(() => {
-    if (activeTab === 'nonames' && noNameProducts.length === 0) {
-      loadNoNameProducts(true);
-    }
-  }, [activeTab]);
+  // ENTFERNT - Doppeltes Laden verhindert
 
 
   // Verhindere mehrfache Initialisierung
@@ -1263,12 +1259,16 @@ export default function ExploreScreen() {
         // User Level für Filter-Kategorien
         const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
         
-        const [kategorienWithAccess, markenData] = await Promise.all([
-          categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium),
-          FirestoreService.getMarken()
-        ]);
+        // Lade zuerst nur Kategorien (wichtig für die Anzeige)
+        const kategorienWithAccess = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
         setKategorien(kategorienWithAccess);
-        setMarkenData(markenData);
+        
+        // Lade Marken asynchron im Hintergrund (nicht kritisch für initiale Anzeige)
+        FirestoreService.getMarken().then(markenData => {
+          setMarkenData(markenData);
+        }).catch(error => {
+          console.error('Error loading marken data:', error);
+        });
 
       } catch (error) {
         console.error('Error loading filter options:', error);
@@ -1278,17 +1278,37 @@ export default function ExploreScreen() {
     loadFilterOptions();
   }, [userProfile?.stats?.currentLevel, userProfile?.level]); // 🎯 NUR bei Level-Änderung neu laden!
 
-  // Load NoName Products when tab becomes active or filters change
+  // Track ob Produkte bereits geladen wurden
+  const hasLoadedNoNames = useRef(false);
+  const hasLoadedMarken = useRef(false);
+  const prevNoNameFilters = useRef(noNameFilters);
+  const prevMarkenFilters = useRef(markenproduktFilters);
+  
+  // Load NoName Products nur bei Filter-Änderung oder erstem Mal
   useEffect(() => {
-    if (activeTab === 'nonames' && kategorien.length > 0) { // Warte auf Kategorien
-      loadNoNameProducts(true);
+    if (activeTab === 'nonames' && kategorien.length > 0) {
+      // Prüfe ob sich Filter geändert haben
+      const filtersChanged = JSON.stringify(prevNoNameFilters.current) !== JSON.stringify(noNameFilters);
+      
+      if (!hasLoadedNoNames.current || filtersChanged) {
+        loadNoNameProducts(true);
+        hasLoadedNoNames.current = true;
+        prevNoNameFilters.current = noNameFilters;
+      }
     }
   }, [activeTab, noNameFilters, kategorien]);
 
-  // Load Markenprodukte when tab becomes active or filters change
+  // Load Markenprodukte nur bei Filter-Änderung oder erstem Mal
   useEffect(() => {
-    if (activeTab === 'markenprodukte' && kategorien.length > 0) { // Warte auf Kategorien
-      loadMarkenprodukte(true);
+    if (activeTab === 'markenprodukte' && kategorien.length > 0) {
+      // Prüfe ob sich Filter geändert haben
+      const filtersChanged = JSON.stringify(prevMarkenFilters.current) !== JSON.stringify(markenproduktFilters);
+      
+      if (!hasLoadedMarken.current || filtersChanged) {
+        loadMarkenprodukte(true);
+        hasLoadedMarken.current = true;
+        prevMarkenFilters.current = markenproduktFilters;
+      }
     }
   }, [activeTab, markenproduktFilters, kategorien]);
 
@@ -2001,10 +2021,9 @@ export default function ExploreScreen() {
       )}
 
       {/* Filter Modal */}
-      <Modal
+      <FixedAndroidModal
         visible={showFilterModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        isBottomSheet={true}
         onRequestClose={() => setShowFilterModal(false)}
       >
         <View style={[styles.filterModalContainer, { backgroundColor: colors.background }]}>
@@ -2032,13 +2051,12 @@ export default function ExploreScreen() {
             ))}
           </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
 
       {/* NoName Filter Modal */}
-      <Modal
+      <FixedAndroidModal
         visible={showNoNameFilterModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        isBottomSheet={true}
         onRequestClose={() => setShowNoNameFilterModal(false)}
       >
         <View style={[styles.filterModalContainer, { backgroundColor: colors.background }]}>
@@ -2049,7 +2067,10 @@ export default function ExploreScreen() {
             </TouchableOpacity>
           </View>
           
-          <ScrollView style={styles.filterOptions}>
+          <ScrollView 
+            style={styles.filterOptions}
+            contentContainerStyle={{ paddingBottom: 100 }}
+          >
             {/* Clear All Button */}
             <View style={styles.filterSection}>
               <TouchableOpacity 
@@ -2216,16 +2237,16 @@ export default function ExploreScreen() {
               </View>
             </View>
 
-                        {/* Allergene Filter */}
-            <View style={styles.filterSection}>
+                        {/* Allergene Filter - TEMPORÄR AUSGEBLENDET */}
+            {/* <View style={styles.filterSection}>
               <AllergenFilterChips
                 selectedAllergens={noNameFilters.allergenFilters || {}}
                 onToggleAllergen={toggleAllergenFilter}
               />
-            </View>
+            </View> */}
 
-            {/* Nährwerte Filter */}
-            <View style={styles.filterSection}>
+            {/* Nährwerte Filter - TEMPORÄR AUSGEBLENDET */}
+            {/* <View style={styles.filterSection}>
               <NutritionSliderFilter
                 nutritionFilters={noNameFilters.nutritionFilters || {}}
                 onUpdateFilter={(filters) => {
@@ -2251,16 +2272,15 @@ export default function ExploreScreen() {
                   analytics.trackFilterChanged('nutrition_range', filterValue, action, 'explore', additionalData);
                 }}
               />
-            </View>
+            </View> */}
       </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
 
       {/* Markenprodukte Filter Modal */}
-      <Modal
+      <FixedAndroidModal
         visible={showMarkenproduktFilterModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        isBottomSheet={true}
         onRequestClose={() => setShowMarkenproduktFilterModal(false)}
       >
         <View style={[styles.filterModalContainer, { backgroundColor: colors.background }]}>
@@ -2271,7 +2291,10 @@ export default function ExploreScreen() {
       </TouchableOpacity>
           </View>
           
-          <ScrollView style={styles.filterOptions}>
+          <ScrollView 
+            style={styles.filterOptions}
+            contentContainerStyle={{ paddingBottom: 100 }}
+          >
             {/* Clear All Button */}
             <View style={styles.filterSection}>
               <TouchableOpacity 
@@ -2430,16 +2453,16 @@ export default function ExploreScreen() {
               </View>
             </View>
 
-            {/* Allergene Filter */}
-            <View style={styles.filterSection}>
+            {/* Allergene Filter - TEMPORÄR AUSGEBLENDET */}
+            {/* <View style={styles.filterSection}>
               <AllergenFilterChips
                 selectedAllergens={markenproduktFilters.allergenFilters || {}}
                 onToggleAllergen={toggleMarkenproduktAllergenFilter}
               />
-            </View>
+            </View> */}
 
-            {/* Nährwerte Filter */}
-            <View style={styles.filterSection}>
+            {/* Nährwerte Filter - TEMPORÄR AUSGEBLENDET */}
+            {/* <View style={styles.filterSection}>
               <NutritionSliderFilter
                 nutritionFilters={markenproduktFilters.nutritionFilters || {}}
                 onUpdateFilter={(filters) => {
@@ -2465,11 +2488,11 @@ export default function ExploreScreen() {
                   analytics.trackFilterChanged('nutrition_range', filterValue, action, 'explore', additionalData);
                 }}
               />
-            </View>
+            </View> */}
 
           </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
 
       {/* Locked Category Modal */}
       {lockedCategoryModal.category && (
@@ -3088,6 +3111,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     fontFamily: 'Nunito_400Regular',
+    ...Platform.select({
+      android: {
+        textAlignVertical: 'center',
+        includeFontPadding: false,
+        paddingVertical: 0,
+      },
+    }),
   },
   // Alte Styles beibehalten für Kompatibilität
   moreMarkenHint: {

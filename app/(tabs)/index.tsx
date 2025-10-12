@@ -1082,12 +1082,14 @@ const styles = StyleSheet.create({
     paddingTop: 0, // Kein Padding oben für vollflächiges Bild
     marginLeft: 12,
      // Reduziert von 3 auf 2 (1px weniger Abstand)
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.09,
-    shadowRadius: 2,
+     shadowColor: '#000',           // Shadow Color: schwarz
+     shadowOffset: { 
+       width: 0,                    // Offset X: 0.0
+       height: 2                    // Offset Y: 2.0
+     },
+     shadowOpacity: 0.05,           // 9% Transparenz (sehr subtil!)
+     shadowRadius: 2,    
     borderRadius: 16,
-    elevation: 2,
     justifyContent: 'flex-start',
     height: 200, // Reduziert von 210 auf 200
   },

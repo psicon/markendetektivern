@@ -1,6 +1,7 @@
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import BatchActionLoader from '@/components/ui/BatchActionLoader';
+import FixedAndroidModal from '@/components/ui/FixedAndroidModal';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
@@ -18,15 +19,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-    Animated,
-    Dimensions,
-    Modal,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Animated,
+  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
 
@@ -863,18 +863,15 @@ export default function FavoritesScreen() {
       )}
 
       {/* Filter Modal EXAKT wie Einkaufszettel */}
-      <Modal
+      <FixedAndroidModal
         visible={showFilterModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
         onRequestClose={() => setShowFilterModal(false)}
+        isBottomSheet={true}
       >
         <View style={[styles.filterModalContainer, { backgroundColor: colors.background }]}>
           {/* Header */}
           <View style={styles.filterModalHeader}>
-            <View style={styles.handleContainer}>
-              <View style={[styles.handle, { backgroundColor: colors.icon }]} />
-            </View>
+            
             <View style={styles.headerRow}>
               <TouchableOpacity 
                 style={styles.closeButtonLeft}
@@ -974,7 +971,7 @@ export default function FavoritesScreen() {
             )}
           </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
 
       {/* Batch Action Loader */}
       <BatchActionLoader
@@ -1044,16 +1041,6 @@ const styles = StyleSheet.create({
   },
   filterModalHeader: {
     paddingBottom: 20,
-  },
-  handleContainer: {
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    opacity: 0.3,
   },
   headerRow: {
     flexDirection: 'row',

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Hintergrund -->
+    <item android:drawable="@color/splashscreen_background" />
+    
+    <!-- Logo mit Hintergrund zentriert - kleiner für alle Bildschirme -->
+    <item
+        android:width="96dp"
+        android:height="96dp"
+        android:gravity="center">
+        <layer-list>
+            <!-- Grüner Kreis Hintergrund -->
+            <item>
+                <shape android:shape="oval">
+                    <solid android:color="@color/ic_launcher_background" />
+                    <size android:width="96dp" android:height="96dp" />
+                </shape>
+            </item>
+            <!-- Logo Vordergrund kleiner skaliert -->
+            <item 
+                android:width="64dp"
+                android:height="64dp"
+                android:gravity="center"
+                android:drawable="@mipmap/ic_launcher_foreground" />
+        </layer-list>
+    </item>
+</layer-list>
+  

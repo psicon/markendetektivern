@@ -23,7 +23,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "953",
+      "buildNumber": "957",
       "appleTeamId": "MZD2N2F887",
       "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true,
@@ -41,7 +41,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0d8575"
       },
       "edgeToEdgeEnabled": true,
       "config": {
@@ -55,7 +55,7 @@
       ],
       "package": "de.markendetektive",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 2
+      "versionCode": 973
     },
     "web": {
       "bundler": "metro",
@@ -98,6 +98,10 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "react-native-google-mobile-ads": {
+      "android_app_id": "ca-app-pub-9082891656550991~6267405772",
+      "ios_app_id": "ca-app-pub-9082891656550991~3669162596"
     },
     "extra": {
       "router": {},

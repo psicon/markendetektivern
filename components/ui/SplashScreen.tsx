@@ -1,13 +1,16 @@
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useRef } from 'react';
-import { Animated, Dimensions, StyleSheet } from 'react-native';
+import { Animated, Dimensions, Platform, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const isSmallDevice = SCREEN_HEIGHT < 700;
+const isAndroid = Platform.OS === 'android';
 
 interface SplashScreenProps {
   onAnimationComplete?: () => void;
@@ -95,6 +98,78 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onAnimationComplete 
     };
   }, [logoScale, logoOpacity, textOpacity, backgroundOpacity, pulseAnim, onAnimationComplete]);
 
+  // Android: Einfacher, zentrierter Screen ohne SafeAreaView
+  if (isAndroid) {
+    return (
+      <Animated.View 
+        style={[
+          styles.container,
+          { opacity: backgroundOpacity }
+        ]}
+      >
+        <LinearGradient
+          colors={[colors.primary, colors.secondary || colors.primary]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        
+        <View style={styles.androidContent}>
+          {/* Logo */}
+          <Animated.View
+            style={[
+              styles.androidLogoWrapper,
+              {
+                opacity: logoOpacity,
+                transform: [{ scale: logoScale }],
+              },
+            ]}
+          >
+            <CustomIcon 
+              name="iconBlack" 
+              size={60} 
+              color="white"
+            />
+          </Animated.View>
+   
+          {/* Text - Einfach und sicher */}
+          <Animated.View
+            style={[
+              styles.androidTextContainer,
+              { opacity: textOpacity },
+            ]}
+          >
+            <Text style={styles.androidAppName}>
+              MarkenDetektive
+            </Text>
+            <Text style={styles.androidTagline}>
+              Wir zeigen dir,{'\n'}wer dahinter steckt!
+            </Text>
+          </Animated.View>
+
+          {/* Loading Indicator */}
+          <Animated.View
+            style={[
+              styles.androidLoadingContainer,
+              { opacity: textOpacity },
+            ]}
+          >
+            <Animated.View
+              style={[
+                styles.loadingDot,
+                {
+                  transform: [{ scale: pulseAnim }],
+                  opacity: textOpacity,
+                },
+              ]}
+            />
+          </Animated.View>
+        </View>
+      </Animated.View>
+    );
+  }
+
+  // iOS: Original Screen
   return (
     <Animated.View 
       style={[
@@ -109,61 +184,63 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onAnimationComplete 
         style={StyleSheet.absoluteFillObject}
       />
       
-      <ThemedView style={styles.content}>
-        {/* Logo/Icon */}
-        <Animated.View
-          style={[
-            styles.logoContainer,
-            {
-              opacity: logoOpacity,
-              transform: [{ scale: logoScale }],
-            },
-          ]}
-        >
-          <CustomIcon 
-            name="iconBlack" 
-            size={100} 
-            color="white"
-          />
-        </Animated.View>
-
-        {/* App Name */}
-        <Animated.View
-          style={[
-            styles.textContainer,
-            { opacity: textOpacity },
-          ]}
-        >
-          <ThemedText style={styles.appName}>
-            MarkenDetektive
-          </ThemedText>
-          <ThemedText style={styles.tagline}>
-            Wir zeigen dir, wer dahinter steckt!
-          </ThemedText>
-        </Animated.View>
-
-        {/* Loading Indicator */}
-        <Animated.View
-          style={[
-            styles.loadingContainer,
-            { opacity: textOpacity },
-          ]}
-        >
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.content}>
+          {/* Logo/Icon mit Animation */}
           <Animated.View
             style={[
-              styles.loadingDot,
+              styles.logoWrapper,
               {
-                transform: [
-                  {
-                    scale: pulseAnim,
-                  },
-                ],
-                opacity: textOpacity,
+                opacity: logoOpacity,
+                transform: [{ scale: logoScale }],
               },
             ]}
-          />
-        </Animated.View>
-      </ThemedView>
+          >
+            <CustomIcon 
+              name="iconBlack" 
+              size={isSmallDevice ? 60 : 70} 
+              color="white"
+            />
+          </Animated.View>
+   
+          {/* App Name */}
+          <Animated.View
+            style={[
+              styles.textContainer,
+              { opacity: textOpacity },
+            ]}
+          >
+            <Text style={styles.appName}>
+              MarkenDetektive
+            </Text>
+            <Text style={styles.tagline}>
+              Wir zeigen dir, wer dahinter steckt!
+            </Text>
+          </Animated.View>
+
+          {/* Loading Indicator */}
+          <Animated.View
+            style={[
+              styles.loadingContainer,
+              { opacity: textOpacity },
+            ]}
+          >
+            <Animated.View
+              style={[
+                styles.loadingDot,
+                {
+                  transform: [
+                    {
+                      scale: pulseAnim,
+                    },
+                  ],
+                  opacity: textOpacity,
+                },
+              ]}
+            />
+          </Animated.View>
+        </View>
+      </SafeAreaView>
     </Animated.View>
   );
 };
@@ -177,69 +254,114 @@ const styles = StyleSheet.create({
     bottom: 0,
     zIndex: 1000,
   },
+  safeArea: {
+    flex: 1,
+  },
   content: {
     flex: 1,
     backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Math.max(20, width * 0.05), // Responsive Padding
-    paddingVertical: Math.max(40, height * 0.05), // Responsive Vertical Padding
+    paddingHorizontal: isAndroid ? 32 : 20,
+    paddingVertical: isAndroid ? 40 : 20,
   },
-  logoContainer: {
-    marginBottom: 40,
+  logoWrapper: {
+    marginBottom: isAndroid ? 16 : 20,
     alignItems: 'center',
     justifyContent: 'center',
-    width: Math.min(160, width * 0.4), // Responsive Container-Größe
-    height: Math.min(160, width * 0.4),
-    borderRadius: Math.min(80, width * 0.2),
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 15,
   },
   textContainer: {
     alignItems: 'center',
-    marginBottom: 60,
-    paddingHorizontal: 20,
-    maxWidth: width - 40, // Verhindert Abschneiden
+    width: '100%',
+    paddingHorizontal: isAndroid ? 20 : 10,
+    maxWidth: isAndroid ? Math.min(280, SCREEN_WIDTH - 64) : 400,
   },
   appName: {
-    fontSize: Math.min(34, width * 0.085), // Etwas kleinere Font-Größe für längeren Namen
+    fontSize: isAndroid 
+      ? (isSmallDevice ? 20 : 24) 
+      : (isSmallDevice ? 24 : 28),
     fontFamily: 'Nunito_700Bold',
     color: 'white',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: isAndroid ? 6 : 8,
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
-    lineHeight: Math.min(42, width * 0.105), // Angepasste Line-Height
-    flexWrap: 'wrap', // Ermöglicht Umbruch falls nötig
+    ...(isAndroid && {
+      includeFontPadding: false,
+      textAlignVertical: 'center',
+    }),
   },
   tagline: {
-    fontSize: Math.min(16, width * 0.045), // Responsive Font-Größe
+    fontSize: isAndroid 
+      ? (isSmallDevice ? 12 : 14) 
+      : (isSmallDevice ? 14 : 16),
     fontFamily: 'Nunito_400Regular',
     color: 'rgba(255, 255, 255, 0.9)',
     textAlign: 'center',
     textShadowColor: 'rgba(0, 0, 0, 0.2)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
-    lineHeight: Math.min(22, width * 0.055), // Responsive Line-Height
-    maxWidth: width - 80, // Extra Schutz vor Abschneiden
+    lineHeight: isAndroid 
+      ? (isSmallDevice ? 16 : 18) 
+      : (isSmallDevice ? 20 : 22),
+    paddingHorizontal: isAndroid ? 4 : 0,
+    ...(isAndroid && {
+      includeFontPadding: false,
+      textAlignVertical: 'center',
+    }),
   },
   loadingContainer: {
     position: 'absolute',
-    bottom: Math.max(80, height * 0.1), // Responsive Bottom-Position
+    bottom: 60,
     alignItems: 'center',
+    alignSelf: 'center',
   },
   loadingDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: 'rgba(255, 255, 255, 0.8)',
+  },
+  
+  // Android-spezifische Styles - einfach und bombensicher
+  androidContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+    paddingVertical: 60,
+  },
+  androidLogoWrapper: {
+    marginBottom: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  androidTextContainer: {
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 260,
+  },
+  androidAppName: {
+    fontSize: 22,
+    fontFamily: 'Nunito_700Bold',
+    color: 'white',
+    textAlign: 'center',
+    marginBottom: 12, 
+    includeFontPadding: false,
+  },
+  androidTagline: {
+    fontSize: 13,
+    fontFamily: 'Nunito_400Regular',
+    color: 'rgba(255, 255, 255, 0.95)',
+    textAlign: 'center', 
+    lineHeight: 18,
+    includeFontPadding: false,
+  },
+  androidLoadingContainer: {
+    position: 'absolute',
+    bottom: 80,
+    alignItems: 'center',
+    alignSelf: 'center',
   },
 });

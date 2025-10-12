@@ -1,7 +1,9 @@
 import { Toasts } from '@backpackapp-io/react-native-toast';
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
+import * as NavigationBar from 'expo-navigation-bar';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -10,6 +12,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { FontLoader } from '@/components/ui/FontLoader';
 import { GamificationProvider } from '@/components/ui/GamificationProvider';
 import { SplashScreen } from '@/components/ui/SplashScreen';
+import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { AnalyticsProvider } from '@/lib/contexts/AnalyticsProvider';
 import { AuthProvider } from '@/lib/contexts/AuthContext';
@@ -17,6 +20,7 @@ import { PushNotificationProvider } from '@/lib/contexts/PushNotificationProvide
 import { RevenueCatProvider } from '@/lib/contexts/RevenueCatProvider';
 import { ThemeProvider } from '@/lib/contexts/ThemeContext';
 import { adMobService } from '@/lib/services/adMobService';
+import { configureGoogleSignIn } from '@/lib/services/auth/googleAuth';
 import { interstitialAdService } from '@/lib/services/interstitialAdService';
 import { testFlightLogger } from '@/lib/utils/testflightLogger';
 import React, { useEffect, useState } from 'react';
@@ -24,11 +28,30 @@ import React, { useEffect, useState } from 'react';
 // Komponente die sowohl FontLoader als auch Navigation mit Theme verwaltet
 function ThemedApp() {
   const colorScheme = useColorScheme();
-  const [showSplash, setShowSplash] = useState(true);
+  // Android: Nur nativen Splash verwenden, iOS: Custom Splash
+  const [showSplash, setShowSplash] = useState(Platform.OS === 'ios');
 
   const handleSplashComplete = () => {
     setShowSplash(false);
   };
+
+  // Android NavigationBar fix
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      const colors = Colors[colorScheme ?? 'light'];
+      NavigationBar.setBackgroundColorAsync(colors.background);
+      NavigationBar.setButtonStyleAsync(colorScheme === 'dark' ? 'light' : 'dark');
+      NavigationBar.setVisibilityAsync('visible');
+      NavigationBar.setBehaviorAsync('inset-swipe');
+    }
+  }, [colorScheme]);
+
+  // Configure Google Sign-In early
+  useEffect(() => {
+    configureGoogleSignIn().catch(error => {
+      console.log('Google Sign-In configuration error:', error);
+    });
+  }, []);
 
   return (
     <FontLoader>
@@ -55,7 +78,11 @@ function ThemedApp() {
                 />
                 <Stack.Screen name="+not-found" />
               </Stack>
-              <StatusBar style="auto" />
+              <StatusBar 
+                style={colorScheme === 'dark' ? 'light' : 'dark'} 
+                translucent={false}
+                backgroundColor={Colors[colorScheme ?? 'light'].background}
+              />
               
               {/* Splash Screen Overlay */}
               {showSplash && (

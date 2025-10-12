@@ -1,11 +1,11 @@
 // Fallback for using MaterialIcons on Android and web.
 
-import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { SymbolViewProps, SymbolWeight } from 'expo-symbols';
 import { ComponentProps } from 'react';
 import { OpaqueColorValue, type StyleProp, type TextStyle } from 'react-native';
 
-type IconMapping = Record<SymbolViewProps['name'], ComponentProps<typeof MaterialIcons>['name']>;
+type IconMapping = Record<SymbolViewProps['name'], ComponentProps<typeof MaterialCommunityIcons>['name']>;
 type IconSymbolName = keyof typeof MAPPING;
 
 /**
@@ -18,78 +18,173 @@ const MAPPING = {
   'house.fill': 'home',
   'chevron.left': 'chevron-left',
   'chevron.right': 'chevron-right',
-  'chevron.left.forwardslash.chevron.right': 'code',
-  'arrow.right': 'arrow-forward',
-  'arrow.left.arrow.right': 'swap-horiz',
+  'chevron.left.forwardslash.chevron.right': 'code-tags',
+  'arrow.right': 'arrow-right',
+  'arrow.left.arrow.right': 'swap-horizontal',
+  'line.3.horizontal': 'menu',
+  'chevron.down': 'chevron-down',
+  'chevron.up': 'chevron-up',
+  'arrow.left': 'arrow-left',
+  'arrow.clockwise': 'refresh',
+  'arrow.uturn.left': 'undo',
+  'arrow.uturn.right': 'redo',
+  'person.crop.circle.badge.plus': 'account-plus',
   
   // User/Person
   'person.circle': 'account-circle',
   'person.circle.fill': 'account-circle',
-  'person.badge.plus': 'person-add',
-  'person.2': 'people',
+  'person.badge.plus': 'account-plus',
+  'person.2': 'account-multiple',
+  'person.crop.circle.badge.questionmark': 'help',
   
   // Common Actions
-  'square.and.pencil': 'edit',
-  'square.and.arrow.up': 'share',
-  'magnifyingglass': 'search',
+  'square.and.pencil': 'pencil',
+  'square.and.arrow.up': 'share-variant',
+  'magnifyingglass': 'magnify',
   'xmark': 'close',
-  'xmark.circle.fill': 'cancel',
+  'xmark.circle': 'close-circle-outline',
+  'xmark.circle.fill': 'close-circle',
   'checkmark': 'check',
-  'info.circle': 'info',
+  'checkmark.circle.fill': 'check-circle',
+  'info.circle': 'information',
+  'plus.circle.fill': 'plus-circle',
+  'trash': 'trash-can-outline',
+  'trash.fill': 'trash-can',
+  'hand.thumbsup.fill': 'thumb-up',
+  'hand.thumbsdown.fill': 'thumb-down',
   
   // Objects
-  'envelope': 'email',
-  'calendar': 'event',
-  'location.fill': 'location-on',
-  'mappin.circle.fill': 'place',
-  'cart': 'shopping-cart',
-  'cart.fill': 'shopping-cart',
-  'cart.badge.plus': 'add-shopping-cart',
-  'heart': 'favorite-border',
-  'heart.fill': 'favorite',
+  'envelope': 'email-outline',
+  'calendar': 'calendar',
+  'location.fill': 'map-marker',
+  'mappin.circle.fill': 'map-marker',
+  'cart': 'cart-outline',
+  'cart.fill': 'cart',
+  'cart.badge.plus': 'cart-plus',
+  'heart': 'heart-outline',
+  'heart.fill': 'heart',
   'star': 'star-outline',
   'star.fill': 'star',
   'lightbulb': 'lightbulb-outline',
-  'crown': 'workspace-premium',
-  'shield': 'security',
-  'doc': 'description',
-  'doc.text': 'description',
-  'newspaper': 'article',
-  'photo': 'image',
-  'sparkles': 'auto-awesome',
-  'barcode': 'qr-code-scanner',
+  'crown': 'crown',
+  'crown.fill': 'crown',
+  'shield': 'shield-outline',
+  'doc': 'file-document-outline',
+  'doc.text': 'file-document',
+  'newspaper': 'newspaper',
+  'photo': 'image-outline',
+  'sparkles': 'auto-fix',
+  'barcode': 'barcode-scan',
+  'gift': 'gift-outline',
+  'gift.fill': 'gift',
+  'plus': 'plus',
+  'tag.fill': 'tag',
+  'lightbulb.max.fill': 'lightbulb-on',
+  'clock.badge.checkmark': 'clock-check',
+  'lock': 'lock',
+  'lock.fill': 'lock',
+  'flame.fill': 'fire',
+  'folder.fill': 'folder',
+  'clock': 'clock-outline',
+  'clock.fill': 'clock',
+  'trophy': 'trophy-outline',
+  'trophy.fill': 'trophy',
+  'eurosign.circle.fill': 'currency-eur',
+  'icloud.and.arrow.up': 'cloud-upload-outline',
+  'building.2': 'office-building',
+  'leaf': 'leaf',
+  'leaf.fill': 'leaf',
+  'bubble.left.and.bubble.right': 'forum',
+  'camera.fill': 'camera',
+  'keyboard': 'keyboard',
+  'wand.and.stars': 'wizard-hat',
+  'lightbulb.fill': 'lightbulb-on',
   
   // Charts/Data
-  'chart.bar': 'bar-chart',
-  'chart.bar.xaxis': 'analytics',
-  'square.grid.2x2': 'grid-view',
+  'chart.bar': 'chart-bar',
+  'chart.bar.xaxis': 'chart-line',
+  'chart.bar.fill': 'chart-bar',
+  'chart.line.uptrend.xyaxis': 'trending-up',
+  'square.grid.2x2': 'view-grid-outline',
   'list.bullet': 'format-list-bulleted',
   'line.3.horizontal': 'menu',
   
   // Business/Shop
-  'storefront': 'store',
-  'cube': 'view-in-ar',
-  'cube.box': 'inventory-2',
-  'eurosign': 'euro',
+  'storefront': 'storefront-outline',
+  'cube': 'cube-outline',
+  'cube.box': 'archive',
+  'eurosign': 'currency-eur',
   'percent': 'percent',
-  'scale.3d': 'balance',
+  'scale.3d': 'scale-balance',
+  'chart.bar': 'chart-bar',
+  'chart.bar.xaxis': 'chart-box',
+  'chart.bar.fill': 'chart-bar',
+  'chart.line.uptrend.xyaxis': 'chart-line',
+  'percent': 'percent',
+  'square.grid.2x2': 'view-grid',
+  'square.and.pencil': 'pencil-box',
+  'number': 'pound',
+  'keyboard': 'keyboard',
+  'camera.rotate': 'camera-flip',
+  'bubble.left.and.bubble.right': 'message-text',
+  'building.2': 'office-building',
+  'flame.fill': 'fire',
+  'clock.fill': 'clock',
+  'spark': 'flash',
+  'clock': 'clock-outline',
+  'crown': 'crown-outline',
+  'crown.fill': 'crown',
+  'leaf': 'leaf',
+  'bubble.left': 'message-outline',
+  'lock': 'lock',
+  'lock.open': 'lock-open',
+  'folder.fill': 'folder',
+  'eurosign': 'currency-eur',
   
   // Settings/Tools
-  'gear': 'settings',
+  'gear': 'cog',
   'paperplane.fill': 'send',
-  'bolt': 'flash-on',
-  'bolt.fill': 'flash-on',
-  'camera.rotate': 'flip-camera-android',
-  'keyboard': 'keyboard',
+  'bolt': 'flash-outline',
+  'bolt.fill': 'flash',
+  'camera.rotate': 'camera-switch',
   
   // Alerts
-  'exclamationmark.triangle': 'warning',
-  'questionmark.circle': 'help-outline',
+  'exclamationmark.triangle': 'alert-outline',
+  'questionmark.circle': 'help-circle-outline',
+  'circle': 'checkbox-blank-circle-outline',
+  'circle.fill': 'circle',
+  'square': 'square-outline',
+  'checkmark.square.fill': 'checkbox-marked',
+  'line.3.horizontal.decrease': 'filter-outline',
+  'line.horizontal.3.decrease': 'filter-outline',
+  'textformat.abc': 'format-letter-case',
+  'pawprint': 'paw',
+  'rosette': 'seal',
+  'sparkle.magnifyingglass': 'magnify-plus-outline',
+  'sun.max': 'white-balance-sunny',
+  'magnifyingglass.circle': 'magnify',
+  'magnifyingglass.circle.fill': 'magnify',
+  'eurosign.circle': 'currency-eur',
+  'target': 'target',
+  'arrow.triangle.2.circlepath': 'sync',
+  'tag': 'tag-outline',
   
   // Brand specific
-  'apple.logo': 'phone-iphone',
-  'moon': 'dark-mode',
-  'number': 'numbers',
+  'apple.logo': 'apple-ios',
+  'moon': 'weather-night',
+  'number': 'pound',
+  'wineglass': 'glass-wine',
+  'cup.and.saucer': 'coffee',
+  'birthday.cake': 'cake-variant',
+  'drop.fill': 'water',
+  'fork.knife': 'silverware-fork-knife',
+  'fish': 'fish',
+  'bag': 'bag-personal-outline',
+  'snowflake': 'snowflake',
+  'archivebox': 'archive',
+  'heart.circle': 'heart-circle',
+  'pawprint.fill': 'paw',
+  'cross.case': 'medical-bag',
 } as IconMapping;
 
 /**
@@ -109,5 +204,13 @@ export function IconSymbol({
   style?: StyleProp<TextStyle>;
   weight?: SymbolWeight;
 }) {
-  return <MaterialIcons color={color} size={size} name={MAPPING[name]} style={style} />;
+  // Use mapped icon or fallback to a default icon
+  const iconName = MAPPING[name] || 'help-circle-outline';
+  
+  // Log unmapped icons in development
+  if (__DEV__ && !MAPPING[name]) {
+    console.warn(`IconSymbol: No mapping found for "${name}", using fallback icon`);
+  }
+  
+  return <MaterialCommunityIcons color={color} size={size} name={iconName} style={style} />;
 }

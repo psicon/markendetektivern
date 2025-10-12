@@ -2,7 +2,9 @@ import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { BannerAd } from '@/components/ads/BannerAd';
+import FixedAndroidModal from '@/components/ui/FixedAndroidModal';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import ImageViewer from '@/components/ui/ImageViewer';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
 import { CommentSkeleton, CommentsHeaderSkeleton, RatingOverviewSkeleton, ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
@@ -21,6 +23,7 @@ import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import { interstitialAdService } from '@/lib/services/interstitialAdService';
 import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
+import ScrapedProductsService from '@/lib/services/scrapedProductsService';
 import { showAlreadyInCartToast, showCartAddedToast, showFavoriteAddedToast, showFavoriteRemovedToast, showInfoToast, showRatingToast } from '@/lib/services/ui/toast';
 import { updateUserStats } from '@/lib/services/userProfile';
 import { MarkenProduktWithDetails, ProductWithDetails } from '@/lib/types/firestore';
@@ -34,7 +37,7 @@ import {
   Animated,
   Dimensions,
   Image,
-  Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -386,7 +389,8 @@ const ProductComparisonContent = ({
   openFoodData, 
   colors,
   comparisonData,
-  productAnimations
+  productAnimations,
+  insets
 }: { 
   mainProduct: MarkenProduktWithDetails;
   selectedProducts: ProductWithDetails[];
@@ -399,6 +403,7 @@ const ProductComparisonContent = ({
     clickedWasNoName: boolean;
   } | null;
   productAnimations: {[key: string]: Animated.Value};
+  insets: { top: number; bottom: number; left: number; right: number };
 }) => {
   // Similarity Info Modal State
   const [showSimilarityInfo, setShowSimilarityInfo] = useState(false);
@@ -1059,18 +1064,21 @@ const ProductComparisonContent = ({
       <View style={{ height: 60 }} />
 
       {/* Similarity Info Modal */}
-      <Modal
+      <FixedAndroidModal
         visible={showSimilarityInfo}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        isBottomSheet={true}
         onRequestClose={() => setShowSimilarityInfo(false)}
       >
-        <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
+        <View style={[
+          styles.bottomSheetContainer,
+          { 
+            backgroundColor: colors.background,
+            paddingBottom: Platform.OS === 'android' ? insets.bottom : 0,
+          }
+        ]}>
           {/* Bottom Sheet Header */}
           <View style={styles.bottomSheetHeader}>
-            <View style={styles.handleContainer}>
-              <View style={styles.handle} />
-            </View>
+            
             <View style={styles.headerRow}>
               <TouchableOpacity 
                 style={styles.closeButtonLeft}
@@ -1186,13 +1194,13 @@ const ProductComparisonContent = ({
             </View>
           </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
     </ScrollView>
   );
 };
 
 export default function ProductComparisonScreen() {
-  const { id, type } = useLocalSearchParams();
+  const { id, type, source } = useLocalSearchParams();
   
   // Product comparison loaded - reduced logging
   
@@ -1726,9 +1734,111 @@ export default function ProductComparisonScreen() {
     }
 
     try {
-
+      // Handle fallback products
+      if (type === 'fallback') {
+        console.log(`🔄 Loading fallback product: ${id} from ${source}`);
+        
+        // Lade Fallback-Produkt
+        const fallbackProduct = await ScrapedProductsService.searchFallbackProduct(id);
+        
+        if (fallbackProduct) {
+          // Konvertiere Fallback-Produkt in Markenprodukt-Format für die Anzeige
+          const convertedProduct: MarkenProduktWithDetails = {
+            id: fallbackProduct.displayData.id,
+            name: fallbackProduct.displayData.name,
+            marke: fallbackProduct.displayData.brandName ? {
+              bezeichnung: fallbackProduct.displayData.brandName,
+              id: 'fallback-brand',
+              bild: null
+            } : undefined,
+            preis: fallbackProduct.displayData.price || 0,
+            packSize: parseInt(fallbackProduct.displayData.packSize?.replace(/[^\d.,]/g, '').replace(',', '.') || '0'),
+            bild: fallbackProduct.displayData.imageUrl || null,
+            kategorie: {
+              id: 'fallback-category',
+              bezeichnung: fallbackProduct.displayData.category || 'Lebensmittel' // Kategorie aus Daten oder Fallback
+            },
+            zutaten: fallbackProduct.displayData.ingredients || '',
+            nutriscore: fallbackProduct.displayData.scores?.nutriscore,
+            ecoscore: fallbackProduct.displayData.scores?.ecoscore,
+            nova: fallbackProduct.displayData.scores?.nova,
+            naehrwerte: {
+              brennwertKcal: parseFloat(fallbackProduct.displayData.nutrition?.calories || '0'),
+              fett: parseFloat(fallbackProduct.displayData.nutrition?.fat || '0'),
+              gesaettigteFettsaeuren: 0,
+              kohlenhydrate: parseFloat(fallbackProduct.displayData.nutrition?.carbs || '0'),
+              zucker: parseFloat(fallbackProduct.displayData.nutrition?.sugar || '0'),
+              eiweiss: parseFloat(fallbackProduct.displayData.nutrition?.protein || '0'),
+              salz: parseFloat(fallbackProduct.displayData.nutrition?.salt || '0')
+            },
+            // Fallback-spezifische Felder
+            isFallback: true,
+            fallbackSource: source as string,
+            originalData: fallbackProduct
+          };
+          
+          // Setze Daten für Anzeige
+          console.log('📦 Setting fallback comparison data:', {
+            productName: convertedProduct.name,
+            hasBrand: !!convertedProduct.marke,
+            hasPrice: convertedProduct.preis > 0,
+            hasImage: !!convertedProduct.bild
+          });
+          
+          setComparisonData({
+            mainProduct: convertedProduct,
+            relatedNoNameProducts: [], // Keine NoName-Alternativen für Fallback-Produkte
+            clickedProductId: id,
+            clickedWasNoName: false,
+            // Diese Felder werden von der UI erwartet
+            markenprodukt: convertedProduct,
+            noNameProduct: null
+          });
+          
+          setLoading(false);
+          
+          // Animiere die Hauptprodukt-Karte
+          setTimeout(() => {
+            Animated.timing(headerAnimation, {
+              toValue: 1,
+              duration: 400,
+              useNativeDriver: true,
+            }).start();
+          }, 150);
+          
+          animateProductCard(convertedProduct.id, 100);
+          
+          // Bei Fallback-Produkten laden wir 3 NoName-Alternativen aus der gleichen Kategorie
+          if (convertedProduct.kategorie?.bezeichnung) {
+            setTimeout(() => {
+              console.log('🔍 Loading 3 NoName alternatives for fallback product');
+              loadSimilarProducts(convertedProduct.kategorie.bezeichnung, id, 3);
+            }, 400);
+          }
+          
+          // Track Fallback product view
+          if (analytics.trackEvent) {
+            analytics.trackEvent({
+              event_name: 'fallback_product_view',
+              event_category: 'product_view',
+              product_id: id,
+              product_name: fallbackProduct.displayData.name,
+              fallback_source: source,
+              has_price: !!fallbackProduct.displayData.price,
+              has_image: !!fallbackProduct.displayData.imageUrl
+            });
+          }
+          
+          return;
+        } else {
+          // Fallback-Produkt nicht gefunden
+          setError('Produkt konnte nicht geladen werden');
+          setLoading(false);
+          return;
+        }
+      }
       
-      // Determine product type from URL parameter
+      // Original code for normal products
       const isMarkenProdukt = type === 'brand';
       
       // Get complete comparison data (brand product + related NoNames)
@@ -2102,12 +2212,12 @@ export default function ProductComparisonScreen() {
           {selectedProducts.size > 0 && (
             <Animated.View style={{
               position: 'absolute',
-              top: 2,
-              right: -4,
+              top: 0,
+              right: -2,
               backgroundColor: colors.error,
               borderRadius: 10,
-              minWidth: 20,
-              height: 20,
+              minWidth: 16,
+              height: 16,
               justifyContent: 'center',
               alignItems: 'center',
                transform: [{ scale: headerButtonAnimation }]
@@ -2150,9 +2260,14 @@ export default function ProductComparisonScreen() {
         headerAnimation.setValue(0);
         weitereHeaderAnimation.setValue(0);
         
-
+        // Check if it's a fallback product
+        if (type === 'fallback') {
+          // Call loadComparisonData for fallback products
+          await loadComparisonData();
+          return;
+        }
         
-        // Determine product type from URL parameter
+        // Original code for normal products
         let isMarkenProdukt = type === 'brand';
         
         // SICHERHEITSCHECK: Prüfe echten Produkttyp aus Firestore
@@ -2559,12 +2674,15 @@ export default function ProductComparisonScreen() {
         >
           {/* Top Chips Row */}
           <View style={styles.chipsRow}>
-            <View style={[styles.brandChip, { backgroundColor: colors.primary }]}>
-              <IconSymbol name="square.grid.2x2" size={12} color="white" />
-              <ThemedText style={styles.chipText}>
-              Markenprodukt
-            </ThemedText>
+            {/* Markenprodukt Chip nur für echte Produkte, nicht für Fallbacks */}
+            {!comparisonData.mainProduct?.isFallback && (
+              <View style={[styles.brandChip, { backgroundColor: colors.primary }]}>
+                <IconSymbol name="square.grid.2x2" size={12} color="white" />
+                <ThemedText style={styles.chipText}>
+                  Markenprodukt
+                </ThemedText>
               </View>
+            )}
             {comparisonData.mainProduct.kategorie && (
               <View style={[styles.categoryMiniCard, { backgroundColor: colors.card }]}>
                 <ThemedText style={[styles.categoryText, { color: colors.icon }]}>
@@ -2607,7 +2725,7 @@ export default function ProductComparisonScreen() {
                         />
                       )}
                       <ThemedText style={[styles.brandText, { color: colors.primary }]}>
-                  {comparisonData.mainProduct.marke?.name || comparisonData.mainProduct.marke?.herstellername || 'Markenprodukt'}
+                  {comparisonData.mainProduct.marke?.bezeichnung || comparisonData.mainProduct.marke?.name || comparisonData.mainProduct.marke?.herstellername || 'Markenprodukt'}
                       </ThemedText>
                 </View>
               <ThemedText style={styles.productTitle}>
@@ -2631,9 +2749,12 @@ export default function ProductComparisonScreen() {
           {/* Horizontal Divider */}
           <View style={[styles.horizontalDivider, { backgroundColor: colors.border }]} />
 
-          {/* Ratings and Cart Button Row */}
-          <View style={styles.ratingsCartRowDirect}>
-          <TouchableOpacity 
+          {/* Ratings and Cart Button Row - Nur anzeigen wenn es kein Fallback ist */}
+          {!comparisonData.mainProduct?.isFallback ? (
+            <View style={styles.ratingsCartRowDirect}>
+          {/* Bewertungen nur für echte Produkte anzeigen, nicht für Fallbacks */}
+          {!comparisonData.mainProduct?.isFallback && (
+            <TouchableOpacity 
               style={styles.ratingsSection}
               onPress={() => {
                 setSelectedProductForDetails(comparisonData.mainProduct);
@@ -2655,7 +2776,7 @@ export default function ProductComparisonScreen() {
                   <StarRatingDisplay 
                     rating={comparisonData.mainProduct.averageRatingOverall || 0}
                     colors={colors}
-                    size={16}
+                    size={18}
                     showValue={false}
                   />
                   <ThemedText style={[styles.ratingsCount, { color: colors.icon }]}>
@@ -2664,63 +2785,70 @@ export default function ProductComparisonScreen() {
                 </View>
               </View>
             </TouchableOpacity>
+          )}
             
-            {/* Favorite Heart Button */}
-            <TouchableOpacity 
-              style={[styles.cartButtonGray, { backgroundColor: colors.background, marginRight: 12 }]} 
-              onPress={async () => {
-                if (comparisonData?.mainProduct) {
-                  // Intelligente Typ-Erkennung
-                  let correctType: 'markenprodukt' | 'noname' = type === 'brand' ? 'markenprodukt' : 'noname';
-                  
-                  // SICHERHEITSCHECK: Falls URL-Parameter falsch ist
-                  if (correctType === 'noname') {
-                    const markenCheck = await getDoc(doc(db, 'markenProdukte', comparisonData.mainProduct.id));
-                    if (markenCheck.exists()) {
-                      correctType = 'markenprodukt';
-                      console.log('🔧 FAVORIT-KORREKTUR: Typ korrigiert zu markenprodukt');
+            {/* Favorite Heart Button - Nur für echte Produkte, nicht für Fallbacks */}
+            {!comparisonData.mainProduct?.isFallback && (
+              <TouchableOpacity 
+                style={[styles.cartButtonGray, { backgroundColor: colors.background, marginRight: 12 }]} 
+                onPress={async () => {
+                  if (comparisonData?.mainProduct) {
+                    // Intelligente Typ-Erkennung
+                    let correctType: 'markenprodukt' | 'noname' = type === 'brand' ? 'markenprodukt' : 'noname';
+                    
+                    // SICHERHEITSCHECK: Falls URL-Parameter falsch ist
+                    if (correctType === 'noname') {
+                      const markenCheck = await getDoc(doc(db, 'markenProdukte', comparisonData.mainProduct.id));
+                      if (markenCheck.exists()) {
+                        correctType = 'markenprodukt';
+                        console.log('🔧 FAVORIT-KORREKTUR: Typ korrigiert zu markenprodukt');
+                      }
                     }
+                    
+                    // Animate heart before action
+                    animateButtonPress('main-product-heart');
+                    handleToggleFavorite(comparisonData.mainProduct, correctType);
                   }
-                  
-                  // Animate heart before action
-                  animateButtonPress('main-product-heart');
-                  handleToggleFavorite(comparisonData.mainProduct, correctType);
-                }
-              }}
-            >
-              <Animated.View style={{
-                transform: [{ scale: buttonAnimations['main-product-heart'] || new Animated.Value(1) }]
-              }}>
-                <IconSymbol 
-                  name={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? "heart.fill" : "heart"} 
-                  size={20} 
-                  color={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? colors.error : colors.icon} 
-                />
-              </Animated.View>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.cartButtonGray, { 
-                backgroundColor: isInCart ? colors.success : colors.background 
-              }]}
-              onPress={handleAddToCart}
-              disabled={isAddingToCart}
-            >
-              {isAddingToCart ? (
-                <ActivityIndicator size="small" color={isInCart ? "white" : colors.icon} />
-              ) : (
+                }}
+              >
                 <Animated.View style={{
-                  transform: [{ scale: buttonAnimations['main-cart-button'] || new Animated.Value(1) }]
+                  transform: [{ scale: buttonAnimations['main-product-heart'] || new Animated.Value(1) }]
                 }}>
                   <IconSymbol 
-                    name={isInCart ? "checkmark" : "plus"} 
+                    name={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? "heart.fill" : "heart"} 
                     size={20} 
-                    color={isInCart ? "white" : colors.icon}
+                    color={comparisonData?.mainProduct && (isLocalFavorite(comparisonData.mainProduct.id, 'markenprodukt') || isLocalFavorite(comparisonData.mainProduct.id, 'noname')) ? colors.error : colors.icon} 
                   />
                 </Animated.View>
+              </TouchableOpacity>
+            )}
+            
+            {/* Cart Button - Nur für echte Produkte, nicht für Fallbacks */}
+            {!comparisonData.mainProduct?.isFallback && (
+              <TouchableOpacity 
+                style={[styles.cartButtonGray, { 
+                  backgroundColor: isInCart ? colors.success : colors.background 
+                }]}
+                onPress={handleAddToCart}
+                disabled={isAddingToCart}
+              >
+                {isAddingToCart ? (
+                  <ActivityIndicator size="small" color={isInCart ? "white" : colors.icon} />
+                ) : (
+                  <Animated.View style={{
+                    transform: [{ scale: buttonAnimations['main-cart-button'] || new Animated.Value(1) }]
+                  }}>
+                    <IconSymbol 
+                      name={isInCart ? "checkmark" : "plus"} 
+                      size={20} 
+                      color={isInCart ? "white" : colors.icon}
+                    />
+                  </Animated.View>
                 )}
-          </TouchableOpacity>
+              </TouchableOpacity>
+            )}
         </View>
+          ) : null}
 
           {/* Details Button */}
           <TouchableOpacity 
@@ -2959,7 +3087,7 @@ export default function ProductComparisonScreen() {
                       <StarRatingDisplay 
                         rating={noNameProduct.averageRatingOverall || 0}
                         colors={colors}
-                        size={16}
+                        size={18}
                         showValue={false}
                       />
                       <ThemedText style={[styles.ratingsCount, { color: colors.icon }]}>
@@ -3036,8 +3164,8 @@ export default function ProductComparisonScreen() {
         })
           ) : null}
         
-          {/* 🆕 Weitere enttarnte Produkte für Stufe 3,4,5 */}
-          {comparisonData.relatedNoNameProducts.length > 0 && similarProducts.length > 0 && (
+          {/* 🆕 Weitere enttarnte Produkte für Stufe 3,4,5 - NICHT für Fallback-Produkte */}
+          {(comparisonData.relatedNoNameProducts.length > 0 && similarProducts.length > 0 && !comparisonData.mainProduct?.isFallback) && (
             <View style={{ marginTop: 6 }}>
               <Animated.View style={{ opacity: weitereHeaderAnimation, marginBottom: 12, alignItems: 'center' }}>
                 <ThemedText style={[styles.alternativesTitle, { textAlign: 'center' }]}>
@@ -3246,7 +3374,7 @@ export default function ProductComparisonScreen() {
                             <StarRatingDisplay 
                               rating={product.averageRatingOverall || 0}
                               colors={colors}
-                              size={16}
+                              size={18}
                               showValue={false}
                             />
                             <ThemedText style={[styles.ratingsCount, { color: colors.icon }]}>
@@ -3329,18 +3457,21 @@ export default function ProductComparisonScreen() {
 
       
       {/* Product Details Bottom Sheet */}
-      <Modal
+      <FixedAndroidModal
         visible={showProductDetails}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        isBottomSheet={true}
         onRequestClose={() => setShowProductDetails(false)}
       >
-        <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
+        <View style={[
+          styles.bottomSheetContainer,
+          { 
+            backgroundColor: colors.background,
+            paddingBottom: Platform.OS === 'android' ? insets.bottom : 0,
+          }
+        ]}>
           {/* Bottom Sheet Header */}
           <View style={styles.bottomSheetHeader}>
-            <View style={styles.handleContainer}>
-              <View style={styles.handle} />
-            </View>
+            
             <View style={styles.headerRow}>
             <TouchableOpacity 
                 style={styles.closeButtonLeft}
@@ -3367,6 +3498,25 @@ export default function ProductComparisonScreen() {
           </View>
           
           <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
+            {/* Fallback-Produkt Hinweis */}
+            {selectedProductForDetails?.isFallback && (
+              <View style={[styles.infoCard, { 
+                backgroundColor: colors.cardBackground,
+                borderWidth: 1,
+                borderColor: colors.primary + '30',
+                marginBottom: 16
+              }]}>
+                <View style={styles.sectionHeader}>
+                  <IconSymbol name="info.circle" size={18} color={colors.primary} />
+                  <ThemedText style={styles.sectionTitleText}>Externe Produktdaten</ThemedText>
+                </View>
+                <ThemedText style={[styles.infoCardDescription, { color: colors.icon }]}>
+                  Dieses Produkt stammt aus {selectedProductForDetails.fallbackSource === 'scraped' ? 'unseren Partnerdaten' : 'der OpenFood Datenbank'}. 
+                  Die Angaben können unvollständig sein.
+                </ThemedText>
+              </View>
+            )}
+            
                          {/* Similarity Section - nur bei NoName-Produkten anzeigen */}
              {(selectedProductForDetails as ProductWithDetails)?.stufe && (
                <View style={[styles.similarityCard, { backgroundColor: colors.cardBackground }]}>
@@ -3452,8 +3602,8 @@ export default function ProductComparisonScreen() {
               )}
               <View style={styles.infoRow}>
                 <ThemedText style={styles.infoLabel}>Ort:</ThemedText>
-                <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                  {(() => {
+                  <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+                    {(() => {
                     // Verwende die richtige Datenquelle je nach Produkttyp
                     const isNoNameProduct = selectedProductForDetails?.stufe;
                     let locationData;
@@ -3471,29 +3621,29 @@ export default function ProductComparisonScreen() {
                     const location = locationData.stadt || locationData.plz ? 
                       `${locationData.stadt || ''} ${locationData.plz ? `(${locationData.plz})` : ''}`.trim() : 
                       locationData.land;
-                    
-                    return location || 'Keine Daten verfügbar';
-                  })()}
-                </ThemedText>
+                      
+                      return location || 'Keine Daten verfügbar';
+                    })()}
+                  </ThemedText>
               </View>
               {/* Infos nur für Markenprodukte anzeigen */}
               {!selectedProductForDetails?.stufe && (
-                <View style={styles.infoRow}>
-                  <ThemedText style={styles.infoLabel}>Infos:</ThemedText>
+              <View style={styles.infoRow}>
+                <ThemedText style={styles.infoLabel}>Infos:</ThemedText>
                   <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                    {(() => {
+              {(() => {
                       // Für Markenprodukte: Infos aus der hersteller Collection (die Marken enthält)
                       const marke = selectedProductForDetails?.marke || selectedProductForDetails?.hersteller;
                       return marke?.infos || 'Keine weiteren Informationen';
                     })()}
-                  </ThemedText>
-                </View>
+                                </ThemedText>
+                              </View>
               )}
               {/* Hersteller nur für Markenprodukte anzeigen */}
               {!selectedProductForDetails?.stufe && (
-                <View style={styles.infoRow}>
-                  <ThemedText style={styles.infoLabel}>Hersteller:</ThemedText>
-                  <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+              <View style={styles.infoRow}>
+                      <ThemedText style={styles.infoLabel}>Hersteller:</ThemedText>
+                      <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
                     {(() => {
                       // Für Markenprodukte: Hersteller aus hersteller_new Collection
                       const marke = selectedProductForDetails?.marke || selectedProductForDetails?.hersteller;
@@ -3502,8 +3652,8 @@ export default function ProductComparisonScreen() {
                              marke?.herstellername || 
                              'Keine Hersteller-Daten verfügbar';
                     })()}
-                  </ThemedText>
-                </View>
+                      </ThemedText>
+                    </View>
               )}
               </View>
             </View>
@@ -3540,6 +3690,12 @@ export default function ProductComparisonScreen() {
                 <ThemedText style={styles.infoLabel}>Zutaten:</ThemedText>
                   <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
                     {(() => {
+                      // Prüfe ob es ein Fallback-Produkt ist
+                      if (selectedProductForDetails?.isFallback && selectedProductForDetails?.zutaten) {
+                        return selectedProductForDetails.zutaten;
+                      }
+                      
+                      // Original-Code für normale Produkte
                       const ean = selectedProductForDetails?.EANs?.[0];
                       if (!ean) return 'Keine Daten verfügbar';
                       const openFoodProduct = openFoodData.get(ean);
@@ -3551,6 +3707,48 @@ export default function ProductComparisonScreen() {
 
                 {/* Scores Row */}
                 {(() => {
+                  // Prüfe ob es ein Fallback-Produkt ist
+                  if (selectedProductForDetails?.isFallback) {
+                    const hasAnyScore = selectedProductForDetails?.nutriscore || 
+                                       selectedProductForDetails?.ecoscore || 
+                                       selectedProductForDetails?.nova;
+                    
+                    if (!hasAnyScore) return null;
+                    
+                    return (
+                      <View style={styles.infoRow}>
+                        <ThemedText style={styles.infoLabel}>Scores:</ThemedText>
+                        <View style={styles.scoresInlineRow}>
+                          {selectedProductForDetails?.nutriscore && (
+                            <View style={styles.scoreContainer}>
+                              <ScoreImage 
+                                type="nutri" 
+                                firestoreValue={selectedProductForDetails.nutriscore.toUpperCase()} 
+                              />
+                            </View>
+                          )}
+                          {selectedProductForDetails?.ecoscore && (
+                            <View style={styles.scoreContainer}>
+                              <ScoreImage 
+                                type="eco" 
+                                firestoreValue={selectedProductForDetails.ecoscore.toUpperCase()} 
+                              />
+                            </View>
+                          )}
+                          {selectedProductForDetails?.nova && (
+                            <View style={styles.scoreContainer}>
+                              <ScoreImage 
+                                type="nova" 
+                                firestoreValue={String(selectedProductForDetails.nova)} 
+                              />
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  }
+                  
+                  // Original-Code für normale Produkte
                   const ean = selectedProductForDetails?.EANs?.[0];
                   const openFoodProduct = ean ? openFoodData.get(ean) : null;
                   
@@ -3605,6 +3803,39 @@ export default function ProductComparisonScreen() {
               </View>
               <View style={styles.infoGrid}>
                 {(() => {
+                  // Prüfe ob es ein Fallback-Produkt ist
+                  if (selectedProductForDetails?.isFallback && selectedProductForDetails?.naehrwerte) {
+                    const naehrwerte = selectedProductForDetails.naehrwerte;
+                    const nutritionData = [
+                      { label: 'Brennwert', value: naehrwerte.brennwertKcal ? `${naehrwerte.brennwertKcal} kcal` : 'k.A.' },
+                      { label: 'Fett', value: naehrwerte.fett ? `${naehrwerte.fett} g` : 'k.A.' },
+                      { label: 'Kohlenhydrate', value: naehrwerte.kohlenhydrate ? `${naehrwerte.kohlenhydrate} g` : 'k.A.' },
+                      { label: '- davon Zucker', value: naehrwerte.zucker ? `${naehrwerte.zucker} g` : 'k.A.' },
+                      { label: 'Eiweiß', value: naehrwerte.eiweiss ? `${naehrwerte.eiweiss} g` : 'k.A.' },
+                      { label: 'Salz', value: naehrwerte.salz ? `${naehrwerte.salz} g` : 'k.A.' }
+                    ].filter(item => item.value !== 'k.A.');
+                    
+                    if (nutritionData.length === 0) {
+                      return (
+                        <View style={styles.infoRow}>
+                          <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+                            Keine Nährwertdaten verfügbar
+                          </ThemedText>
+                        </View>
+                      );
+                    }
+                    
+                    return nutritionData.map((item, index) => (
+                      <View key={index} style={styles.infoRow}>
+                        <ThemedText style={styles.infoLabel}>{item.label}:</ThemedText>
+                        <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
+                          {item.value}
+                        </ThemedText>
+                      </View>
+                    ));
+                  }
+                  
+                  // Original-Code für normale Produkte
                   if (!comparisonData?.mainProduct.EANs?.[0]) {
                     return (
               <View style={styles.infoRow}>
@@ -3640,38 +3871,37 @@ export default function ProductComparisonScreen() {
               </View>
               </View>
 
-            {/* Rating Button */}
+            {/* Rating Button - nicht für Fallback-Produkte */}
+            {!selectedProductForDetails?.isFallback && (
             <View style={styles.buttonSection}>
               <TouchableOpacity 
                 style={[styles.ratingButton, { backgroundColor: colors.primary }]}
-                onPress={async () => {
-                  const targetProduct = selectedProductForDetails || comparisonData?.mainProduct;
-                  console.log('🎯 Opening ratings from product details for:', targetProduct?.name);
+                  onPress={async () => {
+                    const targetProduct = selectedProductForDetails || comparisonData?.mainProduct;
+                    console.log('🎯 Opening ratings from product details for:', targetProduct?.name);
                   setShowProductDetails(false);
-                  setShowRatingsView(true); // Modal SOFORT öffnen!
-                  loadProductRatings(targetProduct); // Parallel laden (ohne await!)
+                    setShowRatingsView(true); // Modal SOFORT öffnen!
+                    loadProductRatings(targetProduct); // Parallel laden (ohne await!)
                 }}
               >
                 <ThemedText style={styles.ratingButtonText}>Bewertungen anzeigen</ThemedText>
               </TouchableOpacity>
             </View>
+            )}
           </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
 
       {/* Rating Bottom Sheet */}
-      <Modal
+      <FixedAndroidModal
         visible={showRatingModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        isBottomSheet={true}
         onRequestClose={() => setShowRatingModal(false)}
       >
         <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
           {/* Rating Header */}
           <View style={styles.bottomSheetHeader}>
-            <View style={styles.handleContainer}>
-              <View style={styles.handle} />
-            </View>
+            
             <View style={styles.headerRow}>
             <TouchableOpacity 
                 style={styles.closeButtonLeft}
@@ -3791,66 +4021,26 @@ export default function ProductComparisonScreen() {
               </View>
           </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
 
-      {/* Image Viewer Modal */}
-      <Modal
+      {/* Image Viewer */}
+      <ImageViewer
+        images={selectedImageUrl ? [{ uri: selectedImageUrl }] : []}
+        imageIndex={0}
         visible={imageViewerVisible}
-        transparent={true}
         onRequestClose={closeImageViewer}
-      >
-        <View style={styles.imageViewerContainer}>
-          <TouchableOpacity 
-            style={styles.imageViewerBackdrop}
-            onPress={closeImageViewer}
-          >
-            <View style={styles.imageViewerContent}>
-              <TouchableOpacity 
-                style={styles.closeButton}
-                onPress={closeImageViewer}
-              >
-                <IconSymbol name="xmark" size={24} color="white" />
-              </TouchableOpacity>
-              {/* Loading Indicator */}
-              {imageLoading && (
-                <View style={styles.imageLoader}>
-                  <View style={styles.loaderContainer}>
-                    <ActivityIndicator size="large" color="white" />
-                    <ThemedText style={styles.loaderText}>Bild wird geladen...</ThemedText>
-                  </View>
-                </View>
-              )}
-              
-              {selectedImageUrl && (
-                <Image 
-                  source={{ 
-                    uri: selectedImageUrl,
-                    cache: 'force-cache'  // Force use cached version
-                  }}
-                  style={styles.fullScreenImage}
-                  resizeMode="contain"
-                  onLoad={() => setImageLoading(false)}
-                  onError={() => setImageLoading(false)}
-                />
-              )}
-            </View>
-                      </TouchableOpacity>
-                  </View>
-      </Modal>
+      />
 
       {/* Ratings View Bottom Sheet */}
-      <Modal
+      <FixedAndroidModal
         visible={showRatingsView}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        isBottomSheet={true}
         onRequestClose={() => setShowRatingsView(false)}
       >
         <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
           {/* Header */}
           <View style={styles.bottomSheetHeader}>
-            <View style={styles.handleContainer}>
-              <View style={styles.handle} />
-                </View>
+            
             <View style={styles.headerRow}>
               <TouchableOpacity 
                 style={styles.closeButtonLeft}
@@ -4059,21 +4249,18 @@ export default function ProductComparisonScreen() {
             </View>
           </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
 
       {/* Product Comparison Bottom Sheet */}
-      <Modal
+      <FixedAndroidModal
         visible={showComparisonSheet}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        isBottomSheet={true}
         onRequestClose={() => setShowComparisonSheet(false)}
       >
         <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
           {/* Bottom Sheet Header */}
           <View style={styles.bottomSheetHeader}>
-            <View style={styles.handleContainer}>
-              <View style={styles.handle} />
-            </View>
+            
             <View style={styles.headerRow}>
               <TouchableOpacity 
                 style={styles.closeButtonLeft}
@@ -4101,26 +4288,24 @@ export default function ProductComparisonScreen() {
                 openFoodData={openFoodData}
                 colors={colors}
                 comparisonData={comparisonData}
+                insets={insets}
                 productAnimations={productAnimations}
               />
             )}
           </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
 
       {/* Stages Info Bottom Sheet */}
-      <Modal
+      <FixedAndroidModal
         visible={showStagesInfo}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        isBottomSheet={true}
         onRequestClose={() => setShowStagesInfo(false)}
       >
         <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
           {/* Bottom Sheet Header */}
           <View style={styles.bottomSheetHeader}>
-            <View style={styles.handleContainer}>
-              <View style={styles.handle} />
-            </View>
+            
             <View style={styles.headerRow}>
               <TouchableOpacity 
                 style={styles.closeButtonLeft}
@@ -4160,7 +4345,7 @@ export default function ProductComparisonScreen() {
             ))}
           </ScrollView>
         </View>
-      </Modal>
+      </FixedAndroidModal>
       
       {/* Shopping List FAB */}
       <TouchableOpacity 
@@ -4634,16 +4819,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 16,
-  },
-  handleContainer: {
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 2,
   },
   headerRow: {
     flexDirection: 'row',

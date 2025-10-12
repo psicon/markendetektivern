@@ -85,7 +85,7 @@ export default function IndexScreen() {
     <View style={styles.container}>
       <View style={styles.content}>
         <Text style={styles.loadingText}>MarkenDetektive</Text>
-        <Text style={styles.subtext}>Wird geladen...</Text>
+        <Text style={styles.subtext}>Wir zeigen dir, wer dahinter steckt!</Text>
       </View>
     </View>
   );
@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   subtext: {
-    fontSize: 14,
+    fontSize: 10,
     color: Colors.light.text,
     opacity: 0.6,
   },

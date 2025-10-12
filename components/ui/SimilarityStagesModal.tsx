@@ -3,7 +3,8 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import React from 'react';
-import { Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface SimilarityStagesModalProps {
   visible: boolean;
@@ -37,12 +38,12 @@ const getStufenTitle = (stufe: number): string => {
 
 const getStufenDescription = (stufe: number): string => {
   switch (stufe) {
-    case 0: return 'Bei diesem Produkt ist uns (noch) keine Stufe bzw. kein Hersteller bekannt. Wir aktualisieren unsere Datenbank kontinuierlich, um Ihnen die bestmöglichen Informationen zu liefern.';
-    case 1: return 'Dieser Hersteller hat nach unseren Recherchen keine Verbindungen zu Markenherstellern oder -produkten. Das Produkt wird ausschließlich als Handelsmarke produziert.';
+    case 0: return 'Zu diesem Produkt liegen uns aktuell (noch) keine Herstellerdaten vor. Wir aktualisieren unsere Datenbank aber regelmäßig – schau einfach später nochmal rein, dann wissen wir vielleicht schon mehr.';
+    case 1: return 'Dieser Hersteller produziert ausschließlich Handelsmarken und hat keine Verbindung zu bekannten Marken oder Markenprodukten. Übrigens: Diese Hersteller gehören häufig direkt zu den Einzelhändlern.';
     case 2: return 'Dieser Hersteller produziert auch für bekannte Marken, aber aktuell kein mit dem NoName-Produkt vergleichbares Markenprodukt. Es besteht jedoch eine Verbindung zu Markenprodukten.';
-    case 3: return 'Dieser Hersteller stellt sowohl ein NoName-Produkt als auch ein Markenprodukt her, die sich in Nährwerten und Geschmack ähneln, aber dennoch Unterschiede aufweisen können.';
-    case 4: return 'Dieser Hersteller stellt sowohl das NoName-Produkt als auch das Markenprodukt her, die sich in Nährwerten und Geschmack sehr ähnlich sind. Nur minimale Unterschiede sind feststellbar.';
-    case 5: return 'Dieser Hersteller stellt sowohl das NoName-Produkt als auch das Markenprodukt her, bei denen die Zusammensetzung und der Geschmack praktisch identisch sind. Sie erhalten die gleiche Qualität zum günstigeren Preis.';
+    case 3: return 'Der Hersteller produziert sowohl dieses NoName-Produkt als auch das Markenprodukt, die sich in Nährwerten und Geschmack ähneln. Die beiden Produkte weisen aber Unterschiede in Zutaten und Nährwerten auf.';
+    case 4: return 'Der Hersteller stellt sowohl das NoName- als auch das Markenprodukt her. Beide sind in Nährwerten und Geschmack nahezu identisch. Die Zutaten sind gleich, es gibt nur minimale Unterschiede in der Rezeptur.';
+    case 5: return 'Das NoName-Produkt stammt vom gleichen Hersteller wie das Markenprodukt. Zusammensetzung und Geschmack sind praktisch gleich – du bekommst hier dieselbe Qualität zum deutlich günstigeren Preis.';
     default: return 'Keine Beschreibung verfügbar.';
   }
 };
@@ -53,15 +54,22 @@ export const SimilarityStagesModal: React.FC<SimilarityStagesModalProps> = ({
 }) => {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal
       visible={visible}
       animationType="slide"
-      presentationStyle="pageSheet"
+      presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
       onRequestClose={onClose}
     >
-      <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
+      <View style={[
+        styles.bottomSheetContainer,
+        { 
+          backgroundColor: colors.background,
+          paddingBottom: Platform.OS === 'android' ? insets.bottom : 0,
+        }
+      ]}>
         {/* Bottom Sheet Header */}
         <View style={styles.bottomSheetHeader}>
           <View style={styles.handleContainer}>

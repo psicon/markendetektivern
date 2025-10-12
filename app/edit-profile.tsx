@@ -499,7 +499,7 @@ export default function EditProfileScreen() {
               <IconSymbol name="storefront" size={20} color={safeColors.icon} />
             </View>
             <Text style={[styles.helperText, { color: theme === 'dark' ? '#8e8e93' : '#6c6c70' }]}>
-              Wo kaufst du am häufigsten ein?
+              Wo kaufst du am liebsten ein?
             </Text>
           </TouchableOpacity>
         </View>
