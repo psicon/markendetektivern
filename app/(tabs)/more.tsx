@@ -9,26 +9,26 @@ import { usePushNotifications } from '@/lib/contexts/PushNotificationProvider';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { useTheme } from '@/lib/contexts/ThemeContext';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 // @ts-ignore
 import { LinearGradient } from 'expo-linear-gradient';
 import * as WebBrowser from 'expo-web-browser';
 // @ts-ignore
 import Constants from 'expo-constants';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
-  Linking,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  Share,
-  StatusBar,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View
+    Alert,
+    Linking,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    Share,
+    StatusBar,
+    StyleSheet,
+    Switch,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 
 const dailyTips = [
@@ -72,19 +72,25 @@ export default function MoreScreen() {
     const buildNumber = Constants.expoConfig?.ios?.buildNumber || '0';
     setAppVersion(`${version}.${buildNumber}`);
     
-    // Prüfe ob Onboarding übersprungen wurde
-    const checkOnboardingStatus = async () => {
-      const { OnboardingService } = await import('@/lib/services/onboardingService');
-      const isSkipped = await OnboardingService.isOnboardingSkipped();
-      setShowOnboardingButton(isSkipped);
-    };
-    
-    checkOnboardingStatus();
-    
     // Rotiere Tipps täglich
     const today = new Date().getDate();
     setCurrentTipIndex(today % dailyTips.length);
   }, []);
+
+  // Prüfe Onboarding-Status jedes Mal wenn der Screen fokussiert wird
+  useFocusEffect(
+    useCallback(() => {
+      const checkOnboardingStatus = async () => {
+        const { OnboardingService } = await import('@/lib/services/onboardingService');
+        const isSkipped = await OnboardingService.isOnboardingSkipped();
+        const isCompleted = await OnboardingService.isOnboardingCompleted();
+        // Zeige Button nur wenn übersprungen UND nicht abgeschlossen
+        setShowOnboardingButton(isSkipped && !isCompleted);
+      };
+      
+      checkOnboardingStatus();
+    }, [])
+  );
 
   const handleDarkModeToggle = (value: boolean) => {
     toggleDarkMode();

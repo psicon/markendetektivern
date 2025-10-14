@@ -15,6 +15,8 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const [isReady, setIsReady] = useState(false);
+  const [adLoaded, setAdLoaded] = useState(false);
+  const [adFailed, setAdFailed] = useState(false);
 
   useEffect(() => {
     // In TestFlight IMMER AdMob initialisieren
@@ -26,20 +28,9 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
     });
   }, []);
 
-  // NUR in Expo Go Placeholder zeigen
-  if (Constants.appOwnership === 'expo') {
-    return (
-      <View style={[styles.container, style]}>
-        <View style={[styles.placeholder, { backgroundColor: colors.cardBackground }]}>
-          <View style={[styles.sponsoredBadge, { backgroundColor: colors.background }]}>
-            <Text style={[styles.sponsoredText, { color: colors.text }]}>Sponsored</Text>
-          </View>
-          <Text style={[styles.placeholderText, { color: colors.text }]}>
-            [Ads werden in Expo Go nicht angezeigt]
-          </Text>
-        </View>
-      </View>
-    );
+  // Bei Ad-Fehler (no fill) oder Expo Go: Nichts anzeigen
+  if (Constants.appOwnership === 'expo' || adFailed) {
+    return null; // Komplett ausblenden
   }
 
   // Zeige dezente Placeholder-Höhe bis SDK bereit ist, damit das Layout nicht springt
@@ -61,27 +52,58 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
     isDev: __DEV__ 
   });
 
+  // Wenn Ad geladen: Zeige Ad mit "Sponsored" Badge
+  // Wenn Ad failed: Zeige nichts (return null oben)
+  if (adLoaded) {
+    return (
+      <View style={[styles.container, style]}>
+        <View style={[styles.sponsoredBadge, { backgroundColor: colors.background }]}>
+          <Text style={[styles.sponsoredText, { color: colors.text }]}>
+            {__DEV__ ? 'Test Ad' : 'Sponsored'}
+          </Text>
+        </View>
+        <RNBannerAd
+          unitId={adUnitId}
+          size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
+          requestOptions={{ requestNonPersonalizedAdsOnly: true }}
+          onAdLoaded={() => {
+            console.log('✅ BannerAd loaded:', { platform: Platform.OS, adUnitId });
+            setAdLoaded(true);
+            onAdLoaded?.();
+          }}
+          onAdFailedToLoad={(error: any) => {
+            console.log('ℹ️ BannerAd no fill (normal):', { 
+              platform: Platform.OS, 
+              adUnitId, 
+              error: error?.message || error 
+            });
+            setAdFailed(true); // Ad ausblenden
+            onAdFailedToLoad?.(error);
+          }}
+        />
+      </View>
+    );
+  }
+  
+  // Während des Ladens: Zeige nichts (oder optionalen Spacer)
   return (
     <View style={[styles.container, style]}>
-      <View style={[styles.sponsoredBadge, { backgroundColor: colors.background }]}>
-        <Text style={[styles.sponsoredText, { color: colors.text }]}>
-          {__DEV__ ? 'Test Ad' : 'Sponsored'}
-        </Text>
-      </View>
       <RNBannerAd
         unitId={adUnitId}
         size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
         requestOptions={{ requestNonPersonalizedAdsOnly: true }}
         onAdLoaded={() => {
           console.log('✅ BannerAd loaded:', { platform: Platform.OS, adUnitId });
+          setAdLoaded(true);
           onAdLoaded?.();
         }}
         onAdFailedToLoad={(error: any) => {
-          console.error('❌ BannerAd failed:', { 
+          console.log('ℹ️ BannerAd no fill (normal):', { 
             platform: Platform.OS, 
             adUnitId, 
             error: error?.message || error 
           });
+          setAdFailed(true); // Ad ausblenden
           onAdFailedToLoad?.(error);
         }}
       />

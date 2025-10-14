@@ -1909,8 +1909,8 @@ export default function ProductComparisonScreen() {
             }, lastNoNameCardDelay + 60);
           }
           
-          // OpenFood API im Hintergrund laden
-          setTimeout(() => loadOpenFoodData(data), 400);
+          // OpenFood API sofort parallel laden (kein Delay mehr!)
+          loadOpenFoodData(data);
       }
     } catch (err) {
       console.error('Error reloading product comparison:', err);
@@ -1926,6 +1926,7 @@ export default function ProductComparisonScreen() {
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadingAlternatives, setLoadingAlternatives] = useState(false); // 🆕 Für Progressive Loading
   
   // OpenFood API Daten
   const [openFoodData, setOpenFoodData] = useState<Map<string, OpenFoodProduct | null>>(new Map());
@@ -2286,92 +2287,183 @@ export default function ProductComparisonScreen() {
           correctType: isMarkenProdukt ? 'markenprodukt' : 'noname'
         });
         
-        // Get complete comparison data (brand product + related NoNames)
-        const data = await FirestoreService.getProductComparisonData(id, isMarkenProdukt);
-        
-        if (data) {
-          // 🚀 SOFORTIGE ANZEIGE: Hauptprodukt + korrekter Header sofort
-          setComparisonData(data); // ALLE Daten sofort setzen
-          setLoading(false); // UI SOFORT anzeigen!
-          
-          // 📊 Tracke Produktvergleich
-          if (analytics.trackProductComparison) {
-            const mainProduct = data.markenprodukt || data.noNameProduct;
-            if (mainProduct && mainProduct.id && data.relatedNoNameProducts) {
-              const comparedProducts = data.relatedNoNameProducts.map(p => ({
-                productId: p.id,
-                productName: p.name || p.produktName || 'NoName Produkt',
-                productType: 'noname' as const,
-                price: p.preis || 0,
-                savings: p.ersparnis || 0
-              }));
-              
-              analytics.trackProductComparison(
-                mainProduct.id,
-                mainProduct.name || mainProduct.produktName || 'Produkt',
-                isMarkenProdukt ? 'brand' : 'noname',
-                comparedProducts
-              );
-            }
-          }
-          
-          // 🎨 HEADER ANIMATION: Sanft einblenden nach kurzer Verzögerung
-          setTimeout(() => {
-            Animated.timing(headerAnimation, {
-              toValue: 1,
-              duration: 400,
-              useNativeDriver: true,
-            }).start();
-          }, 150);
-          
-          // 🎨 PRODUKT ANIMATIONEN: Alle Produkte einzeln animieren
-          // Brand-Produkt sofort animieren
-          animateProductCard(data.mainProduct.id, 100);
-          
-          // NoName-Produkte gestaffelt animieren
-          data.relatedNoNameProducts.forEach((product, index) => {
-            animateProductCard(product.id, 300 + (index * 120));
-          });
-          
-          // Wenn es ein Markenprodukt ist und keine NoName-Alternativen hat, lade ähnliche Produkte
-          if (isMarkenProdukt && data.relatedNoNameProducts.length === 0 && data.mainProduct.kategorie?.bezeichnung) {
-            setTimeout(() => {
-            loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id, 3);
-            }, 400);
-          }
-          
-          // 🆕 Für Stufe 3,4,5 Produkte: Lade "Weitere enttarnte Produkte" NUR bei genau 1 NoName-Produkt
-          if (data.relatedNoNameProducts.length === 1 && data.mainProduct.kategorie?.bezeichnung) {
-            // Berechne wann die letzte NoName-Karte startet
-            const lastNoNameCardDelay = 300 + ((data.relatedNoNameProducts.length - 1) * 120);
+        // 🎯 PROGRESSIVE LOADING: Hauptprodukt zuerst laden
+        if (isMarkenProdukt) {
+          // Bei Markenprodukten: Zeige Hauptprodukt sofort
+          const mainProduct = await FirestoreService.getMarkenProduktWithDetails(id, true, true);
+          if (mainProduct) {
+            // UI sofort anzeigen mit Hauptprodukt
+            setComparisonData({
+              mainProduct,
+              relatedNoNameProducts: [],
+              clickedProductId: id,
+              clickedWasNoName: false,
+              markenprodukt: mainProduct,
+              noNameProduct: null
+            });
+            setLoading(false); // UI ist SOFORT sichtbar!
+            setLoadingAlternatives(true); // Zeige Skeleton für Alternativen
             
-            // Header direkt nach letzter Karte (nur +120ms)
+            // Animation für Hauptprodukt
             setTimeout(() => {
-              // ✨ Header sofort animieren
-              Animated.timing(weitereHeaderAnimation, {
+              Animated.timing(headerAnimation, {
                 toValue: 1,
-                duration: 300, // Schnellere Animation
+                duration: 400,
                 useNativeDriver: true,
               }).start();
-              
-              // Lade Similar Products sofort (nur 3 für weniger Reads)
-              loadSimilarProducts(data.mainProduct.kategorie.bezeichnung, id, 3);
-            }, lastNoNameCardDelay + 120);
-          }
-          
-          // OpenFood API im Hintergrund laden
-          setTimeout(() => loadOpenFoodData(data), 400);
-          
-          // Track Achievement: view_comparison
-          if (user?.uid) {
-            achievementService.trackAction(user.uid, 'view_comparison', {
-              productId: id,
-              productType: type
+            }, 150);
+            animateProductCard(mainProduct.id, 100);
+            
+            // Jetzt Alternativen im Hintergrund laden
+            const alternatives = await FirestoreService.findNoNameProductsByBrandId(id);
+            setLoadingAlternatives(false); // Skeleton ausblenden
+            setComparisonData(prev => ({
+              ...prev!,
+              relatedNoNameProducts: alternatives
+            }));
+            
+            // NoName-Produkte gestaffelt animieren
+            alternatives.forEach((product, index) => {
+              animateProductCard(product.id, 300 + (index * 120));
             });
+            
+            // Ähnliche Produkte wenn keine NoName-Alternativen
+            if (alternatives.length === 0 && mainProduct.kategorie?.bezeichnung) {
+              setTimeout(() => {
+                loadSimilarProducts(mainProduct.kategorie.bezeichnung, id, 3);
+              }, 400);
+            }
+            
+            // 🆕 Weitere Produkte bei genau 1 NoName-Produkt
+            if (alternatives.length === 1 && mainProduct.kategorie?.bezeichnung) {
+              const lastNoNameCardDelay = 300 + ((alternatives.length - 1) * 120);
+              setTimeout(() => {
+                // Animiere Header
+                Animated.timing(weitereHeaderAnimation, {
+                  toValue: 1,
+                  duration: 300,
+                  useNativeDriver: true,
+                }).start();
+                // Lade 3 weitere Produkte
+                loadSimilarProducts(mainProduct.kategorie.bezeichnung, id, 3);
+              }, lastNoNameCardDelay + 120);
+            }
+            
+            // OpenFood API sofort parallel laden
+            loadOpenFoodData({
+              mainProduct,
+              relatedNoNameProducts: alternatives
+            });
+            
+            // Track Achievement
+            if (user?.uid) {
+              achievementService.trackAction(user.uid, 'view_comparison', {
+                productId: id,
+                productType: type
+              });
+            }
+          } else {
+            setError('Produkt nicht gefunden');
+            setLoading(false);
           }
-        } else {
-          setError('Produkt nicht gefunden');
+          return;
         }
+        
+        // 🎯 PROGRESSIVE LOADING für NoName-Produkte
+        // Phase 1: Lade nur die Hauptprodukte (NoName + Markenprodukt)
+        const rawProductDoc = await getDoc(doc(db, 'produkte', id));
+        if (!rawProductDoc.exists()) {
+          setError('Produkt nicht gefunden');
+          setLoading(false);
+          return;
+        }
+        
+        const rawData = rawProductDoc.data();
+        const markenProduktRef = rawData.markenProdukt;
+        if (!markenProduktRef?.id) {
+          setError('Ungültige Produktdaten');
+          setLoading(false);
+          return;
+        }
+        
+        // Lade beide Hauptprodukte parallel
+        const [noNameProduct, brandProduct] = await Promise.all([
+          FirestoreService.populateProductReferences(rawData, id),
+          FirestoreService.getMarkenProduktWithDetails(markenProduktRef.id, true, true)
+        ]);
+        
+        if (!noNameProduct || !brandProduct) {
+          setError('Produkt nicht gefunden');
+          setLoading(false);
+          return;
+        }
+        
+        // UI SOFORT anzeigen mit Hauptprodukt (nach ~400ms statt 671ms!)
+        setComparisonData({
+          mainProduct: brandProduct,
+          relatedNoNameProducts: [],
+          clickedProductId: id,
+          clickedWasNoName: true,
+          markenprodukt: brandProduct,
+          noNameProduct: noNameProduct
+        });
+        setLoading(false); // ✨ UI ist SOFORT sichtbar!
+        setLoadingAlternatives(true); // Zeige Skeleton für Alternativen
+        
+        // Animation für Hauptprodukt
+        setTimeout(() => {
+          Animated.timing(headerAnimation, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }).start();
+        }, 150);
+        animateProductCard(brandProduct.id, 100);
+        
+        // Phase 2: Lade Alternativen im Hintergrund
+        const alternatives = await FirestoreService.findNoNameProductsByBrandReference(markenProduktRef);
+        setLoadingAlternatives(false); // Skeleton ausblenden
+        setComparisonData(prev => ({
+          ...prev!,
+          relatedNoNameProducts: alternatives
+        }));
+        
+        // NoName-Produkte gestaffelt animieren
+        alternatives.forEach((product, index) => {
+          animateProductCard(product.id, 300 + (index * 120));
+        });
+        
+        // 🆕 Weitere Produkte bei genau 1 NoName-Produkt
+        if (alternatives.length === 1 && brandProduct.kategorie?.bezeichnung) {
+          const lastNoNameCardDelay = 300 + ((alternatives.length - 1) * 120);
+          setTimeout(() => {
+            // Animiere Header
+            Animated.timing(weitereHeaderAnimation, {
+              toValue: 1,
+              duration: 300,
+              useNativeDriver: true,
+            }).start();
+            // Lade 3 weitere Produkte
+            loadSimilarProducts(brandProduct.kategorie.bezeichnung, id, 3);
+          }, lastNoNameCardDelay + 120);
+        }
+        
+        // OpenFood API sofort parallel laden
+        loadOpenFoodData({
+          mainProduct: brandProduct,
+          relatedNoNameProducts: alternatives
+        });
+        
+        // Track Achievement
+        if (user?.uid) {
+          achievementService.trackAction(user.uid, 'view_comparison', {
+            productId: id,
+            productType: type
+          });
+        }
+        
+        return; // Fertig!
+        
       } catch (err) {
         console.error('Error loading product comparison:', err);
         setError('Fehler beim Laden des Produkts');
@@ -2900,8 +2992,48 @@ export default function ProductComparisonScreen() {
             </View>
           )}
 
+          {/* Skeleton während Alternativen laden (Progressive Loading) */}
+          {loadingAlternatives && (
+            <>
+              {[1, 2, 3].map((index) => (
+                <View key={`skeleton-${index}`} style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 16 }]}>
+                  {/* Skeleton Chips Row */}
+                  <View style={styles.chipsRow}>
+                    <ShimmerSkeleton width={90} height={28} style={{ borderRadius: 14, marginRight: 8 }} />
+                    <ShimmerSkeleton width={70} height={28} style={{ borderRadius: 14 }} />
+                  </View>
+                  
+                  {/* Skeleton Product Row */}
+                  <View style={styles.productRow}>
+                    <ShimmerSkeleton width={80} height={80} style={{ borderRadius: 12 }} />
+                    <View style={styles.productInfo}>
+                      <ShimmerSkeleton width="60%" height={14} style={{ marginBottom: 6 }} />
+                      <ShimmerSkeleton width="85%" height={18} style={{ marginBottom: 12 }} />
+                    </View>
+                    <View style={styles.priceSection}>
+                      <ShimmerSkeleton width={60} height={20} style={{ marginBottom: 4 }} />
+                      <ShimmerSkeleton width={50} height={14} />
+                    </View>
+                  </View>
+                  
+                  {/* Skeleton Divider */}
+                  <View style={[styles.horizontalDivider, { backgroundColor: colors.border }]} />
+                  
+                  {/* Skeleton Buttons */}
+                  <View style={styles.ratingsCartRowDirect}>
+                    <ShimmerSkeleton width="60%" height={44} style={{ borderRadius: 12 }} />
+                    <ShimmerSkeleton width={44} height={44} style={{ borderRadius: 12, marginRight: 12 }} />
+                    <ShimmerSkeleton width={44} height={44} style={{ borderRadius: 12 }} />
+                  </View>
+                  
+                  <ShimmerSkeleton width="100%" height={44} style={{ borderRadius: 12, marginTop: 12 }} />
+                </View>
+              ))}
+            </>
+          )}
+
           {/* NoName-Alternativen oder ähnliche Produkte */}
-          {comparisonData.relatedNoNameProducts.length > 0 ? (
+          {!loadingAlternatives && comparisonData.relatedNoNameProducts.length > 0 ? (
             // NoName-Alternativen anzeigen
             comparisonData.relatedNoNameProducts.map((noNameProduct, index) => {
                 const isSelected = selectedProducts.has(noNameProduct.id);

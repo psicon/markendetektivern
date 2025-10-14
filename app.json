@@ -23,7 +23,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "957",
+      "buildNumber": "959",
       "appleTeamId": "MZD2N2F887",
       "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true,
@@ -44,6 +44,9 @@
         "backgroundColor": "#0d8575"
       },
       "edgeToEdgeEnabled": true,
+      "compileSdkVersion": 35,
+      "targetSdkVersion": 35,
+      "buildToolsVersion": "35.0.0",
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyCq7kOMAf65qjkZbG-futbMAL9N8NOFNi4"
@@ -55,7 +58,7 @@
       ],
       "package": "de.markendetektive",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 974
+      "versionCode": 983
     },
     "web": {
       "bundler": "metro",

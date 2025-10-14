@@ -3,6 +3,8 @@
  * Lädt Nährwerte und Zutaten basierend auf EAN
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 export interface OpenFoodNutrition {
   energy_100g?: number;           // kJ pro 100g
   'energy-kcal_100g'?: number;    // kcal pro 100g
@@ -38,19 +40,37 @@ export interface OpenFoodProduct {
 
 class OpenFoodService {
   private static readonly BASE_URL = 'https://world.openfoodfacts.org/api/v0/product';
-  private static readonly CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 Stunden
-  private static cache = new Map<string, { data: OpenFoodProduct, timestamp: number }>();
+  private static readonly CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 Tage (AsyncStorage)
+  private static readonly MEMORY_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 Stunden (Memory)
+  private static memoryCache = new Map<string, { data: OpenFoodProduct, timestamp: number }>();
+  private static readonly STORAGE_PREFIX = 'openfood_cache_';
 
   /**
    * Lädt Produktdaten von OpenFoodFacts API
    */
   static async getProductByEAN(ean: string): Promise<OpenFoodProduct | null> {
     try {
-      // Cache prüfen
-      const cached = this.cache.get(ean);
-      if (cached && (Date.now() - cached.timestamp) < this.CACHE_DURATION) {
-        console.log(`🗄️ OpenFood Cache Hit für EAN: ${ean}`);
-        return cached.data;
+      // 1. Prüfe Memory Cache (schnellst)
+      const memCached = this.memoryCache.get(ean);
+      if (memCached && (Date.now() - memCached.timestamp) < this.MEMORY_CACHE_DURATION) {
+        console.log(`⚡ OpenFood Memory Cache Hit für EAN: ${ean}`);
+        return memCached.data;
+      }
+
+      // 2. Prüfe AsyncStorage Cache (persistent)
+      try {
+        const storageCached = await AsyncStorage.getItem(`${this.STORAGE_PREFIX}${ean}`);
+        if (storageCached) {
+          const { data, timestamp } = JSON.parse(storageCached);
+          if (Date.now() - timestamp < this.CACHE_DURATION) {
+            console.log(`🗄️ OpenFood AsyncStorage Cache Hit für EAN: ${ean}`);
+            // In Memory Cache übertragen für schnelleren nächsten Zugriff
+            this.memoryCache.set(ean, { data, timestamp });
+            return data;
+          }
+        }
+      } catch (storageError) {
+        console.warn('AsyncStorage read error:', storageError);
       }
 
       console.log(`🌍 Lade OpenFood Daten für EAN: ${ean}`);
@@ -103,11 +123,19 @@ class OpenFoodService {
         }
       });
 
-      // Cache speichern
-      this.cache.set(ean, {
+      // Cache speichern (Memory + AsyncStorage)
+      const cacheData = {
         data: product,
         timestamp: Date.now()
-      });
+      };
+      
+      this.memoryCache.set(ean, cacheData);
+      
+      // AsyncStorage Cache speichern (fire-and-forget, blockiert nicht)
+      AsyncStorage.setItem(
+        `${this.STORAGE_PREFIX}${ean}`, 
+        JSON.stringify(cacheData)
+      ).catch(err => console.warn('AsyncStorage write error:', err));
 
       console.log(`✅ OpenFood Daten geladen für: ${product.product_name}`);
       return product;

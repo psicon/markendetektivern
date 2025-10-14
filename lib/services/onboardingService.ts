@@ -59,8 +59,9 @@ export class OnboardingService {
   static async markOnboardingCompleted(): Promise<void> {
     try {
       await AsyncStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
-      // Lösche Progress da nicht mehr benötigt
+      // Lösche Progress und Skip-Flag da nicht mehr benötigt
       await AsyncStorage.removeItem(ONBOARDING_PROGRESS_KEY);
+      await AsyncStorage.removeItem(ONBOARDING_SKIPPED_KEY);
     } catch (error) {
       console.error('Error marking onboarding as completed:', error);
       throw error;
