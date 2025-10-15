@@ -19,6 +19,7 @@ $RNFirebaseAsStaticFramework = true
 
 target 'MarkenDetektive' do
   use_expo_modules!
+  use_modular_headers!
 
   if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'
     config_command = ['node', '-e', "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"];
