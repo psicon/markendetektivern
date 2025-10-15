@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { createUserWithEmailAndPassword, onAuthStateChanged, signInAnonymously, signInWithEmailAndPassword, signOut, updateProfile, User } from 'firebase/auth';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { auth } from '../firebase';
@@ -134,6 +135,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('🔄 AuthContext: Auth state changed:', user ? `User: ${user.uid} (anonymous: ${user.isAnonymous})` : 'No user');
       setUser(user);
       setIsAnonymous(user?.isAnonymous || false);
+      
+        // Set user ID in Crashlytics (nur in Production Builds)
+        if (!__DEV__ && Constants.appOwnership !== 'expo') {
+          try {
+            const crashlytics = require('@react-native-firebase/crashlytics').default;
+            if (user?.uid) {
+              await crashlytics().setUserId(user.uid);
+              crashlytics().setAttribute('is_anonymous', user.isAnonymous ? 'true' : 'false');
+            }
+          } catch (error) {
+            console.log('⚠️ Crashlytics not available:', error);
+          }
+        }
       
       if (user?.uid) {
         // 🔄 EINMALIGE GAMIFICATION INITIALISIERUNG nach Authentifizierung

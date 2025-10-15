@@ -1,0 +1,5 @@
+NSCameraUsageDescription = "Diese App benötigt Zugriff auf die Kamera, um Barcodes von Produkten zu scannen und Preise zu vergleichen.";
+NSLocationWhenInUseUsageDescription = "Diese App benötigt Zugriff auf deinen Standort, um dir lokale Angebote und Märkte in deiner Nähe zu zeigen.";
+NSPhotoLibraryUsageDescription = "Diese App benötigt Zugriff auf deine Fotos, um dein Profilbild aus der Galerie auszuwählen.";
+CFBundleDisplayName = "MarkenDetektive";
+CFBundleName = "MarkenDetektive";

@@ -92,8 +92,8 @@ android {
         applicationId 'de.markendetektive'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 983
-        versionName "4.5.0"
+        versionCode 999
+        versionName "5.0.0"
     }
     signingConfigs {
         debug {
@@ -177,3 +177,4 @@ dependencies {
 }
 
 apply plugin: 'com.google.gms.google-services'
+apply plugin: 'com.google.firebase.crashlytics'

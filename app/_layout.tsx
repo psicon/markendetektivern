@@ -1,5 +1,6 @@
 import { Toasts } from '@backpackapp-io/react-native-toast';
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
+import Constants from 'expo-constants';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -51,6 +52,34 @@ function ThemedApp() {
     configureGoogleSignIn().catch(error => {
       console.log('Google Sign-In configuration error:', error);
     });
+  }, []);
+
+  // Initialize Firebase Crashlytics
+  useEffect(() => {
+    const initCrashlytics = async () => {
+      try {
+        // Skip in Expo Go or development
+        if (__DEV__ || Constants.appOwnership === 'expo') {
+          console.log('⏭️ Crashlytics skipped (Development/Expo Go)');
+          return;
+        }
+        
+        const crashlytics = require('@react-native-firebase/crashlytics').default;
+        
+        // Enable Crashlytics collection
+        await crashlytics().setCrashlyticsCollectionEnabled(true);
+        
+        // Set custom attributes
+        crashlytics().setAttribute('platform', Platform.OS);
+        crashlytics().setAttribute('app_version', '5.0.0');
+        
+        console.log('✅ Firebase Crashlytics initialized');
+      } catch (error) {
+        console.log('⚠️ Crashlytics not available:', error);
+      }
+    };
+    
+    initCrashlytics();
   }, []);
 
   return (

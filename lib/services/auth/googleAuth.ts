@@ -29,9 +29,19 @@ export const configureGoogleSignIn = async () => {
     const { GoogleSignin } = require('@react-native-google-signin/google-signin');
     
     GoogleSignin.configure({
+      // WICHTIG: Web Client ID für ID Token!
       webClientId: '139509881339-8r18hd499h6615f4ebos35ihbqqqvjvs.apps.googleusercontent.com',
-      offlineAccess: false, // if you want to access Google API on behalf of the user FROM YOUR SERVER
-      forceCodeForRefreshToken: true, // [Android] related to `serverAuthCode`, must be true if you want to get serverAuthCode
+      // Android OAuth 2.0 Client
+      androidClientId: '139509881339-h8ief6hmf22i77k4bcb6h4psilqna86v.apps.googleusercontent.com',
+      iosClientId: '139509881339-8m7rjqtur27arme7utiuptqmjbllofbu.apps.googleusercontent.com',
+      offlineAccess: true,
+      forceCodeForRefreshToken: true,
+      scopes: ['profile', 'email'],
+      // Android-spezifische Optionen
+      ...(Platform.OS === 'android' && {
+        hostedDomain: '',
+        forceAccountSelection: true,
+      })
     });
     
     isGoogleSignInConfigured = true;
@@ -68,13 +78,61 @@ export const signInWithGoogle = async () => {
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
     }
     
-    const userInfo = await GoogleSignin.signIn();
-    
-    if (!userInfo.idToken) {
-      throw new Error('No ID token received from Google Sign-In');
+    // Android: Stelle sicher, dass Account-Auswahl angezeigt wird
+    if (Platform.OS === 'android') {
+      try {
+        await GoogleSignin.signOut(); // Logout vorher um Account-Auswahl zu erzwingen
+      } catch (e) {
+        // Ignore - user might not be signed in
+      }
     }
     
-    const googleCredential = GoogleAuthProvider.credential(userInfo.idToken);
+    const response = await GoogleSignin.signIn();
+    
+    // WICHTIG: Die Response-Struktur kann variieren!
+    const userInfo = response.data || response;
+    
+    console.log('🔍 Google Sign-In Response:', {
+      hasResponse: !!response,
+      responseType: response?.type,
+      hasData: !!response?.data,
+      hasUserInfo: !!userInfo,
+      hasIdToken: !!userInfo?.idToken,
+      hasUser: !!userInfo?.user,
+      userEmail: userInfo?.user?.email,
+      userId: userInfo?.user?.id,
+      serverAuthCode: !!userInfo?.serverAuthCode,
+      scopes: userInfo?.scopes,
+      rawResponse: JSON.stringify(response)
+    });
+    
+    // WICHTIG: Bei Android kann idToken manchmal in serverAuthCode sein
+    let idToken = userInfo.idToken || userInfo?.idToken;
+    
+    if (!idToken && userInfo.serverAuthCode) {
+      console.log('⚠️ Trying serverAuthCode as fallback for idToken');
+      idToken = userInfo.serverAuthCode;
+    }
+    
+    if (!idToken) {
+      // Detaillierte Fehleranalyse
+      console.error('❌ No ID token in response. Full userInfo:', {
+        user: userInfo?.user,
+        idToken: userInfo?.idToken,
+        serverAuthCode: userInfo?.serverAuthCode,
+        scopes: userInfo?.scopes,
+        fullObject: userInfo
+      });
+      
+      // Prüfe ob wir überhaupt einen User haben
+      if (!userInfo?.user?.email) {
+        throw new Error('Google Sign-In fehlgeschlagen: Keine Benutzerdaten erhalten. Bitte stelle sicher, dass du einen Google Account ausgewählt hast.');
+      }
+      
+      throw new Error('Google Sign-In Konfigurationsfehler: Kein ID Token erhalten. Bitte kontaktiere den Support.');
+    }
+    
+    const googleCredential = GoogleAuthProvider.credential(idToken);
     const userCredential = await signInWithCredential(auth, googleCredential);
     
     console.log('✅ Google Sign-In successful:', userCredential.user.email);

@@ -1,7 +1,7 @@
 {
   "name": "markendetektive",
   "main": "expo-router/entry",
-  "version": "5.0.8.17",
+  "version": "5.0.0",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
@@ -24,6 +24,7 @@
     "@react-native-community/slider": "4.5.6",
     "@react-native-firebase/analytics": "^23.2.2",
     "@react-native-firebase/app": "^23.2.2",
+    "@react-native-firebase/crashlytics": "^23.4.0",
     "@react-native-firebase/firestore": "^23.0.0",
     "@react-native-google-signin/google-signin": "^15.0.0",
     "@react-navigation/bottom-tabs": "^7.3.10",
@@ -32,9 +33,11 @@
     "algoliasearch": "^5.35.0",
     "expo": "~53.0.23",
     "expo-application": "^6.1.5",
+    "expo-auth-session": "^7.0.8",
     "expo-blur": "~14.1.5",
     "expo-camera": "^16.1.11",
     "expo-constants": "~17.1.7",
+    "expo-crypto": "^15.0.7",
     "expo-dev-client": "~5.2.4",
     "expo-device": "~7.1.4",
     "expo-font": "~13.3.2",

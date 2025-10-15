@@ -2,12 +2,15 @@
   "expo": {
     "name": "MarkenDetektive",
     "slug": "markendetektive",
-    "version": "4.5.0",
+    "version": "5.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "markendetektivern",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "locales": {
+      "de": "./locales/de.json"
+    },
     "router": {
       "lazy": false
     },
@@ -21,9 +24,10 @@
       "node_modules/@expo-google-fonts/nunito/Nunito_700Bold.ttf"
     ],
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
+      "requireFullScreen": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "959",
+      "buildNumber": "1007",
       "appleTeamId": "MZD2N2F887",
       "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true,
@@ -33,6 +37,14 @@
         ]
       },
       "infoPlist": {
+        "UIDeviceFamily": [
+          1
+        ],
+        "CFBundleDevelopmentRegion": "de",
+        "UIRequiresFullScreen": true,
+        "UISupportedInterfaceOrientations": [
+          "UIInterfaceOrientationPortrait"
+        ],
         "NSCameraUsageDescription": "Diese App benötigt Zugriff auf die Kamera, um Barcodes von Produkten zu scannen und Preise zu vergleichen.",
         "NSLocationWhenInUseUsageDescription": "Diese App benötigt Zugriff auf deinen Standort, um dir lokale Angebote und Märkte in deiner Nähe zu zeigen.",
         "NSPhotoLibraryUsageDescription": "Diese App benötigt Zugriff auf deine Fotos, um dein Profilbild aus der Galerie auszuwählen."
@@ -58,7 +70,7 @@
       ],
       "package": "de.markendetektive",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 983
+      "versionCode": 999
     },
     "web": {
       "bundler": "metro",
@@ -87,6 +99,7 @@
         }
       ],
       "@react-native-firebase/app",
+      "@react-native-firebase/crashlytics",
       [
         "react-native-google-mobile-ads",
         {

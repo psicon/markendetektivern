@@ -11,7 +11,8 @@
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
-		82AA32F28D1540098B545B7A /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = B3F79FD0B3154D4E89EBAA7D /* GoogleService-Info.plist */; };
+		8920965471C14ECCA36A1D63 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = EFCCCB0322C24C40A03E330F /* InfoPlist.strings */; };
+		1DD8E5A896F64BB481E91347 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 0AD0E2185E03486A9CB5B7A1 /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -23,7 +24,8 @@
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = MarkenDetektive/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* MarkenDetektive-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "MarkenDetektive-Bridging-Header.h"; path = "MarkenDetektive/MarkenDetektive-Bridging-Header.h"; sourceTree = "<group>"; };
-		B3F79FD0B3154D4E89EBAA7D /* GoogleService-Info.plist */ = {isa = PBXFileReference; name = "GoogleService-Info.plist"; path = "MarkenDetektive/GoogleService-Info.plist"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = text.plist.xml; explicitFileType = undefined; includeInIndex = 0; };
+		EFCCCB0322C24C40A03E330F /* InfoPlist.strings */ = {isa = PBXFileReference; name = "InfoPlist.strings"; path = "de.lproj/InfoPlist.strings"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = text.plist.strings; explicitFileType = undefined; includeInIndex = 0; };
+		0AD0E2185E03486A9CB5B7A1 /* GoogleService-Info.plist */ = {isa = PBXFileReference; name = "GoogleService-Info.plist"; path = "MarkenDetektive/GoogleService-Info.plist"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = text.plist.xml; explicitFileType = undefined; includeInIndex = 0; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -46,7 +48,7 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				B3F79FD0B3154D4E89EBAA7D /* GoogleService-Info.plist */,
+				0AD0E2185E03486A9CB5B7A1 /* GoogleService-Info.plist */,
 			);
 			name = MarkenDetektive;
 			sourceTree = "<group>";
@@ -91,10 +93,20 @@
 			isa = PBXGroup;
 			children = (
 				BB2F792C24A3F905000567C9 /* Expo.plist */,
+				35018349920C4BCB99BBA5BA /* de.lproj */,
 			);
 			name = Supporting;
 			path = MarkenDetektive/Supporting;
 			sourceTree = "<group>";
+		};
+		35018349920C4BCB99BBA5BA /* de.lproj */ = {
+			isa = "PBXGroup";
+			children = (
+				EFCCCB0322C24C40A03E330F /* InfoPlist.strings */,
+			);
+			name = de.lproj;
+			sourceTree = "<group>";
+			path = "";
 		};
 /* End PBXGroup section */
 
@@ -158,7 +170,8 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				82AA32F28D1540098B545B7A /* GoogleService-Info.plist in Resources */,
+				8920965471C14ECCA36A1D63 /* InfoPlist.strings in Resources */,
+				1DD8E5A896F64BB481E91347 /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -268,7 +281,7 @@
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
 				DEVELOPMENT_TEAM = MZD2N2F887;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = "1";
 				CODE_SIGN_ENTITLEMENTS = MarkenDetektive/MarkenDetektive.entitlements;
 			};
 			name = Debug;
@@ -297,7 +310,7 @@
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
 				DEVELOPMENT_TEAM = MZD2N2F887;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = "1";
 				CODE_SIGN_ENTITLEMENTS = MarkenDetektive/MarkenDetektive.entitlements;
 			};
 			name = Release;

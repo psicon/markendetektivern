@@ -30,6 +30,14 @@
           }
         },
         {
+          "client_id": "139509881339-8l8cqbn80qkm56f61l8kdd32ha72iloa.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "de.markendetektive",
+            "certificate_hash": "e28d7021afb0ad2c0bf74ca48be098311bf5787c"
+          }
+        },
+        {
           "client_id": "139509881339-h8ief6hmf22i77k4bcb6h4psilqna86v.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {

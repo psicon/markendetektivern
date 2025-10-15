@@ -30,8 +30,23 @@ export class ErrorBoundary extends React.Component<Props, State> {
     console.error('💥 Error Message:', error.message);
     console.error('📋 Error Stack:', error.stack);
     
-    // In production, you could send this to a crash reporting service
-    // Example: Sentry.captureException(error, { contexts: { react: errorInfo } });
+    // Firebase Crashlytics: Send error to Firebase Console
+    try {
+      const crashlytics = require('@react-native-firebase/crashlytics').default;
+      
+      // Log component stack
+      crashlytics().log(`Component Stack: ${errorInfo.componentStack?.slice(0, 500)}`);
+      
+      // Record error with context
+      crashlytics().recordError(error, {
+        type: 'react_error_boundary',
+        componentStack: errorInfo.componentStack
+      });
+      
+      console.log('✅ Error sent to Firebase Crashlytics');
+    } catch (crashlyticsError) {
+      console.warn('⚠️ Crashlytics not available:', crashlyticsError);
+    }
   }
 
   render() {
