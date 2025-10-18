@@ -52,6 +52,8 @@ const MAPPING = {
   'trash.fill': 'trash-can',
   'hand.thumbsup.fill': 'thumb-up',
   'hand.thumbsdown.fill': 'thumb-down',
+  'bell.slash': 'bell-off-outline',
+  'bell': 'bell-outline',
   
   // Objects
   'envelope': 'email-outline',

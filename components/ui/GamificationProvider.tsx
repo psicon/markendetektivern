@@ -5,6 +5,7 @@ import {
     setLevelUpHandler,
     setPointsEarnedHandler
 } from '@/lib/services/achievementService';
+import { gamificationSettingsService } from '@/lib/services/gamificationSettingsService';
 import { overlayManager } from '@/lib/services/overlayManager';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
 import { showPointsToast, showStreakToast as showStreakToastNew } from '@/lib/services/ui/toast';
@@ -67,8 +68,15 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   const [showAppRatingModal, setShowAppRatingModal] = useState(false);
 
   // 🎯 Stabile Callback-Funktionen mit useCallback
-  const achievementHandler = useCallback((achievement: Achievement) => {
+  const achievementHandler = useCallback(async (achievement: Achievement) => {
     console.log('🏆 Achievement Unlock UI triggered:', achievement.name);
+    
+    // Prüfe ob Benachrichtigungen deaktiviert sind
+    const notificationsDisabled = await gamificationSettingsService.areNotificationsDisabled();
+    if (notificationsDisabled) {
+      console.log('🔕 Achievement Overlay unterdrückt (Benachrichtigungen deaktiviert)');
+      return;
+    }
     
     // Verwende OverlayManager um Konflikte zu vermeiden
     overlayManager.showOverlay(() => {
@@ -92,17 +100,31 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     });
   }, []);
 
-  const pointsHandler = useCallback((points: number, action: string, message: string) => {
+  const pointsHandler = useCallback(async (points: number, action: string, message: string) => {
     if (points > 0) {
+      // Prüfe ob Benachrichtigungen deaktiviert sind
+      const notificationsDisabled = await gamificationSettingsService.areNotificationsDisabled();
+      if (notificationsDisabled) {
+        console.log('🔕 Punkte Toast unterdrückt (Benachrichtigungen deaktiviert)');
+        return;
+      }
+      
       // Neue Toast-Bibliothek: stapelbar, top-position, swipe dismiss, theme-aware
       showPointsToast(message, points, colorScheme || 'light');
     }
   }, [colorScheme]);
 
-  const levelUpHandler = useCallback((newLevel: number, oldLevel: number, unlockedCategory?: { id: string; name: string; imageUrl: string }) => {
+  const levelUpHandler = useCallback(async (newLevel: number, oldLevel: number, unlockedCategory?: { id: string; name: string; imageUrl: string }) => {
     console.log(`🎯 Level-Up UI triggered: ${oldLevel} → ${newLevel}`);
     if (unlockedCategory) {
       console.log(`🎁 Mit freigeschalteter Kategorie: ${unlockedCategory.name}`);
+    }
+    
+    // Prüfe ob Benachrichtigungen deaktiviert sind
+    const notificationsDisabled = await gamificationSettingsService.areNotificationsDisabled();
+    if (notificationsDisabled) {
+      console.log('🔕 Level-Up Overlay unterdrückt (Benachrichtigungen deaktiviert)');
+      return;
     }
     
     const newLevelData = { visible: true, newLevel, oldLevel, unlockedCategory };

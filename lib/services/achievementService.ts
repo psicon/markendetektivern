@@ -1195,7 +1195,12 @@ class AchievementService {
         const existingDocs = await getDocs(existingQuery);
         if (!existingDocs.empty) {
           console.log(`⚠️ One-time action ${action} bereits ausgeführt`);
-          await showOneTimeRestrictionToast(action);
+          // Prüfe ob Gamification Benachrichtigungen deaktiviert sind
+          const { gamificationSettingsService } = await import('./gamificationSettingsService');
+          const notificationsDisabled = await gamificationSettingsService.areNotificationsDisabled();
+          if (!notificationsDisabled) {
+            await showOneTimeRestrictionToast(action);
+          }
           return;
         }
       }
@@ -1216,7 +1221,12 @@ class AchievementService {
           const lastTimestamp = lastDoc.data().timestamp.toDate();
           const remainingSeconds = Math.ceil((lastTimestamp.getTime() + actionConfig.antiAbuse.dedupeWindowSec * 1000 - now.getTime()) / 1000);
           if (remainingSeconds > 0) {
-            await showDedupeWindowToast(action, remainingSeconds);
+            // Prüfe ob Gamification Benachrichtigungen deaktiviert sind
+            const { gamificationSettingsService } = await import('./gamificationSettingsService');
+            const notificationsDisabled = await gamificationSettingsService.areNotificationsDisabled();
+            if (!notificationsDisabled) {
+              await showDedupeWindowToast(action, remainingSeconds);
+            }
           }
           return;
         }
@@ -1234,7 +1244,12 @@ class AchievementService {
         const dailyDocs = await getDocs(dailyQuery);
         if (dailyDocs.size >= actionConfig.antiAbuse.dailyCap) {
           console.log(`⚠️ Daily cap erreicht für ${action} (${actionConfig.antiAbuse.dailyCap})`);
-          await showDailyCapToast(action, actionConfig.antiAbuse.dailyCap);
+          // Prüfe ob Gamification Benachrichtigungen deaktiviert sind
+          const { gamificationSettingsService } = await import('./gamificationSettingsService');
+          const notificationsDisabled = await gamificationSettingsService.areNotificationsDisabled();
+          if (!notificationsDisabled) {
+            await showDailyCapToast(action, actionConfig.antiAbuse.dailyCap);
+          }
           return;
         }
       }
@@ -1255,7 +1270,12 @@ class AchievementService {
         const weeklyDocs = await getDocs(weeklyQuery);
         if (weeklyDocs.size >= actionConfig.antiAbuse.weeklyCap) {
           console.log(`⚠️ Weekly cap erreicht für ${action} (${actionConfig.antiAbuse.weeklyCap})`);
-          await showWeeklyCapToast(action, actionConfig.antiAbuse.weeklyCap);
+          // Prüfe ob Gamification Benachrichtigungen deaktiviert sind
+          const { gamificationSettingsService } = await import('./gamificationSettingsService');
+          const notificationsDisabled = await gamificationSettingsService.areNotificationsDisabled();
+          if (!notificationsDisabled) {
+            await showWeeklyCapToast(action, actionConfig.antiAbuse.weeklyCap);
+          }
           return;
         }
       }

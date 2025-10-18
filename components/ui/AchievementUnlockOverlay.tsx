@@ -1,3 +1,4 @@
+import { gamificationSettingsService } from '@/lib/services/gamificationSettingsService';
 import { Achievement } from '@/lib/types/achievements';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -106,6 +107,16 @@ export const AchievementUnlockOverlay: React.FC<AchievementUnlockOverlayProps> =
       onClose();
     });
   }, [fadeAnim, scaleAnim, onClose]);
+
+  const handleDisableNotifications = useCallback(async () => {
+    try {
+      await gamificationSettingsService.setNotificationsDisabled(true);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      handleClose();
+    } catch (error) {
+      console.error('Error disabling gamification notifications:', error);
+    }
+  }, [handleClose]);
 
   useEffect(() => {
     if (visible && achievement) {
@@ -224,6 +235,15 @@ export const AchievementUnlockOverlay: React.FC<AchievementUnlockOverlayProps> =
                   onPress={handleClose}
                 >
                   <Text style={styles.actionButtonText}>Weiter</Text>
+                </TouchableOpacity>
+                
+                {/* Nicht mehr anzeigen Button */}
+                <TouchableOpacity 
+                  style={styles.disableButton}
+                  onPress={handleDisableNotifications}
+                >
+                  <IconSymbol name="bell.slash" size={14} color="rgba(255,255,255,0.7)" />
+                  <Text style={styles.disableButtonText}>Nicht mehr anzeigen</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -370,6 +390,20 @@ const styles = StyleSheet.create({
   buttonContainer: {
     width: '100%',
     gap: 10,
+  },
+  disableButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 4,
+  },
+  disableButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.7)',
   },
   autoHideHint: {
     backgroundColor: 'rgba(255,255,255,0.1)',

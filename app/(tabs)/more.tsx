@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { usePushNotifications } from '@/lib/contexts/PushNotificationProvider';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { useTheme } from '@/lib/contexts/ThemeContext';
+import { gamificationSettingsService } from '@/lib/services/gamificationSettingsService';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
 import { useFocusEffect, useRouter } from 'expo-router';
 // @ts-ignore
@@ -65,6 +66,7 @@ export default function MoreScreen() {
   const [showOnboardingButton, setShowOnboardingButton] = useState(false);
   const [currentTipIndex, setCurrentTipIndex] = useState(0);
   const [showSimilarityModal, setShowSimilarityModal] = useState(false);
+  const [gamificationNotificationsDisabled, setGamificationNotificationsDisabled] = useState(false);
 
   useEffect(() => {
     // Get app version from app.json via Constants
@@ -77,18 +79,22 @@ export default function MoreScreen() {
     setCurrentTipIndex(today % dailyTips.length);
   }, []);
 
-  // Prüfe Onboarding-Status jedes Mal wenn der Screen fokussiert wird
+  // Prüfe Onboarding-Status und Gamification-Einstellungen jedes Mal wenn der Screen fokussiert wird
   useFocusEffect(
     useCallback(() => {
-      const checkOnboardingStatus = async () => {
+      const checkSettings = async () => {
         const { OnboardingService } = await import('@/lib/services/onboardingService');
         const isSkipped = await OnboardingService.isOnboardingSkipped();
         const isCompleted = await OnboardingService.isOnboardingCompleted();
         // Zeige Button nur wenn übersprungen UND nicht abgeschlossen
         setShowOnboardingButton(isSkipped && !isCompleted);
+        
+        // Lade Gamification Notifications Einstellung
+        const notificationsDisabled = await gamificationSettingsService.areNotificationsDisabled();
+        setGamificationNotificationsDisabled(notificationsDisabled);
       };
       
-      checkOnboardingStatus();
+      checkSettings();
     }, [])
   );
 
@@ -157,6 +163,16 @@ export default function MoreScreen() {
 
   const handleTieredSystemInfo = () => {
     setShowSimilarityModal(true);
+  };
+
+  const handleGamificationNotificationsToggle = async (value: boolean) => {
+    try {
+      await gamificationSettingsService.setNotificationsDisabled(value);
+      setGamificationNotificationsDisabled(value);
+      console.log(`✅ Gamification Benachrichtigungen ${value ? 'deaktiviert' : 'aktiviert'}`);
+    } catch (error) {
+      console.error('Error toggling gamification notifications:', error);
+    }
   };
 
   const handleTipsAndTricks = () => {
@@ -542,11 +558,12 @@ export default function MoreScreen() {
           </View>
         </View>
 
-        {/* Dark Mode Toggle als separate Menu-Gruppe */}
+        {/* Einstellungen als separate Menu-Gruppe */}
         <View style={styles.sectionContainer}>
           <View style={[styles.menuGroup, { backgroundColor: colors.cardBackground }]}>
+            {/* Dark Mode Toggle */}
             <TouchableOpacity 
-              style={styles.menuItemLast} 
+              style={styles.menuItem} 
               onPress={toggleDarkMode}
               activeOpacity={0.7}
             >
@@ -566,6 +583,32 @@ export default function MoreScreen() {
                   true: colors.secondary 
                 }}
                 thumbColor={isDarkMode ? colors.cardBackground : colors.secondary}
+                ios_backgroundColor={colors.border}
+              />
+            </TouchableOpacity>
+            
+            {/* Gamification Notifications Toggle */}
+            <TouchableOpacity 
+              style={styles.menuItemLast} 
+              onPress={() => handleGamificationNotificationsToggle(!gamificationNotificationsDisabled)}
+              activeOpacity={0.7}
+            >
+              <IconSymbol 
+                name={gamificationNotificationsDisabled ? "bell.slash" : "bell"} 
+                size={24} 
+                color={colors.secondary} 
+              />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>
+                Gamification Benachrichtigungen deaktivieren
+              </Text>
+              <Switch
+                value={gamificationNotificationsDisabled}
+                onValueChange={handleGamificationNotificationsToggle}
+                trackColor={{ 
+                  false: colors.border, 
+                  true: colors.secondary 
+                }}
+                thumbColor={gamificationNotificationsDisabled ? colors.cardBackground : colors.secondary}
                 ios_backgroundColor={colors.border}
               />
             </TouchableOpacity>

@@ -71,7 +71,7 @@ function ThemedApp() {
         
         // Set custom attributes
         crashlytics().setAttribute('platform', Platform.OS);
-        crashlytics().setAttribute('app_version', '5.0.0');
+        crashlytics().setAttribute('app_version', '5.0.1');
         
         console.log('✅ Firebase Crashlytics initialized');
       } catch (error) {

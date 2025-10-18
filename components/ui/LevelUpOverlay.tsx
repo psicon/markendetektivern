@@ -1,4 +1,5 @@
 import { achievementService } from '@/lib/services/achievementService';
+import { gamificationSettingsService } from '@/lib/services/gamificationSettingsService';
 import { Level } from '@/lib/types/achievements';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -204,6 +205,16 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
       // 📱 Periodic check will handle rating after overlay closes
       console.log('🎯 Level-Up closed - periodic check will handle rating');
     });
+  };
+
+  const handleDisableNotifications = async () => {
+    try {
+      await gamificationSettingsService.setNotificationsDisabled(true);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      handleClose();
+    } catch (error) {
+      console.error('Error disabling gamification notifications:', error);
+    }
   };
 
   const handleNavigateToLevels = () => {
@@ -425,6 +436,15 @@ export const LevelUpOverlay: React.FC<LevelUpOverlayProps> = ({
               >
                 <Text style={styles.secondaryButtonText}>Weiter</Text>
               </TouchableOpacity>
+              
+              {/* Nicht mehr anzeigen Button */}
+              <TouchableOpacity 
+                style={styles.disableButton}
+                onPress={handleDisableNotifications}
+              >
+                <IconSymbol name="bell.slash" size={14} color="rgba(255,255,255,0.7)" />
+                <Text style={styles.disableButtonText}>Nicht mehr anzeigen</Text>
+              </TouchableOpacity>
             </View>
           </LinearGradient>
         </Animated.View>
@@ -603,6 +623,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: 'white',
+  },
+  disableButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 8,
+  },
+  disableButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.7)',
   },
   // Kategorie-Freischaltung Styles
   categoryUnlockSection: {
