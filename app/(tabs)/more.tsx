@@ -18,18 +18,18 @@ import * as WebBrowser from 'expo-web-browser';
 import Constants from 'expo-constants';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    Alert,
-    Linking,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    Share,
-    StatusBar,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View
+  Alert,
+  Linking,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  Share,
+  StatusBar,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 
 const dailyTips = [

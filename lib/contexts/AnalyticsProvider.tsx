@@ -97,9 +97,18 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
       const screenName = pathname.replace(/^\//, '').replace(/\//g, '_') || 'home';
       const now = new Date();
       
-      // Track Screen-Leave für vorherigen Screen (mit Verweildauer)
+      // Track Screen-Transition für Pfadanalyse
       if (lastScreenRef.current) {
         const dwellTime = now.getTime() - screenStartTimeRef.current.getTime();
+        analyticsService.trackEvent({
+          event_name: 'screen_transition',
+          event_category: 'navigation',
+          from_screen: lastScreenRef.current,
+          to_screen: screenName,
+          dwell_time_ms: dwellTime
+        }, user?.uid);
+        
+        // Zusätzlich: screen_left für Backwards-Kompatibilität
         analyticsService.trackEvent({
           event_name: 'screen_left',
           event_category: 'navigation',

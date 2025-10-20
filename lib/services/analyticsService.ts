@@ -306,6 +306,41 @@ class AnalyticsService {
         if (event.session_duration_ms) ga4Params.session_duration_ms = event.session_duration_ms;
         if (event.journey_step) ga4Params.journey_step = event.journey_step;
 
+        // 🆕 SCAN PARAMETER (kritisch!)
+        if (event.ean_code) ga4Params.ean_code = event.ean_code;
+        if (event.product_found !== undefined) ga4Params.product_found = event.product_found;
+        if (event.product_name) ga4Params.product_name = event.product_name;
+        if (event.total_scans_in_journey) ga4Params.total_scans_in_journey = event.total_scans_in_journey;
+        
+        // 🆕 SEARCH PARAMETER (kritisch!)
+        if (event.search_query) ga4Params.search_query = event.search_query;
+        if (event.results_count !== undefined) ga4Params.results_count = event.results_count;
+        if (event.total_searches_in_journey) ga4Params.total_searches_in_journey = event.total_searches_in_journey;
+        
+        // 🆕 NAVIGATION / PFADANALYSE (kritisch!)
+        if (event.from_screen) ga4Params.from_screen = event.from_screen;
+        if (event.to_screen) ga4Params.to_screen = event.to_screen;
+        if (event.tab_name) ga4Params.tab_name = event.tab_name;
+        
+        // 🆕 JOURNEY & SOURCE
+        if (event.journey_id) ga4Params.journey_id = event.journey_id;
+        if (event.source) ga4Params.source = event.source;
+        
+        // 🆕 FILTER DETAILS
+        if (event.filter_type) ga4Params.filter_type = event.filter_type;
+        if (event.filter_value) ga4Params.filter_value = event.filter_value;
+        if (event.filters_active) ga4Params.filters_active = JSON.stringify(event.filters_active);
+        
+        // 🆕 FALLBACK & BRAND
+        if (event.is_fallback !== undefined) ga4Params.is_fallback = event.is_fallback;
+        if (event.fallback_source) ga4Params.fallback_source = event.fallback_source;
+        if (event.brand_id) ga4Params.brand_id = event.brand_id;
+        if (event.brand_name) ga4Params.brand_name = event.brand_name;
+        
+        // 🆕 TAB NAVIGATION
+        if (event.from_tab) ga4Params.from_tab = event.from_tab;
+        if (event.to_tab) ga4Params.to_tab = event.to_tab;
+
         // Event zu GA4 senden
         await analytics().logEvent(event.event_name, ga4Params);
       }

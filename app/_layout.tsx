@@ -71,7 +71,7 @@ function ThemedApp() {
         
         // Set custom attributes
         crashlytics().setAttribute('platform', Platform.OS);
-        crashlytics().setAttribute('app_version', '5.0.1');
+        crashlytics().setAttribute('app_version', '5.0.2');
         
         console.log('✅ Firebase Crashlytics initialized');
       } catch (error) {
@@ -142,11 +142,30 @@ export default function RootLayout() {
     testFlightLogger.enable();
     console.log('🚀 App gestartet - TestFlight Logger aktiviert');
     
-    // Initialisiere AdMob und Interstitial Ads
-    adMobService.initialize().then(() => {
-      console.log('📱 AdMob initialisiert');
-      interstitialAdService.initialize();
-    });
+    // Initialisiere UMP Consent + AdMob
+    const initializeAdsWithConsent = async () => {
+      try {
+        // 1. UMP Consent prüfen
+        const { consentService } = await import('@/lib/services/consentService');
+        const consentStatus = await consentService.initialize();
+        
+        // 2. Consent Form zeigen wenn nötig (nur beim ersten Start)
+        if (consentStatus === 'REQUIRED') {
+          await consentService.showConsentFormIfRequired();
+        }
+        
+        // 3. AdMob initialisieren
+        await adMobService.initialize();
+        console.log('📱 AdMob initialisiert');
+        
+        // 4. Interstitial Ads laden
+        interstitialAdService.initialize();
+      } catch (error) {
+        console.error('❌ Ads initialization error:', error);
+      }
+    };
+    
+    initializeAdsWithConsent();
   }, []);
 
   return (

@@ -17,19 +17,35 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
   const [isReady, setIsReady] = useState(false);
   const [adLoaded, setAdLoaded] = useState(false);
   const [adFailed, setAdFailed] = useState(false);
+  const [canShowAds, setCanShowAds] = useState(false);
 
   useEffect(() => {
-    // In TestFlight IMMER AdMob initialisieren
-    adMobService.initialize().then(() => {
-      setIsReady(true);
-    }).catch(err => {
-      console.error('AdMob init error:', err);
-      setIsReady(true); // Trotzdem versuchen anzuzeigen
-    });
+    const initAds = async () => {
+      try {
+        // Prüfe Consent Status
+        const { consentService } = await import('@/lib/services/consentService');
+        const hasConsent = consentService.canShowAds();
+        setCanShowAds(hasConsent);
+        
+        if (!hasConsent) {
+          console.log('⏭️ Banner Ad skipped (no consent)');
+          return;
+        }
+        
+        // AdMob initialisieren
+        await adMobService.initialize();
+        setIsReady(true);
+      } catch (err) {
+        console.error('AdMob init error:', err);
+        setIsReady(true); // Trotzdem versuchen anzuzeigen
+      }
+    };
+    
+    initAds();
   }, []);
 
-  // Bei Ad-Fehler (no fill) oder Expo Go: Nichts anzeigen
-  if (Constants.appOwnership === 'expo' || adFailed) {
+  // Bei Ad-Fehler (no fill), Expo Go oder kein Consent: Nichts anzeigen
+  if (Constants.appOwnership === 'expo' || adFailed || !canShowAds) {
     return null; // Komplett ausblenden
   }
 
