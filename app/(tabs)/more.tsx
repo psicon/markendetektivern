@@ -615,11 +615,26 @@ export default function MoreScreen() {
           </View>
         </View>
 
-        {/* Version */}
+        {/* Version + Debug */}
         <View style={styles.versionContainer}>
           <ThemedText style={[styles.versionText, { color: colors.icon }]}>
             Version [{appVersion}]
           </ThemedText>
+          
+          {/* 🔧 DEBUG: UMP Consent testen (nur für Entwickler sichtbar) */}
+          {__DEV__ && (
+            <TouchableOpacity
+              style={{ marginTop: 8, padding: 8, backgroundColor: colors.error, borderRadius: 8 }}
+              onPress={async () => {
+                const { consentService } = await import('@/lib/services/consentService');
+                await consentService.forceShowConsentForm();
+              }}
+            >
+              <ThemedText style={{ color: 'white', fontSize: 12, textAlign: 'center' }}>
+                🔧 TEST: Consent Form anzeigen
+              </ThemedText>
+            </TouchableOpacity>
+          )}
         </View>
       </ScrollView>
 

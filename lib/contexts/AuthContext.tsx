@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { createUserWithEmailAndPassword, onAuthStateChanged, signInAnonymously, signInWithEmailAndPassword, signOut, updateProfile, User } from 'firebase/auth';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
@@ -135,6 +136,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('🔄 AuthContext: Auth state changed:', user ? `User: ${user.uid} (anonymous: ${user.isAnonymous})` : 'No user');
       setUser(user);
       setIsAnonymous(user?.isAnonymous || false);
+      
+      // 🔐 BACKUP: Speichere User-ID zusätzlich (falls AsyncStorage teilweise gelöscht wird)
+      if (user?.uid) {
+        try {
+          await AsyncStorage.setItem('@auth_user_id_backup', user.uid);
+          await AsyncStorage.setItem('@auth_user_email_backup', user.email || 'anonymous');
+          await AsyncStorage.setItem('@auth_last_login', Date.now().toString());
+        } catch (error) {
+          console.warn('⚠️ Could not backup user session:', error);
+        }
+      }
       
         // Set user ID in Crashlytics (nur in Production Builds)
         if (!__DEV__ && Constants.appOwnership !== 'expo') {

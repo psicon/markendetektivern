@@ -19,6 +19,12 @@
 -keepattributes *Annotation*
 -keepattributes Signature
 
+# Google Mobile Ads
+-keep class io.invertase.googlemobileads.** { *; }
+-keep class com.google.android.gms.ads.** { *; }
+-keep class com.google.ads.** { *; }
+-dontwarn com.google.android.gms.ads.**
+
 # RevenueCat
 -keep class com.revenuecat.** { *; }
 

@@ -21,6 +21,7 @@ import { PushNotificationProvider } from '@/lib/contexts/PushNotificationProvide
 import { RevenueCatProvider } from '@/lib/contexts/RevenueCatProvider';
 import { ThemeProvider } from '@/lib/contexts/ThemeContext';
 import { adMobService } from '@/lib/services/adMobService';
+import appLifecycleService from '@/lib/services/appLifecycleService';
 import { configureGoogleSignIn } from '@/lib/services/auth/googleAuth';
 import { interstitialAdService } from '@/lib/services/interstitialAdService';
 import { testFlightLogger } from '@/lib/utils/testflightLogger';
@@ -142,30 +143,60 @@ export default function RootLayout() {
     testFlightLogger.enable();
     console.log('🚀 App gestartet - TestFlight Logger aktiviert');
     
-    // Initialisiere UMP Consent + AdMob
-    const initializeAdsWithConsent = async () => {
-      try {
-        // 1. UMP Consent prüfen
-        const { consentService } = await import('@/lib/services/consentService');
-        const consentStatus = await consentService.initialize();
-        
-        // 2. Consent Form zeigen wenn nötig (nur beim ersten Start)
-        if (consentStatus === 'REQUIRED') {
-          await consentService.showConsentFormIfRequired();
+    // ⚠️ iOS CRASH FIX: Alles was wir in 5.0.2 hinzugefügt haben auf iOS skip/verzögern
+    // Navigation muss ZUERST vollständig initialisiert werden
+    
+    if (Platform.OS === 'ios') {
+      // iOS: ALLES verzögern - erst nach Navigation vollständig initialisiert
+      // WICHTIG: Navigation muss ZUERST vollständig fertig sein
+      setTimeout(() => {
+        // App Lifecycle Service (NEU in 5.0.2)
+        // Registriert nur einen Event Listener - sollte Navigation nicht stören wenn verzögert
+        try {
+          appLifecycleService.initialize();
+        } catch (error) {
+          console.error('❌ iOS AppLifecycle init error:', error);
+          // Nicht kritisch - App kann ohne laufen
         }
         
-        // 3. AdMob initialisieren
-        await adMobService.initialize();
-        console.log('📱 AdMob initialisiert');
+        // AdMob Initialisierung (wurde geändert in 5.0.2)
+        // Zusätzlich verzögern um sicherzugehen
+        setTimeout(() => {
+          adMobService.initialize().then(() => {
+            console.log('📱 iOS AdMob initialisiert');
+            interstitialAdService.initialize();
+          }).catch(error => {
+            console.error('❌ iOS AdMob init error:', error);
+          });
+        }, 1000);
+      }, 3000); // 3 Sekunden warten bis Navigation bereit ist
+    } else {
+      // Android: Wie vorher (funktioniert)
+      appLifecycleService.initialize();
+      
+      // Android: Consent + AdMob wie bisher
+      setTimeout(() => {
+        const initializeAdsWithConsent = async () => {
+          try {
+            const { consentService } = await import('@/lib/services/consentService');
+            const { InteractionManager } = await import('react-native');
+            await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()));
+            
+            await consentService.initialize();
+            
+            setTimeout(async () => {
+              await adMobService.initialize();
+              console.log('📱 Android AdMob mit Delay initialisiert');
+              interstitialAdService.initialize();
+            }, 2000);
+          } catch (error) {
+            console.error('❌ Ads initialization error:', error);
+          }
+        };
         
-        // 4. Interstitial Ads laden
-        interstitialAdService.initialize();
-      } catch (error) {
-        console.error('❌ Ads initialization error:', error);
-      }
-    };
-    
-    initializeAdsWithConsent();
+        initializeAdsWithConsent();
+      }, 2000);
+    }
   }, []);
 
   return (

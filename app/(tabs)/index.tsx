@@ -22,11 +22,12 @@ import WordPressService, { WordPressPost } from '@/lib/services/wordpress';
 import { Level } from '@/lib/types/achievements';
 import { FirestoreDocument, Handelsmarken, Kategorien, Produkte } from '@/lib/types/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { SymbolViewProps } from 'expo-symbols';
 import * as WebBrowser from 'expo-web-browser';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -73,6 +74,56 @@ export default function HomeScreen() {
   
   // WordPress News State
   const [newsLoading, setNewsLoading] = useState(true);
+  
+  // 🎯 UMP Consent nach Homepage Load (NUR für Android - iOS braucht das nicht)
+  useFocusEffect(
+    React.useCallback(() => {
+      // iOS: Skip Consent Form (kann Navigation crashen + iOS braucht es nicht kritisch)
+      if (Platform.OS === 'ios') {
+        return;
+      }
+      
+      let cancelled = false;
+      
+      const showConsentIfNeeded = async () => {
+        try {
+          // Kurze Delay für saubere UI
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          
+          if (cancelled) return;
+          
+          const { consentService } = await import('@/lib/services/consentService');
+          
+          // Prüfe ob Consent bereits vorhanden
+          const hasConsent = await consentService.hasConsent();
+          if (hasConsent) {
+            console.log('✅ UMP: Consent bereits vorhanden');
+            return;
+          }
+          
+          // Initialisiere falls noch nicht geschehen
+          const consentStatus = await consentService.initialize();
+          
+          if (cancelled) return;
+          
+          // Zeige Consent Form wenn nötig
+          if (consentStatus === 'REQUIRED') {
+            console.log('📝 UMP: Showing consent form on homepage load');
+            await consentService.showConsentFormIfRequired();
+          }
+        } catch (error) {
+          console.error('❌ UMP consent check error:', error);
+        }
+      };
+      
+      showConsentIfNeeded();
+      
+      return () => {
+        cancelled = true;
+      };
+    }, [])
+  );
+  
   // Sichere Präsentation der Onboarding-Paywall NACH Mount der Home-Seite
   useEffect(() => {
     let cancelled = false;

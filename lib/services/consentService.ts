@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 import { isExpoGo } from '../utils/platform';
 
 const CONSENT_STATUS_KEY = '@user_consent_status';
@@ -11,6 +10,18 @@ export type ConsentStatus = 'OBTAINED' | 'REQUIRED' | 'NOT_REQUIRED' | 'UNKNOWN'
 class ConsentService {
   private consentStatus: ConsentStatus = 'UNKNOWN';
   private consentInfoUpdateListener: any = null;
+  
+  /**
+   * Prüft ob es der erste App Launch ist (kein gespeicherter Consent)
+   */
+  private async isFirstLaunch(): Promise<boolean> {
+    try {
+      const savedStatus = await AsyncStorage.getItem(CONSENT_STATUS_KEY);
+      return !savedStatus; // true wenn noch nie Consent gespeichert
+    } catch (error) {
+      return true; // Im Fehlerfall annehmen dass es First Launch ist
+    }
+  }
 
   /**
    * Initialisiert UMP (User Messaging Platform) und prüft Consent
@@ -42,7 +53,7 @@ class ConsentService {
       const { AdsConsent, AdsConsentStatus } = require('react-native-google-mobile-ads');
 
       console.log('🔄 UMP: Requesting consent info update...');
-
+      
       // Request consent information
       const consentInfo = await AdsConsent.requestInfoUpdate();
 
@@ -57,7 +68,7 @@ class ConsentService {
 
       // Prüfe Status
       if (consentInfo.status === AdsConsentStatus.REQUIRED && consentInfo.isConsentFormAvailable) {
-        console.log('📝 UMP: Consent required - will show form');
+        console.log('📝 UMP: Consent required - form available');
         this.consentStatus = 'REQUIRED';
       } else if (consentInfo.status === AdsConsentStatus.OBTAINED) {
         console.log('✅ UMP: Consent obtained');
@@ -76,61 +87,79 @@ class ConsentService {
 
     } catch (error) {
       console.error('❌ UMP initialization failed:', error);
-      // Fallback: Erlaube non-personalized Ads
-      this.consentStatus = 'NOT_REQUIRED';
-      return 'NOT_REQUIRED';
+      // Fallback: Erlaube Ads (non-personalized als Fallback)
+      this.consentStatus = 'UNKNOWN';
+      return 'UNKNOWN';
     }
   }
 
   /**
-   * Zeigt Consent Form (nur wenn nötig)
+   * Zeigt Consent Form (nur wenn nötig) - Best Practices Implementation
    */
   async showConsentFormIfRequired(): Promise<boolean> {
     try {
+      const { AdsConsent, AdsConsentStatus } = require('react-native-google-mobile-ads');
+      
+      // Prüfe ob Form nötig ist
       if (this.consentStatus !== 'REQUIRED') {
-        console.log('⏭️ UMP: Consent form not required');
+        console.log('⏭️ UMP: Consent form not required, status:', this.consentStatus);
         return true; // Ads können gezeigt werden
       }
 
-      const { AdsConsent } = require('react-native-google-mobile-ads');
+      console.log('📝 UMP: Loading and showing consent form...');
+      
+      // Best Practice: loadAndShowConsentFormIfRequired ist die empfohlene Methode
+      const formResult = await AdsConsent.loadAndShowConsentFormIfRequired();
 
-      console.log('📝 UMP: Loading consent form...');
-      
-      // Load consent form
-      const consentForm = await AdsConsent.loadConsentForm();
-      
-      console.log('📝 UMP: Showing consent form...');
-      
-      // Show form
-      const formResult = await consentForm.show();
-      
-      console.log('✅ UMP: Consent form result:', formResult);
+      console.log('✅ UMP: Consent form result:', {
+        status: formResult.status,
+        canRequestAds: formResult.canRequestAds
+      });
 
-      // Update status
+      // Status nach Form neu laden
       const consentInfo = await AdsConsent.requestInfoUpdate();
       
-      if (consentInfo.canRequestAds) {
+      // Update lokalen Status
+      if (consentInfo.status === AdsConsentStatus.OBTAINED) {
         this.consentStatus = 'OBTAINED';
         await AsyncStorage.setItem(CONSENT_STATUS_KEY, 'OBTAINED');
         console.log('✅ UMP: User gave consent - ads can be shown');
         return true;
+      } else if (consentInfo.status === AdsConsentStatus.NOT_REQUIRED) {
+        this.consentStatus = 'NOT_REQUIRED';
+        await AsyncStorage.setItem(CONSENT_STATUS_KEY, 'NOT_REQUIRED');
+        console.log('✅ UMP: User outside EEA - ads can be shown');
+        return true;
       } else {
-        console.log('⚠️ UMP: User declined consent');
-        return false;
+        // User hat abgelehnt oder Status unklar
+        console.log('⚠️ UMP: Consent not obtained, status:', consentInfo.status);
+        // Erlaube trotzdem non-personalized ads
+        return true;
       }
 
     } catch (error) {
       console.error('❌ UMP form error:', error);
-      // Fallback: non-personalized ads erlauben
+      // Fallback: Erlaube non-personalized ads
       return true;
     }
+  }
+  
+  /**
+   * Prüft ob Consent bereits gegeben wurde
+   */
+  async hasConsent(): Promise<boolean> {
+    const savedStatus = await AsyncStorage.getItem(CONSENT_STATUS_KEY);
+    return savedStatus === 'OBTAINED' || savedStatus === 'NOT_REQUIRED';
   }
 
   /**
    * Prüft ob Ads gezeigt werden können
+   * UNKNOWN wird als "erlauben" behandelt (Fallback zu personalized ads)
    */
   canShowAds(): boolean {
-    return this.consentStatus === 'OBTAINED' || this.consentStatus === 'NOT_REQUIRED';
+    // OBTAINED, NOT_REQUIRED, UNKNOWN → Ads erlaubt
+    // Nur REQUIRED blockiert (bis Consent gegeben)
+    return this.consentStatus !== 'REQUIRED';
   }
 
   /**
@@ -138,6 +167,22 @@ class ConsentService {
    */
   getConsentStatus(): ConsentStatus {
     return this.consentStatus;
+  }
+  
+  /**
+   * Gibt die Ad Request Options basierend auf Consent Status zurück
+   * FALSE = Personalized Ads (Standard, wenn Consent gegeben oder unbekannt)
+   * TRUE = Non-Personalized Ads (nur wenn Consent explizit REQUIRED)
+   */
+  getAdRequestOptions(): { requestNonPersonalizedAdsOnly: boolean } {
+    // Standard: Personalized Ads (false)
+    // Nur wenn REQUIRED (explizit Consent nötig) → Non-Personalized (true)
+    // OBTAINED, NOT_REQUIRED, UNKNOWN → Personalized (false)
+    const useNonPersonalized = this.consentStatus === 'REQUIRED';
+    
+    return {
+      requestNonPersonalizedAdsOnly: useNonPersonalized
+    };
   }
 
   /**
@@ -157,6 +202,29 @@ class ConsentService {
       console.log('🔄 UMP: Consent reset');
     } catch (error) {
       console.error('❌ UMP reset error:', error);
+    }
+  }
+  
+  /**
+   * Force Consent Form (für Testing in Deutschland)
+   */
+  async forceShowConsentForm(): Promise<void> {
+    try {
+      const { AdsConsent, AdsConsentDebugGeography } = require('react-native-google-mobile-ads');
+      
+      // Reset + EEA erzwingen
+      await this.resetConsent();
+      await AdsConsent.setDebugGeography(AdsConsentDebugGeography.EEA);
+      
+      // Neu initialisieren
+      await this.initialize();
+      
+      // Form zeigen
+      await this.showConsentFormIfRequired();
+      
+      console.log('✅ UMP: Forced consent form shown');
+    } catch (error) {
+      console.error('❌ Force consent error:', error);
     }
   }
 }

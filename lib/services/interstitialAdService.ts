@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { isExpoGo } from '../utils/platform';
 import { adMobService } from './adMobService';
 
@@ -32,6 +33,28 @@ class InterstitialAdService {
     }
 
     try {
+      // iOS: Consent nicht prüfen (nicht kritisch)
+      if (Platform.OS === 'ios') {
+        // Auf iOS direkt mit Ad Request fortfahren
+      } else {
+        // Android: Consent Status prüfen vor Initialisierung
+        const { consentService } = require('./consentService');
+        
+        // Initialisiere Consent falls noch nicht geschehen
+        const consentStatus = consentService.getConsentStatus();
+        if (consentStatus === 'UNKNOWN') {
+          console.log('🔄 InterstitialAd: Initializing consent service...');
+          await consentService.initialize();
+        }
+        
+        // Prüfe ob Ads gezeigt werden können
+        const canShowAds = consentService.canShowAds();
+        if (!canShowAds) {
+          console.log('⏭️ InterstitialAd: Skipping (consent required, not obtained)');
+          return;
+        }
+      }
+      
       const { InterstitialAd, TestIds, AdEventType } = require('react-native-google-mobile-ads');
       
       // Get ad unit ID (test in dev, real in production)
@@ -39,10 +62,21 @@ class InterstitialAdService {
         ? TestIds.INTERSTITIAL 
         : adMobService.getAdUnitId('interstitial');
 
-      // Create interstitial instance
-      this.interstitialAd = InterstitialAd.createForAdRequest(adUnitId, {
-        requestNonPersonalizedAdsOnly: true,
+      // Create interstitial instance mit Consent-basierten Options
+      // iOS: Personalized Ads (kein Consent nötig)
+      // Android: Dynamisch basierend auf Consent Status
+      let adRequestOptions = { requestNonPersonalizedAdsOnly: false }; // iOS Default
+      if (Platform.OS === 'android') {
+        const { consentService } = require('./consentService');
+        adRequestOptions = consentService.getAdRequestOptions();
+      }
+      
+      console.log('📊 Interstitial Ad Request Options:', {
+        ...adRequestOptions,
+        platform: Platform.OS
       });
+      
+      this.interstitialAd = InterstitialAd.createForAdRequest(adUnitId, adRequestOptions);
 
       // Set up event listeners
       this.interstitialAd.addAdEventListener(AdEventType.LOADED, () => {
@@ -128,6 +162,21 @@ class InterstitialAdService {
     if (isExpoGo()) {
       console.log('📱 Would show interstitial (Expo Go)');
       return;
+    }
+
+    // iOS: Consent nicht prüfen (nicht kritisch)
+    if (Platform.OS === 'android') {
+      // Android: Prüfe Consent Status
+      try {
+        const { consentService } = require('./consentService');
+        const canShowAds = consentService.canShowAds();
+        if (!canShowAds) {
+          console.log('⏭️ Interstitial: Skipping (no consent)');
+          return;
+        }
+      } catch (err) {
+        console.warn('⚠️ Interstitial: Could not check consent, allowing anyway');
+      }
     }
 
     // Check if enough time has passed

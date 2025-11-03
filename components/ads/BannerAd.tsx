@@ -22,13 +22,34 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
   useEffect(() => {
     const initAds = async () => {
       try {
-        // Prüfe Consent Status
+        // iOS: Consent nicht prüfen (nicht kritisch, kann Navigation stören)
+        if (Platform.OS === 'ios') {
+          setCanShowAds(true);
+          await adMobService.initialize();
+          setIsReady(true);
+          return;
+        }
+        
+        // Android: Consent prüfen
         const { consentService } = await import('@/lib/services/consentService');
+        
+        // Initialisiere Consent falls noch nicht geschehen
+        const consentStatus = consentService.getConsentStatus();
+        if (consentStatus === 'UNKNOWN') {
+          console.log('🔄 BannerAd: Initializing consent service...');
+          await consentService.initialize();
+        }
+        
         const hasConsent = consentService.canShowAds();
         setCanShowAds(hasConsent);
         
+        console.log('📊 BannerAd Consent Check:', {
+          consentStatus: consentService.getConsentStatus(),
+          canShowAds: hasConsent
+        });
+        
         if (!hasConsent) {
-          console.log('⏭️ Banner Ad skipped (no consent)');
+          console.log('⏭️ Banner Ad skipped (consent required, not obtained)');
           return;
         }
         
@@ -38,6 +59,7 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
       } catch (err) {
         console.error('AdMob init error:', err);
         setIsReady(true); // Trotzdem versuchen anzuzeigen
+        setCanShowAds(true); // Fallback: erlauben
       }
     };
     
@@ -58,7 +80,22 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
     );
   }
 
-  const { BannerAd: RNBannerAd, BannerAdSize, TestIds } = require('react-native-google-mobile-ads');
+  // Safe dynamic import with error handling
+  let RNBannerAd, BannerAdSize;
+  try {
+    const mobileAds = require('react-native-google-mobile-ads');
+    RNBannerAd = mobileAds.BannerAd;
+    BannerAdSize = mobileAds.BannerAdSize;
+  } catch (error) {
+    console.warn('Failed to load Google Mobile Ads:', error);
+    return null;
+  }
+  
+  if (!RNBannerAd || !BannerAdSize) {
+    console.warn('BannerAd components not available');
+    return null;
+  }
+  
   const adUnitId = adMobService.getAdUnitId('banner');
 
   console.log('🎯 BannerAd Render:', { 
@@ -81,7 +118,20 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
         <RNBannerAd
           unitId={adUnitId}
           size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
-          requestOptions={{ requestNonPersonalizedAdsOnly: true }}
+          requestOptions={(() => {
+            // iOS: Personalized Ads (kein Consent nötig)
+            if (Platform.OS === 'ios') {
+              return { requestNonPersonalizedAdsOnly: false };
+            }
+            // Android: Dynamisch basierend auf Consent Status
+            try {
+              const { consentService } = require('@/lib/services/consentService');
+              return consentService.getAdRequestOptions();
+            } catch {
+              // Fallback: personalized ads
+              return { requestNonPersonalizedAdsOnly: false };
+            }
+          })()}
           onAdLoaded={() => {
             console.log('✅ BannerAd loaded:', { platform: Platform.OS, adUnitId });
             setAdLoaded(true);
@@ -107,7 +157,20 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
       <RNBannerAd
         unitId={adUnitId}
         size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
-        requestOptions={{ requestNonPersonalizedAdsOnly: true }}
+        requestOptions={(() => {
+          // iOS: Personalized Ads (kein Consent nötig)
+          if (Platform.OS === 'ios') {
+            return { requestNonPersonalizedAdsOnly: false };
+          }
+          // Android: Dynamisch basierend auf Consent Status
+          try {
+            const { consentService } = require('@/lib/services/consentService');
+            return consentService.getAdRequestOptions();
+          } catch {
+            // Fallback: personalized ads
+            return { requestNonPersonalizedAdsOnly: false };
+          }
+        })()}
         onAdLoaded={() => {
           console.log('✅ BannerAd loaded:', { platform: Platform.OS, adUnitId });
           setAdLoaded(true);

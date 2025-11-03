@@ -1,4 +1,5 @@
-import { Platform } from 'react-native';
+import * as Device from 'expo-device';
+import { InteractionManager, Platform } from 'react-native';
 import { isExpoGo } from '../utils/platform';
 
 // AdMob Configuration
@@ -27,6 +28,15 @@ class AdMobService {
     }
 
     try {
+      // Check if device should skip ads
+      if (Platform.OS === 'android') {
+        const shouldSkip = await this.shouldSkipAdsForDevice();
+        if (shouldSkip) {
+          console.log('⏭️ AdMob skipped for problematic device');
+          return;
+        }
+      }
+
       // Import the module
       const { default: MobileAds } = require('react-native-google-mobile-ads');
       
@@ -43,21 +53,67 @@ class AdMobService {
         });
       }
 
-      // Initialize AdMob - mobileAds() returns the initialization promise
-      const initializationStatus = await MobileAds();
+      // Platform-specific initialization
+      if (Platform.OS === 'ios') {
+        // iOS: Direct initialization
+        const initializationStatus = await MobileAds();
+        this.initialized = true;
+        console.log('✅ iOS AdMob initialized:', initializationStatus);
+      } else {
+        // Android: Defensive initialization with delay
+        await new Promise((resolve) => {
+          InteractionManager.runAfterInteractions(async () => {
+            try {
+              const initializationStatus = await MobileAds();
+              this.initialized = true;
+              console.log('✅ Android AdMob initialized:', initializationStatus);
+              resolve(initializationStatus);
+            } catch (androidError) {
+              console.warn('⚠️ Android AdMob init failed (non-critical):', androidError);
+              // App continues without ads
+              resolve(null);
+            }
+          });
+        });
+      }
       
-      this.initialized = true;
-      
-      console.log('✅ AdMob initialized:', { 
+      console.log('✅ AdMob initialization complete:', { 
         platform: Platform.OS,
-        status: initializationStatus,
+        initialized: this.initialized,
         bannerAdUnit: this.getAdUnitId('banner')
       });
     } catch (error) {
-      console.error('❌ AdMob init failed:', { 
+      console.error('❌ AdMob init failed (non-critical):', { 
         platform: Platform.OS, 
         error: error?.message || error 
       });
+      // App continues without ads - no crash
+    }
+  }
+
+  private async shouldSkipAdsForDevice(): Promise<boolean> {
+    try {
+      const model = Device.modelId || Device.modelName;
+      if (!model) {
+        console.log('Could not determine device model');
+        return false;
+      }
+      
+      // Samsung A13 5G models that have issues
+      const problematicDevices = [
+        'SM-A136U', 'SM-A136U1', 'SM-A136B', 'SM-A136W',
+        'SM-A125F', 'SM-A125U' // Also A12 with similar issues
+      ];
+      
+      if (problematicDevices.includes(model)) {
+        console.log('⚠️ Problematic device detected:', model);
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.log('Could not check device model:', error);
+      return false;
     }
   }
 
