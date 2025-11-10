@@ -636,6 +636,111 @@ export class FirestoreService {
   }
 
   /**
+   * Sucht ähnliche NoName-Produkte basierend auf Keywords mit Algolia
+   * Für Fallback-Produkte (z.B. Nutella → ähnliche Nuss-Nougat-Cremes)
+   */
+  static async searchSimilarProductsByKeywords(
+    productName: string,
+    limit: number = 5
+  ): Promise<(FirestoreDocument<Produkte> & {
+    discounter?: Discounter;
+    handelsmarke?: Handelsmarken;
+    kategorie?: Kategorien;
+  })[]> {
+    try {
+      const { KeywordExtractor } = await import('./keywordExtractor');
+      const { AlgoliaService } = await import('./algolia');
+      
+      // Bereinige den Produktnamen für die Algolia-Suche
+      const searchQuery = KeywordExtractor.extractSearchQuery(productName);
+      
+      if (!searchQuery) {
+        console.log('⚠️ No valid search query from:', productName);
+        return [];
+      }
+      
+      console.log(`🔍 Searching similar products with Algolia query: "${searchQuery}"`);
+      
+      // Suche mit Algolia (nur NoName Produkte) - mehr laden, da wir nach Stufe filtern
+      const algoliaResults = await AlgoliaService.searchNoNameProducts(searchQuery, 0, limit * 2);
+      
+      if (algoliaResults.hits.length === 0) {
+        console.log('⚠️ No similar products found');
+        return [];
+      }
+      
+      console.log(`✅ Found ${algoliaResults.hits.length} similar products from Algolia`);
+      
+      // Lade die vollständigen Produkte aus Firestore basierend auf Algolia objectIDs
+      const productPromises = algoliaResults.hits.map(async (hit) => {
+        try {
+          // Lade Produkt aus Firestore
+          const productDoc = await getDoc(doc(db, 'produkte', hit.objectID));
+          
+          if (!productDoc.exists()) {
+            console.warn(`Product ${hit.objectID} not found in Firestore`);
+            return null;
+          }
+          
+          const data = productDoc.data() as Produkte;
+          const productWithDetails = {
+            id: productDoc.id,
+            ...data
+          } as FirestoreDocument<Produkte> & {
+            discounter?: Discounter;
+            handelsmarke?: Handelsmarken;
+            kategorie?: Kategorien;
+          };
+          
+          // Lade References parallel
+          const [discounterData, handelsmarkeData, kategorieData] = await Promise.all([
+            data.discounter ? getDoc(data.discounter) : null,
+            data.handelsmarke ? getDoc(data.handelsmarke) : null,
+            data.kategorie ? getDoc(data.kategorie) : null
+          ]);
+          
+          if (discounterData?.exists()) {
+            productWithDetails.discounter = { id: discounterData.id, ...discounterData.data() } as Discounter;
+          }
+          if (handelsmarkeData?.exists()) {
+            productWithDetails.handelsmarke = { id: handelsmarkeData.id, ...handelsmarkeData.data() } as Handelsmarken;
+          }
+          if (kategorieData?.exists()) {
+            productWithDetails.kategorie = { id: kategorieData.id, ...kategorieData.data() } as Kategorien;
+          }
+          
+          return productWithDetails;
+        } catch (error) {
+          console.error(`Error loading product ${hit.objectID}:`, error);
+          return null;
+        }
+      });
+      
+      const products = await Promise.all(productPromises);
+      
+      // Filtere null-Werte und nur Stufe 3, 4, 5 Produkte
+      const filteredProducts = products.filter(p => {
+        if (!p) return false;
+        const stufe = parseInt(p.stufe || '0');
+        return stufe >= 3 && stufe <= 5;
+      }) as (FirestoreDocument<Produkte> & {
+        discounter?: Discounter;
+        handelsmarke?: Handelsmarken;
+        kategorie?: Kategorien;
+      })[];
+      
+      console.log(`✅ Filtered to ${filteredProducts.length} products with Stufe 3-5`);
+      
+      // Limitiere auf die gewünschte Anzahl
+      return filteredProducts.slice(0, limit);
+      
+    } catch (error) {
+      console.error('Error searching similar products with Algolia:', error);
+      return [];
+    }
+  }
+
+  /**
    * Holt ähnliche Produkte (Stufe 3,4,5) aus der gleichen Kategorie
    * Für die "Ähnliche Produkte" Sektion auf Stufe 1+2 Detailseiten
    */

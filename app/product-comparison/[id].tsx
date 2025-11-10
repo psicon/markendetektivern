@@ -1808,11 +1808,31 @@ export default function ProductComparisonScreen() {
           
           animateProductCard(convertedProduct.id, 100);
           
-          // Bei Fallback-Produkten laden wir 3 NoName-Alternativen aus der gleichen Kategorie
-          if (convertedProduct.kategorie?.bezeichnung) {
-            setTimeout(() => {
-              console.log('🔍 Loading 3 NoName alternatives for fallback product');
-              loadSimilarProducts(convertedProduct.kategorie.bezeichnung, id, 3);
+          // Bei Fallback-Produkten suchen wir ähnliche Produkte basierend auf Keywords
+          if (fallbackProduct) {
+            setTimeout(async () => {
+              console.log('🔍 Searching similar products for fallback:', fallbackProduct.displayData.name);
+              setSimilarProductsLoading(true);
+              
+              try {
+                const similarProducts = await FirestoreService.searchSimilarProductsByKeywords(
+                  fallbackProduct.displayData.name,
+                  5 // Max 5 ähnliche Produkte
+                );
+                
+                console.log(`✅ Found ${similarProducts.length} similar products for fallback`);
+                setSimilarProducts(similarProducts);
+                
+                // Animiere die gefundenen Produkte
+                similarProducts.forEach((product, index) => {
+                  // Initialisiere Animation für jedes Produkt
+                  animateProductCard(product.id, index * 100);
+                });
+              } catch (error) {
+                console.error('Error loading similar products for fallback:', error);
+              } finally {
+                setSimilarProductsLoading(false);
+              }
             }, 400);
           }
           
@@ -2962,28 +2982,30 @@ export default function ProductComparisonScreen() {
         {/* Alternatives Section */}
         <View style={[
           styles.alternativesContainer,
-          // Extra Margin wenn mehr als 1 NoName-Produkt (da keine "Weitere enttarnte Produkte" angezeigt werden)
-          comparisonData.relatedNoNameProducts.length > 1 ? { marginBottom: 100 } : {}
+          // Extra Margin bei Fallback mit similarProducts oder bei mehr als 1 NoName-Produkt (da keine "Weitere enttarnte Produkte" angezeigt werden)
+          (comparisonData.mainProduct?.isFallback && similarProducts.length > 0) || comparisonData.relatedNoNameProducts.length > 1 ? { marginBottom: 100 } : {}
         ]}>
-          <Animated.View style={{ opacity: headerAnimation, alignItems: 'center' }}>
+          <Animated.View style={{ opacity: headerAnimation, marginBottom: 6, alignItems: 'center' }}>
             <ThemedText style={[styles.alternativesTitle, { textAlign: 'center' }]}>
-            {comparisonData.relatedNoNameProducts.length > 0 
-                ? 'NoName Alternativen vom gleichen Hersteller'
-              : 'Enttarnte Produkte'
+            {comparisonData.mainProduct?.isFallback
+                ? 'Alternativen anderer Hersteller'
+                : comparisonData.relatedNoNameProducts.length > 0 
+                  ? 'NoName Alternativen vom gleichen Hersteller'
+                  : 'Enttarnte Produkte'
             }
           </ThemedText>
-          </Animated.View>
-          {comparisonData.relatedNoNameProducts.length === 0 && (
-            <Animated.View style={{ opacity: headerAnimation, alignItems: 'center' }}>
-              <ThemedText style={[styles.alternativesSubtitle, { color: colors.icon, textAlign: 'center' }]}>
-              Entdecke andere Produkte mit Stufe 3, 4 oder 5
+          {!comparisonData.relatedNoNameProducts.length && (
+            <ThemedText style={[styles.alternativesSubtitle, { color: colors.icon, textAlign: 'center' }]}>
+              {comparisonData.mainProduct?.isFallback
+                ? 'Entdecke ähnliche Produkte'
+                : 'Entdecke andere Produkte mit Stufe 3, 4 oder 5'}
             </ThemedText>
-            </Animated.View>
           )}
+          </Animated.View>
 
           {/* Banner - nur ohne Premium */}
           {!isPremium && (
-            <View style={{ marginBottom: 16, marginHorizontal: -20 }}>
+            <View style={{ marginBottom: 8, marginHorizontal: -20 }}>
               <BannerAd 
                 style={{ marginHorizontal: 0 }}
                 onAdLoaded={() => console.log('✅ Product Comparison Banner loaded')}
@@ -2993,7 +3015,7 @@ export default function ProductComparisonScreen() {
           )}
 
           {/* Skeleton während Alternativen laden (Progressive Loading) */}
-          {loadingAlternatives && (
+          {loadingAlternatives && !comparisonData.mainProduct?.isFallback && (
             <>
               {[1, 2, 3].map((index) => (
                 <View key={`skeleton-${index}`} style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 16 }]}>
@@ -3031,9 +3053,94 @@ export default function ProductComparisonScreen() {
               ))}
             </>
           )}
+          
+          {/* Skeleton für Fallback-Produkte (kompakte Liste) */}
+          {similarProductsLoading && comparisonData.mainProduct?.isFallback && (
+            <>
+              {[1, 2, 3].map((index) => (
+                <View key={`skeleton-${index}`} style={[styles.similarProductItem, { backgroundColor: colors.cardBackground }]}>
+                  <View style={[styles.similarProductImagePlaceholder, { backgroundColor: colors.border }]} />
+                  <View style={styles.similarProductContent}>
+                    <View style={[styles.skeletonLine, { backgroundColor: colors.border, width: '80%', height: 14 }]} />
+                    <View style={[styles.skeletonLine, { backgroundColor: colors.border, width: '60%', height: 12, marginTop: 4 }]} />
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
 
-          {/* NoName-Alternativen oder ähnliche Produkte */}
-          {!loadingAlternatives && comparisonData.relatedNoNameProducts.length > 0 ? (
+          {/* Kompakte Liste für Fallback-Produkte */}
+          {!similarProductsLoading && comparisonData.mainProduct?.isFallback && similarProducts.length > 0 && (
+            similarProducts.map((product) => (
+              <Animated.View 
+                key={product.id}
+                style={{
+                  opacity: productAnimations[product.id] || 0,
+                  transform: [{ scale: productAnimations[`${product.id}_scale`] || 0.8 }]
+                }}
+              >
+                <TouchableOpacity 
+                  style={[styles.similarProductItem, { backgroundColor: colors.cardBackground }]}
+                  onPress={() => router.push(`/product-comparison/${product.id}?type=noname` as any)}
+                >
+                  <View style={styles.similarProductImageContainer}>
+                    {product.bild ? (
+                      <ImageWithShimmer
+                        source={{ uri: product.bild }}
+                        style={styles.similarProductImage}
+                        fallbackIcon="cube.box"
+                        fallbackIconSize={20}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={[styles.similarProductImagePlaceholder, { backgroundColor: colors.border }]}>
+                        <IconSymbol name="cube.box" size={20} color={colors.icon} />
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.similarProductContent}>
+                    <ThemedText style={[styles.similarProductName, { color: colors.text }]} numberOfLines={2}>
+                      {product.name}
+                    </ThemedText>
+                    <ThemedText style={[styles.similarProductBrand, { color: colors.icon }]} numberOfLines={1}>
+                      {product.handelsmarke?.bezeichnung || 'NoName'}
+                    </ThemedText>
+                    <View style={styles.similarProductBottomRow}>
+                      {product.discounter && (
+                        <View style={styles.similarProductMarket}>
+                          <ImageWithShimmer
+                            source={{ uri: product.discounter.bild }}
+                            style={styles.similarProductMarketLogo}
+                            fallbackIcon="house.fill"
+                            fallbackIconSize={12}
+                            resizeMode="contain"
+                          />
+                          <ThemedText style={[styles.similarProductMarketText, { color: colors.icon }]}>
+                            {product.discounter.name}
+                          </ThemedText>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                  <View style={styles.similarProductRight}>
+                    <View style={[styles.stufeBadgeSmall, { backgroundColor: getStufenColor(parseInt(product.stufe || '3')) }]}>
+                      <IconSymbol name="chart.bar" size={8} color="white" />
+                      <ThemedText style={styles.stufeBadgeTextSmall}>{product.stufe}</ThemedText>
+                    </View>
+                    <ThemedText style={[styles.similarProductPrice, { color: colors.primary }]}>
+                      {product.preis ? `${product.preis.toFixed(2)} €` : 'Preis n.v.'}
+                    </ThemedText>
+                  </View>
+                  <View style={styles.similarProductChevron}>
+                    <IconSymbol name="chevron.right" size={16} color={colors.icon} />
+                  </View>
+                </TouchableOpacity>
+              </Animated.View>
+            ))
+          )}
+          
+          {/* NoName-Alternativen (große Cards) */}
+          {!loadingAlternatives && !comparisonData.mainProduct?.isFallback && comparisonData.relatedNoNameProducts.length > 0 ? (
             // NoName-Alternativen anzeigen
             comparisonData.relatedNoNameProducts.map((noNameProduct, index) => {
                 const isSelected = selectedProducts.has(noNameProduct.id);
@@ -3296,10 +3403,10 @@ export default function ProductComparisonScreen() {
         })
           ) : null}
         
-          {/* 🆕 Weitere enttarnte Produkte für Stufe 3,4,5 - NICHT für Fallback-Produkte */}
-          {(comparisonData.relatedNoNameProducts.length > 0 && similarProducts.length > 0 && !comparisonData.mainProduct?.isFallback) && (
-            <View style={{ marginTop: 6 }}>
-              <Animated.View style={{ opacity: weitereHeaderAnimation, marginBottom: 12, alignItems: 'center' }}>
+          {/* 🆕 Weitere enttarnte Produkte für Stufe 3,4,5 - NICHT bei Fallback (da bereits oben gezeigt) */}
+          {comparisonData.relatedNoNameProducts.length > 0 && !comparisonData.mainProduct?.isFallback && similarProducts.length > 0 && (
+            <View style={{ marginTop: 6, marginBottom: 100 }}>
+              <Animated.View style={{ opacity: weitereHeaderAnimation, marginBottom: 6, alignItems: 'center' }}>
                 <ThemedText style={[styles.alternativesTitle, { textAlign: 'center' }]}>
                   Weitere enttarnte Produkte
                 </ThemedText>
@@ -3307,6 +3414,17 @@ export default function ProductComparisonScreen() {
                   Entdecke andere Produkte mit Stufe 3, 4 oder 5
                 </ThemedText>
               </Animated.View>
+              
+              {/* Banner - nur ohne Premium */}
+              {!isPremium && (
+                <View style={{ marginBottom: 8, marginHorizontal: -20 }}>
+                  <BannerAd 
+                    style={{ marginHorizontal: 0 }}
+                    onAdLoaded={() => console.log('✅ Similar Products Banner loaded')}
+                    onAdFailedToLoad={(error) => console.log('❌ Similar Products Banner failed:', error)}
+                  />
+                </View>
+              )}
               
               {similarProducts.map((product) => (
                 <Animated.View 
@@ -3377,9 +3495,9 @@ export default function ProductComparisonScreen() {
             </View>
           )}
         
-        {/* Ähnliche Produkte für Markenprodukte ohne NoName-Alternativen */}
-        {comparisonData.relatedNoNameProducts.length === 0 && (
-          <View style={{ marginTop: 16 }}>
+        {/* Ähnliche Produkte für Markenprodukte ohne NoName-Alternativen - NICHT für Fallback-Produkte */}
+        {comparisonData.relatedNoNameProducts.length === 0 && !comparisonData.mainProduct?.isFallback && (
+          <View style={{ marginTop: 16, marginBottom: 100 }}>
             {similarProductsLoading ? (
               [...Array(3)].map((_, index) => (
                 <View key={index} style={[styles.similarProductItem, { backgroundColor: colors.cardBackground }]}>
@@ -4883,14 +5001,14 @@ const styles = StyleSheet.create({
   // Alternatives Section
   alternativesContainer: {
     paddingHorizontal: 0,
+    marginTop: 6,  // Konsistenter Abstand wie bei "Weitere enttarnte Produkte"
   },
   alternativesTitle: {
     fontSize: 14,
     fontFamily: 'Nunito_700Bold',
-    marginBottom: 0, // Reduziert von 6 auf 3px
-    marginTop: 12,   // Reduziert von 32 auf 16px für weniger Abstand
+    marginBottom: 0, 
+    marginTop: 0,   // Kein extra Margin - wird über Container gesteuert
     marginLeft: 0,
-    
   },
 
 

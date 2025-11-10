@@ -22,9 +22,10 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
   useEffect(() => {
     const initAds = async () => {
       try {
-        // iOS: Consent nicht prüfen (nicht kritisch, kann Navigation stören)
         if (Platform.OS === 'ios') {
+          // iOS: SOFORT anzeigen für maximale Einnahmen (wie in 5.0.1)
           setCanShowAds(true);
+          // WICHTIG: Auch hier initialize aufrufen (wie in Version 5.0.1!)
           await adMobService.initialize();
           setIsReady(true);
           return;
@@ -53,9 +54,8 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
           return;
         }
         
-        // AdMob initialisieren
-        await adMobService.initialize();
-        setIsReady(true);
+        // Android: AdMob sollte bereits initialisiert sein
+        setIsReady(adMobService.isAvailable());
       } catch (err) {
         console.error('AdMob init error:', err);
         setIsReady(true); // Trotzdem versuchen anzuzeigen

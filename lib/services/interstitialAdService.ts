@@ -33,11 +33,8 @@ class InterstitialAdService {
     }
 
     try {
-      // iOS: Consent nicht prüfen (nicht kritisch)
-      if (Platform.OS === 'ios') {
-        // Auf iOS direkt mit Ad Request fortfahren
-      } else {
-        // Android: Consent Status prüfen vor Initialisierung
+      // Android: Consent prüfen
+      if (Platform.OS === 'android') {
         const { consentService } = require('./consentService');
         
         // Initialisiere Consent falls noch nicht geschehen
@@ -54,6 +51,7 @@ class InterstitialAdService {
           return;
         }
       }
+      // iOS: Direkt fortfahren (wie in 5.0.1)
       
       const { InterstitialAd, TestIds, AdEventType } = require('react-native-google-mobile-ads');
       

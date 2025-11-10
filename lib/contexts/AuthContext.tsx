@@ -132,7 +132,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Registriere Profile-Refresh-Callback für Achievement-System
     setProfileRefreshCallback(refreshUserProfile);
     
+    let anonymousSignInTimeout: NodeJS.Timeout | null = null;
+    let isMounted = true;
+    let hasInitialAuthState = false;
+    
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      // Verhindere State Updates wenn Component unmounted ist
+      if (!isMounted) {
+        console.log('⏭️ Auth state change ignored (component unmounted)');
+        return;
+      }
+      
       console.log('🔄 AuthContext: Auth state changed:', user ? `User: ${user.uid} (anonymous: ${user.isAnonymous})` : 'No user');
       setUser(user);
       setIsAnonymous(user?.isAnonymous || false);
@@ -162,6 +172,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       
       if (user?.uid) {
+        // User gefunden - lösche Timeout falls noch aktiv
+        if (anonymousSignInTimeout) {
+          clearTimeout(anonymousSignInTimeout);
+          anonymousSignInTimeout = null;
+          console.log('✅ Timeout gecancelt - User gefunden');
+        }
+        hasInitialAuthState = true;
+        
         // 🔄 EINMALIGE GAMIFICATION INITIALISIERUNG nach Authentifizierung
         console.log('🚀 Starte Gamification-Initialisierung nach Authentifizierung...');
         try {
@@ -212,26 +230,80 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch (error) {
           console.warn('⚠️ Achievement-Checks fehlgeschlagen für User:', user.uid, error);
         }
-      } else {
-        setUserProfile(null);
         
-        // 🚀 AUTO-ANONYMOUS LOGIN: Wenn kein User vorhanden, automatisch anonym anmelden
-        console.log('👤 Kein User gefunden - starte automatische anonyme Anmeldung...');
-        try {
-          await signInAnonymously(auth);
-          console.log('✅ Anonyme Anmeldung erfolgreich');
-          // onAuthStateChanged wird automatisch getriggert, daher kein setLoading(false) hier
-          return; // Wichtig: nicht setLoading(false) aufrufen, da Auth-Zustand sich ändert
-        } catch (error) {
-          console.error('❌ Anonyme Anmeldung fehlgeschlagen:', error);
-          // Fallback: Lade trotzdem die App ohne User
+        setLoading(false);
+      } else {
+        // WICHTIG: Warte 1 Sekunde bevor neue anonyme Session erstellt wird
+        // Firebase braucht Zeit um persistierte Session aus AsyncStorage zu laden
+        // Nur beim ERSTEN Call mit user=null, nicht bei jedem weiteren
+        if (!hasInitialAuthState && !anonymousSignInTimeout) {
+          console.log('⏳ Warte auf Firebase Session-Wiederherstellung (1 Sekunde)...');
+          
+          anonymousSignInTimeout = setTimeout(async () => {
+            // Prüfe ob Component noch mounted ist
+            if (!isMounted) {
+              console.log('⏭️ Timeout ignored (component unmounted)');
+              return;
+            }
+            
+            // Prüfe nochmal ob inzwischen User geladen wurde
+            const currentUser = auth.currentUser;
+            if (!currentUser) {
+              // Prüfe ob es einen Backup gibt (deutet auf verlorene Session hin)
+              try {
+                const backupUserId = await AsyncStorage.getItem('@auth_user_id_backup');
+                const backupEmail = await AsyncStorage.getItem('@auth_user_email_backup');
+                
+                if (backupUserId && backupEmail && backupEmail !== 'anonymous') {
+                  // User hatte eine registrierte Session - nicht überschreiben!
+                  console.warn('⚠️ Registrierte Session verloren - bitte User neu anmelden lassen');
+                  console.warn('   Backup User ID:', backupUserId);
+                  if (isMounted) {
+                    setUserProfile(null);
+                    setLoading(false);
+                  }
+                  return;
+                }
+              } catch (error) {
+                console.warn('⚠️ Konnte Backup nicht prüfen:', error);
+              }
+              
+              console.log('👤 Kein User nach Wartezeit gefunden - starte anonyme Anmeldung...');
+              try {
+                await signInAnonymously(auth);
+                console.log('✅ Neue anonyme Anmeldung erfolgreich');
+                // onAuthStateChanged wird automatisch getriggert
+              } catch (error) {
+                console.error('❌ Anonyme Anmeldung fehlgeschlagen:', error);
+                if (isMounted) {
+                  setLoading(false);
+                }
+              }
+            } else {
+              console.log('✅ Firebase Session wurde während Wartezeit wiederhergestellt');
+              if (isMounted) {
+                setLoading(false);
+              }
+            }
+            
+            anonymousSignInTimeout = null;
+          }, 1000);
+        } else if (hasInitialAuthState) {
+          // User war vorher da, aber jetzt nicht mehr (z.B. Logout)
+          setUserProfile(null);
+          setLoading(false);
         }
       }
-      
-      setLoading(false);
     });
 
-    return unsubscribe;
+    return () => {
+      isMounted = false;
+      if (anonymousSignInTimeout) {
+        clearTimeout(anonymousSignInTimeout);
+        anonymousSignInTimeout = null;
+      }
+      unsubscribe();
+    };
   }, [refreshUserProfile]);
 
   const signIn = async (email: string, password: string) => {

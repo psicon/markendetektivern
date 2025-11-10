@@ -72,7 +72,7 @@ function ThemedApp() {
         
         // Set custom attributes
         crashlytics().setAttribute('platform', Platform.OS);
-        crashlytics().setAttribute('app_version', '5.0.2');
+        crashlytics().setAttribute('app_version', '5.0.4');
         
         console.log('✅ Firebase Crashlytics initialized');
       } catch (error) {
@@ -143,60 +143,36 @@ export default function RootLayout() {
     testFlightLogger.enable();
     console.log('🚀 App gestartet - TestFlight Logger aktiviert');
     
-    // ⚠️ iOS CRASH FIX: Alles was wir in 5.0.2 hinzugefügt haben auf iOS skip/verzögern
-    // Navigation muss ZUERST vollständig initialisiert werden
+    // App Lifecycle Service initialisieren
+    appLifecycleService.initialize();
     
-    if (Platform.OS === 'ios') {
-      // iOS: ALLES verzögern - erst nach Navigation vollständig initialisiert
-      // WICHTIG: Navigation muss ZUERST vollständig fertig sein
-      setTimeout(() => {
-        // App Lifecycle Service (NEU in 5.0.2)
-        // Registriert nur einen Event Listener - sollte Navigation nicht stören wenn verzögert
-        try {
-          appLifecycleService.initialize();
-        } catch (error) {
-          console.error('❌ iOS AppLifecycle init error:', error);
-          // Nicht kritisch - App kann ohne laufen
-        }
-        
-        // AdMob Initialisierung (wurde geändert in 5.0.2)
-        // Zusätzlich verzögern um sicherzugehen
-        setTimeout(() => {
-          adMobService.initialize().then(() => {
-            console.log('📱 iOS AdMob initialisiert');
+    // AdMob SOFORT initialisieren - keine Verzögerungen mehr!
+    // KRITISCH: Jede Sekunde Verzögerung = verlorene Einnahmen
+    const initializeAdsWithConsent = async () => {
+      try {
+        if (Platform.OS === 'ios') {
+          // iOS: SOFORT initialisieren für maximale Einnahmen
+          await adMobService.initialize();
+          console.log('✅ iOS AdMob sofort initialisiert');
+          interstitialAdService.initialize();
+        } else {
+          // Android: Mit Consent aber trotzdem schnell
+          const { consentService } = await import('@/lib/services/consentService');
+          await consentService.initialize();
+          
+          // Android braucht etwas Delay wegen dem Crash
+          setTimeout(async () => {
+            await adMobService.initialize();
+            console.log('✅ Android AdMob initialisiert');
             interstitialAdService.initialize();
-          }).catch(error => {
-            console.error('❌ iOS AdMob init error:', error);
-          });
-        }, 1000);
-      }, 3000); // 3 Sekunden warten bis Navigation bereit ist
-    } else {
-      // Android: Wie vorher (funktioniert)
-      appLifecycleService.initialize();
-      
-      // Android: Consent + AdMob wie bisher
-      setTimeout(() => {
-        const initializeAdsWithConsent = async () => {
-          try {
-            const { consentService } = await import('@/lib/services/consentService');
-            const { InteractionManager } = await import('react-native');
-            await new Promise<void>(resolve => InteractionManager.runAfterInteractions(() => resolve()));
-            
-            await consentService.initialize();
-            
-            setTimeout(async () => {
-              await adMobService.initialize();
-              console.log('📱 Android AdMob mit Delay initialisiert');
-              interstitialAdService.initialize();
-            }, 2000);
-          } catch (error) {
-            console.error('❌ Ads initialization error:', error);
-          }
-        };
-        
-        initializeAdsWithConsent();
-      }, 2000);
-    }
+          }, 2000);
+        }
+      } catch (error) {
+        console.error('❌ Ads initialization error:', error);
+      }
+    };
+    
+    initializeAdsWithConsent();
   }, []);
 
   return (
