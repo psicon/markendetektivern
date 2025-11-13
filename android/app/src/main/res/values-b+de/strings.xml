@@ -1,0 +1,7 @@
+<resources>
+  <string name="NSCameraUsageDescription">"Diese App benötigt Zugriff auf die Kamera, um Barcodes von Produkten zu scannen und Preise zu vergleichen."</string>
+  <string name="NSLocationWhenInUseUsageDescription">"Diese App benötigt Zugriff auf deinen Standort, um dir lokale Angebote und Märkte in deiner Nähe zu zeigen."</string>
+  <string name="NSPhotoLibraryUsageDescription">"Diese App benötigt Zugriff auf deine Fotos, um dein Profilbild aus der Galerie auszuwählen."</string>
+  <string name="CFBundleDisplayName">"MarkenDetektive"</string>
+  <string name="CFBundleName">"MarkenDetektive"</string>
+</resources>

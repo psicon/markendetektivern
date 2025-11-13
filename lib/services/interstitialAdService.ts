@@ -61,9 +61,9 @@ class InterstitialAdService {
         : adMobService.getAdUnitId('interstitial');
 
       // Create interstitial instance mit Consent-basierten Options
-      // iOS: Personalized Ads (kein Consent nötig)
+      // iOS: NON-Personalized Ads (kein UMP implementiert = kein Consent = non-personalized required)
       // Android: Dynamisch basierend auf Consent Status
-      let adRequestOptions = { requestNonPersonalizedAdsOnly: false }; // iOS Default
+      let adRequestOptions = { requestNonPersonalizedAdsOnly: true }; // iOS Default - MUSS true sein!
       if (Platform.OS === 'android') {
         const { consentService } = require('./consentService');
         adRequestOptions = consentService.getAdRequestOptions();

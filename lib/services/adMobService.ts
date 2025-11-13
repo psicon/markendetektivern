@@ -92,28 +92,49 @@ class AdMobService {
   }
 
   private async shouldSkipAdsForDevice(): Promise<boolean> {
+    // NUR für Android relevant - iOS hat keine bekannten problematischen Geräte
+    if (Platform.OS !== 'android') {
+      return false;
+    }
+    
     try {
-      const model = Device.modelId || Device.modelName;
-      if (!model) {
-        console.log('Could not determine device model');
+      const modelId = Device.modelId;
+      const modelName = Device.modelName;
+      
+      console.log('📱 Android Device Check:', { modelId, modelName });
+      
+      // Wenn wir das Device nicht erkennen können, erlauben wir Ads (nur bestimmte Samsung Geräte sind problematisch)
+      if (!modelId && !modelName) {
+        console.log('⚠️ Could not determine Android device model - allowing ads');
         return false;
       }
       
-      // Samsung A13 5G models that have issues
-      const problematicDevices = [
-        'SM-A136U', 'SM-A136U1', 'SM-A136B', 'SM-A136W',
-        'SM-A125F', 'SM-A125U' // Also A12 with similar issues
+      // Combine both for matching
+      const deviceInfo = `${modelId || ''} ${modelName || ''}`.toUpperCase();
+      
+      // Samsung A13 5G models that have issues (verschiedene Varianten)
+      const problematicPatterns = [
+        'SM-A136',  // A13 5G (alle Varianten: U, U1, B, W, etc.)
+        'SM-A125',  // A12 (alle Varianten)
+        'GALAXY A13', // Fallback für Namens-Check
+        'GALAXY A12'  // Fallback für Namens-Check
       ];
       
-      if (problematicDevices.includes(model)) {
-        console.log('⚠️ Problematic device detected:', model);
+      // Check if any pattern matches
+      const isProblematic = problematicPatterns.some(pattern => 
+        deviceInfo.includes(pattern.toUpperCase())
+      );
+      
+      if (isProblematic) {
+        console.log('⚠️ Problematic Samsung device detected - skipping AdMob:', { modelId, modelName });
         return true;
       }
       
+      console.log('✅ Android device OK for AdMob:', { modelId, modelName });
       return false;
     } catch (error) {
-      console.log('Could not check device model:', error);
-      return false;
+      console.log('⚠️ Android device check failed - allowing ads:', error);
+      return false; // Bei Fehler erlauben wir Ads, nur Samsung A13/A12 sind bekannt problematisch
     }
   }
 

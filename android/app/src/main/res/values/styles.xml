@@ -3,13 +3,10 @@
     <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
     <item name="colorPrimary">@color/colorPrimary</item>
     <item name="android:statusBarColor">#ffffff</item>
-    <item name="android:windowBackground">@android:color/white</item>
   </style>
-  <!-- Nativer Android Splash Screen - einfach nur Logo -->
   <style name="Theme.App.SplashScreen" parent="Theme.SplashScreen">
-    <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
-    <item name="windowSplashScreenAnimatedIcon">@drawable/splashscreen_with_text</item>
-    <item name="windowSplashScreenAnimationDuration">1500</item>
+    <item name="windowSplashScreenBackground">@color/splashscreen_background</item>
+    <item name="windowSplashScreenAnimatedIcon">@drawable/splashscreen_logo</item>
     <item name="postSplashScreenTheme">@style/AppTheme</item>
   </style>
 </resources>

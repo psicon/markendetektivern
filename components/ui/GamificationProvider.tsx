@@ -1,9 +1,9 @@
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import {
-    setAchievementUnlockHandler,
-    setLevelUpHandler,
-    setPointsEarnedHandler
+  setAchievementUnlockHandler,
+  setLevelUpHandler,
+  setPointsEarnedHandler
 } from '@/lib/services/achievementService';
 import { gamificationSettingsService } from '@/lib/services/gamificationSettingsService';
 import { overlayManager } from '@/lib/services/overlayManager';

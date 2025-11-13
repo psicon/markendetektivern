@@ -34,14 +34,17 @@ export class ErrorBoundary extends React.Component<Props, State> {
     try {
       const crashlytics = require('@react-native-firebase/crashlytics').default;
       
+      // Set custom attributes BEFORE recording error
+      crashlytics().setAttribute('error_type', 'react_error_boundary');
+      if (errorInfo.componentStack) {
+        crashlytics().setAttribute('component_stack', String(errorInfo.componentStack).slice(0, 500));
+      }
+      
       // Log component stack
       crashlytics().log(`Component Stack: ${errorInfo.componentStack?.slice(0, 500)}`);
       
-      // Record error with context
-      crashlytics().recordError(error, {
-        type: 'react_error_boundary',
-        componentStack: errorInfo.componentStack
-      });
+      // Record error (without second parameter - attributes are already set)
+      crashlytics().recordError(error);
       
       console.log('✅ Error sent to Firebase Crashlytics');
     } catch (crashlyticsError) {

@@ -119,17 +119,17 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
           unitId={adUnitId}
           size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
           requestOptions={(() => {
-            // iOS: Personalized Ads (kein Consent nötig)
+            // iOS: NON-Personalized Ads (kein UMP = kein Consent = non-personalized required)
             if (Platform.OS === 'ios') {
-              return { requestNonPersonalizedAdsOnly: false };
+              return { requestNonPersonalizedAdsOnly: true };
             }
             // Android: Dynamisch basierend auf Consent Status
             try {
               const { consentService } = require('@/lib/services/consentService');
               return consentService.getAdRequestOptions();
             } catch {
-              // Fallback: personalized ads
-              return { requestNonPersonalizedAdsOnly: false };
+              // Fallback: non-personalized für Safety
+              return { requestNonPersonalizedAdsOnly: true };
             }
           })()}
           onAdLoaded={() => {
@@ -158,17 +158,17 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
         unitId={adUnitId}
         size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
         requestOptions={(() => {
-          // iOS: Personalized Ads (kein Consent nötig)
+          // iOS: NON-Personalized Ads (kein UMP = kein Consent = non-personalized required)
           if (Platform.OS === 'ios') {
-            return { requestNonPersonalizedAdsOnly: false };
+            return { requestNonPersonalizedAdsOnly: true };
           }
           // Android: Dynamisch basierend auf Consent Status
           try {
             const { consentService } = require('@/lib/services/consentService');
             return consentService.getAdRequestOptions();
           } catch {
-            // Fallback: personalized ads
-            return { requestNonPersonalizedAdsOnly: false };
+            // Fallback: non-personalized für Safety
+            return { requestNonPersonalizedAdsOnly: true };
           }
         })()}
         onAdLoaded={() => {

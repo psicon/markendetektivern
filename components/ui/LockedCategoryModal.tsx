@@ -5,14 +5,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import LottieView from 'lottie-react-native';
 import React, { useEffect, useRef } from 'react';
 import {
-    Animated,
-    Dimensions,
-    Modal,
-    Platform,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Animated,
+  Dimensions,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconSymbol } from './IconSymbol';
@@ -294,9 +294,9 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   lockContainer: {
-    width: 80,
-    height: 80,
-    marginBottom: 20,
+    width: 50,
+    height: 50,
+    marginBottom: 5,
   },
   lockAnimation: {
     width: '100%',
@@ -304,19 +304,19 @@ const styles = StyleSheet.create({
   },
   categoryInfoContainer: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 10,
   },
   categoryImage: {
-    width: 80,
-    height: 80,
+    width: 70,
+    height: 70,
     borderRadius: 16,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   categoryImagePlaceholder: {
-    width: 80,
-    height: 80,
+    width: 70,
+    height: 70,
     borderRadius: 16,
-    marginBottom: 12,
+    marginBottom: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -335,11 +335,11 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito',
     textAlign: 'center',
     lineHeight: 24,
-    marginBottom: 24,
+    marginBottom: 18,
   },
   progressContainer: {
     width: '100%',
-    marginBottom: 20,
+    marginBottom: 12,
   },
   progressBar: {
     width: '100%',
