@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { usePushNotifications } from '@/lib/contexts/PushNotificationProvider';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { useTheme } from '@/lib/contexts/ThemeContext';
+import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { gamificationSettingsService } from '@/lib/services/gamificationSettingsService';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -623,17 +624,116 @@ export default function MoreScreen() {
           
           {/* 🔧 DEBUG: UMP Consent testen (nur für Entwickler sichtbar) */}
           {__DEV__ && (
-            <TouchableOpacity
-              style={{ marginTop: 8, padding: 8, backgroundColor: colors.error, borderRadius: 8 }}
-              onPress={async () => {
-                const { consentService } = await import('@/lib/services/consentService');
-                await consentService.forceShowConsentForm();
-              }}
-            >
-              <ThemedText style={{ color: 'white', fontSize: 12, textAlign: 'center' }}>
-                🔧 TEST: Consent Form anzeigen
-              </ThemedText>
-            </TouchableOpacity>
+            <View style={{ marginTop: 8, gap: 8 }}>
+              <TouchableOpacity
+                style={{ padding: 8, backgroundColor: colors.error, borderRadius: 8 }}
+                onPress={async () => {
+                  try {
+                    console.log('🔧 Force showing consent form...');
+                    const { consentService } = await import('@/lib/services/consentService');
+                    await consentService.forceShowConsentForm();
+                  } catch (error) {
+                    console.error('❌ Error showing consent form:', error);
+                    Alert.alert('Fehler', 'Consent Form konnte nicht angezeigt werden: ' + error.message);
+                  }
+                }}
+              >
+                <ThemedText style={{ color: 'white', fontSize: 12, textAlign: 'center' }}>
+                  🔧 TEST: Consent Form anzeigen
+                </ThemedText>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={{ padding: 8, backgroundColor: colors.secondary, borderRadius: 8 }}
+                onPress={async () => {
+                  try {
+                    console.log('🔄 Resetting consent...');
+                    const { consentService } = await import('@/lib/services/consentService');
+                    await consentService.resetConsent();
+                    Alert.alert(
+                      'Consent zurückgesetzt',
+                      'Die Consent-Einstellungen wurden zurückgesetzt. Beim nächsten App-Start wird das Consent-Formular erneut angezeigt.',
+                      [{ text: 'OK' }]
+                    );
+                  } catch (error) {
+                    console.error('❌ Error resetting consent:', error);
+                    Alert.alert('Fehler', 'Consent konnte nicht zurückgesetzt werden: ' + error.message);
+                  }
+                }}
+              >
+                <ThemedText style={{ color: 'white', fontSize: 12, textAlign: 'center' }}>
+                  🗑️ Consent zurücksetzen
+                </ThemedText>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={{ padding: 8, backgroundColor: colors.primary, borderRadius: 8 }}
+                onPress={async () => {
+                  try {
+                    console.log('📊 Getting consent status...');
+                    const { consentService } = await import('@/lib/services/consentService');
+                    
+                    // Initialisiere falls noch nicht geschehen
+                    await consentService.initialize();
+                    
+                    const detailedStatus = await consentService.getDetailedStatus();
+                    
+                    console.log('📊 Detailed Consent Status:', detailedStatus);
+                    
+                    Alert.alert(
+                      'Consent Status Details',
+                      `🔹 Platform: ${Platform.OS}\n` +
+                      `🔹 Status: ${detailedStatus.status}\n` +
+                      `🔹 Is Initialized: ${detailedStatus.isInitialized ? '✅' : '❌'}\n\n` +
+                      
+                      `📱 SDK Info:\n` +
+                      `🔹 Can Show Ads: ${detailedStatus.canShowAds ? '✅' : '❌'}\n` +
+                      `🔹 Can Show Personalized: ${detailedStatus.canShowPersonalizedAds ? '✅' : '❌'}\n` +
+                      `🔹 Privacy Options Required: ${detailedStatus.privacyOptionsRequirementStatus || 'N/A'}\n` +
+                      `🔹 Can Request Ads: ${detailedStatus.canRequestAds !== undefined ? (detailedStatus.canRequestAds ? '✅' : '❌') : 'N/A'}\n\n` +
+                      
+                      `💾 Stored Info:\n` +
+                      `🔹 Has Saved Status: ${detailedStatus.hasSavedStatus ? '✅' : '❌'}\n` +
+                      `🔹 Saved Status: ${detailedStatus.savedStatus || 'None'}\n` +
+                      `🔹 Raw Consent Info: ${detailedStatus.rawConsentInfo ? 'Available' : 'None'}\n\n` +
+                      
+                      `🎯 Request Options:\n` +
+                      `🔹 Non-Personalized Only: ${detailedStatus.adRequestOptions?.requestNonPersonalizedAdsOnly ? '✅' : '❌'}`,
+                      [{ text: 'OK' }]
+                    );
+                  } catch (error) {
+                    console.error('❌ Error getting consent status:', error);
+                    Alert.alert('Fehler', 'Status konnte nicht abgerufen werden: ' + error.message);
+                  }
+                }}
+              >
+                <ThemedText style={{ color: 'white', fontSize: 12, textAlign: 'center' }}>
+                  📊 Consent Status anzeigen
+                </ThemedText>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{ padding: 8, backgroundColor: colors.warning, borderRadius: 8 }}
+                onPress={async () => {
+                  try {
+                    console.log('🔓 Resetting temporary category unlocks via debug button...');
+                    await categoryAccessService.resetAllTemporaryUnlocks();
+                    Alert.alert(
+                      'Freischaltungen zurückgesetzt',
+                      'Alle temporär freigeschalteten Kategorien wurden entfernt.',
+                      [{ text: 'OK' }]
+                    );
+                  } catch (error: any) {
+                    console.error('❌ Error resetting temporary unlocks:', error);
+                    Alert.alert('Fehler', `Kategorien konnten nicht zurückgesetzt werden: ${error.message || error}`);
+                  }
+                }}
+              >
+                <ThemedText style={{ color: 'white', fontSize: 12, textAlign: 'center' }}>
+                  🔄 Temporäre Kategorie-Freischaltungen löschen
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
       </ScrollView>

@@ -64,8 +64,8 @@ class AdMobService {
         await new Promise((resolve) => {
           InteractionManager.runAfterInteractions(async () => {
             try {
-              const initializationStatus = await MobileAds();
-              this.initialized = true;
+      const initializationStatus = await MobileAds();
+      this.initialized = true;
               console.log('✅ Android AdMob initialized:', initializationStatus);
               resolve(initializationStatus);
             } catch (androidError) {

@@ -964,7 +964,9 @@ export default function ExploreScreen() {
 
   // Load NoName Products with pagination
   const loadNoNameProducts = async (reset: boolean = false) => {
-    if (noNameLoading || (!noNameHasMore && !reset)) return;
+    if ((noNameLoading && !reset) || (!noNameHasMore && !reset)) return;
+    
+    const requestId = ++noNameRequestId.current;
     
     try {
       setNoNameLoading(true);
@@ -977,22 +979,23 @@ export default function ExploreScreen() {
         allergenFilters: Object.keys(noNameFilters.allergenFilters || {}).length,
         nutritionDetails: noNameFilters.nutritionFilters
       });
-      
-      // Nutze die normale FirestoreService mit erweiterten Filtern
+
+      const validatedFilters = validateFiltersSync({
+        ...noNameFilters,
+        sortBy: 'name'
+      });
+
+      const pageSize = reset ? 20 : 10;
       const result = await FirestoreService.getNoNameProductsPaginated(
-        10, // Reduziert von 20 auf 10 - spart 50% Reads!
+        pageSize,
         reset ? null : noNameLastDoc,
-        {
-          categoryFilters: noNameFilters.categoryFilters,
-          discounterFilters: noNameFilters.discounterFilters,
-          stufeFilters: noNameFilters.stufeFilters,
-          priceMin: noNameFilters.priceMin,
-          priceMax: noNameFilters.priceMax,
-          allergenFilters: noNameFilters.allergenFilters,
-          nutritionFilters: noNameFilters.nutritionFilters,
-          sortBy: 'name'
-        }
+        validatedFilters
       );
+
+      if (noNameRequestId.current !== requestId) {
+        console.log('⚠️ Überspringe veraltete NoName-Response');
+        return;
+      }
 
       if (reset) {
         setNoNameProducts(result.products);
@@ -1009,35 +1012,49 @@ export default function ExploreScreen() {
       setNoNameHasMore(result.hasMore);
 
     } catch (error) {
-      console.error('Error loading NoName products:', error);
-      setNoNameError('Fehler beim Laden der Produkte');
+      if (noNameRequestId.current === requestId) {
+        console.error('Error loading NoName products:', error);
+        setNoNameError('Fehler beim Laden der Produkte');
+      } else {
+        console.warn('⚠️ Fehler in veralteter NoName-Anfrage ignoriert:', error);
+      }
     } finally {
-      setNoNameLoading(false);
+      if (noNameRequestId.current === requestId) {
+        setNoNameLoading(false);
+      }
     }
   };
 
   // Load Markenprodukte with pagination
   const loadMarkenprodukte = async (reset: boolean = false) => {
-    if (markenproduktLoading || (!markenproduktHasMore && !reset)) return;
+    if ((markenproduktLoading && !reset) || (!markenproduktHasMore && !reset)) return;
+    
+    const requestId = ++markenRequestId.current;
     
     try {
       setMarkenproduktLoading(true);
       setMarkenproduktError(null);
 
-      // Nutze die normale FirestoreService mit erweiterten Filtern
+      const validatedFiltersRaw = validateFiltersSync({
+        ...markenproduktFilters,
+        sortBy: 'name'
+      });
+      const validatedFilters = {
+        ...validatedFiltersRaw,
+        categoryFilters: markenproduktFilters.categoryFilters || []
+      };
+
+      const pageSize = reset ? 20 : 10;
       const result = await FirestoreService.getMarkenproduktePaginated(
-        10, // Reduziert von 20 auf 10 - spart 50% Reads!
+        pageSize,
         reset ? null : markenproduktLastDoc,
-        {
-          categoryFilters: markenproduktFilters.categoryFilters,
-          herstellerFilters: markenproduktFilters.herstellerFilters,
-          priceMin: markenproduktFilters.priceMin,
-          priceMax: markenproduktFilters.priceMax,
-          allergenFilters: markenproduktFilters.allergenFilters,
-          nutritionFilters: markenproduktFilters.nutritionFilters,
-          sortBy: 'name'
-        }
+        validatedFilters
       );
+
+      if (markenRequestId.current !== requestId) {
+        console.log('⚠️ Überspringe veraltete Markenprodukte-Response');
+        return;
+      }
 
       if (reset) {
         setMarkenprodukte(result.products);
@@ -1054,10 +1071,16 @@ export default function ExploreScreen() {
       setMarkenproduktHasMore(result.hasMore);
 
     } catch (error) {
-      console.error('Error loading Markenprodukte:', error);
-      setMarkenproduktError('Fehler beim Laden der Produkte');
+      if (markenRequestId.current === requestId) {
+        console.error('Error loading Markenprodukte:', error);
+        setMarkenproduktError('Fehler beim Laden der Produkte');
+      } else {
+        console.warn('⚠️ Fehler in veralteter Markenprodukte-Anfrage ignoriert:', error);
+      }
     } finally {
-      setMarkenproduktLoading(false);
+      if (markenRequestId.current === requestId) {
+        setMarkenproduktLoading(false);
+      }
     }
   };
 
@@ -1066,6 +1089,27 @@ export default function ExploreScreen() {
 
   // Verhindere mehrfache Initialisierung
   const hasInitialized = useRef(false);
+
+  // Load categories function - außerhalb von useEffect damit es für onUnlockSuccess verfügbar ist
+  const loadCategories = async () => {
+    try {
+      setCategoriesLoading(true);
+      
+      // User Level für Kategorie-Zugriff
+      const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
+      
+      // Lade Kategorien mit Access-Information
+      const categoriesWithAccess = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
+      
+      // Zeige ALLE Kategorien, auch gesperrte (wie auf Startseite)
+      setCategoriesData(categoriesWithAccess);
+      setCategoriesLoading(false); // ✅ Kategorien sofort anzeigen!
+      
+    } catch (error) {
+      console.error('Error loading categories:', error);
+      setCategoriesLoading(false);
+    }
+  };
 
   // Load markets data
   useEffect(() => {
@@ -1098,34 +1142,10 @@ export default function ExploreScreen() {
       }
     };
 
-    // Load categories data - ähnlich wie loadMarkets
-    const loadCategories = async () => {
-      try {
-        setCategoriesLoading(true);
-        
-        // User Level für Kategorie-Zugriff
-        const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
-        
-        // Lade Kategorien mit Access-Information
-        const categoriesWithAccess = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
-        
-        // Zeige ALLE Kategorien, auch gesperrte (wie auf Startseite)
-        setCategoriesData(categoriesWithAccess);
-        setCategoriesLoading(false); // ✅ Kategorien sofort anzeigen!
-        
-        
-
-        
-      } catch (error) {
-        console.error('Error loading categories:', error);
-        setCategoriesLoading(false);
-      }
-    };
-
     loadMarkets();
     loadCategories();
     hasInitialized.current = true; // Markiere als initialisiert
-  }, [userProfile?.stats?.currentLevel, userProfile?.level]); // Nur bei Level-Änderung, nicht bei jedem Profile-Update
+  }, [userProfile?.stats?.currentLevel, userProfile?.level, isPremium]); // Nur bei Level-Änderung oder Premium-Status-Änderung
 
 
 
@@ -1164,41 +1184,12 @@ export default function ExploreScreen() {
         };
         setNoNameFilters(newFilters);
         
-        // Reset and load NoName products with category filter
+        // Reset state und markiere für erneutes Laden
         setNoNameProducts([]);
         setNoNameLastDoc(null);
         setNoNameHasMore(true);
         setNoNameError(null);
-        
-        // Load products immediately without setTimeout
-        const loadFilteredProducts = async () => {
-          try {
-            setNoNameLoading(true);
-
-            // Validiere Filter vor der Abfrage (synchron)
-            const validatedFilters = validateFiltersSync({
-              ...newFilters,
-              sortBy: 'name'
-            });
-            
-            const result = await FirestoreService.getNoNameProductsPaginated(
-              20,
-              null,
-              validatedFilters
-            );
-            setNoNameProducts(result.products);
-            setNoNameLastDoc(result.lastDoc);
-            setNoNameHasMore(result.hasMore);
-
-          } catch (error) {
-            console.error('Error loading filtered products:', error);
-            setNoNameError('Fehler beim Laden der Produkte');
-          } finally {
-            setNoNameLoading(false);
-          }
-        };
-        
-        loadFilteredProducts();
+        hasLoadedNoNames.current = false;
       };
       
       checkCategoryAccess();
@@ -1214,41 +1205,12 @@ export default function ExploreScreen() {
       };
       setMarkenproduktFilters(newFilters);
       
-      // Reset and load Markenprodukte with marke filter
+      // Reset state und markiere für erneutes Laden
       setMarkenprodukte([]);
       setMarkenproduktLastDoc(null);
       setMarkenproduktHasMore(true);
       setMarkenproduktError(null);
-      
-      // Load products immediately
-      const loadFilteredMarkenprodukte = async () => {
-        try {
-          setMarkenproduktLoading(true);
-
-          // Validiere Filter vor der Abfrage (synchron)
-          const validatedFilters = validateFiltersSync({
-            ...newFilters,
-            sortBy: 'name'
-          });
-          
-          const result = await FirestoreService.getMarkenproduktePaginated(
-            20,
-            null,
-            validatedFilters
-          );
-          setMarkenprodukte(result.products);
-          setMarkenproduktLastDoc(result.lastDoc);
-          setMarkenproduktHasMore(result.hasMore);
-
-        } catch (error) {
-          console.error('Error loading filtered markenprodukte:', error);
-          setMarkenproduktError('Fehler beim Laden der Markenprodukte');
-        } finally {
-          setMarkenproduktLoading(false);
-        }
-      };
-      
-      loadFilteredMarkenprodukte();
+      hasLoadedMarken.current = false;
     }
   }, [params.tab, params.categoryFilter, params.categoryName, params.markeFilter, params.markeName]); // Spezifische Dependencies
 
@@ -1281,6 +1243,8 @@ export default function ExploreScreen() {
   // Track ob Produkte bereits geladen wurden
   const hasLoadedNoNames = useRef(false);
   const hasLoadedMarken = useRef(false);
+  const noNameRequestId = useRef(0);
+  const markenRequestId = useRef(0);
   const prevNoNameFilters = useRef(noNameFilters);
   const prevMarkenFilters = useRef(markenproduktFilters);
   
@@ -1410,10 +1374,10 @@ export default function ExploreScreen() {
                         borderBottomColor: colors.border, 
                         borderBottomWidth: 0.5 
                       },
-                      category.isLocked && { opacity: 0.6 } // Ausgegraut für gesperrte
+                      category.isLocked && !category.temporaryUnlock && { opacity: 0.6 } // Ausgegraut für gesperrte
                     ]}
                     onPress={() => {
-                      if (category.isLocked) {
+                      if (category.isLocked && !category.temporaryUnlock) {
                         // Zeige gesperrte Kategorie Modal
                         setLockedCategoryModal({
                           visible: true,
@@ -1435,32 +1399,8 @@ export default function ExploreScreen() {
                       setNoNameProducts([]);
                       setNoNameLastDoc(null);
                       setNoNameHasMore(true);
-                      
-                      setTimeout(async () => {
-                        try {
-                          setNoNameLoading(true);
-                          // Validiere Filter vor der Abfrage (synchron)
-                          const validatedFilters = validateFiltersSync({
-                            ...newFilters,
-                            sortBy: 'name'
-                          });
-                          
-                          const result = await FirestoreService.getNoNameProductsPaginated(
-                            20,
-                            null,
-                            validatedFilters
-                          );
-                          setNoNameProducts(result.products);
-                          setNoNameLastDoc(result.lastDoc);
-                          setNoNameHasMore(result.hasMore);
-
-                        } catch (error) {
-                          console.error('Error loading filtered products:', error);
-                          setNoNameError('Fehler beim Laden der Produkte');
-                        } finally {
-                          setNoNameLoading(false);
-                        }
-                      }, 100);
+                      setNoNameError(null);
+                      hasLoadedNoNames.current = false;
                     }}
                   >
                     <View style={styles.marketLogo}>
@@ -1486,9 +1426,14 @@ export default function ExploreScreen() {
                           color={category.isLocked ? colors.icon : colors.primary}
                         />
                       )}
-                      {category.isLocked && (
+                      {category.isLocked && !category.temporaryUnlock && (
                         <View style={styles.marketLockBadge}>
                           <IconSymbol name="lock" size={12} color="white" />
+                        </View>
+                      )}
+                      {category.temporaryUnlock && (
+                        <View style={[styles.marketLockBadge, { backgroundColor: '#FF9500' }]}>
+                          <IconSymbol name="clock.fill" size={12} color="white" />
                         </View>
                       )}
                     </View>
@@ -1563,32 +1508,8 @@ export default function ExploreScreen() {
                       setNoNameProducts([]);
                       setNoNameLastDoc(null);
                       setNoNameHasMore(true);
-                      
-                      // Lade mit den neuen Filtern direkt
-                      setTimeout(async () => {
-                        try {
-                          setNoNameLoading(true);
-                          // Validiere Filter vor der Abfrage (synchron)
-                          const validatedFilters = validateFiltersSync({
-                            ...newFilters,
-                            sortBy: 'name'
-                          });
-                          
-                          const result = await FirestoreService.getNoNameProductsPaginated(
-                            20,
-                            null,
-                            validatedFilters // Verwende die validierten Filter
-                          );
-                          setNoNameProducts(result.products);
-                          setNoNameLastDoc(result.lastDoc);
-                          setNoNameHasMore(result.hasMore);
-                        } catch (error) {
-                          console.error('Error loading filtered products:', error);
-                          setNoNameError('Fehler beim Laden der Produkte');
-                        } finally {
-                          setNoNameLoading(false);
-                        }
-                      }, 100);
+                      setNoNameError(null);
+                      hasLoadedNoNames.current = false;
                     }}
                   >
                     <View style={[styles.marketLogo, { backgroundColor: colors.background }]}>
@@ -2498,6 +2419,7 @@ export default function ExploreScreen() {
       {lockedCategoryModal.category && (
         <LockedCategoryModal
           visible={lockedCategoryModal.visible}
+          categoryId={lockedCategoryModal.category.id}
           categoryName={lockedCategoryModal.category.bezeichnung}
           categoryImage={lockedCategoryModal.category.bild}
           requiredLevel={lockedCategoryModal.category.requiredLevel || 1}
@@ -2507,6 +2429,7 @@ export default function ExploreScreen() {
             setLockedCategoryModal({ visible: false, category: null });
             router.push('/achievements' as any);
           }}
+          onUnlockSuccess={loadCategories}
         />
       )}
 

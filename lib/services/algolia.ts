@@ -184,6 +184,7 @@ export class AlgoliaService {
 
   /**
    * Search both NoName products and Markenprodukte
+   * OPTIMIERT: Keine automatischen Marken/Hersteller-Suchen mehr!
    */
   static async searchAll(
     query: string,
@@ -195,51 +196,16 @@ export class AlgoliaService {
     totalHits: number;
   }> {
     try {
-      console.log(`🔍 Algolia: Searching all products for "${query}"`);
+      // Split hitsPerPage between both indices
+      const hitsPerIndex = Math.ceil(hitsPerPage / 2);
       
-      // First, search in products directly
+      console.log(`🔍 Algolia: Searching products for "${query}" (page: ${page}, ${hitsPerIndex} per index)`);
+      
+      // OPTIMIERT: Nur noch direkte Produktsuche - keine extra Marken/Hersteller-Anfragen!
       const [noNameResults, markenproduktResults] = await Promise.all([
-        this.searchNoNameProducts(query, page, hitsPerPage),
-        this.searchMarkenprodukte(query, page, hitsPerPage)
+        this.searchNoNameProducts(query, page, hitsPerIndex),
+        this.searchMarkenprodukte(query, page, hitsPerIndex)
       ]);
-
-      // Then search in handelsmarken and hersteller indices to find matching brands
-      const [handelsmarkenMatches, herstellerMatches] = await Promise.all([
-        this.searchHandelsmarken(query),
-        this.searchHersteller(query)
-      ]);
-
-      // If we found matching Handelsmarken, search for products with those Handelsmarken
-      if (handelsmarkenMatches.length > 0) {
-        console.log(`🔍 Found ${handelsmarkenMatches.length} matching Handelsmarken`);
-        const handelsmarkenIds = handelsmarkenMatches.map(h => `handelsmarken/${h.objectID}`);
-        
-        // Search for NoName products with these Handelsmarken
-        const additionalNoName = await this.searchNoNameByHandelsmarken(handelsmarkenIds, hitsPerPage);
-        
-        // Merge results (avoid duplicates)
-        const existingIds = new Set(noNameResults.hits.map(h => h.objectID));
-        const newHits = additionalNoName.hits.filter(h => !existingIds.has(h.objectID));
-        
-        noNameResults.hits = [...noNameResults.hits, ...newHits];
-        noNameResults.nbHits += newHits.length;
-      }
-
-      // If we found matching Hersteller/Marken, search for products with those Marken
-      if (herstellerMatches.length > 0) {
-        console.log(`🔍 Found ${herstellerMatches.length} matching Hersteller/Marken`);
-        const herstellerIds = herstellerMatches.map(h => `hersteller/${h.objectID}`);
-        
-        // Search for Markenprodukte with these Hersteller
-        const additionalMarken = await this.searchMarkenByHersteller(herstellerIds, hitsPerPage);
-        
-        // Merge results (avoid duplicates)
-        const existingIds = new Set(markenproduktResults.hits.map(h => h.objectID));
-        const newHits = additionalMarken.hits.filter(h => !existingIds.has(h.objectID));
-        
-        markenproduktResults.hits = [...markenproduktResults.hits, ...newHits];
-        markenproduktResults.nbHits += newHits.length;
-      }
       
       const totalHits = noNameResults.nbHits + markenproduktResults.nbHits;
       console.log(`✅ Algolia: Found ${totalHits} total products (${noNameResults.nbHits} NoName + ${markenproduktResults.nbHits} Markenprodukte)`);

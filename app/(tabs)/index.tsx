@@ -284,6 +284,20 @@ export default function HomeScreen() {
     loadLevels();
   }, [user]); // Nur neu laden wenn User sich ändert
 
+  // Reload categories function - außerhalb von useEffect damit es verfügbar ist
+  const reloadCategories = async () => {
+    try {
+      setCategoriesLoading(true);
+      const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
+      const kategorienWithAccess = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
+      setKategorien(kategorienWithAccess);
+    } catch (error) {
+      console.error('❌ Fehler beim Laden der Kategorien:', error);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
+
   // Load data from Firestore
   useEffect(() => {
     // Remote Config hier initialisieren (nach App-Start)
@@ -292,7 +306,7 @@ export default function HomeScreen() {
         console.error('❌ Remote Config init failed:', error);
       });
     });
-    
+
     const loadData = async () => {
       try {
         setLoading(true);
@@ -542,11 +556,11 @@ export default function HomeScreen() {
                     styles.categoryChip, 
                     { 
                       backgroundColor: colors.cardBackground,
-                      opacity: kategorie.isLocked ? 0.6 : 1
+                      opacity: kategorie.isLocked && !kategorie.temporaryUnlock ? 0.6 : 1
                     }
                   ]}
                   onPress={() => {
-                    if (kategorie.isLocked) {
+                    if (kategorie.isLocked && !kategorie.temporaryUnlock) {
                       // Zeige gesperrte Kategorie Modal
                       setLockedCategoryModal({
                         visible: true,
@@ -588,9 +602,14 @@ export default function HomeScreen() {
                         color={kategorie.isLocked ? colors.icon : colors.primary} 
                       />
                     )}
-                    {kategorie.isLocked && (
+                    {kategorie.isLocked && !kategorie.temporaryUnlock && (
                       <View style={styles.categoryLockBadge}>
                         <IconSymbol name="lock" size={12} color="white" />
+                      </View>
+                    )}
+                    {kategorie.temporaryUnlock && (
+                      <View style={[styles.categoryLockBadge, { backgroundColor: '#FF9500' }]}>
+                        <IconSymbol name="clock.fill" size={12} color="white" />
                       </View>
                     )}
                   </View>
@@ -865,6 +884,7 @@ export default function HomeScreen() {
       {lockedCategoryModal.category && (
         <LockedCategoryModal
           visible={lockedCategoryModal.visible}
+          categoryId={lockedCategoryModal.category.id}
           categoryName={lockedCategoryModal.category.bezeichnung}
           categoryImage={lockedCategoryModal.category.bild}
           requiredLevel={lockedCategoryModal.category.requiredLevel || 1}
@@ -874,6 +894,7 @@ export default function HomeScreen() {
             setLockedCategoryModal({ visible: false, category: null });
             router.push('/achievements' as any);
           }}
+          onUnlockSuccess={reloadCategories}
         />
       )}
       </ThemedView>

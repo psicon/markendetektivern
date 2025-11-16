@@ -293,6 +293,7 @@ export function showStreakToast(streakDays: number, bonusPoints?: number, colorS
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   
   toast(message, {
+    id: 'streak-toast',
     position: ToastPosition.TOP,
     duration: 3000,
     disableShadow: false,

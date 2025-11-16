@@ -56,6 +56,7 @@ const MAPPING = {
   'bell': 'bell-outline',
   
   // Objects
+  'play.rectangle.fill': 'play-box-outline',
   'envelope': 'email-outline',
   'calendar': 'calendar',
   'location.fill': 'map-marker',
@@ -101,6 +102,7 @@ const MAPPING = {
   'keyboard': 'keyboard',
   'wand.and.stars': 'wizard-hat',
   'lightbulb.fill': 'lightbulb-on',
+  'exclamationmark.triangle.fill': 'alert-outline',
   
   // Charts/Data
   'chart.bar': 'chart-bar',

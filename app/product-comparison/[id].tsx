@@ -2990,12 +2990,12 @@ export default function ProductComparisonScreen() {
             {comparisonData.mainProduct?.isFallback
                 ? 'Alternativen anderer Hersteller'
                 : comparisonData.relatedNoNameProducts.length > 0 
-                  ? 'NoName Alternativen vom gleichen Hersteller'
-                  : 'Enttarnte Produkte'
+                ? 'NoName Alternativen vom gleichen Hersteller'
+              : 'Enttarnte Produkte'
             }
           </ThemedText>
           {!comparisonData.relatedNoNameProducts.length && (
-            <ThemedText style={[styles.alternativesSubtitle, { color: colors.icon, textAlign: 'center' }]}>
+              <ThemedText style={[styles.alternativesSubtitle, { color: colors.icon, textAlign: 'center' }]}>
               {comparisonData.mainProduct?.isFallback
                 ? 'Entdecke ähnliche Produkte'
                 : 'Entdecke andere Produkte mit Stufe 3, 4 oder 5'}
@@ -3053,7 +3053,7 @@ export default function ProductComparisonScreen() {
               ))}
             </>
           )}
-          
+
           {/* Skeleton für Fallback-Produkte (kompakte Liste) */}
           {similarProductsLoading && comparisonData.mainProduct?.isFallback && (
             <>

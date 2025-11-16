@@ -24,6 +24,7 @@ import { adMobService } from '@/lib/services/adMobService';
 import appLifecycleService from '@/lib/services/appLifecycleService';
 import { configureGoogleSignIn } from '@/lib/services/auth/googleAuth';
 import { interstitialAdService } from '@/lib/services/interstitialAdService';
+import { rewardedAdService } from '@/lib/services/rewardedAdService';
 import { testFlightLogger } from '@/lib/utils/testflightLogger';
 import React, { useEffect, useState } from 'react';
 
@@ -155,6 +156,7 @@ export default function RootLayout() {
           await adMobService.initialize();
           console.log('✅ iOS AdMob sofort initialisiert');
           interstitialAdService.initialize();
+          rewardedAdService.initialize();
         } else {
           // Android: Mit Consent aber trotzdem schnell
           const { consentService } = await import('@/lib/services/consentService');
@@ -165,6 +167,7 @@ export default function RootLayout() {
             await adMobService.initialize();
             console.log('✅ Android AdMob initialisiert');
             interstitialAdService.initialize();
+            rewardedAdService.initialize();
           }, 2000);
         }
       } catch (error) {

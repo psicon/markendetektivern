@@ -20,18 +20,18 @@ import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  FlatList,
-  Image,
-  PanResponder,
+    ActivityIndicator,
+    Animated,
+    Dimensions,
+    FlatList,
+    Image,
+    PanResponder,
     Platform,
     ScrollView,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -118,18 +118,22 @@ export default function SearchResultsScreen() {
   // Algolia Results States
   const [noNameResults, setNoNameResults] = useState<AlgoliaSearchResult[]>([]);
   const [markenproduktResults, setMarkenproduktResults] = useState<AlgoliaSearchResult[]>([]);
+  const [totalNoNameCount, setTotalNoNameCount] = useState(0);
+  const [totalMarkenCount, setTotalMarkenCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   // Set header options like explore.tsx - grün ohne (tabs)
   useLayoutEffect(() => {
     router.setParams({});
   }, []);
 
-  // Cache für Algolia lookups
+  // Cache für Firebase lookups (günstiger als Algolia!)
   const [lookupCache, setLookupCache] = useState<Map<string, any>>(new Map());
   
-  // Helper to get cached or fetch from Algolia
+  // Helper to get cached or fetch from Firebase
   const getCachedLookup = async (path: string): Promise<any> => {
     if (!path) return null;
     
@@ -138,16 +142,20 @@ export default function SearchResultsScreen() {
       return lookupCache.get(path);
     }
     
-    // Parse path and fetch from Algolia
+    // Parse path and fetch from Firebase (VIEL günstiger als Algolia!)
     const [collection, id] = path.split('/');
     let result = null;
     
     try {
-      // Direct Algolia search using filters
-      const searchResult = await AlgoliaService.searchInIndex(collection, id);
-      if (searchResult) {
-        result = searchResult;
-
+      // Firebase Firestore statt Algolia - 1.400x günstiger!
+      const { doc, getDoc } = await import('firebase/firestore');
+      const { db } = await import('@/lib/firebase');
+      
+      const docRef = doc(db, collection, id);
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        result = { id: docSnap.id, ...docSnap.data() };
       }
     } catch (error) {
       console.error(`Failed to lookup ${path}:`, error);
@@ -203,8 +211,8 @@ export default function SearchResultsScreen() {
       // Track search for interstitial ads
       interstitialAdService.trackSearch(isPremium);
       
-      // Load ALL results by setting a high hitsPerPage
-      const results = await AlgoliaService.searchAll(query.trim(), 0, 1000);
+      // OPTIMIERT: Nur noch 30 Produkte initial laden (15 pro Index)
+      const results = await AlgoliaService.searchAll(query.trim(), 0, 30);
       
       // Populate references from Algolia
       const populatedNoName = await Promise.all(results.noNameResults.hits.map(async (product) => {
@@ -246,6 +254,13 @@ export default function SearchResultsScreen() {
       
       setNoNameResults(populatedNoName);
       setMarkenproduktResults(populatedMarken);
+      
+      // Speichere die Gesamtanzahl aus Algolia (kostet nichts extra!)
+      setTotalNoNameCount(results.noNameResults.nbHits);
+      setTotalMarkenCount(results.markenproduktResults.nbHits);
+      
+      // Reset pagination state bei neuer Suche
+      setCurrentPage(0);
       
       // GA4 Event: Search completed
       analytics.trackCustomEvent('search_completed', {
@@ -621,23 +636,34 @@ export default function SearchResultsScreen() {
     }
   }, [userProfile?.stats?.currentLevel, userProfile?.level]); // 🎯 NUR bei Level-Änderung neu laden!
 
-  // Tab titles with FILTERED result counts - OPTIMIERT mit useMemo
+  // Tab titles with TOTAL result counts from Algolia
   const getTabTitle = React.useMemo(() => {
     return (tabId: string) => {
-      // Berechne gefilterte Counts für beide Tabs
-      const filteredNoName = getFilteredResults('nonames').length;
-      const filteredMarken = getFilteredResults('markenprodukte').length;
-      
-    switch (tabId) {
-      case 'nonames':
-          return `NoName-\nProdukte${filteredNoName > 0 ? ` (${filteredNoName})` : ''}`;
-      case 'markenprodukte':
-          return `Marken-\nProdukte${filteredMarken > 0 ? ` (${filteredMarken})` : ''}`;
-      default:
-        return tabId;
-    }
+      // Zeige die Gesamtanzahl aus Algolia
+      switch (tabId) {
+        case 'nonames': {
+          const loaded = noNameResults.length;
+          const total = totalNoNameCount;
+          if (total > 0) {
+            // Zeige nur Gesamtanzahl, nicht "X von Y"
+            return `NoName-\nProdukte (${total})`;
+          }
+          return `NoName-\nProdukte`;
+        }
+        case 'markenprodukte': {
+          const loaded = markenproduktResults.length;
+          const total = totalMarkenCount;
+          if (total > 0) {
+            // Zeige nur Gesamtanzahl, nicht "X von Y"
+            return `Marken-\nProdukte (${total})`;
+          }
+          return `Marken-\nProdukte`;
+        }
+        default:
+          return tabId;
+      }
     };
-  }, [noNameResults, markenproduktResults, noNameFilters, markenproduktFilters, activeTab]);
+  }, [totalNoNameCount, totalMarkenCount, noNameResults.length, markenproduktResults.length]);
 
   // Helper für gefilterte Ergebnisse pro Tab - NEUE LOGIK basierend auf activeTab
   const getFilteredResults = (forTab?: string) => {
@@ -931,6 +957,70 @@ export default function SearchResultsScreen() {
     return getFilteredResults();
   };
 
+  // Handle load more for infinite scrolling
+  const handleLoadMore = async () => {
+    // Nicht nachladen wenn bereits am Laden oder alle geladen
+    if (isLoadingMore || loading || !searchQuery) return;
+    
+    const currentResults = activeTab === 'nonames' ? noNameResults : markenproduktResults;
+    const totalCount = activeTab === 'nonames' ? totalNoNameCount : totalMarkenCount;
+    
+    // Alle bereits geladen?
+    if (currentResults.length >= totalCount) return;
+    
+    try {
+      setIsLoadingMore(true);
+      
+      // Berechne nächste Seite basierend auf ALLEN geladenen Produkten
+      const totalLoadedProducts = noNameResults.length + markenproduktResults.length;
+      const nextPage = Math.floor(totalLoadedProducts / 30); // 30 pro Seite (15 pro Index)
+      const moreResults = await AlgoliaService.searchAll(searchQuery.trim(), nextPage, 30);
+      
+      // Populate references für neue Ergebnisse
+      const populatedNoName = await Promise.all(moreResults.noNameResults.hits.map(async (product) => {
+        const populated = { ...product };
+        
+        if (product.handelsmarke && typeof product.handelsmarke === 'string') {
+          const lookup = await getCachedLookup(product.handelsmarke);
+          if (lookup) {
+            populated.handelsmarke = lookup;
+          }
+        }
+        
+        if (product.discounter && typeof product.discounter === 'string') {
+          const lookup = await getCachedLookup(product.discounter);
+          if (lookup) {
+            populated.discounter = lookup;
+          }
+        }
+        
+        return populated;
+      }));
+      
+      const populatedMarken = await Promise.all(moreResults.markenproduktResults.hits.map(async (product) => {
+        const populated = { ...product };
+        
+        if (product.hersteller && typeof product.hersteller === 'string') {
+          const lookup = await getCachedLookup(product.hersteller);
+          if (lookup) {
+            populated.hersteller = lookup;
+          }
+        }
+        
+        return populated;
+      }));
+      
+      // Füge neue Ergebnisse hinzu
+      setNoNameResults(prev => [...prev, ...populatedNoName]);
+      setMarkenproduktResults(prev => [...prev, ...populatedMarken]);
+      
+    } catch (error) {
+      console.error('Error loading more results:', error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
+
   return (
     <>
       <Stack.Screen
@@ -1055,6 +1145,18 @@ export default function SearchResultsScreen() {
               style={[styles.productListContainer, { backgroundColor: colors.cardBackground }]}
               contentContainerStyle={styles.productListContent}
               showsVerticalScrollIndicator={false}
+              onEndReached={handleLoadMore}
+              onEndReachedThreshold={0.5}
+              ListFooterComponent={() => {
+                if (isLoadingMore) {
+                  return (
+                    <View style={styles.loadingMoreContainer}>
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    </View>
+                  );
+                }
+                return null;
+              }}
               ListEmptyComponent={() => (
                 <View style={styles.emptyContainer}>
                   {loading ? (
@@ -1943,5 +2045,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Nunito_500Medium',
     flex: 1,
+  },
+  loadingMoreContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
   },
 });
