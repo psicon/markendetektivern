@@ -20,18 +20,18 @@ import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    FlatList,
-    Image,
-    PanResponder,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  FlatList,
+  Image,
+  PanResponder,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -640,7 +640,7 @@ export default function SearchResultsScreen() {
   const getTabTitle = React.useMemo(() => {
     return (tabId: string) => {
       // Zeige die Gesamtanzahl aus Algolia
-      switch (tabId) {
+    switch (tabId) {
         case 'nonames': {
           const loaded = noNameResults.length;
           const total = totalNoNameCount;
@@ -659,10 +659,10 @@ export default function SearchResultsScreen() {
           }
           return `Marken-\nProdukte`;
         }
-        default:
-          return tabId;
-      }
-    };
+      default:
+        return tabId;
+    }
+  };
   }, [totalNoNameCount, totalMarkenCount, noNameResults.length, markenproduktResults.length]);
 
   // Helper für gefilterte Ergebnisse pro Tab - NEUE LOGIK basierend auf activeTab

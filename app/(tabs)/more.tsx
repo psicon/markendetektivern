@@ -68,6 +68,7 @@ export default function MoreScreen() {
   const [currentTipIndex, setCurrentTipIndex] = useState(0);
   const [showSimilarityModal, setShowSimilarityModal] = useState(false);
   const [gamificationNotificationsDisabled, setGamificationNotificationsDisabled] = useState(false);
+  const androidStatusBarOffset = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
 
   useEffect(() => {
     // Get app version from app.json via Constants
@@ -296,7 +297,16 @@ export default function MoreScreen() {
       <StatusBar barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'} />
       
       {/* Fixed Header */}
-      <View style={[styles.header, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: colors.background,
+            borderBottomColor: colors.border,
+            paddingTop: 16 + androidStatusBarOffset,
+          },
+        ]}
+      >
         <ThemedText style={styles.headerTitle}>
           {user?.displayName || 'Weitere Inhalte'}
         </ThemedText>
@@ -625,23 +635,23 @@ export default function MoreScreen() {
           {/* 🔧 DEBUG: UMP Consent testen (nur für Entwickler sichtbar) */}
           {__DEV__ && (
             <View style={{ marginTop: 8, gap: 8 }}>
-              <TouchableOpacity
+            <TouchableOpacity
                 style={{ padding: 8, backgroundColor: colors.error, borderRadius: 8 }}
-                onPress={async () => {
+              onPress={async () => {
                   try {
                     console.log('🔧 Force showing consent form...');
-                    const { consentService } = await import('@/lib/services/consentService');
-                    await consentService.forceShowConsentForm();
+                const { consentService } = await import('@/lib/services/consentService');
+                await consentService.forceShowConsentForm();
                   } catch (error) {
                     console.error('❌ Error showing consent form:', error);
                     Alert.alert('Fehler', 'Consent Form konnte nicht angezeigt werden: ' + error.message);
                   }
-                }}
-              >
-                <ThemedText style={{ color: 'white', fontSize: 12, textAlign: 'center' }}>
-                  🔧 TEST: Consent Form anzeigen
-                </ThemedText>
-              </TouchableOpacity>
+              }}
+            >
+              <ThemedText style={{ color: 'white', fontSize: 12, textAlign: 'center' }}>
+                🔧 TEST: Consent Form anzeigen
+              </ThemedText>
+            </TouchableOpacity>
               
               <TouchableOpacity
                 style={{ padding: 8, backgroundColor: colors.secondary, borderRadius: 8 }}

@@ -131,25 +131,10 @@ export const LockedCategoryModal: React.FC<LockedCategoryModalProps> = ({
         (error) => {
           console.error('❌ Rewarded Ad error:', error);
           setIsLoadingAd(false);
-          const typedError = error as RewardedAdError;
-          setAdFailureCount((prev) => {
-            const next = prev + 1;
-            const shouldShowFallback = typedError instanceof RewardedAdError
-              ? typedError.code === 'NO_FILL' || typedError.code === 'CONSENT_REQUIRED' || next >= 2
-              : next >= 2;
-            
-            if (shouldShowFallback) {
-              setShowAdUnavailableModal(true);
-            } else {
-              Alert.alert(
-                'Werbung nicht verfügbar',
-                error.message,
-                [{ text: 'OK' }]
-              );
-            }
-            
-            return next;
-          });
+          
+          // IMMER sofort das Modal zeigen bei JEDEM Fehler
+          setShowAdUnavailableModal(true);
+          setAdFailureCount((prev) => prev + 1);
         }
       );
     } catch (error: any) {
@@ -162,14 +147,74 @@ export const LockedCategoryModal: React.FC<LockedCategoryModalProps> = ({
   const handleConsentRetry = useCallback(async () => {
     try {
       setIsConsentRetrying(true);
-      const module = await import('@/lib/services/consentService');
-      await module.consentService.forceShowConsentForm();
-      setAdFailureCount(0);
       setShowAdUnavailableModal(false);
-      await runRewardedUnlock();
+      
+      // Zeige Consent-Form
+      const module = await import('@/lib/services/consentService');
+      const oldStatus = module.consentService.getConsentStatus();
+      await module.consentService.forceShowConsentForm();
+      
+      // Prüfe ob sich Status geändert hat
+      const newStatus = module.consentService.getConsentStatus();
+      console.log('✅ Consent form closed - status change:', oldStatus, '->', newStatus);
+      
+      if (oldStatus !== 'OBTAINED' && newStatus === 'OBTAINED') {
+        // Consent neu erteilt - Neustart empfehlen
+        Alert.alert(
+          'App-Neustart empfohlen',
+          'Die Werbeeinstellungen wurden aktualisiert. Für optimale Werbeanzeigen empfehlen wir einen Neustart der App.',
+          [
+            {
+              text: 'Später',
+              style: 'cancel',
+              onPress: async () => {
+                // Trotzdem versuchen ohne Neustart
+                console.log('🔄 User chose to continue without restart');
+                await rewardedAdService.initialize();
+                setAdFailureCount(0);
+                await runRewardedUnlock();
+              }
+            },
+            {
+              text: 'App neustarten',
+              style: 'default',
+              onPress: () => {
+                if (Platform.OS === 'ios') {
+                  // iOS: Anleitung zum manuellen Neustart
+                  Alert.alert(
+                    'Bitte App manuell neustarten',
+                    '1. Wische vom unteren Bildschirmrand nach oben\n2. Wische die App nach oben um sie zu schließen\n3. Öffne die App erneut',
+                    [{ text: 'Verstanden' }]
+                  );
+                } else {
+                  // Android: Versuche App zu beenden
+                  Alert.alert(
+                    'App wird beendet',
+                    'Bitte starte die App manuell neu für beste Ergebnisse.',
+                    [{ 
+                      text: 'OK',
+                      onPress: () => {
+                        // Android BackHandler zum Beenden
+                        const { BackHandler } = require('react-native');
+                        BackHandler.exitApp();
+                      }
+                    }]
+                  );
+                }
+              }
+            }
+          ]
+        );
+      } else {
+        // Kein neuer Consent oder bereits erteilt - direkt neu versuchen
+        await rewardedAdService.initialize();
+        setAdFailureCount(0);
+        await runRewardedUnlock();
+      }
     } catch (error: any) {
       console.error('❌ Consent retry failed:', error);
       Alert.alert('Fehler', `Consent konnte nicht geöffnet werden: ${error?.message || 'Unbekannter Fehler'}`);
+      setShowAdUnavailableModal(true);
     } finally {
       setIsConsentRetrying(false);
     }
@@ -346,7 +391,7 @@ export const LockedCategoryModal: React.FC<LockedCategoryModalProps> = ({
           <View style={styles.buttonContainer}>
             {/* Rewarded Ad Button */}
             {categoryId && (
-              <TouchableOpacity 
+            <TouchableOpacity 
                 style={[
                   styles.adButton, 
                   { backgroundColor: colors.primary }
@@ -369,11 +414,11 @@ export const LockedCategoryModal: React.FC<LockedCategoryModalProps> = ({
                       </Text>
                       <Text style={styles.adButtonTextSecondary}>
                           Werbung ansehen
-                      </Text>
+              </Text>
                     </View>
                   )}
                 </View>
-              </TouchableOpacity>
+            </TouchableOpacity>
             )}
             
             {/* Premium Button */}
@@ -565,7 +610,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 12,
-     gap: 8,
+    gap: 8,
   },
   motivationInfoButton: {
     padding: 6,
@@ -732,6 +777,9 @@ const AdUnavailableModal: React.FC<AdUnavailableModalProps> = ({
 }) => {
   if (!visible) return null;
   
+  // Im Dev-Modus: Klarere Nachricht
+  const isDevMode = __DEV__;
+  
   return (
     <Modal
       visible={visible}
@@ -745,31 +793,39 @@ const AdUnavailableModal: React.FC<AdUnavailableModalProps> = ({
           <IconSymbol name="exclamationmark.triangle.fill" size={28} color={colors.warning} />
           
           <Text style={[styles.fallbackModalTitle, { color: colors.text }]}>
-            Werbung gerade nicht verfügbar
+            {isDevMode ? 'Test-Werbung nicht verfügbar' : 'Werbung gerade nicht verfügbar'}
           </Text>
           
           <Text style={[styles.fallbackModalText, { color: colors.icon }]}>
-            Werbung konnte nicht geladen werden. Ohne Zustimmung können nur wenige Partner Non-Personalized Ads liefern. Du kannst zustimmen oder es später erneut versuchen.
+            {isDevMode 
+              ? 'Im Test-Modus liefert Google oft keine Werbung. Im Production-Build funktioniert es normal. Du kannst trotzdem den Consent-Flow testen oder das Modal schließen.'
+              : 'Werbung konnte nicht geladen werden. Ohne Zustimmung können nur wenige Partner Non-Personalized Ads liefern. Du kannst zustimmen oder es später erneut versuchen.'
+            }
           </Text>
           
-          <TouchableOpacity
-            style={[styles.fallbackModalButton, { backgroundColor: colors.primary }]}
-            onPress={onRetryConsent}
-            disabled={isProcessing}
-          >
-            {isProcessing ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.fallbackModalButtonText}>Werbung zustimmen</Text>
-            )}
-          </TouchableOpacity>
+          {/* iOS: Kein Consent-Button, da kein UMP */}
+          {Platform.OS === 'android' && (
+            <TouchableOpacity
+              style={[styles.fallbackModalButton, { backgroundColor: colors.primary }]}
+              onPress={onRetryConsent}
+              disabled={isProcessing}
+            >
+              {isProcessing ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.fallbackModalButtonText}>
+                  {isDevMode ? 'Consent-Flow testen' : 'Werbung zustimmen'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
           
           <TouchableOpacity
             style={styles.fallbackModalLink}
             onPress={onClose}
           >
             <Text style={[styles.fallbackModalLinkText, { color: colors.icon }]}>
-              Später versuchen
+              {isDevMode ? 'Modal schließen' : 'Später versuchen'}
             </Text>
           </TouchableOpacity>
         </View>

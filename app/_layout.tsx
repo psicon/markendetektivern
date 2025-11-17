@@ -139,6 +139,8 @@ function ThemedApp() {
 }
 
 export default function RootLayout() {
+  const adsInitializedRef = React.useRef(false);
+  
   useEffect(() => {
     // Aktiviere TestFlight Logger
     testFlightLogger.enable();
@@ -149,7 +151,13 @@ export default function RootLayout() {
     
     // AdMob SOFORT initialisieren - keine Verzögerungen mehr!
     // KRITISCH: Jede Sekunde Verzögerung = verlorene Einnahmen
+    let cancelled = false;
+
     const initializeAdsWithConsent = async () => {
+      if (adsInitializedRef.current) {
+        return;
+      }
+
       try {
         if (Platform.OS === 'ios') {
           // iOS: SOFORT initialisieren für maximale Einnahmen
@@ -157,18 +165,36 @@ export default function RootLayout() {
           console.log('✅ iOS AdMob sofort initialisiert');
           interstitialAdService.initialize();
           rewardedAdService.initialize();
+          adsInitializedRef.current = true;
         } else {
-          // Android: Mit Consent aber trotzdem schnell
-          const { consentService } = await import('@/lib/services/consentService');
-          await consentService.initialize();
+          const waitForOnboardingAndInit = async () => {
+            const { OnboardingService } = await import('@/lib/services/onboardingService');
+            const { consentService } = await import('@/lib/services/consentService');
+            
+            while (!cancelled) {
+              const hasPassedOnboarding = await OnboardingService.hasPassedOnboarding();
+              if (hasPassedOnboarding) {
+                console.log('✅ Onboarding abgeschlossen - initialisiere Consent & Ads');
+                await consentService.initialize();
+                
+                // Android braucht etwas Delay wegen dem Crash
+                setTimeout(async () => {
+                  if (adsInitializedRef.current || cancelled) return;
+                  await adMobService.initialize();
+                  console.log('✅ Android AdMob initialisiert');
+                  interstitialAdService.initialize();
+                  rewardedAdService.initialize();
+                  adsInitializedRef.current = true;
+                }, 2000);
+                return;
+              }
+              
+              console.log('⏳ Onboarding nicht abgeschlossen - warte mit Consent/Ads...');
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+          };
           
-          // Android braucht etwas Delay wegen dem Crash
-          setTimeout(async () => {
-            await adMobService.initialize();
-            console.log('✅ Android AdMob initialisiert');
-            interstitialAdService.initialize();
-            rewardedAdService.initialize();
-          }, 2000);
+          waitForOnboardingAndInit();
         }
       } catch (error) {
         console.error('❌ Ads initialization error:', error);
@@ -176,6 +202,10 @@ export default function RootLayout() {
     };
     
     initializeAdsWithConsent();
+    
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (

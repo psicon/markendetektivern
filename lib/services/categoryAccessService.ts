@@ -262,7 +262,7 @@ class CategoryAccessService {
         : undefined;
 
       return {
-        ...cat,
+      ...cat,
         isLocked,
         temporaryUnlock
       };

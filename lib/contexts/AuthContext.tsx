@@ -183,10 +183,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // 🔄 EINMALIGE GAMIFICATION INITIALISIERUNG nach Authentifizierung
         console.log('🚀 Starte Gamification-Initialisierung nach Authentifizierung...');
         try {
-          // Reset Achievement Service komplett (nur bei User-Wechsel)
-          achievementService.resetForNewAuth();
+          // Reset Achievement Service nur bei User-Wechsel
+          achievementService.resetForNewAuth(user.uid);
           
-          // Neu-Initialisierung mit authentifizierten User
+          // Neu-Initialisierung mit authentifiziertem User
           await achievementService.initialize();
           console.log('✅ Gamification-System erfolgreich nach Auth reinitialisiert');
         } catch (error) {

@@ -67,6 +67,7 @@ class RewardedAdServiceWithFallback {
       if (this.initialized) {
         return;
       }
+      // Initialisierung OHNE forceForm - nur Status prüfen
       await this.ensureConsentAndAdInstances(false);
       this.initialized = true;
     } catch (error) {
@@ -98,9 +99,11 @@ class RewardedAdServiceWithFallback {
       requestOptions = { requestNonPersonalizedAdsOnly: true };
     }
     
+    // Nur neu bauen wenn noch nicht initialisiert ODER consent options sich geändert haben
     if (!this.initialized || this.hasRequestOptionsChanged(requestOptions)) {
       await this.buildAdInstances(requestOptions);
-    } else if (!this.loadStatus[this.currentType]) {
+    } else if (!this.loadStatus[this.currentType] && !this.isLoading) {
+      // Einfach nachladen wenn noch nicht geladen
       await this.load();
     }
   }
@@ -114,11 +117,25 @@ class RewardedAdServiceWithFallback {
       RewardedAd, 
       RewardedInterstitialAd, 
       InterstitialAd, 
-      TestIds, 
+      TestIds,
+      default: MobileAds,
     } = require('react-native-google-mobile-ads');
     
-    const USE_TEST_ADS = false;
     const platform = Platform.OS as 'ios' | 'android';
+    
+    // Set test device configuration (für bessere Test-Fills)
+    if (__DEV__ && MobileAds?.setRequestConfiguration) {
+      try {
+        await MobileAds.setRequestConfiguration({
+          testDeviceIdentifiers: ['EMULATOR'], // Füge hier deine Geräte-IDs hinzu
+        });
+        console.log('🧪 Test devices configured for better ad fills');
+      } catch (e) {
+        console.warn('⚠️ Could not set test device config:', e);
+      }
+    }
+    
+    console.log('🔧 Building ad instances with options:', adRequestOptions);
     
     // Reset states
     this.ads = {};
@@ -143,8 +160,8 @@ class RewardedAdServiceWithFallback {
       await this.initializeAdType('interstitial', InterstitialAd, TestIds.INTERSTITIAL, adRequestOptions);
     }
     
+    // Starte das Laden des primären Ad-Typs
     await this.load();
-    this.initialized = true;
   }
 
   private async initializeAdType(
@@ -155,7 +172,11 @@ class RewardedAdServiceWithFallback {
   ) {
     try {
       const platform = Platform.OS as 'ios' | 'android';
-      const adUnitId = __DEV__ && false ? testId : AD_CONFIG[platform][type];
+      
+      // Map type to config key (handle underscore vs camelCase)
+      const configKey = type === 'rewarded_interstitial' ? 'rewardedInterstitial' : type;
+      // Im Production-Build: Echte Ad-Unit-IDs verwenden
+      const adUnitId = AD_CONFIG[platform][configKey as keyof typeof AD_CONFIG['ios']];
       
       if (!adUnitId) {
         console.log(`⏭️ No ${type} ad unit ID for ${platform}`);
@@ -178,8 +199,10 @@ class RewardedAdServiceWithFallback {
     
     const { RewardedAdEventType, AdEventType } = require('react-native-google-mobile-ads');
     
-    // LOADED event
-    const loadedEvent = type === 'rewarded' ? RewardedAdEventType.LOADED : AdEventType.LOADED;
+    // LOADED event - RewardedInterstitialAd also uses RewardedAdEventType
+    const loadedEvent = (type === 'rewarded' || type === 'rewarded_interstitial') 
+      ? RewardedAdEventType.LOADED 
+      : AdEventType.LOADED;
     ad.addAdEventListener(loadedEvent, () => {
       console.log(`✅ ${type} ad loaded`);
       this.loadStatus[type] = true;
@@ -200,17 +223,20 @@ class RewardedAdServiceWithFallback {
       };
       this.loadStatus[type] = false;
       
+      // NUR bei aktuellem Typ Fallback versuchen
       if (type === this.currentType) {
         this.isLoading = false;
-        // Try fallback if available
-        this.tryFallback(this.lastError);
+        // WICHTIG: Nicht sofort fallback bei NO_FILL im Hintergrund
+        // Nur wenn User aktiv wartet (isShowing oder pendingCategoryId)
+        if (this.isShowing || this.pendingCategoryId) {
+          this.tryFallback(this.lastError);
+        }
       }
     });
     
-    // EARNED_REWARD event
+    // EARNED_REWARD event - both rewarded types use RewardedAdEventType
     if (type === 'rewarded' || type === 'rewarded_interstitial') {
-      const rewardEvent = type === 'rewarded' ? RewardedAdEventType.EARNED_REWARD : AdEventType.PAID;
-      ad.addAdEventListener(rewardEvent, (reward: any) => {
+      ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, (reward: any) => {
         console.log(`🎁 User earned reward from ${type}:`, reward);
         this.rewardEarned = true;
       });
@@ -258,6 +284,14 @@ class RewardedAdServiceWithFallback {
         console.log(`🔄 Switching to ${nextType} fallback`);
         this.currentType = nextType;
         this.loadAttempts = 0;
+        
+        // Prüfe ob dieser Typ schon geladen ist
+        if (this.loadStatus[nextType]) {
+          console.log(`✅ ${nextType} already loaded - ready to show`);
+          return true;
+        }
+        
+        // Sonst lade ihn
         await this.load();
         return true;
       }
@@ -307,10 +341,17 @@ class RewardedAdServiceWithFallback {
         message: error?.message || 'Werbung konnte nicht geladen werden.',
       };
       
+      // Retry nur wenn unter MAX_ATTEMPTS
       if (this.loadAttempts < this.MAX_LOAD_ATTEMPTS) {
+        console.log(`🔄 Retrying ${this.currentType} ad load in 1s...`);
         setTimeout(() => this.load(), 1000);
       } else {
-        await this.tryFallback(this.lastError);
+        // Nur fallback wenn User aktiv wartet
+        if (this.isShowing || this.pendingCategoryId) {
+          await this.tryFallback(this.lastError);
+        } else {
+          console.log('⏭️ Max attempts reached, but no active request - skipping fallback');
+        }
       }
     }
   }
@@ -327,13 +368,17 @@ class RewardedAdServiceWithFallback {
     this.onErrorCallback = onError;
     
     try {
-      await this.ensureConsentAndAdInstances(true);
+      // WICHTIG: Consent NUR prüfen, NICHT erzwingen
+      // User hat bereits im Modal die Möglichkeit, Consent zu geben
+      await this.ensureConsentAndAdInstances(false);
+      
       const ad = this.ads[this.currentType];
       if (!ad) {
         this.emitError('NO_FILL', 'Keine Werbung verfügbar. Bitte versuche es später erneut.');
         return;
       }
       
+      // Warte bis zu 10 Sekunden auf Ad-Load (Best Practice für Rewarded Ads)
       if (!this.loadStatus[this.currentType]) {
         if (!this.isLoading) {
           this.load();
@@ -342,7 +387,7 @@ class RewardedAdServiceWithFallback {
         console.log('⏳ Waiting for ad to load...');
         let waitTime = 0;
         const checkInterval = 100;
-        const maxWaitTime = 5000;
+        const maxWaitTime = 10000; // 10s statt 5s
         
         await new Promise<void>((resolve, reject) => {
           const checkLoaded = setInterval(() => {
@@ -354,9 +399,11 @@ class RewardedAdServiceWithFallback {
               resolve();
             } else if (waitTime >= maxWaitTime) {
               clearInterval(checkLoaded);
-              console.log('❌ Ad load timeout');
+              console.log('❌ Ad load timeout after 10s');
+              // Versuche Fallback
               this.tryFallback().then((fallbackAvailable) => {
-                if (fallbackAvailable && this.ads[this.currentType]) {
+                if (fallbackAvailable && this.loadStatus[this.currentType]) {
+                  console.log('✅ Fallback ad ready');
                   resolve();
                 } else {
                   reject(new RewardedAdError('NO_FILL', 'Die Werbung konnte nicht geladen werden.'));
@@ -398,7 +445,10 @@ class RewardedAdServiceWithFallback {
         code: normalizedCode,
         message: error?.message || 'Werbung konnte nicht angezeigt werden.',
       });
-      if (fallbackAvailable && this.ads[this.currentType]) {
+      
+      // Nur rekursiv aufrufen wenn Fallback verfügbar UND geladen
+      if (fallbackAvailable && this.loadStatus[this.currentType]) {
+        console.log('🔄 Retrying with fallback ad type');
         return this.showForCategory(categoryId, onReward, onError);
       }
     }
@@ -449,10 +499,12 @@ class RewardedAdServiceWithFallback {
       isShowing: this.isShowing,
       currentType: this.currentType,
       loadStatus: this.loadStatus,
+      consentStatus: this.consentStatus,
     };
   }
   
   preload(): void {
+    // Preload OHNE forceForm
     this.ensureConsentAndAdInstances(false)
       .then(() => {
         if (!this.loadStatus[this.currentType] && !this.isLoading) {
@@ -480,3 +532,5 @@ export const rewardedAdService = new RewardedAdServiceWithFallback();
 if (__DEV__ && typeof window !== 'undefined') {
   (window as any).rewardedAdService = rewardedAdService;
 }
+
+

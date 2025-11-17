@@ -20,6 +20,8 @@ class ConsentService {
   private consentStatus: ConsentStatus = 'UNKNOWN';
   private consentInfo: any = null;
   private isInitialized = false;
+  private isPromptInFlight = false;
+  private hasShownThisSession = false;
 
   async initialize(): Promise<ConsentStatus> {
     try {
@@ -70,25 +72,43 @@ class ConsentService {
     }
   }
 
-  async showConsentFormIfRequired(): Promise<boolean> {
+  async showConsentFormIfRequired(options?: { force?: boolean }): Promise<boolean> {
+    const force = options?.force ?? false;
+    
     try {
       if (Platform.OS === 'ios') {
         return false;
       }
 
+      if (this.hasShownThisSession && !force) {
+        console.log('⏭️ Consent form already shown this session - skipping');
+        return false;
+      }
+
       const { AdsConsent } = require('react-native-google-mobile-ads');
+      
+      if (this.isPromptInFlight) {
+        console.log('⏭️ Consent form already showing - skipping duplicate request');
+        return false;
+      }
 
       if (this.consentStatus === 'REQUIRED') {
         console.log('📝 Showing consent form...');
-        const formResult = await AdsConsent.loadAndShowConsentFormIfRequired();
-        console.log('✅ Consent form result:', formResult);
-        
-        // Update status nach Form
-        const newInfo = await AdsConsent.requestInfoUpdate();
-        this.updateConsentStatusFromInfo(newInfo);
-        await this.saveConsentInfo(this.consentStatus, newInfo);
-        
-        return true;
+        this.isPromptInFlight = true;
+        try {
+          const formResult = await AdsConsent.loadAndShowConsentFormIfRequired();
+          console.log('✅ Consent form result:', formResult);
+          
+          // Update status nach Form
+          const newInfo = await AdsConsent.requestInfoUpdate();
+          this.updateConsentStatusFromInfo(newInfo);
+          await this.saveConsentInfo(this.consentStatus, newInfo);
+          this.hasShownThisSession = true;
+          
+          return true;
+        } finally {
+          this.isPromptInFlight = false;
+        }
       }
       
       return false;
@@ -106,18 +126,28 @@ class ConsentService {
       }
 
       const { AdsConsent } = require('react-native-google-mobile-ads');
-      
-      // Zeige Form erzwungen (für Tests)
+
+      if (this.isPromptInFlight) {
+        console.log('⏭️ Consent form already showing - skipping duplicate force request');
+        return;
+      }
+
       console.log('🔧 Force showing consent form...');
-      await AdsConsent.showForm();
-      
-      // Update status
-      const newInfo = await AdsConsent.requestInfoUpdate();
-      this.updateConsentStatusFromInfo(newInfo);
-      await this.saveConsentInfo(this.consentStatus, newInfo);
-      
+      this.isPromptInFlight = true;
+      try {
+        await AdsConsent.showForm();
+
+        // Update status
+        const newInfo = await AdsConsent.requestInfoUpdate();
+        this.updateConsentStatusFromInfo(newInfo);
+        await this.saveConsentInfo(this.consentStatus, newInfo);
+        this.hasShownThisSession = true;
+      } finally {
+        this.isPromptInFlight = false;
+      }
     } catch (error) {
       console.error('❌ Error force showing consent form:', error);
+      throw error;
     }
   }
 
@@ -133,6 +163,7 @@ class ConsentService {
       this.consentStatus = 'UNKNOWN';
       this.consentInfo = null;
       this.isInitialized = false;
+      this.hasShownThisSession = false;
       
       if (Platform.OS === 'android') {
         try {
@@ -261,25 +292,24 @@ class ConsentService {
       };
     }
     
-    const forceForm = options?.forceForm ?? true;
+    const forceForm = options?.forceForm ?? false; // DEFAULT: false!
     
     try {
       const { AdsConsent } = require('react-native-google-mobile-ads');
       
-      // Immer aktuellen Status erfragen & Formular anzeigen wenn nötig
-      const latestInfo = await AdsConsent.loadAndShowConsentFormIfRequired();
+      // Nur Status aktualisieren, kein automatisches Anzeigen
+      const latestInfo = await AdsConsent.requestInfoUpdate();
       if (latestInfo) {
         this.updateConsentStatusFromInfo(latestInfo);
         await this.saveConsentInfo(this.consentStatus, latestInfo);
       }
       
-      // Falls weiterhin REQUIRED → optionales erzwungenes Formular
+      // Falls weiterhin REQUIRED UND explizit forceForm → Formular zeigen
+      // WICHTIG: Nur wenn explizit angefordert (z.B. vom Modal-Button)
       if (forceForm && this.consentStatus === 'REQUIRED') {
+        console.log('📝 ensureConsentForRewardedAd: Force showing consent form');
         try {
-          await AdsConsent.showForm();
-          const refreshedInfo = await AdsConsent.requestInfoUpdate();
-          this.updateConsentStatusFromInfo(refreshedInfo);
-          await this.saveConsentInfo(this.consentStatus, refreshedInfo);
+          await this.showConsentFormIfRequired({ force: true });
         } catch (formError) {
           console.warn('⚠️ Consent form display failed:', formError);
         }
@@ -288,6 +318,7 @@ class ConsentService {
       console.warn('⚠️ ensureConsentForRewardedAd failed:', error);
     }
     
+    // isBypass = true bedeutet: wir zeigen non-personalized Ads auch ohne Consent
     const isBypass = !(this.consentStatus === 'OBTAINED' || this.consentStatus === 'NOT_REQUIRED');
     const adRequestOptions = this.getAdRequestOptions(isBypass);
     

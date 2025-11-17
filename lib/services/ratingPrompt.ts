@@ -155,13 +155,33 @@ class RatingPromptService {
   async requestStoreReview(): Promise<void> {
     try {
       const { Platform, Linking } = require('react-native');
+      const StoreReview = require('react-native-store-review');
       
-      // Öffne direkt die Store-Seite
-      const storeUrl = Platform.OS === 'ios' 
-        ? 'https://apps.apple.com/de/app/markendetektive-clever-sparen/id6471081082'
-        : 'https://play.google.com/store/apps/details?id=de.markendetektive';
+      let nativePromptShown = false;
       
-      await Linking.openURL(storeUrl);
+      if (StoreReview?.isAvailable && StoreReview.isAvailable()) {
+        try {
+          console.log('⭐ Versuche native In-App-Review anzuzeigen...');
+          const result = await StoreReview.requestReview();
+          // requestReview gibt auf iOS nichts zurück, auf Android bool
+          nativePromptShown = result !== false;
+          console.log('⭐ Native In-App-Review Ergebnis:', result);
+        } catch (error) {
+          console.warn('⚠️ Native In-App-Review fehlgeschlagen, fallback zum Store:', error);
+        }
+      } else {
+        console.log('⚠️ Native In-App-Review nicht verfügbar – wechsle direkt zum Store');
+      }
+      
+      if (!nativePromptShown) {
+        // Öffne Store Fallback
+        const storeUrl = Platform.OS === 'ios' 
+          ? 'https://apps.apple.com/de/app/markendetektive-clever-sparen/id6471081082'
+          : 'https://play.google.com/store/apps/details?id=de.markendetektive';
+        
+        console.log('🔗 Öffne Store-URL für Bewertung:', storeUrl);
+        await Linking.openURL(storeUrl);
+      }
       
     } catch (error) {
       console.error('❌ Store review error:', error);

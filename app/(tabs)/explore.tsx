@@ -979,7 +979,7 @@ export default function ExploreScreen() {
         allergenFilters: Object.keys(noNameFilters.allergenFilters || {}).length,
         nutritionDetails: noNameFilters.nutritionFilters
       });
-
+      
       const validatedFilters = validateFiltersSync({
         ...noNameFilters,
         sortBy: 'name'
@@ -1013,14 +1013,14 @@ export default function ExploreScreen() {
 
     } catch (error) {
       if (noNameRequestId.current === requestId) {
-        console.error('Error loading NoName products:', error);
-        setNoNameError('Fehler beim Laden der Produkte');
+      console.error('Error loading NoName products:', error);
+      setNoNameError('Fehler beim Laden der Produkte');
       } else {
         console.warn('⚠️ Fehler in veralteter NoName-Anfrage ignoriert:', error);
       }
     } finally {
       if (noNameRequestId.current === requestId) {
-        setNoNameLoading(false);
+      setNoNameLoading(false);
       }
     }
   };
@@ -1072,14 +1072,14 @@ export default function ExploreScreen() {
 
     } catch (error) {
       if (markenRequestId.current === requestId) {
-        console.error('Error loading Markenprodukte:', error);
-        setMarkenproduktError('Fehler beim Laden der Produkte');
+      console.error('Error loading Markenprodukte:', error);
+      setMarkenproduktError('Fehler beim Laden der Produkte');
       } else {
         console.warn('⚠️ Fehler in veralteter Markenprodukte-Anfrage ignoriert:', error);
       }
     } finally {
       if (markenRequestId.current === requestId) {
-        setMarkenproduktLoading(false);
+      setMarkenproduktLoading(false);
       }
     }
   };

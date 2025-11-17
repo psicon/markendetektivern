@@ -20,21 +20,39 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
   const [canShowAds, setCanShowAds] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+    let retryTimeout: NodeJS.Timeout | null = null;
+
+    const scheduleRetry = (reason: string, delay = 2000) => {
+      if (cancelled) return;
+      console.log(`⏳ BannerAd wartet: ${reason}. Neuer Versuch in ${delay}ms`);
+      retryTimeout = setTimeout(() => {
+        retryTimeout = null;
+        initAds();
+      }, delay);
+    };
+
     const initAds = async () => {
       try {
+        if (cancelled) return;
+
         if (Platform.OS === 'ios') {
-          // iOS: SOFORT anzeigen für maximale Einnahmen (wie in 5.0.1)
           setCanShowAds(true);
-          // WICHTIG: Auch hier initialize aufrufen (wie in Version 5.0.1!)
           await adMobService.initialize();
-          setIsReady(true);
+          if (!cancelled) {
+            setIsReady(true);
+          }
           return;
         }
         
-        // Android: Consent prüfen
+        const { OnboardingService } = await import('@/lib/services/onboardingService');
+        const hasPassedOnboarding = await OnboardingService.hasPassedOnboarding();
+        if (!hasPassedOnboarding) {
+          scheduleRetry('Onboarding noch nicht abgeschlossen');
+          return;
+        }
+
         const { consentService } = await import('@/lib/services/consentService');
-        
-        // Initialisiere Consent falls noch nicht geschehen
         const consentStatus = consentService.getConsentStatus();
         if (consentStatus === 'UNKNOWN') {
           console.log('🔄 BannerAd: Initializing consent service...');
@@ -42,7 +60,9 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
         }
         
         const hasConsent = consentService.canShowAds();
-        setCanShowAds(hasConsent);
+        if (!cancelled) {
+          setCanShowAds(hasConsent);
+        }
         
         console.log('📊 BannerAd Consent Check:', {
           consentStatus: consentService.getConsentStatus(),
@@ -50,20 +70,35 @@ export const BannerAd = ({ style, onAdLoaded, onAdFailedToLoad }: BannerAdProps)
         });
         
         if (!hasConsent) {
-          console.log('⏭️ Banner Ad skipped (consent required, not obtained)');
+          scheduleRetry('keine Einwilligung', 3000);
           return;
         }
         
-        // Android: AdMob sollte bereits initialisiert sein
-        setIsReady(adMobService.isAvailable());
+        if (!adMobService.isAvailable()) {
+          scheduleRetry('AdMob noch nicht bereit', 1500);
+          return;
+        }
+
+        if (!cancelled) {
+          setIsReady(true);
+        }
       } catch (err) {
         console.error('AdMob init error:', err);
-        setIsReady(true); // Trotzdem versuchen anzuzeigen
-        setCanShowAds(true); // Fallback: erlauben
+        if (!cancelled) {
+          setIsReady(true);
+          setCanShowAds(true);
+        }
       }
     };
     
     initAds();
+
+    return () => {
+      cancelled = true;
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+      }
+    };
   }, []);
 
   // Bei Ad-Fehler (no fill), Expo Go oder kein Consent: Nichts anzeigen

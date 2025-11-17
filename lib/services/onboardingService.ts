@@ -113,6 +113,7 @@ export class OnboardingService {
     try {
       await AsyncStorage.removeItem(ONBOARDING_COMPLETED_KEY);
       await AsyncStorage.removeItem(ONBOARDING_PROGRESS_KEY);
+      await AsyncStorage.removeItem(ONBOARDING_SKIPPED_KEY);
       console.log('✅ Onboarding reset successfully');
     } catch (error) {
       console.error('Error resetting onboarding:', error);

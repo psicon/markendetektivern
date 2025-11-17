@@ -43,6 +43,7 @@ class AchievementService {
   private configCacheDuration = 5 * 60 * 1000; // 5 Minuten Cache
   private loggedLevelUnlocks = new Set<string>(); // Verhindert doppelte Level-Unlock-Logs
   private categoryRewardsEnhanced = false; // Verhindert mehrfache Category-Enhancement
+  private activeUserId: string | null = null;
 
   // Static Callbacks für UI-Integration
   static onAchievementUnlock: ((achievement: Achievement) => void) | null = null;
@@ -59,26 +60,6 @@ class AchievementService {
       AchievementService.instance = new AchievementService();
     }
     return AchievementService.instance;
-  }
-
-  /**
-   * Vollständiger Reset für neue Authentifizierung
-   * Löst Permission-Probleme beim ersten App-Start
-   */
-  resetForNewAuth(): void {
-    console.log('🔄 RESET: Kompletter Gamification-Reset für neue Auth...');
-    
-    // Reset aller Caches und States
-    this.isInitialized = false;
-    this.initializationPromise = null;
-    this.achievements = [];
-    this.levels = [];
-    this.gameActions = null;
-    this.streakConfig = null;
-    this.lastConfigLoad = 0;
-    this.categoryRewardsEnhanced = false;
-    
-    console.log('✅ RESET: Alle Caches und States zurückgesetzt');
   }
 
   // Static Methods für Callback-Registrierung
@@ -105,8 +86,16 @@ class AchievementService {
   /**
    * Reset für neue Authentifizierung
    */
-  resetForNewAuth(): void {
-    console.log('🔄 RESET: Kompletter Gamification-Reset für neue Auth...');
+  resetForNewAuth(userId?: string | null): void {
+    const normalizedUid = userId ?? null;
+    const sameUser = this.activeUserId === normalizedUid;
+    if (sameUser && (this.isInitialized || this.initializationPromise)) {
+      console.log('⏭️ Gamification-Reset übersprungen (gleicher User, bereits initialisiert oder läuft)');
+      return;
+    }
+    
+    this.activeUserId = normalizedUid;
+    console.log(`🔄 RESET: Kompletter Gamification-Reset für neue Auth (User: ${normalizedUid ?? 'anonym'})...`);
     this.isInitialized = false;
     this.initializationPromise = null;
     this.achievements = [];

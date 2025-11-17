@@ -91,6 +91,13 @@ export default function HomeScreen() {
           await new Promise(resolve => setTimeout(resolve, 1500));
           
           if (cancelled) return;
+
+          const { OnboardingService } = await import('@/lib/services/onboardingService');
+          const hasPassedOnboarding = await OnboardingService.hasPassedOnboarding();
+          if (!hasPassedOnboarding) {
+            console.log('⏭️ UMP: Onboarding noch nicht abgeschlossen – Consent wird später angezeigt');
+            return;
+          }
           
           const { consentService } = await import('@/lib/services/consentService');
           
