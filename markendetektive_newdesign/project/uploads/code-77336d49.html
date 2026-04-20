@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+
+<html class="light" lang="de"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;500;700&amp;family=Sora:wght@400;500;700&amp;family=Manrope:wght@600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        outline: "#6e7a76",
+                        "inverse-on-surface": "#eff1f2",
+                        "on-tertiary-fixed": "#301400",
+                        "surface-variant": "#e1e3e4",
+                        "on-primary-fixed": "#00201b",
+                        "on-error": "#ffffff",
+                        "on-surface": "#191c1d",
+                        "surface-tint": "#006b5d",
+                        "tertiary-container": "#b85e00",
+                        "secondary-fixed-dim": "#b4cad6",
+                        "secondary-fixed": "#cfe6f2",
+                        secondary: "#4c616c",
+                        "outline-variant": "#bdc9c5",
+                        "on-secondary-fixed": "#071e27",
+                        "surface-bright": "#f8fafb",
+                        "tertiary-fixed": "#ffdcc5",
+                        "surface-container-lowest": "#ffffff",
+                        "inverse-surface": "#2e3132",
+                        "surface-container": "#eceeef",
+                        "on-secondary-fixed-variant": "#354a53",
+                        "on-tertiary-container": "#ffffff",
+                        "on-tertiary-fixed-variant": "#713700",
+                        "primary-fixed": "#92f4e1",
+                        "on-tertiary": "#ffffff",
+                        "on-secondary": "#ffffff",
+                        "on-primary-container": "#ffffff",
+                        "tertiary-fixed-dim": "#ffb783",
+                        "inverse-primary": "#75d7c5",
+                        "on-background": "#191c1d",
+                        "secondary-container": "#cfe6f2",
+                        "primary-container": "#0d8575",
+                        "error-container": "#ffdad6",
+                        "surface-container-high": "#e6e8e9",
+                        background: "#f8fafb",
+                        "surface-container-low": "#f2f4f5",
+                        "surface-dim": "#d8dadb",
+                        surface: "#f8fafb",
+                        "on-error-container": "#93000a",
+                        "on-secondary-container": "#526772",
+                        "on-primary": "#ffffff",
+                        "on-surface-variant": "#3e4946",
+                        "primary-fixed-dim": "#75d7c5",
+                        "on-primary-fixed-variant": "#005046",
+                        primary: "#006a5d",
+                        tertiary: "#934a00",
+                        "surface-container-highest": "#e1e3e4",
+                        error: "#ba1a1a"
+                    },
+                    fontFamily: {
+                        headline: ["Nunito Sans"],
+                        body: ["Nunito Sans"],
+                        label: ["Sora"],
+                        display: "Nunito Sans",
+                        manrope: ["Manrope"]
+                    },
+                    borderRadius: {
+                        DEFAULT: "0.5rem",
+                        lg: "1rem",
+                        xl: "1.5rem",
+                        full: "9999px"
+                    }
+                }
+            }
+        };
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        body { min-height: max(884px, 100dvh); }
+    </style>
+</head>
+<body class="bg-surface font-body text-on-surface min-h-screen pb-32">
+<!-- TopAppBar -->
+<header class="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-sm dark:shadow-none docked full-width top-0 sticky z-50">
+<div class="flex justify-between items-center px-6 py-4 w-full max-w-screen-xl mx-auto">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-teal-700 dark:text-teal-400">search</span>
+<h1 class="text-xl font-extrabold tracking-tight text-teal-800 dark:text-teal-300 font-headline">Stöbern</h1>
+</div>
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-slate-500 dark:text-slate-400">account_circle</span>
+</div>
+</div>
+<div class="bg-slate-100 dark:bg-slate-800 h-[1px] w-full"></div>
+</header>
+<main class="max-w-screen-xl mx-auto px-6 pt-6">
+<!-- Segmented Control Filters -->
+<section class="mb-8">
+<div class="bg-surface-container-high p-1 rounded-xl flex">
+<button class="flex-1 py-2 text-sm font-bold rounded-lg transition-all bg-white text-primary shadow-sm">
+                Eigenmarken
+            </button>
+<button class="flex-1 py-2 text-sm font-bold rounded-lg transition-all text-on-surface-variant hover:text-on-surface">
+                Marken
+            </button>
+</div>
+</section>
+<!-- Results Grid -->
+<section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
+<!-- Card 1 -->
+<div class="bg-surface-container-lowest rounded-xl overflow-hidden group hover:shadow-lg transition-all duration-300">
+<div class="relative aspect-square bg-surface-container overflow-hidden">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Bio Hafermilch auf hellem Hintergrund" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBJYinPtN0d5tQbr0fXkLt1XMwhRhzQe892NeMfFCgD09G3qdPE8-s94kdgYkLrwV8ZIvfwE51cj9e0wxOOLumz-g2RxsHYKIU8M2Kkm8LIfBIgtb8SUktp1_yEnkavngFmyl0axcbGb9JqJEFgI197UwLOyHvXx_dteBW_RPWwyix2hdq7grSQXQSxFPgxRb4b5xKlxSO2TaqY6WztaBEWwKpuybL6KbpVcD7B9ojgGLG7XAKLLg6FJvnfTIsTpAEdQK1PP0vvywtf"/>
+<div class="absolute top-2 left-2 px-2 py-1 bg-white/90 backdrop-blur rounded-lg shadow-sm flex items-center gap-1">
+<span class="w-4 h-4 bg-blue-600 rounded-sm flex items-center justify-center text-[8px] text-white font-bold">L</span>
+<span class="text-[10px] font-bold text-slate-800 uppercase">Lidl</span>
+</div>
+<div class="absolute bottom-2 right-2 flex gap-0.5">
+<div class="w-1.5 h-4 bg-green-500 rounded-full"></div>
+<div class="w-1.5 h-4 bg-green-500 rounded-full"></div>
+<div class="w-1.5 h-4 bg-green-500 rounded-full"></div>
+<div class="w-1.5 h-4 bg-green-500 rounded-full"></div>
+<div class="w-1.5 h-4 bg-surface-variant rounded-full"></div>
+</div>
+</div>
+<div class="p-4">
+<p class="text-[10px] font-bold text-tertiary uppercase tracking-tighter mb-1">Eigenmarke</p>
+<h3 class="font-headline font-bold text-sm text-on-surface leading-tight mb-2">Milbona Bio Haferdrink</h3>
+<div class="flex justify-between items-end">
+<span class="text-lg font-extrabold text-primary">0,95€</span>
+<span class="text-[10px] text-outline font-medium">1L (0,95€/L)</span>
+</div>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="bg-surface-container-lowest rounded-xl overflow-hidden group hover:shadow-lg transition-all duration-300">
+<div class="relative aspect-square bg-surface-container overflow-hidden">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Haselnuss-Schokocreme Glas Nahaufnahme" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBh6WpzgtGOygWr1hdwFpvuflV4CK2IgYkOZJGeSy1suk2PRgY7h1TB_q4khYzYNo7Aji6CHD4GCDCoVuVo1YghoUrmSOFZYuuvMugpzmpsylzsRG-C4cztiQefCOlhARYw_eYlSJ8yE1w97LB3OkVHxRkMygJF8mFMm2A8iRIlgM-WfxGk8F8jjAQIwAKGbtWETwmSiv3s5ZEKFEWXoUp1kzy7-JqJvJCUqKYMOYor5JoI6fn_zhy4AHXwjgaxgMM63vH3aYUmEeEQ"/>
+<div class="absolute top-2 left-2 px-2 py-1 bg-white/90 backdrop-blur rounded-lg shadow-sm flex items-center gap-1">
+<span class="w-4 h-4 bg-red-600 rounded-sm flex items-center justify-center text-[8px] text-white font-bold">R</span>
+<span class="text-[10px] font-bold text-slate-800 uppercase">Rewe</span>
+</div>
+<div class="absolute bottom-2 right-2 flex gap-0.5">
+<div class="w-1.5 h-4 bg-[#0d8575] rounded-full"></div>
+<div class="w-1.5 h-4 bg-[#0d8575] rounded-full"></div>
+<div class="w-1.5 h-4 bg-[#0d8575] rounded-full"></div>
+<div class="w-1.5 h-4 bg-[#0d8575] rounded-full"></div>
+<div class="w-1.5 h-4 bg-[#0d8575] rounded-full"></div>
+</div>
+</div>
+<div class="p-4">
+<p class="text-[10px] font-bold text-tertiary uppercase tracking-tighter mb-1">Ja!</p>
+<h3 class="font-headline font-bold text-sm text-on-surface leading-tight mb-2">Nuss-Nougat Creme</h3>
+<div class="flex justify-between items-end">
+<span class="text-lg font-extrabold text-primary">1,89€</span>
+<span class="text-[10px] text-outline font-medium">400g (4,72€/kg)</span>
+</div>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="bg-surface-container-lowest rounded-xl overflow-hidden group hover:shadow-lg transition-all duration-300">
+<div class="relative aspect-square bg-surface-container overflow-hidden">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Handvoll gerösteter Kaffeebohnen" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC27ibZZ0pGoyLa2nDQ66S0FWK8HB2Yj8X0nxdAeO7hD9M5Cp6VYk5vsU_eHf_t733jalm7G6KL7jTyeO-FhHorIih5pcmwZPx2xoTaoKvklElvDpynYE5OeZcBH85RZ3UYHY50zQ0H1vRhFu25VWpcTzC51y9jB9kP1PBUBDwSSW1Ee6Y7YMMh57c98E8cAk5YGfnOylEgxt5HVD72jM02SuEgcTUeE9HnAjBL6QiL9oW290b0ck5sg010GJ2I1OrzNPZx-aQieiaG"/>
+<div class="absolute top-2 left-2 px-2 py-1 bg-white/90 backdrop-blur rounded-lg shadow-sm flex items-center gap-1">
+<span class="w-4 h-4 bg-blue-800 rounded-sm flex items-center justify-center text-[8px] text-white font-bold">A</span>
+<span class="text-[10px] font-bold text-slate-800 uppercase">Aldi</span>
+</div>
+<div class="absolute bottom-2 right-2 flex gap-0.5">
+<div class="w-1.5 h-4 bg-yellow-400 rounded-full"></div>
+<div class="w-1.5 h-4 bg-yellow-400 rounded-full"></div>
+<div class="w-1.5 h-4 bg-yellow-400 rounded-full"></div>
+<div class="w-1.5 h-4 bg-surface-variant rounded-full"></div>
+<div class="w-1.5 h-4 bg-surface-variant rounded-full"></div>
+</div>
+</div>
+<div class="p-4">
+<p class="text-[10px] font-bold text-tertiary uppercase tracking-tighter mb-1">Moreno</p>
+<h3 class="font-headline font-bold text-sm text-on-surface leading-tight mb-2">Caffè Crema Ganze Bohne</h3>
+<div class="flex justify-between items-end">
+<span class="text-lg font-extrabold text-primary">8,99€</span>
+<span class="text-[10px] text-outline font-medium">1kg (8,99€/kg)</span>
+</div>
+</div>
+</div>
+<!-- Card 4 -->
+<div class="bg-surface-container-lowest rounded-xl overflow-hidden group hover:shadow-lg transition-all duration-300">
+<div class="relative aspect-square bg-surface-container overflow-hidden">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Frischer körniger Frischkäse in Schale" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCm_585UeHcfluP-jkAL6x5GBT6zp7LQT_qbD3ufqKoEvwtBfuzfJwBC2nG3r5RHNKGPtgqh6Ikh9xwXocM237TAMjAVHpkn7WwHl4pvMMICdZigS85nVwIwhv8HTC1O1xbKXGe1tPmrrjR-qszv6rRBKyQCMgyeWtmVbwLxipwaBYpEhfvcHBPuj1-Sec1AFvJeg89gwRpFB4L-ywSLVawjC_ulBlm1tY--oC5AX479g7gNuqS8cZVKgABRyZyLuiu46SI44WrO4Et"/>
+<div class="absolute top-2 left-2 px-2 py-1 bg-white/90 backdrop-blur rounded-lg shadow-sm flex items-center gap-1">
+<span class="w-4 h-4 bg-blue-600 rounded-sm flex items-center justify-center text-[8px] text-white font-bold">L</span>
+<span class="text-[10px] font-bold text-slate-800 uppercase">Lidl</span>
+</div>
+<div class="absolute bottom-2 right-2 flex gap-0.5">
+<div class="w-1.5 h-4 bg-green-500 rounded-full"></div>
+<div class="w-1.5 h-4 bg-green-500 rounded-full"></div>
+<div class="w-1.5 h-4 bg-green-500 rounded-full"></div>
+<div class="w-1.5 h-4 bg-green-500 rounded-full"></div>
+<div class="w-1.5 h-4 bg-surface-variant rounded-full"></div>
+</div>
+</div>
+<div class="p-4">
+<p class="text-[10px] font-bold text-tertiary uppercase tracking-tighter mb-1">Milbona</p>
+<h3 class="font-headline font-bold text-sm text-on-surface leading-tight mb-2">Hüttenkäse High Protein</h3>
+<div class="flex justify-between items-end">
+<span class="text-lg font-extrabold text-primary">0,79€</span>
+<span class="text-[10px] text-outline font-medium">200g (3,95€/kg)</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Floating Action Button -->
+<button class="fixed bottom-24 right-6 w-14 h-14 rounded-2xl bg-primary text-on-primary shadow-xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all z-40">
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">tune</span>
+</button>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 w-full z-50 rounded-t-2xl border-t border-slate-100 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl shadow-lg">
+<div class="flex justify-around items-center px-2 pb-5 pt-1">
+<a class="flex flex-col items-center justify-center text-slate-400 px-2 py-1" href="#">
+<span class="material-symbols-outlined text-xl">home</span>
+<span class="font-semibold text-[9px] uppercase tracking-wider mt-0.5 font-manrope">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-primary px-2 py-1" href="#">
+<span class="material-symbols-outlined text-xl" style='font-variation-settings: "FILL" 1;'>explore</span>
+<span class="font-semibold text-[9px] uppercase tracking-wider mt-0.5 font-manrope">Stöbern</span>
+</a>
+<div class="-mt-8 bg-primary p-3 rounded-full shadow-lg border-4 border-background">
+<span class="material-symbols-outlined text-white text-2xl">center_focus_strong</span>
+</div>
+<a class="flex flex-col items-center justify-center text-slate-400 px-2 py-1" href="#">
+<span class="material-symbols-outlined text-xl">military_tech</span>
+<span class="font-semibold text-[9px] uppercase tracking-wider mt-0.5 font-manrope">Rewards</span>
+</a>
+<a class="flex flex-col items-center justify-center text-slate-400 px-2 py-1" href="#">
+<span class="material-symbols-outlined text-xl">person</span>
+<span class="font-semibold text-[9px] uppercase tracking-wider mt-0.5 font-manrope">Profil</span>
+</a>
+</div>
+</nav>
+</body></html>
