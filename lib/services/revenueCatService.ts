@@ -1,4 +1,4 @@
-import { REVENUECAT_CONFIG } from '@/lib/config/revenueCatConfig';
+import { REVENUECAT_CONFIG, isAdFreeCustomer } from '@/lib/config/revenueCatConfig';
 import Constants from 'expo-constants';
 import { LogBox, Platform } from 'react-native';
 
@@ -229,13 +229,13 @@ class RevenueCatService {
         entitlementKeys: Object.keys(customerInfo.entitlements.active || {}),
       });
       
-      // WICHTIG: Prüfe ob Premium-Entitlement wirklich aktiv ist!
-      const isPremium = !!customerInfo.entitlements.active[REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM];
-      
+      // Prüfe ob ein Ad-Free-Entitlement (neu oder legacy) aktiv ist.
+      const isPremium = isAdFreeCustomer(customerInfo);
+
       console.log('✅ RevenueCat purchase completed:', {
         packageIdentifier,
         isPremium,
-        premiumEntitlementKey: REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM,
+        adFreeEntitlement: REVENUECAT_CONFIG.ENTITLEMENTS.AD_FREE,
         activeEntitlements: Object.keys(customerInfo.entitlements.active || {}),
       });
       
@@ -277,8 +277,8 @@ class RevenueCatService {
       const Purchases = require('react-native-purchases');
       const customerInfo = await Purchases.default.restorePurchases();
       
-      // Direkt Premium Status loggen
-      const hasPremium = !!customerInfo?.entitlements?.active?.[REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM];
+      // Direkt Ad-Free Status loggen (neu + legacy).
+      const hasPremium = isAdFreeCustomer(customerInfo);
       const hasAnyEntitlement = Object.keys(customerInfo?.entitlements?.active || {}).length > 0;
       const hasActiveSubscriptions = customerInfo?.activeSubscriptions?.length > 0;
       
@@ -392,22 +392,13 @@ class RevenueCatService {
       let targetOffering = offeringIdentifier;
       
       if (!targetOffering && context) {
-        switch (context.toLowerCase()) {
-          case 'onboarding':
-            targetOffering = REVENUECAT_CONFIG.PAYWALL_CONTEXTS.ONBOARDING;
-            break;
-          case 'category_unlock':
-            targetOffering = REVENUECAT_CONFIG.PAYWALL_CONTEXTS.CATEGORY_UNLOCK;
-            break;
-          case 'profile_upgrade':
-            targetOffering = REVENUECAT_CONFIG.PAYWALL_CONTEXTS.PROFILE_UPGRADE;
-            break;
-          case 'feature_gate':
-            targetOffering = REVENUECAT_CONFIG.PAYWALL_CONTEXTS.FEATURE_GATE;
-            break;
-          default:
-            targetOffering = REVENUECAT_CONFIG.PAYWALL_CONTEXTS.DEFAULT;
-        }
+        // v6: Nur noch zwei Paywall-Kontexte (Onboarding + Default).
+        // Legacy-Kontext-Namen werden weiter akzeptiert, fallen aber alle
+        // auf das DEFAULT-Offering zurück.
+        targetOffering =
+          context.toLowerCase() === 'onboarding'
+            ? REVENUECAT_CONFIG.PAYWALL_CONTEXTS.ONBOARDING
+            : REVENUECAT_CONFIG.PAYWALL_CONTEXTS.DEFAULT;
       }
       
       // Fallback zum Standard-Offering
@@ -472,8 +463,10 @@ class RevenueCatService {
       const RevenueCatUI = require('react-native-purchases-ui');
       
       // React Native API: RevenueCatUI.presentPaywallIfNeeded()
+      // NOTE: Grandfathered users (LEGACY_PREMIUM) sehen hier ggf. die
+      // Paywall erneut, bis das RC-Dashboard auf `ad_free` migriert wurde.
       const result = await RevenueCatUI.default.presentPaywallIfNeeded({
-        requiredEntitlementIdentifier: REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM,
+        requiredEntitlementIdentifier: REVENUECAT_CONFIG.ENTITLEMENTS.AD_FREE,
       });
       
       console.log('🛒 Paywall if needed result:', result);
@@ -622,16 +615,19 @@ class RevenueCatService {
     return this.presentPaywall('onboarding');
   }
 
+  /** @deprecated v6: Alle Kategorien außer Alkohol sind frei. Zeigt nun die Standard-Ad-Free-Paywall. */
   async showCategoryUnlockPaywall(): Promise<{ result: 'purchased' | 'cancelled' | 'error' | 'not_presented' }> {
-    return this.presentPaywall('category_unlock');
+    return this.presentPaywall('default');
   }
 
+  /** @deprecated v6: Profil-Upgrade entfällt, es gibt nur noch Ad-Free. Zeigt die Standard-Paywall. */
   async showProfileUpgradePaywall(): Promise<{ result: 'purchased' | 'cancelled' | 'error' | 'not_presented' }> {
-    return this.presentPaywall('profile_upgrade');
+    return this.presentPaywall('default');
   }
 
+  /** @deprecated v6: Feature-Gates entfallen, es gibt nur noch Ad-Free. Zeigt die Standard-Paywall. */
   async showFeatureGatePaywall(): Promise<{ result: 'purchased' | 'cancelled' | 'error' | 'not_presented' }> {
-    return this.presentPaywall('feature_gate');
+    return this.presentPaywall('default');
   }
 
   /**
@@ -688,7 +684,7 @@ class RevenueCatService {
       
       console.log('✅ Force-Refresh erfolgreich:', {
         activeSubscriptions: customerInfo.activeSubscriptions?.length || 0,
-        hasPremium: !!customerInfo.entitlements.active[REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM]
+        hasPremium: isAdFreeCustomer(customerInfo),
       });
       
       return customerInfo;
@@ -714,7 +710,7 @@ class RevenueCatService {
     try {
       if (forceRefresh) {
         const customerInfo = await this.forceRefreshCustomerInfo();
-        return !!customerInfo.entitlements.active[REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM];
+        return isAdFreeCustomer(customerInfo);
       }
       
       // Normaler Check
@@ -732,7 +728,8 @@ class RevenueCatService {
     console.log('🔍 === RevenueCat Debug Info ===');
     console.log('Initialized:', this._isInitialized);
     console.log('Is Expo Go:', this.isExpoGo);
-    console.log('Entitlement Name:', REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM);
+    console.log('Entitlement Name (primary):', REVENUECAT_CONFIG.ENTITLEMENTS.AD_FREE);
+    console.log('Entitlement Name (legacy):', REVENUECAT_CONFIG.ENTITLEMENTS.LEGACY_PREMIUM);
     
     if (!this._isInitialized) {
       console.log('❌ RevenueCat nicht initialisiert!');
@@ -765,8 +762,8 @@ class RevenueCatService {
       activeSubscriptions: isPremium ? ['premium_monthly'] : [],
       allPurchasedProductIdentifiers: isPremium ? ['premium_monthly'] : [],
       entitlements: {
-        active: isPremium ? { [REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM]: { isActive: true } } : {},
-        all: { [REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM]: { isActive: isPremium } },
+        active: isPremium ? { [REVENUECAT_CONFIG.ENTITLEMENTS.AD_FREE]: { isActive: true } } : {},
+        all: { [REVENUECAT_CONFIG.ENTITLEMENTS.AD_FREE]: { isActive: isPremium } },
       },
       originalAppUserId: 'mock_user_id',
     };

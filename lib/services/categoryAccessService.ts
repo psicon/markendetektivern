@@ -1,7 +1,29 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { FirestoreDocument, Kategorien } from '../types/firestore';
+
+/**
+ * v6-Regel (siehe docs/DESIGN_SYSTEM.md §15):
+ * Alle Kategorien sind frei zugänglich — mit EINER Ausnahme: `alkohol`
+ * benötigt Level 3 (Produktdetektiv). Die Freischaltung kann entweder
+ * durch Level-Up oder temporär durch einen Rewarded Ad erfolgen.
+ *
+ * Das Mapping überschreibt den Firestore-Wert `getsFreeAtLevel` für die
+ * Gating-Entscheidung. Firestore bleibt unangetastet; eine Bereinigung
+ * der DB (alle anderen auf 0 setzen) kann unabhängig erfolgen.
+ *
+ * Schlüssel = `bezeichnung.toLowerCase()` der Kategorie (robuster als Doc-ID,
+ * da die Bezeichnung auch im Rest der App als Normalized Key genutzt wird).
+ */
+const GATED_CATEGORIES: Record<string, number> = {
+  alkohol: 3,
+};
+
+function getEffectiveRequiredLevel(category: Pick<Kategorien, 'bezeichnung'>): number {
+  const key = category.bezeichnung?.toLowerCase?.() ?? '';
+  return GATED_CATEGORIES[key] ?? 0;
+}
 
 interface CategoryWithAccess extends FirestoreDocument<Kategorien> {
   isLocked: boolean;
@@ -124,13 +146,16 @@ class CategoryAccessService {
   }
 
   /**
-   * Lädt alle Kategorien mit Access-Informationen
+   * Lädt alle Kategorien mit Access-Informationen.
+   *
    * @param userLevel - Aktuelles User-Level
-   * @param isPremium - Premium-Status (Premium-User haben Zugang zu allen Kategorien)
+   * @param isPremium - @deprecated Seit v6 wird `isPremium` für Kategorie-Gating
+   *   ignoriert; Parameter bleibt für API-Kompatibilität erhalten. Gating
+   *   erfolgt ausschließlich via GATED_CATEGORIES + Level + Temp-Unlock.
    */
   async getAllCategoriesWithAccess(userLevel: number, isPremium: boolean = false): Promise<CategoryWithAccess[]> {
     const now = Date.now();
-    
+
     // Cache verwenden wenn noch gültig
     if (this.cachedCategories.length > 0 && now - this.lastCacheTime < this.cacheDuration) {
       return this.mapCategoriesWithAccess(this.cachedCategories, userLevel, isPremium);
@@ -140,28 +165,27 @@ class CategoryAccessService {
       // Lade alle Kategorien aus Firestore
       const kategorienRef = collection(db, 'kategorien');
       const querySnapshot = await getDocs(kategorienRef);
-      
+
       const categories: CategoryWithAccess[] = [];
-      
+
       querySnapshot.forEach((doc) => {
         const data = doc.data() as Kategorien;
-        const getsFreeAtLevel = data.getsFreeAtLevel ?? 0; // Default: sofort verfügbar
-        
-        const temporaryUnlock = this.isCategoryTemporarilyUnlocked(doc.id) 
-          ? this.temporaryUnlocks[doc.id] 
+        const requiredLevel = getEffectiveRequiredLevel(data);
+
+        const temporaryUnlock = this.isCategoryTemporarilyUnlocked(doc.id)
+          ? this.temporaryUnlocks[doc.id]
           : undefined;
-        
+
         const isTemporarilyUnlocked = this.isCategoryTemporarilyUnlocked(doc.id);
-        const isLockedByLevel = userLevel < getsFreeAtLevel;
-        const isLocked = isPremium ? false : (isLockedByLevel && !isTemporarilyUnlocked);
-        
+        const isLocked = requiredLevel > 0 && userLevel < requiredLevel && !isTemporarilyUnlocked;
+
         categories.push({
           id: doc.id,
           ...data,
           isLocked,
-          requiredLevel: getsFreeAtLevel,
-          unlocksAtLevel: getsFreeAtLevel > 0 ? getsFreeAtLevel : undefined,
-          temporaryUnlock
+          requiredLevel,
+          unlocksAtLevel: requiredLevel > 0 ? requiredLevel : undefined,
+          temporaryUnlock,
         });
       });
       
@@ -210,27 +234,30 @@ class CategoryAccessService {
   }
 
   /**
-   * Gibt die Kategorie zurück die bei einem bestimmten Level freigeschaltet wird
+   * Gibt die Kategorie zurück, die bei einem bestimmten Level freigeschaltet wird.
+   * Nutzt GATED_CATEGORIES als Quelle der Wahrheit (Firestore-Wert wird ignoriert).
    */
   async getCategoryUnlockedAtLevel(level: number): Promise<CategoryWithAccess | null> {
+    const gatedKey = Object.entries(GATED_CATEGORIES).find(([, lvl]) => lvl === level)?.[0];
+    if (!gatedKey) return null;
+
     try {
       const kategorienRef = collection(db, 'kategorien');
-      const q = query(kategorienRef, where('getsFreeAtLevel', '==', level));
-      const querySnapshot = await getDocs(q);
-      
-      if (!querySnapshot.empty) {
-        const doc = querySnapshot.docs[0];
+      const querySnapshot = await getDocs(kategorienRef);
+
+      for (const doc of querySnapshot.docs) {
         const data = doc.data() as Kategorien;
-        
-        return {
-          id: doc.id,
-          ...data,
-          isLocked: false, // Wird ja gerade freigeschaltet
-          requiredLevel: level,
-          unlocksAtLevel: level
-        };
+        if (data.bezeichnung?.toLowerCase?.() === gatedKey) {
+          return {
+            id: doc.id,
+            ...data,
+            isLocked: false,
+            requiredLevel: level,
+            unlocksAtLevel: level,
+          };
+        }
       }
-      
+
       return null;
     } catch (error) {
       console.error(`❌ Fehler beim Laden der Kategorie für Level ${level}:`, error);
@@ -249,22 +276,22 @@ class CategoryAccessService {
   }
 
   /**
-   * Hilfsfunktion um Access-Status basierend auf User-Level und Premium-Status zu mappen
+   * Hilfsfunktion um Access-Status basierend auf User-Level zu mappen.
+   * `isPremium` ist seit v6 ohne Wirkung (siehe JSDoc von `getAllCategoriesWithAccess`).
    */
-  private mapCategoriesWithAccess(categories: CategoryWithAccess[], userLevel: number, isPremium: boolean = false): CategoryWithAccess[] {
+  private mapCategoriesWithAccess(categories: CategoryWithAccess[], userLevel: number, _isPremium: boolean = false): CategoryWithAccess[] {
     return categories.map(cat => {
       const isTemporarilyUnlocked = this.isCategoryTemporarilyUnlocked(cat.id);
-      const isLockedByLevel = userLevel < cat.requiredLevel;
-      const isLocked = isPremium ? false : (isLockedByLevel && !isTemporarilyUnlocked);
-      
-      const temporaryUnlock = this.isCategoryTemporarilyUnlocked(cat.id) 
-        ? this.temporaryUnlocks[cat.id] 
+      const isLocked = cat.requiredLevel > 0 && userLevel < cat.requiredLevel && !isTemporarilyUnlocked;
+
+      const temporaryUnlock = isTemporarilyUnlocked
+        ? this.temporaryUnlocks[cat.id]
         : undefined;
 
       return {
-      ...cat,
+        ...cat,
         isLocked,
-        temporaryUnlock
+        temporaryUnlock,
       };
     });
   }

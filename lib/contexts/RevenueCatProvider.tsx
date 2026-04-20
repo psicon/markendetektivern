@@ -1,3 +1,4 @@
+import { isAdFreeCustomer } from '@/lib/config/revenueCatConfig';
 import { revenueCatService } from '@/lib/services/revenueCatService';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useAuth } from './AuthContext';
@@ -154,7 +155,7 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
         if (forceRefresh) {
           // FORCE REFRESH: Cache löschen und neu laden
           const customerInfo = await revenueCatService.forceRefreshCustomerInfo();
-          premium = !!customerInfo?.entitlements?.active?.[REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM];
+          premium = isAdFreeCustomer(customerInfo);
         } else {
           // Normal: Cache nutzen für Speed
           premium = await revenueCatService.isPremium();

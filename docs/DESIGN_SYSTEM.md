@@ -340,16 +340,38 @@ Scanner is accessible **only** via:
 ## 15. Paywall / Access Rules
 
 ### RevenueCat — ad-free only
-- Only entitlement: `ad_free` (removes banner + interstitial ads)
-- All other content/features are free
-- Remove all other product/entitlement checks
+- **Primary entitlement:** `ad_free` (removes banner + interstitial ads)
+- **Legacy entitlement (grandfathered):** `MarkenDetektive Premium` — still recognized in
+  `isAdFreeCustomer()` so bestehende Abonnenten weiterhin ad-free sind.
+- `lib/config/revenueCatConfig.ts` exportiert `AD_FREE_ENTITLEMENTS` (Array) und
+  `isAdFreeCustomer(customerInfo)` — überall wo Ad-Free geprüft wird, diesen
+  Helper nutzen (nie einzelnen Entitlement-String vergleichen).
+- Paywall-Kontexte reduziert auf `ONBOARDING` + `DEFAULT`. Die drei Legacy-Helper
+  `showCategoryUnlockPaywall`/`showProfileUpgradePaywall`/`showFeatureGatePaywall`
+  bleiben vorhanden (als `@deprecated`) und zeigen jetzt alle die Standard-Paywall.
+
+### Dashboard-Koordination (muss separat erfolgen)
+- [ ] In RevenueCat ein Entitlement `ad_free` anlegen
+- [ ] Alle bestehenden Produkte (weekly/monthly/annual/lifetime) an `ad_free` binden
+- [ ] Bestehende aktive Subs entweder auf beide Entitlements mappen oder via
+      RC-Sync auf `ad_free` migrieren
+- [ ] Sobald Migration abgeschlossen: `LEGACY_PREMIUM` aus Code entfernen
+- [ ] Offering `AdFree` (+ optional `AdFreeOnboarding`) im Dashboard einrichten
 
 ### Category access — Gamification gating
 - **All categories free** except Alkohol
 - **Alkohol**: requires Level 3 (`Produktdetektiv`)
-- Gate via `categoryAccessService` (existing service, simplify to single check)
-- `LockedCategoryModal` remains for Alkohol gate
-- Rewarded Ad one-off unlock: user can watch ad to unlock Alkohol temporarily (existing flow)
+- `categoryAccessService` pflegt eine `GATED_CATEGORIES`-Konstante (derzeit
+  `{ alkohol: 3 }`). Firestore-Werte von `getsFreeAtLevel` werden für die
+  Gating-Entscheidung ignoriert — App ist Single Source of Truth.
+- `isPremium`-Parameter am Service ist `@deprecated` (bleibt aus API-Gründen,
+  hat aber keine Wirkung mehr; Premium entsperrt keine Kategorien).
+- `LockedCategoryModal` bleibt für das Alkohol-Gate. Die Premium-Kauf-CTA im
+  Modal ist obsolet (nicht Teil dieses Commits) und sollte im zugehörigen
+  Design-Implementation-Branch entfernt werden — verbleibender Unlock-Pfad:
+  Level-Up oder 24-h-Rewarded-Ad-Unlock.
+- Optional / separate Migration: In Firestore `getsFreeAtLevel` für alle
+  Kategorien außer Alkohol auf 0 setzen, damit DB und App-Regeln matchen.
 
 ### Level names
 | Level | Name |
