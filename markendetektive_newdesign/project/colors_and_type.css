@@ -1,0 +1,176 @@
+/* ─── Brand font ─────────────────────────────────────────
+   Nunito is loaded from the uploaded variable file (weights 200–1000).
+   The url() below is resolved relative to THIS css file (project root),
+   so it works from any consumer regardless of subdirectory depth.
+   Do not fall back to Google Fonts — this file is the source of truth. */
+@font-face {
+  font-family: 'Nunito';
+  src: url('fonts/Nunito-VariableFont_wght.ttf') format('truetype-variations'),
+       url('fonts/Nunito-VariableFont_wght.ttf') format('truetype');
+  font-weight: 200 1000;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* ─── Primary ────────────────────────────────────────── */
+  --md-primary:        #0d8575;   /* detektiv-petrol — the brand */
+  --md-primary-hover:  #0a6f62;
+  --md-primary-soft:   #eaf5f2;   /* large washes & empty states */
+  --md-gradient:       linear-gradient(135deg, #0d8575 0%, #0aa18a 100%);
+
+  /* ─── Secondary ──────────────────────────────────────── */
+  --md-secondary:      #42a968;   /* savings-green, success-adjacent */
+  --md-accent:         #f5720e;   /* level-orange, playful highlight */
+
+  /* ─── Surfaces (the No-Line rule) ────────────────────── */
+  --md-surface:        #f8fafb;   /* app background */
+  --md-surface-low:    #f2f4f5;   /* resting containers */
+  --md-surface-high:   #e7eaeb;   /* deep containers, skeletons */
+  --md-card:           #ffffff;   /* floating card */
+
+  /* ─── Text ───────────────────────────────────────────── */
+  --md-text:           #191c1d;
+  --md-text-variant:   #43484a;
+  --md-text-muted:     #6c7275;
+  --md-text-faint:     #a0a5a8;
+  --md-text-on-primary:#ffffff;
+
+  /* ─── Ähnlichkeits-Stufen (DATA-VIZ ONLY) ────────────── */
+  --md-stufe-1:        #ef2d1a;   /* rot */
+  --md-stufe-2:        #f5720e;   /* orange */
+  --md-stufe-3:        #fbc801;   /* gelb */
+  --md-stufe-4:        #73c928;   /* hellgrün */
+  --md-stufe-5:        #0d8575;   /* detektiv-petrol */
+
+  /* ─── Semantic ───────────────────────────────────────── */
+  --md-success:        #34c759;
+  --md-warning:        #ff9500;
+  --md-error:          #ff3b30;
+  --md-info:           #0aa18a;
+
+  /* ─── Typography ─────────────────────────────────────── */
+  --md-font:           'Nunito', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --md-font-mono:      ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --md-text-display:   800 32px/1.15 var(--md-font);
+  --md-text-h1:        700 28px/1.2  var(--md-font);
+  --md-text-h2:        700 22px/1.25 var(--md-font);
+  --md-text-h3:        700 18px/1.3  var(--md-font);
+  --md-text-title:     700 16px/1.35 var(--md-font);
+  --md-text-body:      400 14px/1.5  var(--md-font);
+  --md-text-body-bold: 600 14px/1.5  var(--md-font);
+  --md-text-caption:   500 12px/1.4  var(--md-font);
+  --md-text-label:     500 11px/1.2  var(--md-font);
+  --md-text-price:     700 14px/1    var(--md-font);
+  --md-text-price-big: 800 40px/1    var(--md-font);
+
+  /* ─── Spacing (4-pt grid) ────────────────────────────── */
+  --md-space-1:  4px;
+  --md-space-2:  8px;
+  --md-space-3:  12px;
+  --md-space-4:  16px;
+  --md-space-5:  20px;
+  --md-space-6:  24px;
+  --md-space-7:  32px;
+  --md-space-8:  40px;
+
+  /* ─── Radii ──────────────────────────────────────────── */
+  --md-radius-xs:    4px;   /* chip inner, dividers */
+  --md-radius-sm:    8px;   /* chip, small pill */
+  --md-radius-md:    12px;  /* button, list row */
+  --md-radius-lg:    16px;  /* card */
+  --md-radius-xl:    18px;  /* search bar */
+  --md-radius-2xl:   25px;  /* bottom sheet */
+  --md-radius-full:  9999px;
+
+  /* ─── Elevation (soft tonal, never aggressive) ───────── */
+  --md-shadow-sm:  0 1px 3px  rgba(25, 28, 29, 0.04);
+  --md-shadow-md:  0 2px 8px  rgba(25, 28, 29, 0.05);
+  --md-shadow-lg:  0 12px 24px rgba(25, 28, 29, 0.06);
+  --md-shadow-fab: 0 4px 12px rgba(13, 133, 117, 0.30);
+
+  /* ─── Motion ─────────────────────────────────────────── */
+  --md-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-ease-emph:     cubic-bezier(0.2, 0, 0, 1.15);
+  --md-duration-fast: 120ms;
+  --md-duration-med:  220ms;
+  --md-duration-slow: 380ms;
+
+  /* ─── Legacy aliases (keep old preview cards painting) ──
+     These map older token names used in preview/*.html to the
+     current system so nothing renders with fallback gray. */
+  --md-font-sans:                   var(--md-font);
+  --md-on-surface:                  var(--md-text);
+  --md-on-surface-variant:          var(--md-text-variant);
+  --md-on-surface-muted:            var(--md-text-muted);
+  --md-surface-container-lowest:    var(--md-card);
+  --md-surface-container-low:       var(--md-surface-low);
+  --md-surface-container:           var(--md-surface-low);
+  --md-surface-container-high:      var(--md-surface-high);
+  --md-surface-variant:             var(--md-surface-high);
+  --md-primary-container:           var(--md-primary-soft);
+  --md-primary-gradient:            var(--md-gradient);
+  --md-inset-shadow:                inset 0 1px 0 rgba(255,255,255,.2), 0 2px 6px rgba(13,133,117,.25);
+
+  /* ─── THEME TOKENS (used via COLORS + inline replacements) ──────── */
+  --th-bg:          #F9FAFB;   /* screen background */
+  --th-surface:     #f8fafb;
+  --th-low:         #f2f4f5;   /* alt surface / segmented bg */
+  --th-high:        #e7eaeb;
+  --th-card:        #ffffff;   /* card */
+  --th-text:        #191c1d;
+  --th-text-var:    #43484a;
+  --th-muted:       #6c7275;
+  --th-faint:       #a0a5a8;
+  --th-border:      rgba(25,28,29,.06);
+  --th-border-md:   rgba(25,28,29,.1);
+  --th-border-strong: rgba(25,28,29,.12);
+  --th-divider:     rgba(25,28,29,.05);
+  --th-primary:     #0d8575;
+  --th-primary-hover:#0a6f62;
+  --th-primary-soft:#eaf5f2;
+  --th-primary-tint:rgba(13,133,117,.08);
+  --th-primary-tint-strong: rgba(13,133,117,.12);
+  --th-shadow-sm:   0 1px 3px rgba(25,28,29,.04);
+  --th-shadow-md:   0 2px 8px rgba(25,28,29,.05);
+  --th-shadow-lg:   0 12px 24px rgba(25,28,29,.06);
+  --th-gradient:    linear-gradient(135deg,#0d8575 0%,#0aa18a 100%);
+  --th-device-bg:   radial-gradient(ellipse at top,#f4f2ed,#e0dfd9);
+}
+
+/* ─── Dark mode ─────────────────────────────────────────── */
+[data-theme="dark"] {
+  --th-bg:          #0f1214;
+  --th-surface:     #0f1214;
+  --th-low:         #1a1d20;
+  --th-high:        #23272a;
+  --th-card:        #1a1d20;
+  --th-text:        #ecf0f2;
+  --th-text-var:    #c9cfd2;
+  --th-muted:       #8a9094;
+  --th-faint:       #5a6065;
+  --th-border:      rgba(255,255,255,.08);
+  --th-border-md:   rgba(255,255,255,.12);
+  --th-border-strong: rgba(255,255,255,.16);
+  --th-divider:     rgba(255,255,255,.06);
+  --th-primary:     #14b39a;
+  --th-primary-hover:#10a18a;
+  --th-primary-soft:#15322d;
+  --th-primary-tint:rgba(20,179,154,.14);
+  --th-primary-tint-strong: rgba(20,179,154,.22);
+  --th-shadow-sm:   0 1px 3px rgba(0,0,0,.35);
+  --th-shadow-md:   0 2px 8px rgba(0,0,0,.35);
+  --th-shadow-lg:   0 12px 24px rgba(0,0,0,.45);
+  --th-gradient:    linear-gradient(135deg,#0d8575 0%,#12b59c 100%);
+  --th-device-bg:   radial-gradient(ellipse at top,#141518,#0b0c0e);
+  color-scheme: dark;
+}
+
+/* Any page that links this stylesheet inherits Nunito on <html>. */
+html {
+  font-family: var(--md-font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
