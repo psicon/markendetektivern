@@ -246,32 +246,34 @@ export default function HomeScreen() {
 
   // ─── Level card data ────────────────────────────────────────────────────────
   const levelNum = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
-  const currentPoints = (userProfile as any)?.stats?.pointsTotal ?? (userProfile as any)?.stats?.totalPoints ?? 0;
   const currentSavings = userProfile?.totalSavings ?? 0;
   const levelInfo = levels.find(l => l.id === levelNum) ?? levels[0];
   const nextLevel = levels.find(l => l.id === levelNum + 1);
-  const levelGradient = (() => {
-    if (!levelInfo) return [theme.primary, theme.primary];
-    const c = levelInfo.color;
-    switch (levelNum) {
-      case 1: return [c, '#9e6b50'];
-      case 2: return [c, '#ff9800'];
-      case 3: return [c, '#4caf50'];
-      case 4: return [c, '#ffc107'];
-      case 5: return [c, '#ff5252'];
-      default: return [c, '#9e6b50'];
-    }
+  const levelBg = levelInfo?.color ?? brand.primary;
+  // Savings-based progress toward the next level threshold.
+  const levelProgress = (() => {
+    if (!nextLevel) return 1;
+    const current = levelInfo?.savingsRequired ?? 0;
+    const span = Math.max(1, nextLevel.savingsRequired - current);
+    return Math.max(0, Math.min(1, (currentSavings - current) / span));
   })();
+  const remainingToNext = nextLevel
+    ? Math.max(0, nextLevel.savingsRequired - currentSavings)
+    : 0;
 
   const scrollContentPaddingTop = insetTop + MORPHING_HEADER_ROW_HEIGHT;
 
   // ─── Schnellzugriff items ────────────────────────────────────────────────────
+  // Matches prototype Home.jsx. Backgrounds are prototype-specific brand accents
+  // (mint for Kassenbon, lavender for Produkte, neutral for the rest).
+  // TODO: route Kassenbon / Produkte / Umfragen to real Rewards screen once built
+  // (currently /achievements is the closest existing surface).
   const schnellzugriff = [
-    { icon: 'barcode-scan' as const, label: 'Barcode\nscannen', background: brand.accent, dark: true as const, onPress: () => router.push('/barcode-scanner') },
-    { icon: 'magnify' as const, label: 'Produkt\nsuchen', background: brand.primary, dark: true as const, onPress: () => setShowSearchSheet(true) },
-    { icon: 'cart-outline' as const, label: 'Einkaufs-\nliste', background: theme.surfaceAlt, dark: false as const, onPress: () => router.push('/shopping-list') },
-    { icon: 'trophy-outline' as const, label: 'Mein\nLevel', background: theme.surfaceAlt, dark: false as const, onPress: () => router.push('/achievements') },
-    { icon: 'newspaper-variant-outline' as const, label: 'Neuig-\nkeiten', background: theme.surfaceAlt, dark: false as const, onPress: () => router.push('/profile') },
+    { icon: 'receipt-text-outline' as const, label: 'Kassenbon\nscannen', background: '#95cfc4', dark: true as const,  onPress: () => router.push('/achievements' as any) },
+    { icon: 'camera-plus-outline'  as const, label: 'Produkte\neinreichen', background: '#a89cdf', dark: true as const,  onPress: () => router.push('/achievements' as any) },
+    { icon: 'heart-outline'        as const, label: 'Deine\nFavoriten',    background: theme.surfaceAlt, dark: false as const, onPress: () => router.push('/favorites' as any) },
+    { icon: 'poll'                 as const, label: 'Umfragen',            background: theme.surfaceAlt, dark: false as const, onPress: () => router.push('/achievements' as any) },
+    { icon: 'format-list-checks'   as const, label: 'Einkaufs-\nliste',    background: theme.surfaceAlt, dark: false as const, onPress: () => router.push('/shopping-list' as any) },
   ];
 
   return (
@@ -369,56 +371,74 @@ export default function HomeScreen() {
             <ActivityIndicator size="small" color={theme.primary} />
           </View>
         ) : (
-          <LinearGradient
-            colors={levelGradient as [string, string]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
+          <Pressable
+            onPress={() => router.push('/achievements' as any)}
             style={{
               marginHorizontal: 20,
               marginTop: 20,
               borderRadius: radii.lg,
               overflow: 'hidden',
+              backgroundColor: levelBg,
+              paddingHorizontal: 16,
+              paddingVertical: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 12,
             }}
           >
-            <Pressable
-              onPress={() => router.push('/achievements')}
-              style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 }}
-            >
+            <View style={{ flex: 1 }}>
+              <Text
+                style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 13, color: '#fff', marginBottom: 8 }}
+                numberOfLines={1}
+              >
+                Level {levelNum}
+                {levelInfo ? `: ${levelInfo.name}` : ''}
+              </Text>
               <View
                 style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
-                  backgroundColor: 'rgba(255,255,255,0.2)',
-                  justifyContent: 'center',
-                  alignItems: 'center',
+                  height: 8,
+                  backgroundColor: 'rgba(255,255,255,0.25)',
+                  borderRadius: 4,
+                  overflow: 'hidden',
                 }}
               >
-                <MaterialCommunityIcons name="trophy" size={20} color="#fff" />
+                <View
+                  style={{
+                    width: `${levelProgress * 100}%`,
+                    height: '100%',
+                    backgroundColor: '#fff',
+                    borderRadius: 4,
+                  }}
+                />
               </View>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 15, color: '#fff' }}
-                >
-                  Level {levelNum}{levelInfo ? ` · ${levelInfo.name}` : ''}
-                </Text>
-                <Text
-                  style={{ fontFamily, fontWeight: fontWeight.regular, fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 2 }}
-                  numberOfLines={1}
-                >
-                  {nextLevel
-                    ? `${Math.max(0, nextLevel.savingsRequired - currentSavings).toFixed(2)} € Ersparnis zum Aufstieg`
-                    : 'Maximales Level erreicht!'}
-                </Text>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="rgba(255,255,255,0.7)" />
-            </Pressable>
-          </LinearGradient>
+              <Text
+                style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 11, color: 'rgba(255,255,255,0.9)', marginTop: 6 }}
+                numberOfLines={1}
+              >
+                {nextLevel
+                  ? `Noch ${remainingToNext.toFixed(2)} € bis zum nächsten Rang`
+                  : 'Maximales Level erreicht!'}
+              </Text>
+            </View>
+            <View
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: 'rgba(255,255,255,0.2)',
+                justifyContent: 'center',
+                alignItems: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <MaterialCommunityIcons name="trophy-outline" size={22} color="#fff" />
+            </View>
+          </Pressable>
         )}
 
         {/* ── Banner Ad ── */}
         {!isPremium && (
-          <View style={{ marginTop: 16, marginHorizontal: -0 }}>
+          <View style={{ marginTop: 16 }}>
             <BannerAd
               onAdLoaded={() => {}}
               onAdFailedToLoad={() => {}}
@@ -433,8 +453,8 @@ export default function HomeScreen() {
               fontFamily,
               fontWeight: fontWeight.bold,
               fontSize: 11,
-              color: brand.accent,
-              letterSpacing: 1,
+              color: theme.primary,
+              letterSpacing: 1.5,
               textTransform: 'uppercase',
               paddingHorizontal: 20,
               marginBottom: 4,
@@ -446,21 +466,21 @@ export default function HomeScreen() {
             style={{
               flexDirection: 'row',
               justifyContent: 'space-between',
-              alignItems: 'center',
+              alignItems: 'baseline',
               paddingHorizontal: 20,
               marginBottom: 12,
             }}
           >
             <Text
-              style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 20, color: theme.text }}
+              style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 22, color: theme.text, letterSpacing: -0.2 }}
             >
               Neu für dich enttarnt
             </Text>
             <Pressable onPress={() => router.push('/(tabs)/explore' as any)}>
               <Text
-                style={{ fontFamily, fontWeight: fontWeight.semibold, fontSize: 14, color: theme.primary }}
+                style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 13, color: theme.primary }}
               >
-                Alle →
+                Alle anzeigen
               </Text>
             </Pressable>
           </View>
@@ -549,7 +569,7 @@ export default function HomeScreen() {
                 <View
                   key={i}
                   style={{
-                    width: 240,
+                    width: 270,
                     height: 180,
                     borderRadius: radii.lg,
                     backgroundColor: theme.shimmer1,
@@ -574,7 +594,6 @@ export default function HomeScreen() {
                   key={post.id}
                   post={post}
                   onPress={openNewsArticle}
-                  theme={theme}
                 />
               ))}
             </Animated.ScrollView>
@@ -584,61 +603,69 @@ export default function HomeScreen() {
         {/* ── Cashback CTA ── */}
         <View style={{ paddingHorizontal: 20, marginTop: 28 }}>
           <LinearGradient
-            colors={[brand.primary, brand.primaryDark]}
+            colors={[brand.primaryDark, brand.primary]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={{ borderRadius: radii.xl ?? radii.lg, overflow: 'hidden' }}
+            style={{ borderRadius: radii.xl, overflow: 'hidden', ...shadows.fab }}
           >
             <Pressable
-              onPress={() => router.push('/achievements' as any)}
-              style={{ padding: 24, flexDirection: 'row', alignItems: 'center' }}
+              onPress={() => router.push('/barcode-scanner' as any)}
+              style={{ padding: 24 }}
             >
-              <View style={{ flex: 1 }}>
+              <View style={{ opacity: 0.18, position: 'absolute', right: -30, bottom: -20 }}>
+                <DetectiveMark size={140} color="#fff" />
+              </View>
+              <View>
                 <Text
                   style={{
                     fontFamily,
                     fontWeight: fontWeight.extraBold,
-                    fontSize: 18,
+                    fontSize: 22,
+                    lineHeight: 26,
                     color: '#fff',
-                    marginBottom: 6,
+                    letterSpacing: -0.2,
+                    marginBottom: 10,
                   }}
                 >
-                  Cashback aktivieren
+                  Sichere dir Cashback &{'\n'}Rewards!
                 </Text>
                 <Text
                   style={{
                     fontFamily,
                     fontWeight: fontWeight.regular,
                     fontSize: 13,
-                    color: 'rgba(255,255,255,0.8)',
+                    lineHeight: 19,
+                    color: 'rgba(255,255,255,0.92)',
                     marginBottom: 16,
+                    maxWidth: 260,
                   }}
                 >
-                  Spare beim nächsten Einkauf extra!
+                  Scanne deinen Kassenbeleg oder nimm an Umfragen teil, um dir Gutscheine oder Cashback zu sichern.
                 </Text>
                 <View
                   style={{
                     alignSelf: 'flex-start',
-                    backgroundColor: 'rgba(255,255,255,0.2)',
+                    backgroundColor: theme.surface,
                     borderRadius: radii.full,
-                    paddingHorizontal: 16,
-                    paddingVertical: 8,
+                    paddingHorizontal: 18,
+                    height: 44,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
                   }}
                 >
+                  <MaterialCommunityIcons name="barcode-scan" size={16} color={brand.primary} />
                   <Text
                     style={{
                       fontFamily,
-                      fontWeight: fontWeight.semibold,
-                      fontSize: 14,
-                      color: '#fff',
+                      fontWeight: fontWeight.bold,
+                      fontSize: 13,
+                      color: brand.primary,
                     }}
                   >
-                    Jetzt starten →
+                    Beleg scannen
                   </Text>
                 </View>
-              </View>
-              <View style={{ opacity: 0.15, position: 'absolute', right: 16, bottom: -8 }}>
-                <DetectiveMark size={100} color="#fff" />
               </View>
             </Pressable>
           </LinearGradient>
@@ -662,10 +689,10 @@ export default function HomeScreen() {
 type NewsCardProps = {
   post: WordPressPost;
   onPress: (url: string) => void;
-  theme: ReturnType<typeof useTokens>['theme'];
 };
 
-function NewsCard({ post, onPress, theme }: NewsCardProps) {
+function NewsCard({ post, onPress }: NewsCardProps) {
+  const { theme, shadows } = useTokens();
   const cleanTitle = WordPressService.cleanHtml(post.title.rendered);
   const formattedDate = WordPressService.formatDate(post.date);
 
@@ -673,16 +700,12 @@ function NewsCard({ post, onPress, theme }: NewsCardProps) {
     <Pressable
       onPress={() => onPress(post.link)}
       style={({ pressed }) => ({
-        width: 240,
+        width: 270,
         borderRadius: radii.lg,
         backgroundColor: theme.surface,
         overflow: 'hidden',
-        opacity: pressed ? 0.9 : 1,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
-        elevation: 3,
+        opacity: pressed ? 0.92 : 1,
+        ...shadows.md,
       })}
     >
       {post.featured_image_url ? (
@@ -704,7 +727,7 @@ function NewsCard({ post, onPress, theme }: NewsCardProps) {
           <MaterialCommunityIcons name="newspaper" size={32} color={theme.textMuted} />
         </View>
       )}
-      <View style={{ padding: 12 }}>
+      <View style={{ padding: 14 }}>
         <Text
           style={{
             fontFamily,
