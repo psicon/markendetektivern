@@ -903,32 +903,22 @@ export default function ExploreScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* Dynamic-Island / status-bar blur overlay — content scrolls UNDER
-          it so the top of the screen takes on the tint of whatever is
-          behind it. iOS uses BlurView; Android falls back to a
-          semi-transparent tinted View. */}
+      {/* Safe-area filler — gives the Dynamic-Island / status-bar zone a
+          blurred (iOS) / tinted (Android) surface so it reads as part of
+          the app chrome instead of a blank slab. Content starts BELOW it
+          (unlike the Detail screens, where content scrolls under) because
+          ScrollView's stickyHeaderIndices would otherwise pin the search
+          rail up behind the island. */}
       {Platform.OS === 'ios' ? (
         <BlurView
           tint={scheme === 'dark' ? 'dark' : 'light'}
           intensity={80}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            height: insets.top,
-            zIndex: 9,
-          }}
+          style={{ height: insets.top }}
         />
       ) : (
         <View
           style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
             height: insets.top,
-            zIndex: 9,
             backgroundColor:
               scheme === 'dark' ? 'rgba(15,18,20,0.92)' : 'rgba(245,247,248,0.92)',
           }}
@@ -981,7 +971,7 @@ export default function ExploreScreen() {
             onScroll={scrollHandlerEigen}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingTop: insets.top + TAB_BAR_HEIGHT, paddingBottom: 120 }}
+            contentContainerStyle={{ paddingTop: TAB_BAR_HEIGHT, paddingBottom: 120 }}
           >
             {/* 0 — sticky glass header (pins to top of ScrollView viewport,
                 which is directly below the collapsible tab bar) */}
@@ -1015,7 +1005,7 @@ export default function ExploreScreen() {
             onScroll={scrollHandlerMarken}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingTop: insets.top + TAB_BAR_HEIGHT, paddingBottom: 120 }}
+            contentContainerStyle={{ paddingTop: TAB_BAR_HEIGHT, paddingBottom: 120 }}
           >
             <StickyHeader forTab="marken" />
             {!isPremium ? (
