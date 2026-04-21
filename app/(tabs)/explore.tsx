@@ -28,6 +28,7 @@ import { BrandCard } from '@/components/design/BrandCard';
 import { FilterChip } from '@/components/design/FilterChip';
 import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
 import { ProductCard } from '@/components/design/ProductCard';
+import { SearchableOptionList } from '@/components/design/SearchableOptionList';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { StufenChips } from '@/components/design/StufenChips';
 import { collection, getDocs } from 'firebase/firestore';
@@ -57,18 +58,7 @@ import type {
 // ────────────────────────────────────────────────────────────────────────
 
 type Tab = 'eigen' | 'marken';
-type SheetKey = 'markt' | 'handels' | 'kategorie' | 'stufe' | 'marke' | 'inhalt' | 'sort' | null;
-
-const INGREDIENTS = [
-  'Bio',
-  'Vegan',
-  'Vegetarisch',
-  'Laktosefrei',
-  'Glutenfrei',
-  'Ohne Palmöl',
-  'Ohne Zuckerzusatz',
-  'Fairtrade',
-] as const;
+type SheetKey = 'markt' | 'handels' | 'kategorie' | 'stufe' | 'marke' | 'sort' | null;
 
 type SortKey = 'name' | 'preis';
 
@@ -76,9 +66,8 @@ const SHEET_TITLES: Record<Exclude<SheetKey, null>, string> = {
   markt: 'Markt',
   handels: 'Handelsmarke',
   kategorie: 'Kategorie',
-  stufe: 'Stufe — mindestens',
+  stufe: 'Ähnlichkeitsstufen',
   marke: 'Marke',
-  inhalt: 'Inhaltsstoffe',
   sort: 'Sortieren',
 };
 
@@ -151,7 +140,6 @@ export default function ExploreScreen() {
   // Multi-select: empty array = all stufes, otherwise only the selected ones.
   const [stufeSelection, setStufeSelection] = useState<number[]>([]);
   const [brandId, setBrandId] = useState<string>('all');
-  const [ingredients, setIngredients] = useState<string[]>([]);
   const [sort, setSort] = useState<SortKey>('name');
   const [sheet, setSheet] = useState<SheetKey>(null);
 
@@ -236,7 +224,7 @@ export default function ExploreScreen() {
     }, 200); // small debounce for typing
     return () => clearTimeout(t);
 
-  }, [tab, query, market, handels, cat, stufeSelection, brandId, ingredients, sort, kategorien.length]);
+  }, [tab, query, market, handels, cat, stufeSelection, brandId, sort, kategorien.length]);
 
   // ─── Category access gate ─────────────────────────────────────────────
   const onChangeCategory = useCallback(
@@ -386,7 +374,6 @@ export default function ExploreScreen() {
     setCat('all');
     setStufeSelection([]);
     setBrandId('all');
-    setIngredients([]);
   }, []);
 
   const toggleStufe = useCallback((n: number) => {
@@ -395,18 +382,11 @@ export default function ExploreScreen() {
     );
   }, []);
 
-  const toggleIngredient = useCallback(
-    (x: string) =>
-      setIngredients((prev) => (prev.includes(x) ? prev.filter((i) => i !== x) : [...prev, x])),
-    [],
-  );
-
   const anyFilter =
     (tab === 'eigen' &&
       (market !== 'all' || handels !== 'all' || stufeSelection.length > 0)) ||
     (tab === 'marken' && brandId !== 'all') ||
-    cat !== 'all' ||
-    ingredients.length > 0;
+    cat !== 'all';
 
   // Chip label: "3" when 1 selected, "3, 4" when 2-3 selected, "3 Stufen"
   // when more. Keeps the rail compact while still showing what's active.
@@ -598,13 +578,6 @@ export default function ExploreScreen() {
             onClear={stufeSelection.length > 0 ? () => setStufeSelection([]) : null}
           />
           <FilterChip
-            icon="leaf"
-            label="Inhaltsstoffe"
-            value={ingredients.length ? String(ingredients.length) : null}
-            onPress={() => setSheet('inhalt')}
-            onClear={ingredients.length ? () => setIngredients([]) : null}
-          />
-          <FilterChip
             icon="tag-outline"
             label="Handelsmarke"
             value={handelsLabel}
@@ -627,13 +600,6 @@ export default function ExploreScreen() {
             value={catLabel}
             onPress={() => setSheet('kategorie')}
             onClear={cat !== 'all' ? () => setCat('all') : null}
-          />
-          <FilterChip
-            icon="leaf"
-            label="Inhaltsstoffe"
-            value={ingredients.length ? String(ingredients.length) : null}
-            onPress={() => setSheet('inhalt')}
-            onClear={ingredients.length ? () => setIngredients([]) : null}
           />
         </>
       )}
@@ -1272,14 +1238,11 @@ export default function ExploreScreen() {
         title={SHEET_TITLES.marke}
         onClose={() => setSheet(null)}
       >
-        <OptionList
+        <SearchableOptionList
+          placeholder="Marke suchen …"
           value={brandId}
-          options={
-            [
-              ['all', 'Alle Marken'],
-              ...markenList.map((m) => [m.id, m.name] as const),
-            ] as const
-          }
+          allOption={['all', 'Alle Marken']}
+          options={markenList.map((m) => [m.id, m.name] as const)}
           onChange={(v) => {
             setBrandId(v);
             setSheet(null);
@@ -1292,16 +1255,13 @@ export default function ExploreScreen() {
         title={SHEET_TITLES.handels}
         onClose={() => setSheet(null)}
       >
-        <OptionList
+        <SearchableOptionList
+          placeholder="Handelsmarke suchen …"
           value={handels}
-          options={
-            [
-              ['all', 'Alle Handelsmarken'],
-              ...handelsmarken.map(
-                (h) => [h.id, (h as any).bezeichnung ?? (h as any).name ?? ''] as const,
-              ),
-            ] as const
-          }
+          allOption={['all', 'Alle Handelsmarken']}
+          options={handelsmarken.map(
+            (h) => [h.id, (h as any).bezeichnung ?? (h as any).name ?? ''] as const,
+          )}
           onChange={(v) => {
             setHandels(v);
             setSheet(null);
@@ -1353,59 +1313,6 @@ export default function ExploreScreen() {
         />
       </FilterSheet>
 
-      <FilterSheet
-        visible={sheet === 'inhalt'}
-        title={SHEET_TITLES.inhalt}
-        onClose={() => setSheet(null)}
-      >
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 13,
-            color: theme.textMuted,
-            marginBottom: 14,
-          }}
-        >
-          Mehrfachauswahl möglich.
-        </Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
-          {INGREDIENTS.map((x) => {
-            const on = ingredients.includes(x);
-            return (
-              <Pressable
-                key={x}
-                onPress={() => toggleIngredient(x)}
-                style={({ pressed }) => ({
-                  height: 38,
-                  paddingHorizontal: 14,
-                  borderRadius: 19,
-                  backgroundColor: on ? brand.primary : theme.surface,
-                  borderWidth: 1,
-                  borderColor: on ? 'transparent' : theme.borderStrong,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  opacity: pressed ? 0.9 : 1,
-                })}
-              >
-                {on ? <MaterialCommunityIcons name="check" size={14} color="#ffffff" /> : null}
-                <Text
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.semibold,
-                    fontSize: 13,
-                    color: on ? '#ffffff' : theme.text,
-                  }}
-                >
-                  {x}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <View style={{ height: 8 }} />
-      </FilterSheet>
 
       {/* ─── Locked category modal (Alkohol gating) ─────────────────── */}
       {lockedCategory ? (
