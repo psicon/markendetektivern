@@ -75,6 +75,20 @@ const parseStufe = (s: any): 1 | 2 | 3 | 4 | 5 => {
 
 /** e.g. (100, 'g', 0.89) → '100g · 8,90€/kg' */
 function formatPack(size?: number, unit?: string, price?: number): string | null {
+  const parts = formatPackParts(size, unit, price);
+  if (!parts) return null;
+  return parts.unitPrice ? `${parts.sizeLabel} · ${parts.unitPrice}` : parts.sizeLabel;
+}
+
+// Same data as formatPack but returned in structured form so the two
+// pieces can be rendered on separate lines when horizontal space is
+// tight (e.g. the NoName carousel cards where the action cluster on
+// the right leaves only ~80 px for the price column).
+function formatPackParts(
+  size?: number,
+  unit?: string,
+  price?: number,
+): { sizeLabel: string; unitPrice: string | null } | null {
   if (!size || !unit) return null;
   const u = unit.toLowerCase().replace(/\.$/, '');
   const isStk = u === 'stk' || u === 'stück';
@@ -87,7 +101,7 @@ function formatPack(size?: number, unit?: string, price?: number): string | null
     else if (u === 'l') unitPrice = `${(price / size).toFixed(2).replace('.', ',')}€/L`;
     else if (isStk) unitPrice = `${(price / size).toFixed(2).replace('.', ',')}€/Stk.`;
   }
-  return unitPrice ? `${sizeLabel} · ${unitPrice}` : sizeLabel;
+  return { sizeLabel, unitPrice };
 }
 
 function savings(brand: { preis?: number } | undefined, nn: { preis?: number } | undefined) {
@@ -261,7 +275,15 @@ export default function ProductComparisonScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nonames.length, pickedId]);
 
-  const onCarouselScroll = (e: any) => {
+  // Carousel settle handler — runs ONCE when the snap animation
+  // finishes, not on every scroll frame. The previous per-frame
+  // onScroll handler was the source of the "hakelig" feel: every one
+  // of the 60 fps scroll events bridged to JS to read contentOffset.x
+  // and potentially fire setState, which is enough to drop frames on
+  // Android and low-power iPhones. Switching to onMomentumScrollEnd
+  // keeps the scroll itself entirely on the native thread; we only
+  // reach into React state once the user has landed on a card.
+  const onCarouselMomentumEnd = (e: any) => {
     const x = e.nativeEvent.contentOffset.x;
     const i = Math.round(x / snapStep);
     if (i !== carouselIdx && i >= 0 && i < nonames.length) {
@@ -542,7 +564,10 @@ export default function ProductComparisonScreen() {
               </View>
             )}
 
-            {/* Brand + Hersteller pill — top-left */}
+            {/* Hersteller pill — top-left. No brand logo inside: the
+                morph title directly above the hero already shows it,
+                and repeating it here looks redundant. Only the
+                Hersteller name remains. */}
             {brandName ? (
               <View
                 style={{
@@ -553,9 +578,6 @@ export default function ProductComparisonScreen() {
                   paddingVertical: 6,
                   paddingHorizontal: 12,
                   borderRadius: 99,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 10,
                   maxWidth: SCREEN_WIDTH - 64,
                   shadowColor: '#000',
                   shadowOpacity: 0.22,
@@ -564,23 +586,6 @@ export default function ProductComparisonScreen() {
                   elevation: 3,
                 }}
               >
-                {brandLogoUri ? (
-                  <View
-                    style={{
-                      width: 18,
-                      height: 18,
-                      borderRadius: 4,
-                      backgroundColor: '#fff',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <Image
-                      source={{ uri: brandLogoUri }}
-                      style={{ width: '100%', height: '100%' }}
-                      resizeMode="contain"
-                    />
-                  </View>
-                ) : null}
                 <Text
                   numberOfLines={1}
                   style={{
@@ -699,8 +704,9 @@ export default function ProductComparisonScreen() {
                 paddingTop: 12,
                 paddingBottom: 4,
               }}
-              onScroll={onCarouselScroll}
-              scrollEventThrottle={16}
+              onMomentumScrollEnd={onCarouselMomentumEnd}
+              // decelerationRate="fast" (already set) lands the snap
+              // quickly; no per-frame scroll event needed.
             >
               {nonames.map((nn, i) => {
                 const isActive = i === carouselIdx;
@@ -718,7 +724,7 @@ export default function ProductComparisonScreen() {
                 // (always-populated) discounter logo first and fall back to
                 // any handelsmarke logo that does exist.
                 const hmLogo = nnDisc?.bild ?? nnHm?.bild ?? null;
-                const nnPackInfo = formatPack(
+                const nnPackParts = formatPackParts(
                   (nn as any).packSize,
                   (nn as any).packTypInfo?.typKurz ?? (nn as any).packTypInfo?.typ,
                   (nn as any).preis,
@@ -904,18 +910,34 @@ export default function ProductComparisonScreen() {
                       }}
                     >
                       <View style={{ flex: 1, minWidth: 0 }}>
-                        {nnPackInfo ? (
-                          <Text
-                            numberOfLines={1}
-                            style={{
-                              fontFamily,
-                              fontWeight: fontWeight.medium,
-                              fontSize: 11,
-                              color: theme.textMuted,
-                            }}
-                          >
-                            {nnPackInfo}
-                          </Text>
+                        {nnPackParts ? (
+                          <>
+                            <Text
+                              numberOfLines={1}
+                              style={{
+                                fontFamily,
+                                fontWeight: fontWeight.semibold,
+                                fontSize: 11,
+                                color: theme.textMuted,
+                              }}
+                            >
+                              {nnPackParts.sizeLabel}
+                            </Text>
+                            {nnPackParts.unitPrice ? (
+                              <Text
+                                numberOfLines={1}
+                                style={{
+                                  fontFamily,
+                                  fontWeight: fontWeight.medium,
+                                  fontSize: 10,
+                                  color: theme.textMuted,
+                                  marginTop: 1,
+                                }}
+                              >
+                                {nnPackParts.unitPrice}
+                              </Text>
+                            ) : null}
+                          </>
                         ) : null}
                         <Text
                           style={{
