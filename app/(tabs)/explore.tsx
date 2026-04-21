@@ -222,16 +222,18 @@ export default function ExploreScreen() {
   // ─── Debounced filter → reload products ────────────────────────────────
   const reloadSeq = useRef(0);
   useEffect(() => {
-    if (kategorien.length === 0) return; // wait for categories (needed for access gate)
+    // Don't gate on kategorien anymore — the access gate only matters
+    // when the user actually picks the Alkohol category, and loading
+    // products in parallel with reference data halves our first-paint
+    // latency.
     const mySeq = ++reloadSeq.current;
     const t = setTimeout(() => {
       if (reloadSeq.current !== mySeq) return;
       if (tab === 'eigen') loadNonames(true);
       else loadMarken(true);
-    }, 200); // small debounce for typing
+    }, 120); // shorter debounce for typing
     return () => clearTimeout(t);
-
-  }, [tab, query, market, handels, cat, stufeSelection, brandId, sort, kategorien.length]);
+  }, [tab, query, market, handels, cat, stufeSelection, brandId, sort]);
 
   // ─── Category access gate ─────────────────────────────────────────────
   const onChangeCategory = useCallback(
@@ -297,7 +299,9 @@ export default function ExploreScreen() {
       if (!reset && (nonameLoading || !nonameHasMore)) return;
       try {
         setNonameLoading(true);
-        const size = reset ? 20 : 10;
+        // Smaller first page = faster first paint. Subsequent pages stay
+        // at 10 to keep pagination granular.
+        const size = reset ? 10 : 10;
         const res = await FirestoreService.getNoNameProductsPaginated(
           size,
           reset ? null : nonameLastDoc,
@@ -306,8 +310,11 @@ export default function ExploreScreen() {
         setNonames((prev) => {
           const existing = reset ? new Set<string>() : new Set(prev.map((p) => p.id));
           const incoming = (res.products as any[]).filter((p) => !existing.has(p.id));
-          const merged = reset ? incoming : [...prev, ...incoming];
-          return [...merged].sort(productSorter) as any;
+          // Sort only on reset — on append we preserve whatever order the
+          // earlier items had so their positions don't shift and the user's
+          // current scroll offset stays anchored.
+          if (reset) return [...incoming].sort(productSorter) as any;
+          return [...prev, ...incoming] as any;
         });
         setNonameLastDoc(res.lastDoc);
         setNonameHasMore(res.hasMore);
@@ -325,7 +332,7 @@ export default function ExploreScreen() {
       if (!reset && (markenLoading || !markenHasMore)) return;
       try {
         setMarkenLoading(true);
-        const size = reset ? 20 : 10;
+        const size = reset ? 10 : 10;
         const res = await FirestoreService.getMarkenproduktePaginated(
           size,
           reset ? null : markenLastDoc,
@@ -334,8 +341,8 @@ export default function ExploreScreen() {
         setMarkenprodukte((prev) => {
           const existing = reset ? new Set<string>() : new Set(prev.map((p) => p.id));
           const incoming = (res.products as any[]).filter((p) => !existing.has(p.id));
-          const merged = reset ? incoming : [...prev, ...incoming];
-          return [...merged].sort(productSorter) as any;
+          if (reset) return [...incoming].sort(productSorter) as any;
+          return [...prev, ...incoming] as any;
         });
         setMarkenLastDoc(res.lastDoc);
         setMarkenHasMore(res.hasMore);
@@ -800,15 +807,27 @@ export default function ExploreScreen() {
           </View>,
         );
       }
-      // Insert a banner row after every AD_EVERY products (unless this was the
-      // very last item — we don't want an ad stranded at the bottom).
+      // Insert a banner row after every AD_EVERY products. Reserve a fixed
+      // 70-px slot regardless of whether the ad fills — otherwise a no-fill
+      // collapses the slot to 0 and everything below jumps up during scroll.
       if (
         !isPremium &&
         (index + 1) % AD_EVERY === 0 &&
         index < items.length - 1
       ) {
         nodes.push(
-          <View key={`ad-${index}`} style={{ width: '100%', marginTop: 4, marginBottom: 4 }}>
+          <View
+            key={`ad-${index}`}
+            style={{
+              width: '100%',
+              height: 70,
+              marginTop: 4,
+              marginBottom: 4,
+              alignItems: 'center',
+              justifyContent: 'center',
+              overflow: 'hidden',
+            }}
+          >
             <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
           </View>,
         );
@@ -940,7 +959,15 @@ export default function ExploreScreen() {
                 which is directly below the collapsible tab bar) */}
             <StickyHeader forTab="eigen" />
             {!isPremium ? (
-              <View style={{ marginTop: 12 }}>
+              <View
+                style={{
+                  marginTop: 12,
+                  height: 70,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflow: 'hidden',
+                }}
+              >
                 <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
               </View>
             ) : null}
@@ -964,7 +991,15 @@ export default function ExploreScreen() {
           >
             <StickyHeader forTab="marken" />
             {!isPremium ? (
-              <View style={{ marginTop: 12 }}>
+              <View
+                style={{
+                  marginTop: 12,
+                  height: 70,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflow: 'hidden',
+                }}
+              >
                 <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
               </View>
             ) : null}
