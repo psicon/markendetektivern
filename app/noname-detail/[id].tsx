@@ -278,10 +278,13 @@ export default function NoNameDetailScreen() {
   // ─── Render ───────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      {/* swapAt = DOCK_DISTANCE so the "Produktdetails" fade-out finishes
+          before the morph title docks (otherwise they overlap in the nav
+          bar for a brief window around the dock moment). */}
       <DetailHeader
         title="Produktdetails"
         scrollY={scrollY}
-        swapAt={DOCK_DISTANCE + 20}
+        swapAt={DOCK_DISTANCE}
         onBack={() => router.back()}
       />
 

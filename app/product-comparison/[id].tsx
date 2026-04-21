@@ -415,10 +415,14 @@ export default function ProductComparisonScreen() {
           scrolledTitle anymore: the product name is a single element
           that physically moves from the hero into the nav bar (see
           `morphTitleStyle` below) — not a second Text that fades in. */}
+      {/* swapAt is set to DOCK_DISTANCE so the "Produktdetails" fade-out
+          range [swapAt-40, swapAt-10] completes BEFORE the morph title
+          reaches the nav bar — otherwise the two briefly stack on top
+          of each other right around the dock moment. */}
       <DetailHeader
         title="Produktdetails"
         scrollY={scrollY}
-        swapAt={DOCK_DISTANCE + 20}
+        swapAt={DOCK_DISTANCE}
         onBack={() => router.back()}
       />
 

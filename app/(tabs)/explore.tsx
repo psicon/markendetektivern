@@ -1025,11 +1025,16 @@ export default function ExploreScreen() {
         onPageSelected={onPageSelected}
       >
         {/* ─── Page 0 — Eigenmarken ─────────────────────────────────── */}
+        {/* scrollsToTop must only be true on the ACTIVE page. When both
+            mounted ScrollViews claim it, iOS silently disables the
+            status-bar-tap scroll-to-top for all of them (documented
+            UIScrollView behaviour when multiple responders exist). */}
         <View key="eigen" style={{ flex: 1 }}>
           <Animated.ScrollView
             onScroll={scrollHandlerEigen}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
+            scrollsToTop={tab === 'eigen'}
             contentContainerStyle={{
               paddingTop: chromeTotalHeight,
               paddingBottom: 120,
@@ -1063,6 +1068,7 @@ export default function ExploreScreen() {
             onScroll={scrollHandlerMarken}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
+            scrollsToTop={tab === 'marken'}
             contentContainerStyle={{
               paddingTop: chromeTotalHeight,
               paddingBottom: 120,
