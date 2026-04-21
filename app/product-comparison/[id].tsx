@@ -820,6 +820,14 @@ export default function ProductComparisonScreen() {
                           flex: 1,
                           minWidth: 0,
                           paddingRight: sv.pct > 0 ? 50 : 0,
+                          // Centering the text column next to the fixed
+                          // 76 px thumb keeps short 1-line names from
+                          // looking stranded in a big empty column: the
+                          // content sits in the vertical middle of the
+                          // row regardless of name length, so a 1-line
+                          // and a 2-line card look like siblings
+                          // instead of completely different layouts.
+                          justifyContent: 'center',
                         }}
                       >
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 }}>
@@ -960,6 +968,63 @@ export default function ProductComparisonScreen() {
                 );
               })}
             </ScrollView>
+
+            {/* Left-edge fade + chevron — mirror of the right-edge
+                affordance. Shown whenever there's a card to the LEFT
+                of the current index, so the user can see (and tap)
+                their way back through the carousel. */}
+            {nonames.length > 1 && carouselIdx > 0 ? (
+              <>
+                <LinearGradient
+                  pointerEvents="none"
+                  colors={[
+                    theme.bg,
+                    (theme.bg as string).endsWith(')')
+                      ? theme.bg
+                      : `${theme.bg}00`,
+                  ]}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 4,
+                    width: 48,
+                  }}
+                />
+                <Pressable
+                  onPress={() => {
+                    const prev = Math.max(carouselIdx - 1, 0);
+                    carouselRef.current?.scrollTo({
+                      x: prev * snapStep,
+                      animated: true,
+                    });
+                  }}
+                  style={({ pressed }) => ({
+                    position: 'absolute',
+                    top: '50%',
+                    left: 10,
+                    marginTop: -18,
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    backgroundColor: theme.surface,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: pressed ? 0.85 : 1,
+                    shadowColor: '#000',
+                    shadowOpacity: 0.15,
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowRadius: 12,
+                    elevation: 4,
+                  })}
+                  hitSlop={4}
+                >
+                  <MaterialCommunityIcons name="chevron-left" size={22} color={theme.text} />
+                </Pressable>
+              </>
+            ) : null}
 
             {/* Right-edge fade + chevron — only when there are more cards
                 to the right of the current index (matches prototype). */}
