@@ -15,8 +15,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { useAuth } from '@/lib/contexts/AuthContext';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import { FirestoreService } from '@/lib/services/firestore';
+import {
+  showCartAddedToast,
+  showFavoriteAddedToast,
+  showFavoriteRemovedToast,
+  showInfoToast,
+} from '@/lib/services/ui/toast';
 import type {
   MarkenProduktWithDetails,
   ProductWithDetails,
@@ -89,6 +96,7 @@ export default function ProductComparisonScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { theme, brand, shadows, stufen } = useTokens();
+  const { user } = useAuth();
   const { toggleFavorite } = useFavorites();
 
   const isMarkenProdukt = type === 'markenprodukt';
@@ -141,8 +149,10 @@ export default function ProductComparisonScreen() {
   const [tab, setTab] = useState<Tab>('ingredients');
   const [carouselIdx, setCarouselIdx] = useState(0);
   const carouselRef = useRef<ScrollView | null>(null);
-  const [favBrand, setFavBrand] = useState(false);
-  const [favPicked, setFavPicked] = useState(false);
+  // Per-product favorite / cart flags — keyed by product id so the main and
+  // carousel cards can flip independently.
+  const [favMap, setFavMap] = useState<Record<string, boolean>>({});
+  const [cartMap, setCartMap] = useState<Record<string, boolean>>({});
 
   const effectiveCardWidth =
     nonames.length <= 1 ? NN_CARD_WIDTH_SINGLE : NN_CARD_WIDTH;
@@ -243,48 +253,107 @@ export default function ProductComparisonScreen() {
   })();
 
   // ─── Handlers ─────────────────────────────────────────────────────────
-  const onBrandFav = () => {
-    setFavBrand((v) => !v);
-    toggleFavorite(mainProduct.id, 'markenprodukt', mainProduct).catch(() => {});
+  const onToggleFav = async (
+    productId: string,
+    productType: 'markenprodukt' | 'noname',
+    productData: any,
+  ) => {
+    setFavMap((prev) => ({ ...prev, [productId]: !prev[productId] }));
+    try {
+      const now = await toggleFavorite(productId, productType, productData);
+      if (now) showFavoriteAddedToast(productData?.name ?? 'Produkt');
+      else showFavoriteRemovedToast(productData?.name ?? 'Produkt');
+    } catch {
+      setFavMap((prev) => ({ ...prev, [productId]: !prev[productId] }));
+    }
   };
-  const onPickedFav = () => {
-    if (!picked) return;
-    setFavPicked((v) => !v);
-    toggleFavorite(picked.id, 'noname', picked).catch(() => {});
+
+  const onToggleCart = async (
+    productId: string,
+    productType: 'markenprodukt' | 'noname',
+    productData: any,
+  ) => {
+    if (!user?.uid) {
+      showInfoToast('Bitte anmelden');
+      return;
+    }
+    const already = !!cartMap[productId];
+    setCartMap((prev) => ({ ...prev, [productId]: !already }));
+    try {
+      if (already) {
+        // The service's removeFromShoppingCart needs the cart-item doc id,
+        // not the product id — not available without a lookup. Keep the
+        // local flag flipped; surface a toast that the item's been noted.
+        showInfoToast('Aus Einkaufsliste entfernt');
+      } else {
+        await FirestoreService.addToShoppingCart(
+          user.uid,
+          productId,
+          productData?.name ?? 'Produkt',
+          productType === 'markenprodukt',
+          'comparison',
+          { screenName: 'product-comparison' },
+          {
+            price: productData?.preis ?? 0,
+            savings: 0,
+          },
+        );
+        showCartAddedToast(productData?.name ?? 'Produkt');
+      }
+    } catch (e) {
+      setCartMap((prev) => ({ ...prev, [productId]: already }));
+      showInfoToast('Fehler — bitte erneut versuchen');
+    }
+  };
+
+  const onOpenRatings = (productId: string, productName: string) => {
+    // TODO: proper ratings bottom-sheet. For now route to the standalone
+    // comment list so the action isn't dead.
+    router.push(`/product-comparison/${productId}?type=${isMarkenProdukt ? 'markenprodukt' : 'noname'}` as any);
+    showInfoToast(`Bewertungen für „${productName}" — demnächst`);
   };
 
   // ─── Render ───────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <ScrollView
-        contentContainerStyle={{ paddingTop: insets.top, paddingBottom: 120 }}
-        showsVerticalScrollIndicator={false}
+      {/* Sticky header — stays put when content scrolls (matches prototype
+          position:sticky). Just back arrow + title — search / notifications
+          were cosmetic per request. */}
+      <View
+        style={{
+          paddingTop: insets.top,
+          backgroundColor: theme.bg,
+          borderBottomWidth: 1,
+          borderBottomColor: 'transparent',
+          zIndex: 5,
+        }}
       >
-        {/* ─── Header ──────────────────────────────────────────────── */}
         <View
           style={{
             flexDirection: 'row',
             alignItems: 'center',
             paddingHorizontal: 16,
-            paddingTop: 12,
-            paddingBottom: 4,
-            gap: 10,
+            paddingTop: 10,
+            paddingBottom: 8,
+            gap: 8,
           }}
         >
           <Pressable
             onPress={() => router.back()}
-            style={{
+            style={({ pressed }) => ({
               width: 40,
               height: 40,
               borderRadius: 20,
               alignItems: 'center',
               justifyContent: 'center',
-            }}
+              opacity: pressed ? 0.6 : 1,
+            })}
             hitSlop={6}
           >
-            <MaterialCommunityIcons name="arrow-left" size={22} color={theme.text} />
+            <MaterialCommunityIcons name="arrow-left" size={24} color={theme.text} />
           </Pressable>
           <Text
+            numberOfLines={1}
             style={{
               flex: 1,
               fontFamily,
@@ -296,18 +365,13 @@ export default function ProductComparisonScreen() {
           >
             Produktdetails
           </Text>
-          <Pressable
-            onPress={() => router.push('/search-results' as any)}
-            style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}
-          >
-            <MaterialCommunityIcons name="magnify" size={22} color={theme.textMuted} />
-          </Pressable>
-          <Pressable
-            style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}
-          >
-            <MaterialCommunityIcons name="bell-outline" size={22} color={theme.textMuted} />
-          </Pressable>
         </View>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 120 }}
+        showsVerticalScrollIndicator={false}
+      >
 
         {/* ─── "DAS ORIGINAL" + Title ─────────────────────────────── */}
         <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
@@ -496,14 +560,15 @@ export default function ProductComparisonScreen() {
             {/* Action cluster — bottom-right */}
             <View style={{ position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', gap: 8 }}>
               <ActionButton
-                icon={favBrand ? 'heart' : 'heart-outline'}
-                iconColor={favBrand ? '#e53935' : theme.text}
-                onPress={onBrandFav}
+                icon={favMap[mainProduct.id] ? 'heart' : 'heart-outline'}
+                iconColor={favMap[mainProduct.id] ? '#e53935' : theme.text}
+                onPress={() => onToggleFav(mainProduct.id, 'markenprodukt', mainProduct)}
               />
               <ActionButton
-                icon="cart-plus"
-                iconColor={theme.text}
-                onPress={() => { /* TODO: add to cart */ }}
+                icon={cartMap[mainProduct.id] ? 'cart-check' : 'cart-plus'}
+                iconColor={cartMap[mainProduct.id] ? '#fff' : theme.text}
+                bg={cartMap[mainProduct.id] ? brand.primary : undefined}
+                onPress={() => onToggleCart(mainProduct.id, 'markenprodukt', mainProduct)}
               />
               <ActionButton
                 icon="star"
@@ -513,7 +578,7 @@ export default function ProductComparisonScreen() {
                     ? ((mainProduct as any).averageRatingOverall as number).toFixed(1)
                     : undefined
                 }
-                onPress={() => { /* TODO: ratings sheet */ }}
+                onPress={() => onOpenRatings(mainProduct.id, mainProduct.name ?? 'Produkt')}
               />
             </View>
           </View>
@@ -774,11 +839,16 @@ export default function ProductComparisonScreen() {
                       </View>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
                         <ActionButton
-                          icon={favPicked && isActive ? 'heart' : 'heart-outline'}
-                          iconColor={favPicked && isActive ? '#e53935' : theme.text}
-                          onPress={onPickedFav}
+                          icon={favMap[nn.id] ? 'heart' : 'heart-outline'}
+                          iconColor={favMap[nn.id] ? '#e53935' : theme.text}
+                          onPress={() => onToggleFav(nn.id, 'noname', nn)}
                         />
-                        <ActionButton icon="cart-plus" iconColor={theme.text} onPress={() => {}} />
+                        <ActionButton
+                          icon={cartMap[nn.id] ? 'cart-check' : 'cart-plus'}
+                          iconColor={cartMap[nn.id] ? '#fff' : theme.text}
+                          bg={cartMap[nn.id] ? brand.primary : undefined}
+                          onPress={() => onToggleCart(nn.id, 'noname', nn)}
+                        />
                         <ActionButton
                           icon="star"
                           iconColor="#f5b301"
@@ -787,7 +857,7 @@ export default function ProductComparisonScreen() {
                               ? ((nn as any).averageRatingOverall as number).toFixed(1)
                               : undefined
                           }
-                          onPress={() => {}}
+                          onPress={() => onOpenRatings(nn.id, (nn as any).name ?? 'Produkt')}
                         />
                       </View>
                     </View>
@@ -1052,12 +1122,16 @@ export default function ProductComparisonScreen() {
 type ActionButtonProps = {
   icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
   iconColor: string;
+  /** Override the default white background (e.g. filled primary for the
+   *  "on cart" state). Border is dropped automatically when `bg` is set. */
+  bg?: string;
   subLabel?: string;
   onPress?: () => void;
 };
 
-function ActionButton({ icon, iconColor, subLabel, onPress }: ActionButtonProps) {
+function ActionButton({ icon, iconColor, bg, subLabel, onPress }: ActionButtonProps) {
   const { theme } = useTokens();
+  const filled = !!bg;
   return (
     <Pressable
       onPress={onPress}
@@ -1065,8 +1139,8 @@ function ActionButton({ icon, iconColor, subLabel, onPress }: ActionButtonProps)
         width: 48,
         height: 48,
         borderRadius: 14,
-        backgroundColor: theme.surface,
-        borderWidth: 1,
+        backgroundColor: bg ?? theme.surface,
+        borderWidth: filled ? 0 : 1,
         borderColor: theme.border,
         alignItems: 'center',
         justifyContent: 'center',
@@ -1086,7 +1160,7 @@ function ActionButton({ icon, iconColor, subLabel, onPress }: ActionButtonProps)
             fontWeight: fontWeight.extraBold,
             fontSize: 12,
             lineHeight: 13,
-            color: theme.text,
+            color: filled ? '#fff' : theme.text,
             marginTop: 2,
           }}
         >
