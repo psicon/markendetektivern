@@ -45,7 +45,7 @@ import WordPressService, { WordPressPost } from '@/lib/services/wordpress';
 import { Level } from '@/lib/types/achievements';
 import { FirestoreDocument, Handelsmarken, Produkte } from '@/lib/types/firestore';
 
-type DiscounterInfo = { color: string; short: string };
+type DiscounterInfo = { color: string; short: string; bild?: string };
 
 export default function HomeScreen() {
   const { top: insetTop } = useSafeAreaInsets();
@@ -168,6 +168,7 @@ export default function HomeScreen() {
           dMap[d.id] = {
             color: d.color ?? '#888888',
             short: n.length <= 2 ? n : n[0].toUpperCase(),
+            bild: (d as any).bild,
           };
         });
         setDiscounterMap(dMap);
@@ -527,11 +528,10 @@ export default function HomeScreen() {
                     key={product.id}
                     title={product.name ?? ''}
                     brand={handelsmarken[product.id] ?? null}
+                    eyebrowLogoUri={disc?.bild ?? null}
                     imageUri={product.bild ?? null}
                     price={product.preis ?? 0}
                     stufe={parseInt(product.stufe) || 1}
-                    marketShort={disc?.short ?? null}
-                    marketColor={disc?.color ?? null}
                     variant="horizontal"
                     onPress={() => handleProductPress(product, index)}
                   />

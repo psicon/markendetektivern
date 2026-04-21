@@ -713,12 +713,10 @@ export default function ExploreScreen() {
     items.forEach((item, index) => {
       if (forTab === 'eigen') {
         const p = item as any;
-        // `discounter` and `handelsmarke` on the product are already populated
-        // FULL objects (not refs) by the service — just read their fields.
+        // `discounter` and `handelsmarke` are already populated FULL objects
+        // (not refs) by the service — read their fields directly.
         const disc = p.discounter as Discounter | undefined;
         const hm = p.handelsmarke as Handelsmarken | undefined;
-        const discName: string = disc?.name ?? '';
-        const discShort = discName ? (discName.length <= 2 ? discName : discName[0].toUpperCase()) : null;
         const handelsmarkeName = hm?.bezeichnung ?? (hm as any)?.name ?? null;
         const packTypId = p.packTyp?.id;
         const unit = packTypId ? packungstypenMap[packTypId] : undefined;
@@ -728,12 +726,10 @@ export default function ExploreScreen() {
             <ProductCard
               title={p.name ?? ''}
               brand={handelsmarkeName ?? null}
+              eyebrowLogoUri={disc?.bild ?? null}
               imageUri={p.bild ?? null}
               price={p.preis ?? 0}
               stufe={parseInt(p.stufe) || 1}
-              marketShort={discShort}
-              marketColor={disc?.color ?? null}
-              marketImageUri={disc?.bild ?? null}
               sizeLabel={sizeLabel}
               unitPriceLabel={unitPriceLabel}
               variant="grid"
@@ -743,8 +739,9 @@ export default function ExploreScreen() {
         );
       } else {
         const m = item as any;
-        // `hersteller` is populated full object — read .name directly.
+        // `hersteller` is populated full object — read .name + .bild directly.
         const marke = m.hersteller?.name ?? '';
+        const brandLogoUri = m.hersteller?.bild ?? null;
         const packTypId = m.packTyp?.id;
         const unit = packTypId ? packungstypenMap[packTypId] : undefined;
         const { sizeLabel, unitPriceLabel } = formatPack(m.packSize, unit, m.preis);
@@ -753,6 +750,7 @@ export default function ExploreScreen() {
             <BrandCard
               title={m.name ?? ''}
               brand={marke}
+              brandLogoUri={brandLogoUri}
               imageUri={m.bild ?? null}
               price={m.preis ?? 0}
               sizeLabel={sizeLabel}

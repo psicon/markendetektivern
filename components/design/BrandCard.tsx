@@ -1,12 +1,15 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import React from 'react';
-import { Image, Pressable, Text, View } from 'react-native';
+import { Image, Platform, Pressable, Text, View } from 'react-native';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 
 type Props = {
   title: string;
   brand: string;
+  /** Brand/manufacturer logo URL (Firestore `hersteller.bild`). Rendered
+   *  as a tiny 16px badge inline to the left of the brand name. */
+  brandLogoUri?: string | null;
   imageUri?: string | null;
   price: number;
   /** Best-alternative savings (€), optional — shown when known. */
@@ -33,6 +36,7 @@ function formatEur(value: number): string {
 export function BrandCard({
   title,
   brand,
+  brandLogoUri,
   imageUri,
   price,
   savingsEur,
@@ -104,20 +108,52 @@ export function BrandCard({
       </View>
 
       <View style={{ padding: 12, paddingBottom: 14 }}>
-        <Text
-          numberOfLines={1}
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.bold,
-            fontSize: 10,
-            color: theme.textMuted,
-            letterSpacing: 0.8,
-            textTransform: 'uppercase',
-            marginBottom: 4,
-          }}
-        >
-          {brand}
-        </Text>
+        {brand || brandLogoUri ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              marginBottom: 4,
+            }}
+          >
+            {brandLogoUri ? (
+              <View
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: 3,
+                  backgroundColor: '#ffffff',
+                  overflow: 'hidden',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: Platform.OS === 'ios' ? 0 : 0.5,
+                  borderColor: theme.border,
+                }}
+              >
+                <Image
+                  source={{ uri: brandLogoUri }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="contain"
+                />
+              </View>
+            ) : null}
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 10,
+                color: theme.textMuted,
+                letterSpacing: 0.8,
+                textTransform: 'uppercase',
+                flexShrink: 1,
+              }}
+            >
+              {brand}
+            </Text>
+          </View>
+        ) : null}
         <Text
           numberOfLines={2}
           style={{
