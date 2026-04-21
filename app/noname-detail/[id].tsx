@@ -384,7 +384,16 @@ export default function NoNameDetailScreen() {
             }}
           >
             {p.bild ? (
-              <Image source={{ uri: p.bild }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+              <Animated.Image
+                source={{ uri: p.bild }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="cover"
+                // Matches the `sharedTag` on the Stöbern ProductCard,
+                // so the Eigenmarken thumbnail morphs into this hero
+                // on push and reverses on pop. Convention is
+                // `product-image-<id>`.
+                sharedTransitionTag={`product-image-${p.id ?? ''}`}
+              />
             ) : (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 <MaterialCommunityIcons name="package-variant" size={64} color={theme.textMuted} />

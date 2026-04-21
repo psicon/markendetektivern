@@ -546,10 +546,16 @@ export default function ProductComparisonScreen() {
             }}
           >
             {mainProduct.bild ? (
-              <Image
+              <Animated.Image
                 source={{ uri: mainProduct.bild }}
                 style={{ width: '100%', height: '100%' }}
                 resizeMode="cover"
+                // Shared-element tag matches `sharedTag` on the
+                // ProductCard/BrandCard back in Stöbern. Reanimated
+                // will morph the card's thumbnail into this hero on
+                // push, and reverse it on pop. The convention is
+                // `product-image-<docId>` — same id that routes here.
+                sharedTransitionTag={`product-image-${(mainProduct as any).id ?? ''}`}
               />
             ) : (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>

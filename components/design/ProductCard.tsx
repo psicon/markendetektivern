@@ -1,5 +1,6 @@
 import React from 'react';
 import { Image, Platform, Pressable, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import {
   fontFamily,
   fontWeight,
@@ -31,6 +32,11 @@ type Props = {
   onPress?: () => void;
   /** Width override (defaults: horizontal=168, grid='100%'). */
   width?: number | string;
+  /** Shared-element tag. When set (and the destination screen renders
+   *  an Animated.Image with the same tag), Reanimated will morph the
+   *  product image from card → hero on push and back on pop. Convention:
+   *  `product-image-<id>`. */
+  sharedTag?: string;
 };
 
 function formatPrice(price: number): string {
@@ -55,6 +61,7 @@ export function ProductCard({
   variant = 'horizontal',
   onPress,
   width,
+  sharedTag,
 }: Props) {
   const { theme, shadows } = useTokens();
 
@@ -76,10 +83,11 @@ export function ProductCard({
     >
       <View style={{ position: 'relative', width: '100%', height: imageHeight }}>
         {imageUri ? (
-          <Image
+          <Animated.Image
             source={{ uri: imageUri }}
             style={{ width: '100%', height: '100%' }}
             resizeMode="cover"
+            sharedTransitionTag={sharedTag}
           />
         ) : (
           <View
