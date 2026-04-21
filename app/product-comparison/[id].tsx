@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
+import { ProductDetailSkeleton } from '@/components/design/Skeletons';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -221,8 +222,8 @@ export default function ProductComparisonScreen() {
   // ─── Loading / Error ──────────────────────────────────────────────────
   if (loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator size="large" color={theme.primary} />
+      <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
+        <ProductDetailSkeleton />
       </View>
     );
   }
@@ -679,7 +680,10 @@ export default function ProductComparisonScreen() {
                   | { name?: string; color?: string; bild?: string }
                   | undefined;
                 const hmName = nnHm?.bezeichnung ?? nnHm?.name ?? null;
-                const hmLogo = nnHm?.bild ?? nnDisc?.bild ?? null;
+                // Handelsmarken rarely carry a logo in our DB — prefer the
+                // (always-populated) discounter logo first and fall back to
+                // any handelsmarke logo that does exist.
+                const hmLogo = nnDisc?.bild ?? nnHm?.bild ?? null;
                 const nnPackInfo = formatPack(
                   (nn as any).packSize,
                   (nn as any).packTypInfo?.typKurz ?? (nn as any).packTypInfo?.typ,

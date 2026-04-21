@@ -30,6 +30,7 @@ import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
 import { ProductCard } from '@/components/design/ProductCard';
 import { SearchableOptionList } from '@/components/design/SearchableOptionList';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
+import { ProductCardSkeleton } from '@/components/design/Skeletons';
 import { StufenChips } from '@/components/design/StufenChips';
 import { collection, getDocs } from 'firebase/firestore';
 
@@ -690,6 +691,27 @@ export default function ExploreScreen() {
     const items = forTab === 'eigen' ? nonames : markenprodukte;
     const loading = forTab === 'eigen' ? nonameLoading : markenLoading;
     const empty = !loading && items.length === 0;
+
+    // First-load shimmer — never flash a blank screen. Six skeletons ≈ 3 rows
+    // of the final grid, enough to hint at the layout on any phone.
+    if (loading && items.length === 0) {
+      return (
+        <View
+          style={{
+            paddingHorizontal: 20,
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <View key={i} style={{ width: GRID_ITEM_WIDTH }}>
+              <ProductCardSkeleton />
+            </View>
+          ))}
+        </View>
+      );
+    }
 
     if (empty) {
       return (
