@@ -1,4 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -28,7 +29,10 @@ import type {
 type Tab = 'ingredients' | 'nutrition';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
-const NN_CARD_WIDTH = Math.min(320, SCREEN_WIDTH - 48);
+// Prototype fixes each NN card at 280 px; when there's only a single card we
+// let it fill the available width (minus the page's 20 px horizontal padding).
+const NN_CARD_WIDTH = 280;
+const NN_CARD_WIDTH_SINGLE = SCREEN_WIDTH - 40;
 const NN_CARD_GAP = 12;
 
 // Labels + one-liners for each similarity level (matches prototype).
@@ -140,23 +144,30 @@ export default function ProductComparisonScreen() {
   const [favBrand, setFavBrand] = useState(false);
   const [favPicked, setFavPicked] = useState(false);
 
-  // Sync carousel index when NoNames first load
+  const effectiveCardWidth =
+    nonames.length <= 1 ? NN_CARD_WIDTH_SINGLE : NN_CARD_WIDTH;
+  const snapStep = effectiveCardWidth + NN_CARD_GAP;
+
+  // Scroll carousel to the clicked product on initial load. Re-runs when
+  // pickedId changes from outside (e.g. user tapped a different card).
   useEffect(() => {
     if (nonames.length === 0) return;
     const target = nonames.findIndex((p) => p.id === pickedId);
-    if (target >= 0 && target !== carouselIdx) {
-      setCarouselIdx(target);
+    if (target < 0) return;
+    if (target !== carouselIdx) setCarouselIdx(target);
+    // Defer to next tick so the ScrollView has laid out.
+    requestAnimationFrame(() => {
       carouselRef.current?.scrollTo({
-        x: target * (NN_CARD_WIDTH + NN_CARD_GAP),
+        x: target * snapStep,
         animated: false,
       });
-    }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nonames.length]);
+  }, [nonames.length, pickedId]);
 
   const onCarouselScroll = (e: any) => {
     const x = e.nativeEvent.contentOffset.x;
-    const i = Math.round(x / (NN_CARD_WIDTH + NN_CARD_GAP));
+    const i = Math.round(x / snapStep);
     if (i !== carouselIdx && i >= 0 && i < nonames.length) {
       setCarouselIdx(i);
       setPickedId(nonames[i]?.id ?? null);
@@ -526,12 +537,14 @@ export default function ProductComparisonScreen() {
               </Text>
             </View>
 
+            <View style={{ position: 'relative' }}>
             <ScrollView
               ref={carouselRef}
               horizontal
               showsHorizontalScrollIndicator={false}
-              snapToInterval={NN_CARD_WIDTH + NN_CARD_GAP}
+              snapToInterval={snapStep}
               decelerationRate="fast"
+              scrollEnabled={nonames.length > 1}
               contentContainerStyle={{
                 paddingHorizontal: 20,
                 gap: NN_CARD_GAP,
@@ -560,12 +573,12 @@ export default function ProductComparisonScreen() {
                     onPress={() => {
                       setPickedId(nn.id);
                       carouselRef.current?.scrollTo({
-                        x: i * (NN_CARD_WIDTH + NN_CARD_GAP),
+                        x: i * snapStep,
                         animated: true,
                       });
                     }}
                     style={({ pressed }) => ({
-                      width: NN_CARD_WIDTH,
+                      width: effectiveCardWidth,
                       backgroundColor: theme.surface,
                       borderRadius: 18,
                       borderWidth: 2,
@@ -782,6 +795,62 @@ export default function ProductComparisonScreen() {
                 );
               })}
             </ScrollView>
+
+            {/* Right-edge fade + chevron — only when there are more cards
+                to the right of the current index (matches prototype). */}
+            {nonames.length > 1 && carouselIdx < nonames.length - 1 ? (
+              <>
+                <LinearGradient
+                  pointerEvents="none"
+                  colors={[
+                    (theme.bg as string).endsWith(')')
+                      ? theme.bg
+                      : `${theme.bg}00`,
+                    theme.bg,
+                  ]}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: 0,
+                    bottom: 4,
+                    width: 48,
+                  }}
+                />
+                <Pressable
+                  onPress={() => {
+                    const next = Math.min(carouselIdx + 1, nonames.length - 1);
+                    carouselRef.current?.scrollTo({
+                      x: next * snapStep,
+                      animated: true,
+                    });
+                  }}
+                  style={({ pressed }) => ({
+                    position: 'absolute',
+                    top: '50%',
+                    right: 10,
+                    marginTop: -18,
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    backgroundColor: theme.surface,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: pressed ? 0.85 : 1,
+                    shadowColor: '#000',
+                    shadowOpacity: 0.15,
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowRadius: 12,
+                    elevation: 4,
+                  })}
+                  hitSlop={4}
+                >
+                  <MaterialCommunityIcons name="chevron-right" size={22} color={theme.text} />
+                </Pressable>
+              </>
+            ) : null}
+            </View>
 
             {/* Dot indicator */}
             {nonames.length > 1 ? (
