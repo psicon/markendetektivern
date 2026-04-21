@@ -14,6 +14,14 @@ import {
   View,
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
+import Animated, {
+  Extrapolation,
+  interpolate,
+  runOnJS,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BrandCard } from '@/components/design/BrandCard';
@@ -93,6 +101,9 @@ const landToCode = (land: string | undefined): string => {
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const GRID_ITEM_WIDTH = Math.floor((SCREEN_WIDTH - 20 * 2 - 12) / 2);
 
+// Collapsible tab-bar height (12 top + 40 SegmentedTabs + 12 bottom).
+const TAB_BAR_HEIGHT = 64;
+
 // ────────────────────────────────────────────────────────────────────────
 
 export default function ExploreScreen() {
@@ -106,6 +117,13 @@ export default function ExploreScreen() {
 
   // PagerView for native horizontal tab swipe
   const pagerRef = useRef<PagerView | null>(null);
+
+  // Reanimated shared values — per-page scroll offset so the tab-bar
+  // collapse state snaps to the active page (if you scrolled down in
+  // "Eigenmarken", then swipe to "Marken" at top, tabs reappear).
+  const scrollYEigen = useSharedValue(0);
+  const scrollYMarken = useSharedValue(0);
+  const pageIndexShared = useSharedValue(0);
 
   // ─── UI state ──────────────────────────────────────────────────────────
   const [tab, setTab] = useState<Tab>('eigen');
@@ -326,15 +344,19 @@ export default function ExploreScreen() {
     setMinStufe(0);
     setBrandId('all');
     // Keep PagerView in sync (user tapped a tab)
-    pagerRef.current?.setPage(k === 'eigen' ? 0 : 1);
-  }, []);
+    const pos = k === 'eigen' ? 0 : 1;
+    pagerRef.current?.setPage(pos);
+    pageIndexShared.value = pos;
+  }, [pageIndexShared]);
 
-  // When user swipes the pager, update the tab state (but don't reset filters —
-  // swipe is a navigation gesture, not a filter change).
+  // When user swipes the pager, update tab state + the shared index so
+  // the collapsing tab bar snaps to the new page's scroll state.
   const onPageSelected = useCallback((e: { nativeEvent: { position: number } }) => {
-    const k: Tab = e.nativeEvent.position === 0 ? 'eigen' : 'marken';
+    const pos = e.nativeEvent.position;
+    pageIndexShared.value = pos;
+    const k: Tab = pos === 0 ? 'eigen' : 'marken';
     if (k !== tab) setTab(k);
-  }, [tab]);
+  }, [tab, pageIndexShared]);
 
   const resetAll = useCallback(() => {
     setMarket('all');
@@ -700,27 +722,87 @@ export default function ExploreScreen() {
     );
   };
 
-  const onPageScroll = useCallback(
-    (e: { nativeEvent: { contentOffset: { y: number }; layoutMeasurement: { height: number }; contentSize: { height: number } } }) => {
-      const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
-      const distance = contentSize.height - contentOffset.y - layoutMeasurement.height;
-      if (distance < 500 && hasMore && !isLoading) loadMore();
+  // JS-side loadMore helpers — called from the worklet via runOnJS when
+  // the user reaches near the bottom of either list.
+  const checkLoadMoreEigen = useCallback(() => {
+    if (nonameHasMore && !nonameLoading) loadNonames(false);
+  }, [nonameHasMore, nonameLoading, loadNonames]);
+  const checkLoadMoreMarken = useCallback(() => {
+    if (markenHasMore && !markenLoading) loadMarken(false);
+  }, [markenHasMore, markenLoading, loadMarken]);
+
+  // Animated scroll handlers drive both the per-page scroll shared value
+  // (→ powers the tab-bar collapse animation on the UI thread) and the
+  // infinite-scroll trigger (JS thread).
+  const scrollHandlerEigen = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      scrollYEigen.value = e.contentOffset.y;
+      const dist =
+        e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
+      if (dist < 500) runOnJS(checkLoadMoreEigen)();
     },
-    [hasMore, isLoading, loadMore],
-  );
+  });
+  const scrollHandlerMarken = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      scrollYMarken.value = e.contentOffset.y;
+      const dist =
+        e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
+      if (dist < 500) runOnJS(checkLoadMoreMarken)();
+    },
+  });
+
+  // Collapsing tab-bar style. Reads the scroll offset of the currently
+  // active page (tracked via `pageIndexShared`). Clamped so the tab-bar
+  // can't translate past its own height.
+  const tabsAnimStyle = useAnimatedStyle(() => {
+    const active =
+      pageIndexShared.value === 0 ? scrollYEigen.value : scrollYMarken.value;
+    const translateY = interpolate(
+      active,
+      [0, TAB_BAR_HEIGHT],
+      [0, -TAB_BAR_HEIGHT],
+      Extrapolation.CLAMP,
+    );
+    const opacity = interpolate(
+      active,
+      [0, TAB_BAR_HEIGHT * 0.8],
+      [1, 0],
+      Extrapolation.CLAMP,
+    );
+    return {
+      transform: [{ translateY }],
+      opacity,
+    };
+  });
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* Fixed SegmentedTabs above the pager — stays put when swiping. */}
-      <View
-        style={{
-          paddingTop: insets.top + 12,
-          paddingHorizontal: 20,
-          paddingBottom: 12,
-          backgroundColor: theme.bg,
-          borderBottomWidth: 1,
-          borderBottomColor: theme.border,
-        }}
+      {/* Safe-area filler so the status bar always has a solid backdrop
+          even when the tab bar collapses out of frame. */}
+      <View style={{ height: insets.top, backgroundColor: theme.bg }} />
+
+      {/* Collapsible SegmentedTabs — absolute so it overlays the pager
+          without pushing content; animates translateY + opacity as the
+          active page scrolls. */}
+      <Animated.View
+        pointerEvents="box-none"
+        style={[
+          {
+            position: 'absolute',
+            top: insets.top,
+            left: 0,
+            right: 0,
+            height: TAB_BAR_HEIGHT,
+            paddingTop: 12,
+            paddingBottom: 12,
+            paddingHorizontal: 20,
+            backgroundColor: theme.bg,
+            borderBottomWidth: 1,
+            borderBottomColor: theme.border,
+            zIndex: 10,
+          },
+          tabsAnimStyle,
+        ]}
       >
         <SegmentedTabs
           tabs={[
@@ -730,7 +812,7 @@ export default function ExploreScreen() {
           value={tab}
           onChange={switchTab}
         />
-      </View>
+      </Animated.View>
 
       <PagerView
         ref={pagerRef}
@@ -740,39 +822,38 @@ export default function ExploreScreen() {
       >
         {/* ─── Page 0 — Eigenmarken ─────────────────────────────────── */}
         <View key="eigen" style={{ flex: 1 }}>
-          <ScrollView
+          <Animated.ScrollView
             stickyHeaderIndices={[0]}
-            onScroll={onPageScroll}
-            scrollEventThrottle={200}
+            onScroll={scrollHandlerEigen}
+            scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingBottom: 120 }}
+            contentContainerStyle={{ paddingTop: TAB_BAR_HEIGHT, paddingBottom: 120 }}
           >
-            {/* 0 — sticky glass header */}
+            {/* 0 — sticky glass header (pins to top of ScrollView viewport,
+                which is directly below the collapsible tab bar) */}
             <StickyHeader forTab="eigen" />
-            {/* banner ad */}
             {!isPremium ? (
               <View style={{ marginTop: 12 }}>
                 <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
               </View>
             ) : null}
-            {/* grid */}
             <View style={{ paddingTop: 12 }}>{renderGrid('eigen')}</View>
             {isLoading && currentList.length > 0 ? (
               <View style={{ paddingVertical: 24 }}>
                 <ActivityIndicator size="small" color={theme.primary} />
               </View>
             ) : null}
-          </ScrollView>
+          </Animated.ScrollView>
         </View>
 
         {/* ─── Page 1 — Marken ──────────────────────────────────────── */}
         <View key="marken" style={{ flex: 1 }}>
-          <ScrollView
+          <Animated.ScrollView
             stickyHeaderIndices={[0]}
-            onScroll={onPageScroll}
-            scrollEventThrottle={200}
+            onScroll={scrollHandlerMarken}
+            scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingBottom: 120 }}
+            contentContainerStyle={{ paddingTop: TAB_BAR_HEIGHT, paddingBottom: 120 }}
           >
             <StickyHeader forTab="marken" />
             {!isPremium ? (
@@ -786,7 +867,7 @@ export default function ExploreScreen() {
                 <ActivityIndicator size="small" color={theme.primary} />
               </View>
             ) : null}
-          </ScrollView>
+          </Animated.ScrollView>
         </View>
       </PagerView>
 
