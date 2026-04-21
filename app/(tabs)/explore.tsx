@@ -1272,50 +1272,6 @@ export default function ExploreScreen() {
             setHandels(v);
             setSheet(null);
           }}
-          renderLeading={(k) => {
-            if (k === 'all')
-              return (
-                <View
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 10,
-                    backgroundColor: theme.surfaceAlt,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <MaterialCommunityIcons name="tag-outline" size={18} color={theme.textMuted} />
-                </View>
-              );
-            const h = handelsmarken.find((x) => x.id === k);
-            const bild = (h as any)?.bild as string | undefined;
-            return (
-              <View
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 10,
-                  backgroundColor: '#ffffff',
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  overflow: 'hidden',
-                }}
-              >
-                {bild ? (
-                  <Image
-                    source={{ uri: bild }}
-                    style={{ width: '100%', height: '100%' }}
-                    resizeMode="contain"
-                  />
-                ) : (
-                  <MaterialCommunityIcons name="tag-outline" size={18} color={theme.textMuted} />
-                )}
-              </View>
-            );
-          }}
         />
       </FilterSheet>
 
