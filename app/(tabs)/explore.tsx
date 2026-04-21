@@ -184,11 +184,11 @@ export default function ExploreScreen() {
     (async () => {
       try {
         const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
-        const [ds, cats, ms, hms, ptSnap] = await Promise.all([
+        const [ds, cats, ms, hmSnap, ptSnap] = await Promise.all([
           FirestoreService.getDiscounter(),
           categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium),
           FirestoreService.getMarken().catch(() => []),
-          (FirestoreService as any).getHandelsmarken?.().catch(() => []) ?? Promise.resolve([]),
+          getDocs(collection(db, 'handelsmarken')).catch(() => null),
           getDocs(collection(db, 'packungstypen')).catch(() => null),
         ]);
         setDiscounter([...ds].sort(byName));
@@ -198,7 +198,13 @@ export default function ExploreScreen() {
             .map((m: any) => ({ id: m.id, name: m.name ?? m.bezeichnung ?? '' }))
             .sort((a, b) => a.name.localeCompare(b.name, 'de', { sensitivity: 'base' })),
         );
-        if (Array.isArray(hms)) setHandelsmarken([...hms].sort(byName));
+        if (hmSnap) {
+          const hms: FirestoreDocument<Handelsmarken>[] = [];
+          hmSnap.forEach((d: any) => {
+            hms.push({ id: d.id, ...(d.data() as any) });
+          });
+          setHandelsmarken(hms.sort(byName));
+        }
         if (ptSnap) {
           const ptMap: Record<string, string> = {};
           ptSnap.forEach((d: any) => {
