@@ -887,7 +887,12 @@ export default function ProductComparisonScreen() {
                         card width — the "Grundpreis gehört zum Preis"
                         principle, but on its own line so it doesn't
                         fight the action cluster for horizontal space.
-                        Size · Grundpreis as one row, comma-separated. */}
+                        Size · Grundpreis as one row, comma-separated.
+                        Font deliberately matches the Markenprodukt's
+                        pack line byte-for-byte (11 px medium, brand
+                        grey #5c6769) so the two screens feel like
+                        they're speaking the same typographic language
+                        when the user compares prices across them. */}
                     {nnPackParts ? (
                       <Text
                         numberOfLines={1}
@@ -895,7 +900,7 @@ export default function ProductComparisonScreen() {
                           fontFamily,
                           fontWeight: fontWeight.medium,
                           fontSize: 11,
-                          color: theme.textMuted,
+                          color: '#5c6769',
                           paddingHorizontal: 14,
                           paddingTop: 10,
                         }}
