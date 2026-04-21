@@ -231,14 +231,25 @@ export default function ProductComparisonScreen() {
   // frame-perfect on iOS and Android. `transformOrigin: 'top left'`
   // keeps scale anchored to the text's top-left so it doesn't drift
   // visually as it shrinks.
-  const TITLE_FONT_SIZE = 26;
+  // Hero title sizing — dialled down from 26 → 22 so the hero block no
+  // longer feels oversized relative to the rest of the page typography
+  // (pack info at 11, prices at 22, Detektiv-Check text at 13). The
+  // docked size stays at 17 (iOS nav-title standard), which yields a
+  // slightly larger scale factor than before.
+  const TITLE_FONT_SIZE = 22;
+  const TITLE_LINE_HEIGHT = 26;
   const TITLE_NAV_SIZE = 17;
-  const TITLE_SCALE = TITLE_NAV_SIZE / TITLE_FONT_SIZE; // ≈ 0.654
-  // Eyebrow has been removed — title sits directly under the blur
-  // chrome at paddingTop: 16 of its wrapper.
-  const HERO_TOP_IN_CONTENT = 16;
+  const TITLE_SCALE = TITLE_NAV_SIZE / TITLE_FONT_SIZE; // ≈ 0.773
+  const TITLE_NAV_LINE_HEIGHT = TITLE_LINE_HEIGHT * TITLE_SCALE; // ≈ 20
+  // Restored "Das Original" eyebrow (11 px uppercase) above the hero
+  // title — adds 16 px + a 2 px gap + the wrapper's paddingTop of 10.
+  const HERO_TOP_IN_CONTENT = 10 + 16 + 2;
   const HERO_SCREEN_Y = insets.top + DETAIL_HEADER_ROW_HEIGHT + HERO_TOP_IN_CONTENT;
-  const NAV_SCREEN_Y = insets.top + (DETAIL_HEADER_ROW_HEIGHT - 24) / 2; // centred in nav row
+  // Vertically centre the docked title in the nav row by subtracting
+  // the scaled line-height, not a fixed 24 px. Without this the glyph
+  // sits a couple of pixels above the back-button's vertical centre.
+  const NAV_SCREEN_Y =
+    insets.top + (DETAIL_HEADER_ROW_HEIGHT - TITLE_NAV_LINE_HEIGHT) / 2;
   const DOCK_DISTANCE = HERO_SCREEN_Y - NAV_SCREEN_Y;
   const NAV_LEFT_OFFSET = 36; // hero padding 20 → nav after back btn (56)
 
@@ -505,7 +516,7 @@ export default function ProductComparisonScreen() {
             fontFamily,
             fontWeight: fontWeight.extraBold,
             fontSize: TITLE_FONT_SIZE,
-            lineHeight: 30,
+            lineHeight: TITLE_LINE_HEIGHT,
             color: theme.text,
             letterSpacing: -0.3,
           }}
@@ -524,14 +535,24 @@ export default function ProductComparisonScreen() {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* Title lives outside the ScrollView as the morph element —
-            see morphTitleStyle. We reserve a 32 px placeholder so the
-            surrounding layout doesn't shift. The "Das Original"
-            eyebrow was dropped: the Hersteller pill on the hero image
-            and the brand logo in the morph title already tell the
-            user this is the brand product. */}
-        <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 10 }}>
-          <View style={{ height: 32 }} />
+        {/* Title lives outside the ScrollView as the morph element
+            (see morphTitleStyle). The 28 px placeholder reserves
+            vertical space for the title at its hero size so the hero
+            image below doesn't jump when the morph starts. */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.semibold,
+              fontSize: 11,
+              color: theme.textMuted,
+              letterSpacing: 1.2,
+              textTransform: 'uppercase',
+            }}
+          >
+            Das Original
+          </Text>
+          <View style={{ height: 28, marginTop: 2 }} />
         </View>
 
         {/* ─── Hero image with overlays ──────────────────────────── */}

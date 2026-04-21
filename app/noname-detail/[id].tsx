@@ -106,15 +106,22 @@ export default function NoNameDetailScreen() {
   });
 
   // ─── Native "large title" morph ────────────────────────────────────
-  // Same mechanic as product-comparison: one Animated.View that IS the
-  // nav title — scrolls naturally until it reaches the nav bar, then
-  // docks there, shrinking 26 px → 17 px via top-left-anchored scale.
-  const TITLE_FONT_SIZE = 26;
+  // Hero title sized 22 px (down from 26) and line-height 26 so the
+  // header block reads proportional to the rest of the page. Docked
+  // size stays at 17 px (iOS nav-title standard). NAV_SCREEN_Y now
+  // accounts for the scaled line-height, so the glyph centres on the
+  // nav row vertically instead of sitting a few px above centre.
+  const TITLE_FONT_SIZE = 22;
+  const TITLE_LINE_HEIGHT = 26;
   const TITLE_NAV_SIZE = 17;
   const TITLE_SCALE = TITLE_NAV_SIZE / TITLE_FONT_SIZE;
-  const HERO_TOP_IN_CONTENT = 10 + 16 + 2; // paddingTop + eyebrow + gap
+  const TITLE_NAV_LINE_HEIGHT = TITLE_LINE_HEIGHT * TITLE_SCALE;
+  // paddingTop (10) + placeholder marginTop (2) = 12 of empty space
+  // above the title before it starts.
+  const HERO_TOP_IN_CONTENT = 12;
   const HERO_SCREEN_Y = insets.top + DETAIL_HEADER_ROW_HEIGHT + HERO_TOP_IN_CONTENT;
-  const NAV_SCREEN_Y = insets.top + (DETAIL_HEADER_ROW_HEIGHT - 24) / 2;
+  const NAV_SCREEN_Y =
+    insets.top + (DETAIL_HEADER_ROW_HEIGHT - TITLE_NAV_LINE_HEIGHT) / 2;
   const DOCK_DISTANCE = HERO_SCREEN_Y - NAV_SCREEN_Y;
   const NAV_LEFT_OFFSET = 36;
 
@@ -339,7 +346,7 @@ export default function NoNameDetailScreen() {
             fontFamily,
             fontWeight: fontWeight.extraBold,
             fontSize: TITLE_FONT_SIZE,
-            lineHeight: 30,
+            lineHeight: TITLE_LINE_HEIGHT,
             color: theme.text,
             letterSpacing: -0.3,
           }}
@@ -359,30 +366,14 @@ export default function NoNameDetailScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Title lives outside the ScrollView as the morph element.
-            32 px placeholder preserves the hero's vertical rhythm.
-            Below the placeholder we show the Hersteller (if known) as
-            a subtitle — this was the info missing on the Eigenmarken
-            detail. The market/discounter name used to live in an
-            eyebrow here too; now it's encoded by the logo in the
-            morph title, so we drop it here to avoid the repetition. */}
-        <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 10 }}>
-          <View style={{ height: 32 }} />
-          {herstellerName ? (
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.medium,
-                fontSize: 13,
-                color: theme.textSub,
-                marginTop: 4,
-              }}
-            >
-              Hersteller:{' '}
-              <Text style={{ fontWeight: fontWeight.bold, color: theme.text }}>
-                {herstellerName}
-              </Text>
-            </Text>
-          ) : null}
+            28 px placeholder reserves vertical space. The Hersteller
+            used to be rendered as a subtitle text under the
+            placeholder — it has been moved to a chip on the hero
+            image (top-left, where the "Exklusiv bei <discounter>"
+            pill used to sit), which matches the design brief and
+            keeps the hero visually weighted. */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
+          <View style={{ height: 28, marginTop: 2 }} />
         </View>
 
         {/* ─── Hero image with overlays ──────────────────────────── */}
@@ -413,10 +404,45 @@ export default function NoNameDetailScreen() {
               </View>
             )}
 
-            {/* The "Exklusiv bei <discounter>" chip was here, but the
-                market logo is now the primary image in the morph
-                title above the hero — repeating it on the hero read
-                as visual noise. Dropped. */}
+            {/* Hersteller chip — top-left, replacing the old
+                "Exklusiv bei <discounter>" pill that used to live
+                here. For stufe 1/2 products the user wanted to see
+                WHO makes the Eigenmarke (Ferrero, Nestlé, …) right
+                on the hero, not buried in the info card further
+                down. Market affordance is handled by the logo in
+                the morph title above. */}
+            {herstellerName ? (
+              <View
+                style={{
+                  position: 'absolute',
+                  left: 12,
+                  top: 12,
+                  backgroundColor: brand.primaryDark,
+                  paddingVertical: 6,
+                  paddingHorizontal: 12,
+                  borderRadius: 99,
+                  maxWidth: '80%',
+                  shadowColor: '#000',
+                  shadowOpacity: 0.22,
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowRadius: 6,
+                  elevation: 3,
+                }}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 13,
+                    color: '#fff',
+                    letterSpacing: -0.1,
+                  }}
+                >
+                  {herstellerName}
+                </Text>
+              </View>
+            ) : null}
 
             {/* Price pill bottom-left */}
             <View
