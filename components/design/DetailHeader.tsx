@@ -56,18 +56,19 @@ export function DetailHeader({
   const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === 'ios';
 
+  // "hasSwap" gates ONLY whether we render the scrolled-in second title.
+  // The default title's fade-out is driven purely by scrollY (if
+  // provided) so callers that only want the default to fade out can
+  // pass scrollY + swapAt without also passing scrolledTitle — which
+  // is what the detail screens now do, since they render their own
+  // morph-title overlay above the chrome instead of letting the
+  // header crossfade a second Text element in.
   const hasSwap = !!scrolledTitle && !!scrollY;
-  // One tight native-feeling handoff beat instead of a long crossfade:
-  // both titles live in the same 32 px band just before `swapAt`, so the
-  // motion reads as a single "Produktdetails slides up → product name
-  // rises in", not two separate fades overlapping.
-  // All interpolation runs on the UI thread (Reanimated 3), so the
-  // animation is frame-perfect on iOS and Android alike.
   const outRange = [swapAt - 40, swapAt - 10] as const;
   const inRange = [swapAt - 30, swapAt] as const;
 
   const defaultTitleStyle = useAnimatedStyle(() => {
-    if (!hasSwap || !scrollY) {
+    if (!scrollY) {
       return { opacity: 1, transform: [{ translateY: 0 }] };
     }
     const t = interpolate(scrollY.value, outRange, [1, 0], Extrapolation.CLAMP);
