@@ -233,7 +233,9 @@ export default function ProductComparisonScreen() {
   const TITLE_FONT_SIZE = 26;
   const TITLE_NAV_SIZE = 17;
   const TITLE_SCALE = TITLE_NAV_SIZE / TITLE_FONT_SIZE; // ≈ 0.654
-  const HERO_TOP_IN_CONTENT = 10 + 16 + 2; // paddingTop + eyebrow + gap
+  // Eyebrow has been removed — title sits directly under the blur
+  // chrome at paddingTop: 16 of its wrapper.
+  const HERO_TOP_IN_CONTENT = 16;
   const HERO_SCREEN_Y = insets.top + DETAIL_HEADER_ROW_HEIGHT + HERO_TOP_IN_CONTENT;
   const NAV_SCREEN_Y = insets.top + (DETAIL_HEADER_ROW_HEIGHT - 24) / 2; // centred in nav row
   const DOCK_DISTANCE = HERO_SCREEN_Y - NAV_SCREEN_Y;
@@ -521,24 +523,14 @@ export default function ProductComparisonScreen() {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* ─── Eyebrow (title lives outside ScrollView as the morph
-            element — see morphTitleStyle). We keep a 32 px placeholder
-            equal to the title's line-height so the surrounding layout
-            doesn't shift. */}
-        <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.semibold,
-              fontSize: 11,
-              color: theme.textMuted,
-              letterSpacing: 1.2,
-              textTransform: 'uppercase',
-            }}
-          >
-            Das Original
-          </Text>
-          <View style={{ height: 32, marginTop: 2 }} />
+        {/* Title lives outside the ScrollView as the morph element —
+            see morphTitleStyle. We reserve a 32 px placeholder so the
+            surrounding layout doesn't shift. The "Das Original"
+            eyebrow was dropped: the Hersteller pill on the hero image
+            and the brand logo in the morph title already tell the
+            user this is the brand product. */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 10 }}>
+          <View style={{ height: 32 }} />
         </View>
 
         {/* ─── Hero image with overlays ──────────────────────────── */}
@@ -911,33 +903,17 @@ export default function ProductComparisonScreen() {
                     >
                       <View style={{ flex: 1, minWidth: 0 }}>
                         {nnPackParts ? (
-                          <>
-                            <Text
-                              numberOfLines={1}
-                              style={{
-                                fontFamily,
-                                fontWeight: fontWeight.semibold,
-                                fontSize: 11,
-                                color: theme.textMuted,
-                              }}
-                            >
-                              {nnPackParts.sizeLabel}
-                            </Text>
-                            {nnPackParts.unitPrice ? (
-                              <Text
-                                numberOfLines={1}
-                                style={{
-                                  fontFamily,
-                                  fontWeight: fontWeight.medium,
-                                  fontSize: 10,
-                                  color: theme.textMuted,
-                                  marginTop: 1,
-                                }}
-                              >
-                                {nnPackParts.unitPrice}
-                              </Text>
-                            ) : null}
-                          </>
+                          <Text
+                            numberOfLines={1}
+                            style={{
+                              fontFamily,
+                              fontWeight: fontWeight.semibold,
+                              fontSize: 11,
+                              color: theme.textMuted,
+                            }}
+                          >
+                            {nnPackParts.sizeLabel}
+                          </Text>
                         ) : null}
                         <Text
                           style={{
@@ -946,7 +922,7 @@ export default function ProductComparisonScreen() {
                             fontSize: 22,
                             color: brand.primary,
                             letterSpacing: -0.3,
-                            marginTop: 4,
+                            marginTop: 2,
                           }}
                         >
                           {formatEur((nn as any).preis)}
