@@ -170,12 +170,12 @@ export default function ProductComparisonScreen() {
     [nonames, pickedId],
   );
 
-  // "Gute Alternativen" — real similarity scoring. The old version
-  // leaned on Kategorie + pack + price, which groups Cola with Bier
-  // (both Getränke, both ~500 ml, both ~1 €). The name token-overlap
-  // signal fixes that: "Coca Cola Classic" and "Pepsi Cola" share
-  // {cola}, while "Coca Cola Classic" and "Beck's Pils" share
-  // nothing → zero name similarity → filtered out.
+  // "Gute Alternativen" — pure name-token similarity (Jaccard on the
+  // product name alone). No pack / price / category-count bonuses for
+  // now; we want to see whether name matching on its own is strong
+  // enough. If a candidate doesn't share any meaningful word with the
+  // main product's name it won't surface, which is the only reliable
+  // way with the current data to keep Cola from pulling in Bier.
   useEffect(() => {
     if (!mainProduct) return;
     const catId =
@@ -183,13 +183,6 @@ export default function ProductComparisonScreen() {
       ((mainProduct as any).kategorie && typeof (mainProduct as any).kategorie === 'object'
         ? undefined
         : (mainProduct as any).kategorie);
-    const mainPackTypId =
-      (mainProduct as any).packTyp?.id ??
-      (mainProduct as any).packTypInfo?.id ??
-      null;
-    const mainSize = (mainProduct as any).packSize as number | undefined;
-    const mainPrice = (mainProduct as any).preis as number | undefined;
-
     // ─── Name similarity (Jaccard on word tokens) ─────────────────
     // German stop words / tiny generic tokens that would otherwise
     // create false matches ("der", "mit", "l", …).
@@ -224,42 +217,17 @@ export default function ProductComparisonScreen() {
           null,
           (catId ? { categoryFilters: [catId] } : {}) as any,
         );
-        const scoreOf = (p: any): { score: number; nameSim: number } => {
-          const candTokens = tokenize(p.name ?? '');
-          const nameSim = jaccard(mainNameTokens, candTokens);
-          // Name similarity is the dominant signal — scaled 0..100.
-          // A single shared token between two short names gives ~20-30,
-          // two shared tokens ~40-60, full-name match approaches 100.
-          let s = nameSim * 100;
-
-          const pPackTypId = p.packTyp?.id ?? p.packTypInfo?.id ?? null;
-          if (mainPackTypId && pPackTypId && mainPackTypId === pPackTypId) s += 20;
-
-          const pSize = p.packSize as number | undefined;
-          if (mainSize && pSize && mainSize > 0 && pSize > 0) {
-            const ratio = Math.min(pSize, mainSize) / Math.max(pSize, mainSize);
-            if (ratio >= 0.6) s += Math.round(15 * ((ratio - 0.6) / 0.4));
-          }
-
-          const pPrice = p.preis as number | undefined;
-          if (mainPrice && pPrice && mainPrice > 0 && pPrice > 0) {
-            const ratio = Math.min(pPrice, mainPrice) / Math.max(pPrice, mainPrice);
-            if (ratio >= 0.6) s += Math.round(10 * ((ratio - 0.6) / 0.4));
-          }
-
-          if ((p.relatedProdukteIDs?.length ?? 0) > 0) s += 10;
-          return { score: s, nameSim };
-        };
-
         const list = (res.products ?? [])
           .filter((p: any) => p.id !== mainProduct.id)
-          .map((p: any) => ({ p, ...scoreOf(p) }))
-          // Must have SOME name-token overlap. This is the filter that
-          // keeps Cola from pulling in Bier: no shared keyword, no
-          // shared lead. Without this, pack + price signals alone
-          // would happily mix product families.
-          .filter(({ nameSim }) => nameSim > 0)
-          .sort((a, b) => b.score - a.score)
+          .map((p: any) => ({
+            p,
+            sim: jaccard(mainNameTokens, tokenize(p.name ?? '')),
+          }))
+          // Only keep candidates that actually share a meaningful word
+          // with the main product's name. Below this threshold it's
+          // too likely to be accidental overlap on something generic.
+          .filter(({ sim }) => sim > 0)
+          .sort((a, b) => b.sim - a.sim)
           .slice(0, 5)
           .map(({ p }) => p);
         setAlternatives(list);
