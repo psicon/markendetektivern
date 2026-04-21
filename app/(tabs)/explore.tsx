@@ -980,18 +980,21 @@ export default function ExploreScreen() {
         {/* ─── Page 0 — Eigenmarken ─────────────────────────────────── */}
         <View key="eigen" style={{ flex: 1 }}>
           <Animated.ScrollView
-            stickyHeaderIndices={[0]}
+            stickyHeaderIndices={[1]}
             onScroll={scrollHandlerEigen}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ paddingBottom: 120 }}
           >
-            {/* 0 — sticky wrapper: its internal paddingTop (=
-                insets.top + TAB_BAR_HEIGHT) stays transparent so content
-                below can scroll up under the BlurView + tabs, while the
-                visible StickyHeader body pins right below the tab bar
-                instead of behind the Dynamic Island. */}
-            <View style={{ paddingTop: insets.top + TAB_BAR_HEIGHT }}>
+            {/* 0 — spacer matching the tab bar. Scrolls away with content
+                so the sticky wrapper below only starts pinning once the
+                tabs have collapsed. */}
+            <View style={{ height: TAB_BAR_HEIGHT }} />
+            {/* 1 — sticky wrapper. paddingTop = insets.top keeps the
+                visible StickyHeader body below the Dynamic-Island blur
+                strip once pinned; the transparent padding lets content
+                continue to scroll through behind the blur. */}
+            <View style={{ paddingTop: insets.top }}>
               <StickyHeader forTab="eigen" />
             </View>
             {!isPremium ? (
@@ -1019,13 +1022,14 @@ export default function ExploreScreen() {
         {/* ─── Page 1 — Marken ──────────────────────────────────────── */}
         <View key="marken" style={{ flex: 1 }}>
           <Animated.ScrollView
-            stickyHeaderIndices={[0]}
+            stickyHeaderIndices={[1]}
             onScroll={scrollHandlerMarken}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ paddingBottom: 120 }}
           >
-            <View style={{ paddingTop: insets.top + TAB_BAR_HEIGHT }}>
+            <View style={{ height: TAB_BAR_HEIGHT }} />
+            <View style={{ paddingTop: insets.top }}>
               <StickyHeader forTab="marken" />
             </View>
             {!isPremium ? (
