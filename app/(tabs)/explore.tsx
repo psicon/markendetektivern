@@ -903,27 +903,14 @@ export default function ExploreScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* Safe-area filler — gives the Dynamic-Island / status-bar zone a
-          blurred (iOS) / tinted (Android) surface so it reads as part of
-          the app chrome instead of a blank slab. Content starts BELOW it
-          (unlike the Detail screens, where content scrolls under) because
-          ScrollView's stickyHeaderIndices would otherwise pin the search
-          rail up behind the island. */}
-      {Platform.OS === 'ios' ? (
-        <BlurView
-          tint={scheme === 'dark' ? 'dark' : 'light'}
-          intensity={80}
-          style={{ height: insets.top }}
-        />
-      ) : (
-        <View
-          style={{
-            height: insets.top,
-            backgroundColor:
-              scheme === 'dark' ? 'rgba(15,18,20,0.92)' : 'rgba(245,247,248,0.92)',
-          }}
-        />
-      )}
+      {/* Safe-area filler — solid theme.bg matches the tabs below
+          seamlessly. A BlurView here would add its own diffuse haze on
+          top of bare bg (no content to blur), producing a visibly
+          different tint next to the tabs and reading as a "gray bar".
+          The detail screens DO get real scroll-under blur because there
+          the content passes behind; here it can't without breaking
+          sticky-header pinning. */}
+      <View style={{ height: insets.top, backgroundColor: theme.bg }} />
 
       {/* Collapsible SegmentedTabs — absolute so it overlays the pager
           without pushing content; animates translateY + opacity as the
