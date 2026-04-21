@@ -105,13 +105,27 @@ export default function NoNameDetailScreen() {
     },
   });
 
-  // Hero title hands off to the nav title — matches the product-
-  // comparison flow. UI-thread animation so Android stays smooth.
-  const heroTitleStyle = useAnimatedStyle(() => {
-    const t = interpolate(scrollY.value, [150, 190], [1, 0], Extrapolation.CLAMP);
+  // ─── Native "large title" morph ────────────────────────────────────
+  // Same mechanic as product-comparison: one Animated.View that IS the
+  // nav title — scrolls naturally until it reaches the nav bar, then
+  // docks there, shrinking 26 px → 17 px via top-left-anchored scale.
+  const TITLE_FONT_SIZE = 26;
+  const TITLE_NAV_SIZE = 17;
+  const TITLE_SCALE = TITLE_NAV_SIZE / TITLE_FONT_SIZE;
+  const HERO_TOP_IN_CONTENT = 10 + 16 + 2; // paddingTop + eyebrow + gap
+  const HERO_SCREEN_Y = insets.top + DETAIL_HEADER_ROW_HEIGHT + HERO_TOP_IN_CONTENT;
+  const NAV_SCREEN_Y = insets.top + (DETAIL_HEADER_ROW_HEIGHT - 24) / 2;
+  const DOCK_DISTANCE = HERO_SCREEN_Y - NAV_SCREEN_Y;
+  const NAV_LEFT_OFFSET = 36;
+
+  const morphTitleStyle = useAnimatedStyle(() => {
+    const s = scrollY.value;
+    const t = interpolate(s, [0, DOCK_DISTANCE], [0, 1], Extrapolation.CLAMP);
+    const translateY = -Math.min(s, DOCK_DISTANCE);
+    const translateX = t * NAV_LEFT_OFFSET;
+    const scale = 1 - t * (1 - TITLE_SCALE);
     return {
-      opacity: t,
-      transform: [{ translateY: (1 - t) * -6 }],
+      transform: [{ translateY }, { translateX }, { scale }],
     };
   });
 
@@ -266,12 +280,66 @@ export default function NoNameDetailScreen() {
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <DetailHeader
         title="Produktdetails"
-        scrolledTitle={`${handelsmarkeName ? handelsmarkeName + ' ' : ''}${p.name ?? ''}`}
-        scrolledLogoUri={(hm as any)?.bild ?? disc?.bild ?? null}
         scrollY={scrollY}
-        swapAt={200}
+        swapAt={DOCK_DISTANCE + 20}
         onBack={() => router.back()}
       />
+
+      {/* Morphing title — scrolls naturally from hero into the nav bar
+          and pins. zIndex 11 keeps it above the BlurView chrome once
+          docked. pointerEvents="none" so touches fall through. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            top: HERO_SCREEN_Y,
+            left: 20,
+            right: 20,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            zIndex: 11,
+            transformOrigin: 'top left',
+          },
+          morphTitleStyle,
+        ]}
+      >
+        {((hm as any)?.bild ?? disc?.bild) ? (
+          <View
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 6,
+              backgroundColor: '#ffffff',
+              borderWidth: 0.5,
+              borderColor: theme.border,
+              overflow: 'hidden',
+            }}
+          >
+            <Image
+              source={{ uri: (hm as any)?.bild ?? disc?.bild }}
+              style={{ width: '100%', height: '100%' }}
+              resizeMode="contain"
+            />
+          </View>
+        ) : null}
+        <Text
+          numberOfLines={1}
+          style={{
+            flexShrink: 1,
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: TITLE_FONT_SIZE,
+            lineHeight: 30,
+            color: theme.text,
+            letterSpacing: -0.3,
+          }}
+        >
+          {handelsmarkeName ? `${handelsmarkeName} ` : ''}
+          {p.name}
+        </Text>
+      </Animated.View>
 
       <Animated.ScrollView
         onScroll={scrollHandler}
@@ -282,7 +350,9 @@ export default function NoNameDetailScreen() {
         }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ─── Eyebrow + Title ───────────────────────────────────── */}
+        {/* ─── Eyebrow (title lives outside ScrollView as the morph
+            element — see morphTitleStyle). 32 px placeholder preserves
+            the hero's vertical rhythm. */}
         <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
           <Text
             style={{
@@ -296,23 +366,7 @@ export default function NoNameDetailScreen() {
           >
             Eigenmarke{disc?.name ? ` · ${disc.name}` : ''}
           </Text>
-          <Animated.Text
-            style={[
-              {
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 26,
-                lineHeight: 30,
-                color: theme.text,
-                letterSpacing: -0.3,
-                marginTop: 2,
-              },
-              heroTitleStyle,
-            ]}
-          >
-            {handelsmarkeName ? `${handelsmarkeName} ` : ''}
-            {p.name}
-          </Animated.Text>
+          <View style={{ height: 32, marginTop: 2 }} />
         </View>
 
         {/* ─── Hero image with overlays ──────────────────────────── */}

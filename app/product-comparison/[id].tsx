@@ -207,14 +207,36 @@ export default function ProductComparisonScreen() {
     },
   });
 
-  // Hero title hands off to the nav title: fades out + slides up in the
-  // same beat the DetailHeader's scrolledTitle fades in (swapAt = 200
-  // below). No competing crossfade — one continuous motion.
-  const heroTitleStyle = useAnimatedStyle(() => {
-    const t = interpolate(scrollY.value, [150, 190], [1, 0], Extrapolation.CLAMP);
+  // ─── Native "large title" morph ────────────────────────────────────
+  // The hero title (brand logo + product name) doesn't get swapped —
+  // it IS the nav title. It scrolls naturally with the content until
+  // it reaches the nav bar, then docks there: translates to the right
+  // of the back button, scales from 26 px → 17 px, and pins.
+  // All interpolation runs on the UI thread, so the motion is
+  // frame-perfect on iOS and Android. `transformOrigin: 'top left'`
+  // keeps scale anchored to the text's top-left so it doesn't drift
+  // visually as it shrinks.
+  const TITLE_FONT_SIZE = 26;
+  const TITLE_NAV_SIZE = 17;
+  const TITLE_SCALE = TITLE_NAV_SIZE / TITLE_FONT_SIZE; // ≈ 0.654
+  const HERO_TOP_IN_CONTENT = 10 + 16 + 2; // paddingTop + eyebrow + gap
+  const HERO_SCREEN_Y = insets.top + DETAIL_HEADER_ROW_HEIGHT + HERO_TOP_IN_CONTENT;
+  const NAV_SCREEN_Y = insets.top + (DETAIL_HEADER_ROW_HEIGHT - 24) / 2; // centred in nav row
+  const DOCK_DISTANCE = HERO_SCREEN_Y - NAV_SCREEN_Y;
+  const NAV_LEFT_OFFSET = 36; // hero padding 20 → nav after back btn (56)
+
+  const morphTitleStyle = useAnimatedStyle(() => {
+    const s = scrollY.value;
+    const t = interpolate(s, [0, DOCK_DISTANCE], [0, 1], Extrapolation.CLAMP);
+    // Natural scroll would already move the title up by `s`; we want
+    // it to stop at NAV_SCREEN_Y. `translateY = -min(s, DOCK)` means:
+    //   • s ≤ DOCK → translate with scroll (visually still = no transform)
+    //   • s ≥ DOCK → translate capped → pinned at nav height.
+    const translateY = -Math.min(s, DOCK_DISTANCE);
+    const translateX = t * NAV_LEFT_OFFSET;
+    const scale = 1 - t * (1 - TITLE_SCALE);
     return {
-      opacity: t,
-      transform: [{ translateY: (1 - t) * -6 }],
+      transform: [{ translateY }, { translateX }, { scale }],
     };
   });
 
@@ -388,18 +410,80 @@ export default function ProductComparisonScreen() {
   // ─── Render ───────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* BlurView header sits absolute on top — content scrolls UNDER it so
-          the Dynamic-Island area gets the native blurred-tint feel. The
-          product name (our H1) cross-fades into the nav bar as it scrolls
-          out of view, iOS-style. */}
+      {/* BlurView nav bar — back button + "Produktdetails" label that
+          fades out as the morph title docks in. We DON'T pass
+          scrolledTitle anymore: the product name is a single element
+          that physically moves from the hero into the nav bar (see
+          `morphTitleStyle` below) — not a second Text that fades in. */}
       <DetailHeader
         title="Produktdetails"
-        scrolledTitle={mainProduct.name ?? undefined}
-        scrolledLogoUri={brandLogoUri ?? null}
         scrollY={scrollY}
-        swapAt={200}
+        swapAt={DOCK_DISTANCE + 20}
         onBack={() => router.back()}
       />
+
+      {/* ─── Morphing product title ─────────────────────────────────
+          Single Animated.View containing the brand logo + product name.
+          At the top of the scroll it sits in the hero position at 26 px;
+          as the user scrolls it translates up with the content and
+          simultaneously shrinks + slides right. Once it reaches the nav
+          bar height (scroll = DOCK_DISTANCE) it pins there at 17 px,
+          sitting exactly where the nav title would normally live —
+          giving the iOS "large title docks into the nav bar" feel.
+          zIndex 11 keeps it above the blur chrome once docked. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            top: HERO_SCREEN_Y,
+            left: 20,
+            right: 20,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            zIndex: 11,
+            // top-left origin means scale shrinks toward the anchor
+            // point (the start of the text), not toward the centre.
+            transformOrigin: 'top left',
+          },
+          morphTitleStyle,
+        ]}
+      >
+        {brandLogoUri ? (
+          <View
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 6,
+              backgroundColor: '#ffffff',
+              borderWidth: 0.5,
+              borderColor: theme.border,
+              overflow: 'hidden',
+            }}
+          >
+            <Image
+              source={{ uri: brandLogoUri }}
+              style={{ width: '100%', height: '100%' }}
+              resizeMode="contain"
+            />
+          </View>
+        ) : null}
+        <Text
+          numberOfLines={1}
+          style={{
+            flexShrink: 1,
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: TITLE_FONT_SIZE,
+            lineHeight: 30,
+            color: theme.text,
+            letterSpacing: -0.3,
+          }}
+        >
+          {mainProduct.name}
+        </Text>
+      </Animated.View>
 
       <Animated.ScrollView
         onScroll={scrollHandler}
@@ -411,7 +495,10 @@ export default function ProductComparisonScreen() {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* ─── "DAS ORIGINAL" + Title ─────────────────────────────── */}
+        {/* ─── Eyebrow (title lives outside ScrollView as the morph
+            element — see morphTitleStyle). We keep a 32 px placeholder
+            equal to the title's line-height so the surrounding layout
+            doesn't shift. */}
         <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
           <Text
             style={{
@@ -425,22 +512,7 @@ export default function ProductComparisonScreen() {
           >
             Das Original
           </Text>
-          <Animated.Text
-            style={[
-              {
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 26,
-                lineHeight: 30,
-                color: theme.text,
-                letterSpacing: -0.3,
-                marginTop: 2,
-              },
-              heroTitleStyle,
-            ]}
-          >
-            {mainProduct.name}
-          </Animated.Text>
+          <View style={{ height: 32, marginTop: 2 }} />
         </View>
 
         {/* ─── Hero image with overlays ──────────────────────────── */}
