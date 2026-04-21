@@ -1,6 +1,5 @@
 import React from 'react';
 import { Image, Platform, Pressable, Text, View } from 'react-native';
-import Animated from 'react-native-reanimated';
 import {
   fontFamily,
   fontWeight,
@@ -32,11 +31,6 @@ type Props = {
   onPress?: () => void;
   /** Width override (defaults: horizontal=168, grid='100%'). */
   width?: number | string;
-  /** Shared-element tag. When set (and the destination screen renders
-   *  an Animated.Image with the same tag), Reanimated will morph the
-   *  product image from card → hero on push and back on pop. Convention:
-   *  `product-image-<id>`. */
-  sharedTag?: string;
 };
 
 function formatPrice(price: number): string {
@@ -61,7 +55,6 @@ export function ProductCard({
   variant = 'horizontal',
   onPress,
   width,
-  sharedTag,
 }: Props) {
   const { theme, shadows } = useTokens();
 
@@ -83,21 +76,11 @@ export function ProductCard({
     >
       <View style={{ position: 'relative', width: '100%', height: imageHeight }}>
         {imageUri ? (
-          // Animated.View with the tag, regular Image inside. Applying
-          // sharedTransitionTag directly to Animated.Image is flaky —
-          // the measured frame isn't always the image's natural size,
-          // so the morph can silently no-op. Wrapping keeps the
-          // measurement deterministic.
-          <Animated.View
+          <Image
+            source={{ uri: imageUri }}
             style={{ width: '100%', height: '100%' }}
-            sharedTransitionTag={sharedTag}
-          >
-            <Image
-              source={{ uri: imageUri }}
-              style={{ width: '100%', height: '100%' }}
-              resizeMode="cover"
-            />
-          </Animated.View>
+            resizeMode="cover"
+          />
         ) : (
           <View
             style={{

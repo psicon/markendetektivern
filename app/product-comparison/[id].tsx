@@ -170,8 +170,22 @@ export default function ProductComparisonScreen() {
     [nonames, pickedId],
   );
 
-  // Fetch 5 other brand products from the same category once the main
-  // product is known, so "Gute Alternativen" at the bottom isn't empty.
+  // Fetch candidates for "Gute Alternativen" and score them by real
+  // similarity to the main product, so we don't just dump "whatever is
+  // in the same category" at the user. Scoring rubric:
+  //   • same Kategorie .............. required (pre-filtered in the query)
+  //   • same Packungstyp (g/ml/Stk.)  +50  — a 250 g jar and a 1 l
+  //                                         bottle aren't really
+  //                                         comparable no matter how
+  //                                         close the categories are
+  //   • Packungsgröße within ±40 %    +30  — proportional fit, graded
+  //   • Preis within ±40 %            +20
+  //   • has NoName alternatives       +15  — users came here for
+  //                                         NoName comparisons, so a
+  //                                         brand that also has some
+  //                                         is a better follow-up
+  // We pull a bigger candidate pool (30) to give the scorer room, then
+  // take the top 5.
   useEffect(() => {
     if (!mainProduct) return;
     const catId =
@@ -179,16 +193,51 @@ export default function ProductComparisonScreen() {
       ((mainProduct as any).kategorie && typeof (mainProduct as any).kategorie === 'object'
         ? undefined
         : (mainProduct as any).kategorie);
+    const mainPackTypId =
+      (mainProduct as any).packTyp?.id ??
+      (mainProduct as any).packTypInfo?.id ??
+      null;
+    const mainSize = (mainProduct as any).packSize as number | undefined;
+    const mainPrice = (mainProduct as any).preis as number | undefined;
+
     (async () => {
       try {
         const res = await FirestoreService.getMarkenproduktePaginated(
-          10,
+          30,
           null,
           (catId ? { categoryFilters: [catId] } : {}) as any,
         );
+        const scoreOf = (p: any): number => {
+          let s = 0;
+          const pPackTypId = p.packTyp?.id ?? p.packTypInfo?.id ?? null;
+          if (mainPackTypId && pPackTypId && mainPackTypId === pPackTypId) s += 50;
+
+          const pSize = p.packSize as number | undefined;
+          if (mainSize && pSize && mainSize > 0 && pSize > 0) {
+            const ratio = Math.min(pSize, mainSize) / Math.max(pSize, mainSize);
+            if (ratio >= 0.6) s += Math.round(30 * ((ratio - 0.6) / 0.4));
+          }
+
+          const pPrice = p.preis as number | undefined;
+          if (mainPrice && pPrice && mainPrice > 0 && pPrice > 0) {
+            const ratio = Math.min(pPrice, mainPrice) / Math.max(pPrice, mainPrice);
+            if (ratio >= 0.6) s += Math.round(20 * ((ratio - 0.6) / 0.4));
+          }
+
+          if ((p.relatedProdukteIDs?.length ?? 0) > 0) s += 15;
+          return s;
+        };
+
         const list = (res.products ?? [])
           .filter((p: any) => p.id !== mainProduct.id)
-          .slice(0, 5);
+          .map((p: any) => ({ p, score: scoreOf(p) }))
+          // Cut anything that's only "same category" with nothing else
+          // in common — prevents random same-category picks when no
+          // genuinely similar products exist.
+          .filter(({ score }) => score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 5)
+          .map(({ p }) => p);
         setAlternatives(list);
       } catch (e) {
         console.warn('ProductComparison: alternatives load failed', e);
@@ -567,20 +616,11 @@ export default function ProductComparisonScreen() {
             }}
           >
             {mainProduct.bild ? (
-              // Animated.View carries the shared-transition tag, the
-              // Image inside renders normally — the same pattern we
-              // use in ProductCard/BrandCard so the card → hero morph
-              // measures reliably.
-              <Animated.View
+              <Image
+                source={{ uri: mainProduct.bild }}
                 style={{ width: '100%', height: '100%' }}
-                sharedTransitionTag={`product-image-${(mainProduct as any).id ?? ''}`}
-              >
-                <Image
-                  source={{ uri: mainProduct.bild }}
-                  style={{ width: '100%', height: '100%' }}
-                  resizeMode="cover"
-                />
-              </Animated.View>
+                resizeMode="cover"
+              />
             ) : (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 <MaterialCommunityIcons name="package-variant" size={64} color={theme.textMuted} />

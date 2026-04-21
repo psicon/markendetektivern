@@ -388,16 +388,11 @@ export default function NoNameDetailScreen() {
             }}
           >
             {p.bild ? (
-              <Animated.View
+              <Image
+                source={{ uri: p.bild }}
                 style={{ width: '100%', height: '100%' }}
-                sharedTransitionTag={`product-image-${p.id ?? ''}`}
-              >
-                <Image
-                  source={{ uri: p.bild }}
-                  style={{ width: '100%', height: '100%' }}
-                  resizeMode="cover"
-                />
-              </Animated.View>
+                resizeMode="cover"
+              />
             ) : (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 <MaterialCommunityIcons name="package-variant" size={64} color={theme.textMuted} />

@@ -875,7 +875,6 @@ export default function ExploreScreen() {
               sizeLabel={sizeLabel}
               unitPriceLabel={unitPriceLabel}
               variant="grid"
-              sharedTag={`product-image-${p.id}`}
               onPress={() => openProduct(p, index)}
             />
           </View>,
@@ -899,7 +898,6 @@ export default function ExploreScreen() {
               sizeLabel={sizeLabel}
               unitPriceLabel={unitPriceLabel}
               alternativeCount={m.relatedProdukteIDs?.length ?? 0}
-              sharedTag={`product-image-${m.id}`}
               onPress={() => openBrand(m, index)}
             />
           </View>,

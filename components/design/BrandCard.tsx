@@ -1,7 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import React from 'react';
 import { Image, Platform, Pressable, Text, View } from 'react-native';
-import Animated from 'react-native-reanimated';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 
@@ -22,10 +21,6 @@ type Props = {
   /** Price per unit — e.g. "8,90€/kg", "0,05€/Stk.". */
   unitPriceLabel?: string | null;
   onPress?: () => void;
-  /** Shared-element tag. When the destination screen renders an
-   *  Animated.Image with the same tag, Reanimated morphs the card
-   *  image into the hero image on push and back on pop. */
-  sharedTag?: string;
 };
 
 function formatEur(value: number): string {
@@ -49,7 +44,6 @@ export function BrandCard({
   sizeLabel,
   unitPriceLabel,
   onPress,
-  sharedTag,
 }: Props) {
   const { theme, shadows } = useTokens();
 
@@ -67,17 +61,11 @@ export function BrandCard({
     >
       <View style={{ position: 'relative', width: '100%', height: 162 }}>
         {imageUri ? (
-          // Animated.View wrapping Image — see ProductCard note.
-          <Animated.View
+          <Image
+            source={{ uri: imageUri }}
             style={{ width: '100%', height: '100%' }}
-            sharedTransitionTag={sharedTag}
-          >
-            <Image
-              source={{ uri: imageUri }}
-              style={{ width: '100%', height: '100%' }}
-              resizeMode="cover"
-            />
-          </Animated.View>
+            resizeMode="cover"
+          />
         ) : (
           <View
             style={{
