@@ -29,6 +29,7 @@ import { FilterChip } from '@/components/design/FilterChip';
 import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
 import { ProductCard } from '@/components/design/ProductCard';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
+import { StufenChips } from '@/components/design/StufenChips';
 import { collection, getDocs } from 'firebase/firestore';
 
 import { BannerAd } from '@/components/ads/BannerAd';
@@ -107,6 +108,17 @@ const GRID_ITEM_WIDTH = Math.floor((SCREEN_WIDTH - 20 * 2 - 12) / 2);
 // Collapsible tab-bar height (12 top + 40 SegmentedTabs + 12 bottom).
 const TAB_BAR_HEIGHT = 64;
 
+// Ähnlichkeitsstufen — label + one-line explanation used in the filter
+// sheet. Labels mirror `ProductDetail` from the prototype: higher stufe
+// = more similar to the brand product.
+const STUFE_INFO: Record<1 | 2 | 3 | 4 | 5, { label: string; line: string }> = {
+  5: { label: 'Identisch', line: 'Gleicher Hersteller, identische Rezeptur.' },
+  4: { label: 'Nahezu identisch', line: 'Gleicher Hersteller, minimal abweichend.' },
+  3: { label: 'Ähnlich', line: 'Gleicher Hersteller, angepasste Rezeptur.' },
+  2: { label: 'Verwandt', line: 'Anderer Hersteller, vergleichbare Qualität.' },
+  1: { label: 'Alternative', line: 'Alternative mit abweichender Rezeptur.' },
+};
+
 // ────────────────────────────────────────────────────────────────────────
 
 export default function ExploreScreen() {
@@ -136,7 +148,8 @@ export default function ExploreScreen() {
   const [marketCountry, setMarketCountry] = useState<string>('DE');
   const [handels, setHandels] = useState<string>('all');
   const [cat, setCat] = useState<string>('all');
-  const [minStufe, setMinStufe] = useState<number>(0);
+  // Multi-select: empty array = all stufes, otherwise only the selected ones.
+  const [stufeSelection, setStufeSelection] = useState<number[]>([]);
   const [brandId, setBrandId] = useState<string>('all');
   const [ingredients, setIngredients] = useState<string[]>([]);
   const [sort, setSort] = useState<SortKey>('name');
@@ -223,7 +236,7 @@ export default function ExploreScreen() {
     }, 200); // small debounce for typing
     return () => clearTimeout(t);
 
-  }, [tab, query, market, handels, cat, minStufe, brandId, ingredients, sort, kategorien.length]);
+  }, [tab, query, market, handels, cat, stufeSelection, brandId, ingredients, sort, kategorien.length]);
 
   // ─── Category access gate ─────────────────────────────────────────────
   const onChangeCategory = useCallback(
@@ -250,14 +263,15 @@ export default function ExploreScreen() {
     return {
       categoryFilters: cat !== 'all' ? [cat] : [],
       discounterFilters: market !== 'all' ? [market] : [],
-      stufeFilters: minStufe > 0 ? [minStufe, minStufe + 1, 5].filter((n, i, a) => a.indexOf(n) === i && n <= 5) : [],
+      // Exact match — only the stufes the user explicitly picked. Empty = no filter.
+      stufeFilters: [...stufeSelection],
       handelsmarkeFilters: handels !== 'all' ? [handels] : [],
       allergenFilters: {},
       nutritionFilters: {},
       searchQuery: query.trim() || undefined,
       sortBy: sort === 'preis' ? 'preis' : 'name',
     } as any;
-  }, [cat, market, minStufe, handels, query, sort]);
+  }, [cat, market, stufeSelection, handels, query, sort]);
 
   const buildMarkenFilters = useCallback((): ExtendedMarkenproduktFilters => {
     return {
@@ -334,7 +348,7 @@ export default function ExploreScreen() {
     setTab(k);
     setMarket('all');
     setHandels('all');
-    setMinStufe(0);
+    setStufeSelection([]);
     setBrandId('all');
     // Keep PagerView in sync (user tapped a tab)
     const pos = k === 'eigen' ? 0 : 1;
@@ -355,9 +369,15 @@ export default function ExploreScreen() {
     setMarket('all');
     setHandels('all');
     setCat('all');
-    setMinStufe(0);
+    setStufeSelection([]);
     setBrandId('all');
     setIngredients([]);
+  }, []);
+
+  const toggleStufe = useCallback((n: number) => {
+    setStufeSelection((prev) =>
+      prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n],
+    );
   }, []);
 
   const toggleIngredient = useCallback(
@@ -367,10 +387,20 @@ export default function ExploreScreen() {
   );
 
   const anyFilter =
-    (tab === 'eigen' && (market !== 'all' || handels !== 'all' || minStufe > 0)) ||
+    (tab === 'eigen' &&
+      (market !== 'all' || handels !== 'all' || stufeSelection.length > 0)) ||
     (tab === 'marken' && brandId !== 'all') ||
     cat !== 'all' ||
     ingredients.length > 0;
+
+  // Chip label: "3" when 1 selected, "3, 4" when 2-3 selected, "3 Stufen"
+  // when more. Keeps the rail compact while still showing what's active.
+  const stufeChipLabel = useMemo(() => {
+    if (stufeSelection.length === 0) return null;
+    const sorted = [...stufeSelection].sort((a, b) => b - a);
+    if (sorted.length <= 3) return sorted.join(', ');
+    return `${sorted.length} Stufen`;
+  }, [stufeSelection]);
 
   // ─── Lookup maps keyed by doc id, built once per reference-data load ──
   const discounterMap = useMemo(() => {
@@ -548,9 +578,9 @@ export default function ExploreScreen() {
           <FilterChip
             icon="star-four-points-outline"
             label="Stufe"
-            value={minStufe ? `${minStufe}+` : null}
+            value={stufeChipLabel}
             onPress={() => setSheet('stufe')}
-            onClear={minStufe ? () => setMinStufe(0) : null}
+            onClear={stufeSelection.length > 0 ? () => setStufeSelection([]) : null}
           />
           <FilterChip
             icon="leaf"
@@ -1122,7 +1152,7 @@ export default function ExploreScreen() {
 
       <FilterSheet
         visible={sheet === 'stufe'}
-        title={SHEET_TITLES.stufe}
+        title="Ähnlichkeitsstufen"
         onClose={() => setSheet(null)}
       >
         <Text
@@ -1130,54 +1160,146 @@ export default function ExploreScreen() {
             fontFamily,
             fontWeight: fontWeight.medium,
             fontSize: 13,
+            lineHeight: 18,
             color: theme.textMuted,
             marginBottom: 14,
           }}
         >
-          Zeige nur Eigenmarken ab dieser Ähnlichkeitsstufe.
+          Die Skala siehst du auf jeder Produktkarte. Je mehr Segmente gefüllt
+          sind, desto näher liegt das Eigenmarken-Produkt am Markenoriginal.
+          Wähle aus, welche Stufen angezeigt werden sollen.
         </Text>
-        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 22 }}>
-          {[0, 1, 2, 3, 4, 5].map((n) => {
-            const on = minStufe === n;
-            const bg = on ? (n === 0 ? theme.text : stufen[n as 1 | 2 | 3 | 4 | 5]) : theme.surface;
-            const fg = on ? (n === 3 ? theme.text : '#ffffff') : theme.text;
+
+        <View style={{ gap: 8, marginBottom: 18 }}>
+          {([5, 4, 3, 2, 1] as const).map((n) => {
+            const selected = stufeSelection.includes(n);
+            const info = STUFE_INFO[n];
+            const tint = stufen[n];
             return (
               <Pressable
                 key={n}
-                onPress={() => setMinStufe(n)}
+                onPress={() => toggleStufe(n)}
                 style={({ pressed }) => ({
-                  flex: 1,
-                  height: 52,
-                  borderRadius: 12,
-                  backgroundColor: bg,
+                  flexDirection: 'row',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: pressed ? 0.9 : 1,
-                  ...shadows.sm,
+                  gap: 12,
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  borderRadius: 12,
+                  borderWidth: 1.5,
+                  borderColor: selected ? tint : theme.border,
+                  backgroundColor: selected
+                    ? theme.surface
+                    : theme.surfaceAlt,
+                  opacity: pressed ? 0.88 : 1,
                 })}
               >
-                <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 16, color: fg }}>
-                  {n === 0 ? '—' : n}
-                </Text>
+                {/* Same StufenChips pattern as on ProductCard — instant
+                    visual connection to what users see in the grid. */}
+                <View style={{ width: 48, alignItems: 'flex-start' }}>
+                  <StufenChips stufe={n} size="lg" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.bold,
+                      fontSize: 14,
+                      color: theme.text,
+                    }}
+                  >
+                    Stufe {n} · {info.label}
+                  </Text>
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.regular,
+                      fontSize: 12,
+                      lineHeight: 16,
+                      color: theme.textMuted,
+                      marginTop: 2,
+                    }}
+                    numberOfLines={2}
+                  >
+                    {info.line}
+                  </Text>
+                </View>
+                {/* Checkbox indicator — matches OptionList styling */}
+                {selected ? (
+                  <MaterialCommunityIcons
+                    name="check-circle"
+                    size={22}
+                    color={tint}
+                  />
+                ) : (
+                  <View
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 11,
+                      borderWidth: 1.5,
+                      borderColor: theme.borderStrong,
+                    }}
+                  />
+                )}
               </Pressable>
             );
           })}
         </View>
-        <Pressable
-          onPress={() => setSheet(null)}
-          style={({ pressed }) => ({
-            height: 48,
-            borderRadius: 12,
-            backgroundColor: brand.primary,
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: pressed ? 0.9 : 1,
-          })}
-        >
-          <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: '#ffffff' }}>
-            Anwenden
-          </Text>
-        </Pressable>
+
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <Pressable
+            onPress={() =>
+              setStufeSelection(
+                stufeSelection.length === 5 ? [] : [1, 2, 3, 4, 5],
+              )
+            }
+            style={({ pressed }) => ({
+              flex: 1,
+              height: 48,
+              borderRadius: 12,
+              backgroundColor: theme.surface,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.9 : 1,
+              ...shadows.sm,
+            })}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 14,
+                color: theme.text,
+              }}
+            >
+              {stufeSelection.length === 5 ? 'Keine' : 'Alle'}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setSheet(null)}
+            style={({ pressed }) => ({
+              flex: 1,
+              height: 48,
+              borderRadius: 12,
+              backgroundColor: brand.primary,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.9 : 1,
+            })}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 14,
+                color: '#ffffff',
+              }}
+            >
+              Anwenden
+            </Text>
+          </Pressable>
+        </View>
       </FilterSheet>
 
       <FilterSheet
