@@ -10,7 +10,10 @@ import {
   View,
 } from 'react-native';
 import Animated, {
+  Extrapolation,
+  interpolate,
   useAnimatedScrollHandler,
+  useAnimatedStyle,
   useSharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -100,6 +103,16 @@ export default function NoNameDetailScreen() {
     onScroll: (e) => {
       scrollY.value = e.contentOffset.y;
     },
+  });
+
+  // Hero title hands off to the nav title — matches the product-
+  // comparison flow. UI-thread animation so Android stays smooth.
+  const heroTitleStyle = useAnimatedStyle(() => {
+    const t = interpolate(scrollY.value, [150, 190], [1, 0], Extrapolation.CLAMP);
+    return {
+      opacity: t,
+      transform: [{ translateY: (1 - t) * -6 }],
+    };
   });
 
   useEffect(() => {
@@ -283,20 +296,23 @@ export default function NoNameDetailScreen() {
           >
             Eigenmarke{disc?.name ? ` · ${disc.name}` : ''}
           </Text>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 26,
-              lineHeight: 30,
-              color: theme.text,
-              letterSpacing: -0.3,
-              marginTop: 2,
-            }}
+          <Animated.Text
+            style={[
+              {
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 26,
+                lineHeight: 30,
+                color: theme.text,
+                letterSpacing: -0.3,
+                marginTop: 2,
+              },
+              heroTitleStyle,
+            ]}
           >
             {handelsmarkeName ? `${handelsmarkeName} ` : ''}
             {p.name}
-          </Text>
+          </Animated.Text>
         </View>
 
         {/* ─── Hero image with overlays ──────────────────────────── */}

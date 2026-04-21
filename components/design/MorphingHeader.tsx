@@ -5,7 +5,9 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Extrapolation,
   interpolate,
+  runOnJS,
   type SharedValue,
+  useAnimatedReaction,
   useAnimatedStyle,
 } from 'react-native-reanimated';
 import { DetectiveMark } from './DetectiveMark';
@@ -72,6 +74,30 @@ export function MorphingHeader({
     };
   });
 
+  // Scanner button in the header is hidden initially (it lives inside the
+  // big search bar below the hero). Once the user starts scrolling past
+  // the morph threshold, it slides/fades in next to the profile button —
+  // same handoff choreography as the search pill. All interpolation runs
+  // on the UI thread via Reanimated, so this stays smooth on Android too.
+  const scannerStyle = useAnimatedStyle(() => {
+    const t = interpolate(scrollY.value, [30, 85], [0, 1], Extrapolation.CLAMP);
+    return {
+      opacity: t,
+      transform: [{ translateY: (1 - t) * -6 }, { scale: 0.85 + t * 0.15 }],
+    };
+  });
+  // `pointerEvents` needs to toggle off when invisible so the hidden
+  // button doesn't swallow taps meant for whatever is underneath.
+  // Driven from the UI thread via useAnimatedReaction so we only pay
+  // the JS-bridge hop when the threshold crosses, not on every frame.
+  const [scannerInteractive, setScannerInteractive] = React.useState(false);
+  useAnimatedReaction(
+    () => scrollY.value > 50,
+    (active, prev) => {
+      if (active !== prev) runOnJS(setScannerInteractive)(active);
+    },
+  );
+
   // Same visual treatment as DetailHeader / Stöbern chrome: BlurView on
   // iOS so the status-bar area feels native (Dynamic Island flows into
   // the header material); tinted semi-transparent fallback on Android,
@@ -115,12 +141,17 @@ export function MorphingHeader({
           </Animated.View>
         </View>
 
-        <Pressable
-          onPress={onPressScanner}
-          style={[styles.iconButton, { backgroundColor: theme.surfaceAlt }]}
+        <Animated.View
+          style={scannerStyle}
+          pointerEvents={scannerInteractive ? 'auto' : 'none'}
         >
-          <MaterialCommunityIcons name="barcode-scan" size={18} color={theme.textMuted} />
-        </Pressable>
+          <Pressable
+            onPress={onPressScanner}
+            style={[styles.iconButton, { backgroundColor: theme.surfaceAlt }]}
+          >
+            <MaterialCommunityIcons name="barcode-scan" size={18} color={theme.textMuted} />
+          </Pressable>
+        </Animated.View>
 
         <Pressable
           onPress={onPressProfile}

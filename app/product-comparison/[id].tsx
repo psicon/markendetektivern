@@ -12,7 +12,10 @@ import {
   View,
 } from 'react-native';
 import Animated, {
+  Extrapolation,
+  interpolate,
   useAnimatedScrollHandler,
+  useAnimatedStyle,
   useSharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -195,12 +198,24 @@ export default function ProductComparisonScreen() {
   const [alternatives, setAlternatives] = useState<any[]>([]);
 
   // Scroll tracking — drives the large-title → nav-title fade in the
-  // DetailHeader.
+  // DetailHeader. Everything reads `scrollY.value` from the UI thread,
+  // so the animation stays on the native side on both iOS and Android.
   const scrollY = useSharedValue(0);
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => {
       scrollY.value = e.contentOffset.y;
     },
+  });
+
+  // Hero title hands off to the nav title: fades out + slides up in the
+  // same beat the DetailHeader's scrolledTitle fades in (swapAt = 200
+  // below). No competing crossfade — one continuous motion.
+  const heroTitleStyle = useAnimatedStyle(() => {
+    const t = interpolate(scrollY.value, [150, 190], [1, 0], Extrapolation.CLAMP);
+    return {
+      opacity: t,
+      transform: [{ translateY: (1 - t) * -6 }],
+    };
   });
 
   const effectiveCardWidth =
@@ -410,19 +425,22 @@ export default function ProductComparisonScreen() {
           >
             Das Original
           </Text>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 26,
-              lineHeight: 30,
-              color: theme.text,
-              letterSpacing: -0.3,
-              marginTop: 2,
-            }}
+          <Animated.Text
+            style={[
+              {
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 26,
+                lineHeight: 30,
+                color: theme.text,
+                letterSpacing: -0.3,
+                marginTop: 2,
+              },
+              heroTitleStyle,
+            ]}
           >
             {mainProduct.name}
-          </Text>
+          </Animated.Text>
         </View>
 
         {/* ─── Hero image with overlays ──────────────────────────── */}

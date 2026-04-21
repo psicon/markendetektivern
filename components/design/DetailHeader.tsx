@@ -57,40 +57,33 @@ export function DetailHeader({
   const isIOS = Platform.OS === 'ios';
 
   const hasSwap = !!scrolledTitle && !!scrollY;
-  // Default fades out first; scrolled arrives while default is still
-  // half-faded (short overlap keeps the bar from feeling empty).
-  const defaultOutRange = [swapAt - 80, swapAt - 30] as const;
-  const scrolledInRange = [swapAt - 40, swapAt + 20] as const;
+  // One tight native-feeling handoff beat instead of a long crossfade:
+  // both titles live in the same 32 px band just before `swapAt`, so the
+  // motion reads as a single "Produktdetails slides up → product name
+  // rises in", not two separate fades overlapping.
+  // All interpolation runs on the UI thread (Reanimated 3), so the
+  // animation is frame-perfect on iOS and Android alike.
+  const outRange = [swapAt - 40, swapAt - 10] as const;
+  const inRange = [swapAt - 30, swapAt] as const;
 
   const defaultTitleStyle = useAnimatedStyle(() => {
     if (!hasSwap || !scrollY) {
       return { opacity: 1, transform: [{ translateY: 0 }] };
     }
+    const t = interpolate(scrollY.value, outRange, [1, 0], Extrapolation.CLAMP);
     return {
-      opacity: interpolate(scrollY.value, defaultOutRange, [1, 0], Extrapolation.CLAMP),
-      transform: [
-        {
-          translateY: interpolate(
-            scrollY.value,
-            defaultOutRange,
-            [0, -8],
-            Extrapolation.CLAMP,
-          ),
-        },
-      ],
+      opacity: t,
+      transform: [{ translateY: (1 - t) * -4 }],
     };
   });
   const scrolledGroupStyle = useAnimatedStyle(() => {
     if (!hasSwap || !scrollY) {
-      return { opacity: 0, transform: [{ translateY: 24 }, { scale: 0.92 }] };
+      return { opacity: 0, transform: [{ translateY: 8 }] };
     }
-    const t = interpolate(scrollY.value, scrolledInRange, [0, 1], Extrapolation.CLAMP);
+    const t = interpolate(scrollY.value, inRange, [0, 1], Extrapolation.CLAMP);
     return {
       opacity: t,
-      transform: [
-        { translateY: 24 * (1 - t) },
-        { scale: 0.92 + t * 0.08 },
-      ],
+      transform: [{ translateY: (1 - t) * 8 }],
     };
   });
   const borderStyle = useAnimatedStyle(() => {
@@ -98,7 +91,7 @@ export function DetailHeader({
     return {
       opacity: interpolate(
         scrollY.value,
-        [swapAt - 10, swapAt + 20],
+        [swapAt - 20, swapAt],
         [0, 1],
         Extrapolation.CLAMP,
       ),
