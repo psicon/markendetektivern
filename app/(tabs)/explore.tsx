@@ -97,6 +97,8 @@ const GRID_ITEM_WIDTH = Math.floor((SCREEN_WIDTH - 20 * 2 - 12) / 2);
 
 // Collapsible tab-bar height (12 top + 40 SegmentedTabs + 12 bottom).
 const TAB_BAR_HEIGHT = 64;
+// Search+filter rail height: 10 (top pad) + 38 (search) + 10 (gap) + 36 (chip row) + 10 (bottom pad).
+const SEARCH_FILTER_HEIGHT = 104;
 
 // Ähnlichkeitsstufen — label + one-line explanation used in the filter
 // sheet. Labels mirror `ProductDetail` from the prototype: higher stufe
@@ -550,8 +552,7 @@ export default function ExploreScreen() {
 
   // One sub-component per page — both share `query` / filter state so typing
   // in the search input on one page reflects on the other (fine because only
-  // one page is visible at a time). Grid rendered as a flexbox wrap since we
-  // need a ScrollView for stickyHeaderIndices support.
+  // one page is visible at a time). Grid rendered as a flexbox wrap.
   const renderFilterRail = (forTab: Tab) => (
     <ScrollView
       horizontal
@@ -661,38 +662,14 @@ export default function ExploreScreen() {
     </View>
   );
 
-  // Fallback BlurView on Android has poor quality; fall back to a tinted
-  // semi-transparent view (still gives the "glassy" feel with the bg showing).
-  const StickyHeader = ({ forTab }: { forTab: Tab }) => {
-    const commonStyle = { paddingBottom: 10 };
-    if (Platform.OS === 'ios') {
-      return (
-        <BlurView
-          tint={scheme === 'dark' ? 'dark' : 'light'}
-          intensity={70}
-          style={commonStyle}
-        >
-          {renderSearchInput(forTab)}
-          {renderFilterRail(forTab)}
-        </BlurView>
-      );
-    }
-    return (
-      <View
-        style={[
-          commonStyle,
-          {
-            backgroundColor: scheme === 'dark'
-              ? 'rgba(15,18,20,0.92)'
-              : 'rgba(245,247,248,0.92)',
-          },
-        ]}
-      >
-        {renderSearchInput(forTab)}
-        {renderFilterRail(forTab)}
-      </View>
-    );
-  };
+  // Search + filter rail content (no wrapper — the animated absolute
+  // container provides positioning/background).
+  const renderSearchFilterContent = (forTab: Tab) => (
+    <>
+      {renderSearchInput(forTab)}
+      {renderFilterRail(forTab)}
+    </>
+  );
 
   const renderGrid = (forTab: Tab) => {
     const items = forTab === 'eigen' ? nonames : markenprodukte;
@@ -901,49 +878,79 @@ export default function ExploreScreen() {
     };
   });
 
+  // Search + filter rail — absolute, translates up with scroll so it
+  // slides up into the space vacated by the collapsing tabs and then
+  // "pins" just below the status bar. No RN sticky-header needed — the
+  // translate is driven by the same scroll shared value as the tabs, so
+  // the two move in lock-step.
+  const searchFilterAnimStyle = useAnimatedStyle(() => {
+    const active =
+      pageIndexShared.value === 0 ? scrollYEigen.value : scrollYMarken.value;
+    const translateY = interpolate(
+      active,
+      [0, TAB_BAR_HEIGHT],
+      [0, -TAB_BAR_HEIGHT],
+      Extrapolation.CLAMP,
+    );
+    return { transform: [{ translateY }] };
+  });
+
+  // iOS blur strip shrinks with scroll. Full height when tabs are
+  // visible (covers status bar + tabs + search rail), clips down to
+  // just status bar + search rail once tabs have collapsed.
+  const blurAnimStyle = useAnimatedStyle(() => {
+    const active =
+      pageIndexShared.value === 0 ? scrollYEigen.value : scrollYMarken.value;
+    const height = interpolate(
+      active,
+      [0, TAB_BAR_HEIGHT],
+      [
+        insets.top + TAB_BAR_HEIGHT + SEARCH_FILTER_HEIGHT,
+        insets.top + SEARCH_FILTER_HEIGHT,
+      ],
+      Extrapolation.CLAMP,
+    );
+    return { height };
+  });
+
+  // Android uses a flat tinted View instead of BlurView; same shrink
+  // behaviour so the chrome stays coherent across platforms.
+  const androidChromeAnimStyle = useAnimatedStyle(() => {
+    const active =
+      pageIndexShared.value === 0 ? scrollYEigen.value : scrollYMarken.value;
+    const height = interpolate(
+      active,
+      [0, TAB_BAR_HEIGHT],
+      [
+        insets.top + TAB_BAR_HEIGHT + SEARCH_FILTER_HEIGHT,
+        insets.top + SEARCH_FILTER_HEIGHT,
+      ],
+      Extrapolation.CLAMP,
+    );
+    return { height };
+  });
+
+  // Hairline separator at the bottom edge of the chrome — translates
+  // as the chrome shrinks so it sits flush with the visible edge.
+  const chromeBorderAnimStyle = useAnimatedStyle(() => {
+    const active =
+      pageIndexShared.value === 0 ? scrollYEigen.value : scrollYMarken.value;
+    const h = interpolate(
+      active,
+      [0, TAB_BAR_HEIGHT],
+      [
+        insets.top + TAB_BAR_HEIGHT + SEARCH_FILTER_HEIGHT,
+        insets.top + SEARCH_FILTER_HEIGHT,
+      ],
+      Extrapolation.CLAMP,
+    );
+    return { transform: [{ translateY: h - 1 }] };
+  });
+
+  const chromeTotalHeight = insets.top + TAB_BAR_HEIGHT + SEARCH_FILTER_HEIGHT;
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* Solid safe-area filler. A blurred variant was tried and
-          abandoned: when the blur only covered insets.top there was a
-          visible seam where the tab bar met the status bar; when it
-          covered both, the collapsing tab animation stopped reading
-          cleanly. The flat bg gives the "gray strip" look but keeps
-          the tabs visually coherent with the page. */}
-      <View style={{ height: insets.top, backgroundColor: theme.bg }} />
-
-      {/* Collapsible SegmentedTabs — absolute so it overlays the pager
-          without pushing content; animates translateY + opacity as the
-          active page scrolls. */}
-      <Animated.View
-        pointerEvents="box-none"
-        style={[
-          {
-            position: 'absolute',
-            top: insets.top,
-            left: 0,
-            right: 0,
-            height: TAB_BAR_HEIGHT,
-            paddingTop: 12,
-            paddingBottom: 12,
-            paddingHorizontal: 20,
-            backgroundColor: theme.bg,
-            borderBottomWidth: 1,
-            borderBottomColor: theme.border,
-            zIndex: 10,
-          },
-          tabsAnimStyle,
-        ]}
-      >
-        <SegmentedTabs
-          tabs={[
-            { key: 'eigen', label: 'Eigenmarken' },
-            { key: 'marken', label: 'Marken' },
-          ] as const}
-          value={tab}
-          onChange={switchTab}
-        />
-      </Animated.View>
-
       <PagerView
         ref={pagerRef}
         style={{ flex: 1 }}
@@ -953,18 +960,14 @@ export default function ExploreScreen() {
         {/* ─── Page 0 — Eigenmarken ─────────────────────────────────── */}
         <View key="eigen" style={{ flex: 1 }}>
           <Animated.ScrollView
-            stickyHeaderIndices={[0]}
             onScroll={scrollHandlerEigen}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingTop: TAB_BAR_HEIGHT, paddingBottom: 120 }}
+            contentContainerStyle={{
+              paddingTop: chromeTotalHeight,
+              paddingBottom: 120,
+            }}
           >
-            {/* 0 — sticky glass header. The ScrollView viewport already
-                starts at insets.top (the solid safe-area filler pushes
-                the pager down), so the natural position is directly
-                below the tabs and the pin target is right below the
-                status bar once the tabs collapse. */}
-            <StickyHeader forTab="eigen" />
             {!isPremium ? (
               <View
                 style={{
@@ -990,13 +993,14 @@ export default function ExploreScreen() {
         {/* ─── Page 1 — Marken ──────────────────────────────────────── */}
         <View key="marken" style={{ flex: 1 }}>
           <Animated.ScrollView
-            stickyHeaderIndices={[0]}
             onScroll={scrollHandlerMarken}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingTop: TAB_BAR_HEIGHT, paddingBottom: 120 }}
+            contentContainerStyle={{
+              paddingTop: chromeTotalHeight,
+              paddingBottom: 120,
+            }}
           >
-            <StickyHeader forTab="marken" />
             {!isPremium ? (
               <View
                 style={{
@@ -1019,6 +1023,123 @@ export default function ExploreScreen() {
           </Animated.ScrollView>
         </View>
       </PagerView>
+
+      {/* ─── Top chrome (absolute, content scrolls under it) ────────
+          Structure:
+            • iOS: one BlurView spanning status bar + tabs + search/filter
+              rail. Height animates from full to (no tabs) as user scrolls.
+            • Android: tinted opaque strip with same shrink behaviour.
+            • Tabs: absolute at insets.top, translate up + fade on scroll.
+            • Search/filter rail: absolute at insets.top+TAB_BAR_HEIGHT,
+              translates up in lock-step with tabs so it settles right
+              below the status bar once tabs have collapsed.
+          No RN sticky-header — both moving pieces are driven directly
+          from the scroll shared value, which dodges the "sticky pins at
+          viewport y=0 / under the blur" problem entirely. */}
+      {Platform.OS === 'ios' ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            {
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              zIndex: 9,
+            },
+            blurAnimStyle,
+          ]}
+        >
+          <BlurView
+            tint={scheme === 'dark' ? 'dark' : 'light'}
+            intensity={80}
+            style={{ flex: 1 }}
+          />
+        </Animated.View>
+      ) : (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            {
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              backgroundColor: theme.bg,
+              zIndex: 9,
+            },
+            androidChromeAnimStyle,
+          ]}
+        />
+      )}
+
+      {/* Search + filter rail — absolute, slides up with the tabs. */}
+      <Animated.View
+        pointerEvents="box-none"
+        style={[
+          {
+            position: 'absolute',
+            top: insets.top + TAB_BAR_HEIGHT,
+            left: 0,
+            right: 0,
+            height: SEARCH_FILTER_HEIGHT,
+            zIndex: 10,
+          },
+          searchFilterAnimStyle,
+        ]}
+      >
+        {renderSearchFilterContent(tab)}
+      </Animated.View>
+
+      {/* Collapsible SegmentedTabs — absolute so it overlays the pager
+          without pushing content; animates translateY + opacity as the
+          active page scrolls. */}
+      <Animated.View
+        pointerEvents="box-none"
+        style={[
+          {
+            position: 'absolute',
+            top: insets.top,
+            left: 0,
+            right: 0,
+            height: TAB_BAR_HEIGHT,
+            paddingTop: 12,
+            paddingBottom: 12,
+            paddingHorizontal: 20,
+            backgroundColor: 'transparent',
+            zIndex: 11,
+          },
+          tabsAnimStyle,
+        ]}
+      >
+        <SegmentedTabs
+          tabs={[
+            { key: 'eigen', label: 'Eigenmarken' },
+            { key: 'marken', label: 'Marken' },
+          ] as const}
+          value={tab}
+          onChange={switchTab}
+        />
+      </Animated.View>
+
+      {/* Hairline separator at the very bottom of the chrome — follows
+          the shrinking blur so it sits right below whatever chrome is
+          currently visible. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            height: 1,
+            backgroundColor: theme.border,
+            zIndex: 12,
+          },
+          chromeBorderAnimStyle,
+        ]}
+      />
 
       {/* ─── Filter sheets ──────────────────────────────────────────── */}
       <FilterSheet
