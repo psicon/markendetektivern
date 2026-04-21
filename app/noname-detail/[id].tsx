@@ -1,5 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { RatingsSheet, type Rating } from '@/components/design/RatingsSheet';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -84,6 +85,9 @@ export default function NoNameDetailScreen() {
   const [tab, setTab] = useState<Tab>('ingredients');
   const [isFav, setIsFav] = useState(false);
   const [inCart, setInCart] = useState(false);
+  const [ratingsOpen, setRatingsOpen] = useState(false);
+  const [ratings, setRatings] = useState<Rating[]>([]);
+  const [ratingsLoading, setRatingsLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -208,19 +212,35 @@ export default function NoNameDetailScreen() {
         { screenName: 'noname-detail' },
         { price: p.preis ?? 0, savings: 0 },
       );
-      showCartAddedToast(p.name ?? 'Produkt');
+      showCartAddedToast(
+        p.name ?? 'Produkt',
+        () => router.push('/shopping-list' as any),
+      );
     } catch {
       setInCart(false);
       showInfoToast('Fehler — bitte erneut versuchen');
     }
   };
-  const onRatingsPress = () => {
-    showInfoToast(`Bewertungen für „${p.name}" — demnächst`);
+  const onRatingsPress = async () => {
+    setRatingsOpen(true);
+    setRatingsLoading(true);
+    setRatings([]);
+    try {
+      const data = await FirestoreService.getProductRatingsWithUserInfo(p.id, true);
+      setRatings(data as any);
+    } catch (e) {
+      console.warn('NoNameDetail: ratings load failed', e);
+    } finally {
+      setRatingsLoading(false);
+    }
   };
 
   // ─── Render ───────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      {/* Hide the default Expo Router stack header — we render our own. */}
+      <Stack.Screen options={{ headerShown: false }} />
+
       {/* Sticky header — back + title */}
       <View style={{ paddingTop: insets.top, backgroundColor: theme.bg, zIndex: 5 }}>
         <View
@@ -650,6 +670,17 @@ export default function NoNameDetailScreen() {
 
         <View style={{ height: 24 }} />
       </ScrollView>
+
+      <RatingsSheet
+        visible={ratingsOpen}
+        onClose={() => setRatingsOpen(false)}
+        productName={p.name ?? 'Produkt'}
+        ratings={ratingsLoading ? [] : ratings}
+        showSimilarity={false}
+        onWriteRating={() => {
+          showInfoToast('Bewertungen schreiben — demnächst');
+        }}
+      />
     </View>
   );
 }

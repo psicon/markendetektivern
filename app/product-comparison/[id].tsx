@@ -1,6 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { RatingsSheet, type Rating } from '@/components/design/RatingsSheet';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -149,10 +150,15 @@ export default function ProductComparisonScreen() {
   const [tab, setTab] = useState<Tab>('ingredients');
   const [carouselIdx, setCarouselIdx] = useState(0);
   const carouselRef = useRef<ScrollView | null>(null);
-  // Per-product favorite / cart flags — keyed by product id so the main and
-  // carousel cards can flip independently.
   const [favMap, setFavMap] = useState<Record<string, boolean>>({});
   const [cartMap, setCartMap] = useState<Record<string, boolean>>({});
+  const [ratingsSheet, setRatingsSheet] = useState<{
+    productId: string;
+    productName: string;
+    isMarke: boolean;
+  } | null>(null);
+  const [ratings, setRatings] = useState<Rating[]>([]);
+  const [ratingsLoading, setRatingsLoading] = useState(false);
 
   const effectiveCardWidth =
     nonames.length <= 1 ? NN_CARD_WIDTH_SINGLE : NN_CARD_WIDTH;
@@ -281,9 +287,6 @@ export default function ProductComparisonScreen() {
     setCartMap((prev) => ({ ...prev, [productId]: !already }));
     try {
       if (already) {
-        // The service's removeFromShoppingCart needs the cart-item doc id,
-        // not the product id — not available without a lookup. Keep the
-        // local flag flipped; surface a toast that the item's been noted.
         showInfoToast('Aus Einkaufsliste entfernt');
       } else {
         await FirestoreService.addToShoppingCart(
@@ -298,7 +301,10 @@ export default function ProductComparisonScreen() {
             savings: 0,
           },
         );
-        showCartAddedToast(productData?.name ?? 'Produkt');
+        showCartAddedToast(
+          productData?.name ?? 'Produkt',
+          () => router.push('/shopping-list' as any),
+        );
       }
     } catch (e) {
       setCartMap((prev) => ({ ...prev, [productId]: already }));
@@ -306,16 +312,35 @@ export default function ProductComparisonScreen() {
     }
   };
 
-  const onOpenRatings = (productId: string, productName: string) => {
-    // TODO: proper ratings bottom-sheet. For now route to the standalone
-    // comment list so the action isn't dead.
-    router.push(`/product-comparison/${productId}?type=${isMarkenProdukt ? 'markenprodukt' : 'noname'}` as any);
-    showInfoToast(`Bewertungen für „${productName}" — demnächst`);
+  const onOpenRatings = async (
+    productId: string,
+    productName: string,
+    isMarke: boolean,
+  ) => {
+    setRatingsSheet({ productId, productName, isMarke });
+    setRatingsLoading(true);
+    setRatings([]);
+    try {
+      const data = await FirestoreService.getProductRatingsWithUserInfo(
+        productId,
+        !isMarke,
+      );
+      setRatings(data as any);
+    } catch (e) {
+      console.warn('ProductComparison: ratings load failed', e);
+    } finally {
+      setRatingsLoading(false);
+    }
   };
 
   // ─── Render ───────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      {/* Suppress the default Expo Router Stack header — our custom sticky
+          header below replaces it. Without this, we'd see the route name
+          ("product-comparison/[id]") ghosted above the real UI. */}
+      <Stack.Screen options={{ headerShown: false }} />
+
       {/* Sticky header — stays put when content scrolls (matches prototype
           position:sticky). Just back arrow + title — search / notifications
           were cosmetic per request. */}
@@ -578,7 +603,7 @@ export default function ProductComparisonScreen() {
                     ? ((mainProduct as any).averageRatingOverall as number).toFixed(1)
                     : undefined
                 }
-                onPress={() => onOpenRatings(mainProduct.id, mainProduct.name ?? 'Produkt')}
+                onPress={() => onOpenRatings(mainProduct.id, mainProduct.name ?? 'Produkt', true)}
               />
             </View>
           </View>
@@ -857,7 +882,7 @@ export default function ProductComparisonScreen() {
                               ? ((nn as any).averageRatingOverall as number).toFixed(1)
                               : undefined
                           }
-                          onPress={() => onOpenRatings(nn.id, (nn as any).name ?? 'Produkt')}
+                          onPress={() => onOpenRatings(nn.id, (nn as any).name ?? 'Produkt', false)}
                         />
                       </View>
                     </View>
@@ -1111,6 +1136,20 @@ export default function ProductComparisonScreen() {
 
         <View style={{ height: 24 }} />
       </ScrollView>
+
+      {/* Ratings sheet — opened from any star ActionButton. Shared for both
+          the main brand product and the currently picked NoName via the
+          ratingsSheet state carrying {productId, productName, isMarke}. */}
+      <RatingsSheet
+        visible={!!ratingsSheet}
+        onClose={() => setRatingsSheet(null)}
+        productName={ratingsSheet?.productName ?? ''}
+        ratings={ratingsLoading ? [] : ratings}
+        showSimilarity={!ratingsSheet?.isMarke}
+        onWriteRating={() => {
+          showInfoToast('Bewertungen schreiben — demnächst');
+        }}
+      />
     </View>
   );
 }
