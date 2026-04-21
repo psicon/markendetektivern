@@ -284,6 +284,19 @@ export default function ExploreScreen() {
     } as any;
   }, [cat, brandId, query, sort]);
 
+  // Client-side comparator — Firestore silently disables its own orderBy
+  // when complex filters are active (see firestore.ts `hasComplexFilters`),
+  // so we always re-sort here to guarantee the order matches the chip.
+  const productSorter = useCallback(
+    (a: any, b: any) => {
+      if (sort === 'preis') return (a.preis ?? 0) - (b.preis ?? 0);
+      return String(a.name ?? '').localeCompare(String(b.name ?? ''), 'de', {
+        sensitivity: 'base',
+      });
+    },
+    [sort],
+  );
+
   const loadNonames = useCallback(
     async (reset: boolean) => {
       if (!reset && (nonameLoading || !nonameHasMore)) return;
@@ -296,9 +309,10 @@ export default function ExploreScreen() {
           buildNonameFilters() as any,
         );
         setNonames((prev) => {
-          if (reset) return res.products as any;
-          const existing = new Set(prev.map((p) => p.id));
-          return [...prev, ...(res.products as any).filter((p: any) => !existing.has(p.id))];
+          const existing = reset ? new Set<string>() : new Set(prev.map((p) => p.id));
+          const incoming = (res.products as any[]).filter((p) => !existing.has(p.id));
+          const merged = reset ? incoming : [...prev, ...incoming];
+          return [...merged].sort(productSorter) as any;
         });
         setNonameLastDoc(res.lastDoc);
         setNonameHasMore(res.hasMore);
@@ -308,7 +322,7 @@ export default function ExploreScreen() {
         setNonameLoading(false);
       }
     },
-    [nonameLoading, nonameHasMore, nonameLastDoc, buildNonameFilters],
+    [nonameLoading, nonameHasMore, nonameLastDoc, buildNonameFilters, productSorter],
   );
 
   const loadMarken = useCallback(
@@ -323,9 +337,10 @@ export default function ExploreScreen() {
           buildMarkenFilters() as any,
         );
         setMarkenprodukte((prev) => {
-          if (reset) return res.products as any;
-          const existing = new Set(prev.map((p) => p.id));
-          return [...prev, ...(res.products as any).filter((p: any) => !existing.has(p.id))];
+          const existing = reset ? new Set<string>() : new Set(prev.map((p) => p.id));
+          const incoming = (res.products as any[]).filter((p) => !existing.has(p.id));
+          const merged = reset ? incoming : [...prev, ...incoming];
+          return [...merged].sort(productSorter) as any;
         });
         setMarkenLastDoc(res.lastDoc);
         setMarkenHasMore(res.hasMore);
@@ -335,7 +350,7 @@ export default function ExploreScreen() {
         setMarkenLoading(false);
       }
     },
-    [markenLoading, markenHasMore, markenLastDoc, buildMarkenFilters],
+    [markenLoading, markenHasMore, markenLastDoc, buildMarkenFilters, productSorter],
   );
 
   const loadMore = useCallback(() => {
@@ -1247,59 +1262,9 @@ export default function ExploreScreen() {
           })}
         </View>
 
-        <View style={{ flexDirection: 'row', gap: 10 }}>
-          <Pressable
-            onPress={() =>
-              setStufeSelection(
-                stufeSelection.length === 5 ? [] : [1, 2, 3, 4, 5],
-              )
-            }
-            style={({ pressed }) => ({
-              flex: 1,
-              height: 48,
-              borderRadius: 12,
-              backgroundColor: theme.surface,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: pressed ? 0.9 : 1,
-              ...shadows.sm,
-            })}
-          >
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold,
-                fontSize: 14,
-                color: theme.text,
-              }}
-            >
-              {stufeSelection.length === 5 ? 'Keine' : 'Alle'}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setSheet(null)}
-            style={({ pressed }) => ({
-              flex: 1,
-              height: 48,
-              borderRadius: 12,
-              backgroundColor: brand.primary,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: pressed ? 0.9 : 1,
-            })}
-          >
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 14,
-                color: '#ffffff',
-              }}
-            >
-              Anwenden
-            </Text>
-          </Pressable>
-        </View>
+        {/* Trailing whitespace to breathe — no Anwenden button; changes
+            apply on toggle and commit on swipe-down dismissal. */}
+        <View style={{ height: 8 }} />
       </FilterSheet>
 
       <FilterSheet
@@ -1439,41 +1404,7 @@ export default function ExploreScreen() {
             );
           })}
         </View>
-        <View style={{ flexDirection: 'row', gap: 10 }}>
-          <Pressable
-            onPress={() => setIngredients([])}
-            style={({ pressed }) => ({
-              flex: 1,
-              height: 48,
-              borderRadius: 12,
-              backgroundColor: theme.surface,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: pressed ? 0.9 : 1,
-              ...shadows.sm,
-            })}
-          >
-            <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: theme.text }}>
-              Zurücksetzen
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setSheet(null)}
-            style={({ pressed }) => ({
-              flex: 1,
-              height: 48,
-              borderRadius: 12,
-              backgroundColor: brand.primary,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: pressed ? 0.9 : 1,
-            })}
-          >
-            <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: '#ffffff' }}>
-              Anwenden
-            </Text>
-          </Pressable>
-        </View>
+        <View style={{ height: 8 }} />
       </FilterSheet>
 
       {/* ─── Locked category modal (Alkohol gating) ─────────────────── */}

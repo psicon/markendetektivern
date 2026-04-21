@@ -1,5 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   Modal,
   Pressable,
@@ -7,8 +7,20 @@ import {
   Text,
   View,
 } from 'react-native';
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from 'react-native-gesture-handler';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 
 type Props = {
@@ -20,15 +32,58 @@ type Props = {
   maxHeightRatio?: number;
 };
 
+const SWIPE_CLOSE_THRESHOLD = 100; // px dragged down
+const SWIPE_CLOSE_VELOCITY = 500; // px/sec
+
 /**
- * Bottom sheet used for filter pickers in Stöbern. Simple native `Modal`-backed
- * sheet with backdrop tap-to-dismiss, drag handle, title row, and scrollable
- * content area. Not as fancy as @gorhom/bottom-sheet but far simpler and works
- * without deep integration into the gesture handler tree.
+ * Bottom sheet used for filter pickers in Stöbern. Native-feeling swipe-
+ * down-to-dismiss via react-native-gesture-handler + reanimated. No
+ * "Apply" button — changes are live; dismissing commits whatever is
+ * currently selected.
  */
-export function FilterSheet({ visible, title, onClose, children, maxHeightRatio = 0.78 }: Props) {
+export function FilterSheet({
+  visible,
+  title,
+  onClose,
+  children,
+  maxHeightRatio = 0.78,
+}: Props) {
   const { theme } = useTokens();
   const insets = useSafeAreaInsets();
+
+  const translateY = useSharedValue(0);
+
+  // Reset the sheet position whenever it opens.
+  useEffect(() => {
+    if (visible) {
+      translateY.value = 0;
+    }
+  }, [visible, translateY]);
+
+  const panGesture = Gesture.Pan()
+    // Only engage once the user has clearly moved vertically — lets taps
+    // through, and keeps the inner ScrollView's scroll gesture intact for
+    // small swipes.
+    .activeOffsetY(10)
+    .onUpdate((e) => {
+      if (e.translationY > 0) {
+        translateY.value = e.translationY;
+      }
+    })
+    .onEnd((e) => {
+      const shouldClose =
+        translateY.value > SWIPE_CLOSE_THRESHOLD || e.velocityY > SWIPE_CLOSE_VELOCITY;
+      if (shouldClose) {
+        translateY.value = withTiming(600, { duration: 180 });
+        runOnJS(onClose)();
+      } else {
+        translateY.value = withSpring(0, { damping: 18, stiffness: 220 });
+      }
+    });
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
 
   return (
     <Modal
@@ -38,66 +93,83 @@ export function FilterSheet({ visible, title, onClose, children, maxHeightRatio 
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <Pressable
-        onPress={onClose}
-        style={{
-          flex: 1,
-          backgroundColor: theme.overlay,
-          justifyContent: 'flex-end',
-        }}
-      >
+      {/* GestureHandlerRootView is required inside Modal because Modal
+          creates its own native view hierarchy outside the app root. */}
+      <GestureHandlerRootView style={{ flex: 1 }}>
         <Pressable
-          onPress={() => {}}
+          onPress={onClose}
           style={{
-            backgroundColor: theme.surface,
-            borderTopLeftRadius: 22,
-            borderTopRightRadius: 22,
-            paddingTop: 10,
-            paddingBottom: Math.max(28, insets.bottom + 16),
-            maxHeight: `${maxHeightRatio * 100}%` as any,
+            flex: 1,
+            backgroundColor: theme.overlay,
+            justifyContent: 'flex-end',
           }}
         >
-          <View
-            style={{
-              width: 36,
-              height: 4,
-              borderRadius: 2,
-              backgroundColor: theme.border,
-              alignSelf: 'center',
-              marginBottom: 14,
-            }}
-          />
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              paddingHorizontal: 20,
-              marginBottom: 14,
-            }}
-          >
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 18,
-                color: theme.text,
-              }}
+          <GestureDetector gesture={panGesture}>
+            <Animated.View
+              // Stop backdrop press from firing when tapping inside the sheet.
+              onStartShouldSetResponder={() => true}
+              style={[
+                sheetStyle,
+                {
+                  backgroundColor: theme.surface,
+                  borderTopLeftRadius: 22,
+                  borderTopRightRadius: 22,
+                  paddingTop: 10,
+                  paddingBottom: Math.max(32, insets.bottom + 20),
+                  maxHeight: `${maxHeightRatio * 100}%` as any,
+                },
+              ]}
             >
-              {title}
-            </Text>
-            <Pressable onPress={onClose} hitSlop={8}>
-              <MaterialCommunityIcons name="close" size={20} color={theme.textMuted} />
-            </Pressable>
-          </View>
-          <ScrollView
-            contentContainerStyle={{ paddingHorizontal: 20 }}
-            keyboardShouldPersistTaps="handled"
-          >
-            {children}
-          </ScrollView>
+              {/* Drag handle — chunky enough to visibly afford the swipe. */}
+              <View
+                style={{
+                  width: 44,
+                  height: 5,
+                  borderRadius: 3,
+                  backgroundColor: theme.borderStrong,
+                  alignSelf: 'center',
+                  marginBottom: 14,
+                }}
+              />
+
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingHorizontal: 20,
+                  marginBottom: 14,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 18,
+                    color: theme.text,
+                  }}
+                >
+                  {title}
+                </Text>
+                <Pressable onPress={onClose} hitSlop={8}>
+                  <MaterialCommunityIcons
+                    name="close"
+                    size={20}
+                    color={theme.textMuted}
+                  />
+                </Pressable>
+              </View>
+
+              <ScrollView
+                contentContainerStyle={{ paddingHorizontal: 20 }}
+                keyboardShouldPersistTaps="handled"
+              >
+                {children}
+              </ScrollView>
+            </Animated.View>
+          </GestureDetector>
         </Pressable>
-      </Pressable>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
@@ -110,7 +182,12 @@ type OptionListProps<T extends string> = {
   renderLeading?: (key: T) => React.ReactNode;
 };
 
-export function OptionList<T extends string>({ value, options, onChange, renderLeading }: OptionListProps<T>) {
+export function OptionList<T extends string>({
+  value,
+  options,
+  onChange,
+  renderLeading,
+}: OptionListProps<T>) {
   const { theme, brand } = useTokens();
 
   return (
