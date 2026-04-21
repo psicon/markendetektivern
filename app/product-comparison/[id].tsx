@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
 import { ProductDetailSkeleton } from '@/components/design/Skeletons';
+import { StufenChips } from '@/components/design/StufenChips';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -776,12 +777,17 @@ export default function ProductComparisonScreen() {
                       </View>
                     ) : null}
 
-                    <View style={{ flexDirection: 'row', padding: 12, gap: 12 }}>
-                      {/* Thumb */}
+                    <View style={{ flexDirection: 'row', padding: 12, gap: 12, alignItems: 'stretch' }}>
+                      {/* Thumb — 76×76 so its height roughly matches the
+                          info block (eyebrow + 2-line name + pack row +
+                          StufenChips). Slightly bigger than the old
+                          60×60 reads as a more substantial product tile
+                          next to the text, which was the point of the
+                          "passt zur höhe"-request. */}
                       <View
                         style={{
-                          width: 60,
-                          height: 60,
+                          width: 76,
+                          height: 76,
                           borderRadius: 10,
                           overflow: 'hidden',
                           backgroundColor: theme.surfaceAlt,
@@ -797,53 +803,33 @@ export default function ProductComparisonScreen() {
                           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                             <MaterialCommunityIcons
                               name="package-variant-closed"
-                              size={24}
+                              size={28}
                               color={theme.textMuted}
                             />
                           </View>
                         )}
                       </View>
-                      {/* Info */}
-                      <View style={{ flex: 1, minWidth: 0, paddingRight: sv.pct > 0 ? 50 : 0 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 }}>
-                          <MaterialCommunityIcons
-                            name={
-                              nnStufe === 5
-                                ? 'check-decagram'
-                                : nnStufe === 4
-                                ? 'check-circle'
-                                : 'circle-slice-5'
-                            }
-                            size={12}
-                            color={nnStufeColor}
-                          />
-                          <Text
-                            numberOfLines={1}
-                            style={{
-                              fontFamily,
-                              fontWeight: fontWeight.bold,
-                              fontSize: 10,
-                              color: nnStufeColor,
-                              letterSpacing: 0.6,
-                              textTransform: 'uppercase',
-                            }}
-                          >
-                            {STUFE_INFO[nnStufe].label}
-                          </Text>
-                        </View>
-                        <Text
-                          numberOfLines={2}
-                          style={{
-                            fontFamily,
-                            fontWeight: fontWeight.bold,
-                            fontSize: 15,
-                            lineHeight: 18,
-                            color: theme.text,
-                            marginBottom: 4,
-                          }}
-                        >
-                          {(nn as any).name}
-                        </Text>
+                      {/* Info column. Layout stack, top → bottom:
+                            1) Handelsmarke eyebrow (market logo + name)
+                            2) Product name (max 2 lines)
+                            3) Pack size · Grundpreis (single line)
+                            4) StufenChips (5-segment bar — same
+                               component as the Stöbern grid, so the
+                               similarity indicator is visually
+                               identical across screens)
+                          The "IDENTISCH"/"VERWANDT" all-caps eyebrow is
+                          gone: the card border colour and the chips
+                          below carry that information more quietly, and
+                          the full label still shows up once in the
+                          Detektiv-Check row below the carousel. */}
+                      <View
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          paddingRight: sv.pct > 0 ? 50 : 0,
+                          justifyContent: 'space-between',
+                        }}
+                      >
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                           {hmLogo ? (
                             <View
@@ -876,6 +862,7 @@ export default function ProductComparisonScreen() {
                           <Text
                             numberOfLines={1}
                             style={{
+                              flex: 1,
                               fontFamily,
                               fontWeight: fontWeight.bold,
                               fontSize: 11,
@@ -887,6 +874,38 @@ export default function ProductComparisonScreen() {
                             {hmName ?? 'Eigenmarke'}
                           </Text>
                         </View>
+                        <Text
+                          numberOfLines={2}
+                          style={{
+                            fontFamily,
+                            fontWeight: fontWeight.bold,
+                            fontSize: 15,
+                            lineHeight: 18,
+                            color: theme.text,
+                            marginTop: 3,
+                          }}
+                        >
+                          {(nn as any).name}
+                        </Text>
+                        {nnPackParts ? (
+                          <Text
+                            numberOfLines={1}
+                            style={{
+                              fontFamily,
+                              fontWeight: fontWeight.medium,
+                              fontSize: 11,
+                              color: theme.textMuted,
+                              marginTop: 3,
+                            }}
+                          >
+                            {nnPackParts.unitPrice
+                              ? `${nnPackParts.sizeLabel} · ${nnPackParts.unitPrice}`
+                              : nnPackParts.sizeLabel}
+                          </Text>
+                        ) : null}
+                        <View style={{ marginTop: 5 }}>
+                          <StufenChips stufe={nnStufe} size="sm" />
+                        </View>
                       </View>
                     </View>
 
@@ -895,39 +914,24 @@ export default function ProductComparisonScreen() {
                     <View
                       style={{
                         flexDirection: 'row',
-                        alignItems: 'flex-end',
+                        alignItems: 'center',
                         padding: 14,
                         paddingTop: 12,
                         gap: 10,
                       }}
                     >
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        {nnPackParts ? (
-                          <Text
-                            numberOfLines={1}
-                            style={{
-                              fontFamily,
-                              fontWeight: fontWeight.semibold,
-                              fontSize: 11,
-                              color: theme.textMuted,
-                            }}
-                          >
-                            {nnPackParts.sizeLabel}
-                          </Text>
-                        ) : null}
-                        <Text
-                          style={{
-                            fontFamily,
-                            fontWeight: fontWeight.extraBold,
-                            fontSize: 22,
-                            color: brand.primary,
-                            letterSpacing: -0.3,
-                            marginTop: 2,
-                          }}
-                        >
-                          {formatEur((nn as any).preis)}
-                        </Text>
-                      </View>
+                      <Text
+                        style={{
+                          flex: 1,
+                          fontFamily,
+                          fontWeight: fontWeight.extraBold,
+                          fontSize: 22,
+                          color: brand.primary,
+                          letterSpacing: -0.3,
+                        }}
+                      >
+                        {formatEur((nn as any).preis)}
+                      </Text>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
                         <ActionButton
                           icon={favMap[nn.id] ? 'heart' : 'heart-outline'}
@@ -1083,20 +1087,25 @@ export default function ProductComparisonScreen() {
                     ))}
                   </View>
                 </View>
+                {/* Shortened — the long descriptive sentence
+                    (`pickedInfo.line`) was dropped. The Stufe label +
+                    Hersteller name carry the essential message; users
+                    who need the full explanation still get it on the
+                    Stöbern filter sheet. Kept concise so this row
+                    doesn't add to the visual noise on this page. */}
                 <Text
                   style={{
                     flex: 1,
                     fontFamily,
                     fontWeight: fontWeight.medium,
-                    fontSize: 12,
+                    fontSize: 13,
                     lineHeight: 18,
                     color: theme.textSub,
                   }}
                 >
                   <Text style={{ fontWeight: fontWeight.bold, color: theme.text }}>
-                    Stufe {pickedStufe} — {pickedInfo.label}:
-                  </Text>{' '}
-                  {pickedInfo.line}
+                    Stufe {pickedStufe} — {pickedInfo.label}.
+                  </Text>
                   {(picked as any)?.hersteller?.name ? (
                     <>
                       {' '}
