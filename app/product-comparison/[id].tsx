@@ -11,6 +11,10 @@ import {
   Text,
   View,
 } from 'react-native';
+import Animated, {
+  useAnimatedScrollHandler,
+  useSharedValue,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
@@ -190,6 +194,15 @@ export default function ProductComparisonScreen() {
   // Bottom "Gute Alternativen" — other brand products from the same category.
   const [alternatives, setAlternatives] = useState<any[]>([]);
 
+  // Scroll tracking — drives the large-title → nav-title fade in the
+  // DetailHeader.
+  const scrollY = useSharedValue(0);
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      scrollY.value = e.contentOffset.y;
+    },
+  });
+
   const effectiveCardWidth =
     nonames.length <= 1 ? NN_CARD_WIDTH_SINGLE : NN_CARD_WIDTH;
   const snapStep = effectiveCardWidth + NN_CARD_GAP;
@@ -361,10 +374,20 @@ export default function ProductComparisonScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       {/* BlurView header sits absolute on top — content scrolls UNDER it so
-          the Dynamic-Island area gets the native blurred-tint feel. */}
-      <DetailHeader title="Produktdetails" onBack={() => router.back()} />
+          the Dynamic-Island area gets the native blurred-tint feel. The
+          product name (our H1) cross-fades into the nav bar as it scrolls
+          out of view, iOS-style. */}
+      <DetailHeader
+        title="Produktdetails"
+        scrolledTitle={mainProduct.name ?? undefined}
+        scrollY={scrollY}
+        swapAt={200}
+        onBack={() => router.back()}
+      />
 
-      <ScrollView
+      <Animated.ScrollView
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
         contentContainerStyle={{
           paddingTop: insets.top + DETAIL_HEADER_ROW_HEIGHT,
           paddingBottom: 120,
@@ -1187,7 +1210,7 @@ export default function ProductComparisonScreen() {
         ) : null}
 
         <View style={{ height: 24 }} />
-      </ScrollView>
+      </Animated.ScrollView>
 
       {/* Ratings sheet — opened from any star ActionButton. Shared for both
           the main brand product and the currently picked NoName via the

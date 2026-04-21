@@ -9,6 +9,10 @@ import {
   Text,
   View,
 } from 'react-native';
+import Animated, {
+  useAnimatedScrollHandler,
+  useSharedValue,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
@@ -90,6 +94,13 @@ export default function NoNameDetailScreen() {
   const [ratingsOpen, setRatingsOpen] = useState(false);
   const [ratings, setRatings] = useState<Rating[]>([]);
   const [ratingsLoading, setRatingsLoading] = useState(false);
+
+  const scrollY = useSharedValue(0);
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      scrollY.value = e.contentOffset.y;
+    },
+  });
 
   useEffect(() => {
     (async () => {
@@ -240,9 +251,17 @@ export default function NoNameDetailScreen() {
   // ─── Render ───────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <DetailHeader title="Produktdetails" onBack={() => router.back()} />
+      <DetailHeader
+        title="Produktdetails"
+        scrolledTitle={`${handelsmarkeName ? handelsmarkeName + ' ' : ''}${p.name ?? ''}`}
+        scrollY={scrollY}
+        swapAt={200}
+        onBack={() => router.back()}
+      />
 
-      <ScrollView
+      <Animated.ScrollView
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
         contentContainerStyle={{
           paddingTop: insets.top + DETAIL_HEADER_ROW_HEIGHT,
           paddingBottom: 120,
@@ -631,7 +650,7 @@ export default function NoNameDetailScreen() {
         </View>
 
         <View style={{ height: 24 }} />
-      </ScrollView>
+      </Animated.ScrollView>
 
       <RatingsSheet
         visible={ratingsOpen}
