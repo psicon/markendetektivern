@@ -280,12 +280,6 @@ export default function ProductComparisonScreen() {
 
   const pickedStufe = picked ? parseStufe((picked as any).stufe) : 1;
   const pickedInfo = STUFE_INFO[pickedStufe];
-  const sameHersteller = (() => {
-    const bh = brandName;
-    const ph = (picked as any)?.hersteller?.name ?? (picked as any)?.hersteller?.herstellername;
-    if (!bh || !ph) return false;
-    return String(bh).toLowerCase() === String(ph).toLowerCase();
-  })();
 
   // ─── Handlers ─────────────────────────────────────────────────────────
   const onToggleFav = async (
@@ -524,41 +518,6 @@ export default function ProductComparisonScreen() {
                   }}
                 >
                   {brandName}
-                </Text>
-              </View>
-            ) : null}
-
-            {/* "Selber Hersteller" badge — top-right, only when matching */}
-            {sameHersteller ? (
-              <View
-                style={{
-                  position: 'absolute',
-                  right: 12,
-                  top: 12,
-                  backgroundColor: brand.primary,
-                  paddingVertical: 6,
-                  paddingHorizontal: 10,
-                  borderRadius: 18,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  shadowColor: brand.primary,
-                  shadowOpacity: 0.3,
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowRadius: 10,
-                  elevation: 4,
-                }}
-              >
-                <MaterialCommunityIcons name="check-decagram" size={13} color="#fff" />
-                <Text
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.bold,
-                    fontSize: 11,
-                    color: '#fff',
-                  }}
-                >
-                  Selber Hersteller
                 </Text>
               </View>
             ) : null}
@@ -1007,6 +966,77 @@ export default function ProductComparisonScreen() {
                 })}
               </View>
             ) : null}
+
+            {/* Detektiv-Check row — directly below the active NoName card so
+                the stufe explanation reads as context for the carousel pick
+                rather than as a global footer. */}
+            {picked ? (
+              <View
+                style={{
+                  marginHorizontal: 20,
+                  marginTop: 16,
+                  padding: 14,
+                  paddingHorizontal: 16,
+                  borderRadius: 14,
+                  backgroundColor: theme.surfaceAlt,
+                  flexDirection: 'row',
+                  gap: 12,
+                  alignItems: 'flex-start',
+                }}
+              >
+                <View style={{ alignItems: 'center', marginTop: 1 }}>
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.extraBold,
+                      fontSize: 18,
+                      color: stufen[pickedStufe],
+                      lineHeight: 18,
+                    }}
+                  >
+                    S{pickedStufe}
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 2, marginTop: 4 }}>
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <View
+                        key={n}
+                        style={{
+                          width: 5,
+                          height: 5,
+                          borderRadius: 3,
+                          backgroundColor: n <= pickedStufe ? stufen[pickedStufe] : theme.borderStrong,
+                        }}
+                      />
+                    ))}
+                  </View>
+                </View>
+                <Text
+                  style={{
+                    flex: 1,
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 12,
+                    lineHeight: 18,
+                    color: theme.textSub,
+                  }}
+                >
+                  <Text style={{ fontWeight: fontWeight.bold, color: theme.text }}>
+                    Stufe {pickedStufe} — {pickedInfo.label}:
+                  </Text>{' '}
+                  {pickedInfo.line}
+                  {(picked as any)?.hersteller?.name ? (
+                    <>
+                      {' '}
+                      Hersteller:{' '}
+                      <Text style={{ fontWeight: fontWeight.bold, color: theme.text }}>
+                        {(picked as any).hersteller.name}
+                      </Text>
+                      .
+                    </>
+                  ) : null}
+                </Text>
+              </View>
+            ) : null}
           </>
         ) : (
           <View
@@ -1098,75 +1128,6 @@ export default function ProductComparisonScreen() {
             primary={brand.primary}
           />
         )}
-
-        {/* ─── Detektiv-Check row ────────────────────────────────── */}
-        {picked ? (
-          <View
-            style={{
-              marginHorizontal: 20,
-              marginTop: 20,
-              padding: 14,
-              paddingHorizontal: 16,
-              borderRadius: 14,
-              backgroundColor: theme.surfaceAlt,
-              flexDirection: 'row',
-              gap: 12,
-              alignItems: 'flex-start',
-            }}
-          >
-            <View style={{ alignItems: 'center', marginTop: 1 }}>
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.extraBold,
-                  fontSize: 18,
-                  color: stufen[pickedStufe],
-                  lineHeight: 18,
-                }}
-              >
-                S{pickedStufe}
-              </Text>
-              <View style={{ flexDirection: 'row', gap: 2, marginTop: 4 }}>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <View
-                    key={n}
-                    style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: 3,
-                      backgroundColor: n <= pickedStufe ? stufen[pickedStufe] : theme.borderStrong,
-                    }}
-                  />
-                ))}
-              </View>
-            </View>
-            <Text
-              style={{
-                flex: 1,
-                fontFamily,
-                fontWeight: fontWeight.medium,
-                fontSize: 12,
-                lineHeight: 18,
-                color: theme.textSub,
-              }}
-            >
-              <Text style={{ fontWeight: fontWeight.bold, color: theme.text }}>
-                Stufe {pickedStufe} — {pickedInfo.label}:
-              </Text>{' '}
-              {pickedInfo.line}
-              {(picked as any)?.hersteller?.name ? (
-                <>
-                  {' '}
-                  Hersteller:{' '}
-                  <Text style={{ fontWeight: fontWeight.bold, color: theme.text }}>
-                    {(picked as any).hersteller.name}
-                  </Text>
-                  .
-                </>
-              ) : null}
-            </Text>
-          </View>
-        ) : null}
 
         {/* ─── Gute Alternativen ──────────────────────────────────── */}
         {alternatives.length > 0 ? (
