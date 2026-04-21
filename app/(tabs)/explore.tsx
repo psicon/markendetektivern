@@ -1,3120 +1,919 @@
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { BrandCard } from '@/components/design/BrandCard';
+import { FilterChip } from '@/components/design/FilterChip';
+import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
+import { ProductCard } from '@/components/design/ProductCard';
+import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { BannerAd } from '@/components/ads/BannerAd';
-// import { AllergenFilterChips } from '@/components/ui/AllergenFilterChips'; // TEMPORÄR AUSGEBLENDET
-import { IconSymbol } from '@/components/ui/IconSymbol';
-import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { LockedCategoryModal } from '@/components/ui/LockedCategoryModal';
-// import { NutritionSliderFilter } from '@/components/ui/NutritionSliderFilter'; // TEMPORÄR AUSGEBLENDET
-import { ListItemSkeleton, LoadingFooterSkeleton } from '@/components/ui/ShimmerSkeleton';
-import { getStufenColor } from '@/constants/AppTexts';
-import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
+import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { useTokens } from '@/hooks/useTokens';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
-// Keine ExtendedFirestoreService mehr nötig
-import FixedAndroidModal from '@/components/ui/FixedAndroidModal';
 import { FirestoreService } from '@/lib/services/firestore';
-import { AllergenFilters, ExtendedMarkenproduktFilters, ExtendedNoNameFilters, NutritionFilters } from '@/lib/types/filters';
-import { Discounter, FirestoreDocument, Handelsmarken, Kategorien, Produkte } from '@/lib/types/firestore';
-import { router, useLocalSearchParams } from 'expo-router';
-import type { SymbolViewProps } from 'expo-symbols';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Dimensions, FlatList, PanResponder, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { ExtendedMarkenproduktFilters, ExtendedNoNameFilters } from '@/lib/types/filters';
+import type {
+  Discounter,
+  FirestoreDocument,
+  Handelsmarken,
+  Kategorien,
+  Produkte,
+} from '@/lib/types/firestore';
 
-const { width: screenWidth } = Dimensions.get('window');
+// ────────────────────────────────────────────────────────────────────────
+// Constants
+// ────────────────────────────────────────────────────────────────────────
+
+type Tab = 'eigen' | 'marken';
+type SheetKey = 'markt' | 'handels' | 'kategorie' | 'stufe' | 'marke' | 'inhalt' | 'sort' | null;
+
+const INGREDIENTS = [
+  'Bio',
+  'Vegan',
+  'Vegetarisch',
+  'Laktosefrei',
+  'Glutenfrei',
+  'Ohne Palmöl',
+  'Ohne Zuckerzusatz',
+  'Fairtrade',
+] as const;
+
+type SortKey = 'name' | 'preis';
+
+const SHEET_TITLES: Record<Exclude<SheetKey, null>, string> = {
+  markt: 'Markt',
+  handels: 'Handelsmarke',
+  kategorie: 'Kategorie',
+  stufe: 'Stufe — mindestens',
+  marke: 'Marke',
+  inhalt: 'Inhaltsstoffe',
+  sort: 'Sortieren',
+};
+
+// ────────────────────────────────────────────────────────────────────────
 
 export default function ExploreScreen() {
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
-  const params = useLocalSearchParams();
+  const { theme, brand, shadows, stufen } = useTokens();
+  const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ tab?: string; categoryFilter?: string; markeFilter?: string }>();
   const { userProfile } = useAuth();
   const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
-  const [activeTab, setActiveTab] = useState('märkte');
-  
-  // 🎯 Journey-Tracking für Explore
-  // ENTFERNT! Explore startet KEINE eigene Journey mehr.
-  // Journeys werden nur auf Hauptscreens (Home) oder bei spezifischen Actions (Search, Scan) gestartet
-  
-  // Verarbeite Navigation-Parameter von der Startseite - NACH Kategorie-Loading!
-  useEffect(() => {
-    // WICHTIG: Warte bis Kategorien geladen sind!
-    if (params.tab === 'nonames' && params.categoryFilter && kategorien.length > 0) {
-      // Prüfe ob Kategorie verfügbar ist
-      const category = kategorien.find(k => k.id === params.categoryFilter);
-      
-      if (category && !category.isLocked) {
-        setActiveTab('nonames');
-        setNoNameFilters(prev => ({
-          ...prev,
-          categoryFilters: [params.categoryFilter as string]
-        }));
-        
-        // Update Journey mit Kategorie-Filter - nur einmal!
-        analytics.updateJourneyFilters({
-          categories: [{
-            docRef: `kategorien/${category.id}`,
-            id: category.id,
-            name: category.name
-          }]
-        }, {
-          action: 'added',
-          filterType: 'category',
-          filterValue: category.name
-        });
-      } else {
-        console.warn('🔒 Kategorie nicht verfügbar oder gesperrt:', params.categoryFilter);
-      }
-    }
-  }, [params.tab, params.categoryFilter, params.categoryName, kategorien]); // WICHTIG: kategorien als Dependency!
 
-  // Journey wird NICHT hier gestartet - nur einmal beim App-Start in AnalyticsProvider!
-  
-  // Track Tab-Wechsel - WICHTIG: Nur zwischen Produkt-Tabs tracken
-  const prevActiveTab = useRef(activeTab);
-  useEffect(() => {
-    if (prevActiveTab.current !== activeTab) {
-      // Nur tracken wenn zwischen NoName und Markenprodukte gewechselt wird
-      const productTabs = ['nonames', 'markenprodukte'];
-      const wasProductTab = productTabs.includes(prevActiveTab.current);
-      const isProductTab = productTabs.includes(activeTab);
-      
-      if (wasProductTab && isProductTab) {
-        // Tab-Wechsel tracken, aber Journey NICHT beenden!
-        console.log(`📊 Tab-Wechsel: ${prevActiveTab.current} → ${activeTab}`);
-      }
-      
-      prevActiveTab.current = activeTab;
-    }
-  }, [activeTab]);
-  
-  // 🎯 OPTIMIERTE Animation für Swipe-Navigation
-  const translateX = useRef(new Animated.Value(0)).current;
-  const isAnimating = useRef(false);
-  
-  // Firestore State
+  // ─── UI state ──────────────────────────────────────────────────────────
+  const [tab, setTab] = useState<Tab>('eigen');
+  const [query, setQuery] = useState('');
+  const [market, setMarket] = useState<string>('all');
+  const [handels, setHandels] = useState<string>('all');
+  const [cat, setCat] = useState<string>('all');
+  const [minStufe, setMinStufe] = useState<number>(0);
+  const [brandId, setBrandId] = useState<string>('all');
+  const [ingredients, setIngredients] = useState<string[]>([]);
+  const [sort, setSort] = useState<SortKey>('name');
+  const [sheet, setSheet] = useState<SheetKey>(null);
+
+  // ─── Reference data (filters) ──────────────────────────────────────────
   const [discounter, setDiscounter] = useState<FirestoreDocument<Discounter>[]>([]);
-  const [marketsLoading, setMarketsLoading] = useState(true);
-  
-  // Categories State
-  const [categoriesData, setCategoriesData] = useState<FirestoreDocument<Kategorien>[]>([]);
-  const [categoriesLoading, setCategoriesLoading] = useState(true);
-  
-  // Failed images state (für alle Tabs)
-  const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
-  
-  // Locked Category Modal State
-  const [lockedCategoryModal, setLockedCategoryModal] = useState<{
-    visible: boolean;
-    category: FirestoreDocument<Kategorien> | null;
-  }>({ visible: false, category: null });
-  
-  
-  // Filter States
-  const [selectedCountry, setSelectedCountry] = useState('Deutschland');
-  const [showFilterModal, setShowFilterModal] = useState(false);
-  
-  // NoName Products States
-  const [noNameProducts, setNoNameProducts] = useState<(FirestoreDocument<Produkte> & {
-    discounter?: Discounter;
-    handelsmarke?: Handelsmarken;
-  })[]>([]);
-  const [noNameLoading, setNoNameLoading] = useState(false);
-  const [noNameLastDoc, setNoNameLastDoc] = useState<any>(null);
-  const [noNameHasMore, setNoNameHasMore] = useState(true);
-  const [noNameError, setNoNameError] = useState<string | null>(null);
-
-  // NoName Filter States - Multi-Select
-  const [showNoNameFilterModal, setShowNoNameFilterModal] = useState(false);
-  const [noNameFilters, setNoNameFilters] = useState<ExtendedNoNameFilters>({
-    categoryFilters: [],
-    discounterFilters: [],
-    stufeFilters: [],
-    allergenFilters: {},
-    nutritionFilters: {}
-  });
-  
-  // Filter Options Data
+  const [handelsmarken, setHandelsmarken] = useState<FirestoreDocument<Handelsmarken>[]>([]);
   const [kategorien, setKategorien] = useState<FirestoreDocument<Kategorien>[]>([]);
-  const [markenData, setMarkenData] = useState<FirestoreDocument<any>[]>([]);
+  const [markenList, setMarkenList] = useState<Array<{ id: string; name: string }>>([]);
 
-  // Markenprodukte States
-  const [markenprodukte, setMarkenprodukte] = useState<(FirestoreDocument<any> & {
-    hersteller?: any; // Kann sowohl hersteller als auch hersteller_new sein
-  })[]>([]);
-  const [markenproduktLoading, setMarkenproduktLoading] = useState(false);
-  const [markenproduktLastDoc, setMarkenproduktLastDoc] = useState<any>(null);
-  const [markenproduktHasMore, setMarkenproduktHasMore] = useState(true);
-  const [markenproduktError, setMarkenproduktError] = useState<string | null>(null);
+  // ─── Product lists ─────────────────────────────────────────────────────
+  const [nonames, setNonames] = useState<FirestoreDocument<Produkte>[]>([]);
+  const [nonameLoading, setNonameLoading] = useState(true);
+  const [nonameLastDoc, setNonameLastDoc] = useState<any>(null);
+  const [nonameHasMore, setNonameHasMore] = useState(true);
 
-  // Markenprodukte Filter States
-  const [showMarkenproduktFilterModal, setShowMarkenproduktFilterModal] = useState(false);
-  const [markenproduktFilters, setMarkenproduktFilters] = useState<ExtendedMarkenproduktFilters>({
-    categoryFilters: [],
-    herstellerFilters: [],
-    allergenFilters: {},
-    nutritionFilters: {}
-  });
+  const [markenprodukte, setMarkenprodukte] = useState<FirestoreDocument<any>[]>([]);
+  const [markenLoading, setMarkenLoading] = useState(false);
+  const [markenLastDoc, setMarkenLastDoc] = useState<any>(null);
+  const [markenHasMore, setMarkenHasMore] = useState(true);
 
-  // Marken-Suche States
-  const [markenSearchQuery, setMarkenSearchQuery] = useState('');
+  // ─── Locked category gate (Alkohol) ────────────────────────────────────
+  const [lockedCategory, setLockedCategory] = useState<FirestoreDocument<Kategorien> | null>(null);
 
+  // ─── Route param handling (from Home quick-access) ─────────────────────
+  useEffect(() => {
+    if (params.tab === 'nonames') setTab('eigen');
+    if (params.tab === 'markenprodukte') setTab('marken');
+    if (params.categoryFilter) setCat(String(params.categoryFilter));
+    if (params.markeFilter) setBrandId(String(params.markeFilter));
+  }, [params.tab, params.categoryFilter, params.markeFilter]);
 
+  // ─── Load reference data once ──────────────────────────────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
+        const [ds, cats, ms] = await Promise.all([
+          FirestoreService.getDiscounter(),
+          categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium),
+          FirestoreService.getMarken().catch(() => []),
+        ]);
+        setDiscounter(ds);
+        setKategorien(cats);
+        setMarkenList(
+          (ms ?? []).map((m: any) => ({ id: m.id, name: m.name ?? m.bezeichnung ?? '' })),
+        );
+      } catch (e) {
+        console.warn('Explore: failed to load reference data', e);
+      }
+    })();
+  }, [userProfile, isPremium]);
 
-  // Helper function to get country flag emoji
-  const getCountryFlag = (country: string): string => {
-    const flagMap: {[key: string]: string} = {
-      'Deutschland': '🇩🇪',
-      'DE': '🇩🇪',
-      'Schweiz': '🇨🇭',
-      'CH': '🇨🇭',
-      'Österreich': '🇦🇹',
-      'AT': '🇦🇹',
-      'Austria': '🇦🇹',
-      'Switzerland': '🇨🇭',
-      'Germany': '🇩🇪',
-      'Alle Länder': '🌍',
-    };
-    
-    return flagMap[country] || '🏳️';
-  };
+  // ─── Lazy-load Handelsmarken the first time the filter sheet opens ─────
+  useEffect(() => {
+    if (sheet !== 'handels' || handelsmarken.length > 0) return;
+    (async () => {
+      try {
+        const hms = await (FirestoreService as any).getHandelsmarken?.();
+        if (Array.isArray(hms)) setHandelsmarken(hms);
+      } catch {
+        /* optional — service may not exist; ignore */
+      }
+    })();
+  }, [sheet, handelsmarken.length]);
 
-  // Normalize country names for filtering
-  const normalizeCountry = (country: string): string => {
-    const countryMap: {[key: string]: string} = {
-      'DE': 'Deutschland',
-      'Germany': 'Deutschland', 
-      'CH': 'Schweiz',
-      'Switzerland': 'Schweiz',
-      'AT': 'Österreich',
-      'Austria': 'Österreich'
-    };
-    return countryMap[country] || country;
-  };
+  // ─── Debounced filter → reload products ────────────────────────────────
+  const reloadSeq = useRef(0);
+  useEffect(() => {
+    if (kategorien.length === 0) return; // wait for categories (needed for access gate)
+    const mySeq = ++reloadSeq.current;
+    const t = setTimeout(() => {
+      if (reloadSeq.current !== mySeq) return;
+      if (tab === 'eigen') loadNonames(true);
+      else loadMarken(true);
+    }, 200); // small debounce for typing
+    return () => clearTimeout(t);
 
-  // Get available countries from markets
-  const availableCountries = React.useMemo(() => {
-    const uniqueCountries = new Set(
-      discounter.map(market => normalizeCountry(market.land))
-    );
-    return ['Alle Länder', ...Array.from(uniqueCountries).sort()];
+  }, [tab, query, market, handels, cat, minStufe, brandId, ingredients, sort, kategorien.length]);
+
+  // ─── Category access gate ─────────────────────────────────────────────
+  const onChangeCategory = useCallback(
+    (k: string) => {
+      if (k === 'all') {
+        setCat('all');
+        setSheet(null);
+        return;
+      }
+      const selected = kategorien.find((c) => c.id === k);
+      if (selected && (selected as any).isLocked) {
+        setLockedCategory(selected);
+        setSheet(null);
+        return;
+      }
+      setCat(k);
+      setSheet(null);
+    },
+    [kategorien],
+  );
+
+  // ─── Data loaders ──────────────────────────────────────────────────────
+  const buildNonameFilters = useCallback((): ExtendedNoNameFilters => {
+    return {
+      categoryFilters: cat !== 'all' ? [cat] : [],
+      discounterFilters: market !== 'all' ? [market] : [],
+      stufeFilters: minStufe > 0 ? [minStufe, minStufe + 1, 5].filter((n, i, a) => a.indexOf(n) === i && n <= 5) : [],
+      handelsmarkeFilters: handels !== 'all' ? [handels] : [],
+      allergenFilters: {},
+      nutritionFilters: {},
+      searchQuery: query.trim() || undefined,
+      sortBy: sort === 'preis' ? 'preis' : 'name',
+    } as any;
+  }, [cat, market, minStufe, handels, query, sort]);
+
+  const buildMarkenFilters = useCallback((): ExtendedMarkenproduktFilters => {
+    return {
+      categoryFilters: cat !== 'all' ? [cat] : [],
+      herstellerFilters: brandId !== 'all' ? [brandId] : [],
+      allergenFilters: {},
+      nutritionFilters: {},
+      searchQuery: query.trim() || undefined,
+      sortBy: sort === 'preis' ? 'preis' : 'name',
+    } as any;
+  }, [cat, brandId, query, sort]);
+
+  const loadNonames = useCallback(
+    async (reset: boolean) => {
+      if (!reset && (nonameLoading || !nonameHasMore)) return;
+      try {
+        setNonameLoading(true);
+        const size = reset ? 20 : 10;
+        const res = await FirestoreService.getNoNameProductsPaginated(
+          size,
+          reset ? null : nonameLastDoc,
+          buildNonameFilters() as any,
+        );
+        setNonames((prev) => {
+          if (reset) return res.products as any;
+          const existing = new Set(prev.map((p) => p.id));
+          return [...prev, ...(res.products as any).filter((p: any) => !existing.has(p.id))];
+        });
+        setNonameLastDoc(res.lastDoc);
+        setNonameHasMore(res.hasMore);
+      } catch (e) {
+        console.warn('Explore: loadNonames failed', e);
+      } finally {
+        setNonameLoading(false);
+      }
+    },
+    [nonameLoading, nonameHasMore, nonameLastDoc, buildNonameFilters],
+  );
+
+  const loadMarken = useCallback(
+    async (reset: boolean) => {
+      if (!reset && (markenLoading || !markenHasMore)) return;
+      try {
+        setMarkenLoading(true);
+        const size = reset ? 20 : 10;
+        const res = await FirestoreService.getMarkenproduktePaginated(
+          size,
+          reset ? null : markenLastDoc,
+          buildMarkenFilters() as any,
+        );
+        setMarkenprodukte((prev) => {
+          if (reset) return res.products as any;
+          const existing = new Set(prev.map((p) => p.id));
+          return [...prev, ...(res.products as any).filter((p: any) => !existing.has(p.id))];
+        });
+        setMarkenLastDoc(res.lastDoc);
+        setMarkenHasMore(res.hasMore);
+      } catch (e) {
+        console.warn('Explore: loadMarken failed', e);
+      } finally {
+        setMarkenLoading(false);
+      }
+    },
+    [markenLoading, markenHasMore, markenLastDoc, buildMarkenFilters],
+  );
+
+  const loadMore = useCallback(() => {
+    if (tab === 'eigen') loadNonames(false);
+    else loadMarken(false);
+  }, [tab, loadNonames, loadMarken]);
+
+  // ─── Helpers ───────────────────────────────────────────────────────────
+  const switchTab = useCallback((k: Tab) => {
+    setTab(k);
+    setMarket('all');
+    setHandels('all');
+    setMinStufe(0);
+    setBrandId('all');
+  }, []);
+
+  const resetAll = useCallback(() => {
+    setMarket('all');
+    setHandels('all');
+    setCat('all');
+    setMinStufe(0);
+    setBrandId('all');
+    setIngredients([]);
+  }, []);
+
+  const toggleIngredient = useCallback(
+    (x: string) =>
+      setIngredients((prev) => (prev.includes(x) ? prev.filter((i) => i !== x) : [...prev, x])),
+    [],
+  );
+
+  const anyFilter =
+    (tab === 'eigen' && (market !== 'all' || handels !== 'all' || minStufe > 0)) ||
+    (tab === 'marken' && brandId !== 'all') ||
+    cat !== 'all' ||
+    ingredients.length > 0;
+
+  // ─── Discounter color/short lookup (for MarketBadge on cards) ─────────
+  const discounterMap = useMemo(() => {
+    const m: Record<string, { color: string; short: string }> = {};
+    discounter.forEach((d) => {
+      const n = (d as any).name ?? '';
+      m[d.id] = {
+        color: (d as any).color ?? '#888888',
+        short: n.length <= 2 ? n : n[0].toUpperCase(),
+      };
+    });
+    return m;
   }, [discounter]);
 
-  // Filter markets by selected country
-  const filteredMarkets = React.useMemo(() => {
-    if (selectedCountry === 'Alle Länder') {
-      return discounter;
-    }
-    return discounter.filter(market => normalizeCountry(market.land) === selectedCountry);
-  }, [discounter, selectedCountry]);
+  // Readable value labels for chips:
+  const catLabel = useMemo(() => {
+    if (cat === 'all') return null;
+    const k = kategorien.find((c) => c.id === cat);
+    return (k as any)?.bezeichnung ?? (k as any)?.name ?? null;
+  }, [cat, kategorien]);
 
-  // Handle country selection
-  const handleCountrySelect = (country: string) => {
-    setSelectedCountry(country);
-    setShowFilterModal(false);
-  };
+  const marketLabel = useMemo(() => {
+    if (market === 'all') return null;
+    const d = discounter.find((x) => x.id === market);
+    return (d as any)?.name ?? null;
+  }, [market, discounter]);
 
-  // Format price helper
-  const formatPrice = (price: number): string => {
-    return new Intl.NumberFormat('de-DE', {
-      style: 'currency',
-      currency: 'EUR'
-    }).format(price);
-  };
+  const brandLabel = useMemo(() => {
+    if (brandId === 'all') return null;
+    const m = markenList.find((x) => x.id === brandId);
+    return m?.name ?? null;
+  }, [brandId, markenList]);
 
-  // getStufenColor wird jetzt aus @/constants/AppTexts importiert
+  const handelsLabel = useMemo(() => {
+    if (handels === 'all') return null;
+    const h = handelsmarken.find((x) => x.id === handels);
+    return (h as any)?.bezeichnung ?? (h as any)?.name ?? null;
+  }, [handels, handelsmarken]);
 
-  // Icon-Mapping für Kategorien (kopiert von index.tsx)
-  const getCategoryIcon = (bezeichnung: string): SymbolViewProps['name'] => {
-    const iconMap: {[key: string]: SymbolViewProps['name']} = {
-      'alkohol': 'wineglass',
-      'alkoholfreie getränke': 'cup.and.saucer',
-      'backwaren': 'birthday.cake',
-      'fertigteig': 'birthday.cake',
-      'butter': 'drop.fill',
-      'margarine': 'drop.fill',
-      'fleisch': 'fork.knife',
-      'wurst': 'fork.knife',
-      'fisch': 'fish',
-      'meeresfrüchte': 'fish',
-      'milch': 'drop.fill',
-      'käse': 'square.grid.2x2',
-      'joghurt': 'cup.and.saucer',
-      'obst': 'leaf.fill',
-      'gemüse': 'leaf.fill',
-      'brot': 'birthday.cake',
-      'getreide': 'leaf.fill',
-      'süßwaren': 'heart.fill',
-      'schokolade': 'heart.fill',
-      'snacks': 'bag',
-      'chips': 'bag',
-      'tiefkühl': 'snowflake',
-      'konserven': 'archivebox',
-      'gewürze': 'sparkles',
-      'öl': 'drop.fill',
-      'essig': 'drop.fill',
-      'drogerie': 'sparkles',
-      'haushalt': 'house',
-      'körperpflege': 'sparkles',
-      'baby': 'heart.fill',
-      'tiernahrung': 'pawprint'
-    };
-
-    const normalizedName = bezeichnung.toLowerCase().trim();
-    
-    // Exakte Übereinstimmung
-    if (iconMap[normalizedName]) {
-      return iconMap[normalizedName];
-    }
-    
-    // Teilstring-Suche
-    for (const [key, icon] of Object.entries(iconMap)) {
-      if (normalizedName.includes(key) || key.includes(normalizedName)) {
-        return icon;
-      }
-    }
-    
-    return 'tag'; // Fallback
-  };
-
-  // Helper functions for multi-select filters
-  const toggleCategoryFilter = (categoryId: string) => {
-    const isAdding = !noNameFilters.categoryFilters.includes(categoryId);
-    
-    setNoNameFilters(prev => ({
-      ...prev,
-      categoryFilters: prev.categoryFilters.includes(categoryId)
-        ? prev.categoryFilters.filter(id => id !== categoryId)
-        : [...prev.categoryFilters, categoryId]
-    }));
-    
-    // 📊 Track Filter Change
-    const category = categoriesData.find(c => c.id === categoryId);
-    if (category) {
-      analytics.trackFilterChanged(
-        'category',
-        category.bezeichnung,
-        isAdding ? 'added' : 'removed',
-        'explore_nonames'
+  // ─── Navigation handlers ───────────────────────────────────────────────
+  const openProduct = useCallback(
+    (p: FirestoreDocument<Produkte>, index: number) => {
+      analytics.trackProductViewWithJourney(
+        p.id,
+        'noname',
+        (p as any).name ?? 'NoName',
+        index,
       );
-      
-      // 🎯 Update Journey with UPDATED filters (korrekte Werte!)
-      const updatedCategories = isAdding 
-        ? [...noNameFilters.categoryFilters, categoryId]
-        : noNameFilters.categoryFilters.filter(id => id !== categoryId);
-        
-      analytics.updateJourneyFilters({
-        markets: noNameFilters.discounterFilters.map(id => {
-          const marketData = discounter.find(d => d.id === id);
-          return {
-            id,
-            name: marketData?.name || 'Unbekannt',
-            docRef: `discounter/${id}`
-          };
-        }),
-        categories: updatedCategories.map(id => {
-          const categoryData = categoriesData.find(c => c.id === id);
-          return {
-            id,
-            name: categoryData?.bezeichnung || 'Unbekannt',
-            docRef: `kategorien/${id}`
-          };
-        }),
-        stufe: noNameFilters.stufeFilters
-      }, {
-        action: isAdding ? 'added' : 'removed',
-        filterType: 'category',
-        filterValue: category.bezeichnung
-      });
-    }
-  };
-
-  const toggleDiscounterFilter = (discounterId: string) => {
-    const isAdding = !noNameFilters.discounterFilters.includes(discounterId);
-    
-    setNoNameFilters(prev => ({
-      ...prev,
-      discounterFilters: prev.discounterFilters.includes(discounterId)
-        ? prev.discounterFilters.filter(id => id !== discounterId)
-        : [...prev.discounterFilters, discounterId]
-    }));
-    
-    // 📊 Track Filter Change
-    const market = discounter.find(d => d.id === discounterId);
-    if (market) {
-      analytics.trackFilterChanged(
-        'market',
-        market.name,
-        isAdding ? 'added' : 'removed',
-        'explore_nonames'
-      );
-      
-      // 🎯 Update Journey with UPDATED filters (korrekte Werte!)
-      const updatedMarkets = isAdding 
-        ? [...noNameFilters.discounterFilters, discounterId]
-        : noNameFilters.discounterFilters.filter(id => id !== discounterId);
-        
-      analytics.updateJourneyFilters({
-        markets: updatedMarkets.map(id => {
-          const marketData = discounter.find(d => d.id === id);
-          return {
-            id,
-            name: marketData?.name || 'Unbekannt',
-            docRef: `discounter/${id}`
-          };
-        }),
-        categories: noNameFilters.categoryFilters.map(id => {
-          const categoryData = categoriesData.find(c => c.id === id);
-          return {
-            id,
-            name: categoryData?.bezeichnung || 'Unbekannt',
-            docRef: `kategorien/${id}`
-          };
-        }),
-        stufe: noNameFilters.stufeFilters
-      }, {
-        action: isAdding ? 'added' : 'removed',
-        filterType: 'market',
-        filterValue: market.name
-      });
-    }
-  };
-
-  const toggleStufeFilter = (stufe: number) => {
-    const isAdding = !noNameFilters.stufeFilters.includes(stufe);
-    
-    setNoNameFilters(prev => ({
-      ...prev,
-      stufeFilters: prev.stufeFilters.includes(stufe)
-        ? prev.stufeFilters.filter(s => s !== stufe)
-        : [...prev.stufeFilters, stufe]
-    }));
-    
-    // 📊 Track Stufe Filter Change
-    analytics.trackFilterChanged(
-      'price', // Stufe ist eine Art Preis-Filter (höhere Stufe = höherer Preis)
-      `stufe_${stufe}`,
-      isAdding ? 'added' : 'removed',
-      'explore_nonames',
-      {
-        stufe_level: stufe,
-        total_stufe_filters: noNameFilters.stufeFilters.length + (isAdding ? 1 : -1)
-      }
-    );
-    
-    // 🎯 Update Journey with new filters
-    const updatedFilters = {
-      markets: noNameFilters.discounterFilters,
-      categories: noNameFilters.categoryFilters.map(id => {
-        const categoryData = categoriesData.find(c => c.id === id);
-        return {
-          docRef: `kategorien/${id}`,
-          id: id,
-          name: categoryData?.name || 'Unbekannt'
-        };
-      }),
-      stufe: isAdding 
-        ? [...noNameFilters.stufeFilters, stufe]
-        : noNameFilters.stufeFilters.filter(s => s !== stufe),
-      allergens: Object.entries(noNameFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
-      nutrition: Object.entries(noNameFilters.nutritionFilters || {}).filter(([_, v]) => v && (v.min !== undefined || v.max !== undefined)).map(([k, _]) => k)
-    };
-    
-    analytics.updateJourneyFilters(updatedFilters, {
-      action: isAdding ? 'added' : 'removed',
-      filterType: 'stufe',
-      filterValue: `stufe_${stufe}`
-    });
-    analytics.checkFilterComplexityOverload();
-  };
-
-  const clearAllFilters = () => {
-    // Track Filter-Clearing für Journey-Analyse
-    analytics.trackFilterCleared();
-    
-    setNoNameFilters({
-      categoryFilters: [],
-      discounterFilters: [],
-      stufeFilters: [],
-      allergenFilters: {},
-      nutritionFilters: {}
-    });
-  };
-  
-  // Neue Filter-Handler für Allergene
-  const toggleAllergenFilter = (allergen: keyof AllergenFilters) => {
-    const isAdding = !(noNameFilters.allergenFilters || {})[allergen];
-    
-    setNoNameFilters(prev => ({
-      ...prev,
-      allergenFilters: {
-        ...(prev.allergenFilters || {}),
-        [allergen]: isAdding
-      }
-    }));
-
-    // 📊 Track Allergen Filter Change
-    analytics.trackFilterChanged(
-      'allergen',
-      allergen.replace('allergens_', ''),
-      isAdding ? 'added' : 'removed',
-      'explore_nonames',
-      {
-        allergen_type: allergen,
-        total_allergen_filters: Object.values(noNameFilters.allergenFilters || {}).filter(Boolean).length + (isAdding ? 1 : -1)
-      }
-    );
-    
-    // 🎯 Update Journey with new filters
-    const updatedFilters = {
-      markets: noNameFilters.discounterFilters,
-      categories: noNameFilters.categoryFilters.map(id => {
-        const categoryData = categoriesData.find(c => c.id === id);
-        return {
-          docRef: `kategorien/${id}`,
-          id: id,
-          name: categoryData?.name || 'Unbekannt'
-        };
-      }),
-      stufe: noNameFilters.stufeFilters,
-      allergens: Object.entries({...(noNameFilters.allergenFilters || {}), [allergen]: isAdding}).filter(([_, v]) => v).map(([k, _]) => k)
-    };
-    
-    analytics.updateJourneyFilters(updatedFilters);
-    
-    // Check für Filter-Komplexitäts-Überlastung
-    analytics.checkFilterComplexityOverload();
-  };
-  
-  // Neue Filter-Handler für Nährwerte
-  const updateNutritionFilter = useCallback((filters: NutritionFilters) => {
-    // Finde Änderungen für Analytics
-    const oldFilters = noNameFilters.nutritionFilters;
-    const newFilters = filters;
-    
-    // Tracke jede Änderung einzeln
-    Object.entries(newFilters).forEach(([key, newRange]) => {
-      const oldRange = oldFilters[key as keyof NutritionFilters];
-      const hasOldRange = oldRange && (oldRange.min !== undefined || oldRange.max !== undefined);
-      const hasNewRange = newRange && (newRange.min !== undefined || newRange.max !== undefined);
-      
-      if (!hasOldRange && hasNewRange) {
-        // Neuer Filter hinzugefügt
-        analytics.trackFilterChanged(
-          'nutrition_range',
-          key,
-          'added',
-          'explore_nonames',
-          {
-            nutrition_type: key,
-            min_value: newRange.min,
-            max_value: newRange.max,
-            range_size: newRange.max && newRange.min ? newRange.max - newRange.min : undefined
-          }
-        );
-      } else if (hasOldRange && !hasNewRange) {
-        // Filter entfernt
-        analytics.trackFilterChanged(
-          'nutrition_range',
-          key,
-          'removed',
-          'explore_nonames',
-          {
-            nutrition_type: key
-          }
-        );
-      }
-    });
-    
-    setNoNameFilters(prev => ({
-      ...prev,
-      nutritionFilters: filters
-    }));
-    
-    // 🎯 Update Journey with new filters (MIT DETAILLIERTEN WERTEN!)
-    // WICHTIG: Verwende die AKTUELLEN Filter-States!
-    const currentNoNameFilters = {
-      ...noNameFilters,
-      nutritionFilters: filters // Die neuen Nutrition-Filter!
-    };
-    
-    const updatedFilters = {
-      markets: currentNoNameFilters.discounterFilters,
-      categories: currentNoNameFilters.categoryFilters.map(id => {
-        const categoryData = categoriesData.find(c => c.id === id);
-        return {
-          docRef: `kategorien/${id}`,
-          id: id,
-          name: categoryData?.name || 'Unbekannt'
-        };
-      }),
-      stufe: currentNoNameFilters.stufeFilters,
-      allergens: Object.entries(currentNoNameFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
-      nutrition: Object.entries(filters || {}).filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined)).map(([k, _]) => k),
-      // NEU: Detaillierte Nutrition-Werte für Analytics
-      nutritionDetails: Object.fromEntries(
-        Object.entries(filters || {})
-          .filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined))
-          .map(([key, range]) => [key, {
-            min: range?.min,
-            max: range?.max,
-            type: range?.min !== undefined ? 'minimum' : 'maximum'
-          }])
-      )
-    };
-    
-    analytics.updateJourneyFilters(updatedFilters);
-    
-    // Check für Filter-Komplexitäts-Überlastung
-    analytics.checkFilterComplexityOverload();
-    
-    // WICHTIG: Lade Produkte neu mit neuen Nutrition-Filtern!
-    loadNoNameProducts(true); // Reset und neu laden
-  }, [noNameFilters, analytics]); // Dependencies!
-  
-  // Automatisch verfügbare Kategorien als Filter hinzufügen
-  const getAvailableCategoriesFilter = () => {
-    const availableCategories = kategorien.filter(k => !k.isLocked);
-    return availableCategories.map(k => k.id);
-  };
-  
-  // Synchrone Filter-Validation (keine async Calls)  
-  const validateFiltersSync = (filters: any) => {
-    // WICHTIG: Nur validieren wenn Kategorien geladen sind!
-    if (kategorien.length === 0) {
-      console.log('⏳ Kategorien noch nicht geladen - überspringe Validation');
-      return filters; // Filter unverändert zurückgeben
-    }
-    
-    // IMMER auf verfügbare Kategorien beschränken
-    const availableCategoryIds = getAvailableCategoriesFilter();
-    
-    let finalCategoryFilters = availableCategoryIds;
-    
-    // Wenn explizite Filter gesetzt: Intersection mit verfügbaren
-    if (filters.categoryFilters && filters.categoryFilters.length > 0) {
-      finalCategoryFilters = filters.categoryFilters.filter((categoryId: string) => {
-        const isValid = availableCategoryIds.includes(categoryId);
-        if (!isValid) {
-          console.warn(`🔒 Kategorie ${categoryId} ist gesperrt - aus Filter entfernt`);
-        }
-        return isValid;
-      });
-      console.log(`🔍 Explizite Filter: ${filters.categoryFilters.length} → ${finalCategoryFilters.length} verfügbar`);
-    } else {
-      console.log(`🔍 Keine expliziten Filter → Verwende alle ${finalCategoryFilters.length} verfügbaren Kategorien`);
-    }
-    
-    return {
-      ...filters,
-      categoryFilters: finalCategoryFilters, // Immer nur verfügbare Kategorien
-      sortBy: filters.sortBy || 'name', // Sortierung beibehalten
-      // WICHTIG: Alle anderen Filter beibehalten!
-      discounterFilters: filters.discounterFilters || [],
-      stufeFilters: filters.stufeFilters || [],
-      allergenFilters: filters.allergenFilters || {},
-      nutritionFilters: filters.nutritionFilters || {} // NEU: Nutrition-Filter beibehalten!
-    };
-  };
-
-  // Helper functions for Markenprodukte filters
-  const toggleMarkenproduktCategoryFilter = (categoryId: string) => {
-    const isAdding = !markenproduktFilters.categoryFilters.includes(categoryId);
-    
-    setMarkenproduktFilters(prev => ({
-      ...prev,
-      categoryFilters: prev.categoryFilters.includes(categoryId)
-        ? prev.categoryFilters.filter(id => id !== categoryId)
-        : [...prev.categoryFilters, categoryId]
-    }));
-    
-    // 📊 Track Filter Change
-    const category = categoriesData.find(c => c.id === categoryId);
-    if (category) {
-      analytics.trackFilterChanged(
-        'category',
-        category.bezeichnung,
-        isAdding ? 'added' : 'removed',
-        'explore_markenprodukte'
-      );
-    }
-  };
-
-
-
-  const toggleMarkenproduktHerstellerFilter = (herstellerId: string) => {
-    const isAdding = !markenproduktFilters.herstellerFilters.includes(herstellerId);
-    
-    setMarkenproduktFilters(prev => ({
-      ...prev,
-      herstellerFilters: prev.herstellerFilters.includes(herstellerId)
-        ? prev.herstellerFilters.filter(id => id !== herstellerId)
-        : [...prev.herstellerFilters, herstellerId]
-    }));
-    
-    // 📊 Track Hersteller Filter Change
-    const hersteller = markenData.find(h => h.id === herstellerId);
-    if (hersteller) {
-      analytics.trackFilterChanged(
-        'market', // Hersteller ist ähnlich wie Markt-Filter
-        hersteller.name || herstellerId,
-        isAdding ? 'added' : 'removed',
-        'explore_markenprodukte',
-        {
-          hersteller_id: herstellerId,
-          total_hersteller_filters: markenproduktFilters.herstellerFilters.length + (isAdding ? 1 : -1)
-        }
-      );
-    }
-    
-    // 🎯 Update Journey with new filters
-    const updatedFilters = {
-      categories: markenproduktFilters.categoryFilters.map(id => {
-        const categoryData = categoriesData.find(c => c.id === id);
-        return {
-          docRef: `kategorien/${id}`,
-          id: id,
-          name: categoryData?.name || 'Unbekannt'
-        };
-      }),
-      hersteller: isAdding 
-        ? [...markenproduktFilters.herstellerFilters, herstellerId]
-        : markenproduktFilters.herstellerFilters.filter(id => id !== herstellerId),
-      allergens: Object.entries(markenproduktFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
-      nutrition: Object.entries(markenproduktFilters.nutritionFilters || {}).filter(([_, v]) => v && (v.min !== undefined || v.max !== undefined)).map(([k, _]) => k)
-    };
-    
-    analytics.updateJourneyFilters(updatedFilters);
-    analytics.checkFilterComplexityOverload();
-  };
-
-  const clearAllMarkenproduktFilters = () => {
-    // Track Filter-Clearing für Journey-Analyse
-    analytics.trackFilterCleared();
-    
-    setMarkenproduktFilters({
-      categoryFilters: [],
-      herstellerFilters: [],
-      allergenFilters: {},
-      nutritionFilters: {}
-    });
-  };
-  
-  // Neue Filter-Handler für Markenprodukte Allergene
-  const toggleMarkenproduktAllergenFilter = (allergen: keyof AllergenFilters) => {
-    const isAdding = !(markenproduktFilters.allergenFilters || {})[allergen];
-    
-    setMarkenproduktFilters(prev => ({
-      ...prev,
-      allergenFilters: {
-        ...(prev.allergenFilters || {}),
-        [allergen]: isAdding
-      }
-    }));
-
-    // 📊 Track Allergen Filter Change
-    analytics.trackFilterChanged(
-      'allergen',
-      allergen.replace('allergens_', ''),
-      isAdding ? 'added' : 'removed',
-      'explore_markenprodukte',
-      {
-        allergen_type: allergen,
-        total_allergen_filters: Object.values(markenproduktFilters.allergenFilters || {}).filter(Boolean).length + (isAdding ? 1 : -1)
-      }
-    );
-    
-    // 🎯 Update Journey with new filters
-    analytics.updateJourneyFilters({
-      categories: markenproduktFilters.categoryFilters.map(id => {
-        const categoryData = categoriesData.find(c => c.id === id);
-        return {
-          docRef: `kategorien/${id}`,
-          id: id,
-          name: categoryData?.name || 'Unbekannt'
-        };
-      }),
-      hersteller: markenproduktFilters.herstellerFilters,
-      allergens: Object.entries({...(markenproduktFilters.allergenFilters || {}), [allergen]: isAdding}).filter(([_, v]) => v).map(([k, _]) => k)
-    });
-  };
-  
-  // Neue Filter-Handler für Markenprodukte Nährwerte
-  const updateMarkenproduktNutritionFilter = useCallback((filters: NutritionFilters) => {
-    // Finde Änderungen für Analytics
-    const oldFilters = markenproduktFilters.nutritionFilters;
-    const newFilters = filters;
-    
-    // Tracke jede Änderung einzeln
-    Object.entries(newFilters).forEach(([key, newRange]) => {
-      const oldRange = oldFilters[key as keyof NutritionFilters];
-      const hasOldRange = oldRange && (oldRange.min !== undefined || oldRange.max !== undefined);
-      const hasNewRange = newRange && (newRange.min !== undefined || newRange.max !== undefined);
-      
-      if (!hasOldRange && hasNewRange) {
-        // Neuer Filter hinzugefügt
-        analytics.trackFilterChanged(
-          'nutrition_range',
-          key,
-          'added',
-          'explore_markenprodukte',
-          {
-            nutrition_type: key,
-            min_value: newRange.min,
-            max_value: newRange.max,
-            range_size: newRange.max && newRange.min ? newRange.max - newRange.min : undefined
-          }
-        );
-      } else if (hasOldRange && !hasNewRange) {
-        // Filter entfernt
-        analytics.trackFilterChanged(
-          'nutrition_range',
-          key,
-          'removed',
-          'explore_markenprodukte',
-          {
-            nutrition_type: key
-          }
-        );
-      }
-    });
-    
-    setMarkenproduktFilters(prev => ({
-      ...prev,
-      nutritionFilters: filters
-    }));
-    
-    // 🎯 Update Journey with new filters (MIT DETAILLIERTEN WERTEN!)
-    // WICHTIG: Verwende die AKTUELLEN Filter-States!
-    const currentMarkenproduktFilters = {
-      ...markenproduktFilters,
-      nutritionFilters: filters // Die neuen Nutrition-Filter!
-    };
-    
-    analytics.updateJourneyFilters({
-      categories: currentMarkenproduktFilters.categoryFilters.map(id => {
-        const categoryData = categoriesData.find(c => c.id === id);
-        return {
-          docRef: `kategorien/${id}`,
-          id: id,
-          name: categoryData?.name || 'Unbekannt'
-        };
-      }),
-      hersteller: currentMarkenproduktFilters.herstellerFilters,
-      allergens: Object.entries(currentMarkenproduktFilters.allergenFilters || {}).filter(([_, v]) => v).map(([k, _]) => k),
-      nutrition: Object.entries(filters || {}).filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined)).map(([k, _]) => k),
-      // NEU: Detaillierte Nutrition-Werte für Analytics
-      nutritionDetails: Object.fromEntries(
-        Object.entries(filters || {})
-          .filter(([_, range]) => range && (range.min !== undefined || range.max !== undefined))
-          .map(([key, range]) => [key, {
-            min: range?.min,
-            max: range?.max,
-            type: range?.min !== undefined ? 'minimum' : 'maximum'
-          }])
-      )
-    });
-    
-    // WICHTIG: Lade Markenprodukte neu mit neuen Nutrition-Filtern!
-    loadMarkenprodukte(true); // Reset und neu laden
-  }, [markenproduktFilters, analytics]); // Dependencies!
-
-  // Filtered and sorted Marken for search
-  const filteredAndSortedMarken = useMemo(() => {
-    let filtered = markenData;
-    
-    // Filter by search query
-    if (markenSearchQuery.trim()) {
-      filtered = markenData.filter(marke => 
-        marke.name.toLowerCase().includes(markenSearchQuery.toLowerCase())
-      );
-    }
-    
-    // Sort: selected first, then alphabetically
-    return filtered.sort((a, b) => {
-      const aSelected = markenproduktFilters.herstellerFilters.includes(a.id);
-      const bSelected = markenproduktFilters.herstellerFilters.includes(b.id);
-      
-      if (aSelected && !bSelected) return -1;
-      if (!aSelected && bSelected) return 1;
-      
-      return a.name.localeCompare(b.name);
-    });
-  }, [markenData, markenSearchQuery, markenproduktFilters.herstellerFilters]);
-
-  // Helper Functions für Filter-Zählung
-  const getActiveFiltersCount = (filters: any) => {
-    let count = 0;
-    if (filters.categoryFilters?.length > 0) count += filters.categoryFilters.length;
-    if (filters.discounterFilters?.length > 0) count += filters.discounterFilters.length;
-    if (filters.stufeFilters?.length > 0) count += filters.stufeFilters.length;
-    if (filters.herstellerFilters?.length > 0) count += filters.herstellerFilters.length;
-    if (filters.priceMin !== undefined || filters.priceMax !== undefined) count += 1;
-    
-    // Zähle Allergen-Filter
-    if (filters.allergenFilters) {
-      count += Object.values(filters.allergenFilters).filter(v => v === true).length;
-    }
-    
-    // Zähle Nährwert-Filter
-    if (filters.nutritionFilters) {
-      const nutritionKeys = ['calories', 'saturatedFat', 'sugar', 'protein', 'carbohydrates', 'totalFat'] as const;
-      count += nutritionKeys.filter(key => {
-        const filter = filters.nutritionFilters[key];
-        return filter && (filter.min !== undefined || filter.max !== undefined);
-      }).length;
-    }
-    
-    return count;
-  };
-
-  const getMarketFiltersCount = () => {
-    // Badge zeigen wenn ein spezifisches Land gewählt ist (inkl. Deutschland als Standard)
-    // Nur bei "Alle Länder" ist kein Filter aktiv
-    return selectedCountry !== 'Alle Länder' ? 1 : 0;
-  };
-
-  // Swipe Navigation Logic - KORREKTE Reihenfolge wie in UI
-  const tabOrder = ['märkte', 'kategorien', 'markenprodukte', 'nonames'];
-  
-  // 🎯 OPTIMIERTE Tab-Wechsel Animation (smoother Timing)
-  const switchToTab = (newTab: string) => {
-    if (isAnimating.current || newTab === activeTab) return;
-    
-    const currentIndex = tabOrder.indexOf(activeTab);
-    const newIndex = tabOrder.indexOf(newTab);
-    const direction = newIndex > currentIndex ? -1 : 1;
-    
-    isAnimating.current = true;
-    
-    // 🚀 VERBESSERTE Animation-Parameter:
-    // Slide-out Animation (schneller)
-    Animated.timing(translateX, {
-      toValue: direction * screenWidth,
-      duration: 150, // 200→150: snappier
-      useNativeDriver: true,
-    }).start(() => {
-      // Track Tab-Switch für Abbruch-Analyse
-      analytics.trackTabSwitched(activeTab, newTab);
-      
-      // Tab wechseln
-      setActiveTab(newTab);
-      
-      // Von der anderen Seite einsliden
-      translateX.setValue(-direction * screenWidth);
-      
-      // Slide-in Animation (schneller)
-      Animated.timing(translateX, {
-        toValue: 0,
-        duration: 150, // 200→150: snappier
-        useNativeDriver: true,
-      }).start(() => {
-        isAnimating.current = false;
-      });
-    });
-  };
-  
-  // 🎯 OPTIMIERTER PanResponder (kleine Performance-Verbesserung)
-  const panResponder = PanResponder.create({
-    onMoveShouldSetPanResponder: (evt, gestureState) => {
-      return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > 8; // 10→8: responsiver
-    },
-    
-    onPanResponderMove: (evt, gestureState) => {
-      // Live-Feedback während des Swipes - weniger Resistance
-      const maxTranslation = screenWidth * 0.2; // 30%→20%: weniger Widerstand
-      let translation = Math.max(-maxTranslation, Math.min(maxTranslation, gestureState.dx));
-      
-      translateX.setValue(translation);
-    },
-    
-    onPanResponderRelease: (evt, gestureState) => {
-      const currentIndex = tabOrder.indexOf(activeTab);
-      const threshold = screenWidth * 0.15; // 25%→15%: einfacher zu triggern
-      
-      if (Math.abs(gestureState.dx) > threshold) {
-        let nextIndex;
-        
-        if (gestureState.dx < 0) {
-          // Swipe nach LINKS = NÄCHSTER Tab
-          nextIndex = (currentIndex + 1) % tabOrder.length;
-        } else {
-          // Swipe nach RECHTS = VORHERIGER Tab  
-          nextIndex = (currentIndex - 1 + tabOrder.length) % tabOrder.length;
-        }
-        
-        switchToTab(tabOrder[nextIndex]);
-        return;
-      }
-      
-      // Zurück zur ursprünglichen Position - schnellere Animation
-      Animated.spring(translateX, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 120, // Höher = schnapper
-        friction: 6,  // Niedriger = weniger Dampfing
-      }).start();
-    },
-  });
-
-
-
-  // Load NoName Products with pagination
-  const loadNoNameProducts = async (reset: boolean = false) => {
-    if ((noNameLoading && !reset) || (!noNameHasMore && !reset)) return;
-    
-    const requestId = ++noNameRequestId.current;
-    
-    try {
-      setNoNameLoading(true);
-      setNoNameError(null);
-
-      // Debug: Zeige aktive Filter
-      console.log('🔍 DEBUG loadNoNameProducts - Filter:', {
-        categoryFilters: noNameFilters.categoryFilters?.length || 0,
-        nutritionFilters: Object.keys(noNameFilters.nutritionFilters || {}).length,
-        allergenFilters: Object.keys(noNameFilters.allergenFilters || {}).length,
-        nutritionDetails: noNameFilters.nutritionFilters
-      });
-      
-      const validatedFilters = validateFiltersSync({
-        ...noNameFilters,
-        sortBy: 'name'
-      });
-
-      const pageSize = reset ? 20 : 10;
-      const result = await FirestoreService.getNoNameProductsPaginated(
-        pageSize,
-        reset ? null : noNameLastDoc,
-        validatedFilters
-      );
-
-      if (noNameRequestId.current !== requestId) {
-        console.log('⚠️ Überspringe veraltete NoName-Response');
-        return;
-      }
-
-      if (reset) {
-        setNoNameProducts(result.products);
+      const stufeNum = parseInt((p as any).stufe) || 1;
+      if (stufeNum <= 2) {
+        router.push(`/noname-detail/${p.id}` as any);
       } else {
-        // ✅ Verhindere Duplikate beim Hinzufügen neuer Produkte
-        setNoNameProducts(prev => {
-          const existingIds = new Set(prev.map(p => p.id));
-          const newProducts = result.products.filter(p => !existingIds.has(p.id));
-          return [...prev, ...newProducts];
-        });
+        router.push(`/product-comparison/${p.id}?type=noname` as any);
       }
+    },
+    [analytics],
+  );
 
-      setNoNameLastDoc(result.lastDoc);
-      setNoNameHasMore(result.hasMore);
-
-    } catch (error) {
-      if (noNameRequestId.current === requestId) {
-      console.error('Error loading NoName products:', error);
-      setNoNameError('Fehler beim Laden der Produkte');
-      } else {
-        console.warn('⚠️ Fehler in veralteter NoName-Anfrage ignoriert:', error);
-      }
-    } finally {
-      if (noNameRequestId.current === requestId) {
-      setNoNameLoading(false);
-      }
-    }
-  };
-
-  // Load Markenprodukte with pagination
-  const loadMarkenprodukte = async (reset: boolean = false) => {
-    if ((markenproduktLoading && !reset) || (!markenproduktHasMore && !reset)) return;
-    
-    const requestId = ++markenRequestId.current;
-    
-    try {
-      setMarkenproduktLoading(true);
-      setMarkenproduktError(null);
-
-      const validatedFiltersRaw = validateFiltersSync({
-        ...markenproduktFilters,
-        sortBy: 'name'
-      });
-      const validatedFilters = {
-        ...validatedFiltersRaw,
-        categoryFilters: markenproduktFilters.categoryFilters || []
-      };
-
-      const pageSize = reset ? 20 : 10;
-      const result = await FirestoreService.getMarkenproduktePaginated(
-        pageSize,
-        reset ? null : markenproduktLastDoc,
-        validatedFilters
+  const openBrand = useCallback(
+    (m: FirestoreDocument<any>, index: number) => {
+      analytics.trackProductViewWithJourney(
+        m.id,
+        'brand',
+        (m as any).name ?? 'Marke',
+        index,
       );
-
-      if (markenRequestId.current !== requestId) {
-        console.log('⚠️ Überspringe veraltete Markenprodukte-Response');
-        return;
-      }
-
-      if (reset) {
-        setMarkenprodukte(result.products);
-      } else {
-        // ✅ Verhindere Duplikate beim Hinzufügen neuer Produkte
-        setMarkenprodukte(prev => {
-          const existingIds = new Set(prev.map(p => p.id));
-          const newProducts = result.products.filter(p => !existingIds.has(p.id));
-          return [...prev, ...newProducts];
-        });
-      }
-
-      setMarkenproduktLastDoc(result.lastDoc);
-      setMarkenproduktHasMore(result.hasMore);
-
-    } catch (error) {
-      if (markenRequestId.current === requestId) {
-      console.error('Error loading Markenprodukte:', error);
-      setMarkenproduktError('Fehler beim Laden der Produkte');
-      } else {
-        console.warn('⚠️ Fehler in veralteter Markenprodukte-Anfrage ignoriert:', error);
-      }
-    } finally {
-      if (markenRequestId.current === requestId) {
-      setMarkenproduktLoading(false);
-      }
-    }
-  };
-
-  // ENTFERNT - Doppeltes Laden verhindert
-
-
-  // Verhindere mehrfache Initialisierung
-  const hasInitialized = useRef(false);
-
-  // Load categories function - außerhalb von useEffect damit es für onUnlockSuccess verfügbar ist
-  const loadCategories = async () => {
-    try {
-      setCategoriesLoading(true);
-      
-      // User Level für Kategorie-Zugriff
-      const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
-      
-      // Lade Kategorien mit Access-Information
-      const categoriesWithAccess = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
-      
-      // Zeige ALLE Kategorien, auch gesperrte (wie auf Startseite)
-      setCategoriesData(categoriesWithAccess);
-      setCategoriesLoading(false); // ✅ Kategorien sofort anzeigen!
-      
-    } catch (error) {
-      console.error('Error loading categories:', error);
-      setCategoriesLoading(false);
-    }
-  };
-
-  // Load markets data
-  useEffect(() => {
-    // Verhindere mehrfache Ausführung bei schnellen userProfile-Updates
-    if (hasInitialized.current) {
-      console.log('⚠️ Explore: Markets/Categories bereits geladen - überspringe');
-      return;
-    }
-    const loadMarkets = async () => {
-      try {
-        setMarketsLoading(true);
-        
-        // Lade Märkte SOFORT - ohne Produktzählung
-        const discounterData = await FirestoreService.getDiscounter();
-
-        
-        // Sortiere Märkte alphabetisch nach Name
-        const sortedDiscounter = discounterData.sort((a, b) => 
-          a.name.localeCompare(b.name, 'de')
-        );
-        setDiscounter(sortedDiscounter);
-        setMarketsLoading(false); // ✅ Märkte sofort anzeigen!
-        
-        
-
-        
-      } catch (error) {
-        console.error('Error loading markets:', error);
-        setMarketsLoading(false);
-      }
-    };
-
-    loadMarkets();
-    loadCategories();
-    hasInitialized.current = true; // Markiere als initialisiert
-  }, [userProfile?.stats?.currentLevel, userProfile?.level, isPremium]); // Nur bei Level-Änderung oder Premium-Status-Änderung
-
-
-
-  // Handle URL parameters for navigation from other screens
-  useEffect(() => {
-    if (params.tab) {
-      setActiveTab(params.tab as string);
-    }
-    
-    if (params.categoryFilter && params.categoryName) {
-      console.log(`🔗 Processing URL params - Category: ${params.categoryName}, Filter: ${params.categoryFilter}`);
-      
-      // Prüfe ob Kategorie verfügbar ist
-      const checkCategoryAccess = async () => {
-        const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
-        const isAvailable = await categoryAccessService.isCategoryAvailable(params.categoryFilter as string, userLevel, isPremium);
-        
-        if (!isAvailable) {
-          // Kategorie ist gesperrt - zeige Hinweis und navigiere zurück
-          Alert.alert(
-            'Kategorie gesperrt 🔒',
-            `Die Kategorie "${params.categoryName}" ist noch nicht verfügbar. Du musst ein höheres Level erreichen.`,
-            [
-              { text: 'OK', onPress: () => router.back() }
-            ]
-          );
-          return;
-        }
-        
-        // Kategorie ist verfügbar - setze Filter
-        const newFilters = {
-          discounterFilters: [],
-          categoryFilters: [params.categoryFilter as string],
-          stufeFilters: [],
-          priceRange: [0, 100]
-        };
-        setNoNameFilters(newFilters);
-        
-        // Reset state und markiere für erneutes Laden
-        setNoNameProducts([]);
-        setNoNameLastDoc(null);
-        setNoNameHasMore(true);
-        setNoNameError(null);
-        hasLoadedNoNames.current = false;
-      };
-      
-      checkCategoryAccess();
-    }
-    
-    if (params.markeFilter && params.markeName) {
-      console.log(`🔗 Processing URL params - Marke: ${params.markeName}, Filter: ${params.markeFilter}`);
-      
-      // Set marke filter for Markenprodukte
-      const newFilters = {
-        categoryFilters: [],
-        herstellerFilters: [params.markeFilter as string]
-      };
-      setMarkenproduktFilters(newFilters);
-      
-      // Reset state und markiere für erneutes Laden
-      setMarkenprodukte([]);
-      setMarkenproduktLastDoc(null);
-      setMarkenproduktHasMore(true);
-      setMarkenproduktError(null);
-      hasLoadedMarken.current = false;
-    }
-  }, [params.tab, params.categoryFilter, params.categoryName, params.markeFilter, params.markeName]); // Spezifische Dependencies
-
-  // Load filter options when component mounts
-  useEffect(() => {
-    const loadFilterOptions = async () => {
-      try {
-        // User Level für Filter-Kategorien
-        const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
-        
-        // Lade zuerst nur Kategorien (wichtig für die Anzeige)
-        const kategorienWithAccess = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
-        setKategorien(kategorienWithAccess);
-        
-        // Lade Marken asynchron im Hintergrund (nicht kritisch für initiale Anzeige)
-        FirestoreService.getMarken().then(markenData => {
-          setMarkenData(markenData);
-        }).catch(error => {
-          console.error('Error loading marken data:', error);
-        });
-
-      } catch (error) {
-        console.error('Error loading filter options:', error);
-      }
-    };
-
-    loadFilterOptions();
-  }, [userProfile?.stats?.currentLevel, userProfile?.level]); // 🎯 NUR bei Level-Änderung neu laden!
-
-  // Track ob Produkte bereits geladen wurden
-  const hasLoadedNoNames = useRef(false);
-  const hasLoadedMarken = useRef(false);
-  const noNameRequestId = useRef(0);
-  const markenRequestId = useRef(0);
-  const prevNoNameFilters = useRef(noNameFilters);
-  const prevMarkenFilters = useRef(markenproduktFilters);
-  
-  // Load NoName Products nur bei Filter-Änderung oder erstem Mal
-  useEffect(() => {
-    if (activeTab === 'nonames' && kategorien.length > 0) {
-      // Prüfe ob sich Filter geändert haben
-      const filtersChanged = JSON.stringify(prevNoNameFilters.current) !== JSON.stringify(noNameFilters);
-      
-      if (!hasLoadedNoNames.current || filtersChanged) {
-        loadNoNameProducts(true);
-        hasLoadedNoNames.current = true;
-        prevNoNameFilters.current = noNameFilters;
-      }
-    }
-  }, [activeTab, noNameFilters, kategorien]);
-
-  // Load Markenprodukte nur bei Filter-Änderung oder erstem Mal
-  useEffect(() => {
-    if (activeTab === 'markenprodukte' && kategorien.length > 0) {
-      // Prüfe ob sich Filter geändert haben
-      const filtersChanged = JSON.stringify(prevMarkenFilters.current) !== JSON.stringify(markenproduktFilters);
-      
-      if (!hasLoadedMarken.current || filtersChanged) {
-        loadMarkenprodukte(true);
-        hasLoadedMarken.current = true;
-        prevMarkenFilters.current = markenproduktFilters;
-      }
-    }
-  }, [activeTab, markenproduktFilters, kategorien]);
-
-  // Static tab titles without counts
-  const getTabTitle = (tabId: string) => {
-    switch (tabId) {
-      case 'märkte':
-        return 'Märkte';
-      case 'kategorien':
-        return 'Kategorien';
-      case 'markenprodukte':
-        return 'Marken-\nProdukte';
-              case 'nonames':
-          return 'NoName-\nProdukte';
-        default:
-          return tabId;
-    }
-  };
-
-  const tabs = [
-    { id: 'märkte', title: 'Märkte', icon: 'house.fill' },
-    { id: 'kategorien', title: 'Kategorien', icon: 'square.grid.2x2' },
-    { id: 'markenprodukte', title: 'Marken-\nProdukte', icon: 'heart.fill' },
-    { id: 'nonames', title: 'NoName-\nProdukte', icon: 'star.fill' },
-  ];
-
-  const categories = [
-    { title: 'Alkohol', icon: '🍷', color: colors.primary },
-    { title: 'Backwaren / Fertigteig', icon: '🥖', color: colors.primary },
-    { title: 'Butter, Margarine etc.', icon: '🧈', color: colors.primary },
-    { title: 'Drogerie & Haushalt', icon: '🧴', color: colors.primary },
-    { title: 'Fertiggerichte', icon: '🍝', color: colors.primary },
-    { title: 'Festliches', icon: '🎄', color: colors.primary },
-    { title: 'Fisch, Feinkost & mehr', icon: '🐟', color: colors.primary },
-  ];
-
-
-
-  const staticMarken = [
-    {
-      title: '11er elfer',
-      logo: '🏷️',
-      description: 'Wir sind ein modernes Familienunternehmen aus dem Westen Österreichs, das sich ganz der Kartoffel verschrieben hat.',
+      router.push(`/product-comparison/${m.id}?type=markenprodukt` as any);
     },
-    {
-      title: 'ACETUM',
-      logo: '🫒',
-      description: 'ACETUM hat seinen Sitz im Herzen einer der reichsten, kulinarischen Region Italiens und ist der weltweit größte Hersteller von zertifiziertem Balsamico-Essig aus Modena PGI.',
-    },
-    {
-      title: 'AHAMA',
-      logo: '🌾',
-      description: 'Mit über 70 Jahren Erfahrung steht AHAMA für höchste Qualitätsstandards in der Herstellung von Naturprodukten.',
-    },
-  ];
+    [analytics],
+  );
 
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'kategorien':
-        return (
-          <View style={styles.contentSection}>
-            {/* Banner - nur ohne Premium */}
-            {!isPremium && (
-              <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
-                <BannerAd 
-                  style={{ marginHorizontal: 0 }}
-                  onAdLoaded={() => console.log('✅ Explore Kategorien Banner loaded')}
-                  onAdFailedToLoad={(error) => console.log('❌ Explore Kategorien Banner failed:', error)}
-                />
-              </View>
-            )}
-            
-            {categoriesLoading ? (
-              <View style={[styles.marketListContainer, { backgroundColor: colors.cardBackground }]}>
-                {[1, 2, 3, 4, 5].map((index) => (
-                  <View 
-                    key={index} 
-                    style={[
-                      styles.marketListItem,
-                      index === 1 && styles.firstMarketItem,
-                      index === 5 && styles.lastMarketItem,
-                      { borderBottomColor: colors.border }
-                    ]}
-                  >
-                    <ListItemSkeleton />
-                </View>
-                ))}
-                </View>
-            ) : (
-              <View style={[styles.marketListContainer, { backgroundColor: colors.cardBackground }]}>
-                {categoriesData.map((category, index) => (
-                  <TouchableOpacity 
-                    key={category.id} 
-                    style={[
-                      styles.marketListItem,
-                      index === 0 && styles.firstMarketItem,
-                      index === categoriesData.length - 1 && styles.lastMarketItem,
-                      index < categoriesData.length - 1 && { 
-                        borderBottomColor: colors.border, 
-                        borderBottomWidth: 0.5 
-                      },
-                      category.isLocked && !category.temporaryUnlock && { opacity: 0.6 } // Ausgegraut für gesperrte
-                    ]}
-                    onPress={() => {
-                      if (category.isLocked && !category.temporaryUnlock) {
-                        // Zeige gesperrte Kategorie Modal
-                        setLockedCategoryModal({
-                          visible: true,
-                          category: category
-                        });
-                        return;
-                      }
-                      
-                      // Switch to NoName tab with category filter
-                      setActiveTab('nonames');
-                      
-                      const newFilters = {
-                        ...noNameFilters,
-                        categoryFilters: [category.id]
-                      };
-                      setNoNameFilters(newFilters);
-                      
-                      // Reset and load NoName products with category filter
-                      setNoNameProducts([]);
-                      setNoNameLastDoc(null);
-                      setNoNameHasMore(true);
-                      setNoNameError(null);
-                      hasLoadedNoNames.current = false;
-                    }}
-                  >
-                    <View style={styles.marketLogo}>
-                      {category.bild && category.bild.trim() !== '' && !failedImages.has(category.id) ? (
-                        <ImageWithShimmer
-                          source={{ uri: category.bild }}
-                          style={[
-                            styles.marketImage,
-                            category.isLocked && styles.marketImageLocked
-                          ]}
-                          fallbackIcon={getCategoryIcon(category.bezeichnung.toLowerCase())}
-                          fallbackIconSize={24}
-                          resizeMode="contain"
-                          onError={() => {
-                            console.log(`Failed to load image for category: ${category.bezeichnung}`);
-                            setFailedImages(prev => new Set([...prev, category.id]));
-                          }}
-                        />
-                      ) : (
-                        <IconSymbol 
-                          name={getCategoryIcon(category.bezeichnung.toLowerCase())} 
-                          size={24} 
-                          color={category.isLocked ? colors.icon : colors.primary}
-                        />
-                      )}
-                      {category.isLocked && !category.temporaryUnlock && (
-                        <View style={styles.marketLockBadge}>
-                          <IconSymbol name="lock" size={12} color="white" />
-                        </View>
-                      )}
-                      {category.temporaryUnlock && (
-                        <View style={[styles.marketLockBadge, { backgroundColor: '#FF9500' }]}>
-                          <IconSymbol name="clock.fill" size={12} color="white" />
-                        </View>
-                      )}
-                    </View>
-                    <ThemedText style={[
-                      styles.categoryTitle, 
-                      { color: category.isLocked ? colors.icon : colors.text }
-                    ]}>
-                      {category.bezeichnung}
-                    </ThemedText>
-                                        <View style={styles.productChevron}>
-                      <IconSymbol name="chevron.right" size={16} color={colors.icon} />
-                    </View>
-              </TouchableOpacity>
-            ))}
-              </View>
-            )}
-          </View>
-        );
-      case 'märkte':
-        return (
-          <View style={styles.contentSection}>
-            {/* Banner - nur ohne Premium */}
-            {!isPremium && (
-              <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
-                <BannerAd 
-                  style={{ marginHorizontal: 0 }}
-                  onAdLoaded={() => console.log('✅ Explore Märkte Banner loaded')}
-                  onAdFailedToLoad={(error) => console.log('❌ Explore Märkte Banner failed:', error)}
-                />
-              </View>
-            )}
-            
-            {marketsLoading ? (
-              <View style={[styles.marketListContainer, { backgroundColor: colors.cardBackground }]}>
-                {[1, 2, 3, 4, 5].map((index) => (
-                  <View 
-                    key={index}
-                    style={[
-                      styles.marketListItem,
-                      index === 1 && styles.firstMarketItem,
-                      index === 5 && styles.lastMarketItem,
-                      index < 5 && { borderBottomColor: colors.border, borderBottomWidth: 0.5 }
-                    ]}
-                  >
-                    <ListItemSkeleton />
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <View style={[styles.marketListContainer, { backgroundColor: colors.cardBackground }]}>
-                {filteredMarkets.map((market, index) => (
-                  <TouchableOpacity 
-                    key={market.id} 
-                    style={[
-                      styles.marketListItem,
-                      index === 0 && styles.firstMarketItem,
-                      index === filteredMarkets.length - 1 && styles.lastMarketItem,
-                      index < filteredMarkets.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 0.5 }
-                    ]}
-                    onPress={() => {
-                      // Wechsle zum NoName Tab und setze Markt-Filter
-                      setActiveTab('nonames');
-                      
-                      const newFilters = {
-                        ...noNameFilters,
-                        discounterFilters: [market.id] // Setze diesen Markt als Filter
-                      };
-                      
-                      setNoNameFilters(newFilters);
-                      
-                      // Lade NoName Produkte mit dem neuen Filter
-                      setNoNameProducts([]);
-                      setNoNameLastDoc(null);
-                      setNoNameHasMore(true);
-                      setNoNameError(null);
-                      hasLoadedNoNames.current = false;
-                    }}
-                  >
-                    <View style={[styles.marketLogo, { backgroundColor: colors.background }]}>
-                      {market.bild && market.bild.trim() !== '' && !failedImages.has(`market-${market.id}`) ? (
-                        <ImageWithShimmer
-                          source={{ uri: market.bild }}
-                          style={styles.marketImage}
-                          fallbackIcon="storefront"
-                          fallbackIconSize={20}
-                          resizeMode="contain"
-                          onError={() => {
-                            console.log(`Failed to load image for market: ${market.name}`);
-                            setFailedImages(prev => new Set([...prev, `market-${market.id}`]));
-                          }}
-                        />
-                      ) : (
-                        <IconSymbol name="storefront" size={20} color={colors.primary} />
-                      )}
-                </View>
-                <View style={styles.marketContent}>
-                  <View style={styles.marketHeader}>
-                        <ThemedText style={styles.marketTitle}>
-                          {market.name}
-                        </ThemedText>
-                        <ThemedText style={styles.marketFlag}>
-                          {getCountryFlag(market.land)}
-                        </ThemedText>
-                  </View>
-                      {market.infos && (
-                        <ThemedText style={styles.marketDescription} numberOfLines={3}>
-                          {market.infos}
-                        </ThemedText>
-                      )}
-                </View>
-                    <View style={styles.productChevron}>
-                      <IconSymbol name="chevron.right" size={16} color={colors.icon} />
-                    </View>
-              </TouchableOpacity>
-            ))}
-                  </View>
-            )}
-          </View>
-        );
-      case 'nonames':
-        return noNameError ? (
-          <View style={styles.contentSection}>
-            <View style={styles.errorState}>
-              <IconSymbol name="exclamationmark.triangle" size={48} color={colors.error} />
-              <ThemedText style={[styles.errorText, { color: colors.error }]}>
-                {noNameError}
-              </ThemedText>
-              <TouchableOpacity 
-                style={[styles.retryButton, { backgroundColor: colors.primary }]}
-                onPress={() => loadNoNameProducts(true)}
-              >
-                <ThemedText style={styles.retryButtonText}>Erneut versuchen</ThemedText>
-              </TouchableOpacity>
-                </View>
-                </View>
-        ) : (
-          <FlatList
-            data={noNameProducts}
-            keyExtractor={(item, index) => `${item.id}-${index}`}
-            ListHeaderComponent={() => (
-              <View>
-                {/* Banner - nur ohne Premium */}
-                {!isPremium && (
-                  <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
-                    <BannerAd 
-                      style={{ marginHorizontal: 0 }}
-                      onAdLoaded={() => console.log('✅ Explore NoName Banner loaded')}
-                      onAdFailedToLoad={(error) => console.log('❌ Explore NoName Banner failed:', error)}
-                    />
-                  </View>
-                )}
-              </View>
-            )}
-                renderItem={({ item: product, index }) => (
-                  <View 
-                    style={[
-                      styles.productItemContainer,
-                      { backgroundColor: colors.cardBackground },
-                      index === 0 && styles.firstProductItem,
-                      index === noNameProducts.length - 1 && styles.lastProductItem,
-                    ]}
-                  >
-                                      <TouchableOpacity 
-                    style={[
-                      styles.productListItem,
-                      index < noNameProducts.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 0.5 }
-                    ]}
-                    onPress={() => {
-                      // 🎯 Track Product View mit Journey-Context
-                      analytics.trackProductViewWithJourney(
-                        product.id,
-                        'noname',
-                        product.name || product.produktName || 'NoName Produkt',
-                        index
-                      );
-                      
-                      const stufe = parseInt(product.stufe) || 1;
-                      if (stufe <= 2) {
-                        // Stufe 1 und 2: Zur speziellen NoName-Detailseite
-                        router.push(`/noname-detail/${product.id}` as any);
-                      } else {
-                        // Stufe 3+: Zum normalen Produktvergleich
-                        router.push(`/product-comparison/${product.id}?type=noname` as any);
-                      }
-                    }}
-                  >
-                    <View style={styles.productLogo}>
-                      {product.bild && product.bild.trim() !== '' && !failedImages.has(`product-${product.id}`) ? (
-                        <ImageWithShimmer
-                          source={{ uri: product.bild }}
-                          style={styles.productImage}
-                          fallbackIcon="photo"
-                          fallbackIconSize={24}
-                          resizeMode="contain"
-                          onError={() => {
-                            console.log(`Failed to load image for product: ${product.name}`);
-                            setFailedImages(prev => new Set([...prev, `product-${product.id}`]));
-                          }}
-                        />
-                      ) : (
-                        <View style={[styles.productImagePlaceholder, { backgroundColor: colors.background }]}>
-                          <IconSymbol name="cube.box" size={32} color={colors.primary} />
-                        </View>
-                      )}
-                    </View>
-
-                    <View style={styles.productContent}>
-                      <ThemedText style={styles.productTitle}>
-                        {product.name}
-                      </ThemedText>
-                      <ThemedText style={styles.productSubtitle}>
-                        {product.handelsmarke?.bezeichnung || 'Unbekannte Handelsmarke'}
-                      </ThemedText>
-                      <View style={styles.productMarketRow}>
-                        {product.discounter?.bild && product.discounter.bild.trim() !== '' && !failedImages.has(`market-${product.discounter.id}`) ? (
-                          <ImageWithShimmer
-                            source={{ uri: product.discounter.bild }}
-                            style={styles.productMarketImage}
-                            fallbackIcon="storefront"
-                            fallbackIconSize={12}
-                            resizeMode="contain"
-                            onError={() => {
-                              console.log(`Failed to load market image: ${product.discounter?.name}`);
-                              setFailedImages(prev => new Set([...prev, `market-${product.discounter?.id}`]));
-                            }}
-                          />
-                        ) : (
-                          <View style={[styles.productMarketImagePlaceholder, { backgroundColor: colors.background }]}>
-                            <IconSymbol name="storefront" size={12} color={colors.icon} />
-                          </View>
-                        )}
-                        <ThemedText style={styles.productMarket}>
-                          {product.discounter?.name || 'Unbekannter Markt'} ({product.discounter?.land || 'DE'})
-                        </ThemedText>
-                      </View>
-                    </View>
-
-                    {/* Rechte Seite: Stufe, Preis und Chevron */}
-                    <View style={styles.productRightSection}>
-                      <View style={styles.productInfoColumn}>
-                        <View style={[styles.stufeBadge, { backgroundColor: getStufenColor(parseInt(product.stufe) || 1) }]}>
-                          <IconSymbol name="chart.bar" size={10} color="white" />
-                          <ThemedText style={styles.stufeBadgeText}>
-                            {product.stufe || '1'}
-                          </ThemedText>
-                        </View>
-                        <ThemedText style={styles.productPrice}>
-                          {formatPrice(product.preis)}
-                        </ThemedText>
-                      </View>
-                      <View style={styles.productChevron}>
-                        <IconSymbol name="chevron.right" size={16} color={colors.icon} />
-                      </View>
-                    </View>
-              </TouchableOpacity>
-          </View>
-                )}
-                onEndReached={() => {
-
-                  if (noNameHasMore && !noNameLoading) {
-                    loadNoNameProducts(false);
-                  }
-                }}
-                onEndReachedThreshold={0.5}
-                ListFooterComponent={() => 
-                  noNameLoading ? (
-                    <LoadingFooterSkeleton />
-                  ) : null
-                }
-            style={[styles.productListContainer, { backgroundColor: colors.cardBackground }]}
-            contentContainerStyle={styles.productListContent}
-            showsVerticalScrollIndicator={false}
-          />
-        );
-      case 'markenprodukte':
-
-        return markenproduktError ? (
-          <View style={styles.contentSection}>
-            <View style={styles.errorState}>
-              <IconSymbol name="exclamationmark.triangle" size={48} color={colors.error} />
-              <ThemedText style={[styles.errorText, { color: colors.error }]}>
-                {markenproduktError}
-              </ThemedText>
-              <TouchableOpacity 
-                style={[styles.retryButton, { backgroundColor: colors.primary }]}
-                onPress={() => loadMarkenprodukte(true)}
-              >
-                <ThemedText style={styles.retryButtonText}>Erneut versuchen</ThemedText>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : (
-          <FlatList
-            data={markenprodukte}
-            keyExtractor={(item, index) => `${item.id}-${index}`}
-            ListHeaderComponent={() => (
-              <View>
-                {/* Banner - nur ohne Premium */}
-                {!isPremium && (
-                  <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
-                    <BannerAd 
-                      style={{ marginHorizontal: 0 }}
-                      onAdLoaded={() => console.log('✅ Explore Marken Banner loaded')}
-                      onAdFailedToLoad={(error) => console.log('❌ Explore Marken Banner failed:', error)}
-                    />
-                  </View>
-                )}
-              </View>
-            )}
-            renderItem={({ item: product, index }) => (
-              <View 
-                style={[
-                  styles.productItemContainer,
-                  { backgroundColor: colors.cardBackground },
-                  index === 0 && styles.firstProductItem,
-                  index === markenprodukte.length - 1 && styles.lastProductItem,
-                ]}
-              >
-                <TouchableOpacity 
-                  style={[
-                    styles.productListItem,
-                    index < markenprodukte.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 0.5 }
-                  ]}
-                  onPress={() => {
-                    // 🎯 Track Product View mit Journey-Context
-                    analytics.trackProductViewWithJourney(
-                      product.id,
-                      'brand',
-                      product.name || product.produktName || 'Markenprodukt',
-                      index
-                    );
-                    
-                    router.push(`/product-comparison/${product.id}?type=brand` as any);
-                  }}
-                >
-                  <View style={styles.productLogo}>
-                    {product.bild && product.bild.trim() !== '' && !failedImages.has(`markenprodukt-${product.id}`) ? (
-                      <ImageWithShimmer
-                        source={{ uri: product.bild }}
-                        style={styles.productImage}
-                        fallbackIcon="cube.box"
-                        fallbackIconSize={32}
-                        resizeMode="contain"
-                        onError={() => {
-                          console.log(`Failed to load image for markenprodukt: ${product.name}`);
-                          setFailedImages(prev => new Set([...prev, `markenprodukt-${product.id}`]));
-                        }}
-                      />
-                    ) : (
-                      <View style={[styles.productImagePlaceholder, { backgroundColor: colors.background }]}>
-                        <IconSymbol name="cube.box" size={32} color={colors.primary} />
-                      </View>
-                    )}
-                  </View>
-
-                  <View style={styles.productContent}>
-                    <ThemedText style={styles.productTitle}>
-                      {product.name}
-                    </ThemedText>
-                    <ThemedText style={styles.productSubtitle}>
-                      {product.marke?.name || product.hersteller?.name || product.hersteller?.herstellername || 'Unbekannte Marke'}
-                    </ThemedText>
-                  </View>
-
-                  {/* Rechte Seite: Nur Preis und Chevron */}
-                  <View style={styles.productRightSection}>
-                    <View style={styles.productInfoColumn}>
-                      <ThemedText style={styles.productPrice}>
-                        {formatPrice(product.preis)}
-                      </ThemedText>
-                    </View>
-                    <View style={styles.productChevron}>
-                      <IconSymbol name="chevron.right" size={16} color={colors.icon} />
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              </View>
-            )}
-            onEndReached={() => {
-
-              if (markenproduktHasMore && !markenproduktLoading) {
-                loadMarkenprodukte(false);
-              }
-            }}
-            onEndReachedThreshold={0.5}
-            ListFooterComponent={() => 
-              markenproduktLoading ? (
-                <LoadingFooterSkeleton />
-              ) : null
-            }
-            style={[styles.productListContainer, { backgroundColor: colors.cardBackground }]}
-            contentContainerStyle={styles.productListContent}
-            showsVerticalScrollIndicator={false}
-          />
-        );
-
-      default:
-        return (
-          <View style={styles.emptyState}>
-            <ThemedText style={styles.emptyText}>Inhalte für {activeTab} werden geladen...</ThemedText>
-          </View>
-        );
-    }
-  };
+  // ─── Render ────────────────────────────────────────────────────────────
+  const currentList = tab === 'eigen' ? nonames : markenprodukte;
+  const isLoading = tab === 'eigen' ? nonameLoading : markenLoading;
+  const hasMore = tab === 'eigen' ? nonameHasMore : markenHasMore;
+  const showEmpty = !isLoading && currentList.length === 0;
 
   return (
-    <ThemedView style={styles.container}>
-      {/* Tab Navigation */}
-      <View style={[styles.tabContainer, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}>
-        <View style={[styles.tabScroll, { flexDirection: 'row' }]}>
-          {tabs.map((tab) => (
-            <TouchableOpacity
-              key={tab.id}
-              style={[
-                styles.tab,
-                activeTab === tab.id && { borderBottomColor: colors.primary }
-              ]}
-              onPress={() => switchToTab(tab.id)}
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      <FlatList
+        data={currentList}
+        numColumns={2}
+        keyExtractor={(item) => item.id}
+        columnWrapperStyle={{ gap: 12, paddingHorizontal: 20 }}
+        contentContainerStyle={{ paddingTop: insets.top, paddingBottom: 120, gap: 12 }}
+        ListHeaderComponent={
+          <View style={{ paddingBottom: 4 }}>
+            {/* Segmented tabs */}
+            <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
+              <SegmentedTabs
+                tabs={[
+                  { key: 'eigen', label: 'Eigenmarken' },
+                  { key: 'marken', label: 'Marken' },
+                ] as const}
+                value={tab}
+                onChange={switchTab}
+              />
+            </View>
+
+            {/* Search input */}
+            <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
+              <View
+                style={{
+                  height: 38,
+                  borderRadius: 11,
+                  backgroundColor: theme.surface,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                  paddingHorizontal: 12,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                <MaterialCommunityIcons name="magnify" size={16} color={theme.textMuted} />
+                <TextInput
+                  placeholder={tab === 'eigen' ? 'Eigenmarken durchsuchen …' : 'Marken oder Hersteller …'}
+                  placeholderTextColor={theme.textMuted}
+                  value={query}
+                  onChangeText={setQuery}
+                  returnKeyType="search"
+                  autoCorrect={false}
+                  style={{
+                    flex: 1,
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 14,
+                    color: theme.text,
+                    paddingVertical: 0,
+                  }}
+                />
+                {query.length > 0 ? (
+                  <Pressable onPress={() => setQuery('')} hitSlop={6}>
+                    <MaterialCommunityIcons name="close-circle" size={16} color={theme.textMuted} />
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+
+            {/* Filter chip rail */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 10, gap: 6 }}
             >
-              <IconSymbol 
-                name={tab.icon as any} 
-                size={18} 
-                color={activeTab === tab.id ? colors.primary : colors.icon} 
+              <FilterChip
+                icon="swap-vertical"
+                label={sort === 'preis' ? 'Preis' : 'A–Z'}
+                strong={sort !== 'name'}
+                onPress={() => setSheet('sort')}
               />
-              <ThemedText 
-                style={[
-                  styles.tabText,
-                  { color: activeTab === tab.id ? colors.primary : colors.icon }
-                ]}
-              >
-                {getTabTitle(tab.id)}
-              </ThemedText>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
+              <View style={{ width: 1, backgroundColor: theme.border, marginVertical: 4, marginHorizontal: 4 }} />
+              {anyFilter ? (
+                <FilterChip icon="filter-remove-outline" label="Zurücksetzen" muted onPress={resetAll} />
+              ) : null}
 
-      {/* Content mit optimiertem Swipe-Verhalten */}
-      <Animated.View 
-        style={[
-          { flex: 1, transform: [{ translateX }] }
-        ]}
-        {...panResponder.panHandlers}
-      >
-        {activeTab === 'nonames' || activeTab === 'markenprodukte' ? (
-          // ✅ FlatList direkt ohne ScrollView für Produkt-Listen - volle Höhe
-          renderContent()
-        ) : (
-          // ScrollView für andere Tabs (märkte, kategorien)
-          <ScrollView 
-            style={styles.scrollView} 
-            showsVerticalScrollIndicator={false}
-          >
-            {renderContent()}
-          </ScrollView>
-        )}
-      </Animated.View>
-
-      {/* Floating Filter Button - nur bei Märkte Tab */}
-      {activeTab === 'märkte' && (
-        <TouchableOpacity 
-          style={[styles.filterFab, { backgroundColor: colors.primary }]}
-          onPress={() => setShowFilterModal(true)}
-        >
-          <IconSymbol name="line.3.horizontal.decrease" size={20} color="white" />
-          {getMarketFiltersCount() > 0 && (
-            <View style={[styles.filterBadge, { backgroundColor: colors.error }]}>
-              <ThemedText style={styles.filterBadgeText}>
-                {getMarketFiltersCount()}
-              </ThemedText>
-      </View>
-          )}
-        </TouchableOpacity>
-      )}
-      
-      {activeTab === 'nonames' && (
-        <TouchableOpacity 
-          style={[styles.filterFab, { backgroundColor: colors.primary }]}
-          onPress={() => setShowNoNameFilterModal(true)}
-        >
-          <IconSymbol name="line.3.horizontal.decrease" size={20} color="white" />
-          {getActiveFiltersCount(noNameFilters) > 0 && (
-            <View style={[styles.filterBadge, { backgroundColor: colors.error }]}>
-              <ThemedText style={styles.filterBadgeText}>
-                {getActiveFiltersCount(noNameFilters)}
-              </ThemedText>
-            </View>
-          )}
-        </TouchableOpacity>
-      )}
-      
-      {activeTab === 'markenprodukte' && (
-        <TouchableOpacity 
-          style={[styles.filterFab, { backgroundColor: colors.primary }]}
-          onPress={() => setShowMarkenproduktFilterModal(true)}
-        >
-          <IconSymbol name="line.3.horizontal.decrease" size={20} color="white" />
-          {getActiveFiltersCount(markenproduktFilters) > 0 && (
-            <View style={[styles.filterBadge, { backgroundColor: colors.error }]}>
-              <ThemedText style={styles.filterBadgeText}>
-                {getActiveFiltersCount(markenproduktFilters)}
-              </ThemedText>
-            </View>
-          )}
-        </TouchableOpacity>
-      )}
-
-      {/* Filter Modal */}
-      <FixedAndroidModal
-        visible={showFilterModal}
-        isBottomSheet={true}
-        onRequestClose={() => setShowFilterModal(false)}
-      >
-        <View style={[styles.filterModalContainer, { backgroundColor: colors.background }]}>
-          <View style={[styles.filterModalHeader, { borderBottomColor: colors.border }]}>
-            <ThemedText style={styles.filterModalTitle}>Nach Land filtern</ThemedText>
-            <TouchableOpacity onPress={() => setShowFilterModal(false)}>
-              <IconSymbol name="xmark" size={24} color={colors.icon} />
-            </TouchableOpacity>
-      </View>
-
-          <ScrollView style={styles.filterOptions}>
-            {availableCountries.map((country) => (
-              <TouchableOpacity 
-                key={country}
-                style={[styles.filterOption, { borderBottomColor: colors.border }]}
-                onPress={() => handleCountrySelect(country)}
-              >
-                <ThemedText style={[styles.filterOptionText, { color: colors.text }]}>
-                  {country} {getCountryFlag(country)}
-                </ThemedText>
-                {selectedCountry === country && (
-                  <IconSymbol name="checkmark" size={20} color={colors.primary} />
-                )}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      </FixedAndroidModal>
-
-      {/* NoName Filter Modal */}
-      <FixedAndroidModal
-        visible={showNoNameFilterModal}
-        isBottomSheet={true}
-        onRequestClose={() => setShowNoNameFilterModal(false)}
-      >
-        <View style={[styles.filterModalContainer, { backgroundColor: colors.background }]}>
-          <View style={[styles.filterModalHeader, { borderBottomColor: colors.border }]}>
-            <ThemedText style={styles.filterModalTitle}>NoName-Produkte filtern</ThemedText>
-            <TouchableOpacity onPress={() => setShowNoNameFilterModal(false)}>
-              <IconSymbol name="xmark" size={24} color={colors.icon} />
-            </TouchableOpacity>
-          </View>
-          
-          <ScrollView 
-            style={styles.filterOptions}
-            contentContainerStyle={{ paddingBottom: 100 }}
-          >
-            {/* Clear All Button */}
-            <View style={styles.filterSection}>
-              <TouchableOpacity 
-                style={[styles.clearAllButton, { backgroundColor: colors.primary }]}
-                onPress={clearAllFilters}
-              >
-                <IconSymbol name="xmark.circle.fill" size={16} color="white" />
-                <ThemedText style={styles.clearAllText}>Alle Filter löschen</ThemedText>
-              </TouchableOpacity>
-            </View>
-
-            {/* Markt Filter - Chips */}
-            <View style={styles.filterSection}>
-              <ThemedText style={[styles.filterSectionTitle, { color: colors.text }]}>Märkte</ThemedText>
-              {selectedCountry !== 'Alle Länder' && (
-                <View style={[styles.countryHint, { backgroundColor: colors.primary + '15' }]}>
-                  <IconSymbol name="info.circle" size={14} color={colors.primary} />
-                  <ThemedText style={[styles.countryHintText, { color: colors.text }]}>
-                    Nur Märkte aus {selectedCountry} (wie im Märkte-Tab gewählt)
-                  </ThemedText>
-                </View>
+              {tab === 'eigen' ? (
+                <>
+                  <FilterChip
+                    icon="storefront-outline"
+                    label="Markt"
+                    value={marketLabel}
+                    onPress={() => setSheet('markt')}
+                    onClear={market !== 'all' ? () => setMarket('all') : null}
+                  />
+                  <FilterChip
+                    icon="shape-outline"
+                    label="Kategorie"
+                    value={catLabel}
+                    onPress={() => setSheet('kategorie')}
+                    onClear={cat !== 'all' ? () => setCat('all') : null}
+                  />
+                  <FilterChip
+                    icon="star-four-points-outline"
+                    label="Stufe"
+                    value={minStufe ? `${minStufe}+` : null}
+                    onPress={() => setSheet('stufe')}
+                    onClear={minStufe ? () => setMinStufe(0) : null}
+                  />
+                  <FilterChip
+                    icon="leaf"
+                    label="Inhaltsstoffe"
+                    value={ingredients.length ? String(ingredients.length) : null}
+                    onPress={() => setSheet('inhalt')}
+                    onClear={ingredients.length ? () => setIngredients([]) : null}
+                  />
+                  <FilterChip
+                    icon="tag-outline"
+                    label="Handelsmarke"
+                    value={handelsLabel}
+                    onPress={() => setSheet('handels')}
+                    onClear={handels !== 'all' ? () => setHandels('all') : null}
+                  />
+                </>
+              ) : (
+                <>
+                  <FilterChip
+                    icon="bookmark-outline"
+                    label="Marke"
+                    value={brandLabel}
+                    onPress={() => setSheet('marke')}
+                    onClear={brandId !== 'all' ? () => setBrandId('all') : null}
+                  />
+                  <FilterChip
+                    icon="shape-outline"
+                    label="Kategorie"
+                    value={catLabel}
+                    onPress={() => setSheet('kategorie')}
+                    onClear={cat !== 'all' ? () => setCat('all') : null}
+                  />
+                  <FilterChip
+                    icon="leaf"
+                    label="Inhaltsstoffe"
+                    value={ingredients.length ? String(ingredients.length) : null}
+                    onPress={() => setSheet('inhalt')}
+                    onClear={ingredients.length ? () => setIngredients([]) : null}
+                  />
+                </>
               )}
-              <View style={styles.chipsContainer}>
-                {filteredMarkets.map((market) => (
-                  <TouchableOpacity 
-                    key={market.id}
-                    style={[
-                      styles.filterChip,
-                      { 
-                        backgroundColor: noNameFilters.discounterFilters.includes(market.id) 
-                          ? colors.primary 
-                          : colors.cardBackground,
-                        borderColor: colors.border
-                      }
-                    ]}
-                    onPress={() => toggleDiscounterFilter(market.id)}
-                  >
-                    <View style={[styles.chipLogo, { backgroundColor: colors.background }]}>
-                      {market.bild && market.bild.trim() !== '' && !failedImages.has(`chip-market-${market.id}`) ? (
-                        <ImageWithShimmer
-                          source={{ uri: market.bild }}
-                          style={styles.chipImage}
-                          fallbackIcon="storefront"
-                          fallbackIconSize={12}
-                          resizeMode="contain"
-                          onError={() => {
-                            setFailedImages(prev => new Set([...prev, `chip-market-${market.id}`]));
-                          }}
-                        />
-                      ) : (
-                        <IconSymbol name="storefront" size={12} color={colors.icon} />
-                      )}
-                    </View>
-                    <ThemedText style={[
-                      styles.chipText, 
-                      { 
-                        color: noNameFilters.discounterFilters.includes(market.id) 
-                          ? 'white' 
-                          : colors.text 
-                      }
-                    ]}>
-                      {market.name}
-                    </ThemedText>
-                  </TouchableOpacity>
-                ))}
-        </View>
-      </View>
+            </ScrollView>
 
-            {/* Kategorie Filter - Chips */}
-            <View style={styles.filterSection}>
-              <ThemedText style={[styles.filterSectionTitle, { color: colors.text }]}>Kategorien</ThemedText>
-              <View style={styles.chipsContainer}>
-                                {kategorien.map((kategorie) => (
-                  <TouchableOpacity 
-                    key={kategorie.id}
-                    style={[
-                      styles.filterChip,
-                      { 
-                        backgroundColor: noNameFilters.categoryFilters.includes(kategorie.id) 
-                          ? colors.primary 
-                          : colors.cardBackground,
-                        borderColor: colors.border,
-                        opacity: kategorie.isLocked ? 0.4 : 1
-                      }
-                    ]}
-                    onPress={kategorie.isLocked ? undefined : () => toggleCategoryFilter(kategorie.id)}
-                    disabled={kategorie.isLocked}
-                  >
-                    {kategorie.bild && kategorie.bild.trim() !== '' && !failedImages.has(`filter-cat-${kategorie.id}`) ? (
-                      <ImageWithShimmer
-                        source={{ uri: kategorie.bild }}
-                        style={styles.chipCategoryImage}
-                        fallbackIcon={getCategoryIcon(kategorie.bezeichnung)}
-                        fallbackIconSize={16}
-                        resizeMode="contain"
-                        onError={() => {
-                          setFailedImages(prev => new Set([...prev, `filter-cat-${kategorie.id}`]));
-                        }}
-                      />
-                    ) : (
-                      <IconSymbol 
-                        name={getCategoryIcon(kategorie.bezeichnung)} 
-                        size={16} 
-                        color={
-                          noNameFilters.categoryFilters.includes(kategorie.id) 
-                            ? 'white' 
-                            : kategorie.isLocked 
-                              ? colors.icon 
-                              : colors.primary
-                        }
-                      />
-                    )}
-                    <ThemedText style={[
-                      styles.chipText, 
-                      { 
-                        color: noNameFilters.categoryFilters.includes(kategorie.id)
-                          ? 'white' 
-                          : kategorie.isLocked
-                            ? colors.icon
-                            : colors.text 
-                      }
-                    ]}>
-                      {kategorie.bezeichnung}
-                    </ThemedText>
-                    {kategorie.isLocked && (
-                      <IconSymbol name="lock" size={12} color={colors.icon} />
-                    )}
-                  </TouchableOpacity>
-                ))}
+            {/* Banner ad (non-premium) */}
+            {!isPremium ? (
+              <View style={{ marginTop: 12 }}>
+                <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
               </View>
-            </View>
-
-            {/* Stufe Filter - Chips */}
-            <View style={styles.filterSection}>
-              <ThemedText style={[styles.filterSectionTitle, { color: colors.text }]}>Stufen</ThemedText>
-              <View style={styles.chipsContainer}>
-                {[1, 2, 3, 4, 5].map((stufe) => (
-                  <TouchableOpacity 
-                    key={stufe}
-                    style={[
-                      styles.filterChip,
-                      { 
-                        backgroundColor: noNameFilters.stufeFilters.includes(stufe) 
-                          ? getStufenColor(stufe)
-                          : colors.cardBackground,
-                        borderColor: colors.border
-                      }
-                    ]}
-                    onPress={() => toggleStufeFilter(stufe)}
-                  >
-                    <IconSymbol name="chart.bar" size={12} color={noNameFilters.stufeFilters.includes(stufe) ? 'white' : colors.icon} />
-                    <ThemedText style={[
-                      styles.chipText, 
-                      { 
-                        color: noNameFilters.stufeFilters.includes(stufe) 
-                          ? 'white' 
-                          : colors.text 
-                      }
-                    ]}>
-                      Stufe {stufe}
-                    </ThemedText>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-                        {/* Allergene Filter - TEMPORÄR AUSGEBLENDET */}
-            {/* <View style={styles.filterSection}>
-              <AllergenFilterChips
-                selectedAllergens={noNameFilters.allergenFilters || {}}
-                onToggleAllergen={toggleAllergenFilter}
-              />
-            </View> */}
-
-            {/* Nährwerte Filter - TEMPORÄR AUSGEBLENDET */}
-            {/* <View style={styles.filterSection}>
-              <NutritionSliderFilter
-                nutritionFilters={noNameFilters.nutritionFilters || {}}
-                onUpdateFilter={(filters) => {
-                  setNoNameFilters(prev => ({
-                    ...prev,
-                    nutritionFilters: filters
-                  }));
-                  // Journey-Update passiert automatisch im useEffect
-                }}
-                onFilterChanged={(filterType, filterValue, action) => {
-                  // Erweiterte Tracking-Daten für Nutrition-Filter
-                  const nutritionFilter = noNameFilters.nutritionFilters?.[filterType];
-                  const additionalData = {
-                    nutrition_type: filterType,
-                    min_value: nutritionFilter?.min,
-                    max_value: nutritionFilter?.max,
-                    filter_range: nutritionFilter?.max && nutritionFilter?.min 
-                      ? nutritionFilter.max - nutritionFilter.min 
-                      : undefined,
-                    filter_direction: nutritionFilter?.min !== undefined ? 'minimum' : 'maximum'
-                  };
-                  
-                  analytics.trackFilterChanged('nutrition_range', filterValue, action, 'explore', additionalData);
-                }}
-              />
-            </View> */}
-      </ScrollView>
-        </View>
-      </FixedAndroidModal>
-
-      {/* Markenprodukte Filter Modal */}
-      <FixedAndroidModal
-        visible={showMarkenproduktFilterModal}
-        isBottomSheet={true}
-        onRequestClose={() => setShowMarkenproduktFilterModal(false)}
-      >
-        <View style={[styles.filterModalContainer, { backgroundColor: colors.background }]}>
-          <View style={[styles.filterModalHeader, { borderBottomColor: colors.border }]}>
-            <ThemedText style={styles.filterModalTitle}>Markenprodukte filtern</ThemedText>
-            <TouchableOpacity onPress={() => setShowMarkenproduktFilterModal(false)}>
-              <IconSymbol name="xmark" size={24} color={colors.icon} />
-      </TouchableOpacity>
+            ) : null}
           </View>
-          
-          <ScrollView 
-            style={styles.filterOptions}
-            contentContainerStyle={{ paddingBottom: 100 }}
-          >
-            {/* Clear All Button */}
-            <View style={styles.filterSection}>
-              <TouchableOpacity 
-                style={[styles.clearAllButton, { backgroundColor: colors.primary }]}
-                onPress={clearAllMarkenproduktFilters}
-              >
-                <IconSymbol name="xmark.circle.fill" size={16} color="white" />
-                <ThemedText style={styles.clearAllText}>Alle Filter löschen</ThemedText>
-              </TouchableOpacity>
+        }
+        renderItem={({ item, index }) => {
+          if (tab === 'eigen') {
+            const p = item as FirestoreDocument<Produkte>;
+            const disc = (p as any).discounter ? discounterMap[(p as any).discounter.id] : null;
+            return (
+              <View style={{ flex: 1, maxWidth: '50%' }}>
+                <ProductCard
+                  title={(p as any).name ?? ''}
+                  brand={null}
+                  imageUri={(p as any).bild ?? null}
+                  price={(p as any).preis ?? 0}
+                  stufe={parseInt((p as any).stufe) || 1}
+                  marketShort={disc?.short ?? null}
+                  marketColor={disc?.color ?? null}
+                  variant="grid"
+                  onPress={() => openProduct(p, index)}
+                />
+              </View>
+            );
+          }
+          const m = item as FirestoreDocument<any>;
+          const marke = markenList.find((x) => x.id === ((m as any).hersteller?.id ?? (m as any).hersteller))?.name;
+          return (
+            <View style={{ flex: 1, maxWidth: '50%' }}>
+              <BrandCard
+                title={(m as any).name ?? ''}
+                brand={marke ?? ''}
+                imageUri={(m as any).bild ?? null}
+                price={(m as any).preis ?? 0}
+                alternativeCount={(m as any).relatedProdukteIDs?.length ?? 0}
+                onPress={() => openBrand(m, index)}
+              />
             </View>
+          );
+        }}
+        onEndReachedThreshold={0.5}
+        onEndReached={() => hasMore && !isLoading && loadMore()}
+        ListEmptyComponent={
+          showEmpty ? (
+            <View style={{ alignItems: 'center', paddingVertical: 60, paddingHorizontal: 32 }}>
+              <Text style={{ fontSize: 54, marginBottom: 12 }}>🔍</Text>
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.bold,
+                  fontSize: 16,
+                  color: theme.text,
+                  textAlign: 'center',
+                }}
+              >
+                Keine Treffer
+              </Text>
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 13,
+                  color: theme.textMuted,
+                  textAlign: 'center',
+                  marginTop: 6,
+                }}
+              >
+                Probier weniger Filter oder einen anderen Tab.
+              </Text>
+            </View>
+          ) : null
+        }
+        ListFooterComponent={
+          isLoading && currentList.length > 0 ? (
+            <View style={{ paddingVertical: 24 }}>
+              <ActivityIndicator size="small" color={theme.primary} />
+            </View>
+          ) : null
+        }
+      />
 
-            {/* Hersteller/Marke Filter - Suchfeld + Chips */}
-            <View style={styles.filterSection}>
-              <ThemedText style={[styles.filterSectionTitle, { color: colors.text }]}>
-                Marken ({markenproduktFilters.herstellerFilters.length} ausgewählt)
-              </ThemedText>
-              
-                            {/* Suchfeld im Stil der Startseite */}
-              <View style={styles.markenSearchSection}>
-                <View style={[styles.markenSearchContainer, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-          <IconSymbol name="magnifyingglass" size={20} color={colors.icon} />
-          <TextInput
-                    style={[styles.markenSearchInput, { color: colors.text }]}
-                    placeholder="Marke suchen..."
-            placeholderTextColor={colors.icon}
-                    value={markenSearchQuery}
-                    onChangeText={setMarkenSearchQuery}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-          />
-                  {markenSearchQuery.length > 0 && (
-                    <TouchableOpacity onPress={() => setMarkenSearchQuery('')}>
-                      <IconSymbol name="xmark.circle.fill" size={18} color={colors.icon} />
-                    </TouchableOpacity>
-                  )}
-        </View>
-      </View>
+      {/* ─── Filter sheets ──────────────────────────────────────────── */}
+      <FilterSheet
+        visible={sheet === 'sort'}
+        title={SHEET_TITLES.sort}
+        onClose={() => setSheet(null)}
+      >
+        <OptionList
+          value={sort}
+          options={[
+            ['name', 'Name (A–Z)'],
+            ['preis', 'Preis (aufsteigend)'],
+          ] as const}
+          onChange={(v) => {
+            setSort(v);
+            setSheet(null);
+          }}
+        />
+      </FilterSheet>
 
-              {/* Dynamische Chips basierend auf Suche */}
-              <View style={styles.chipsContainer}>
-                {filteredAndSortedMarken.slice(0, markenSearchQuery.trim() ? 50 : 7).map((marke) => {
-                  const isSelected = markenproduktFilters.herstellerFilters.includes(marke.id);
-                  return (
-                    <TouchableOpacity 
-                      key={marke.id}
-                      style={[
-                        styles.filterChip,
-                        { 
-                          backgroundColor: isSelected 
-                            ? colors.primary 
-                            : colors.cardBackground,
-                          borderColor: isSelected ? colors.primary : colors.border,
-                          borderWidth: 1
-                        }
-                      ]}
-                      onPress={() => toggleMarkenproduktHerstellerFilter(marke.id)}
-                    >
-                      <IconSymbol 
-                        name={isSelected ? "checkmark" : "tag"} 
-                        size={14} 
-                        color={isSelected ? 'white' : colors.primary}
-                      />
-                      <ThemedText style={[
-                        styles.chipText, 
-                        { 
-                          color: isSelected ? 'white' : colors.text 
-                        }
-                      ]}>
-                        {marke.name}
-                      </ThemedText>
-                    </TouchableOpacity>
-                  );
+      <FilterSheet
+        visible={sheet === 'markt'}
+        title={SHEET_TITLES.markt}
+        onClose={() => setSheet(null)}
+      >
+        <OptionList
+          value={market}
+          options={
+            [
+              ['all', 'Alle Märkte'],
+              ...discounter.map((d) => [d.id, (d as any).name ?? ''] as const),
+            ] as const
+          }
+          onChange={(v) => {
+            setMarket(v);
+            setSheet(null);
+          }}
+          renderLeading={(k) => {
+            if (k === 'all')
+              return (
+                <View
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 8,
+                    backgroundColor: theme.surfaceAlt,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <MaterialCommunityIcons name="storefront-outline" size={16} color={theme.textMuted} />
+                </View>
+              );
+            const d = discounter.find((x) => x.id === k);
+            return (
+              <View
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 8,
+                  backgroundColor: (d as any)?.color ?? theme.surfaceAlt,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 12, color: '#ffffff' }}>
+                  {((d as any)?.name?.[0] ?? '?').toUpperCase()}
+                </Text>
+              </View>
+            );
+          }}
+        />
+      </FilterSheet>
+
+      <FilterSheet
+        visible={sheet === 'kategorie'}
+        title={SHEET_TITLES.kategorie}
+        onClose={() => setSheet(null)}
+      >
+        <OptionList
+          value={cat}
+          options={
+            [
+              ['all', 'Alle Kategorien'],
+              ...kategorien.map(
+                (c) =>
+                  [
+                    c.id,
+                    `${(c as any).bezeichnung ?? (c as any).name ?? ''}${
+                      (c as any).isLocked ? ' 🔒' : ''
+                    }`,
+                  ] as const,
+              ),
+            ] as const
+          }
+          onChange={(v) => onChangeCategory(v)}
+        />
+      </FilterSheet>
+
+      <FilterSheet
+        visible={sheet === 'stufe'}
+        title={SHEET_TITLES.stufe}
+        onClose={() => setSheet(null)}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 13,
+            color: theme.textMuted,
+            marginBottom: 14,
+          }}
+        >
+          Zeige nur Eigenmarken ab dieser Ähnlichkeitsstufe.
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 22 }}>
+          {[0, 1, 2, 3, 4, 5].map((n) => {
+            const on = minStufe === n;
+            const bg = on ? (n === 0 ? theme.text : stufen[n as 1 | 2 | 3 | 4 | 5]) : theme.surface;
+            const fg = on ? (n === 3 ? theme.text : '#ffffff') : theme.text;
+            return (
+              <Pressable
+                key={n}
+                onPress={() => setMinStufe(n)}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  height: 52,
+                  borderRadius: 12,
+                  backgroundColor: bg,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: pressed ? 0.9 : 1,
+                  ...shadows.sm,
                 })}
-                
-                {filteredAndSortedMarken.length === 0 && markenSearchQuery.trim() && (
-                  <ThemedText style={[styles.noResultsText, { color: colors.icon }]}>
-                    Keine Marken gefunden für "{markenSearchQuery}"
-                  </ThemedText>
-                )}
-              </View>
-
-              {/* Kompakter Hinweis für weitere Marken */}
-              {!markenSearchQuery.trim() && filteredAndSortedMarken.length > 7 && (
-                <View style={[styles.moreMarkenHintCompact, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                  <IconSymbol name="magnifyingglass" size={12} color={colors.icon} />
-                  <ThemedText style={[styles.moreMarkenTextCompact, { color: colors.icon }]}>
-                    +{filteredAndSortedMarken.length - 7} weitere • Suchen
-                  </ThemedText>
-                </View>
-              )}
-      </View>
-
-
-
-            {/* Kategorie Filter - Chips */}
-            <View style={styles.filterSection}>
-              <ThemedText style={[styles.filterSectionTitle, { color: colors.text }]}>Kategorien</ThemedText>
-              <View style={styles.chipsContainer}>
-                {kategorien.map((kategorie) => (
-                  <TouchableOpacity 
-                    key={kategorie.id}
-                    style={[
-                      styles.filterChip,
-                      { 
-                        backgroundColor: markenproduktFilters.categoryFilters.includes(kategorie.id) 
-                          ? colors.primary 
-                          : colors.cardBackground,
-                        borderColor: colors.border,
-                        opacity: kategorie.isLocked ? 0.4 : 1
-                      }
-                    ]}
-                    onPress={kategorie.isLocked ? undefined : () => toggleMarkenproduktCategoryFilter(kategorie.id)}
-                    disabled={kategorie.isLocked}
-                  >
-                    {kategorie.bild && kategorie.bild.trim() !== '' && !failedImages.has(`filter-marken-cat-${kategorie.id}`) ? (
-                      <ImageWithShimmer
-                        source={{ uri: kategorie.bild }}
-                        style={styles.chipCategoryImage}
-                        fallbackIcon={getCategoryIcon(kategorie.bezeichnung)}
-                        fallbackIconSize={16}
-                        resizeMode="contain"
-                        onError={() => {
-                          setFailedImages(prev => new Set([...prev, `filter-marken-cat-${kategorie.id}`]));
-                        }}
-                      />
-                    ) : (
-                      <IconSymbol 
-                        name={getCategoryIcon(kategorie.bezeichnung)} 
-                        size={16} 
-                        color={
-                          markenproduktFilters.categoryFilters.includes(kategorie.id) 
-                            ? 'white' 
-                            : kategorie.isLocked 
-                              ? colors.icon 
-                              : colors.primary
-                        }
-                      />
-                    )}
-                    <ThemedText style={[
-                      styles.chipText, 
-                      { 
-                        color: markenproduktFilters.categoryFilters.includes(kategorie.id) 
-                          ? 'white' 
-                          : kategorie.isLocked
-                            ? colors.icon
-                            : colors.text 
-                      }
-                    ]}>
-                      {kategorie.bezeichnung}
-                    </ThemedText>
-                    {kategorie.isLocked && (
-                      <IconSymbol name="lock" size={12} color={colors.icon} />
-                    )}
-      </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {/* Allergene Filter - TEMPORÄR AUSGEBLENDET */}
-            {/* <View style={styles.filterSection}>
-              <AllergenFilterChips
-                selectedAllergens={markenproduktFilters.allergenFilters || {}}
-                onToggleAllergen={toggleMarkenproduktAllergenFilter}
-              />
-            </View> */}
-
-            {/* Nährwerte Filter - TEMPORÄR AUSGEBLENDET */}
-            {/* <View style={styles.filterSection}>
-              <NutritionSliderFilter
-                nutritionFilters={markenproduktFilters.nutritionFilters || {}}
-                onUpdateFilter={(filters) => {
-                  setMarkenproduktFilters(prev => ({
-                    ...prev,
-                    nutritionFilters: filters
-                  }));
-                  // Journey-Update passiert automatisch im useEffect
-                }}
-                onFilterChanged={(filterType, filterValue, action) => {
-                  // Erweiterte Tracking-Daten für Nutrition-Filter
-                  const nutritionFilter = markenproduktFilters.nutritionFilters?.[filterType];
-                  const additionalData = {
-                    nutrition_type: filterType,
-                    min_value: nutritionFilter?.min,
-                    max_value: nutritionFilter?.max,
-                    filter_range: nutritionFilter?.max && nutritionFilter?.min 
-                      ? nutritionFilter.max - nutritionFilter.min 
-                      : undefined,
-                    filter_direction: nutritionFilter?.min !== undefined ? 'minimum' : 'maximum'
-                  };
-                  
-                  analytics.trackFilterChanged('nutrition_range', filterValue, action, 'explore', additionalData);
-                }}
-              />
-            </View> */}
-
-          </ScrollView>
+              >
+                <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 16, color: fg }}>
+                  {n === 0 ? '—' : n}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
-      </FixedAndroidModal>
+        <Pressable
+          onPress={() => setSheet(null)}
+          style={({ pressed }) => ({
+            height: 48,
+            borderRadius: 12,
+            backgroundColor: brand.primary,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed ? 0.9 : 1,
+          })}
+        >
+          <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: '#ffffff' }}>
+            Anwenden
+          </Text>
+        </Pressable>
+      </FilterSheet>
 
-      {/* Locked Category Modal */}
-      {lockedCategoryModal.category && (
+      <FilterSheet
+        visible={sheet === 'marke'}
+        title={SHEET_TITLES.marke}
+        onClose={() => setSheet(null)}
+      >
+        <OptionList
+          value={brandId}
+          options={
+            [
+              ['all', 'Alle Marken'],
+              ...markenList.map((m) => [m.id, m.name] as const),
+            ] as const
+          }
+          onChange={(v) => {
+            setBrandId(v);
+            setSheet(null);
+          }}
+        />
+      </FilterSheet>
+
+      <FilterSheet
+        visible={sheet === 'handels'}
+        title={SHEET_TITLES.handels}
+        onClose={() => setSheet(null)}
+      >
+        <OptionList
+          value={handels}
+          options={
+            [
+              ['all', 'Alle Handelsmarken'],
+              ...handelsmarken.map(
+                (h) => [h.id, (h as any).bezeichnung ?? (h as any).name ?? ''] as const,
+              ),
+            ] as const
+          }
+          onChange={(v) => {
+            setHandels(v);
+            setSheet(null);
+          }}
+        />
+      </FilterSheet>
+
+      <FilterSheet
+        visible={sheet === 'inhalt'}
+        title={SHEET_TITLES.inhalt}
+        onClose={() => setSheet(null)}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 13,
+            color: theme.textMuted,
+            marginBottom: 14,
+          }}
+        >
+          Mehrfachauswahl möglich.
+        </Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+          {INGREDIENTS.map((x) => {
+            const on = ingredients.includes(x);
+            return (
+              <Pressable
+                key={x}
+                onPress={() => toggleIngredient(x)}
+                style={({ pressed }) => ({
+                  height: 38,
+                  paddingHorizontal: 14,
+                  borderRadius: 19,
+                  backgroundColor: on ? brand.primary : theme.surface,
+                  borderWidth: 1,
+                  borderColor: on ? 'transparent' : theme.borderStrong,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  opacity: pressed ? 0.9 : 1,
+                })}
+              >
+                {on ? <MaterialCommunityIcons name="check" size={14} color="#ffffff" /> : null}
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.semibold,
+                    fontSize: 13,
+                    color: on ? '#ffffff' : theme.text,
+                  }}
+                >
+                  {x}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <Pressable
+            onPress={() => setIngredients([])}
+            style={({ pressed }) => ({
+              flex: 1,
+              height: 48,
+              borderRadius: 12,
+              backgroundColor: theme.surface,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.9 : 1,
+              ...shadows.sm,
+            })}
+          >
+            <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: theme.text }}>
+              Zurücksetzen
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setSheet(null)}
+            style={({ pressed }) => ({
+              flex: 1,
+              height: 48,
+              borderRadius: 12,
+              backgroundColor: brand.primary,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.9 : 1,
+            })}
+          >
+            <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: '#ffffff' }}>
+              Anwenden
+            </Text>
+          </Pressable>
+        </View>
+      </FilterSheet>
+
+      {/* ─── Locked category modal (Alkohol gating) ─────────────────── */}
+      {lockedCategory ? (
         <LockedCategoryModal
-          visible={lockedCategoryModal.visible}
-          categoryId={lockedCategoryModal.category.id}
-          categoryName={lockedCategoryModal.category.bezeichnung}
-          categoryImage={lockedCategoryModal.category.bild}
-          requiredLevel={lockedCategoryModal.category.requiredLevel || 1}
-          currentLevel={userProfile?.stats?.currentLevel || userProfile?.level || 1}
-          onClose={() => setLockedCategoryModal({ visible: false, category: null })}
+          visible={!!lockedCategory}
+          categoryId={lockedCategory.id}
+          categoryName={(lockedCategory as any).bezeichnung ?? (lockedCategory as any).name ?? ''}
+          categoryImage={(lockedCategory as any).bild}
+          requiredLevel={(lockedCategory as any).requiredLevel ?? 3}
+          currentLevel={(userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1}
+          onClose={() => setLockedCategory(null)}
           onNavigateToLevels={() => {
-            setLockedCategoryModal({ visible: false, category: null });
+            setLockedCategory(null);
             router.push('/achievements' as any);
           }}
-          onUnlockSuccess={loadCategories}
+          onUnlockSuccess={() => {
+            setLockedCategory(null);
+            // Re-fetch categories so the lock state updates after rewarded-ad unlock
+            (async () => {
+              const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
+              const cats = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
+              setKategorien(cats);
+            })();
+          }}
         />
-      )}
-
-    </ThemedView>
+      ) : null}
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  tabContainer: {
-    paddingTop: 60,
-    borderBottomWidth: 1,
-  },
-  tabScroll: {
-    paddingHorizontal: 8, // Weniger Padding
-  },
-  tab: {
-    alignItems: 'center',
-    paddingVertical: 10, // Weniger Padding
-    paddingHorizontal: 8, // Viel weniger Padding
-    marginRight: 4, // Weniger Margin
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-    minWidth: 60, // Kleinere Mindestbreite
-    flex: 1, // Gleichmäßige Verteilung
-  },
-  tabText: {
-    fontSize: 10, // Kleinere Schrift
-    fontFamily: 'Nunito_500Medium',
-    marginTop: 2, // Weniger Margin
-    textAlign: 'center',
-    lineHeight: 11,
-  },
-
-  scrollView: {
-    flex: 1,
-  },
-  contentSection: {
-    paddingHorizontal: 12,
-    paddingTop: 16,
-    paddingBottom: Platform.OS === 'ios' ? 100 : 20, // Platz für Tab Bar + extra Abstand
-  },
-  listItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    gap: 16,
-  },
-  itemIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  itemEmoji: {
-    fontSize: 24,
-  },
-  itemContent: {
-    flex: 1,
-  },
-  itemTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 2,
-    lineHeight: 18,
-  },
-  itemSubtitle: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    opacity: 0.7,
-    lineHeight: 12,
-  },
-  // iOS-Style Market List Container
-  marketListContainer: {
-    borderRadius: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.09,
-    shadowRadius: 2,
-    elevation: 2,
-    overflow: 'hidden',
-  },
-  marketListItem: {
-    flexDirection: 'row',
-    paddingVertical: 10, // 40% weniger (16 → 10)
-    paddingHorizontal: 16,
-    gap: 12,
-    alignItems: 'center', // ✅ Vertikal zentriert
-  },
-  firstMarketItem: {
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-  },
-  lastMarketItem: {
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
-  },
-  marketChevron: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 20,
-    height: 36, // 40% weniger (60 → 36) für kompaktere Zeilen
-  },
-  // Legacy market item (kept for other tabs)
-  marketItem: {
-    flexDirection: 'row',
-    paddingVertical: 12,
-    paddingHorizontal: 0,
-    borderBottomWidth: 1,
-    gap: 12,
-    alignItems: 'flex-start',
-  },
-  marketLogo: {
-    width: 60,
-    height: 60,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 6,
-    position: 'relative', // Für Lock-Badge Positionierung
-  },
-  marketEmoji: {
-    fontSize: 24,
-  },
-  marketImage: {
-    width: 44,
-    height: 44,
-    borderRadius: 1,
-    resizeMode: 'contain',
-  },
-  marketImageLocked: {
-    opacity: 0.5,
-  },
-  marketLockBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  marketContent: {
-    flex: 1,
-    paddingTop: 6, // Mehr Platz gegen Abschneiden
-    paddingBottom: 2, // Verhindert Abschneiden am unteren Rand
-  },
-  marketHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 2,
-  },
-  marketTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    flex: 1,
-    lineHeight: 18, // Etwas mehr Line-Height
-    marginTop: 2, // Mehr Abstand nach oben
-  },
-  categoryTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    flex: 1,
-    textAlign: 'left', // Links ausgerichtet
-  },
-  marketFlag: {
-    fontSize: 20,
-    marginLeft: 8,
-  },
-  marketCount: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    opacity: 0.7,
-    marginBottom: 3, // Abstand zur Beschreibung
-    marginTop: 1, // Gleicher Abstand wie zur Beschreibung
-    lineHeight: 14, // Etwas mehr Line-Height
-  },
-  marketDescription: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    opacity: 0.7,
-    lineHeight: 14,
-    marginTop: 1, // Symmetrischer Abstand zur Produktzahl
-  },
-
-  // Empty State
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-    gap: 16,
-  },
-  emptyText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_400Regular',
-    textAlign: 'center',
-    opacity: 0.7,
-  },
-
-  // Floating Action Button (exakt wie auf Startseite)
-  filterFab: {
-    position: 'absolute',
-    bottom: 120,      // Gleiche Position wie auf Startseite
-    right: 20,        // Gleiche Position wie auf Startseite
-    width: 48,        // Gleiche Größe wie auf Startseite
-    height: 48,       // Gleiche Größe wie auf Startseite
-    borderRadius: 12, // Gleicher Radius wie auf Startseite
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 }, // Gleiche Shadow wie auf Startseite
-    shadowOpacity: 0.25,                   // Gleiche Shadow wie auf Startseite
-    shadowRadius: 4,                       // Gleiche Shadow wie auf Startseite
-  },
-  filterBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-  },
-  filterBadgeText: {
-    fontSize: 10,
-    fontFamily: 'Nunito_600SemiBold',
-    color: 'white',
-    lineHeight: 12,
-  },
-
-  // Filter Modal
-  filterModalContainer: {
-    flex: 1,
-  },
-  filterModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-  },
-  filterModalTitle: {
-    fontSize: 18,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  filterOptions: {
-    flex: 1,
-  },
-  filterOption: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderBottomWidth: 0.5,
-  },
-  filterOptionText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_400Regular',
-  },
-  filterSection: {
-    marginBottom: 24,
-  },
-  filterSectionTitle: {
-    fontSize: 18,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 12,
-    paddingHorizontal: 20,
-  },
-  clearAllButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    marginHorizontal: 20,
-    gap: 8,
-  },
-  clearAllText: {
-    color: 'white',
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  chipsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 20,
-    gap: 8,
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    gap: 6,
-    marginBottom: 8,
-  },
-  chipLogo: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 2,
-  },
-  chipImage: {
-    width: 16,
-    height: 16,
-    borderRadius: 2,
-    resizeMode: 'contain',
-  },
-  chipCategoryImage: {
-    width: 16,
-    height: 16,
-  },
-  chipText: {
-    fontSize: 12,
-    fontFamily: 'Nunito_500Medium',
-  },
-  filterOptionWithBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  stufeBadgeSmall: {
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  stufeBadgeSmallText: {
-    color: 'white',
-    fontSize: 8,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-
-  // Product List Styles (ähnlich wie Märkte)
-  productListContainer: {
-    flex: 1,
-  },
-  productListContent: {
-    paddingHorizontal: 12,
-    paddingTop: 16,
-    paddingBottom: Platform.OS === 'ios' ? 100 : 20,
-  },
-  productItemContainer: {
-    borderRadius: 16,
-    marginBottom: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    overflow: 'hidden',
-  },
-  productListItem: {
-    flexDirection: 'row',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  firstProductItem: {
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-  },
-  lastProductItem: {
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
-  },
-  productLogo: {
-    width: 70,
-    height: 70,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  productImage: {
-    width: 70,
-    height: 70,
-    borderRadius: 8,
-    resizeMode: 'contain',
-  },
-  productImagePlaceholder: {
-    width: 70,
-    height: 70,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  productContent: {
-    flex: 1,
-    paddingTop: 2,
-    paddingBottom: 2,
-    paddingRight: 8,
-  },
-  productRightSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  productInfoColumn: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  productTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    lineHeight: 18,
-    marginBottom: 4,
-  },
-  productSubtitle: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    opacity: 0.7,
-    lineHeight: 14,
-    marginBottom: 2,
-  },
-  productMarketRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 2,
-  },
-  productMarketImage: {
-    width: 16,
-    height: 16,
-    borderRadius: 4,
-    resizeMode: 'contain',
-  },
-  productMarketImagePlaceholder: {
-    width: 16,
-    height: 16,
-    borderRadius: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  productMarket: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    opacity: 0.8,
-    lineHeight: 14,
-    flex: 1,
-  },
-  stufeBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  stufeBadgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  productPrice: {
-    fontSize: 12,
-    fontFamily: 'Nunito_600SemiBold',
-    color: '#22c55e',
-    textAlign: 'center',
-  },
-  productChevron: {
-    height: 60,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  // Infinite Scroll Loading
-  loadingFooter: {
-    paddingVertical: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  loadingText: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-  },
-  errorFooter: {
-    paddingVertical: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // Error State
-  errorState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-    gap: 16,
-  },
-  errorText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_400Regular',
-    textAlign: 'center',
-  },
-  retryButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-    color: 'white',
-  },
-  brandItem: {
-    flexDirection: 'row',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    gap: 12,
-  },
-  brandLogo: {
-    width: 60,
-    height: 60,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  brandEmoji: {
-    fontSize: 24,
-  },
-  brandContent: {
-    flex: 1,
-  },
-  brandTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 4,
-    lineHeight: 16,
-  },
-  brandDescription: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    opacity: 0.8,
-    lineHeight: 14,
-  },
-  // Alte Styles für andere Verwendung beibehalten
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginBottom: 16,
-    gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    paddingVertical: 2,
-    fontFamily: 'Nunito_400Regular',
-  },
-  
-  // Neue Marken-Suchfeld Styles im Startseiten-Stil
-  markenSearchSection: {
-    paddingHorizontal: 20, // Bündig mit chipsContainer
-    marginBottom: 16,
-  },
-  markenSearchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#00000010',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-    gap: 12,
-    height: 48,
-  },
-  markenSearchInput: {
-    flex: 1,
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-    ...Platform.select({
-      android: {
-        textAlignVertical: 'center',
-        includeFontPadding: false,
-        paddingVertical: 0,
-      },
-    }),
-  },
-  // Alte Styles beibehalten für Kompatibilität
-  moreMarkenHint: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    marginTop: 8,
-    marginHorizontal: 20,
-    gap: 4,
-  },
-  moreMarkenText: {
-    fontSize: 12,
-    fontFamily: 'Nunito_500Medium',
-    textAlign: 'center',
-  },
-  moreMarkenSubtext: {
-    fontSize: 10,
-    fontFamily: 'Nunito_400Regular',
-    textAlign: 'center',
-    opacity: 0.8,
-  },
-  
-  // Neue kompakte Styles
-  moreMarkenHintCompact: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    marginTop: 6,
-    marginHorizontal: 20,
-    gap: 6,
-    alignSelf: 'center',
-    maxWidth: 200,
-  },
-  moreMarkenTextCompact: {
-    fontSize: 11,
-    fontFamily: 'Nunito_400Regular',
-    textAlign: 'center',
-    opacity: 0.7,
-  },
-  // Country Hint Styles
-  countryHint: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    marginHorizontal: 20,
-    marginTop: 4,
-    marginBottom: 8,
-    gap: 6,
-  },
-  countryHintText: {
-    fontSize: 12,
-    fontFamily: 'Nunito_500Medium',
-  },
-  noResultsText: {
-    fontSize: 12,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    paddingVertical: 12,
-  },
-
-  // 🎯 Optimiertes Content-Layout
-  contentContainer: {
-    flex: 1,
-  },
-});
