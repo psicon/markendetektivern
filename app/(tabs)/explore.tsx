@@ -903,14 +903,40 @@ export default function ExploreScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* Safe-area filler — solid theme.bg matches the tabs below
-          seamlessly. A BlurView here would add its own diffuse haze on
-          top of bare bg (no content to blur), producing a visibly
-          different tint next to the tabs and reading as a "gray bar".
-          The detail screens DO get real scroll-under blur because there
-          the content passes behind; here it can't without breaking
-          sticky-header pinning. */}
-      <View style={{ height: insets.top, backgroundColor: theme.bg }} />
+      {/* Dynamic-Island / status-bar blur — absolute, zIndex 9 so tabs
+          (zIndex 10) stay on top. Content scrolls UNDER it because each
+          page's sticky header has an internal paddingTop that keeps its
+          visible body below the tab bar when pinned; the transparent
+          padding strip lets everything else scroll freely behind the
+          blur. iOS gets a real BlurView, Android a tinted 92 %-alpha
+          fallback. */}
+      {Platform.OS === 'ios' ? (
+        <BlurView
+          tint={scheme === 'dark' ? 'dark' : 'light'}
+          intensity={80}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: insets.top,
+            zIndex: 9,
+          }}
+        />
+      ) : (
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: insets.top,
+            zIndex: 9,
+            backgroundColor:
+              scheme === 'dark' ? 'rgba(15,18,20,0.92)' : 'rgba(245,247,248,0.92)',
+          }}
+        />
+      )}
 
       {/* Collapsible SegmentedTabs — absolute so it overlays the pager
           without pushing content; animates translateY + opacity as the
@@ -958,11 +984,16 @@ export default function ExploreScreen() {
             onScroll={scrollHandlerEigen}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingTop: TAB_BAR_HEIGHT, paddingBottom: 120 }}
+            contentContainerStyle={{ paddingBottom: 120 }}
           >
-            {/* 0 — sticky glass header (pins to top of ScrollView viewport,
-                which is directly below the collapsible tab bar) */}
-            <StickyHeader forTab="eigen" />
+            {/* 0 — sticky wrapper: its internal paddingTop (=
+                insets.top + TAB_BAR_HEIGHT) stays transparent so content
+                below can scroll up under the BlurView + tabs, while the
+                visible StickyHeader body pins right below the tab bar
+                instead of behind the Dynamic Island. */}
+            <View style={{ paddingTop: insets.top + TAB_BAR_HEIGHT }}>
+              <StickyHeader forTab="eigen" />
+            </View>
             {!isPremium ? (
               <View
                 style={{
@@ -992,9 +1023,11 @@ export default function ExploreScreen() {
             onScroll={scrollHandlerMarken}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingTop: TAB_BAR_HEIGHT, paddingBottom: 120 }}
+            contentContainerStyle={{ paddingBottom: 120 }}
           >
-            <StickyHeader forTab="marken" />
+            <View style={{ paddingTop: insets.top + TAB_BAR_HEIGHT }}>
+              <StickyHeader forTab="marken" />
+            </View>
             {!isPremium ? (
               <View
                 style={{

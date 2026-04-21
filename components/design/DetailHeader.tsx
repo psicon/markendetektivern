@@ -62,28 +62,44 @@ export function DetailHeader({
   // Animated styles — only active when scrollY is supplied AND a
   // scrolledTitle exists. Shared values are cheap; unused hooks just
   // compute a no-op style.
+  //
+  // Timing: the default title ("Produktdetails") fades out FIRST, and
+  // the scrolled title then rises from 16 px below with a tiny 0.96→1
+  // scale while fading in. Slight stagger + overshoot-free easing reads
+  // as a proper UINavigationBar large-title dismissal, not a swap.
   const hasSwap = !!scrolledTitle && !!scrollY;
-  const fadeInRange = [swapAt - 40, swapAt] as const;
+  const defaultOutRange = [swapAt - 70, swapAt - 30] as const; // fades out earlier
+  const scrolledInRange = [swapAt - 40, swapAt + 10] as const; // starts while default still mid-fade
 
   const defaultTitleStyle = useAnimatedStyle(() => {
-    if (!hasSwap || !scrollY) return { opacity: 1 };
+    if (!hasSwap || !scrollY) return { opacity: 1, transform: [{ translateY: 0 }] };
     return {
-      opacity: interpolate(scrollY.value, fadeInRange, [1, 0], Extrapolation.CLAMP),
-    };
-  });
-  const scrolledTitleStyle = useAnimatedStyle(() => {
-    if (!hasSwap || !scrollY) return { opacity: 0 };
-    return {
-      opacity: interpolate(scrollY.value, fadeInRange, [0, 1], Extrapolation.CLAMP),
+      opacity: interpolate(scrollY.value, defaultOutRange, [1, 0], Extrapolation.CLAMP),
       transform: [
         {
           translateY: interpolate(
             scrollY.value,
-            fadeInRange,
-            [10, 0],
+            defaultOutRange,
+            [0, -6],
             Extrapolation.CLAMP,
           ),
         },
+      ],
+    };
+  });
+  const scrolledTitleStyle = useAnimatedStyle(() => {
+    if (!hasSwap || !scrollY) return { opacity: 0, transform: [{ translateY: 16 }, { scale: 0.96 }] };
+    const t = interpolate(
+      scrollY.value,
+      scrolledInRange,
+      [0, 1],
+      Extrapolation.CLAMP,
+    );
+    return {
+      opacity: t,
+      transform: [
+        { translateY: 16 * (1 - t) },
+        { scale: 0.96 + t * 0.04 },
       ],
     };
   });
