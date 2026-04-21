@@ -1,15 +1,18 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { BlurView } from 'expo-blur';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
+  Image,
+  Platform,
   Pressable,
   ScrollView,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import PagerView from 'react-native-pager-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BrandCard } from '@/components/design/BrandCard';
@@ -21,6 +24,7 @@ import { BannerAd } from '@/components/ads/BannerAd';
 import { LockedCategoryModal } from '@/components/ui/LockedCategoryModal';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
@@ -69,11 +73,15 @@ const SHEET_TITLES: Record<Exclude<SheetKey, null>, string> = {
 
 export default function ExploreScreen() {
   const { theme, brand, shadows, stufen } = useTokens();
+  const scheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ tab?: string; categoryFilter?: string; markeFilter?: string }>();
   const { userProfile } = useAuth();
   const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
+
+  // PagerView for native horizontal tab swipe
+  const pagerRef = useRef<PagerView | null>(null);
 
   // ─── UI state ──────────────────────────────────────────────────────────
   const [tab, setTab] = useState<Tab>('eigen');
@@ -115,8 +123,14 @@ export default function ExploreScreen() {
     if (params.markeFilter) setBrandId(String(params.markeFilter));
   }, [params.tab, params.categoryFilter, params.markeFilter]);
 
-  // ─── Load reference data once ──────────────────────────────────────────
+  // ─── Load reference data once (sorted A–Z for stable filter UX) ──────
   useEffect(() => {
+    const byName = (a: any, b: any) =>
+      String(a.name ?? a.bezeichnung ?? '').localeCompare(
+        String(b.name ?? b.bezeichnung ?? ''),
+        'de',
+        { sensitivity: 'base' },
+      );
     (async () => {
       try {
         const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
@@ -125,10 +139,12 @@ export default function ExploreScreen() {
           categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium),
           FirestoreService.getMarken().catch(() => []),
         ]);
-        setDiscounter(ds);
-        setKategorien(cats);
+        setDiscounter([...ds].sort(byName));
+        setKategorien([...cats].sort(byName));
         setMarkenList(
-          (ms ?? []).map((m: any) => ({ id: m.id, name: m.name ?? m.bezeichnung ?? '' })),
+          (ms ?? [])
+            .map((m: any) => ({ id: m.id, name: m.name ?? m.bezeichnung ?? '' }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'de', { sensitivity: 'base' })),
         );
       } catch (e) {
         console.warn('Explore: failed to load reference data', e);
@@ -142,7 +158,16 @@ export default function ExploreScreen() {
     (async () => {
       try {
         const hms = await (FirestoreService as any).getHandelsmarken?.();
-        if (Array.isArray(hms)) setHandelsmarken(hms);
+        if (Array.isArray(hms)) {
+          const sorted = [...hms].sort((a: any, b: any) =>
+            String(a.bezeichnung ?? a.name ?? '').localeCompare(
+              String(b.bezeichnung ?? b.name ?? ''),
+              'de',
+              { sensitivity: 'base' },
+            ),
+          );
+          setHandelsmarken(sorted);
+        }
       } catch {
         /* optional — service may not exist; ignore */
       }
@@ -274,7 +299,16 @@ export default function ExploreScreen() {
     setHandels('all');
     setMinStufe(0);
     setBrandId('all');
+    // Keep PagerView in sync (user tapped a tab)
+    pagerRef.current?.setPage(k === 'eigen' ? 0 : 1);
   }, []);
+
+  // When user swipes the pager, update the tab state (but don't reset filters —
+  // swipe is a navigation gesture, not a filter change).
+  const onPageSelected = useCallback((e: { nativeEvent: { position: number } }) => {
+    const k: Tab = e.nativeEvent.position === 0 ? 'eigen' : 'marken';
+    if (k !== tab) setTab(k);
+  }, [tab]);
 
   const resetAll = useCallback(() => {
     setMarket('all');
@@ -373,164 +407,217 @@ export default function ExploreScreen() {
   const hasMore = tab === 'eigen' ? nonameHasMore : markenHasMore;
   const showEmpty = !isLoading && currentList.length === 0;
 
-  return (
-    <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <FlatList
-        data={currentList}
-        numColumns={2}
-        keyExtractor={(item) => item.id}
-        columnWrapperStyle={{ gap: 12, paddingHorizontal: 20 }}
-        contentContainerStyle={{ paddingTop: insets.top, paddingBottom: 120, gap: 12 }}
-        ListHeaderComponent={
-          <View style={{ paddingBottom: 4 }}>
-            {/* Segmented tabs */}
-            <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
-              <SegmentedTabs
-                tabs={[
-                  { key: 'eigen', label: 'Eigenmarken' },
-                  { key: 'marken', label: 'Marken' },
-                ] as const}
-                value={tab}
-                onChange={switchTab}
-              />
-            </View>
+  // One sub-component per page — both share `query` / filter state so typing
+  // in the search input on one page reflects on the other (fine because only
+  // one page is visible at a time). Grid rendered as a flexbox wrap since we
+  // need a ScrollView for stickyHeaderIndices support.
+  const renderFilterRail = (forTab: Tab) => (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 10, gap: 6 }}
+    >
+      <FilterChip
+        icon="swap-vertical"
+        label={sort === 'preis' ? 'Preis' : 'A–Z'}
+        strong={sort !== 'name'}
+        onPress={() => setSheet('sort')}
+      />
+      <View style={{ width: 1, backgroundColor: theme.border, marginVertical: 4, marginHorizontal: 4 }} />
+      {anyFilter ? (
+        <FilterChip icon="filter-remove-outline" label="Zurücksetzen" muted onPress={resetAll} />
+      ) : null}
+      {forTab === 'eigen' ? (
+        <>
+          <FilterChip
+            icon="storefront-outline"
+            label="Markt"
+            value={marketLabel}
+            onPress={() => setSheet('markt')}
+            onClear={market !== 'all' ? () => setMarket('all') : null}
+          />
+          <FilterChip
+            icon="shape-outline"
+            label="Kategorie"
+            value={catLabel}
+            onPress={() => setSheet('kategorie')}
+            onClear={cat !== 'all' ? () => setCat('all') : null}
+          />
+          <FilterChip
+            icon="star-four-points-outline"
+            label="Stufe"
+            value={minStufe ? `${minStufe}+` : null}
+            onPress={() => setSheet('stufe')}
+            onClear={minStufe ? () => setMinStufe(0) : null}
+          />
+          <FilterChip
+            icon="leaf"
+            label="Inhaltsstoffe"
+            value={ingredients.length ? String(ingredients.length) : null}
+            onPress={() => setSheet('inhalt')}
+            onClear={ingredients.length ? () => setIngredients([]) : null}
+          />
+          <FilterChip
+            icon="tag-outline"
+            label="Handelsmarke"
+            value={handelsLabel}
+            onPress={() => setSheet('handels')}
+            onClear={handels !== 'all' ? () => setHandels('all') : null}
+          />
+        </>
+      ) : (
+        <>
+          <FilterChip
+            icon="bookmark-outline"
+            label="Marke"
+            value={brandLabel}
+            onPress={() => setSheet('marke')}
+            onClear={brandId !== 'all' ? () => setBrandId('all') : null}
+          />
+          <FilterChip
+            icon="shape-outline"
+            label="Kategorie"
+            value={catLabel}
+            onPress={() => setSheet('kategorie')}
+            onClear={cat !== 'all' ? () => setCat('all') : null}
+          />
+          <FilterChip
+            icon="leaf"
+            label="Inhaltsstoffe"
+            value={ingredients.length ? String(ingredients.length) : null}
+            onPress={() => setSheet('inhalt')}
+            onClear={ingredients.length ? () => setIngredients([]) : null}
+          />
+        </>
+      )}
+    </ScrollView>
+  );
 
-            {/* Search input */}
-            <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
-              <View
-                style={{
-                  height: 38,
-                  borderRadius: 11,
-                  backgroundColor: theme.surface,
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                  paddingHorizontal: 12,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 8,
-                }}
-              >
-                <MaterialCommunityIcons name="magnify" size={16} color={theme.textMuted} />
-                <TextInput
-                  placeholder={tab === 'eigen' ? 'Eigenmarken durchsuchen …' : 'Marken oder Hersteller …'}
-                  placeholderTextColor={theme.textMuted}
-                  value={query}
-                  onChangeText={setQuery}
-                  returnKeyType="search"
-                  autoCorrect={false}
-                  style={{
-                    flex: 1,
-                    fontFamily,
-                    fontWeight: fontWeight.medium,
-                    fontSize: 14,
-                    color: theme.text,
-                    paddingVertical: 0,
-                  }}
-                />
-                {query.length > 0 ? (
-                  <Pressable onPress={() => setQuery('')} hitSlop={6}>
-                    <MaterialCommunityIcons name="close-circle" size={16} color={theme.textMuted} />
-                  </Pressable>
-                ) : null}
-              </View>
-            </View>
+  const renderSearchInput = (forTab: Tab) => (
+    <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
+      <View
+        style={{
+          height: 38,
+          borderRadius: 11,
+          backgroundColor: theme.surface,
+          borderWidth: 1,
+          borderColor: theme.border,
+          paddingHorizontal: 12,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+        }}
+      >
+        <MaterialCommunityIcons name="magnify" size={16} color={theme.textMuted} />
+        <TextInput
+          placeholder={forTab === 'eigen' ? 'Eigenmarken durchsuchen …' : 'Marken oder Hersteller …'}
+          placeholderTextColor={theme.textMuted}
+          value={query}
+          onChangeText={setQuery}
+          returnKeyType="search"
+          autoCorrect={false}
+          style={{
+            flex: 1,
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 14,
+            color: theme.text,
+            paddingVertical: 0,
+          }}
+        />
+        {query.length > 0 ? (
+          <Pressable onPress={() => setQuery('')} hitSlop={6}>
+            <MaterialCommunityIcons name="close-circle" size={16} color={theme.textMuted} />
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
 
-            {/* Filter chip rail */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 10, gap: 6 }}
-            >
-              <FilterChip
-                icon="swap-vertical"
-                label={sort === 'preis' ? 'Preis' : 'A–Z'}
-                strong={sort !== 'name'}
-                onPress={() => setSheet('sort')}
-              />
-              <View style={{ width: 1, backgroundColor: theme.border, marginVertical: 4, marginHorizontal: 4 }} />
-              {anyFilter ? (
-                <FilterChip icon="filter-remove-outline" label="Zurücksetzen" muted onPress={resetAll} />
-              ) : null}
+  // Fallback BlurView on Android has poor quality; fall back to a tinted
+  // semi-transparent view (still gives the "glassy" feel with the bg showing).
+  const StickyHeader = ({ forTab }: { forTab: Tab }) => {
+    const commonStyle = { paddingBottom: 10 };
+    if (Platform.OS === 'ios') {
+      return (
+        <BlurView
+          tint={scheme === 'dark' ? 'dark' : 'light'}
+          intensity={70}
+          style={commonStyle}
+        >
+          {renderSearchInput(forTab)}
+          {renderFilterRail(forTab)}
+        </BlurView>
+      );
+    }
+    return (
+      <View
+        style={[
+          commonStyle,
+          {
+            backgroundColor: scheme === 'dark'
+              ? 'rgba(15,18,20,0.92)'
+              : 'rgba(245,247,248,0.92)',
+          },
+        ]}
+      >
+        {renderSearchInput(forTab)}
+        {renderFilterRail(forTab)}
+      </View>
+    );
+  };
 
-              {tab === 'eigen' ? (
-                <>
-                  <FilterChip
-                    icon="storefront-outline"
-                    label="Markt"
-                    value={marketLabel}
-                    onPress={() => setSheet('markt')}
-                    onClear={market !== 'all' ? () => setMarket('all') : null}
-                  />
-                  <FilterChip
-                    icon="shape-outline"
-                    label="Kategorie"
-                    value={catLabel}
-                    onPress={() => setSheet('kategorie')}
-                    onClear={cat !== 'all' ? () => setCat('all') : null}
-                  />
-                  <FilterChip
-                    icon="star-four-points-outline"
-                    label="Stufe"
-                    value={minStufe ? `${minStufe}+` : null}
-                    onPress={() => setSheet('stufe')}
-                    onClear={minStufe ? () => setMinStufe(0) : null}
-                  />
-                  <FilterChip
-                    icon="leaf"
-                    label="Inhaltsstoffe"
-                    value={ingredients.length ? String(ingredients.length) : null}
-                    onPress={() => setSheet('inhalt')}
-                    onClear={ingredients.length ? () => setIngredients([]) : null}
-                  />
-                  <FilterChip
-                    icon="tag-outline"
-                    label="Handelsmarke"
-                    value={handelsLabel}
-                    onPress={() => setSheet('handels')}
-                    onClear={handels !== 'all' ? () => setHandels('all') : null}
-                  />
-                </>
-              ) : (
-                <>
-                  <FilterChip
-                    icon="bookmark-outline"
-                    label="Marke"
-                    value={brandLabel}
-                    onPress={() => setSheet('marke')}
-                    onClear={brandId !== 'all' ? () => setBrandId('all') : null}
-                  />
-                  <FilterChip
-                    icon="shape-outline"
-                    label="Kategorie"
-                    value={catLabel}
-                    onPress={() => setSheet('kategorie')}
-                    onClear={cat !== 'all' ? () => setCat('all') : null}
-                  />
-                  <FilterChip
-                    icon="leaf"
-                    label="Inhaltsstoffe"
-                    value={ingredients.length ? String(ingredients.length) : null}
-                    onPress={() => setSheet('inhalt')}
-                    onClear={ingredients.length ? () => setIngredients([]) : null}
-                  />
-                </>
-              )}
-            </ScrollView>
+  const renderGrid = (forTab: Tab) => {
+    const items = forTab === 'eigen' ? nonames : markenprodukte;
+    const loading = forTab === 'eigen' ? nonameLoading : markenLoading;
+    const empty = !loading && items.length === 0;
 
-            {/* Banner ad (non-premium) */}
-            {!isPremium ? (
-              <View style={{ marginTop: 12 }}>
-                <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-              </View>
-            ) : null}
-          </View>
-        }
-        renderItem={({ item, index }) => {
-          if (tab === 'eigen') {
+    if (empty) {
+      return (
+        <View style={{ alignItems: 'center', paddingVertical: 60, paddingHorizontal: 32 }}>
+          <Text style={{ fontSize: 54, marginBottom: 12 }}>🔍</Text>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.bold,
+              fontSize: 16,
+              color: theme.text,
+              textAlign: 'center',
+            }}
+          >
+            Keine Treffer
+          </Text>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 13,
+              color: theme.textMuted,
+              textAlign: 'center',
+              marginTop: 6,
+            }}
+          >
+            Probier weniger Filter oder einen anderen Tab.
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <View
+        style={{
+          paddingHorizontal: 20,
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 12,
+        }}
+      >
+        {items.map((item, index) => {
+          if (forTab === 'eigen') {
             const p = item as FirestoreDocument<Produkte>;
             const disc = (p as any).discounter ? discounterMap[(p as any).discounter.id] : null;
             return (
-              <View style={{ flex: 1, maxWidth: '50%' }}>
+              <View key={p.id} style={{ width: '48.5%' }}>
                 <ProductCard
                   title={(p as any).name ?? ''}
                   brand={null}
@@ -546,9 +633,11 @@ export default function ExploreScreen() {
             );
           }
           const m = item as FirestoreDocument<any>;
-          const marke = markenList.find((x) => x.id === ((m as any).hersteller?.id ?? (m as any).hersteller))?.name;
+          const marke = markenList.find(
+            (x) => x.id === ((m as any).hersteller?.id ?? (m as any).hersteller),
+          )?.name;
           return (
-            <View style={{ flex: 1, maxWidth: '50%' }}>
+            <View key={m.id} style={{ width: '48.5%' }}>
               <BrandCard
                 title={(m as any).name ?? ''}
                 brand={marke ?? ''}
@@ -559,47 +648,100 @@ export default function ExploreScreen() {
               />
             </View>
           );
-        }}
-        onEndReachedThreshold={0.5}
-        onEndReached={() => hasMore && !isLoading && loadMore()}
-        ListEmptyComponent={
-          showEmpty ? (
-            <View style={{ alignItems: 'center', paddingVertical: 60, paddingHorizontal: 32 }}>
-              <Text style={{ fontSize: 54, marginBottom: 12 }}>🔍</Text>
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.bold,
-                  fontSize: 16,
-                  color: theme.text,
-                  textAlign: 'center',
-                }}
-              >
-                Keine Treffer
-              </Text>
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.medium,
-                  fontSize: 13,
-                  color: theme.textMuted,
-                  textAlign: 'center',
-                  marginTop: 6,
-                }}
-              >
-                Probier weniger Filter oder einen anderen Tab.
-              </Text>
+        })}
+      </View>
+    );
+  };
+
+  const onPageScroll = useCallback(
+    (e: { nativeEvent: { contentOffset: { y: number }; layoutMeasurement: { height: number }; contentSize: { height: number } } }) => {
+      const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+      const distance = contentSize.height - contentOffset.y - layoutMeasurement.height;
+      if (distance < 500 && hasMore && !isLoading) loadMore();
+    },
+    [hasMore, isLoading, loadMore],
+  );
+
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      <PagerView
+        ref={pagerRef}
+        style={{ flex: 1, paddingTop: insets.top }}
+        initialPage={0}
+        onPageSelected={onPageSelected}
+      >
+        {/* ─── Page 0 — Eigenmarken ─────────────────────────────────── */}
+        <View key="eigen" style={{ flex: 1 }}>
+          <ScrollView
+            stickyHeaderIndices={[1]}
+            onScroll={onPageScroll}
+            scrollEventThrottle={200}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingBottom: 120 }}
+          >
+            {/* 0 — tabs (scrolls away with content) */}
+            <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: theme.bg }}>
+              <SegmentedTabs
+                tabs={[
+                  { key: 'eigen', label: 'Eigenmarken' },
+                  { key: 'marken', label: 'Marken' },
+                ] as const}
+                value={tab}
+                onChange={switchTab}
+              />
             </View>
-          ) : null
-        }
-        ListFooterComponent={
-          isLoading && currentList.length > 0 ? (
-            <View style={{ paddingVertical: 24 }}>
-              <ActivityIndicator size="small" color={theme.primary} />
+            {/* 1 — sticky glass header */}
+            <StickyHeader forTab="eigen" />
+            {/* 2 — banner ad */}
+            {!isPremium ? (
+              <View style={{ marginTop: 12 }}>
+                <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
+              </View>
+            ) : null}
+            {/* 3 — grid */}
+            <View style={{ paddingTop: 12 }}>{renderGrid('eigen')}</View>
+            {isLoading && currentList.length > 0 ? (
+              <View style={{ paddingVertical: 24 }}>
+                <ActivityIndicator size="small" color={theme.primary} />
+              </View>
+            ) : null}
+          </ScrollView>
+        </View>
+
+        {/* ─── Page 1 — Marken ──────────────────────────────────────── */}
+        <View key="marken" style={{ flex: 1 }}>
+          <ScrollView
+            stickyHeaderIndices={[1]}
+            onScroll={onPageScroll}
+            scrollEventThrottle={200}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingBottom: 120 }}
+          >
+            <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: theme.bg }}>
+              <SegmentedTabs
+                tabs={[
+                  { key: 'eigen', label: 'Eigenmarken' },
+                  { key: 'marken', label: 'Marken' },
+                ] as const}
+                value={tab}
+                onChange={switchTab}
+              />
             </View>
-          ) : null
-        }
-      />
+            <StickyHeader forTab="marken" />
+            {!isPremium ? (
+              <View style={{ marginTop: 12 }}>
+                <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
+              </View>
+            ) : null}
+            <View style={{ paddingTop: 12 }}>{renderGrid('marken')}</View>
+            {isLoading && currentList.length > 0 ? (
+              <View style={{ paddingVertical: 24 }}>
+                <ActivityIndicator size="small" color={theme.primary} />
+              </View>
+            ) : null}
+          </ScrollView>
+        </View>
+      </PagerView>
 
       {/* ─── Filter sheets ──────────────────────────────────────────── */}
       <FilterSheet
@@ -642,32 +784,55 @@ export default function ExploreScreen() {
               return (
                 <View
                   style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: 8,
+                    width: 36,
+                    height: 36,
+                    borderRadius: 10,
                     backgroundColor: theme.surfaceAlt,
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
                 >
-                  <MaterialCommunityIcons name="storefront-outline" size={16} color={theme.textMuted} />
+                  <MaterialCommunityIcons name="storefront-outline" size={18} color={theme.textMuted} />
                 </View>
               );
             const d = discounter.find((x) => x.id === k);
+            const bild = (d as any)?.bild as string | undefined;
+            const discColor = (d as any)?.color ?? theme.surfaceAlt;
             return (
               <View
                 style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: 8,
-                  backgroundColor: (d as any)?.color ?? theme.surfaceAlt,
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  backgroundColor: '#ffffff',
+                  borderWidth: 1,
+                  borderColor: theme.border,
                   alignItems: 'center',
                   justifyContent: 'center',
+                  overflow: 'hidden',
                 }}
               >
-                <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 12, color: '#ffffff' }}>
-                  {((d as any)?.name?.[0] ?? '?').toUpperCase()}
-                </Text>
+                {bild ? (
+                  <Image
+                    source={{ uri: bild }}
+                    style={{ width: '100%', height: '100%' }}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <View
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      backgroundColor: discColor,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: '#ffffff' }}>
+                      {((d as any)?.name?.[0] ?? '?').toUpperCase()}
+                    </Text>
+                  </View>
+                )}
               </View>
             );
           }}
@@ -696,6 +861,48 @@ export default function ExploreScreen() {
             ] as const
           }
           onChange={(v) => onChangeCategory(v)}
+          renderLeading={(k) => {
+            if (k === 'all')
+              return (
+                <View
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 10,
+                    backgroundColor: theme.surfaceAlt,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <MaterialCommunityIcons name="shape-outline" size={18} color={theme.textMuted} />
+                </View>
+              );
+            const c = kategorien.find((x) => x.id === k);
+            const bild = (c as any)?.bild as string | undefined;
+            return (
+              <View
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  backgroundColor: theme.surfaceAlt,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflow: 'hidden',
+                }}
+              >
+                {bild ? (
+                  <Image
+                    source={{ uri: bild }}
+                    style={{ width: '100%', height: '100%' }}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <MaterialCommunityIcons name="shape-outline" size={18} color={theme.textMuted} />
+                )}
+              </View>
+            );
+          }}
         />
       </FilterSheet>
 
@@ -797,6 +1004,50 @@ export default function ExploreScreen() {
           onChange={(v) => {
             setHandels(v);
             setSheet(null);
+          }}
+          renderLeading={(k) => {
+            if (k === 'all')
+              return (
+                <View
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 10,
+                    backgroundColor: theme.surfaceAlt,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <MaterialCommunityIcons name="tag-outline" size={18} color={theme.textMuted} />
+                </View>
+              );
+            const h = handelsmarken.find((x) => x.id === k);
+            const bild = (h as any)?.bild as string | undefined;
+            return (
+              <View
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  backgroundColor: '#ffffff',
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflow: 'hidden',
+                }}
+              >
+                {bild ? (
+                  <Image
+                    source={{ uri: bild }}
+                    style={{ width: '100%', height: '100%' }}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <MaterialCommunityIcons name="tag-outline" size={18} color={theme.textMuted} />
+                )}
+              </View>
+            );
           }}
         />
       </FilterSheet>
