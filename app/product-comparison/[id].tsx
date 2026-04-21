@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
 import { ProductDetailSkeleton } from '@/components/design/Skeletons';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
@@ -359,60 +360,15 @@ export default function ProductComparisonScreen() {
   // ─── Render ───────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* Sticky header — stays put when content scrolls (matches prototype
-          position:sticky). The default Stack header is hidden statically
-          in app/_layout.tsx so it never flashes on mount. */}
-      <View
-        style={{
-          paddingTop: insets.top,
-          backgroundColor: theme.bg,
-          borderBottomWidth: 1,
-          borderBottomColor: 'transparent',
-          zIndex: 5,
-        }}
-      >
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingHorizontal: 16,
-            paddingTop: 10,
-            paddingBottom: 8,
-            gap: 8,
-          }}
-        >
-          <Pressable
-            onPress={() => router.back()}
-            style={({ pressed }) => ({
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: pressed ? 0.6 : 1,
-            })}
-            hitSlop={6}
-          >
-            <MaterialCommunityIcons name="arrow-left" size={24} color={theme.text} />
-          </Pressable>
-          <Text
-            numberOfLines={1}
-            style={{
-              flex: 1,
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 20,
-              color: theme.text,
-              letterSpacing: -0.2,
-            }}
-          >
-            Produktdetails
-          </Text>
-        </View>
-      </View>
+      {/* BlurView header sits absolute on top — content scrolls UNDER it so
+          the Dynamic-Island area gets the native blurred-tint feel. */}
+      <DetailHeader title="Produktdetails" onBack={() => router.back()} />
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 120 }}
+        contentContainerStyle={{
+          paddingTop: insets.top + DETAIL_HEADER_ROW_HEIGHT,
+          paddingBottom: 120,
+        }}
         showsVerticalScrollIndicator={false}
       >
 
