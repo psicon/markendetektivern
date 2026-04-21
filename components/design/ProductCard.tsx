@@ -83,12 +83,21 @@ export function ProductCard({
     >
       <View style={{ position: 'relative', width: '100%', height: imageHeight }}>
         {imageUri ? (
-          <Animated.Image
-            source={{ uri: imageUri }}
+          // Animated.View with the tag, regular Image inside. Applying
+          // sharedTransitionTag directly to Animated.Image is flaky —
+          // the measured frame isn't always the image's natural size,
+          // so the morph can silently no-op. Wrapping keeps the
+          // measurement deterministic.
+          <Animated.View
             style={{ width: '100%', height: '100%' }}
-            resizeMode="cover"
             sharedTransitionTag={sharedTag}
-          />
+          >
+            <Image
+              source={{ uri: imageUri }}
+              style={{ width: '100%', height: '100%' }}
+              resizeMode="cover"
+            />
+          </Animated.View>
         ) : (
           <View
             style={{

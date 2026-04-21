@@ -112,6 +112,15 @@ const STUFE_INFO: Record<1 | 2 | 3 | 4 | 5, { label: string; line: string }> = {
 };
 
 // ────────────────────────────────────────────────────────────────────────
+// Module-level cache for the "defaults" view of Stöbern (no filters, no
+// search, default sort). When the user lands on Stöbern a second time
+// in the same session, we seed state from this cache so the products
+// render instantly; the reload effect then refreshes in the
+// background. Cache stores only the first page (what the user sees
+// first), to keep memory bounded and state re-hydration cheap.
+type CachedPage = { items: any[]; lastDoc: any; hasMore: boolean };
+let cachedEigen: CachedPage | null = null;
+let cachedMarken: CachedPage | null = null;
 
 export default function ExploreScreen() {
   const { theme, brand, shadows, stufen } = useTokens();
@@ -155,15 +164,24 @@ export default function ExploreScreen() {
   const [packungstypenMap, setPackungstypenMap] = useState<Record<string, string>>({});
 
   // ─── Product lists ─────────────────────────────────────────────────────
-  const [nonames, setNonames] = useState<FirestoreDocument<Produkte>[]>([]);
-  const [nonameLoading, setNonameLoading] = useState(true);
-  const [nonameLastDoc, setNonameLastDoc] = useState<any>(null);
-  const [nonameHasMore, setNonameHasMore] = useState(true);
+  // Initial state is hydrated from the module-level cache: if the user
+  // already visited Stöbern in this session, they see the cards
+  // immediately on re-entry instead of a fresh skeleton pass. The
+  // reload effect still fires and replaces the data with a fresh
+  // response in the background.
+  const [nonames, setNonames] = useState<FirestoreDocument<Produkte>[]>(
+    () => (cachedEigen?.items as any) ?? [],
+  );
+  const [nonameLoading, setNonameLoading] = useState(!cachedEigen);
+  const [nonameLastDoc, setNonameLastDoc] = useState<any>(cachedEigen?.lastDoc ?? null);
+  const [nonameHasMore, setNonameHasMore] = useState(cachedEigen?.hasMore ?? true);
 
-  const [markenprodukte, setMarkenprodukte] = useState<FirestoreDocument<any>[]>([]);
+  const [markenprodukte, setMarkenprodukte] = useState<FirestoreDocument<any>[]>(
+    () => (cachedMarken?.items as any) ?? [],
+  );
   const [markenLoading, setMarkenLoading] = useState(false);
-  const [markenLastDoc, setMarkenLastDoc] = useState<any>(null);
-  const [markenHasMore, setMarkenHasMore] = useState(true);
+  const [markenLastDoc, setMarkenLastDoc] = useState<any>(cachedMarken?.lastDoc ?? null);
+  const [markenHasMore, setMarkenHasMore] = useState(cachedMarken?.hasMore ?? true);
 
   // ─── Locked category gate (Alkohol) ────────────────────────────────────
   const [lockedCategory, setLockedCategory] = useState<FirestoreDocument<Kategorien> | null>(null);
@@ -313,6 +331,23 @@ export default function ExploreScreen() {
   const FIRST_PAGE_SIZE = 6;
   const PAGE_SIZE = 12;
 
+  // "Are we viewing the unfiltered default list?" — only THEN is it
+  // safe to seed the module-level cache with what we see, because any
+  // other Stöbern visit with those same defaults will see the same
+  // results. Typing in the search or applying a filter would produce
+  // a different slice that shouldn't be cached as the landing state.
+  const isDefaultFilters = useCallback(
+    () =>
+      !query.trim() &&
+      market === 'all' &&
+      handels === 'all' &&
+      cat === 'all' &&
+      stufeSelection.length === 0 &&
+      brandId === 'all' &&
+      sort === 'name',
+    [query, market, handels, cat, stufeSelection, brandId, sort],
+  );
+
   const loadNonames = useCallback(
     async (reset: boolean) => {
       if (!reset && (nonameLoading || !nonameHasMore)) return;
@@ -330,8 +365,16 @@ export default function ExploreScreen() {
           // Sort only on reset — on append we preserve whatever order the
           // earlier items had so their positions don't shift and the user's
           // current scroll offset stays anchored.
-          if (reset) return [...incoming].sort(productSorter) as any;
-          return [...prev, ...incoming] as any;
+          const next = reset
+            ? ([...incoming].sort(productSorter) as any)
+            : ([...prev, ...incoming] as any);
+          // Seed the module-level cache so a later Stöbern remount
+          // lands on this state instantly. Only do it for default
+          // filters (see isDefaultFilters comment).
+          if (reset && isDefaultFilters()) {
+            cachedEigen = { items: next, lastDoc: res.lastDoc, hasMore: res.hasMore };
+          }
+          return next;
         });
         setNonameLastDoc(res.lastDoc);
         setNonameHasMore(res.hasMore);
@@ -386,8 +429,13 @@ export default function ExploreScreen() {
         setMarkenprodukte((prev) => {
           const existing = reset ? new Set<string>() : new Set(prev.map((p) => p.id));
           const incoming = (res.products as any[]).filter((p) => !existing.has(p.id));
-          if (reset) return [...incoming].sort(productSorter) as any;
-          return [...prev, ...incoming] as any;
+          const next = reset
+            ? ([...incoming].sort(productSorter) as any)
+            : ([...prev, ...incoming] as any);
+          if (reset && isDefaultFilters()) {
+            cachedMarken = { items: next, lastDoc: res.lastDoc, hasMore: res.hasMore };
+          }
+          return next;
         });
         setMarkenLastDoc(res.lastDoc);
         setMarkenHasMore(res.hasMore);

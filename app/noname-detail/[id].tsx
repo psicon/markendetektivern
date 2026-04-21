@@ -308,7 +308,12 @@ export default function NoNameDetailScreen() {
           morphTitleStyle,
         ]}
       >
-        {((hm as any)?.bild ?? disc?.bild) ? (
+        {/* Stufe 1/2 products come from the discounter's own shelf but
+            rarely belong to a distinct Handelsmarke we have branding
+            for, so the MARKET (discounter) logo is what best identifies
+            them at a glance. Fall back to the Handelsmarke logo only
+            if no discounter logo exists. */}
+        {(disc?.bild ?? (hm as any)?.bild) ? (
           <View
             style={{
               width: 26,
@@ -321,7 +326,7 @@ export default function NoNameDetailScreen() {
             }}
           >
             <Image
-              source={{ uri: (hm as any)?.bild ?? disc?.bild }}
+              source={{ uri: disc?.bild ?? (hm as any)?.bild }}
               style={{ width: '100%', height: '100%' }}
               resizeMode="contain"
             />
@@ -353,23 +358,31 @@ export default function NoNameDetailScreen() {
         }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ─── Eyebrow (title lives outside ScrollView as the morph
-            element — see morphTitleStyle). 32 px placeholder preserves
-            the hero's vertical rhythm. */}
-        <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.semibold,
-              fontSize: 11,
-              color: theme.textMuted,
-              letterSpacing: 1.2,
-              textTransform: 'uppercase',
-            }}
-          >
-            Eigenmarke{disc?.name ? ` · ${disc.name}` : ''}
-          </Text>
-          <View style={{ height: 32, marginTop: 2 }} />
+        {/* Title lives outside the ScrollView as the morph element.
+            32 px placeholder preserves the hero's vertical rhythm.
+            Below the placeholder we show the Hersteller (if known) as
+            a subtitle — this was the info missing on the Eigenmarken
+            detail. The market/discounter name used to live in an
+            eyebrow here too; now it's encoded by the logo in the
+            morph title, so we drop it here to avoid the repetition. */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 10 }}>
+          <View style={{ height: 32 }} />
+          {herstellerName ? (
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 13,
+                color: theme.textSub,
+                marginTop: 4,
+              }}
+            >
+              Hersteller:{' '}
+              <Text style={{ fontWeight: fontWeight.bold, color: theme.text }}>
+                {herstellerName}
+              </Text>
+            </Text>
+          ) : null}
         </View>
 
         {/* ─── Hero image with overlays ──────────────────────────── */}
@@ -384,95 +397,26 @@ export default function NoNameDetailScreen() {
             }}
           >
             {p.bild ? (
-              <Animated.Image
-                source={{ uri: p.bild }}
+              <Animated.View
                 style={{ width: '100%', height: '100%' }}
-                resizeMode="cover"
-                // Matches the `sharedTag` on the Stöbern ProductCard,
-                // so the Eigenmarken thumbnail morphs into this hero
-                // on push and reverses on pop. Convention is
-                // `product-image-<id>`.
                 sharedTransitionTag={`product-image-${p.id ?? ''}`}
-              />
+              >
+                <Image
+                  source={{ uri: p.bild }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="cover"
+                />
+              </Animated.View>
             ) : (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 <MaterialCommunityIcons name="package-variant" size={64} color={theme.textMuted} />
               </View>
             )}
 
-            {/* Market chip top-left */}
-            {disc?.name ? (
-              <View
-                style={{
-                  position: 'absolute',
-                  left: 12,
-                  top: 12,
-                  backgroundColor: disc.color ?? brand.primary,
-                  paddingVertical: 8,
-                  paddingHorizontal: 14,
-                  borderRadius: 22,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 8,
-                  shadowColor: '#000',
-                  shadowOpacity: 0.18,
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowRadius: 10,
-                  elevation: 3,
-                }}
-              >
-                {disc.bild ? (
-                  <View
-                    style={{
-                      width: 20,
-                      height: 20,
-                      borderRadius: 5,
-                      backgroundColor: '#fff',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <Image
-                      source={{ uri: disc.bild }}
-                      style={{ width: '100%', height: '100%' }}
-                      resizeMode="contain"
-                    />
-                  </View>
-                ) : (
-                  <View
-                    style={{
-                      width: 20,
-                      height: 20,
-                      borderRadius: 5,
-                      backgroundColor: 'rgba(255,255,255,0.25)',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontFamily,
-                        fontWeight: fontWeight.extraBold,
-                        fontSize: 10,
-                        color: '#fff',
-                      }}
-                    >
-                      {disc.name[0]?.toUpperCase() ?? '?'}
-                    </Text>
-                  </View>
-                )}
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.bold,
-                    fontSize: 13,
-                    color: '#fff',
-                  }}
-                >
-                  Exklusiv bei {disc.name}
-                </Text>
-              </View>
-            ) : null}
+            {/* The "Exklusiv bei <discounter>" chip was here, but the
+                market logo is now the primary image in the morph
+                title above the hero — repeating it on the hero read
+                as visual noise. Dropped. */}
 
             {/* Price pill bottom-left */}
             <View

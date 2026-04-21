@@ -67,12 +67,17 @@ export function BrandCard({
     >
       <View style={{ position: 'relative', width: '100%', height: 162 }}>
         {imageUri ? (
-          <Animated.Image
-            source={{ uri: imageUri }}
+          // Animated.View wrapping Image — see ProductCard note.
+          <Animated.View
             style={{ width: '100%', height: '100%' }}
-            resizeMode="cover"
             sharedTransitionTag={sharedTag}
-          />
+          >
+            <Image
+              source={{ uri: imageUri }}
+              style={{ width: '100%', height: '100%' }}
+              resizeMode="cover"
+            />
+          </Animated.View>
         ) : (
           <View
             style={{
