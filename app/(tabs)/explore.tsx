@@ -29,6 +29,8 @@ import { FilterChip } from '@/components/design/FilterChip';
 import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
 import { ProductCard } from '@/components/design/ProductCard';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
+import { collection, getDocs } from 'firebase/firestore';
+
 import { BannerAd } from '@/components/ads/BannerAd';
 import { LockedCategoryModal } from '@/components/ui/LockedCategoryModal';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
@@ -37,6 +39,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
+import { db } from '@/lib/firebase';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { FirestoreService } from '@/lib/services/firestore';
 import { ExtendedMarkenproduktFilters, ExtendedNoNameFilters } from '@/lib/types/filters';
@@ -139,11 +142,13 @@ export default function ExploreScreen() {
   const [sort, setSort] = useState<SortKey>('name');
   const [sheet, setSheet] = useState<SheetKey>(null);
 
-  // ─── Reference data (filters) ──────────────────────────────────────────
+  // ─── Reference data (filters + card lookup) ───────────────────────────
   const [discounter, setDiscounter] = useState<FirestoreDocument<Discounter>[]>([]);
   const [handelsmarken, setHandelsmarken] = useState<FirestoreDocument<Handelsmarken>[]>([]);
   const [kategorien, setKategorien] = useState<FirestoreDocument<Kategorien>[]>([]);
   const [markenList, setMarkenList] = useState<Array<{ id: string; name: string }>>([]);
+  // Map packungstypen doc id → `typKurz` (e.g. "g", "kg", "ml", "l", "Stk").
+  const [packungstypenMap, setPackungstypenMap] = useState<Record<string, string>>({});
 
   // ─── Product lists ─────────────────────────────────────────────────────
   const [nonames, setNonames] = useState<FirestoreDocument<Produkte>[]>([]);
@@ -178,10 +183,12 @@ export default function ExploreScreen() {
     (async () => {
       try {
         const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
-        const [ds, cats, ms] = await Promise.all([
+        const [ds, cats, ms, hms, ptSnap] = await Promise.all([
           FirestoreService.getDiscounter(),
           categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium),
           FirestoreService.getMarken().catch(() => []),
+          (FirestoreService as any).getHandelsmarken?.().catch(() => []) ?? Promise.resolve([]),
+          getDocs(collection(db, 'packungstypen')).catch(() => null),
         ]);
         setDiscounter([...ds].sort(byName));
         setKategorien([...cats].sort(byName));
@@ -190,33 +197,19 @@ export default function ExploreScreen() {
             .map((m: any) => ({ id: m.id, name: m.name ?? m.bezeichnung ?? '' }))
             .sort((a, b) => a.name.localeCompare(b.name, 'de', { sensitivity: 'base' })),
         );
+        if (Array.isArray(hms)) setHandelsmarken([...hms].sort(byName));
+        if (ptSnap) {
+          const ptMap: Record<string, string> = {};
+          ptSnap.forEach((d: any) => {
+            ptMap[d.id] = (d.data() as any).typKurz ?? (d.data() as any).typ ?? '';
+          });
+          setPackungstypenMap(ptMap);
+        }
       } catch (e) {
         console.warn('Explore: failed to load reference data', e);
       }
     })();
   }, [userProfile, isPremium]);
-
-  // ─── Lazy-load Handelsmarken the first time the filter sheet opens ─────
-  useEffect(() => {
-    if (sheet !== 'handels' || handelsmarken.length > 0) return;
-    (async () => {
-      try {
-        const hms = await (FirestoreService as any).getHandelsmarken?.();
-        if (Array.isArray(hms)) {
-          const sorted = [...hms].sort((a: any, b: any) =>
-            String(a.bezeichnung ?? a.name ?? '').localeCompare(
-              String(b.bezeichnung ?? b.name ?? ''),
-              'de',
-              { sensitivity: 'base' },
-            ),
-          );
-          setHandelsmarken(sorted);
-        }
-      } catch {
-        /* optional — service may not exist; ignore */
-      }
-    })();
-  }, [sheet, handelsmarken.length]);
 
   // ─── Debounced filter → reload products ────────────────────────────────
   const reloadSeq = useRef(0);
@@ -379,18 +372,55 @@ export default function ExploreScreen() {
     cat !== 'all' ||
     ingredients.length > 0;
 
-  // ─── Discounter color/short lookup (for MarketBadge on cards) ─────────
+  // ─── Lookup maps keyed by doc id, built once per reference-data load ──
   const discounterMap = useMemo(() => {
-    const m: Record<string, { color: string; short: string }> = {};
+    const m: Record<string, { color: string; short: string; bild?: string }> = {};
     discounter.forEach((d) => {
       const n = (d as any).name ?? '';
       m[d.id] = {
         color: (d as any).color ?? '#888888',
         short: n.length <= 2 ? n : n[0].toUpperCase(),
+        bild: (d as any).bild,
       };
     });
     return m;
   }, [discounter]);
+
+  const handelsmarkenMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    handelsmarken.forEach((h) => {
+      m[h.id] = (h as any).bezeichnung ?? (h as any).name ?? '';
+    });
+    return m;
+  }, [handelsmarken]);
+
+  const markenMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    markenList.forEach((x) => {
+      m[x.id] = x.name;
+    });
+    return m;
+  }, [markenList]);
+
+  // Format a German-localised "100g" label + price-per-unit helper:
+  //   size=100, unit='g', price=0.89  →  ('100g', '8,90€/kg')
+  //   size=1.5, unit='l', price=0.55  →  ('1.5l', '0,37€/L')
+  const formatPack = useCallback(
+    (size?: number, unit?: string, price?: number) => {
+      if (!size || !unit) return { sizeLabel: null as string | null, unitPriceLabel: null as string | null };
+      const u = unit.toLowerCase();
+      const sizeLabel = `${size}${unit}`;
+      let unitPriceLabel: string | null = null;
+      if (price && price > 0) {
+        if (u === 'g') unitPriceLabel = `${((price / size) * 1000).toFixed(2).replace('.', ',')}€/kg`;
+        else if (u === 'kg') unitPriceLabel = `${(price / size).toFixed(2).replace('.', ',')}€/kg`;
+        else if (u === 'ml') unitPriceLabel = `${((price / size) * 1000).toFixed(2).replace('.', ',')}€/L`;
+        else if (u === 'l') unitPriceLabel = `${(price / size).toFixed(2).replace('.', ',')}€/L`;
+      }
+      return { sizeLabel, unitPriceLabel };
+    },
+    [],
+  );
 
   // Readable value labels for chips:
   const catLabel = useMemo(() => {
@@ -672,6 +702,75 @@ export default function ExploreScreen() {
       );
     }
 
+    // Ad cadence: a banner is injected after every AD_EVERY items (= 10 rows
+     // at 2 per row). Skipped when user is premium. Spacer View with width:'100%'
+     // forces the flex-wrap row to break, keeping the grid aligned.
+    const AD_EVERY = 20;
+    const nodes: React.ReactNode[] = [];
+    items.forEach((item, index) => {
+      if (forTab === 'eigen') {
+        const p = item as FirestoreDocument<Produkte>;
+        const discId = (p as any).discounter?.id;
+        const disc = discId ? discounterMap[discId] : null;
+        const hmId = (p as any).handelsmarke?.id;
+        const handelsmarke = hmId ? handelsmarkenMap[hmId] : null;
+        const packTypId = (p as any).packTyp?.id;
+        const unit = packTypId ? packungstypenMap[packTypId] : undefined;
+        const { sizeLabel, unitPriceLabel } = formatPack(
+          (p as any).packSize,
+          unit,
+          (p as any).preis,
+        );
+        nodes.push(
+          <View key={p.id} style={{ width: GRID_ITEM_WIDTH }}>
+            <ProductCard
+              title={(p as any).name ?? ''}
+              brand={handelsmarke ?? null}
+              imageUri={(p as any).bild ?? null}
+              price={(p as any).preis ?? 0}
+              stufe={parseInt((p as any).stufe) || 1}
+              marketShort={disc?.short ?? null}
+              marketColor={disc?.color ?? null}
+              marketImageUri={disc?.bild ?? null}
+              sizeLabel={sizeLabel}
+              unitPriceLabel={unitPriceLabel}
+              variant="grid"
+              onPress={() => openProduct(p, index)}
+            />
+          </View>,
+        );
+      } else {
+        const m = item as FirestoreDocument<any>;
+        const herstellerId = (m as any).hersteller?.id ?? (m as any).hersteller;
+        const marke = (typeof herstellerId === 'string' ? markenMap[herstellerId] : undefined) ?? '';
+        nodes.push(
+          <View key={m.id} style={{ width: GRID_ITEM_WIDTH }}>
+            <BrandCard
+              title={(m as any).name ?? ''}
+              brand={marke}
+              imageUri={(m as any).bild ?? null}
+              price={(m as any).preis ?? 0}
+              alternativeCount={(m as any).relatedProdukteIDs?.length ?? 0}
+              onPress={() => openBrand(m, index)}
+            />
+          </View>,
+        );
+      }
+      // Insert a banner row after every AD_EVERY products (unless this was the
+      // very last item — we don't want an ad stranded at the bottom).
+      if (
+        !isPremium &&
+        (index + 1) % AD_EVERY === 0 &&
+        index < items.length - 1
+      ) {
+        nodes.push(
+          <View key={`ad-${index}`} style={{ width: '100%', marginTop: 4, marginBottom: 4 }}>
+            <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
+          </View>,
+        );
+      }
+    });
+
     return (
       <View
         style={{
@@ -681,43 +780,7 @@ export default function ExploreScreen() {
           gap: 12,
         }}
       >
-        {items.map((item, index) => {
-          if (forTab === 'eigen') {
-            const p = item as FirestoreDocument<Produkte>;
-            const disc = (p as any).discounter ? discounterMap[(p as any).discounter.id] : null;
-            return (
-              <View key={p.id} style={{ width: GRID_ITEM_WIDTH }}>
-                <ProductCard
-                  title={(p as any).name ?? ''}
-                  brand={null}
-                  imageUri={(p as any).bild ?? null}
-                  price={(p as any).preis ?? 0}
-                  stufe={parseInt((p as any).stufe) || 1}
-                  marketShort={disc?.short ?? null}
-                  marketColor={disc?.color ?? null}
-                  variant="grid"
-                  onPress={() => openProduct(p, index)}
-                />
-              </View>
-            );
-          }
-          const m = item as FirestoreDocument<any>;
-          const marke = markenList.find(
-            (x) => x.id === ((m as any).hersteller?.id ?? (m as any).hersteller),
-          )?.name;
-          return (
-            <View key={m.id} style={{ width: GRID_ITEM_WIDTH }}>
-              <BrandCard
-                title={(m as any).name ?? ''}
-                brand={marke ?? ''}
-                imageUri={(m as any).bild ?? null}
-                price={(m as any).preis ?? 0}
-                alternativeCount={(m as any).relatedProdukteIDs?.length ?? 0}
-                onPress={() => openBrand(m, index)}
-              />
-            </View>
-          );
-        })}
+        {nodes}
       </View>
     );
   };

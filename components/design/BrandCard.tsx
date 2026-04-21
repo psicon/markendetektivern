@@ -41,7 +41,7 @@ export function BrandCard({ title, brand, imageUri, price, savingsEur, alternati
         ...shadows.sm,
       })}
     >
-      <View style={{ position: 'relative', width: '100%', height: 180 }}>
+      <View style={{ position: 'relative', width: '100%', height: 162 }}>
         {imageUri ? (
           <Image
             source={{ uri: imageUri }}
