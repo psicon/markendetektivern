@@ -1,6 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  Dimensions,
   Modal,
   Pressable,
   ScrollView,
@@ -13,6 +14,7 @@ import {
   GestureHandlerRootView,
 } from 'react-native-gesture-handler';
 import Animated, {
+  Easing,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -32,14 +34,15 @@ type Props = {
   maxHeightRatio?: number;
 };
 
-const SWIPE_CLOSE_THRESHOLD = 100; // px dragged down
-const SWIPE_CLOSE_VELOCITY = 500; // px/sec
+const SWIPE_CLOSE_THRESHOLD = 100;
+const SWIPE_CLOSE_VELOCITY = 500;
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 /**
- * Bottom sheet used for filter pickers in Stöbern. Native-feeling swipe-
- * down-to-dismiss via react-native-gesture-handler + reanimated. No
- * "Apply" button — changes are live; dismissing commits whatever is
- * currently selected.
+ * Bottom sheet with a real slide-up entry animation and backdrop fade.
+ * Uses Reanimated shared values — no reliance on Modal's stock
+ * animationType — and keeps the Modal mounted through the close
+ * animation so the slide-out is actually visible.
  */
 export function FilterSheet({
   visible,
@@ -51,62 +54,93 @@ export function FilterSheet({
   const { theme } = useTokens();
   const insets = useSafeAreaInsets();
 
-  const translateY = useSharedValue(0);
+  // Mount the Modal as long as we still have an animation to play, even
+  // after the parent flipped `visible` to false.
+  const [mounted, setMounted] = useState(visible);
 
-  // Reset the sheet position whenever it opens.
+  // translateY: SCREEN_HEIGHT (off-screen below) → 0 (fully up).
+  const translateY = useSharedValue(SCREEN_HEIGHT);
+  const backdropOpacity = useSharedValue(0);
+
   useEffect(() => {
     if (visible) {
-      translateY.value = 0;
+      setMounted(true);
+      // Give the modal a frame to mount before animating.
+      requestAnimationFrame(() => {
+        translateY.value = withSpring(0, {
+          damping: 24,
+          stiffness: 220,
+          mass: 0.9,
+        });
+        backdropOpacity.value = withTiming(1, { duration: 220 });
+      });
+    } else {
+      translateY.value = withTiming(SCREEN_HEIGHT, {
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+      });
+      backdropOpacity.value = withTiming(
+        0,
+        { duration: 220 },
+        (finished) => {
+          if (finished) runOnJS(setMounted)(false);
+        },
+      );
     }
-  }, [visible, translateY]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   const panGesture = Gesture.Pan()
-    // Only engage once the user has clearly moved vertically — lets taps
-    // through, and keeps the inner ScrollView's scroll gesture intact for
-    // small swipes.
     .activeOffsetY(10)
     .onUpdate((e) => {
-      if (e.translationY > 0) {
-        translateY.value = e.translationY;
-      }
+      if (e.translationY > 0) translateY.value = e.translationY;
     })
     .onEnd((e) => {
       const shouldClose =
         translateY.value > SWIPE_CLOSE_THRESHOLD || e.velocityY > SWIPE_CLOSE_VELOCITY;
       if (shouldClose) {
-        translateY.value = withTiming(600, { duration: 180 });
+        // Let the `visible` effect drive the final slide-down + fade —
+        // fewer concurrent tweens = smoother finish.
         runOnJS(onClose)();
       } else {
-        translateY.value = withSpring(0, { damping: 18, stiffness: 220 });
+        translateY.value = withSpring(0, { damping: 22, stiffness: 240 });
       }
     });
 
   const sheetStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
   }));
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: backdropOpacity.value,
+  }));
+
+  if (!mounted) return null;
 
   return (
     <Modal
-      animationType="fade"
+      animationType="none"
       transparent
-      visible={visible}
+      visible={mounted}
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      {/* GestureHandlerRootView is required inside Modal because Modal
-          creates its own native view hierarchy outside the app root. */}
       <GestureHandlerRootView style={{ flex: 1 }}>
+        {/* Animated backdrop — fades in/out independently of the sheet. */}
+        <Animated.View
+          style={[
+            {
+              ...StyleAbsoluteFill,
+              backgroundColor: theme.overlay,
+            },
+            backdropStyle,
+          ]}
+        />
         <Pressable
           onPress={onClose}
-          style={{
-            flex: 1,
-            backgroundColor: theme.overlay,
-            justifyContent: 'flex-end',
-          }}
+          style={{ flex: 1, justifyContent: 'flex-end' }}
         >
           <GestureDetector gesture={panGesture}>
             <Animated.View
-              // Stop backdrop press from firing when tapping inside the sheet.
               onStartShouldSetResponder={() => true}
               style={[
                 sheetStyle,
@@ -120,7 +154,7 @@ export function FilterSheet({
                 },
               ]}
             >
-              {/* Drag handle — chunky enough to visibly afford the swipe. */}
+              {/* Drag handle */}
               <View
                 style={{
                   width: 44,
@@ -173,6 +207,16 @@ export function FilterSheet({
     </Modal>
   );
 }
+
+// Literal `StyleSheet.absoluteFillObject` is a pain to type inline; this
+// const keeps the style blocks tidy.
+const StyleAbsoluteFill = {
+  position: 'absolute' as const,
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+};
 
 // ─── Option list — used inside FilterSheet for radio-style pickers ─────────
 type OptionListProps<T extends string> = {

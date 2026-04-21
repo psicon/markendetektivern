@@ -1,5 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -238,10 +238,8 @@ export default function NoNameDetailScreen() {
   // ─── Render ───────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* Hide the default Expo Router stack header — we render our own. */}
-      <Stack.Screen options={{ headerShown: false }} />
-
-      {/* Sticky header — back + title */}
+      {/* Sticky header — back + title. Default Stack header is hidden
+          statically in app/_layout.tsx. */}
       <View style={{ paddingTop: insets.top, backgroundColor: theme.bg, zIndex: 5 }}>
         <View
           style={{

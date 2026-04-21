@@ -1,6 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -364,14 +364,9 @@ export default function ProductComparisonScreen() {
   // ─── Render ───────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* Suppress the default Expo Router Stack header — our custom sticky
-          header below replaces it. Without this, we'd see the route name
-          ("product-comparison/[id]") ghosted above the real UI. */}
-      <Stack.Screen options={{ headerShown: false }} />
-
       {/* Sticky header — stays put when content scrolls (matches prototype
-          position:sticky). Just back arrow + title — search / notifications
-          were cosmetic per request. */}
+          position:sticky). The default Stack header is hidden statically
+          in app/_layout.tsx so it never flashes on mount. */}
       <View
         style={{
           paddingTop: insets.top,

@@ -1,6 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Dimensions,
   Modal,
   Pressable,
   ScrollView,
@@ -14,6 +15,7 @@ import {
   GestureHandlerRootView,
 } from 'react-native-gesture-handler';
 import Animated, {
+  Easing,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -26,7 +28,16 @@ import { useTokens } from '@/hooks/useTokens';
 
 const SWIPE_CLOSE_THRESHOLD = 110;
 const SWIPE_CLOSE_VELOCITY = 500;
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 const AVATAR_COLORS = ['#0d8575', '#cc6610', '#7b53b8', '#1b6fc7', '#a83753'];
+
+const StyleAbsoluteFill = {
+  position: 'absolute' as const,
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+};
 
 export type Rating = {
   id?: string;
@@ -108,14 +119,40 @@ export function RatingsSheet({
     setComment('');
   };
 
-  const translateY = useSharedValue(0);
+  // Slide-up + backdrop fade animation. Sheet stays mounted through the
+  // out-animation so the close gesture is actually visible.
+  const [mounted, setMounted] = useState(visible);
+  const translateY = useSharedValue(SCREEN_HEIGHT);
+  const backdropOpacity = useSharedValue(0);
+
   useEffect(() => {
     if (visible) {
-      translateY.value = 0;
+      setMounted(true);
       setView('list');
       resetForm();
+      requestAnimationFrame(() => {
+        translateY.value = withSpring(0, {
+          damping: 24,
+          stiffness: 220,
+          mass: 0.9,
+        });
+        backdropOpacity.value = withTiming(1, { duration: 220 });
+      });
+    } else {
+      translateY.value = withTiming(SCREEN_HEIGHT, {
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+      });
+      backdropOpacity.value = withTiming(
+        0,
+        { duration: 220 },
+        (finished) => {
+          if (finished) runOnJS(setMounted)(false);
+        },
+      );
     }
-  }, [visible, translateY]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   const panGesture = Gesture.Pan()
     .activeOffsetY(10)
@@ -126,15 +163,17 @@ export function RatingsSheet({
       const close =
         translateY.value > SWIPE_CLOSE_THRESHOLD || e.velocityY > SWIPE_CLOSE_VELOCITY;
       if (close) {
-        translateY.value = withTiming(800, { duration: 180 });
         runOnJS(onClose)();
       } else {
-        translateY.value = withSpring(0, { damping: 18, stiffness: 220 });
+        translateY.value = withSpring(0, { damping: 22, stiffness: 240 });
       }
     });
 
   const sheetStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
+  }));
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: backdropOpacity.value,
   }));
 
   const avg = useMemo(() => {
@@ -182,22 +221,26 @@ export function RatingsSheet({
     }
   };
 
+  if (!mounted) return null;
+
   return (
     <Modal
-      animationType="fade"
+      animationType="none"
       transparent
-      visible={visible}
+      visible={mounted}
       onRequestClose={onClose}
       statusBarTranslucent
     >
       <GestureHandlerRootView style={{ flex: 1 }}>
+        <Animated.View
+          style={[
+            { ...StyleAbsoluteFill, backgroundColor: theme.overlay },
+            backdropStyle,
+          ]}
+        />
         <Pressable
           onPress={onClose}
-          style={{
-            flex: 1,
-            backgroundColor: theme.overlay,
-            justifyContent: 'flex-end',
-          }}
+          style={{ flex: 1, justifyContent: 'flex-end' }}
         >
           <GestureDetector gesture={panGesture}>
             <Animated.View
