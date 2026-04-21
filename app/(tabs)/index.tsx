@@ -245,6 +245,20 @@ export default function HomeScreen() {
     ],
   }));
 
+  // Scan-icon-in-the-search-bar handoff: while the header scan button
+  // is appearing (see MorphingHeader.scannerStyle, scrollY 30→95), this
+  // icon simultaneously translates UP and shrinks, giving the visual
+  // impression of the icon "flying" into the header. It fades before
+  // the header button's landing-pop at scrollY ≈ 72, so the arrival
+  // there reads as the same icon reaching its destination.
+  const bigScanIconAnimStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [0, 50, 68], [1, 0.5, 0], Extrapolation.CLAMP),
+    transform: [
+      { translateY: interpolate(scrollY.value, [0, 68], [0, -72], Extrapolation.CLAMP) },
+      { scale: interpolate(scrollY.value, [0, 68], [1, 0.7], Extrapolation.CLAMP) },
+    ],
+  }));
+
   // ─── Level card data ────────────────────────────────────────────────────────
   const levelNum = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
   const currentSavings = userProfile?.totalSavings ?? 0;
@@ -293,33 +307,53 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingTop: scrollContentPaddingTop, paddingBottom: 100 }}
       >
-        {/* ── Below-header search bar ── */}
-        <Animated.View style={[{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 }, searchBarAnimStyle]}>
-          <Pressable
-            onPress={() => setShowSearchSheet(true)}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              backgroundColor: theme.surface,
-              borderRadius: radii.full,
-              height: 48,
-              paddingHorizontal: 16,
-              gap: 10,
-              ...shadows.sm,
-            }}
-          >
-            <MaterialCommunityIcons name="magnify" size={20} color={theme.textMuted} />
-            <Text
-              style={{ flex: 1, fontFamily, fontWeight: fontWeight.regular, fontSize: 14, color: theme.textMuted }}
-              numberOfLines={1}
+        {/* ── Below-header search bar ── The scan-icon is pulled out of
+            the searchBarAnimStyle wrapper so it can travel up to the
+            header position independently of the pill's fade. That way
+            the icon looks like it's physically flying into the chrome
+            instead of vanishing with the pill and re-appearing above. */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 }}>
+          <Animated.View style={searchBarAnimStyle}>
+            <Pressable
+              onPress={() => setShowSearchSheet(true)}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: theme.surface,
+                borderRadius: radii.full,
+                height: 48,
+                paddingLeft: 16,
+                paddingRight: 48, // reserve space where the scan icon visually sits
+                gap: 10,
+                ...shadows.sm,
+              }}
             >
-              Marken oder Produkte suchen…
-            </Text>
-            <Pressable onPress={() => router.push('/barcode-scanner')}>
+              <MaterialCommunityIcons name="magnify" size={20} color={theme.textMuted} />
+              <Text
+                style={{ flex: 1, fontFamily, fontWeight: fontWeight.regular, fontSize: 14, color: theme.textMuted }}
+                numberOfLines={1}
+              >
+                Marken oder Produkte suchen…
+              </Text>
+            </Pressable>
+          </Animated.View>
+          <Animated.View
+            style={[
+              {
+                position: 'absolute',
+                // top = 12 (wrapper paddingTop) + (48 pill height - 20 icon) / 2
+                top: 26,
+                // right = 20 (wrapper paddingRight) + 16 (pill paddingRight)
+                right: 36,
+              },
+              bigScanIconAnimStyle,
+            ]}
+          >
+            <Pressable onPress={() => router.push('/barcode-scanner')} hitSlop={10}>
               <MaterialCommunityIcons name="barcode-scan" size={20} color={theme.primary} />
             </Pressable>
-          </Pressable>
-        </Animated.View>
+          </Animated.View>
+        </View>
 
         {/* ── Schnellzugriff ── */}
         <View style={{ marginTop: 20 }}>
@@ -340,6 +374,7 @@ export default function HomeScreen() {
           <Animated.ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
+            scrollsToTop={false}
             contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
           >
             {schnellzugriff.map((item, i) => (
@@ -490,6 +525,7 @@ export default function HomeScreen() {
             <Animated.ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              scrollsToTop={false}
               contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}
             >
               {[0, 1, 2, 3].map(i => (
@@ -519,6 +555,7 @@ export default function HomeScreen() {
             <Animated.ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              scrollsToTop={false}
               contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}
             >
               {enttarnteProdukte.map((product, index) => {
@@ -563,6 +600,7 @@ export default function HomeScreen() {
             <Animated.ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              scrollsToTop={false}
               contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}
             >
               {[0, 1, 2].map(i => (
@@ -587,6 +625,7 @@ export default function HomeScreen() {
             <Animated.ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              scrollsToTop={false}
               contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}
             >
               {newsPosts.map(post => (

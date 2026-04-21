@@ -624,6 +624,10 @@ export default function ExploreScreen() {
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
+      // Horizontal rails must not claim scrollsToTop — otherwise they
+      // conflict with the main vertical ScrollView and iOS silently
+      // disables the status-bar-tap feature for all of them.
+      scrollsToTop={false}
       contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 10, gap: 6 }}
     >
       <FilterChip

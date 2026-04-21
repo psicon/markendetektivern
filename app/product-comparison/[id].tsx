@@ -689,6 +689,7 @@ export default function ProductComparisonScreen() {
               ref={carouselRef}
               horizontal
               showsHorizontalScrollIndicator={false}
+              scrollsToTop={false}
               snapToInterval={snapStep}
               decelerationRate="fast"
               scrollEnabled={nonames.length > 1}
@@ -1230,6 +1231,7 @@ export default function ProductComparisonScreen() {
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              scrollsToTop={false}
               contentContainerStyle={{ paddingHorizontal: 20, gap: 14, paddingBottom: 4 }}
             >
               {alternatives.map((ap: any) => (

@@ -74,17 +74,39 @@ export function MorphingHeader({
     };
   });
 
-  // Scanner button in the header is hidden initially (it lives inside the
-  // big search bar below the hero). Once the user starts scrolling past
-  // the morph threshold, it slides/fades in next to the profile button —
-  // same handoff choreography as the search pill. All interpolation runs
-  // on the UI thread via Reanimated, so this stays smooth on Android too.
+  // Scanner button in the header rises up from the direction of the big
+  // search bar (which sits below the hero and contains the primary scan
+  // icon). Direction matters — coming from BELOW tells the user's eye
+  // "this is the scan icon from down there, moved up". Adds a small
+  // over-shoot (1.12×) right before settling so the arrival reads as
+  // a deliberate pop instead of a fade.
+  //   • scrollY  ≤ 30 → hidden (opacity 0, 10 px below, tiny)
+  //   • scrollY  ≈ 72 → peak (scale 1.12 — the "landed" moment)
+  //   • scrollY  ≥ 95 → settled at rest
+  // All interpolation runs on the UI thread via Reanimated, so the pop
+  // is frame-perfect on Android too.
   const scannerStyle = useAnimatedStyle(() => {
-    const t = interpolate(scrollY.value, [30, 85], [0, 1], Extrapolation.CLAMP);
-    return {
-      opacity: t,
-      transform: [{ translateY: (1 - t) * -6 }, { scale: 0.85 + t * 0.15 }],
-    };
+    const opacity = interpolate(
+      scrollY.value,
+      [30, 72],
+      [0, 1],
+      Extrapolation.CLAMP,
+    );
+    const translateY = interpolate(
+      scrollY.value,
+      [30, 85],
+      [10, 0],
+      Extrapolation.CLAMP,
+    );
+    // Three-key-frame scale: start small, overshoot at the landing
+    // moment, settle at 1.
+    const scale = interpolate(
+      scrollY.value,
+      [30, 72, 95],
+      [0.6, 1.12, 1],
+      Extrapolation.CLAMP,
+    );
+    return { opacity, transform: [{ translateY }, { scale }] };
   });
   // `pointerEvents` needs to toggle off when invisible so the hidden
   // button doesn't swallow taps meant for whatever is underneath.
