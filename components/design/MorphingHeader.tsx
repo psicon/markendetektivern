@@ -1,4 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { BlurView } from 'expo-blur';
 import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
@@ -9,6 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { DetectiveMark } from './DetectiveMark';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 
 type Props = {
@@ -41,6 +43,8 @@ export function MorphingHeader({
   onPressProfile,
 }: Props) {
   const { theme } = useTokens();
+  const scheme = useColorScheme() ?? 'light';
+  const isIOS = Platform.OS === 'ios';
 
   const logoStyle = useAnimatedStyle(() => {
     const t = interpolate(scrollY.value, [30, 85], [0, 1], Extrapolation.CLAMP);
@@ -68,16 +72,14 @@ export function MorphingHeader({
     };
   });
 
-  return (
-    <View
-      style={[
-        styles.container,
-        {
-          paddingTop: insetTop,
-          backgroundColor: theme.bg,
-        },
-      ]}
-    >
+  // Same visual treatment as DetailHeader / Stöbern chrome: BlurView on
+  // iOS so the status-bar area feels native (Dynamic Island flows into
+  // the header material); tinted semi-transparent fallback on Android,
+  // where expo-blur quality is poor. Both let content scroll UNDER the
+  // header, which is why the outer Home ScrollView pads its top by
+  // `insetTop + MORPHING_HEADER_ROW_HEIGHT`.
+  const inner = (
+    <>
       <View style={styles.row}>
         {/* Morphing slot: logo + title ↔ compact search pill */}
         <View style={styles.morphSlot}>
@@ -139,6 +141,35 @@ export function MorphingHeader({
           },
         ]}
       />
+    </>
+  );
+
+  if (isIOS) {
+    return (
+      <BlurView
+        tint={scheme === 'dark' ? 'dark' : 'light'}
+        intensity={80}
+        style={[styles.container, { paddingTop: insetTop }]}
+      >
+        {inner}
+      </BlurView>
+    );
+  }
+
+  return (
+    <View
+      style={[
+        styles.container,
+        {
+          paddingTop: insetTop,
+          backgroundColor:
+            scheme === 'dark'
+              ? 'rgba(15,18,20,0.92)'
+              : 'rgba(245,247,248,0.92)',
+        },
+      ]}
+    >
+      {inner}
     </View>
   );
 }
