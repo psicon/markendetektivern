@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   Image,
   Platform,
   Pressable,
@@ -69,6 +70,29 @@ const SHEET_TITLES: Record<Exclude<SheetKey, null>, string> = {
   sort: 'Sortieren',
 };
 
+// Country code mapping for discounter.land (German names → ISO-like 2-letter codes).
+// Unknown lands fall back to the first two uppercase letters.
+const LAND_TO_CODE: Record<string, string> = {
+  Deutschland: 'DE',
+  Österreich: 'AT',
+  Schweiz: 'CH',
+  Frankreich: 'FR',
+  Italien: 'IT',
+  Niederlande: 'NL',
+  Belgien: 'BE',
+  Luxemburg: 'LU',
+  Polen: 'PL',
+  Tschechien: 'CZ',
+};
+const landToCode = (land: string | undefined): string => {
+  if (!land) return '??';
+  return LAND_TO_CODE[land] ?? land.slice(0, 2).toUpperCase();
+};
+
+// 2-column grid math — precomputed once. 20 = horizontal padding, 12 = gap.
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const GRID_ITEM_WIDTH = Math.floor((SCREEN_WIDTH - 20 * 2 - 12) / 2);
+
 // ────────────────────────────────────────────────────────────────────────
 
 export default function ExploreScreen() {
@@ -87,6 +111,8 @@ export default function ExploreScreen() {
   const [tab, setTab] = useState<Tab>('eigen');
   const [query, setQuery] = useState('');
   const [market, setMarket] = useState<string>('all');
+  // Country filter inside the Markt sheet — default DE.
+  const [marketCountry, setMarketCountry] = useState<string>('DE');
   const [handels, setHandels] = useState<string>('all');
   const [cat, setCat] = useState<string>('all');
   const [minStufe, setMinStufe] = useState<number>(0);
@@ -354,8 +380,29 @@ export default function ExploreScreen() {
   const marketLabel = useMemo(() => {
     if (market === 'all') return null;
     const d = discounter.find((x) => x.id === market);
-    return (d as any)?.name ?? null;
+    if (!d) return null;
+    const name = (d as any).name ?? '';
+    const code = landToCode((d as any).land);
+    return `${name} (${code})`;
   }, [market, discounter]);
+
+  // Countries present in the loaded discounter set, sorted with DE first when
+  // available (default selection). Powers the Markt sheet's country tabs.
+  const availableCountries = useMemo(() => {
+    const codes = Array.from(
+      new Set(discounter.map((d) => landToCode((d as any).land))),
+    ).filter((c) => c && c !== '??');
+    codes.sort((a, b) => (a === 'DE' ? -1 : b === 'DE' ? 1 : a.localeCompare(b)));
+    return codes;
+  }, [discounter]);
+
+  // If the default country isn't in the loaded set, fall back to the first available.
+  useEffect(() => {
+    if (availableCountries.length === 0) return;
+    if (!availableCountries.includes(marketCountry)) {
+      setMarketCountry(availableCountries[0]);
+    }
+  }, [availableCountries, marketCountry]);
 
   const brandLabel = useMemo(() => {
     if (brandId === 'all') return null;
@@ -617,7 +664,7 @@ export default function ExploreScreen() {
             const p = item as FirestoreDocument<Produkte>;
             const disc = (p as any).discounter ? discounterMap[(p as any).discounter.id] : null;
             return (
-              <View key={p.id} style={{ width: '48.5%' }}>
+              <View key={p.id} style={{ width: GRID_ITEM_WIDTH }}>
                 <ProductCard
                   title={(p as any).name ?? ''}
                   brand={null}
@@ -637,7 +684,7 @@ export default function ExploreScreen() {
             (x) => x.id === ((m as any).hersteller?.id ?? (m as any).hersteller),
           )?.name;
           return (
-            <View key={m.id} style={{ width: '48.5%' }}>
+            <View key={m.id} style={{ width: GRID_ITEM_WIDTH }}>
               <BrandCard
                 title={(m as any).name ?? ''}
                 brand={marke ?? ''}
@@ -664,41 +711,51 @@ export default function ExploreScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      {/* Fixed SegmentedTabs above the pager — stays put when swiping. */}
+      <View
+        style={{
+          paddingTop: insets.top + 12,
+          paddingHorizontal: 20,
+          paddingBottom: 12,
+          backgroundColor: theme.bg,
+          borderBottomWidth: 1,
+          borderBottomColor: theme.border,
+        }}
+      >
+        <SegmentedTabs
+          tabs={[
+            { key: 'eigen', label: 'Eigenmarken' },
+            { key: 'marken', label: 'Marken' },
+          ] as const}
+          value={tab}
+          onChange={switchTab}
+        />
+      </View>
+
       <PagerView
         ref={pagerRef}
-        style={{ flex: 1, paddingTop: insets.top }}
+        style={{ flex: 1 }}
         initialPage={0}
         onPageSelected={onPageSelected}
       >
         {/* ─── Page 0 — Eigenmarken ─────────────────────────────────── */}
         <View key="eigen" style={{ flex: 1 }}>
           <ScrollView
-            stickyHeaderIndices={[1]}
+            stickyHeaderIndices={[0]}
             onScroll={onPageScroll}
             scrollEventThrottle={200}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ paddingBottom: 120 }}
           >
-            {/* 0 — tabs (scrolls away with content) */}
-            <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: theme.bg }}>
-              <SegmentedTabs
-                tabs={[
-                  { key: 'eigen', label: 'Eigenmarken' },
-                  { key: 'marken', label: 'Marken' },
-                ] as const}
-                value={tab}
-                onChange={switchTab}
-              />
-            </View>
-            {/* 1 — sticky glass header */}
+            {/* 0 — sticky glass header */}
             <StickyHeader forTab="eigen" />
-            {/* 2 — banner ad */}
+            {/* banner ad */}
             {!isPremium ? (
               <View style={{ marginTop: 12 }}>
                 <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
               </View>
             ) : null}
-            {/* 3 — grid */}
+            {/* grid */}
             <View style={{ paddingTop: 12 }}>{renderGrid('eigen')}</View>
             {isLoading && currentList.length > 0 ? (
               <View style={{ paddingVertical: 24 }}>
@@ -711,22 +768,12 @@ export default function ExploreScreen() {
         {/* ─── Page 1 — Marken ──────────────────────────────────────── */}
         <View key="marken" style={{ flex: 1 }}>
           <ScrollView
-            stickyHeaderIndices={[1]}
+            stickyHeaderIndices={[0]}
             onScroll={onPageScroll}
             scrollEventThrottle={200}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ paddingBottom: 120 }}
           >
-            <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: theme.bg }}>
-              <SegmentedTabs
-                tabs={[
-                  { key: 'eigen', label: 'Eigenmarken' },
-                  { key: 'marken', label: 'Marken' },
-                ] as const}
-                value={tab}
-                onChange={switchTab}
-              />
-            </View>
             <StickyHeader forTab="marken" />
             {!isPremium ? (
               <View style={{ marginTop: 12 }}>
@@ -767,12 +814,30 @@ export default function ExploreScreen() {
         title={SHEET_TITLES.markt}
         onClose={() => setSheet(null)}
       >
+        {/* Country segmented control — filters the market list below */}
+        {availableCountries.length > 1 ? (
+          <View style={{ marginBottom: 12 }}>
+            <SegmentedTabs
+              tabs={availableCountries.map((c) => ({ key: c, label: c })) as any}
+              value={marketCountry}
+              onChange={(v) => setMarketCountry(v)}
+            />
+          </View>
+        ) : null}
         <OptionList
           value={market}
           options={
             [
-              ['all', 'Alle Märkte'],
-              ...discounter.map((d) => [d.id, (d as any).name ?? ''] as const),
+              ['all', `Alle Märkte (${marketCountry})`] as const,
+              ...discounter
+                .filter((d) => landToCode((d as any).land) === marketCountry)
+                .map(
+                  (d) =>
+                    [
+                      d.id,
+                      `${(d as any).name ?? ''} (${landToCode((d as any).land)})`,
+                    ] as const,
+                ),
             ] as const
           }
           onChange={(v) => {
