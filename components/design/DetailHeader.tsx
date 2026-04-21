@@ -1,7 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BlurView } from 'expo-blur';
 import React from 'react';
-import { Platform, Pressable, Text, View } from 'react-native';
+import { Image, Platform, Pressable, Text, View } from 'react-native';
 import Animated, {
   Extrapolation,
   interpolate,
@@ -20,6 +20,8 @@ type Props = {
    *  scrolls past `swapAt`. Typical use: the screen's big H1 moving into
    *  the nav bar as the user scrolls. */
   scrolledTitle?: string;
+  /** Optional small logo URL to render inline before `scrolledTitle`. */
+  scrolledLogoUri?: string | null;
   /** Reanimated scroll offset of the main ScrollView. Required when
    *  `scrolledTitle` is set. */
   scrollY?: SharedValue<number>;
@@ -35,21 +37,16 @@ export const DETAIL_HEADER_ROW_HEIGHT = 48;
 
 /**
  * Detail-screen header built for iOS Dynamic-Island feel:
- *  - On iOS: rendered in a BlurView, so scroll content passing behind it
- *    gets a native translucent tint. The status-bar area (insets.top) is
- *    part of the same blurred surface — the island "flows into" it.
- *  - On Android: a semi-transparent tinted View fallback (BlurView on
- *    Android is visually unreliable across OEMs). Same layering idea
- *    without the GPU-level blur — content is still visible through the
- *    92 %-opaque tint.
- *
- * Optional large-title behavior: pass `scrolledTitle` + `scrollY` to get
- * an iOS-style cross-fade where the H1 (e.g. product name) rises into
- * the nav bar as the user scrolls past it.
+ *  - iOS: BlurView surface, scroll content behind gets a native tint.
+ *  - Android: tinted semi-transparent View fallback.
+ *  - Optional UINavigationBar-style large-title dismissal: pass scrollY
+ *    + scrolledTitle + an optional scrolledLogoUri, and the product
+ *    logo+name will rise into the nav bar as the hero scrolls out.
  */
 export function DetailHeader({
   title,
   scrolledTitle,
+  scrolledLogoUri,
   scrollY,
   swapAt = 120,
   onBack,
@@ -59,20 +56,16 @@ export function DetailHeader({
   const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === 'ios';
 
-  // Animated styles — only active when scrollY is supplied AND a
-  // scrolledTitle exists. Shared values are cheap; unused hooks just
-  // compute a no-op style.
-  //
-  // Timing: the default title ("Produktdetails") fades out FIRST, and
-  // the scrolled title then rises from 16 px below with a tiny 0.96→1
-  // scale while fading in. Slight stagger + overshoot-free easing reads
-  // as a proper UINavigationBar large-title dismissal, not a swap.
   const hasSwap = !!scrolledTitle && !!scrollY;
-  const defaultOutRange = [swapAt - 70, swapAt - 30] as const; // fades out earlier
-  const scrolledInRange = [swapAt - 40, swapAt + 10] as const; // starts while default still mid-fade
+  // Default fades out first; scrolled arrives while default is still
+  // half-faded (short overlap keeps the bar from feeling empty).
+  const defaultOutRange = [swapAt - 80, swapAt - 30] as const;
+  const scrolledInRange = [swapAt - 40, swapAt + 20] as const;
 
   const defaultTitleStyle = useAnimatedStyle(() => {
-    if (!hasSwap || !scrollY) return { opacity: 1, transform: [{ translateY: 0 }] };
+    if (!hasSwap || !scrollY) {
+      return { opacity: 1, transform: [{ translateY: 0 }] };
+    }
     return {
       opacity: interpolate(scrollY.value, defaultOutRange, [1, 0], Extrapolation.CLAMP),
       transform: [
@@ -80,26 +73,23 @@ export function DetailHeader({
           translateY: interpolate(
             scrollY.value,
             defaultOutRange,
-            [0, -6],
+            [0, -8],
             Extrapolation.CLAMP,
           ),
         },
       ],
     };
   });
-  const scrolledTitleStyle = useAnimatedStyle(() => {
-    if (!hasSwap || !scrollY) return { opacity: 0, transform: [{ translateY: 16 }, { scale: 0.96 }] };
-    const t = interpolate(
-      scrollY.value,
-      scrolledInRange,
-      [0, 1],
-      Extrapolation.CLAMP,
-    );
+  const scrolledGroupStyle = useAnimatedStyle(() => {
+    if (!hasSwap || !scrollY) {
+      return { opacity: 0, transform: [{ translateY: 24 }, { scale: 0.92 }] };
+    }
+    const t = interpolate(scrollY.value, scrolledInRange, [0, 1], Extrapolation.CLAMP);
     return {
       opacity: t,
       transform: [
-        { translateY: 16 * (1 - t) },
-        { scale: 0.96 + t * 0.04 },
+        { translateY: 24 * (1 - t) },
+        { scale: 0.92 + t * 0.08 },
       ],
     };
   });
@@ -108,7 +98,7 @@ export function DetailHeader({
     return {
       opacity: interpolate(
         scrollY.value,
-        [swapAt - 20, swapAt + 10],
+        [swapAt - 10, swapAt + 20],
         [0, 1],
         Extrapolation.CLAMP,
       ),
@@ -150,13 +140,17 @@ export function DetailHeader({
           <MaterialCommunityIcons name="arrow-left" size={24} color={theme.text} />
         </Pressable>
       ) : null}
-      {/* Title swap slot — two Animated.Text layered; one fades out while
-          the other fades in, giving the iOS large-title → nav-title feel. */}
+      {/* Title slot — two overlapping absolute groups crossfade. Default
+          is the chrome label ("Produktdetails"); scrolled is the H1 that
+          rose from the content, optionally prefixed with a tiny logo. */}
       <View style={{ flex: 1, position: 'relative', height: 24, justifyContent: 'center' }}>
         <Animated.Text
           numberOfLines={1}
           style={[
             {
+              position: 'absolute',
+              left: 0,
+              right: 0,
               fontFamily,
               fontWeight: fontWeight.extraBold,
               fontSize: 20,
@@ -169,24 +163,52 @@ export function DetailHeader({
           {title}
         </Animated.Text>
         {hasSwap ? (
-          <Animated.Text
-            numberOfLines={1}
+          <Animated.View
             style={[
               {
                 position: 'absolute',
                 left: 0,
                 right: 0,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+              },
+              scrolledGroupStyle,
+            ]}
+          >
+            {scrolledLogoUri ? (
+              <View
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 4,
+                  backgroundColor: '#ffffff',
+                  overflow: 'hidden',
+                  borderWidth: 0.5,
+                  borderColor: theme.border,
+                }}
+              >
+                <Image
+                  source={{ uri: scrolledLogoUri }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="contain"
+                />
+              </View>
+            ) : null}
+            <Text
+              numberOfLines={1}
+              style={{
+                flex: 1,
                 fontFamily,
                 fontWeight: fontWeight.extraBold,
                 fontSize: 17,
                 color: theme.text,
                 letterSpacing: -0.2,
-              },
-              scrolledTitleStyle,
-            ]}
-          >
-            {scrolledTitle}
-          </Animated.Text>
+              }}
+            >
+              {scrolledTitle}
+            </Text>
+          </Animated.View>
         ) : null}
       </View>
     </View>

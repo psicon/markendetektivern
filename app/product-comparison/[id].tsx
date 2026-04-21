@@ -380,6 +380,7 @@ export default function ProductComparisonScreen() {
       <DetailHeader
         title="Produktdetails"
         scrolledTitle={mainProduct.name ?? undefined}
+        scrolledLogoUri={brandLogoUri ?? null}
         scrollY={scrollY}
         swapAt={200}
         onBack={() => router.back()}

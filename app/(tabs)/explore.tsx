@@ -903,13 +903,11 @@ export default function ExploreScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* Dynamic-Island / status-bar blur — absolute, zIndex 9 so tabs
-          (zIndex 10) stay on top. Content scrolls UNDER it because each
-          page's sticky header has an internal paddingTop that keeps its
-          visible body below the tab bar when pinned; the transparent
-          padding strip lets everything else scroll freely behind the
-          blur. iOS gets a real BlurView, Android a tinted 92 %-alpha
-          fallback. */}
+      {/* One continuous blur surface from the top of the screen all the
+          way down to the bottom of the tabs. Seamless — no edge where a
+          blurred strip meets a solid one. Tabs below render on top of
+          this surface with a transparent background, so their text sits
+          on the same blurred material as the status-bar zone. */}
       {Platform.OS === 'ios' ? (
         <BlurView
           tint={scheme === 'dark' ? 'dark' : 'light'}
@@ -919,7 +917,7 @@ export default function ExploreScreen() {
             top: 0,
             left: 0,
             right: 0,
-            height: insets.top,
+            height: insets.top + TAB_BAR_HEIGHT,
             zIndex: 9,
           }}
         />
@@ -930,7 +928,7 @@ export default function ExploreScreen() {
             top: 0,
             left: 0,
             right: 0,
-            height: insets.top,
+            height: insets.top + TAB_BAR_HEIGHT,
             zIndex: 9,
             backgroundColor:
               scheme === 'dark' ? 'rgba(15,18,20,0.92)' : 'rgba(245,247,248,0.92)',
@@ -953,7 +951,10 @@ export default function ExploreScreen() {
             paddingTop: 12,
             paddingBottom: 12,
             paddingHorizontal: 20,
-            backgroundColor: theme.bg,
+            // Transparent on purpose — the continuous BlurView behind the
+            // tabs provides the material, so there's no hard edge where a
+            // colored tab bar would meet the status-bar strip.
+            backgroundColor: 'transparent',
             borderBottomWidth: 1,
             borderBottomColor: theme.border,
             zIndex: 10,

@@ -254,6 +254,7 @@ export default function NoNameDetailScreen() {
       <DetailHeader
         title="Produktdetails"
         scrolledTitle={`${handelsmarkeName ? handelsmarkeName + ' ' : ''}${p.name ?? ''}`}
+        scrolledLogoUri={(hm as any)?.bild ?? disc?.bild ?? null}
         scrollY={scrollY}
         swapAt={200}
         onBack={() => router.back()}
