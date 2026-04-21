@@ -903,38 +903,13 @@ export default function ExploreScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* One continuous blur surface from the top of the screen all the
-          way down to the bottom of the tabs. Seamless — no edge where a
-          blurred strip meets a solid one. Tabs below render on top of
-          this surface with a transparent background, so their text sits
-          on the same blurred material as the status-bar zone. */}
-      {Platform.OS === 'ios' ? (
-        <BlurView
-          tint={scheme === 'dark' ? 'dark' : 'light'}
-          intensity={80}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            height: insets.top + TAB_BAR_HEIGHT,
-            zIndex: 9,
-          }}
-        />
-      ) : (
-        <View
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            height: insets.top + TAB_BAR_HEIGHT,
-            zIndex: 9,
-            backgroundColor:
-              scheme === 'dark' ? 'rgba(15,18,20,0.92)' : 'rgba(245,247,248,0.92)',
-          }}
-        />
-      )}
+      {/* Solid safe-area filler. A blurred variant was tried and
+          abandoned: when the blur only covered insets.top there was a
+          visible seam where the tab bar met the status bar; when it
+          covered both, the collapsing tab animation stopped reading
+          cleanly. The flat bg gives the "gray strip" look but keeps
+          the tabs visually coherent with the page. */}
+      <View style={{ height: insets.top, backgroundColor: theme.bg }} />
 
       {/* Collapsible SegmentedTabs — absolute so it overlays the pager
           without pushing content; animates translateY + opacity as the
@@ -951,10 +926,7 @@ export default function ExploreScreen() {
             paddingTop: 12,
             paddingBottom: 12,
             paddingHorizontal: 20,
-            // Transparent on purpose — the continuous BlurView behind the
-            // tabs provides the material, so there's no hard edge where a
-            // colored tab bar would meet the status-bar strip.
-            backgroundColor: 'transparent',
+            backgroundColor: theme.bg,
             borderBottomWidth: 1,
             borderBottomColor: theme.border,
             zIndex: 10,
@@ -981,23 +953,18 @@ export default function ExploreScreen() {
         {/* ─── Page 0 — Eigenmarken ─────────────────────────────────── */}
         <View key="eigen" style={{ flex: 1 }}>
           <Animated.ScrollView
-            stickyHeaderIndices={[1]}
+            stickyHeaderIndices={[0]}
             onScroll={scrollHandlerEigen}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingBottom: 120 }}
+            contentContainerStyle={{ paddingTop: TAB_BAR_HEIGHT, paddingBottom: 120 }}
           >
-            {/* 0 — spacer matching the tab bar. Scrolls away with content
-                so the sticky wrapper below only starts pinning once the
-                tabs have collapsed. */}
-            <View style={{ height: TAB_BAR_HEIGHT }} />
-            {/* 1 — sticky wrapper. paddingTop = insets.top keeps the
-                visible StickyHeader body below the Dynamic-Island blur
-                strip once pinned; the transparent padding lets content
-                continue to scroll through behind the blur. */}
-            <View style={{ paddingTop: insets.top }}>
-              <StickyHeader forTab="eigen" />
-            </View>
+            {/* 0 — sticky glass header. The ScrollView viewport already
+                starts at insets.top (the solid safe-area filler pushes
+                the pager down), so the natural position is directly
+                below the tabs and the pin target is right below the
+                status bar once the tabs collapse. */}
+            <StickyHeader forTab="eigen" />
             {!isPremium ? (
               <View
                 style={{
@@ -1023,16 +990,13 @@ export default function ExploreScreen() {
         {/* ─── Page 1 — Marken ──────────────────────────────────────── */}
         <View key="marken" style={{ flex: 1 }}>
           <Animated.ScrollView
-            stickyHeaderIndices={[1]}
+            stickyHeaderIndices={[0]}
             onScroll={scrollHandlerMarken}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingBottom: 120 }}
+            contentContainerStyle={{ paddingTop: TAB_BAR_HEIGHT, paddingBottom: 120 }}
           >
-            <View style={{ height: TAB_BAR_HEIGHT }} />
-            <View style={{ paddingTop: insets.top }}>
-              <StickyHeader forTab="marken" />
-            </View>
+            <StickyHeader forTab="marken" />
             {!isPremium ? (
               <View
                 style={{
