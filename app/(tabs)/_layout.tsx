@@ -112,6 +112,13 @@ export default function TabLayout() {
     >
       <Tabs
         screenOptions={{
+        // Pre-mount every tab on app start instead of lazily mounting
+        // the first time the user taps the tab button. Stöbern in
+        // particular carries a heavy JSX tree (filter sheets, pager
+        // view, grids) whose first mount added a noticeable lag to
+        // the first Stöbern tap. Warming all tabs up front trades a
+        // tiny amount of cold-start work for instant tab switches.
+        lazy: false,
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tabIconSelected,
         tabBarInactiveTintColor: Colors[colorScheme ?? 'light'].tabIconDefault,
         headerShown: false,

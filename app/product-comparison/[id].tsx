@@ -170,22 +170,12 @@ export default function ProductComparisonScreen() {
     [nonames, pickedId],
   );
 
-  // Fetch candidates for "Gute Alternativen" and score them by real
-  // similarity to the main product, so we don't just dump "whatever is
-  // in the same category" at the user. Scoring rubric:
-  //   • same Kategorie .............. required (pre-filtered in the query)
-  //   • same Packungstyp (g/ml/Stk.)  +50  — a 250 g jar and a 1 l
-  //                                         bottle aren't really
-  //                                         comparable no matter how
-  //                                         close the categories are
-  //   • Packungsgröße within ±40 %    +30  — proportional fit, graded
-  //   • Preis within ±40 %            +20
-  //   • has NoName alternatives       +15  — users came here for
-  //                                         NoName comparisons, so a
-  //                                         brand that also has some
-  //                                         is a better follow-up
-  // We pull a bigger candidate pool (30) to give the scorer room, then
-  // take the top 5.
+  // "Gute Alternativen" — real similarity scoring. The old version
+  // leaned on Kategorie + pack + price, which groups Cola with Bier
+  // (both Getränke, both ~500 ml, both ~1 €). The name token-overlap
+  // signal fixes that: "Coca Cola Classic" and "Pepsi Cola" share
+  // {cola}, while "Coca Cola Classic" and "Beck's Pils" share
+  // nothing → zero name similarity → filtered out.
   useEffect(() => {
     if (!mainProduct) return;
     const catId =
@@ -200,6 +190,33 @@ export default function ProductComparisonScreen() {
     const mainSize = (mainProduct as any).packSize as number | undefined;
     const mainPrice = (mainProduct as any).preis as number | undefined;
 
+    // ─── Name similarity (Jaccard on word tokens) ─────────────────
+    // German stop words / tiny generic tokens that would otherwise
+    // create false matches ("der", "mit", "l", …).
+    const STOPS = new Set<string>([
+      'der', 'die', 'das', 'und', 'oder', 'mit', 'ohne', 'fur', 'für',
+      'von', 'im', 'in', 'ein', 'eine', 'auf', 'bei', 'nach', 'als',
+      'als', 'pro', 'per', 'alt', 'neu', 'ml', 'cl', 'dl', 'kg', 'stk',
+      'stück', 'liter', 'l', 'g', 'gr',
+    ]);
+    const tokenize = (s: string): Set<string> => {
+      const tokens = (s || '')
+        .toLowerCase()
+        .replace(/[^a-zäöüß0-9\s]/gi, ' ')
+        .split(/\s+/)
+        .filter((t) => t.length >= 3 && !STOPS.has(t) && !/^\d+$/.test(t));
+      return new Set(tokens);
+    };
+    const jaccard = (a: Set<string>, b: Set<string>): number => {
+      if (a.size === 0 || b.size === 0) return 0;
+      let inter = 0;
+      a.forEach((t) => {
+        if (b.has(t)) inter++;
+      });
+      return inter / (a.size + b.size - inter);
+    };
+    const mainNameTokens = tokenize(mainProduct.name ?? '');
+
     (async () => {
       try {
         const res = await FirestoreService.getMarkenproduktePaginated(
@@ -207,34 +224,41 @@ export default function ProductComparisonScreen() {
           null,
           (catId ? { categoryFilters: [catId] } : {}) as any,
         );
-        const scoreOf = (p: any): number => {
-          let s = 0;
+        const scoreOf = (p: any): { score: number; nameSim: number } => {
+          const candTokens = tokenize(p.name ?? '');
+          const nameSim = jaccard(mainNameTokens, candTokens);
+          // Name similarity is the dominant signal — scaled 0..100.
+          // A single shared token between two short names gives ~20-30,
+          // two shared tokens ~40-60, full-name match approaches 100.
+          let s = nameSim * 100;
+
           const pPackTypId = p.packTyp?.id ?? p.packTypInfo?.id ?? null;
-          if (mainPackTypId && pPackTypId && mainPackTypId === pPackTypId) s += 50;
+          if (mainPackTypId && pPackTypId && mainPackTypId === pPackTypId) s += 20;
 
           const pSize = p.packSize as number | undefined;
           if (mainSize && pSize && mainSize > 0 && pSize > 0) {
             const ratio = Math.min(pSize, mainSize) / Math.max(pSize, mainSize);
-            if (ratio >= 0.6) s += Math.round(30 * ((ratio - 0.6) / 0.4));
+            if (ratio >= 0.6) s += Math.round(15 * ((ratio - 0.6) / 0.4));
           }
 
           const pPrice = p.preis as number | undefined;
           if (mainPrice && pPrice && mainPrice > 0 && pPrice > 0) {
             const ratio = Math.min(pPrice, mainPrice) / Math.max(pPrice, mainPrice);
-            if (ratio >= 0.6) s += Math.round(20 * ((ratio - 0.6) / 0.4));
+            if (ratio >= 0.6) s += Math.round(10 * ((ratio - 0.6) / 0.4));
           }
 
-          if ((p.relatedProdukteIDs?.length ?? 0) > 0) s += 15;
-          return s;
+          if ((p.relatedProdukteIDs?.length ?? 0) > 0) s += 10;
+          return { score: s, nameSim };
         };
 
         const list = (res.products ?? [])
           .filter((p: any) => p.id !== mainProduct.id)
-          .map((p: any) => ({ p, score: scoreOf(p) }))
-          // Cut anything that's only "same category" with nothing else
-          // in common — prevents random same-category picks when no
-          // genuinely similar products exist.
-          .filter(({ score }) => score > 0)
+          .map((p: any) => ({ p, ...scoreOf(p) }))
+          // Must have SOME name-token overlap. This is the filter that
+          // keeps Cola from pulling in Bier: no shared keyword, no
+          // shared lead. Without this, pack + price signals alone
+          // would happily mix product families.
+          .filter(({ nameSim }) => nameSim > 0)
           .sort((a, b) => b.score - a.score)
           .slice(0, 5)
           .map(({ p }) => p);

@@ -1292,9 +1292,15 @@ export default function ExploreScreen() {
         ]}
       />
 
-      {/* ─── Filter sheets ──────────────────────────────────────────── */}
+      {/* ─── Filter sheets ────────────────────────────────────────────
+          Rendered conditionally — only the open sheet's JSX subtree is
+          actually built. Before this gate, all 6 sheets constructed
+          their children (OptionLists, SegmentedTabs, StufenChips rows,
+          SearchableOptionLists …) on every Stöbern render, which was
+          a chunk of the first-mount cost. */}
+      {sheet === 'sort' ? (
       <FilterSheet
-        visible={sheet === 'sort'}
+        visible
         title={SHEET_TITLES.sort}
         onClose={() => setSheet(null)}
       >
@@ -1310,9 +1316,11 @@ export default function ExploreScreen() {
           }}
         />
       </FilterSheet>
+      ) : null}
 
+      {sheet === 'markt' ? (
       <FilterSheet
-        visible={sheet === 'markt'}
+        visible
         title={SHEET_TITLES.markt}
         onClose={() => setSheet(null)}
       >
@@ -1405,9 +1413,11 @@ export default function ExploreScreen() {
           }}
         />
       </FilterSheet>
+      ) : null}
 
+      {sheet === 'kategorie' ? (
       <FilterSheet
-        visible={sheet === 'kategorie'}
+        visible
         title={SHEET_TITLES.kategorie}
         onClose={() => setSheet(null)}
       >
@@ -1472,9 +1482,11 @@ export default function ExploreScreen() {
           }}
         />
       </FilterSheet>
+      ) : null}
 
+      {sheet === 'stufe' ? (
       <FilterSheet
-        visible={sheet === 'stufe'}
+        visible
         title="Ähnlichkeitsstufen"
         onClose={() => setSheet(null)}
       >
@@ -1574,9 +1586,11 @@ export default function ExploreScreen() {
             apply on toggle and commit on swipe-down dismissal. */}
         <View style={{ height: 8 }} />
       </FilterSheet>
+      ) : null}
 
+      {sheet === 'marke' ? (
       <FilterSheet
-        visible={sheet === 'marke'}
+        visible
         title={SHEET_TITLES.marke}
         onClose={() => setSheet(null)}
       >
@@ -1591,9 +1605,11 @@ export default function ExploreScreen() {
           }}
         />
       </FilterSheet>
+      ) : null}
 
+      {sheet === 'handels' ? (
       <FilterSheet
-        visible={sheet === 'handels'}
+        visible
         title={SHEET_TITLES.handels}
         onClose={() => setSheet(null)}
       >
@@ -1610,6 +1626,7 @@ export default function ExploreScreen() {
           }}
         />
       </FilterSheet>
+      ) : null}
 
 
       {/* ─── Locked category modal (Alkohol gating) ─────────────────── */}
