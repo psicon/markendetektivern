@@ -170,12 +170,12 @@ export default function ProductComparisonScreen() {
     [nonames, pickedId],
   );
 
-  // "Gute Alternativen" — pure name-token similarity (Jaccard on the
-  // product name alone). No pack / price / category-count bonuses for
-  // now; we want to see whether name matching on its own is strong
-  // enough. If a candidate doesn't share any meaningful word with the
-  // main product's name it won't surface, which is the only reliable
-  // way with the current data to keep Cola from pulling in Bier.
+  // "Gute Alternativen" — simple: 5 random products from the same
+  // Kategorie, minus the main product itself. Similarity scoring kept
+  // producing empty sections on product names where no other
+  // candidate shared meaningful word stems (proprietary brand names
+  // like "Nutella"), so we fall back to the straightforward
+  // approach until we have richer product metadata to work with.
   useEffect(() => {
     if (!mainProduct) return;
     const catId =
@@ -183,54 +183,25 @@ export default function ProductComparisonScreen() {
       ((mainProduct as any).kategorie && typeof (mainProduct as any).kategorie === 'object'
         ? undefined
         : (mainProduct as any).kategorie);
-    // ─── Name similarity (Jaccard on word tokens) ─────────────────
-    // German stop words / tiny generic tokens that would otherwise
-    // create false matches ("der", "mit", "l", …).
-    const STOPS = new Set<string>([
-      'der', 'die', 'das', 'und', 'oder', 'mit', 'ohne', 'fur', 'für',
-      'von', 'im', 'in', 'ein', 'eine', 'auf', 'bei', 'nach', 'als',
-      'als', 'pro', 'per', 'alt', 'neu', 'ml', 'cl', 'dl', 'kg', 'stk',
-      'stück', 'liter', 'l', 'g', 'gr',
-    ]);
-    const tokenize = (s: string): Set<string> => {
-      const tokens = (s || '')
-        .toLowerCase()
-        .replace(/[^a-zäöüß0-9\s]/gi, ' ')
-        .split(/\s+/)
-        .filter((t) => t.length >= 3 && !STOPS.has(t) && !/^\d+$/.test(t));
-      return new Set(tokens);
-    };
-    const jaccard = (a: Set<string>, b: Set<string>): number => {
-      if (a.size === 0 || b.size === 0) return 0;
-      let inter = 0;
-      a.forEach((t) => {
-        if (b.has(t)) inter++;
-      });
-      return inter / (a.size + b.size - inter);
-    };
-    const mainNameTokens = tokenize(mainProduct.name ?? '');
-
     (async () => {
       try {
         const res = await FirestoreService.getMarkenproduktePaginated(
-          30,
+          15,
           null,
           (catId ? { categoryFilters: [catId] } : {}) as any,
         );
-        const list = (res.products ?? [])
-          .filter((p: any) => p.id !== mainProduct.id)
-          .map((p: any) => ({
-            p,
-            sim: jaccard(mainNameTokens, tokenize(p.name ?? '')),
-          }))
-          // Only keep candidates that actually share a meaningful word
-          // with the main product's name. Below this threshold it's
-          // too likely to be accidental overlap on something generic.
-          .filter(({ sim }) => sim > 0)
-          .sort((a, b) => b.sim - a.sim)
-          .slice(0, 5)
-          .map(({ p }) => p);
-        setAlternatives(list);
+        const pool = (res.products ?? []).filter(
+          (p: any) => p.id !== mainProduct.id,
+        );
+        // Fisher-Yates shuffle, then slice — picks 5 random from the
+        // pool. Avoids always showing the same 5 for the same main
+        // product, which makes the section feel static on repeat
+        // visits.
+        for (let i = pool.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+        setAlternatives(pool.slice(0, 5));
       } catch (e) {
         console.warn('ProductComparison: alternatives load failed', e);
       }
