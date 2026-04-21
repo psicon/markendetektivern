@@ -99,13 +99,18 @@ function ThemedApp() {
                 <Stack.Screen name="auth/welcome" options={{ headerShown: false }} />
                 <Stack.Screen name="auth/login" options={{ headerShown: false }} />
                 <Stack.Screen name="auth/register" options={{ headerShown: false }} />
-                <Stack.Screen 
-                  name="barcode-scanner" 
-                  options={{ 
+                {/* Detail screens render their own sticky header — suppress
+                    the default Stack header statically here so it never
+                    flashes on mount. */}
+                <Stack.Screen name="product-comparison/[id]" options={{ headerShown: false }} />
+                <Stack.Screen name="noname-detail/[id]" options={{ headerShown: false }} />
+                <Stack.Screen
+                  name="barcode-scanner"
+                  options={{
                     headerShown: false,
                     animation: 'slide_from_right',
-                    gestureEnabled: true 
-                  }} 
+                    gestureEnabled: true
+                  }}
                 />
                 <Stack.Screen name="+not-found" />
               </Stack>
