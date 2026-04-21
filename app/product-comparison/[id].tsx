@@ -820,17 +820,14 @@ export default function ProductComparisonScreen() {
                           flex: 1,
                           minWidth: 0,
                           paddingRight: sv.pct > 0 ? 50 : 0,
-                          // Centering the text column next to the fixed
-                          // 76 px thumb keeps short 1-line names from
-                          // looking stranded in a big empty column: the
-                          // content sits in the vertical middle of the
-                          // row regardless of name length, so a 1-line
-                          // and a 2-line card look like siblings
-                          // instead of completely different layouts.
-                          justifyContent: 'center',
                         }}
                       >
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+                        {/* Handelsmarke eyebrow — ALWAYS pinned to the
+                            top of the info column so the market-logo +
+                            Eigenmarke name stay in the same position
+                            across every card, regardless of how long
+                            the product name below is. */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                           {hmLogo ? (
                             <View
                               style={{
@@ -874,18 +871,26 @@ export default function ProductComparisonScreen() {
                             {hmName ?? 'Eigenmarke'}
                           </Text>
                         </View>
-                        <Text
-                          numberOfLines={3}
-                          style={{
-                            fontFamily,
-                            fontWeight: fontWeight.bold,
-                            fontSize: 15,
-                            lineHeight: 19,
-                            color: theme.text,
-                          }}
-                        >
-                          {(nn as any).name}
-                        </Text>
+                        {/* Product name lives in a flex:1 slot under the
+                            eyebrow with `justifyContent: 'center'` — so
+                            a 1-line name sits in the middle of the
+                            remaining vertical space, and a 2- or 3-line
+                            name fills it naturally. The eyebrow's
+                            position is unaffected either way. */}
+                        <View style={{ flex: 1, justifyContent: 'center', marginTop: 4 }}>
+                          <Text
+                            numberOfLines={3}
+                            style={{
+                              fontFamily,
+                              fontWeight: fontWeight.bold,
+                              fontSize: 15,
+                              lineHeight: 19,
+                              color: theme.text,
+                            }}
+                          >
+                            {(nn as any).name}
+                          </Text>
+                        </View>
                       </View>
                     </View>
 
