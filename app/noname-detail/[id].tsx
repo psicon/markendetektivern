@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { RatingsSheet, type Rating } from '@/components/design/RatingsSheet';
+import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -675,10 +675,35 @@ export default function NoNameDetailScreen() {
         visible={ratingsOpen}
         onClose={() => setRatingsOpen(false)}
         productName={p.name ?? 'Produkt'}
-        ratings={ratingsLoading ? [] : ratings}
+        ratings={ratings}
+        loading={ratingsLoading}
         showSimilarity={false}
-        onWriteRating={() => {
-          showInfoToast('Bewertungen schreiben — demnächst');
+        onSubmit={async (r: SubmittedRating) => {
+          if (!user?.uid) {
+            showInfoToast('Bitte anmelden');
+            throw new Error('not-authenticated');
+          }
+          const now = new Date();
+          await FirestoreService.addProductRating({
+            userID: user.uid,
+            productID: p.id,
+            brandProductID: null,
+            ratingOverall: r.ratingOverall,
+            ratingPriceValue: r.ratingPriceValue ?? null,
+            ratingTasteFunction: r.ratingTasteFunction ?? null,
+            ratingContent: r.ratingContent ?? null,
+            ratingSimilarity: r.ratingSimilarity ?? null,
+            comment: r.comment ?? null,
+            ratedate: now,
+            updatedate: now,
+          });
+          try {
+            const refreshed =
+              await FirestoreService.getProductRatingsWithUserInfo(p.id, true);
+            setRatings(refreshed as any);
+          } catch {
+            /* non-fatal */
+          }
         }}
       />
     </View>

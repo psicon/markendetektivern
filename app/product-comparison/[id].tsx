@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { RatingsSheet, type Rating } from '@/components/design/RatingsSheet';
+import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -146,6 +146,32 @@ export default function ProductComparisonScreen() {
     [nonames, pickedId],
   );
 
+  // Fetch 5 other brand products from the same category once the main
+  // product is known, so "Gute Alternativen" at the bottom isn't empty.
+  useEffect(() => {
+    if (!mainProduct) return;
+    const catId =
+      (mainProduct as any).kategorie?.id ??
+      ((mainProduct as any).kategorie && typeof (mainProduct as any).kategorie === 'object'
+        ? undefined
+        : (mainProduct as any).kategorie);
+    (async () => {
+      try {
+        const res = await FirestoreService.getMarkenproduktePaginated(
+          10,
+          null,
+          (catId ? { categoryFilters: [catId] } : {}) as any,
+        );
+        const list = (res.products ?? [])
+          .filter((p: any) => p.id !== mainProduct.id)
+          .slice(0, 5);
+        setAlternatives(list);
+      } catch (e) {
+        console.warn('ProductComparison: alternatives load failed', e);
+      }
+    })();
+  }, [mainProduct]);
+
   // ─── UI state ─────────────────────────────────────────────────────────
   const [tab, setTab] = useState<Tab>('ingredients');
   const [carouselIdx, setCarouselIdx] = useState(0);
@@ -159,6 +185,8 @@ export default function ProductComparisonScreen() {
   } | null>(null);
   const [ratings, setRatings] = useState<Rating[]>([]);
   const [ratingsLoading, setRatingsLoading] = useState(false);
+  // Bottom "Gute Alternativen" — other brand products from the same category.
+  const [alternatives, setAlternatives] = useState<any[]>([]);
 
   const effectiveCardWidth =
     nonames.length <= 1 ? NN_CARD_WIDTH_SINGLE : NN_CARD_WIDTH;
@@ -649,9 +677,14 @@ export default function ProductComparisonScreen() {
                 const sv = savings(mainProduct as any, nn as any);
                 const nnStufe = parseStufe((nn as any).stufe);
                 const nnStufeColor = stufen[nnStufe];
+                const nnHm = (nn as any).handelsmarke as
+                  | { bezeichnung?: string; name?: string; bild?: string }
+                  | undefined;
                 const nnDisc = (nn as any).discounter as
                   | { name?: string; color?: string; bild?: string }
                   | undefined;
+                const hmName = nnHm?.bezeichnung ?? nnHm?.name ?? null;
+                const hmLogo = nnHm?.bild ?? nnDisc?.bild ?? null;
                 const nnPackInfo = formatPack(
                   (nn as any).packSize,
                   (nn as any).packTypInfo?.typKurz ?? (nn as any).packTypInfo?.typ,
@@ -781,7 +814,7 @@ export default function ProductComparisonScreen() {
                           {(nn as any).name}
                         </Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                          {nnDisc?.bild ? (
+                          {hmLogo ? (
                             <View
                               style={{
                                 width: 16,
@@ -794,7 +827,7 @@ export default function ProductComparisonScreen() {
                               }}
                             >
                               <Image
-                                source={{ uri: nnDisc.bild }}
+                                source={{ uri: hmLogo }}
                                 style={{ width: '100%', height: '100%' }}
                                 resizeMode="contain"
                               />
@@ -813,12 +846,14 @@ export default function ProductComparisonScreen() {
                             numberOfLines={1}
                             style={{
                               fontFamily,
-                              fontWeight: fontWeight.medium,
+                              fontWeight: fontWeight.bold,
                               fontSize: 11,
-                              color: theme.textMuted,
+                              color: theme.primary,
+                              letterSpacing: 0.3,
+                              textTransform: 'uppercase',
                             }}
                           >
-                            {nnDisc?.name ? `${nnDisc.name} Eigenmarke` : 'Eigenmarke'}
+                            {hmName ?? 'Eigenmarke'}
                           </Text>
                         </View>
                       </View>
@@ -1134,6 +1169,107 @@ export default function ProductComparisonScreen() {
           </View>
         ) : null}
 
+        {/* ─── Gute Alternativen ──────────────────────────────────── */}
+        {alternatives.length > 0 ? (
+          <View style={{ marginTop: 28 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                paddingHorizontal: 20,
+                marginBottom: 14,
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 20,
+                  color: theme.text,
+                  letterSpacing: -0.2,
+                }}
+              >
+                Gute Alternativen
+              </Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 20, gap: 14, paddingBottom: 4 }}
+            >
+              {alternatives.map((ap: any) => (
+                <Pressable
+                  key={ap.id}
+                  onPress={() =>
+                    router.push(
+                      `/product-comparison/${ap.id}?type=markenprodukt` as any,
+                    )
+                  }
+                  style={({ pressed }) => ({
+                    width: 140,
+                    backgroundColor: theme.surface,
+                    borderRadius: 14,
+                    overflow: 'hidden',
+                    opacity: pressed ? 0.92 : 1,
+                    ...shadows.sm,
+                  })}
+                >
+                  <View
+                    style={{
+                      width: '100%',
+                      height: 110,
+                      backgroundColor: theme.surfaceAlt,
+                    }}
+                  >
+                    {ap.bild ? (
+                      <Image
+                        source={{ uri: ap.bild }}
+                        style={{ width: '100%', height: '100%' }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                        <MaterialCommunityIcons
+                          name="package-variant"
+                          size={30}
+                          color={theme.textMuted}
+                        />
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ padding: 10, paddingBottom: 12 }}>
+                    <Text
+                      numberOfLines={2}
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.semibold,
+                        fontSize: 13,
+                        lineHeight: 16,
+                        color: theme.text,
+                        minHeight: 32,
+                      }}
+                    >
+                      {ap.name ?? ''}
+                    </Text>
+                    <Text
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.bold,
+                        fontSize: 13,
+                        color: theme.text,
+                        marginTop: 4,
+                      }}
+                    >
+                      {formatEur(ap.preis)}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+
         <View style={{ height: 24 }} />
       </ScrollView>
 
@@ -1144,10 +1280,38 @@ export default function ProductComparisonScreen() {
         visible={!!ratingsSheet}
         onClose={() => setRatingsSheet(null)}
         productName={ratingsSheet?.productName ?? ''}
-        ratings={ratingsLoading ? [] : ratings}
+        ratings={ratings}
+        loading={ratingsLoading}
         showSimilarity={!ratingsSheet?.isMarke}
-        onWriteRating={() => {
-          showInfoToast('Bewertungen schreiben — demnächst');
+        onSubmit={async (r: SubmittedRating) => {
+          if (!user?.uid || !ratingsSheet) {
+            showInfoToast('Bitte anmelden');
+            throw new Error('not-authenticated');
+          }
+          const now = new Date();
+          await FirestoreService.addProductRating({
+            userID: user.uid,
+            productID: ratingsSheet.isMarke ? null : ratingsSheet.productId,
+            brandProductID: ratingsSheet.isMarke ? ratingsSheet.productId : null,
+            ratingOverall: r.ratingOverall,
+            ratingPriceValue: r.ratingPriceValue ?? null,
+            ratingTasteFunction: r.ratingTasteFunction ?? null,
+            ratingContent: r.ratingContent ?? null,
+            ratingSimilarity: r.ratingSimilarity ?? null,
+            comment: r.comment ?? null,
+            ratedate: now,
+            updatedate: now,
+          });
+          // Refresh the list so the new review shows up.
+          try {
+            const refreshed = await FirestoreService.getProductRatingsWithUserInfo(
+              ratingsSheet.productId,
+              !ratingsSheet.isMarke,
+            );
+            setRatings(refreshed as any);
+          } catch {
+            /* non-fatal */
+          }
         }}
       />
     </View>
