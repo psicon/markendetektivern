@@ -32,8 +32,12 @@ function formatEur(value: number): string {
  * ProductCard (NoName), this card leads with the brand (e.g. "Coca Cola"),
  * highlights how many alternatives exist, and shows potential savings.
  * Matches `BrandCard` in the prototype.
+ *
+ * Wrapped in React.memo below so the grid doesn't re-render every tile
+ * when the user types in the search bar or swipes between tabs — only
+ * cards whose props actually changed repaint.
  */
-export function BrandCard({
+function BrandCardImpl({
   title,
   brand,
   brandLogoUri,
@@ -205,3 +209,5 @@ export function BrandCard({
     </Pressable>
   );
 }
+
+export const BrandCard = React.memo(BrandCardImpl);

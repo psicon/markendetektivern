@@ -179,7 +179,10 @@ export default function ExploreScreen() {
   const [markenprodukte, setMarkenprodukte] = useState<FirestoreDocument<any>[]>(
     () => (cachedMarken?.items as any) ?? [],
   );
-  const [markenLoading, setMarkenLoading] = useState(false);
+  // Start in loading state (unless we have a cache to seed from) so
+  // the Marken tab shows the skeleton grid instead of the "Keine
+  // Treffer" lupe flash while its first query is in flight.
+  const [markenLoading, setMarkenLoading] = useState(!cachedMarken);
   const [markenLastDoc, setMarkenLastDoc] = useState<any>(cachedMarken?.lastDoc ?? null);
   const [markenHasMore, setMarkenHasMore] = useState(cachedMarken?.hasMore ?? true);
 
@@ -240,20 +243,29 @@ export default function ExploreScreen() {
   }, [userProfile, isPremium]);
 
   // ─── Filter-change-driven reload ───────────────────────────────────
-  // First mount fires the Firestore query IMMEDIATELY (no debounce) so
-  // the first batch of products can arrive in parallel with reference-
-  // data loading. Subsequent changes (filter tweaks, typing in search)
-  // keep the 120 ms debounce to avoid hammering the backend.
+  // First mount fires BOTH lists in parallel (no debounce) so the
+  // Marken tab has data ready by the time the user swipes over — no
+  // more lupe flash. Subsequent filter / search changes fire only
+  // the active tab's query, with a 120 ms debounce so typing in the
+  // search field doesn't hammer the backend.
   const reloadSeq = useRef(0);
   const isFirstMount = useRef(true);
   useEffect(() => {
     const mySeq = ++reloadSeq.current;
-    const delay = isFirstMount.current ? 0 : 120;
+    const wasFirst = isFirstMount.current;
+    const delay = wasFirst ? 0 : 120;
     isFirstMount.current = false;
     const fire = () => {
       if (reloadSeq.current !== mySeq) return;
-      if (tab === 'eigen') loadNonames(true);
-      else loadMarken(true);
+      if (wasFirst) {
+        // Warm both tabs' first pages concurrently.
+        if (!cachedEigen) loadNonames(true);
+        if (!cachedMarken) loadMarken(true);
+      } else if (tab === 'eigen') {
+        loadNonames(true);
+      } else {
+        loadMarken(true);
+      }
     };
     if (delay === 0) {
       fire();
@@ -1086,6 +1098,13 @@ export default function ExploreScreen() {
             onScroll={scrollHandlerEigen}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
+            // Detach off-screen tiles from the native view hierarchy
+            // while scrolling. For a flex-wrap grid with 20+ cards on
+            // screen, this keeps frame pacing smooth on older devices.
+            removeClippedSubviews
+            // iOS-native overscroll "pull" — adds the subtle rubber
+            // band that the system uses, costs nothing on Android.
+            overScrollMode="auto"
             scrollsToTop={tab === 'eigen'}
             contentContainerStyle={{
               paddingTop: chromeTotalHeight,
@@ -1120,6 +1139,13 @@ export default function ExploreScreen() {
             onScroll={scrollHandlerMarken}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
+            // Detach off-screen tiles from the native view hierarchy
+            // while scrolling. For a flex-wrap grid with 20+ cards on
+            // screen, this keeps frame pacing smooth on older devices.
+            removeClippedSubviews
+            // iOS-native overscroll "pull" — adds the subtle rubber
+            // band that the system uses, costs nothing on Android.
+            overScrollMode="auto"
             scrollsToTop={tab === 'marken'}
             contentContainerStyle={{
               paddingTop: chromeTotalHeight,

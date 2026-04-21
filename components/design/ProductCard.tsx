@@ -42,8 +42,12 @@ function formatPrice(price: number): string {
  * Shows image, StufenChips (on a translucent pill for readability on any
  * image), small brand/handelsmarke logo inline with the eyebrow, title,
  * price and pack/unit info.
+ *
+ * Wrapped in React.memo below so that typing in the Stöbern search or
+ * scrolling doesn't trigger a re-render of every tile — only cards
+ * whose props actually changed repaint.
  */
-export function ProductCard({
+function ProductCardImpl({
   title,
   brand,
   eyebrowLogoUri,
@@ -226,3 +230,5 @@ export function ProductCard({
     </Pressable>
   );
 }
+
+export const ProductCard = React.memo(ProductCardImpl);
