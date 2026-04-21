@@ -704,8 +704,6 @@ export default function ProductComparisonScreen() {
               {nonames.map((nn, i) => {
                 const isActive = i === carouselIdx;
                 const sv = savings(mainProduct as any, nn as any);
-                const nnStufe = parseStufe((nn as any).stufe);
-                const nnStufeColor = stufen[nnStufe];
                 const nnHm = (nn as any).handelsmarke as
                   | { bezeichnung?: string; name?: string; bild?: string }
                   | undefined;
@@ -809,28 +807,22 @@ export default function ProductComparisonScreen() {
                           </View>
                         )}
                       </View>
-                      {/* Info column. Layout stack, top → bottom:
+                      {/* Info column — deliberately lean:
                             1) Handelsmarke eyebrow (market logo + name)
-                            2) Product name (max 2 lines)
-                            3) Pack size · Grundpreis (single line)
-                            4) StufenChips (5-segment bar — same
-                               component as the Stöbern grid, so the
-                               similarity indicator is visually
-                               identical across screens)
-                          The "IDENTISCH"/"VERWANDT" all-caps eyebrow is
-                          gone: the card border colour and the chips
-                          below carry that information more quietly, and
-                          the full label still shows up once in the
-                          Detektiv-Check row below the carousel. */}
+                            2) Product name (up to 3 lines since there's
+                               nothing else below to compete for space)
+                          Stufe display moved to the Detektiv-Check row
+                          below the carousel. Pack + Grundpreis moved
+                          down to the price area so they stay visually
+                          tied to the price itself. */}
                       <View
                         style={{
                           flex: 1,
                           minWidth: 0,
                           paddingRight: sv.pct > 0 ? 50 : 0,
-                          justifyContent: 'space-between',
                         }}
                       >
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 }}>
                           {hmLogo ? (
                             <View
                               style={{
@@ -875,48 +867,51 @@ export default function ProductComparisonScreen() {
                           </Text>
                         </View>
                         <Text
-                          numberOfLines={2}
+                          numberOfLines={3}
                           style={{
                             fontFamily,
                             fontWeight: fontWeight.bold,
                             fontSize: 15,
-                            lineHeight: 18,
+                            lineHeight: 19,
                             color: theme.text,
-                            marginTop: 3,
                           }}
                         >
                           {(nn as any).name}
                         </Text>
-                        {nnPackParts ? (
-                          <Text
-                            numberOfLines={1}
-                            style={{
-                              fontFamily,
-                              fontWeight: fontWeight.medium,
-                              fontSize: 11,
-                              color: theme.textMuted,
-                              marginTop: 3,
-                            }}
-                          >
-                            {nnPackParts.unitPrice
-                              ? `${nnPackParts.sizeLabel} · ${nnPackParts.unitPrice}`
-                              : nnPackParts.sizeLabel}
-                          </Text>
-                        ) : null}
-                        <View style={{ marginTop: 5 }}>
-                          <StufenChips stufe={nnStufe} size="sm" />
-                        </View>
                       </View>
                     </View>
 
                     <View style={{ height: 1, backgroundColor: theme.border, marginHorizontal: 14 }} />
+
+                    {/* Pack info lives directly above the price at full
+                        card width — the "Grundpreis gehört zum Preis"
+                        principle, but on its own line so it doesn't
+                        fight the action cluster for horizontal space.
+                        Size · Grundpreis as one row, comma-separated. */}
+                    {nnPackParts ? (
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          fontFamily,
+                          fontWeight: fontWeight.medium,
+                          fontSize: 11,
+                          color: theme.textMuted,
+                          paddingHorizontal: 14,
+                          paddingTop: 10,
+                        }}
+                      >
+                        {nnPackParts.unitPrice
+                          ? `${nnPackParts.sizeLabel} · ${nnPackParts.unitPrice}`
+                          : nnPackParts.sizeLabel}
+                      </Text>
+                    ) : null}
 
                     <View
                       style={{
                         flexDirection: 'row',
                         alignItems: 'center',
                         padding: 14,
-                        paddingTop: 12,
+                        paddingTop: nnPackParts ? 2 : 12,
                         gap: 10,
                       }}
                     >
@@ -1061,38 +1056,19 @@ export default function ProductComparisonScreen() {
                   alignItems: 'flex-start',
                 }}
               >
-                <View style={{ alignItems: 'center', marginTop: 1 }}>
-                  <Text
-                    style={{
-                      fontFamily,
-                      fontWeight: fontWeight.extraBold,
-                      fontSize: 18,
-                      color: stufen[pickedStufe],
-                      lineHeight: 18,
-                    }}
-                  >
-                    S{pickedStufe}
-                  </Text>
-                  <View style={{ flexDirection: 'row', gap: 2, marginTop: 4 }}>
-                    {[1, 2, 3, 4, 5].map((n) => (
-                      <View
-                        key={n}
-                        style={{
-                          width: 5,
-                          height: 5,
-                          borderRadius: 3,
-                          backgroundColor: n <= pickedStufe ? stufen[pickedStufe] : theme.borderStrong,
-                        }}
-                      />
-                    ))}
-                  </View>
+                {/* StufenChips (same component as the Stöbern grid) so
+                    the similarity indicator lives in EXACTLY one place
+                    per screen — the Detektiv-Check row — and looks the
+                    same everywhere it appears. */}
+                <View style={{ marginTop: 3 }}>
+                  <StufenChips stufe={pickedStufe} size="md" />
                 </View>
-                {/* Shortened — the long descriptive sentence
-                    (`pickedInfo.line`) was dropped. The Stufe label +
-                    Hersteller name carry the essential message; users
-                    who need the full explanation still get it on the
-                    Stöbern filter sheet. Kept concise so this row
-                    doesn't add to the visual noise on this page. */}
+                {/* Short stufe info: label bold + one-line explanation
+                    from STUFE_INFO, plus Hersteller. This is the single
+                    place on the detail page where the user sees what
+                    the stufe actually MEANS, so the short sentence is
+                    genuinely useful here — unlike on the cards where
+                    the colour + bars already carry the info. */}
                 <Text
                   style={{
                     flex: 1,
@@ -1105,7 +1081,8 @@ export default function ProductComparisonScreen() {
                 >
                   <Text style={{ fontWeight: fontWeight.bold, color: theme.text }}>
                     Stufe {pickedStufe} — {pickedInfo.label}.
-                  </Text>
+                  </Text>{' '}
+                  {pickedInfo.line}
                   {(picked as any)?.hersteller?.name ? (
                     <>
                       {' '}
