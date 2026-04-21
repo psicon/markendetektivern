@@ -13,6 +13,10 @@ type Props = {
   savingsEur?: number | null;
   /** Count of NoName alternatives linked to this brand product. */
   alternativeCount?: number;
+  /** Pack size label — e.g. "200g", "25 Stk.". */
+  sizeLabel?: string | null;
+  /** Price per unit — e.g. "8,90€/kg", "0,05€/Stk.". */
+  unitPriceLabel?: string | null;
   onPress?: () => void;
 };
 
@@ -26,7 +30,17 @@ function formatEur(value: number): string {
  * highlights how many alternatives exist, and shows potential savings.
  * Matches `BrandCard` in the prototype.
  */
-export function BrandCard({ title, brand, imageUri, price, savingsEur, alternativeCount = 0, onPress }: Props) {
+export function BrandCard({
+  title,
+  brand,
+  imageUri,
+  price,
+  savingsEur,
+  alternativeCount = 0,
+  sizeLabel,
+  unitPriceLabel,
+  onPress,
+}: Props) {
   const { theme, shadows } = useTokens();
 
   return (
@@ -120,15 +134,31 @@ export function BrandCard({ title, brand, imageUri, price, savingsEur, alternati
         <View
           style={{
             flexDirection: 'row',
-            justifyContent: 'space-between',
             alignItems: 'baseline',
             marginTop: 6,
             gap: 8,
+            flexWrap: 'wrap',
           }}
         >
           <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 16, color: theme.text }}>
             {formatEur(price)}
           </Text>
+          {sizeLabel || unitPriceLabel ? (
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 11,
+                color: theme.textMuted,
+                flexShrink: 1,
+              }}
+            >
+              {sizeLabel ?? ''}
+              {sizeLabel && unitPriceLabel ? ' ' : ''}
+              {unitPriceLabel ? `(${unitPriceLabel})` : ''}
+            </Text>
+          ) : null}
           {typeof savingsEur === 'number' && savingsEur > 0 ? (
             <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 12, color: theme.primary }}>
               −{formatEur(savingsEur)}

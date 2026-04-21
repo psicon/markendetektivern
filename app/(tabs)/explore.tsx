@@ -402,20 +402,23 @@ export default function ExploreScreen() {
     return m;
   }, [markenList]);
 
-  // Format a German-localised "100g" label + price-per-unit helper:
-  //   size=100, unit='g', price=0.89  →  ('100g', '8,90€/kg')
-  //   size=1.5, unit='l', price=0.55  →  ('1.5l', '0,37€/L')
+  // Format a German-localised pack-size label + price-per-unit helper:
+  //   size=100, unit='g',   price=0.89  →  ('100g',   '8,90€/kg')
+  //   size=1.5, unit='l',   price=0.55  →  ('1.5l',   '0,37€/L')
+  //   size=25,  unit='Stk.',price=1.19  →  ('25 Stk.', '0,05€/Stk.')
   const formatPack = useCallback(
     (size?: number, unit?: string, price?: number) => {
       if (!size || !unit) return { sizeLabel: null as string | null, unitPriceLabel: null as string | null };
-      const u = unit.toLowerCase();
-      const sizeLabel = `${size}${unit}`;
+      const u = unit.toLowerCase().replace(/\.$/, ''); // strip trailing dot
+      const isStk = u === 'stk' || u === 'stück';
+      const sizeLabel = isStk ? `${size} ${unit}` : `${size}${unit}`;
       let unitPriceLabel: string | null = null;
       if (price && price > 0) {
         if (u === 'g') unitPriceLabel = `${((price / size) * 1000).toFixed(2).replace('.', ',')}€/kg`;
         else if (u === 'kg') unitPriceLabel = `${(price / size).toFixed(2).replace('.', ',')}€/kg`;
         else if (u === 'ml') unitPriceLabel = `${((price / size) * 1000).toFixed(2).replace('.', ',')}€/L`;
         else if (u === 'l') unitPriceLabel = `${(price / size).toFixed(2).replace('.', ',')}€/L`;
+        else if (isStk) unitPriceLabel = `${(price / size).toFixed(2).replace('.', ',')}€/Stk.`;
       }
       return { sizeLabel, unitPriceLabel };
     },
@@ -709,27 +712,26 @@ export default function ExploreScreen() {
     const nodes: React.ReactNode[] = [];
     items.forEach((item, index) => {
       if (forTab === 'eigen') {
-        const p = item as FirestoreDocument<Produkte>;
-        const discId = (p as any).discounter?.id;
-        const disc = discId ? discounterMap[discId] : null;
-        const hmId = (p as any).handelsmarke?.id;
-        const handelsmarke = hmId ? handelsmarkenMap[hmId] : null;
-        const packTypId = (p as any).packTyp?.id;
+        const p = item as any;
+        // `discounter` and `handelsmarke` on the product are already populated
+        // FULL objects (not refs) by the service — just read their fields.
+        const disc = p.discounter as Discounter | undefined;
+        const hm = p.handelsmarke as Handelsmarken | undefined;
+        const discName: string = disc?.name ?? '';
+        const discShort = discName ? (discName.length <= 2 ? discName : discName[0].toUpperCase()) : null;
+        const handelsmarkeName = hm?.bezeichnung ?? (hm as any)?.name ?? null;
+        const packTypId = p.packTyp?.id;
         const unit = packTypId ? packungstypenMap[packTypId] : undefined;
-        const { sizeLabel, unitPriceLabel } = formatPack(
-          (p as any).packSize,
-          unit,
-          (p as any).preis,
-        );
+        const { sizeLabel, unitPriceLabel } = formatPack(p.packSize, unit, p.preis);
         nodes.push(
           <View key={p.id} style={{ width: GRID_ITEM_WIDTH }}>
             <ProductCard
-              title={(p as any).name ?? ''}
-              brand={handelsmarke ?? null}
-              imageUri={(p as any).bild ?? null}
-              price={(p as any).preis ?? 0}
-              stufe={parseInt((p as any).stufe) || 1}
-              marketShort={disc?.short ?? null}
+              title={p.name ?? ''}
+              brand={handelsmarkeName ?? null}
+              imageUri={p.bild ?? null}
+              price={p.preis ?? 0}
+              stufe={parseInt(p.stufe) || 1}
+              marketShort={discShort}
               marketColor={disc?.color ?? null}
               marketImageUri={disc?.bild ?? null}
               sizeLabel={sizeLabel}
@@ -740,17 +742,22 @@ export default function ExploreScreen() {
           </View>,
         );
       } else {
-        const m = item as FirestoreDocument<any>;
-        const herstellerId = (m as any).hersteller?.id ?? (m as any).hersteller;
-        const marke = (typeof herstellerId === 'string' ? markenMap[herstellerId] : undefined) ?? '';
+        const m = item as any;
+        // `hersteller` is populated full object — read .name directly.
+        const marke = m.hersteller?.name ?? '';
+        const packTypId = m.packTyp?.id;
+        const unit = packTypId ? packungstypenMap[packTypId] : undefined;
+        const { sizeLabel, unitPriceLabel } = formatPack(m.packSize, unit, m.preis);
         nodes.push(
           <View key={m.id} style={{ width: GRID_ITEM_WIDTH }}>
             <BrandCard
-              title={(m as any).name ?? ''}
+              title={m.name ?? ''}
               brand={marke}
-              imageUri={(m as any).bild ?? null}
-              price={(m as any).preis ?? 0}
-              alternativeCount={(m as any).relatedProdukteIDs?.length ?? 0}
+              imageUri={m.bild ?? null}
+              price={m.preis ?? 0}
+              sizeLabel={sizeLabel}
+              unitPriceLabel={unitPriceLabel}
+              alternativeCount={m.relatedProdukteIDs?.length ?? 0}
               onPress={() => openBrand(m, index)}
             />
           </View>,
