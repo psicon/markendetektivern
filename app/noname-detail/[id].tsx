@@ -653,14 +653,18 @@ export default function NoNameDetailScreen() {
             alignItems: 'flex-start',
           }}
         >
-          <View style={{ alignItems: 'center', marginTop: 1 }}>
+          <View style={{ alignItems: 'center' }}>
+            {/* lineHeight must be > fontSize or the extra-bold
+                ascender clips at the top of the line-box ("S" was
+                getting shaved on iOS). */}
             <Text
               style={{
                 fontFamily,
                 fontWeight: fontWeight.extraBold,
                 fontSize: 18,
                 color: stufeColor,
-                lineHeight: 18,
+                lineHeight: 22,
+                includeFontPadding: false,
               }}
             >
               S{stufe}
