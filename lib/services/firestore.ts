@@ -44,24 +44,66 @@ export class FirestoreService {
     try {
       const produkteRef = collection(db, 'produkte');
       const q = query(
-        produkteRef, 
-        orderBy('created_at', 'desc'), 
+        produkteRef,
+        orderBy('created_at', 'desc'),
         limit(limitCount)
       );
-      
+
       const querySnapshot = await getDocs(q);
       const produkte: FirestoreDocument<Produkte>[] = [];
-      
+
       querySnapshot.forEach((doc) => {
         produkte.push({
           id: doc.id,
           ...doc.data() as Produkte
         });
       });
-      
+
       return produkte;
     } catch (error) {
       console.error('Error fetching latest enttarnte produkte:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Top-enttarnte-Produkte-Rotator für die Home-Sektion:
+   *   • Zieht einen Pool von `poolSize` neuesten Stufe 3/4/5-Produkten
+   *     aus `produkte` (= die "Top" der enttarnten, konsistent geordnet
+   *     nach created_at desc — diese Sortierung passt Firestore sauber
+   *     in den Index rein).
+   *   • Mischt den Pool Fisher-Yates.
+   *   • Gibt die ersten `pickCount` Einträge zurück.
+   * So sieht der User bei jedem Home-Besuch 10 aus einer größeren
+   * Auswahl zufälliger Top-Produkte statt immer derselben 10 neuesten.
+   */
+  static async getTopEnttarnteProdukteRandomized(
+    poolSize: number = 200,
+    pickCount: number = 10,
+  ): Promise<FirestoreDocument<Produkte>[]> {
+    try {
+      const produkteRef = collection(db, 'produkte');
+      const q = query(
+        produkteRef,
+        where('stufe', 'in', ['3', '4', '5']),
+        orderBy('created_at', 'desc'),
+        limit(poolSize),
+      );
+
+      const snap = await getDocs(q);
+      const pool: FirestoreDocument<Produkte>[] = [];
+      snap.forEach((d) => {
+        pool.push({ id: d.id, ...(d.data() as Produkte) });
+      });
+
+      // Fisher-Yates shuffle in place
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+      return pool.slice(0, pickCount);
+    } catch (error) {
+      console.error('Error fetching top enttarnte produkte:', error);
       throw error;
     }
   }

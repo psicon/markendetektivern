@@ -159,7 +159,11 @@ export default function HomeScreen() {
         setLoading(true);
         const [discounters, produkteData] = await Promise.all([
           FirestoreService.getDiscounter(),
-          FirestoreService.getLatestEnttarnteProdukte(10),
+          // Pool of the 200 most-recent Stufe 3/4/5 products, then
+          // pick 10 at random. Each Home visit rotates the sample so
+          // the section doesn't feel static, but the pool is still
+          // bounded to the high-quality hits.
+          FirestoreService.getTopEnttarnteProdukteRandomized(200, 10),
         ]);
 
         const dMap: Record<string, DiscounterInfo> = {};
@@ -496,7 +500,7 @@ export default function HomeScreen() {
               marginBottom: 4,
             }}
           >
-            Investigation Update
+            Unter der Lupe
           </Text>
           <View
             style={{
