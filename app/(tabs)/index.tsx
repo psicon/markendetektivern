@@ -486,15 +486,18 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* ── Investigation Update / Products ── */}
+        {/* ── Neue Funde — typography matches the "Schnellzugriff"
+            section-eyebrow further up the page for a consistent
+            rhythm across the Home sections (same size, same muted
+            grey, same letter-spacing). */}
         <View style={{ marginTop: 24 }}>
           <Text
             style={{
               fontFamily,
               fontWeight: fontWeight.bold,
-              fontSize: 11,
-              color: theme.primary,
-              letterSpacing: 1.5,
+              fontSize: 13,
+              color: theme.textMuted,
+              letterSpacing: 0.6,
               textTransform: 'uppercase',
               paddingHorizontal: 20,
               marginBottom: 4,
