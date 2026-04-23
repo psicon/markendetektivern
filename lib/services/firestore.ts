@@ -68,14 +68,17 @@ export class FirestoreService {
 
   /**
    * Top-enttarnte-Produkte-Rotator für die Home-Sektion:
-   *   • Zieht einen Pool von `poolSize` neuesten Stufe 3/4/5-Produkten
-   *     aus `produkte` (= die "Top" der enttarnten, konsistent geordnet
-   *     nach created_at desc — diese Sortierung passt Firestore sauber
-   *     in den Index rein).
+   *   • Zieht einen Pool von `poolSize` Stufe-3/4/5-Produkten aus
+   *     `produkte`.
    *   • Mischt den Pool Fisher-Yates.
    *   • Gibt die ersten `pickCount` Einträge zurück.
-   * So sieht der User bei jedem Home-Besuch 10 aus einer größeren
-   * Auswahl zufälliger Top-Produkte statt immer derselben 10 neuesten.
+   *
+   * Bewusst OHNE orderBy('created_at') — Firestore würde sonst einen
+   * Composite-Index auf (stufe, created_at) verlangen, den wir nicht
+   * haben. Seit wir den Pool sowieso clientseitig shuffeln, ist die
+   * serverseitige Sortierreihenfolge egal: der User bekommt bei jedem
+   * Home-Besuch 10 aus einem größeren Pool, egal in welcher
+   * Reihenfolge Firestore die zurückliefert.
    */
   static async getTopEnttarnteProdukteRandomized(
     poolSize: number = 200,
@@ -86,7 +89,6 @@ export class FirestoreService {
       const q = query(
         produkteRef,
         where('stufe', 'in', ['3', '4', '5']),
-        orderBy('created_at', 'desc'),
         limit(poolSize),
       );
 
