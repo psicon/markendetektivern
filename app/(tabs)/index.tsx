@@ -288,7 +288,7 @@ export default function HomeScreen() {
   // TODO: route Kassenbon / Produkte / Umfragen to real Rewards screen once built
   // (currently /achievements is the closest existing surface).
   const schnellzugriff = [
-    { icon: 'receipt-text-outline' as const, label: 'Kassenbon\nscannen', background: '#95cfc4', dark: true as const,  onPress: () => router.push('/achievements' as any) },
+    { icon: 'receipt' as const, label: 'Kassenbon\nscannen', background: '#95cfc4', dark: true as const,  onPress: () => router.push('/achievements' as any) },
     { icon: 'camera-plus-outline'  as const, label: 'Produkte\neinreichen', background: '#a89cdf', dark: true as const,  onPress: () => router.push('/achievements' as any) },
     { icon: 'heart-outline'        as const, label: 'Deine\nFavoriten',    background: theme.surfaceAlt, dark: false as const, onPress: () => router.push('/favorites' as any) },
     { icon: 'poll'                 as const, label: 'Umfragen',            background: theme.surfaceAlt, dark: false as const, onPress: () => router.push('/achievements' as any) },
