@@ -500,7 +500,7 @@ export default function HomeScreen() {
               marginBottom: 4,
             }}
           >
-            Unter der Lupe
+            Neue Funde
           </Text>
           <View
             style={{
@@ -514,7 +514,7 @@ export default function HomeScreen() {
             <Text
               style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 22, color: theme.text, letterSpacing: -0.2 }}
             >
-              Neu für dich enttarnt
+              Für dich enttarnt
             </Text>
             <Pressable onPress={() => router.push('/(tabs)/explore' as any)}>
               <Text
