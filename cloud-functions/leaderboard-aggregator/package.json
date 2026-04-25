@@ -1,0 +1,14 @@
+{
+  "name": "leaderboard-aggregator",
+  "version": "1.0.0",
+  "description": "Nightly aggregator that pre-computes the Bestenliste payload from journeys + users into a single Firestore doc.",
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}

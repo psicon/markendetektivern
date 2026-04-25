@@ -3,7 +3,14 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import {
+  Image as RNImage,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { doc, updateDoc } from 'firebase/firestore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,10 +23,12 @@ import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { db } from '@/lib/firebase';
 import {
+  getAggregateUpdatedAt,
   getBundeslandRanks,
   getCityRanks,
+  getOverallUsers,
   type LbRow,
-  type LbScope,
+  type LbUser,
   userContributionFromProfile,
 } from '@/lib/services/leaderboard';
 
@@ -894,22 +903,37 @@ function EarnRow({
 
 
 
-// ────────────────────────────────────────────────────────────────────────
-// BESTENLISTE TAB
-// ────────────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+// BESTENLISTE (Rewards Tab "Bestenliste")
+// ════════════════════════════════════════════════════════════════════════
 //
-// Two collective leaderboards side-by-side:
-//   • Bundesland-Liga: 16 Bundesländer ranked by total Detektiv-Punkte
-//   • Städte-Liga: top-50 Städte
+// Structure:
+//   [Overall | Regionenkampf]            ← top scope (PagerView, swipe)
 //
-// No individual users on the leaderboard, no period filter (one
-// All-Time aggregate), no Friends. Each user contributes their
-// totalSavings + stats.pointsTotal to one bucket (their explicit
-// `city` if set, else the journey-derived guessedCity).
+//   Overall:                              | Regionenkampf:
+//     [Punkte | Ersparnisse]              |   [Bundesländer | Städte]
+//     [Legendär | Champion | Rising Star] |   [Legendär | Champion | Rising Star]
+//     [Yellow Hero context card]          |   [Yellow Hero card]
+//     [Top-3 medal podium]                |   [Top-3 medal podium]
+//     [Rank 4+ list]                      |   [Rank 4+ list]
+//     [Refresh hint]                      |   [Refresh hint]
+//     [Deine Position card]               |   [Deine Position card]
 //
-// User's own region row gets the "DU"-highlight. The Status-Hero at
-// the top shows their personal stats from their userProfile.
-// Setup-Sheet nudges them to confirm/pick a region if none is set.
+// Data: ONE Firestore doc (aggregates/leaderboard_v1) prebuilt by the
+// Cloud Function (cloud-functions/leaderboard-aggregator) every night
+// at 03:00 Berlin time. App reads once per session and caches in
+// memory — instant on Tab open.
+//
+// Periods:
+//   • Legendär (Aller Zeiten) — real data, populated today
+//   • Champion (Dieses Jahr) — empty state, Cloud Function will add
+//     yearly counters once we deploy that schema upgrade
+//   • Rising Star (Diese Woche) — same; weekly rolling counter
+
+type LbScopeOuter = 'overall' | 'region';
+type OverallMetric = 'pts' | 'eur';
+type RegionGeo = 'bundesland' | 'stadt';
+type Period = 'all' | 'year' | 'week';
 
 function RanksTab() {
   const { theme } = useTokens();
@@ -923,29 +947,70 @@ function RanksTab() {
     (userProfile as any)?.city ??
     (userProfile as any)?.guessedCity ??
     null;
+  const userNick = userProfile?.display_name ?? null;
   const hasExplicitCity = !!(userProfile as any)?.city;
 
-  const [scope, setScope] = useState<LbScope>('bundesland');
-  const pagerRef = useRef<PagerView | null>(null);
-  const onScopeChange = (next: LbScope) => {
-    setScope(next);
-    pagerRef.current?.setPage(next === 'bundesland' ? 0 : 1);
+  // ─── Outer scope: Overall | Regionenkampf (PagerView) ──────────
+  const [outerScope, setOuterScope] = useState<LbScopeOuter>('overall');
+  const outerPagerRef = useRef<PagerView | null>(null);
+  const onOuterChange = (next: LbScopeOuter) => {
+    setOuterScope(next);
+    outerPagerRef.current?.setPage(next === 'overall' ? 0 : 1);
   };
-  const onPagerSelected = (e: { nativeEvent: { position: number } }) => {
-    const next: LbScope = e.nativeEvent.position === 0 ? 'bundesland' : 'stadt';
-    setScope((prev) => (prev === next ? prev : next));
+  const onOuterPagerSelected = (e: { nativeEvent: { position: number } }) => {
+    const next: LbScopeOuter = e.nativeEvent.position === 0 ? 'overall' : 'region';
+    setOuterScope((prev) => (prev === next ? prev : next));
   };
 
+  // ─── Overall: metric + period ─────────────────────────────────
+  const [metric, setMetric] = useState<OverallMetric>('pts');
+  const [overallPeriod, setOverallPeriod] = useState<Period>('all');
+
+  // ─── Regionenkampf: geo + period ──────────────────────────────
+  const [geo, setGeo] = useState<RegionGeo>('bundesland');
+  const [regionPeriod, setRegionPeriod] = useState<Period>('all');
+
+  // ─── Data ─────────────────────────────────────────────────────
+  const [overallUsers, setOverallUsers] = useState<LbUser[]>([]);
   const [blRows, setBlRows] = useState<LbRow[]>([]);
   const [cityRows, setCityRows] = useState<LbRow[]>([]);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+
   useEffect(() => {
     let alive = true;
-    getBundeslandRanks(userBL).then((r) => alive && setBlRows(r));
-    getCityRanks(userCity).then((r) => alive && setCityRows(r));
+    if (overallPeriod === 'all') {
+      getOverallUsers(userNick, 'all', metric).then(
+        (r) => alive && setOverallUsers(r),
+      );
+    } else {
+      setOverallUsers([]);
+    }
     return () => {
       alive = false;
     };
-  }, [userBL, userCity]);
+  }, [userNick, metric, overallPeriod]);
+
+  useEffect(() => {
+    let alive = true;
+    if (regionPeriod === 'all') {
+      if (geo === 'bundesland') {
+        getBundeslandRanks(userBL, 'all', 'pts').then(
+          (r) => alive && setBlRows(r),
+        );
+      } else {
+        getCityRanks(userCity, 'all', 'pts').then(
+          (r) => alive && setCityRows(r),
+        );
+      }
+    }
+    return () => {
+      alive = false;
+    };
+  }, [userBL, userCity, geo, regionPeriod]);
+
+  useEffect(() => {
+    getAggregateUpdatedAt().then(setUpdatedAt);
+  }, []);
 
   const contribution = userContributionFromProfile(userProfile);
 
@@ -954,10 +1019,7 @@ function RanksTab() {
     async (bl: string, city: string) => {
       if (!user?.uid) return;
       try {
-        await updateDoc(doc(db, 'users', user.uid), {
-          bundesland: bl,
-          city,
-        });
+        await updateDoc(doc(db, 'users', user.uid), { bundesland: bl, city });
         await refreshUserProfile();
       } catch (e) {
         console.warn('Rewards: saveRegion failed', e);
@@ -966,17 +1028,30 @@ function RanksTab() {
     [user?.uid, refreshUserProfile],
   );
 
+  // The user's rank within the active list — used by the
+  // "Deine Position" card to show their global position even if
+  // they're outside the top-50.
+  const userOverallRank = overallUsers.find((u) => u.isMe)?.rank ?? null;
+  const userBLRank = blRows.find((r) => r.isMe)?.rank ?? null;
+  const userCityRank = cityRows.find((r) => r.isMe)?.rank ?? null;
+
   return (
     <>
-      {/* ─── Status hero (user's own stats) ─── */}
+      {/* ─── Outer pill: Overall | Regionenkampf ─── */}
       <View style={{ paddingHorizontal: 20, paddingTop: 4 }}>
-        <StatusHero
-          contribution={contribution}
-          userNick={userProfile?.display_name ?? null}
+        <SegmentedTabs
+          tabs={[
+            { key: 'overall', label: 'Overall' },
+            { key: 'region', label: 'Regionenkampf' },
+          ] as const}
+          value={outerScope}
+          onChange={onOuterChange}
         />
       </View>
 
-      {/* ─── Setup nudge — only when explicit city not yet set ─── */}
+      {/* Setup nudge — only when explicit city not set yet (Regionenkampf
+          works without it via guessedCity, but the user gets a softer
+          "Wo wohnst du?" hint that gives them a better DU-highlight.) */}
       {!hasExplicitCity ? (
         <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
           <SetupNudge
@@ -986,34 +1061,99 @@ function RanksTab() {
         </View>
       ) : null}
 
-      {/* ─── Scope tabs (Bundesland / Stadt) ─── */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 16 }}>
-        <SegmentedTabs
-          tabs={[
-            { key: 'bundesland', label: 'Bundesländer' },
-            { key: 'stadt', label: 'Städte' },
-          ] as const}
-          value={scope}
-          onChange={onScopeChange}
-        />
-      </View>
-
-      {/* ─── List (swipeable PagerView) ─── */}
+      {/* ─── Outer pager (Overall / Regionenkampf) ─── */}
       <PagerView
-        ref={pagerRef}
-        style={{ height: 720 }}
+        ref={outerPagerRef}
+        style={{ height: 1100 }}
         initialPage={0}
-        onPageSelected={onPagerSelected}
+        onPageSelected={onOuterPagerSelected}
       >
-        <View key="bundesland">
-          <LeaderboardList rows={blRows} />
+        {/* ════ PAGE 1 — Overall ════ */}
+        <View key="overall">
+          <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
+            <SegmentedTabs
+              tabs={[
+                { key: 'pts', label: 'Punkte' },
+                { key: 'eur', label: 'Ersparnisse' },
+              ] as const}
+              value={metric}
+              onChange={setMetric}
+            />
+          </View>
+          <View style={{ paddingTop: 10 }}>
+            <PeriodSwitcher value={overallPeriod} onChange={setOverallPeriod} />
+          </View>
+          <HeroBanner
+            icon={metric === 'pts' ? 'trophy' : 'cash-multiple'}
+            title={metric === 'pts' ? 'Punkte Bestenliste' : 'Ersparnis-Bestenliste'}
+            subtitle={
+              metric === 'pts'
+                ? 'Wer sammelt die meisten Punkte?'
+                : 'Wer hat am meisten gespart?'
+            }
+          />
+
+          {overallPeriod !== 'all' ? (
+            <PeriodComingSoon period={overallPeriod} />
+          ) : (
+            <UserBoard
+              users={overallUsers}
+              metric={metric}
+              userRank={userOverallRank}
+              myEntry={
+                userOverallRank !== null
+                  ? overallUsers.find((u) => u.isMe) ?? null
+                  : null
+              }
+              userMetricValue={metric === 'pts' ? contribution?.pts ?? 0 : contribution?.eur ?? 0}
+              totalUsers={overallUsers.length}
+            />
+          )}
+
+          <RefreshHint updatedAt={updatedAt} />
         </View>
-        <View key="stadt">
-          <LeaderboardList rows={cityRows} showBundesland />
+
+        {/* ════ PAGE 2 — Regionenkampf ════ */}
+        <View key="region">
+          <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
+            <SegmentedTabs
+              tabs={[
+                { key: 'bundesland', label: 'Bundesländer' },
+                { key: 'stadt', label: 'Städte' },
+              ] as const}
+              value={geo}
+              onChange={setGeo}
+            />
+          </View>
+          <View style={{ paddingTop: 10 }}>
+            <PeriodSwitcher value={regionPeriod} onChange={setRegionPeriod} />
+          </View>
+          <HeroBanner
+            icon={geo === 'bundesland' ? 'map' : 'city'}
+            title={geo === 'bundesland' ? 'Bundesländer-Liga' : 'Städte-Liga'}
+            subtitle={
+              geo === 'bundesland'
+                ? 'Welche Region sammelt am meisten Punkte?'
+                : 'Welche Stadt liegt vorne?'
+            }
+          />
+
+          {regionPeriod !== 'all' ? (
+            <PeriodComingSoon period={regionPeriod} />
+          ) : (
+            <RegionBoard
+              rows={geo === 'bundesland' ? blRows : cityRows}
+              showBundesland={geo === 'stadt'}
+              myRank={geo === 'bundesland' ? userBLRank : userCityRank}
+              myLabel={geo === 'bundesland' ? userBL : userCity}
+            />
+          )}
+
+          <RefreshHint updatedAt={updatedAt} />
         </View>
       </PagerView>
 
-      {/* ─── Setup sheet ─── */}
+      {/* ─── Region-Setup-Sheet ─── */}
       <FilterSheet
         visible={setupOpen}
         title="Spiel für deine Stadt"
@@ -1022,169 +1162,17 @@ function RanksTab() {
         <RegionSetupContent
           suggestion={{ city: userCity, bundesland: userBL }}
           onAccept={async () => {
-            if (userBL && userCity) {
-              await saveRegion(userBL, userCity);
-            }
+            if (userBL && userCity) await saveRegion(userBL, userCity);
             setSetupOpen(false);
           }}
-          onPickOther={() => {
-            // Picker sheet phase 4 — for now just close.
-            setSetupOpen(false);
-          }}
+          onPickOther={() => setSetupOpen(false)}
         />
       </FilterSheet>
     </>
   );
 }
 
-// ─── Sub-pieces ─────────────────────────────────────────────────────────
-
-function StatusHero({
-  contribution,
-  userNick,
-}: {
-  contribution: ReturnType<typeof userContributionFromProfile>;
-  userNick: string | null;
-}) {
-  const pts = contribution?.pts ?? 0;
-  const eur = contribution?.eur ?? 0;
-  const level = contribution?.level ?? 1;
-  const streak = contribution?.streakDays ?? 0;
-  const region = contribution?.city ?? 'Region nicht gesetzt';
-  return (
-    <LinearGradient
-      colors={['#0a6f62', '#0d8575', '#10a18a']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={{ borderRadius: 20, padding: 18, overflow: 'hidden' }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <View
-          style={{
-            width: 50,
-            height: 50,
-            borderRadius: 25,
-            backgroundColor: '#fff',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Text style={{ fontSize: 26 }}>🦉</Text>
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text
-            numberOfLines={1}
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 17,
-              color: '#fff',
-              letterSpacing: -0.2,
-            }}
-          >
-            {userNick ?? 'Anonymer Detektiv'}
-          </Text>
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 5,
-              marginTop: 2,
-            }}
-          >
-            <MaterialCommunityIcons
-              name="shield-star-outline"
-              size={12}
-              color="#ffd44b"
-            />
-            <Text
-              numberOfLines={1}
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.semibold,
-                fontSize: 11,
-                color: '#fff',
-                opacity: 0.92,
-              }}
-            >
-              Level {level} · {region}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      <View
-        style={{
-          flexDirection: 'row',
-          gap: 8,
-          marginTop: 14,
-        }}
-      >
-        <HeroStat
-          icon="star-four-points"
-          value={pts.toLocaleString('de-DE')}
-          label="Detektiv-Pkt"
-        />
-        <HeroStat
-          icon="cash"
-          value={`${eur.toFixed(2).replace('.', ',')} €`}
-          label="gespart"
-        />
-        {streak > 0 ? (
-          <HeroStat icon="fire" value={`${streak}`} label="Streak" />
-        ) : null}
-      </View>
-    </LinearGradient>
-  );
-}
-
-function HeroStat({
-  icon,
-  value,
-  label,
-}: {
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  value: string;
-  label: string;
-}) {
-  return (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: 'rgba(255,255,255,0.16)',
-        borderRadius: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-      }}
-    >
-      <MaterialCommunityIcons name={icon} size={14} color="#ffd44b" />
-      <Text
-        numberOfLines={1}
-        style={{
-          fontFamily,
-          fontWeight: fontWeight.extraBold,
-          fontSize: 16,
-          color: '#fff',
-          marginTop: 4,
-        }}
-      >
-        {value}
-      </Text>
-      <Text
-        style={{
-          fontFamily,
-          fontWeight: fontWeight.semibold,
-          fontSize: 10,
-          color: '#fff',
-          opacity: 0.8,
-          marginTop: 1,
-        }}
-      >
-        {label}
-      </Text>
-    </View>
-  );
-}
+// ─── Setup nudge (kept) ─────────────────────────────────────────────────
 
 function SetupNudge({
   guessedCity,
@@ -1258,12 +1246,516 @@ function SetupNudge({
   );
 }
 
-function LeaderboardList({
+// ─── Period switcher (3 wide pills with subtitle) ───────────────────────
+
+function PeriodSwitcher({
+  value,
+  onChange,
+}: {
+  value: Period;
+  onChange: (p: Period) => void;
+}) {
+  const { theme, shadows } = useTokens();
+  const items: {
+    key: Period;
+    icon: string;
+    title: string;
+    sub: string;
+    iconColor: string;
+    bg: string;
+  }[] = [
+    {
+      key: 'all',
+      icon: '👑',
+      title: 'Legendär',
+      sub: 'Aller Zeiten',
+      iconColor: '#f5b301',
+      bg: '#fff7e0',
+    },
+    {
+      key: 'year',
+      icon: '🏆',
+      title: 'Champion',
+      sub: 'Dieses Jahr',
+      iconColor: '#bf8636',
+      bg: '#fff3df',
+    },
+    {
+      key: 'week',
+      icon: '⭐',
+      title: 'Rising Star',
+      sub: 'Diese Woche',
+      iconColor: '#f5b301',
+      bg: '#fff9d8',
+    },
+  ];
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      scrollsToTop={false}
+      contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}
+    >
+      {items.map((it) => {
+        const on = value === it.key;
+        return (
+          <Pressable
+            key={it.key}
+            onPress={() => onChange(it.key)}
+            style={({ pressed }) => ({
+              minWidth: 150,
+              height: 64,
+              borderRadius: 14,
+              paddingHorizontal: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              backgroundColor: on ? it.bg : theme.surface,
+              borderWidth: on ? 0 : 1,
+              borderColor: theme.border,
+              opacity: pressed ? 0.9 : 1,
+              ...(on ? shadows.sm : {}),
+            })}
+          >
+            <Text style={{ fontSize: 22 }}>{it.icon}</Text>
+            <View>
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 14,
+                  color: on ? '#191c1d' : theme.text,
+                }}
+              >
+                {it.title}
+              </Text>
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 11,
+                  color: on ? '#6b6b6b' : theme.textMuted,
+                  marginTop: 1,
+                }}
+              >
+                {it.sub}
+              </Text>
+            </View>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+// ─── Yellow hero banner ─────────────────────────────────────────────────
+
+function HeroBanner({
+  icon,
+  title,
+  subtitle,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  title: string;
+  subtitle: string;
+}) {
+  return (
+    <LinearGradient
+      colors={['#ffd34a', '#f5a623']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={{
+        marginHorizontal: 20,
+        marginTop: 16,
+        borderRadius: 16,
+        paddingVertical: 16,
+        paddingHorizontal: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+      }}
+    >
+      <MaterialCommunityIcons name={icon} size={28} color="#5a3500" />
+      <View style={{ flex: 1 }}>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 17,
+            color: '#1a1a1a',
+            letterSpacing: -0.2,
+          }}
+        >
+          {title}
+        </Text>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 12,
+            color: '#3a3a3a',
+            marginTop: 2,
+          }}
+        >
+          {subtitle}
+        </Text>
+      </View>
+    </LinearGradient>
+  );
+}
+
+// ─── Coming-soon state for periods we don't have data for yet ───────────
+
+function PeriodComingSoon({ period }: { period: Exclude<Period, 'all'> }) {
+  const { theme } = useTokens();
+  const copy =
+    period === 'year'
+      ? {
+          icon: '🏆',
+          title: 'Champion-Liga öffnet bald',
+          body: 'Mit dem nächsten Jahres-Reset startet die Champion-Liga. Sammle ab jetzt Punkte fürs Jahresergebnis.',
+        }
+      : {
+          icon: '⭐',
+          title: 'Rising-Star-Liga startet diese Woche',
+          body: 'Wer sammelt zwischen Montag und Sonntag die meisten Punkte? Schalten wir sehr bald frei.',
+        };
+  return (
+    <View
+      style={{
+        marginHorizontal: 20,
+        marginTop: 18,
+        padding: 22,
+        backgroundColor: theme.surface,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: theme.border,
+        alignItems: 'center',
+      }}
+    >
+      <Text style={{ fontSize: 38, marginBottom: 10 }}>{copy.icon}</Text>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 16,
+          color: theme.text,
+          textAlign: 'center',
+        }}
+      >
+        {copy.title}
+      </Text>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 13,
+          lineHeight: 18,
+          color: theme.textMuted,
+          textAlign: 'center',
+          marginTop: 6,
+        }}
+      >
+        {copy.body}
+      </Text>
+    </View>
+  );
+}
+
+// ─── Refresh hint (best-practice motivation row) ────────────────────────
+
+function RefreshHint({ updatedAt }: { updatedAt: Date | null }) {
+  const { theme } = useTokens();
+  const stand = updatedAt
+    ? `${updatedAt.toLocaleDateString('de-DE', {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit',
+      })}, ${updatedAt.toLocaleTimeString('de-DE', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })}`
+    : 'gleich';
+  return (
+    <View
+      style={{
+        marginHorizontal: 20,
+        marginTop: 18,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+      }}
+    >
+      <MaterialCommunityIcons
+        name="autorenew"
+        size={14}
+        color={theme.textMuted}
+      />
+      <Text
+        style={{
+          flex: 1,
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 11,
+          lineHeight: 16,
+          color: theme.textMuted,
+        }}
+      >
+        Wird täglich um 03:00 aktualisiert · Stand: {stand}. Komm morgen
+        wieder rein und sammle Punkte!
+      </Text>
+    </View>
+  );
+}
+
+// ─── User leaderboard board (Overall) ───────────────────────────────────
+
+function UserBoard({
+  users,
+  metric,
+  userRank,
+  myEntry,
+  userMetricValue,
+  totalUsers,
+}: {
+  users: LbUser[];
+  metric: OverallMetric;
+  userRank: number | null;
+  myEntry: LbUser | null;
+  userMetricValue: number;
+  totalUsers: number;
+}) {
+  const { theme } = useTokens();
+  if (users.length === 0) {
+    return (
+      <View style={{ padding: 40, alignItems: 'center' }}>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 13,
+            color: theme.textMuted,
+          }}
+        >
+          Liga lädt …
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <>
+      <View
+        style={{
+          marginHorizontal: 20,
+          marginTop: 14,
+          gap: 10,
+        }}
+      >
+        {users.map((u) => (
+          <UserCard key={u.id} user={u} metric={metric} />
+        ))}
+      </View>
+      <DeinePositionCard
+        rank={userRank}
+        totalUsers={totalUsers}
+        metric={metric}
+        myValue={userMetricValue}
+        inList={!!myEntry}
+      />
+    </>
+  );
+}
+
+// ─── Single user card ───────────────────────────────────────────────────
+
+function UserCard({ user, metric }: { user: LbUser; metric: OverallMetric }) {
+  const { theme, shadows } = useTokens();
+  const isTop3 = user.rank <= 3;
+  const value =
+    metric === 'pts'
+      ? `${user.pts.toLocaleString('de-DE')} Pkt`
+      : `${user.eur.toFixed(2).replace('.', ',')} €`;
+  const subValue =
+    metric === 'pts'
+      ? `${user.eur.toFixed(2).replace('.', ',')} € gespart`
+      : `${user.pts.toLocaleString('de-DE')} Pkt`;
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        backgroundColor: user.isMe
+          ? theme.primaryContainer ?? theme.surfaceAlt
+          : theme.surface,
+        borderRadius: 14,
+        padding: 12,
+        ...shadows.sm,
+      }}
+    >
+      <RankBadge rank={user.rank} />
+      <UserAvatar
+        name={user.name}
+        photoUrl={(user as any).photoUrl ?? null}
+      />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          numberOfLines={1}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 15,
+            color: theme.text,
+          }}
+        >
+          {user.name}
+          {user.isMe ? (
+            <Text style={{ color: theme.primary }}> · Du</Text>
+          ) : null}
+        </Text>
+        <Text
+          numberOfLines={1}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 11,
+            color: theme.textMuted,
+            marginTop: 2,
+          }}
+        >
+          {(user as any).level ? `Level ${(user as any).level} · ` : ''}
+          {subValue}
+        </Text>
+      </View>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 15,
+          color: theme.primary,
+        }}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function UserAvatar({ name, photoUrl }: { name: string; photoUrl: string | null }) {
+  const { theme } = useTokens();
+  if (photoUrl) {
+    return (
+      <View
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 20,
+          overflow: 'hidden',
+          backgroundColor: theme.surfaceAlt,
+        }}
+      >
+        {/* eslint-disable-next-line @typescript-eslint/no-require-imports */}
+        <RNImage source={{ uri: photoUrl }} style={{ width: '100%', height: '100%' }} />
+      </View>
+    );
+  }
+  const initial = name?.[0]?.toUpperCase() ?? '?';
+  // Deterministic colour per first letter so the same user keeps the
+  // same colour across renders.
+  const palette = ['#0d8575', '#1f5e96', '#a32d6f', '#c2462b', '#7a4a9a', '#345a3a'];
+  const idx = (initial.charCodeAt(0) || 0) % palette.length;
+  return (
+    <View
+      style={{
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: palette[idx],
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 16,
+          color: '#fff',
+        }}
+      >
+        {initial}
+      </Text>
+    </View>
+  );
+}
+
+function RankBadge({ rank }: { rank: number }) {
+  const { theme } = useTokens();
+  if (rank <= 3) {
+    const tint = rank === 1 ? '#f5b301' : rank === 2 ? '#a3adb1' : '#c98a51';
+    return (
+      <View
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 18,
+          backgroundColor: tint + '22',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderWidth: 2,
+          borderColor: tint,
+        }}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 14,
+            color: tint,
+          }}
+        >
+          {rank}
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <View
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: theme.surfaceAlt,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 14,
+          color: theme.textMuted,
+        }}
+      >
+        {rank}
+      </Text>
+    </View>
+  );
+}
+
+// ─── Region leaderboard ─────────────────────────────────────────────────
+
+function RegionBoard({
   rows,
   showBundesland,
+  myRank,
+  myLabel,
 }: {
   rows: LbRow[];
   showBundesland?: boolean;
+  myRank: number | null;
+  myLabel: string | null;
 }) {
   const { theme } = useTokens();
   if (rows.length === 0) {
@@ -1282,179 +1774,267 @@ function LeaderboardList({
       </View>
     );
   }
-  // Highest pts gets a primary-bar; everyone else scaled relative.
-  const max = rows[0]?.pts || 1;
   return (
-    <View
-      style={{
-        marginHorizontal: 20,
-        marginTop: 14,
-        backgroundColor: theme.surface,
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: theme.border,
-        overflow: 'hidden',
-      }}
-    >
-      {rows.map((r, i) => (
-        <RankRow
-          key={r.key}
-          row={r}
-          isLast={i === rows.length - 1}
-          showBundesland={showBundesland}
-          relativePct={Math.max(2, Math.round((r.pts / max) * 100))}
-        />
-      ))}
-    </View>
-  );
-}
-
-function RankRow({
-  row,
-  isLast,
-  showBundesland,
-  relativePct,
-}: {
-  row: LbRow;
-  isLast: boolean;
-  showBundesland?: boolean;
-  relativePct: number;
-}) {
-  const { theme } = useTokens();
-  const accent = row.rank === 1 ? '#f5b301' : row.rank === 2 ? '#a3adb1' : row.rank === 3 ? '#c98a51' : null;
-  return (
-    <View
-      style={{
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-        borderBottomWidth: isLast ? 0 : 1,
-        borderBottomColor: theme.border,
-        backgroundColor: row.isMe ? theme.primaryContainer ?? theme.surfaceAlt : 'transparent',
-      }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <View
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 15,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: accent ? accent + '22' : theme.surfaceAlt,
-          }}
-        >
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 13,
-              color: accent ?? theme.textMuted,
-            }}
-          >
-            {row.rank}
-          </Text>
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text
-              numberOfLines={1}
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold,
-                fontSize: 14,
-                color: theme.text,
-              }}
-            >
-              {row.label}
-            </Text>
-            {row.isMe ? (
-              <View
-                style={{
-                  backgroundColor: theme.primary,
-                  paddingHorizontal: 6,
-                  paddingVertical: 2,
-                  borderRadius: 4,
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.extraBold,
-                    fontSize: 9,
-                    letterSpacing: 0.4,
-                    color: '#fff',
-                  }}
-                >
-                  DU
-                </Text>
-              </View>
-            ) : null}
-          </View>
-          {showBundesland && row.bundesland ? (
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.medium,
-                fontSize: 11,
-                color: theme.textMuted,
-                marginTop: 1,
-              }}
-            >
-              {row.bundesland}
-            </Text>
-          ) : null}
-        </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 14,
-              color: theme.text,
-            }}
-          >
-            {row.pts.toLocaleString('de-DE')}
-          </Text>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 11,
-              color: theme.textMuted,
-              marginTop: 1,
-            }}
-          >
-            {row.eur.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} € · {row.users.toLocaleString('de-DE')} User
-          </Text>
-        </View>
-      </View>
-
-      {/* Relative-strength bar */}
+    <>
       <View
         style={{
-          height: 4,
-          backgroundColor: theme.border,
-          borderRadius: 2,
-          overflow: 'hidden',
-          marginTop: 8,
-          marginLeft: 42,
+          marginHorizontal: 20,
+          marginTop: 14,
+          gap: 10,
         }}
       >
-        <View
-          style={{
-            width: `${relativePct}%`,
-            height: '100%',
-            backgroundColor: row.isMe ? theme.primary : accent ?? theme.borderStrong,
-          }}
-        />
+        {rows.map((r) => (
+          <RegionCard key={r.key} row={r} showBundesland={showBundesland} />
+        ))}
       </View>
+      <DeinePositionRegionCard
+        rank={myRank}
+        label={myLabel}
+        total={rows.length}
+      />
+    </>
+  );
+}
+
+function RegionCard({
+  row,
+  showBundesland,
+}: {
+  row: LbRow;
+  showBundesland?: boolean;
+}) {
+  const { theme, shadows } = useTokens();
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        backgroundColor: row.isMe
+          ? theme.primaryContainer ?? theme.surfaceAlt
+          : theme.surface,
+        borderRadius: 14,
+        padding: 12,
+        ...shadows.sm,
+      }}
+    >
+      <RankBadge rank={row.rank} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          numberOfLines={1}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 15,
+            color: theme.text,
+          }}
+        >
+          {row.label}
+          {row.isMe ? (
+            <Text style={{ color: theme.primary }}> · Du</Text>
+          ) : null}
+        </Text>
+        <Text
+          numberOfLines={1}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 11,
+            color: theme.textMuted,
+            marginTop: 2,
+          }}
+        >
+          {showBundesland && row.bundesland ? `${row.bundesland} · ` : ''}
+          {row.users.toLocaleString('de-DE')} Detektive ·{' '}
+          {row.eur.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} € gespart
+        </Text>
+      </View>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 15,
+          color: theme.primary,
+        }}
+      >
+        {row.pts.toLocaleString('de-DE')} Pkt
+      </Text>
     </View>
   );
 }
 
-// ─── Region setup sheet content ─────────────────────────────────────────
-// Friendly opt-in prompt — uses the user's `guessedCity` (lazy-filled
-// from journey history in AuthContext) as the suggestion.
+// ─── Deine Position card (sticky-ish at end of list) ────────────────────
+
+function DeinePositionCard({
+  rank,
+  totalUsers,
+  metric,
+  myValue,
+  inList,
+}: {
+  rank: number | null;
+  totalUsers: number;
+  metric: OverallMetric;
+  myValue: number;
+  inList: boolean;
+}) {
+  // Encouraging line — tiered by approximate percentile, since we
+  // don't know the EXACT global rank for users outside the top-50.
+  let tagline = 'Sammle Punkte und mach mit!';
+  if (inList && rank !== null) {
+    if (rank === 1) tagline = '🏆 Du bist die Nr. 1 — unfassbar!';
+    else if (rank <= 3) tagline = '🥇 Auf dem Treppchen — stark!';
+    else if (rank <= 10) tagline = '🔥 Top 10 — du jagst die Spitze!';
+    else tagline = '💪 In den Top 50 — bleib dran!';
+  } else if (myValue > 0) {
+    tagline = '🚀 Sammle weiter — die Top 50 sind dein Ziel!';
+  } else {
+    tagline = '🎯 Erste Punkte sammeln und einsteigen!';
+  }
+  return (
+    <LinearGradient
+      colors={['#0d8575', '#10a18a']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={{
+        marginHorizontal: 20,
+        marginTop: 16,
+        borderRadius: 16,
+        padding: 16,
+      }}
+    >
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+        }}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 16,
+            color: '#fff',
+          }}
+        >
+          Deine Position
+        </Text>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 18,
+            color: '#fff',
+          }}
+        >
+          {rank !== null ? `Platz ${rank}` : 'Außerhalb Top 50'}
+        </Text>
+      </View>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 13,
+          color: '#fff',
+          opacity: 0.95,
+          marginTop: 4,
+        }}
+      >
+        {tagline}
+        {' · '}
+        {metric === 'pts'
+          ? `${myValue.toLocaleString('de-DE')} Pkt`
+          : `${myValue.toFixed(2).replace('.', ',')} € gespart`}
+      </Text>
+    </LinearGradient>
+  );
+}
+
+function DeinePositionRegionCard({
+  rank,
+  label,
+  total,
+}: {
+  rank: number | null;
+  label: string | null;
+  total: number;
+}) {
+  if (!label) {
+    return (
+      <View style={{ paddingHorizontal: 20, marginTop: 12 }}>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 12,
+            color: '#666',
+            textAlign: 'center',
+          }}
+        >
+          Setze deine Stadt um in der Region-Liga mitzuspielen.
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <LinearGradient
+      colors={['#0d8575', '#10a18a']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={{
+        marginHorizontal: 20,
+        marginTop: 16,
+        borderRadius: 16,
+        padding: 16,
+      }}
+    >
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+        }}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 16,
+            color: '#fff',
+          }}
+        >
+          Deine Region
+        </Text>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 18,
+            color: '#fff',
+          }}
+        >
+          {rank !== null ? `Platz ${rank}` : 'außerhalb Top'}
+          {rank !== null ? ` / ${total}` : ''}
+        </Text>
+      </View>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 13,
+          color: '#fff',
+          opacity: 0.95,
+          marginTop: 4,
+        }}
+      >
+        {label} — sammle Punkte und hilf deiner Region in der Liga!
+      </Text>
+    </LinearGradient>
+  );
+}
+
+// ─── Region setup sheet content (kept) ──────────────────────────────────
 
 function RegionSetupContent({
   suggestion,
@@ -1602,29 +2182,6 @@ function RegionSetupContent({
           >
             Damit deine Punkte für deine Region zählen.
           </Text>
-          <Pressable
-            onPress={onPickOther}
-            style={({ pressed }) => ({
-              marginTop: 18,
-              height: 50,
-              borderRadius: 14,
-              backgroundColor: theme.primary,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: pressed ? 0.9 : 1,
-            })}
-          >
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 15,
-                color: '#fff',
-              }}
-            >
-              Stadt wählen
-            </Text>
-          </Pressable>
         </>
       )}
     </View>
