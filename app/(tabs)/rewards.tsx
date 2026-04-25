@@ -933,7 +933,7 @@ function EarnRow({
 type LbScopeOuter = 'overall' | 'region';
 type OverallMetric = 'pts' | 'eur';
 type RegionGeo = 'bundesland' | 'stadt';
-type Period = 'all' | 'year' | 'week';
+type Period = 'all' | 'year' | 'month' | 'week';
 
 function RanksTab() {
   const { theme } = useTokens();
@@ -1037,16 +1037,28 @@ function RanksTab() {
 
   return (
     <>
-      {/* ─── Outer pill: Overall | Regionenkampf ─── */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 4 }}>
-        <SegmentedTabs
-          tabs={[
-            { key: 'overall', label: 'Overall' },
-            { key: 'region', label: 'Regionenkampf' },
-          ] as const}
-          value={outerScope}
-          onChange={onOuterChange}
-        />
+      {/* ─── Outer scope: 2 SCOPE-CARDS (NOT pills) ───
+          Card-style selector visually distinct from the parent
+          "Einlösen | Bestenliste" pill, so we don't have stacked
+          identical-looking tab rows. Same family as the period
+          cards below. */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <ScopeCard
+            active={outerScope === 'overall'}
+            onPress={() => onOuterChange('overall')}
+            icon="account-multiple"
+            title="Overall"
+            sub="Detektive Deutschland"
+          />
+          <ScopeCard
+            active={outerScope === 'region'}
+            onPress={() => onOuterChange('region')}
+            icon="map-marker-radius"
+            title="Regionenkampf"
+            sub="Städte vs. Bundesländer"
+          />
+        </View>
       </View>
 
       {/* Setup nudge — only when explicit city not set yet (Regionenkampf
@@ -1070,19 +1082,12 @@ function RanksTab() {
       >
         {/* ════ PAGE 1 — Overall ════ */}
         <View key="overall">
-          <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
-            <SegmentedTabs
-              tabs={[
-                { key: 'pts', label: 'Punkte' },
-                { key: 'eur', label: 'Ersparnisse' },
-              ] as const}
-              value={metric}
-              onChange={setMetric}
-            />
-          </View>
-          <View style={{ paddingTop: 10 }}>
+          {/* Period cards (4 items, horizontal scroll) — same family
+              as the scope cards above. */}
+          <View style={{ paddingTop: 14 }}>
             <PeriodSwitcher value={overallPeriod} onChange={setOverallPeriod} />
           </View>
+
           <HeroBanner
             icon={metric === 'pts' ? 'trophy' : 'cash-multiple'}
             title={metric === 'pts' ? 'Punkte Bestenliste' : 'Ersparnis-Bestenliste'}
@@ -1090,6 +1095,16 @@ function RanksTab() {
               metric === 'pts'
                 ? 'Wer sammelt die meisten Punkte?'
                 : 'Wer hat am meisten gespart?'
+            }
+            inlineSelector={
+              <InlineToggle
+                value={metric}
+                onChange={setMetric}
+                options={[
+                  { key: 'pts', label: 'Punkte' },
+                  { key: 'eur', label: 'Ersparnisse' },
+                ]}
+              />
             }
           />
 
@@ -1115,22 +1130,22 @@ function RanksTab() {
 
         {/* ════ PAGE 2 — Regionenkampf ════ */}
         <View key="region">
-          <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
-            <SegmentedTabs
-              tabs={[
-                { key: 'bundesland', label: 'Bundesländer' },
-                { key: 'stadt', label: 'Städte' },
-              ] as const}
-              value={geo}
-              onChange={setGeo}
-            />
-          </View>
-          <View style={{ paddingTop: 10 }}>
+          <View style={{ paddingTop: 14 }}>
             <PeriodSwitcher value={regionPeriod} onChange={setRegionPeriod} />
           </View>
           <HeroBanner
             icon={geo === 'bundesland' ? 'map' : 'city'}
             title={geo === 'bundesland' ? 'Bundesländer-Liga' : 'Städte-Liga'}
+            inlineSelector={
+              <InlineToggle
+                value={geo}
+                onChange={setGeo}
+                options={[
+                  { key: 'bundesland', label: 'Bundesländer' },
+                  { key: 'stadt', label: 'Städte' },
+                ]}
+              />
+            }
             subtitle={
               geo === 'bundesland'
                 ? 'Welche Region sammelt am meisten Punkte?'
@@ -1270,7 +1285,7 @@ function PeriodSwitcher({
       title: 'Legendär',
       sub: 'Aller Zeiten',
       iconColor: '#f5b301',
-      bg: '#fff7e0',
+      bg: '#fff3c2',
     },
     {
       key: 'year',
@@ -1278,15 +1293,23 @@ function PeriodSwitcher({
       title: 'Champion',
       sub: 'Dieses Jahr',
       iconColor: '#bf8636',
-      bg: '#fff3df',
+      bg: '#fff0d0',
+    },
+    {
+      key: 'month',
+      icon: '⭐',
+      title: 'Rising Star',
+      sub: 'Dieser Monat',
+      iconColor: '#f5b301',
+      bg: '#fff7d8',
     },
     {
       key: 'week',
-      icon: '⭐',
-      title: 'Rising Star',
+      icon: '🔥',
+      title: 'On Fire',
       sub: 'Diese Woche',
-      iconColor: '#f5b301',
-      bg: '#fff9d8',
+      iconColor: '#e64f1f',
+      bg: '#ffe3d6',
     },
   ];
   return (
@@ -1354,10 +1377,15 @@ function HeroBanner({
   icon,
   title,
   subtitle,
+  inlineSelector,
 }: {
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
   title: string;
   subtitle: string;
+  /** Optional inline metric/geo selector rendered at the bottom of
+   *  the hero — keeps the metric-switch in context without a third
+   *  separate tab row. */
+  inlineSelector?: React.ReactNode;
 }) {
   return (
     <LinearGradient
@@ -1370,37 +1398,167 @@ function HeroBanner({
         borderRadius: 16,
         paddingVertical: 16,
         paddingHorizontal: 16,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
       }}
     >
-      <MaterialCommunityIcons name={icon} size={28} color="#5a3500" />
-      <View style={{ flex: 1 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <MaterialCommunityIcons name={icon} size={28} color="#5a3500" />
+        <View style={{ flex: 1 }}>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 17,
+              color: '#1a1a1a',
+              letterSpacing: -0.2,
+            }}
+          >
+            {title}
+          </Text>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 12,
+              color: '#3a3a3a',
+              marginTop: 2,
+            }}
+          >
+            {subtitle}
+          </Text>
+        </View>
+      </View>
+      {inlineSelector ? <View style={{ marginTop: 12 }}>{inlineSelector}</View> : null}
+    </LinearGradient>
+  );
+}
+
+// ─── Scope card (Overall / Regionenkampf top selector) ──────────────────
+
+function ScopeCard({
+  active,
+  onPress,
+  icon,
+  title,
+  sub,
+}: {
+  active: boolean;
+  onPress: () => void;
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  title: string;
+  sub: string;
+}) {
+  const { theme, shadows } = useTokens();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flex: 1,
+        minHeight: 76,
+        borderRadius: 14,
+        padding: 12,
+        backgroundColor: active
+          ? theme.primaryContainer ?? theme.surfaceAlt
+          : theme.surface,
+        borderWidth: active ? 1.5 : 1,
+        borderColor: active ? theme.primary : theme.border,
+        opacity: pressed ? 0.92 : 1,
+        ...(active ? shadows.sm : {}),
+      })}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <View
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            backgroundColor: active ? theme.primary : theme.surfaceAlt,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <MaterialCommunityIcons
+            name={icon}
+            size={18}
+            color={active ? '#fff' : theme.primary}
+          />
+        </View>
         <Text
           style={{
             fontFamily,
             fontWeight: fontWeight.extraBold,
-            fontSize: 17,
-            color: '#1a1a1a',
-            letterSpacing: -0.2,
+            fontSize: 14,
+            color: theme.text,
           }}
         >
           {title}
         </Text>
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 12,
-            color: '#3a3a3a',
-            marginTop: 2,
-          }}
-        >
-          {subtitle}
-        </Text>
       </View>
-    </LinearGradient>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 11,
+          color: theme.textMuted,
+          marginTop: 6,
+        }}
+      >
+        {sub}
+      </Text>
+    </Pressable>
+  );
+}
+
+// ─── Inline metric/geo toggle (lives inside the yellow hero) ────────────
+
+function InlineToggle<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (key: T) => void;
+  options: readonly { key: T; label: string }[];
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        backgroundColor: 'rgba(0,0,0,0.08)',
+        borderRadius: 10,
+        padding: 3,
+        gap: 3,
+      }}
+    >
+      {options.map((opt) => {
+        const on = opt.key === value;
+        return (
+          <Pressable
+            key={opt.key}
+            onPress={() => onChange(opt.key)}
+            style={({ pressed }) => ({
+              flex: 1,
+              height: 30,
+              borderRadius: 8,
+              backgroundColor: on ? '#fff' : 'transparent',
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 12,
+                color: on ? '#1a1a1a' : '#3a3a3a',
+              }}
+            >
+              {opt.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -1408,18 +1566,24 @@ function HeroBanner({
 
 function PeriodComingSoon({ period }: { period: Exclude<Period, 'all'> }) {
   const { theme } = useTokens();
-  const copy =
-    period === 'year'
-      ? {
-          icon: '🏆',
-          title: 'Champion-Liga öffnet bald',
-          body: 'Mit dem nächsten Jahres-Reset startet die Champion-Liga. Sammle ab jetzt Punkte fürs Jahresergebnis.',
-        }
-      : {
-          icon: '⭐',
-          title: 'Rising-Star-Liga startet diese Woche',
-          body: 'Wer sammelt zwischen Montag und Sonntag die meisten Punkte? Schalten wir sehr bald frei.',
-        };
+  const COPY: Record<Exclude<Period, 'all'>, { icon: string; title: string; body: string }> = {
+    year: {
+      icon: '🏆',
+      title: 'Champion-Liga öffnet bald',
+      body: 'Mit dem nächsten Jahres-Reset startet die Champion-Liga. Sammle ab jetzt Punkte fürs Jahresergebnis.',
+    },
+    month: {
+      icon: '⭐',
+      title: 'Rising-Star-Liga öffnet bald',
+      body: 'Wer sammelt im laufenden Monat die meisten Punkte? Schalten wir sehr bald frei.',
+    },
+    week: {
+      icon: '🔥',
+      title: 'On-Fire-Liga öffnet bald',
+      body: 'Wer ist diese Woche besonders aktiv? Wochenliga startet sehr bald.',
+    },
+  };
+  const copy = COPY[period];
   return (
     <View
       style={{
@@ -1594,10 +1758,7 @@ function UserCard({ user, metric }: { user: LbUser; metric: OverallMetric }) {
       }}
     >
       <RankBadge rank={user.rank} />
-      <UserAvatar
-        name={user.name}
-        photoUrl={(user as any).photoUrl ?? null}
-      />
+      <UserAvatar name={user.name} photoUrl={user.photoUrl} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text
           numberOfLines={1}
@@ -1623,7 +1784,7 @@ function UserCard({ user, metric }: { user: LbUser; metric: OverallMetric }) {
             marginTop: 2,
           }}
         >
-          {(user as any).level ? `Level ${(user as any).level} · ` : ''}
+          {user.level ? `Level ${user.level} · ` : ''}
           {subValue}
         </Text>
       </View>
@@ -1692,30 +1853,58 @@ function UserAvatar({ name, photoUrl }: { name: string; photoUrl: string | null 
 function RankBadge({ rank }: { rank: number }) {
   const { theme } = useTokens();
   if (rank <= 3) {
+    // Medal style: gradient-tinted disc + ribbon-look notch on top.
+    // Centred big number in white. Distinctly different from the
+    // grey rank-N pill below.
     const tint = rank === 1 ? '#f5b301' : rank === 2 ? '#a3adb1' : '#c98a51';
+    const tintDark = rank === 1 ? '#bf8636' : rank === 2 ? '#6f7a7e' : '#955f33';
     return (
-      <View
-        style={{
-          width: 36,
-          height: 36,
-          borderRadius: 18,
-          backgroundColor: tint + '22',
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderWidth: 2,
-          borderColor: tint,
-        }}
-      >
-        <Text
+      <View style={{ width: 38, alignItems: 'center' }}>
+        {/* Ribbons (two angled stripes that peek above the medal) */}
+        <View style={{ flexDirection: 'row', height: 8, marginBottom: -4, zIndex: 0 }}>
+          <View
+            style={{
+              width: 8,
+              height: 14,
+              backgroundColor: '#dc3545',
+              transform: [{ skewX: '-12deg' }],
+              marginRight: 6,
+            }}
+          />
+          <View
+            style={{
+              width: 8,
+              height: 14,
+              backgroundColor: '#0d6efd',
+              transform: [{ skewX: '12deg' }],
+            }}
+          />
+        </View>
+        {/* Medal disc */}
+        <LinearGradient
+          colors={[tint, tintDark]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
           style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 14,
-            color: tint,
+            width: 30,
+            height: 30,
+            borderRadius: 15,
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1,
           }}
         >
-          {rank}
-        </Text>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 13,
+              color: '#fff',
+            }}
+          >
+            {rank}
+          </Text>
+        </LinearGradient>
       </View>
     );
   }

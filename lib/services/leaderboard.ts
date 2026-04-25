@@ -18,7 +18,7 @@ import { db } from '@/lib/firebase';
 import { CITY_TO_BUNDESLAND, normalizeCityName } from '@/lib/data/city-to-bundesland';
 
 export type LbScope = 'overall' | 'bundesland' | 'stadt';
-export type LbPeriod = 'all' | 'year' | 'week';
+export type LbPeriod = 'all' | 'year' | 'month' | 'week';
 export type LbMetric = 'pts' | 'eur';
 
 /** True when the period has real data today. Year + week are stubs
@@ -72,8 +72,12 @@ export type LbUser = {
   /** display_name as chosen by the user (gamer-tag style). */
   name: string;
   avatar: string;
+  /** photoUrl from userProfile.photo_url — rendered as the avatar
+   *  when present, falls back to first-letter circle when null. */
+  photoUrl: string | null;
   city: string | null;
   bundesland: string | null;
+  level: number;
   pts: number;
   eur: number;
   isMe?: boolean;
@@ -137,8 +141,10 @@ async function fetchSnapshot(): Promise<Snapshot> {
         rank: Number(u.rank || 0),
         name: String(u.name || 'Anonymer Detektiv'),
         avatar: String(u.avatar || '🦉'),
+        photoUrl: u.photoUrl ?? null,
         city: u.city ? normalizeCityName(u.city) : null,
         bundesland: u.bundesland || (u.city ? CITY_TO_BUNDESLAND[u.city] : null) || null,
+        level: Number(u.level || 1),
         pts: Number(u.pts || 0),
         eur: Number(u.eur || 0),
       }));
