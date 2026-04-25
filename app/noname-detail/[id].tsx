@@ -1,6 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -17,9 +17,11 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import PagerView from 'react-native-pager-view';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
+import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { ProductDetailSkeleton } from '@/components/design/Skeletons';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
@@ -92,6 +94,20 @@ export default function NoNameDetailScreen() {
   const [product, setProduct] = useState<ProductWithDetails | null>(null);
 
   const [tab, setTab] = useState<Tab>('ingredients');
+  // SegmentedTabs + PagerView combo for tabs (project rule).
+  const tabPagerRef = useRef<PagerView | null>(null);
+  const [tabHeights, setTabHeights] = useState<{
+    ingredients?: number;
+    nutrition?: number;
+  }>({});
+  const onTabChange = (next: Tab) => {
+    setTab(next);
+    tabPagerRef.current?.setPage(next === 'ingredients' ? 0 : 1);
+  };
+  const onTabPagerSelected = (e: { nativeEvent: { position: number } }) => {
+    const next: Tab = e.nativeEvent.position === 0 ? 'ingredients' : 'nutrition';
+    setTab((prev) => (prev === next ? prev : next));
+  };
   const [isFav, setIsFav] = useState(false);
   const [inCart, setInCart] = useState(false);
   const [ratingsOpen, setRatingsOpen] = useState(false);
@@ -582,62 +598,70 @@ export default function NoNameDetailScreen() {
           </View>
         </View>
 
-        {/* ─── Tabs: Inhaltsstoffe / Nährwerte ───────────────────── */}
-        <View
-          style={{
-            marginHorizontal: 20,
-            marginTop: 20,
-            padding: 4,
-            borderRadius: 999,
-            backgroundColor: theme.surfaceAlt,
-            flexDirection: 'row',
-            gap: 4,
-          }}
-        >
-          {(
-            [
-              ['ingredients', 'Inhaltsstoffe'],
-              ['nutrition', 'Nährwerte'],
-            ] as const
-          ).map(([k, label]) => {
-            const on = tab === k;
-            return (
-              <Pressable
-                key={k}
-                onPress={() => setTab(k)}
-                style={({ pressed }) => ({
-                  flex: 1,
-                  height: 40,
-                  borderRadius: 999,
-                  backgroundColor: on ? theme.surface : 'transparent',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: pressed ? 0.92 : 1,
-                  ...(on ? shadows.sm : {}),
-                })}
-              >
-                <Text
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.bold,
-                    fontSize: 13,
-                    color: on ? theme.text : theme.textMuted,
-                  }}
-                >
-                  {label}
-                </Text>
-              </Pressable>
-            );
-          })}
+        {/* ─── Tabs: Inhaltsstoffe / Nährwerte ─────────────────────
+            SegmentedTabs (animated pill) + PagerView for swipe.
+            Same pattern as Stöbern / Rewards / product-comparison. */}
+        <View style={{ marginHorizontal: 20, marginTop: 20 }}>
+          <SegmentedTabs
+            tabs={[
+              { key: 'ingredients', label: 'Inhaltsstoffe' },
+              { key: 'nutrition', label: 'Nährwerte' },
+            ] as const}
+            value={tab}
+            onChange={onTabChange}
+          />
         </View>
 
-        {/* ─── Single-column content ─────────────────────────────── */}
-        <SingleInfoCard
-          tab={tab}
-          product={p}
-          theme={theme}
-          shadows={shadows}
-        />
+        {/* PagerView height = max of measured page heights. 220 px
+            fallback so the screen doesn't collapse to 0 before the
+            first onLayout fires. */}
+        <PagerView
+          ref={tabPagerRef}
+          style={{
+            height: Math.max(
+              tabHeights.ingredients ?? 0,
+              tabHeights.nutrition ?? 0,
+              220,
+            ),
+          }}
+          initialPage={0}
+          onPageSelected={onTabPagerSelected}
+        >
+          <View
+            key="ingredients"
+            onLayout={(e) =>
+              setTabHeights((prev) =>
+                prev.ingredients === e.nativeEvent.layout.height
+                  ? prev
+                  : { ...prev, ingredients: e.nativeEvent.layout.height },
+              )
+            }
+          >
+            <SingleInfoCard
+              tab="ingredients"
+              product={p}
+              theme={theme}
+              shadows={shadows}
+            />
+          </View>
+          <View
+            key="nutrition"
+            onLayout={(e) =>
+              setTabHeights((prev) =>
+                prev.nutrition === e.nativeEvent.layout.height
+                  ? prev
+                  : { ...prev, nutrition: e.nativeEvent.layout.height },
+              )
+            }
+          >
+            <SingleInfoCard
+              tab="nutrition"
+              product={p}
+              theme={theme}
+              shadows={shadows}
+            />
+          </View>
+        </PagerView>
 
         {/* ─── Detektiv-Einordnung row ───────────────────────────── */}
         <View

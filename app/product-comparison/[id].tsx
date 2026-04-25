@@ -19,9 +19,11 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import PagerView from 'react-native-pager-view';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
+import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { ProductDetailSkeleton } from '@/components/design/Skeletons';
 import { StufenChips } from '@/components/design/StufenChips';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
@@ -210,6 +212,21 @@ export default function ProductComparisonScreen() {
 
   // ─── UI state ─────────────────────────────────────────────────────────
   const [tab, setTab] = useState<Tab>('ingredients');
+  // Inline-tabs follow the project rule: SegmentedTabs (animated pill)
+  // visually + PagerView for the swipe-and-native-page-animation
+  // mechanic. Because the section sits INSIDE the page's main
+  // ScrollView, PagerView needs an explicit height; we measure each
+  // tab's content via onLayout and use the larger of the two.
+  const tabPagerRef = useRef<PagerView | null>(null);
+  const [tabHeights, setTabHeights] = useState<{ ingredients?: number; nutrition?: number }>({});
+  const onTabChange = (next: Tab) => {
+    setTab(next);
+    tabPagerRef.current?.setPage(next === 'ingredients' ? 0 : 1);
+  };
+  const onTabPagerSelected = (e: { nativeEvent: { position: number } }) => {
+    const next: Tab = e.nativeEvent.position === 0 ? 'ingredients' : 'nutrition';
+    setTab((prev) => (prev === next ? prev : next));
+  };
   const [carouselIdx, setCarouselIdx] = useState(0);
   const carouselRef = useRef<ScrollView | null>(null);
   const [favMap, setFavMap] = useState<Record<string, boolean>>({});
@@ -1235,66 +1252,67 @@ export default function ProductComparisonScreen() {
           </View>
         )}
 
-        {/* ─── Tabs: Inhaltsstoffe / Nährwerte ───────────────────── */}
-        <View
-          style={{
-            marginHorizontal: 20,
-            marginTop: 24,
-            padding: 4,
-            borderRadius: 999,
-            backgroundColor: theme.surfaceAlt,
-            flexDirection: 'row',
-            gap: 4,
-          }}
-        >
-          {(
-            [
-              ['ingredients', 'Inhaltsstoffe'],
-              ['nutrition', 'Nährwerte'],
-            ] as const
-          ).map(([k, label]) => {
-            const on = tab === k;
-            return (
-              <Pressable
-                key={k}
-                onPress={() => setTab(k)}
-                style={({ pressed }) => ({
-                  flex: 1,
-                  height: 40,
-                  borderRadius: 999,
-                  backgroundColor: on ? theme.surface : 'transparent',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: pressed ? 0.92 : 1,
-                  ...(on ? shadows.sm : {}),
-                })}
-              >
-                <Text
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.bold,
-                    fontSize: 13,
-                    color: on ? theme.text : theme.textMuted,
-                  }}
-                >
-                  {label}
-                </Text>
-              </Pressable>
-            );
-          })}
+        {/* ─── Tabs: Inhaltsstoffe / Nährwerte ─────────────────────
+            SegmentedTabs (animated pill) drives a PagerView so
+            users can also swipe horizontally between the two
+            sections. Same pattern as Stöbern / Rewards. */}
+        <View style={{ marginHorizontal: 20, marginTop: 24 }}>
+          <SegmentedTabs
+            tabs={[
+              { key: 'ingredients', label: 'Inhaltsstoffe' },
+              { key: 'nutrition', label: 'Nährwerte' },
+            ] as const}
+            value={tab}
+            onChange={onTabChange}
+          />
         </View>
 
-        {/* ─── Comparison content ────────────────────────────────── */}
-        {tab === 'ingredients' ? (
-          <IngredientsMatch brandProduct={mainProduct} noname={picked} theme={theme} />
-        ) : (
-          <NutritionTable
-            brandProduct={mainProduct}
-            noname={picked}
-            theme={theme}
-            primary={brand.primary}
-          />
-        )}
+        {/* PagerView height = the larger of the two pages' measured
+            heights. Falls back to a minHeight while we wait for the
+            first onLayout, so the screen doesn't jump from 0 → real
+            on first paint. */}
+        <PagerView
+          ref={tabPagerRef}
+          style={{
+            height: Math.max(
+              tabHeights.ingredients ?? 0,
+              tabHeights.nutrition ?? 0,
+              280,
+            ),
+          }}
+          initialPage={0}
+          onPageSelected={onTabPagerSelected}
+        >
+          <View
+            key="ingredients"
+            onLayout={(e) =>
+              setTabHeights((prev) =>
+                prev.ingredients === e.nativeEvent.layout.height
+                  ? prev
+                  : { ...prev, ingredients: e.nativeEvent.layout.height },
+              )
+            }
+          >
+            <IngredientsMatch brandProduct={mainProduct} noname={picked} theme={theme} />
+          </View>
+          <View
+            key="nutrition"
+            onLayout={(e) =>
+              setTabHeights((prev) =>
+                prev.nutrition === e.nativeEvent.layout.height
+                  ? prev
+                  : { ...prev, nutrition: e.nativeEvent.layout.height },
+              )
+            }
+          >
+            <NutritionTable
+              brandProduct={mainProduct}
+              noname={picked}
+              theme={theme}
+              primary={brand.primary}
+            />
+          </View>
+        </PagerView>
 
         {/* ─── Gute Alternativen ──────────────────────────────────── */}
         {alternatives.length > 0 ? (
