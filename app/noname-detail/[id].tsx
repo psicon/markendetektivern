@@ -629,13 +629,16 @@ export default function NoNameDetailScreen() {
         >
           <View
             key="ingredients"
-            onLayout={(e) =>
+            onLayout={(e) => {
+              // Guard for null nativeEvent.layout — PagerView on the
+              // new architecture sometimes fires onLayout with no
+              // layout payload while recycling pages.
+              const h = e?.nativeEvent?.layout?.height;
+              if (typeof h !== 'number') return;
               setTabHeights((prev) =>
-                prev.ingredients === e.nativeEvent.layout.height
-                  ? prev
-                  : { ...prev, ingredients: e.nativeEvent.layout.height },
-              )
-            }
+                prev.ingredients === h ? prev : { ...prev, ingredients: h },
+              );
+            }}
           >
             <SingleInfoCard
               tab="ingredients"
@@ -646,13 +649,13 @@ export default function NoNameDetailScreen() {
           </View>
           <View
             key="nutrition"
-            onLayout={(e) =>
+            onLayout={(e) => {
+              const h = e?.nativeEvent?.layout?.height;
+              if (typeof h !== 'number') return;
               setTabHeights((prev) =>
-                prev.nutrition === e.nativeEvent.layout.height
-                  ? prev
-                  : { ...prev, nutrition: e.nativeEvent.layout.height },
-              )
-            }
+                prev.nutrition === h ? prev : { ...prev, nutrition: h },
+              );
+            }}
           >
             <SingleInfoCard
               tab="nutrition"

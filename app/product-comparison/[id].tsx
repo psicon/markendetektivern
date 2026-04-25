@@ -1285,25 +1285,29 @@ export default function ProductComparisonScreen() {
         >
           <View
             key="ingredients"
-            onLayout={(e) =>
+            onLayout={(e) => {
+              // PagerView on the new architecture occasionally fires
+              // onLayout with a null nativeEvent.layout while it
+              // recycles pages — guard so we don't crash on
+              // `null.height`.
+              const h = e?.nativeEvent?.layout?.height;
+              if (typeof h !== 'number') return;
               setTabHeights((prev) =>
-                prev.ingredients === e.nativeEvent.layout.height
-                  ? prev
-                  : { ...prev, ingredients: e.nativeEvent.layout.height },
-              )
-            }
+                prev.ingredients === h ? prev : { ...prev, ingredients: h },
+              );
+            }}
           >
             <IngredientsMatch brandProduct={mainProduct} noname={picked} theme={theme} />
           </View>
           <View
             key="nutrition"
-            onLayout={(e) =>
+            onLayout={(e) => {
+              const h = e?.nativeEvent?.layout?.height;
+              if (typeof h !== 'number') return;
               setTabHeights((prev) =>
-                prev.nutrition === e.nativeEvent.layout.height
-                  ? prev
-                  : { ...prev, nutrition: e.nativeEvent.layout.height },
-              )
-            }
+                prev.nutrition === h ? prev : { ...prev, nutrition: h },
+              );
+            }}
           >
             <NutritionTable
               brandProduct={mainProduct}
