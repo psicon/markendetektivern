@@ -1,37 +1,46 @@
-// Leaderboard service — collective city/Bundesland scoring.
+// Leaderboard service — individual user rankings + collective city battle.
 //
 // Phase 3 ships with MOCK data so the UI can be reviewed without a
 // backend. The contract is intentionally narrow so the day Cloud
 // Function aggregates land we only swap out the implementations
-// here. Nothing else in the app touches the underlying collections.
+// here. Nothing else in the app touches the underlying data.
 //
-// Concept (deliberately NOT individual user rankings):
-//   • Each user's points are added anonymously to their CITY and
-//     BUNDESLAND counters.
-//   • Leaderboards rank cities/Bundesländer, not users.
-//   • The user sees their own contribution privately (mini card) but
-//     never appears as an individual on a public list.
-// This is the GDPR-friendly variant: aggregate output, k-anonymity
-// on the sale side, no per-user listing.
+// Two concepts side-by-side, mirroring the prototype:
+//   1. Individual user leaderboard — display_name + chosen city,
+//      sorted by Detektiv-Punkte. Public listing relies on the user
+//      having a chosen display_name (already public) and having
+//      opted-in to share their city via the Region-Setup sheet.
+//   2. Städte-Duell — anonymous aggregate per city, no user names.
+//      This is the GDPR-friendly "kollektiv"-Konzept the user wanted
+//      preserved as a complement to the user list.
 
-export type LbScope = 'bundesland' | 'stadt';
+export type LbScope = 'overall' | 'bundesland' | 'friends';
 export type LbPeriod = 'month' | 'all';
 
-export type LbRow = {
-  /** Stable key — slug of the label, used for highlight matching. */
-  key: string;
-  /** Human-readable name shown in the list. */
-  label: string;
-  /** Bundesland name (cities only). */
-  bundesland?: string;
-  /** Score for the requested period. */
-  pts: number;
-  /** Aktuelle Position (1-based) in der gelieferten Sortierung. */
+export type LbUser = {
+  /** Stable id (would be uid in real life, slugged nick for mock). */
+  id: string;
   rank: number;
-  /** Highlight flag — set by the service when it matches the
-   *  passed-in user region, so the renderer doesn't have to do that
-   *  matching again. */
+  /** Public display name (gamer-tag style). */
+  name: string;
+  /** Avatar emoji — can be replaced by a photo_url later. */
+  avatar: string;
+  /** User's opted-in city (free-text on the profile). */
+  city: string;
+  /** Detektiv-Punkte for the requested period. */
+  pts: number;
+  /** Cumulative Ersparnis in € for the requested period. */
+  eur: number;
+  /** True when this row is the current user. */
   isMe?: boolean;
+};
+
+export type LbCityBattleRow = {
+  city: string;
+  bundesland: string;
+  pts: number;
+  /** % change vs. last period — string with leading sign, e.g. "+4.2%". */
+  delta: string;
 };
 
 // ─── Static Bundesland list — the 16 of them ────────────────────────────
@@ -56,62 +65,53 @@ export const BUNDESLAENDER = [
 
 export type Bundesland = (typeof BUNDESLAENDER)[number];
 
-// ─── Mock data ──────────────────────────────────────────────────────────
-type BLEntry = { label: Bundesland; monthPts: number; allPts: number };
-const MOCK_BL: BLEntry[] = [
-  { label: 'Bayern', monthPts: 842_000, allPts: 12_400_000 },
-  { label: 'Nordrhein-Westfalen', monthPts: 612_000, allPts: 9_800_000 },
-  { label: 'Baden-Württemberg', monthPts: 498_000, allPts: 7_900_000 },
-  { label: 'Niedersachsen', monthPts: 312_000, allPts: 4_400_000 },
-  { label: 'Hessen', monthPts: 248_000, allPts: 3_500_000 },
-  { label: 'Sachsen', monthPts: 198_000, allPts: 2_800_000 },
-  { label: 'Rheinland-Pfalz', monthPts: 162_000, allPts: 2_100_000 },
-  { label: 'Berlin', monthPts: 151_000, allPts: 2_050_000 },
-  { label: 'Schleswig-Holstein', monthPts: 124_000, allPts: 1_700_000 },
-  { label: 'Brandenburg', monthPts: 98_000, allPts: 1_300_000 },
-  { label: 'Sachsen-Anhalt', monthPts: 86_000, allPts: 1_100_000 },
-  { label: 'Hamburg', monthPts: 82_000, allPts: 1_080_000 },
-  { label: 'Thüringen', monthPts: 76_000, allPts: 1_020_000 },
-  { label: 'Mecklenburg-Vorpommern', monthPts: 58_000, allPts: 720_000 },
-  { label: 'Saarland', monthPts: 41_000, allPts: 540_000 },
-  { label: 'Bremen', monthPts: 35_000, allPts: 460_000 },
+// ─── Mock data — individual leaderboard ─────────────────────────────────
+// Realistic-looking gamer-tag style nicknames + spoof user as
+// "Hannah K." (matches the prototype). The "isMe" flag is set on the
+// fly inside getLeaderboard once we know the current user's nick.
+type RawUser = { name: string; avatar: string; city: string; bundesland: Bundesland };
+
+const MOCK_USERS_OVERALL_MONTH: (RawUser & { pts: number; eur: number })[] = [
+  { name: 'PreisjägerT',      avatar: '🦊', city: 'München',     bundesland: 'Bayern',                pts: 3210, eur: 128.4 },
+  { name: 'AldiAgent23',      avatar: '🐻', city: 'Nürnberg',    bundesland: 'Bayern',                pts: 2980, eur: 112.9 },
+  { name: 'SparfuchsMila',    avatar: '🦊', city: 'Augsburg',    bundesland: 'Bayern',                pts: 2760, eur: 98.2 },
+  { name: 'Detektiv Dave',    avatar: '🕵️', city: 'Regensburg',  bundesland: 'Bayern',                pts: 2510, eur: 68.1 },
+  { name: 'Hannah K.',        avatar: '🦉', city: 'München',     bundesland: 'Bayern',                pts: 2340, eur: 76.3 },
+  { name: 'Billig-Betty',     avatar: '🐨', city: 'Würzburg',    bundesland: 'Bayern',                pts: 2120, eur: 54.4 },
+  { name: 'KeinMarkusKeiner', avatar: '🦝', city: 'Ingolstadt',  bundesland: 'Bayern',                pts: 1980, eur: 84.5 },
+  { name: 'NoNameNina',       avatar: '🐸', city: 'Erlangen',    bundesland: 'Bayern',                pts: 1740, eur: 42.8 },
+  { name: 'Herr Sparschwein', avatar: '🐷', city: 'Bamberg',     bundesland: 'Bayern',                pts: 1520, eur: 31.5 },
+  { name: 'BayernBlitz',      avatar: '🦁', city: 'München',     bundesland: 'Bayern',                pts: 1480, eur: 96.2 },
+  { name: 'KölscherKlaus',    avatar: '🦄', city: 'Köln',        bundesland: 'Nordrhein-Westfalen',   pts: 1320, eur: 64.5 },
+  { name: 'HamburgerHero',    avatar: '⚓', city: 'Hamburg',     bundesland: 'Hamburg',               pts: 1180, eur: 48.3 },
+  { name: 'BerlinerBär',      avatar: '🐻', city: 'Berlin',      bundesland: 'Berlin',                pts: 1090, eur: 39.8 },
+  { name: 'StuttgartStar',    avatar: '⭐', city: 'Stuttgart',   bundesland: 'Baden-Württemberg',     pts: 980,  eur: 34.2 },
+  { name: 'Frankfurter F',    avatar: '🌭', city: 'Frankfurt',   bundesland: 'Hessen',                pts: 870,  eur: 28.7 },
 ];
 
-type CityEntry = { label: string; bundesland: Bundesland; monthPts: number; allPts: number };
-const MOCK_CITIES: CityEntry[] = [
-  { label: 'München', bundesland: 'Bayern', monthPts: 184_000, allPts: 2_400_000 },
-  { label: 'Köln', bundesland: 'Nordrhein-Westfalen', monthPts: 156_000, allPts: 2_080_000 },
-  { label: 'Hamburg', bundesland: 'Hamburg', monthPts: 82_000, allPts: 1_080_000 },
-  { label: 'Berlin', bundesland: 'Berlin', monthPts: 151_000, allPts: 2_050_000 },
-  { label: 'Stuttgart', bundesland: 'Baden-Württemberg', monthPts: 124_000, allPts: 1_900_000 },
-  { label: 'Frankfurt am Main', bundesland: 'Hessen', monthPts: 118_000, allPts: 1_650_000 },
-  { label: 'Düsseldorf', bundesland: 'Nordrhein-Westfalen', monthPts: 96_000, allPts: 1_400_000 },
-  { label: 'Nürnberg', bundesland: 'Bayern', monthPts: 92_000, allPts: 1_360_000 },
-  { label: 'Dortmund', bundesland: 'Nordrhein-Westfalen', monthPts: 78_000, allPts: 1_120_000 },
-  { label: 'Essen', bundesland: 'Nordrhein-Westfalen', monthPts: 72_000, allPts: 980_000 },
-  { label: 'Leipzig', bundesland: 'Sachsen', monthPts: 68_000, allPts: 940_000 },
-  { label: 'Dresden', bundesland: 'Sachsen', monthPts: 62_000, allPts: 860_000 },
-  { label: 'Bremen', bundesland: 'Bremen', monthPts: 35_000, allPts: 460_000 },
-  { label: 'Hannover', bundesland: 'Niedersachsen', monthPts: 56_000, allPts: 780_000 },
-  { label: 'Augsburg', bundesland: 'Bayern', monthPts: 48_000, allPts: 690_000 },
-  { label: 'Mannheim', bundesland: 'Baden-Württemberg', monthPts: 44_000, allPts: 620_000 },
-  { label: 'Karlsruhe', bundesland: 'Baden-Württemberg', monthPts: 42_000, allPts: 580_000 },
-  { label: 'Bonn', bundesland: 'Nordrhein-Westfalen', monthPts: 40_000, allPts: 540_000 },
-  { label: 'Wiesbaden', bundesland: 'Hessen', monthPts: 38_000, allPts: 510_000 },
-  { label: 'Münster', bundesland: 'Nordrhein-Westfalen', monthPts: 36_000, allPts: 480_000 },
-  { label: 'Mainz', bundesland: 'Rheinland-Pfalz', monthPts: 34_000, allPts: 450_000 },
-  { label: 'Regensburg', bundesland: 'Bayern', monthPts: 32_000, allPts: 420_000 },
-  { label: 'Kiel', bundesland: 'Schleswig-Holstein', monthPts: 30_000, allPts: 410_000 },
-  { label: 'Saarbrücken', bundesland: 'Saarland', monthPts: 28_000, allPts: 380_000 },
-  { label: 'Erfurt', bundesland: 'Thüringen', monthPts: 26_000, allPts: 360_000 },
-  { label: 'Magdeburg', bundesland: 'Sachsen-Anhalt', monthPts: 24_000, allPts: 320_000 },
-  { label: 'Potsdam', bundesland: 'Brandenburg', monthPts: 22_000, allPts: 290_000 },
-  { label: 'Rostock', bundesland: 'Mecklenburg-Vorpommern', monthPts: 20_000, allPts: 270_000 },
-  { label: 'Schwerin', bundesland: 'Mecklenburg-Vorpommern', monthPts: 14_000, allPts: 180_000 },
-  { label: 'Lübeck', bundesland: 'Schleswig-Holstein', monthPts: 18_000, allPts: 240_000 },
+const MOCK_USERS_OVERALL_ALL: (RawUser & { pts: number; eur: number })[] = [
+  { name: 'PreisjägerT',      avatar: '🦊', city: 'München',     bundesland: 'Bayern',                pts: 41820, eur: 1284.4 },
+  { name: 'AldiAgent23',      avatar: '🐻', city: 'Nürnberg',    bundesland: 'Bayern',                pts: 38420, eur: 1108.9 },
+  { name: 'Detektiv Dave',    avatar: '🕵️', city: 'Regensburg',  bundesland: 'Bayern',                pts: 34100, eur: 624.1 },
+  { name: 'SparfuchsMila',    avatar: '🦊', city: 'Augsburg',    bundesland: 'Bayern',                pts: 29760, eur: 892.2 },
+  { name: 'Hannah K.',        avatar: '🦉', city: 'München',     bundesland: 'Bayern',                pts: 24340, eur: 682.3 },
+  { name: 'Billig-Betty',     avatar: '🐨', city: 'Würzburg',    bundesland: 'Bayern',                pts: 22120, eur: 498.4 },
+  { name: 'KeinMarkusKeiner', avatar: '🦝', city: 'Ingolstadt',  bundesland: 'Bayern',                pts: 19810, eur: 760.5 },
+  { name: 'NoNameNina',       avatar: '🐸', city: 'Erlangen',    bundesland: 'Bayern',                pts: 17410, eur: 412.8 },
+  { name: 'Herr Sparschwein', avatar: '🐷', city: 'Bamberg',     bundesland: 'Bayern',                pts: 15200, eur: 301.5 },
+  { name: 'BayernBlitz',      avatar: '🦁', city: 'München',     bundesland: 'Bayern',                pts: 14820, eur: 894.2 },
+  { name: 'KölscherKlaus',    avatar: '🦄', city: 'Köln',        bundesland: 'Nordrhein-Westfalen',   pts: 13320, eur: 644.5 },
+  { name: 'HamburgerHero',    avatar: '⚓', city: 'Hamburg',     bundesland: 'Hamburg',               pts: 11800, eur: 488.3 },
 ];
 
-// ─── Helpers ────────────────────────────────────────────────────────────
+const MOCK_CITY_BATTLE: LbCityBattleRow[] = [
+  { city: 'München',    bundesland: 'Bayern',              pts: 842_000, delta: '+4.2%' },
+  { city: 'Köln',       bundesland: 'Nordrhein-Westfalen', pts: 612_000, delta: '+2.1%' },
+  { city: 'Augsburg',   bundesland: 'Bayern',              pts: 498_000, delta: '+6.8%' },
+  { city: 'Hamburg',    bundesland: 'Hamburg',             pts: 312_000, delta: '+1.4%' },
+  { city: 'Berlin',     bundesland: 'Berlin',              pts: 248_000, delta: '-0.8%' },
+];
+
 const slug = (s: string): string =>
   s
     .toLowerCase()
@@ -125,73 +125,92 @@ const slug = (s: string): string =>
 // ─── Public API ─────────────────────────────────────────────────────────
 
 /**
- * Fetch the leaderboard for a given scope (Bundesländer or Cities) and
- * period (month or all-time). The user's region is passed in so the
- * service can mark the matching row as `isMe` for highlighting.
+ * Fetch the user leaderboard for the given scope + period.
  *
- * Today returns mock data instantly; tomorrow this is a Firestore read
- * against the aggregate counter collections.
+ * Scopes:
+ *   • overall    — all users in Germany
+ *   • bundesland — only users in `userBL` (returns empty if userBL is null)
+ *   • friends    — placeholder; no friends feature yet, returns []
+ *
+ * The current user is identified by `userNick` (display_name) so the
+ * matching row gets `isMe = true` for highlighting. If the user hasn't
+ * chosen a display_name they won't be in the list.
  */
 export async function getLeaderboard(
   scope: LbScope,
   period: LbPeriod,
   userBL?: string | null,
-  userCity?: string | null,
-): Promise<LbRow[]> {
-  const ptsKey = period === 'month' ? 'monthPts' : 'allPts';
-  if (scope === 'bundesland') {
-    const sorted = [...MOCK_BL].sort((a, b) => b[ptsKey] - a[ptsKey]);
-    return sorted.map((r, i) => ({
-      key: slug(r.label),
-      label: r.label,
-      pts: r[ptsKey],
+  userNick?: string | null,
+): Promise<LbUser[]> {
+  if (scope === 'friends') return [];
+  const pool =
+    period === 'month' ? MOCK_USERS_OVERALL_MONTH : MOCK_USERS_OVERALL_ALL;
+
+  const filtered =
+    scope === 'bundesland' && userBL
+      ? pool.filter((u) => u.bundesland === userBL)
+      : pool;
+
+  return filtered
+    .slice()
+    .sort((a, b) => b.pts - a.pts)
+    .map((u, i) => ({
+      id: slug(u.name),
       rank: i + 1,
-      isMe: !!userBL && userBL === r.label,
+      name: u.name,
+      avatar: u.avatar,
+      city: u.city,
+      pts: u.pts,
+      eur: u.eur,
+      isMe: !!userNick && u.name === userNick,
     }));
-  }
-  const sorted = [...MOCK_CITIES].sort((a, b) => b[ptsKey] - a[ptsKey]);
-  return sorted.map((r, i) => ({
-    key: slug(r.label),
-    label: r.label,
-    bundesland: r.bundesland,
-    pts: r[ptsKey],
-    rank: i + 1,
-    isMe: !!userCity && userCity === r.label,
-  }));
 }
 
 /**
- * The user's own contribution to their city / Bundesland for the given
- * period. Mock for now — wired to the live counters once the backend
- * exists. Returns null when the user hasn't picked a region.
+ * The user's own contribution in the active period — pts + eur. Mock
+ * for now; real implementation reads from userProfile.stats and a
+ * period-keyed counter (Cloud Function maintains rolling-month
+ * windows).
  */
 export async function getUserContribution(
   period: LbPeriod,
-  userBL?: string | null,
-  userCity?: string | null,
-): Promise<{ pts: number; city: string; bundesland: string } | null> {
-  if (!userBL || !userCity) return null;
-  // Mock: 240 pts this month, 4_200 all-time.
+  _userBL?: string | null,
+  _userCity?: string | null,
+): Promise<{ pts: number; eur: number; level: number; nextLevelInPts: number; pctToNext: number; streakDays: number; streakFreezes: number } | null> {
+  // Mocked numbers matching the prototype (Hannah K.).
   return {
-    pts: period === 'month' ? 240 : 4_200,
-    city: userCity,
-    bundesland: userBL,
+    pts: period === 'month' ? 2340 : 24340,
+    eur: period === 'month' ? 76.3 : 682.3,
+    level: 6,
+    nextLevelInPts: 450,
+    pctToNext: 85,
+    streakDays: 18,
+    streakFreezes: 2,
   };
+}
+
+/**
+ * Top-N cities ranked by collective points. Anonymous aggregate, no
+ * per-user data exposed. Used in the Städte-Duell widget below the
+ * user leaderboard.
+ */
+export async function getCityBattle(
+  _period: LbPeriod,
+): Promise<LbCityBattleRow[]> {
+  return MOCK_CITY_BATTLE;
 }
 
 /**
  * Best-effort suggestion of (Bundesland, city) for the current user
  * from their recent journey records. Phase 3 returns a plausible
  * default ('München'/'Bayern') so the setup-sheet has something to
- * show; the real implementation reads the most-recent
- * `journeys/<id>.location.city` and runs it through a city→Bundesland
- * lookup table.
+ * show; the real implementation reads `journeys/<id>.location.city`
+ * (we already store it via AnonymousLocationService) and runs it
+ * through a city → Bundesland lookup table.
  */
 export async function suggestRegionFromJourneys(_userId: string): Promise<{
   city: string | null;
   bundesland: Bundesland | null;
 }> {
-  // Phase 3 stub. Returns München / Bayern as a placeholder — the
-  // real journey query slots in here.
   return { city: 'München', bundesland: 'Bayern' };
 }
