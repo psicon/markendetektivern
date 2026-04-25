@@ -1,49 +1,43 @@
-// Leaderboard service — individual user rankings + collective city battle.
+// Leaderboard service — reads from the Firestore aggregate doc that
+// the daily Cloud Function writes (admin script today, scheduled
+// function later). Single doc, ~4 KB, one read per session.
 //
-// Phase 3 ships with MOCK data so the UI can be reviewed without a
-// backend. The contract is intentionally narrow so the day Cloud
-// Function aggregates land we only swap out the implementations
-// here. Nothing else in the app touches the underlying data.
+// Conceptually:
+//   - Each user's totalSavings + stats.pointsTotal feed into ONE
+//     city/Bundesland bucket.
+//   - Bucket assignment: userProfile.city if explicitly set,
+//     otherwise the most-frequent city from that user's journey
+//     history.
+//   - The aggregator runs server-side; the app just reads the result.
 //
-// Two concepts side-by-side, mirroring the prototype:
-//   1. Individual user leaderboard — display_name + chosen city,
-//      sorted by Detektiv-Punkte. Public listing relies on the user
-//      having a chosen display_name (already public) and having
-//      opted-in to share their city via the Region-Setup sheet.
-//   2. Städte-Duell — anonymous aggregate per city, no user names.
-//      This is the GDPR-friendly "kollektiv"-Konzept the user wanted
-//      preserved as a complement to the user list.
+// No per-user listing. The Liga is a city/Bundesland duel; users
+// don't appear individually anywhere on the leaderboard.
 
-export type LbScope = 'overall' | 'bundesland' | 'friends';
-export type LbPeriod = 'month' | 'all';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { CITY_TO_BUNDESLAND, normalizeCityName } from '@/lib/data/city-to-bundesland';
 
-export type LbUser = {
-  /** Stable id (would be uid in real life, slugged nick for mock). */
-  id: string;
-  rank: number;
-  /** Public display name (gamer-tag style). */
-  name: string;
-  /** Avatar emoji — can be replaced by a photo_url later. */
-  avatar: string;
-  /** User's opted-in city (free-text on the profile). */
-  city: string;
-  /** Detektiv-Punkte for the requested period. */
+export type LbScope = 'bundesland' | 'stadt';
+
+export type LbRow = {
+  /** Stable key for highlight matching (slug of label). */
+  key: string;
+  /** Human-readable name shown in the list. */
+  label: string;
+  /** Bundesland of the city (cities only). */
+  bundesland?: string;
+  /** Detektiv-Punkte total in the bucket. */
   pts: number;
-  /** Cumulative Ersparnis in € for the requested period. */
+  /** Cumulative Ersparnis in € in the bucket. */
   eur: number;
-  /** True when this row is the current user. */
+  /** How many users contributed to this bucket. */
+  users: number;
+  /** 1-based rank in the sorted list. */
+  rank: number;
+  /** Highlighted "DU" row, set on the client based on user region. */
   isMe?: boolean;
 };
 
-export type LbCityBattleRow = {
-  city: string;
-  bundesland: string;
-  pts: number;
-  /** % change vs. last period — string with leading sign, e.g. "+4.2%". */
-  delta: string;
-};
-
-// ─── Static Bundesland list — the 16 of them ────────────────────────────
 export const BUNDESLAENDER = [
   'Baden-Württemberg',
   'Bayern',
@@ -62,55 +56,53 @@ export const BUNDESLAENDER = [
   'Schleswig-Holstein',
   'Thüringen',
 ] as const;
-
 export type Bundesland = (typeof BUNDESLAENDER)[number];
 
-// ─── Mock data — individual leaderboard ─────────────────────────────────
-// Realistic-looking gamer-tag style nicknames + spoof user as
-// "Hannah K." (matches the prototype). The "isMe" flag is set on the
-// fly inside getLeaderboard once we know the current user's nick.
-type RawUser = { name: string; avatar: string; city: string; bundesland: Bundesland };
+// In-memory cache for the session — the aggregate is updated daily,
+// no point re-fetching it on every Bestenliste-tap.
+type Snapshot = {
+  bundesland: Omit<LbRow, 'isMe'>[];
+  cities: Omit<LbRow, 'isMe'>[];
+  updatedAt: number;
+  fetchedAt: number;
+};
+let _cache: Snapshot | null = null;
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1h
 
-const MOCK_USERS_OVERALL_MONTH: (RawUser & { pts: number; eur: number })[] = [
-  { name: 'PreisjägerT',      avatar: '🦊', city: 'München',     bundesland: 'Bayern',                pts: 3210, eur: 128.4 },
-  { name: 'AldiAgent23',      avatar: '🐻', city: 'Nürnberg',    bundesland: 'Bayern',                pts: 2980, eur: 112.9 },
-  { name: 'SparfuchsMila',    avatar: '🦊', city: 'Augsburg',    bundesland: 'Bayern',                pts: 2760, eur: 98.2 },
-  { name: 'Detektiv Dave',    avatar: '🕵️', city: 'Regensburg',  bundesland: 'Bayern',                pts: 2510, eur: 68.1 },
-  { name: 'Hannah K.',        avatar: '🦉', city: 'München',     bundesland: 'Bayern',                pts: 2340, eur: 76.3 },
-  { name: 'Billig-Betty',     avatar: '🐨', city: 'Würzburg',    bundesland: 'Bayern',                pts: 2120, eur: 54.4 },
-  { name: 'KeinMarkusKeiner', avatar: '🦝', city: 'Ingolstadt',  bundesland: 'Bayern',                pts: 1980, eur: 84.5 },
-  { name: 'NoNameNina',       avatar: '🐸', city: 'Erlangen',    bundesland: 'Bayern',                pts: 1740, eur: 42.8 },
-  { name: 'Herr Sparschwein', avatar: '🐷', city: 'Bamberg',     bundesland: 'Bayern',                pts: 1520, eur: 31.5 },
-  { name: 'BayernBlitz',      avatar: '🦁', city: 'München',     bundesland: 'Bayern',                pts: 1480, eur: 96.2 },
-  { name: 'KölscherKlaus',    avatar: '🦄', city: 'Köln',        bundesland: 'Nordrhein-Westfalen',   pts: 1320, eur: 64.5 },
-  { name: 'HamburgerHero',    avatar: '⚓', city: 'Hamburg',     bundesland: 'Hamburg',               pts: 1180, eur: 48.3 },
-  { name: 'BerlinerBär',      avatar: '🐻', city: 'Berlin',      bundesland: 'Berlin',                pts: 1090, eur: 39.8 },
-  { name: 'StuttgartStar',    avatar: '⭐', city: 'Stuttgart',   bundesland: 'Baden-Württemberg',     pts: 980,  eur: 34.2 },
-  { name: 'Frankfurter F',    avatar: '🌭', city: 'Frankfurt',   bundesland: 'Hessen',                pts: 870,  eur: 28.7 },
-];
-
-const MOCK_USERS_OVERALL_ALL: (RawUser & { pts: number; eur: number })[] = [
-  { name: 'PreisjägerT',      avatar: '🦊', city: 'München',     bundesland: 'Bayern',                pts: 41820, eur: 1284.4 },
-  { name: 'AldiAgent23',      avatar: '🐻', city: 'Nürnberg',    bundesland: 'Bayern',                pts: 38420, eur: 1108.9 },
-  { name: 'Detektiv Dave',    avatar: '🕵️', city: 'Regensburg',  bundesland: 'Bayern',                pts: 34100, eur: 624.1 },
-  { name: 'SparfuchsMila',    avatar: '🦊', city: 'Augsburg',    bundesland: 'Bayern',                pts: 29760, eur: 892.2 },
-  { name: 'Hannah K.',        avatar: '🦉', city: 'München',     bundesland: 'Bayern',                pts: 24340, eur: 682.3 },
-  { name: 'Billig-Betty',     avatar: '🐨', city: 'Würzburg',    bundesland: 'Bayern',                pts: 22120, eur: 498.4 },
-  { name: 'KeinMarkusKeiner', avatar: '🦝', city: 'Ingolstadt',  bundesland: 'Bayern',                pts: 19810, eur: 760.5 },
-  { name: 'NoNameNina',       avatar: '🐸', city: 'Erlangen',    bundesland: 'Bayern',                pts: 17410, eur: 412.8 },
-  { name: 'Herr Sparschwein', avatar: '🐷', city: 'Bamberg',     bundesland: 'Bayern',                pts: 15200, eur: 301.5 },
-  { name: 'BayernBlitz',      avatar: '🦁', city: 'München',     bundesland: 'Bayern',                pts: 14820, eur: 894.2 },
-  { name: 'KölscherKlaus',    avatar: '🦄', city: 'Köln',        bundesland: 'Nordrhein-Westfalen',   pts: 13320, eur: 644.5 },
-  { name: 'HamburgerHero',    avatar: '⚓', city: 'Hamburg',     bundesland: 'Hamburg',               pts: 11800, eur: 488.3 },
-];
-
-const MOCK_CITY_BATTLE: LbCityBattleRow[] = [
-  { city: 'München',    bundesland: 'Bayern',              pts: 842_000, delta: '+4.2%' },
-  { city: 'Köln',       bundesland: 'Nordrhein-Westfalen', pts: 612_000, delta: '+2.1%' },
-  { city: 'Augsburg',   bundesland: 'Bayern',              pts: 498_000, delta: '+6.8%' },
-  { city: 'Hamburg',    bundesland: 'Hamburg',             pts: 312_000, delta: '+1.4%' },
-  { city: 'Berlin',     bundesland: 'Berlin',              pts: 248_000, delta: '-0.8%' },
-];
+async function fetchSnapshot(): Promise<Snapshot> {
+  if (_cache && Date.now() - _cache.fetchedAt < CACHE_TTL_MS) return _cache;
+  const snap = await getDoc(doc(db, 'aggregates', 'leaderboard_v1'));
+  if (!snap.exists()) {
+    return { bundesland: [], cities: [], updatedAt: 0, fetchedAt: Date.now() };
+  }
+  const data = snap.data() as any;
+  const bundesland = (data.bundesland || []).map((r: any) => ({
+    key: slug(r.label),
+    label: r.label,
+    pts: Number(r.pts || 0),
+    eur: Number(r.eur || 0),
+    users: Number(r.users || 0),
+    rank: Number(r.rank || 0),
+  }));
+  const cities = (data.cities || []).map((r: any) => ({
+    key: slug(r.label),
+    // Normalize "Munich" → "München" etc. on read so the UI shows
+    // German names regardless of what the IP-geocoder produced.
+    label: normalizeCityName(r.label),
+    bundesland: r.bl || CITY_TO_BUNDESLAND[r.label] || undefined,
+    pts: Number(r.pts || 0),
+    eur: Number(r.eur || 0),
+    users: Number(r.users || 0),
+    rank: Number(r.rank || 0),
+  }));
+  _cache = {
+    bundesland,
+    cities,
+    updatedAt: data.updatedAt?.toMillis?.() ?? 0,
+    fetchedAt: Date.now(),
+  };
+  return _cache;
+}
 
 const slug = (s: string): string =>
   s
@@ -122,95 +114,74 @@ const slug = (s: string): string =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
 
-// ─── Public API ─────────────────────────────────────────────────────────
-
 /**
- * Fetch the user leaderboard for the given scope + period.
- *
- * Scopes:
- *   • overall    — all users in Germany
- *   • bundesland — only users in `userBL` (returns empty if userBL is null)
- *   • friends    — placeholder; no friends feature yet, returns []
- *
- * The current user is identified by `userNick` (display_name) so the
- * matching row gets `isMe = true` for highlighting. If the user hasn't
- * chosen a display_name they won't be in the list.
+ * Bundesland-Liga, sorted by Detektiv-Punkte. The user's row is
+ * marked with `isMe = true` based on their userProfile.bundesland (or
+ * guessedBundesland fallback), so the renderer doesn't have to do
+ * matching.
  */
-export async function getLeaderboard(
-  scope: LbScope,
-  period: LbPeriod,
-  userBL?: string | null,
-  userNick?: string | null,
-): Promise<LbUser[]> {
-  if (scope === 'friends') return [];
-  const pool =
-    period === 'month' ? MOCK_USERS_OVERALL_MONTH : MOCK_USERS_OVERALL_ALL;
-
-  const filtered =
-    scope === 'bundesland' && userBL
-      ? pool.filter((u) => u.bundesland === userBL)
-      : pool;
-
-  return filtered
-    .slice()
-    .sort((a, b) => b.pts - a.pts)
-    .map((u, i) => ({
-      id: slug(u.name),
-      rank: i + 1,
-      name: u.name,
-      avatar: u.avatar,
-      city: u.city,
-      pts: u.pts,
-      eur: u.eur,
-      isMe: !!userNick && u.name === userNick,
-    }));
+export async function getBundeslandRanks(
+  userBundesland?: string | null,
+): Promise<LbRow[]> {
+  const snap = await fetchSnapshot();
+  return snap.bundesland.map((r) => ({
+    ...r,
+    isMe: !!userBundesland && r.label === userBundesland,
+  }));
 }
 
 /**
- * The user's own contribution in the active period — pts + eur. Mock
- * for now; real implementation reads from userProfile.stats and a
- * period-keyed counter (Cloud Function maintains rolling-month
- * windows).
+ * Städte-Liga, top 50 sorted by Detektiv-Punkte. Same isMe-marking
+ * via userProfile.city / guessedCity.
  */
-export async function getUserContribution(
-  period: LbPeriod,
-  _userBL?: string | null,
-  _userCity?: string | null,
-): Promise<{ pts: number; eur: number; level: number; nextLevelInPts: number; pctToNext: number; streakDays: number; streakFreezes: number } | null> {
-  // Mocked numbers matching the prototype (Hannah K.).
+export async function getCityRanks(
+  userCity?: string | null,
+): Promise<LbRow[]> {
+  const snap = await fetchSnapshot();
+  const target = userCity ? normalizeCityName(userCity) : null;
+  return snap.cities.map((r) => ({
+    ...r,
+    isMe: !!target && r.label === target,
+  }));
+}
+
+/**
+ * Lifetime contribution of the current user — read straight from
+ * their userProfile (totalSavings + stats.pointsTotal). No
+ * leaderboard fetch needed; the App already has the userProfile.
+ */
+export type UserContribution = {
+  pts: number;
+  eur: number;
+  level: number;
+  pctToNext: number;
+  streakDays: number;
+  city: string | null;
+  bundesland: string | null;
+};
+
+export function userContributionFromProfile(
+  userProfile: any,
+): UserContribution | null {
+  if (!userProfile) return null;
+  const stats = userProfile.stats || {};
   return {
-    pts: period === 'month' ? 2340 : 24340,
-    eur: period === 'month' ? 76.3 : 682.3,
-    level: 6,
-    nextLevelInPts: 450,
-    pctToNext: 85,
-    streakDays: 18,
-    streakFreezes: 2,
+    pts: Number(stats.pointsTotal || 0),
+    eur: Number(userProfile.totalSavings || 0),
+    level: Number(stats.currentLevel || userProfile.level || 1),
+    // Without a known nextLevel-threshold here, we just expose 0;
+    // the UI can compute pct from level metadata if needed later.
+    pctToNext: 0,
+    streakDays: Number(stats.currentStreak || 0),
+    city:
+      userProfile.city ?? userProfile.guessedCity ?? null,
+    bundesland:
+      userProfile.bundesland ?? userProfile.guessedBundesland ?? null,
   };
 }
 
-/**
- * Top-N cities ranked by collective points. Anonymous aggregate, no
- * per-user data exposed. Used in the Städte-Duell widget below the
- * user leaderboard.
- */
-export async function getCityBattle(
-  _period: LbPeriod,
-): Promise<LbCityBattleRow[]> {
-  return MOCK_CITY_BATTLE;
-}
-
-/**
- * Best-effort suggestion of (Bundesland, city) for the current user
- * from their recent journey records. Phase 3 returns a plausible
- * default ('München'/'Bayern') so the setup-sheet has something to
- * show; the real implementation reads `journeys/<id>.location.city`
- * (we already store it via AnonymousLocationService) and runs it
- * through a city → Bundesland lookup table.
- */
-export async function suggestRegionFromJourneys(_userId: string): Promise<{
-  city: string | null;
-  bundesland: Bundesland | null;
-}> {
-  return { city: 'München', bundesland: 'Bayern' };
+/** When was the aggregate last refreshed? Useful for "Stand: heute" labels. */
+export async function getAggregateUpdatedAt(): Promise<Date | null> {
+  const snap = await fetchSnapshot();
+  return snap.updatedAt > 0 ? new Date(snap.updatedAt) : null;
 }

@@ -16,16 +16,11 @@ import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { db } from '@/lib/firebase';
 import {
-  BUNDESLAENDER,
-  type Bundesland,
-  getCityBattle,
-  getLeaderboard,
-  getUserContribution,
-  type LbCityBattleRow,
-  type LbPeriod,
+  getBundeslandRanks,
+  getCityRanks,
+  type LbRow,
   type LbScope,
-  type LbUser,
-  suggestRegionFromJourneys,
+  userContributionFromProfile,
 } from '@/lib/services/leaderboard';
 
 // ─── Demo data ─────────────────────────────────────────────────────────
@@ -898,93 +893,71 @@ function EarnRow({
 }
 
 
+
 // ────────────────────────────────────────────────────────────────────────
-// BESTENLISTE TAB (Phase 3)
+// BESTENLISTE TAB
 // ────────────────────────────────────────────────────────────────────────
 //
-// Mirrors the prototype's leaderboard:
-//   • Status hero (gradient card) at the top — user's avatar, level,
-//     current rank in the active scope, Detektiv-Punkte progress to
-//     the next level, streak chips.
-//   • Scope SegmentedTabs: Deutschland / Mein Bundesland / Freunde
-//     (Freunde is rendered but disabled — feature comes later).
-//   • Period SegmentedTabs: Diesen Monat / All-Time
-//   • Top-3 podium-style rows + remaining list rows
-//   • Städte-Duell widget below — anonymous aggregate per city
+// Two collective leaderboards side-by-side:
+//   • Bundesland-Liga: 16 Bundesländer ranked by total Detektiv-Punkte
+//   • Städte-Liga: top-50 Städte
 //
-// Region setup (city + Bundesland) is opt-in via the friendly
-// suggestion sheet built on the standard `FilterSheet` so it shares
-// the same backdrop / slide-up / swipe-down behaviour as every other
-// bottom sheet in the app.
+// No individual users on the leaderboard, no period filter (one
+// All-Time aggregate), no Friends. Each user contributes their
+// totalSavings + stats.pointsTotal to one bucket (their explicit
+// `city` if set, else the journey-derived guessedCity).
+//
+// User's own region row gets the "DU"-highlight. The Status-Hero at
+// the top shows their personal stats from their userProfile.
+// Setup-Sheet nudges them to confirm/pick a region if none is set.
 
 function RanksTab() {
-  const { theme, shadows } = useTokens();
+  const { theme } = useTokens();
   const { user, userProfile, refreshUserProfile } = useAuth();
 
-  const userBL = (userProfile as any)?.bundesland ?? null;
-  const userCity = (userProfile as any)?.city ?? null;
-  const userNick = userProfile?.display_name ?? null;
-  const hasRegion = !!userBL;
+  const userBL: string | null =
+    (userProfile as any)?.bundesland ??
+    (userProfile as any)?.guessedBundesland ??
+    null;
+  const userCity: string | null =
+    (userProfile as any)?.city ??
+    (userProfile as any)?.guessedCity ??
+    null;
+  const hasExplicitCity = !!(userProfile as any)?.city;
 
-  // Default scope: bundesland if set, else overall.
-  const [scope, setScope] = useState<LbScope>(hasRegion ? 'bundesland' : 'overall');
-  const [period, setPeriod] = useState<LbPeriod>('month');
-  useEffect(() => {
-    // When user picks a region for the first time, jump them to the
-    // Bundesland-Liga since that's why they came.
-    if (hasRegion && scope === 'overall') setScope('bundesland');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasRegion]);
+  const [scope, setScope] = useState<LbScope>('bundesland');
+  const pagerRef = useRef<PagerView | null>(null);
+  const onScopeChange = (next: LbScope) => {
+    setScope(next);
+    pagerRef.current?.setPage(next === 'bundesland' ? 0 : 1);
+  };
+  const onPagerSelected = (e: { nativeEvent: { position: number } }) => {
+    const next: LbScope = e.nativeEvent.position === 0 ? 'bundesland' : 'stadt';
+    setScope((prev) => (prev === next ? prev : next));
+  };
 
-  const [rows, setRows] = useState<LbUser[]>([]);
-  const [contribution, setContribution] = useState<{
-    pts: number;
-    eur: number;
-    level: number;
-    nextLevelInPts: number;
-    pctToNext: number;
-    streakDays: number;
-    streakFreezes: number;
-  } | null>(null);
-  const [cityBattle, setCityBattle] = useState<LbCityBattleRow[]>([]);
-
+  const [blRows, setBlRows] = useState<LbRow[]>([]);
+  const [cityRows, setCityRows] = useState<LbRow[]>([]);
   useEffect(() => {
     let alive = true;
-    getLeaderboard(scope, period, userBL, userNick).then((r) => {
-      if (alive) setRows(r);
-    });
-    getCityBattle(period).then((c) => {
-      if (alive) setCityBattle(c);
-    });
-    getUserContribution(period, userBL, userCity).then((c) => {
-      if (alive) setContribution(c);
-    });
+    getBundeslandRanks(userBL).then((r) => alive && setBlRows(r));
+    getCityRanks(userCity).then((r) => alive && setCityRows(r));
     return () => {
       alive = false;
     };
-  }, [scope, period, userBL, userCity, userNick]);
+  }, [userBL, userCity]);
 
-  // Region setup sheet plumbing.
+  const contribution = userContributionFromProfile(userProfile);
+
   const [setupOpen, setSetupOpen] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [suggestion, setSuggestion] = useState<{
-    city: string | null;
-    bundesland: Bundesland | null;
-  }>({ city: null, bundesland: null });
-
-  const openSetup = useCallback(async () => {
-    if (user?.uid) {
-      const s = await suggestRegionFromJourneys(user.uid);
-      setSuggestion(s);
-    }
-    setSetupOpen(true);
-  }, [user?.uid]);
-
   const saveRegion = useCallback(
-    async (bundesland: string, city: string) => {
+    async (bl: string, city: string) => {
       if (!user?.uid) return;
       try {
-        await updateDoc(doc(db, 'users', user.uid), { bundesland, city });
+        await updateDoc(doc(db, 'users', user.uid), {
+          bundesland: bl,
+          city,
+        });
         await refreshUserProfile();
       } catch (e) {
         console.warn('Rewards: saveRegion failed', e);
@@ -993,376 +966,110 @@ function RanksTab() {
     [user?.uid, refreshUserProfile],
   );
 
-  // The user's own row in the active list (for the hero card).
-  const meRow = rows.find((r) => r.isMe) ?? null;
-  const scopeLabel =
-    scope === 'overall'
-      ? 'Deutschland'
-      : scope === 'bundesland'
-        ? userBL ?? 'Region'
-        : 'Freunde';
-
-  const top3 = rows.slice(0, 3);
-  const rest = rows.slice(3);
-
   return (
     <>
-      {/* ─── Status hero ─── */}
+      {/* ─── Status hero (user's own stats) ─── */}
       <View style={{ paddingHorizontal: 20, paddingTop: 4 }}>
         <StatusHero
           contribution={contribution}
-          rank={meRow?.rank ?? null}
-          totalInList={rows.length}
-          scopeLabel={scopeLabel}
-          userNick={userNick}
+          userNick={userProfile?.display_name ?? null}
         />
       </View>
 
-      {/* ─── Region setup nudge if user hasn't picked yet ─── */}
-      {!hasRegion ? (
+      {/* ─── Setup nudge — only when explicit city not yet set ─── */}
+      {!hasExplicitCity ? (
         <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
-          <SetupNudge onPress={openSetup} />
+          <SetupNudge
+            guessedCity={userCity}
+            onPress={() => setSetupOpen(true)}
+          />
         </View>
       ) : null}
 
-      {/* ─── Scope tabs ─── */}
+      {/* ─── Scope tabs (Bundesland / Stadt) ─── */}
       <View style={{ paddingHorizontal: 20, paddingTop: 16 }}>
         <SegmentedTabs
           tabs={[
-            { key: 'overall', label: 'Deutschland' },
-            {
-              key: 'bundesland',
-              label: hasRegion ? userBL ?? 'Region' : 'Mein Bundesland',
-            },
-            { key: 'friends', label: 'Freunde' },
+            { key: 'bundesland', label: 'Bundesländer' },
+            { key: 'stadt', label: 'Städte' },
           ] as const}
           value={scope}
-          onChange={(k) => {
-            if (k === 'bundesland' && !hasRegion) {
-              openSetup();
-              return;
-            }
-            setScope(k);
-          }}
+          onChange={onScopeChange}
         />
       </View>
 
-      {/* ─── Period tabs ─── */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
-        <SegmentedTabs
-          tabs={[
-            { key: 'month', label: 'Diesen Monat' },
-            { key: 'all', label: 'All-Time' },
-          ] as const}
-          value={period}
-          onChange={setPeriod}
-        />
-      </View>
-
-      {/* ─── Top-3 + list ─── */}
-      {scope === 'friends' ? (
-        <FriendsEmptyState />
-      ) : (
-        <>
-          {top3.length > 0 ? (
-            <View style={{ paddingHorizontal: 20, paddingTop: 18 }}>
-              <Podium top3={top3} />
-            </View>
-          ) : null}
-
-          {rest.length > 0 ? (
-            <View
-              style={{
-                marginHorizontal: 20,
-                marginTop: 14,
-                backgroundColor: theme.surface,
-                borderRadius: 14,
-                overflow: 'hidden',
-                borderWidth: 1,
-                borderColor: theme.border,
-              }}
-            >
-              {rest.map((r, i) => (
-                <UserRow
-                  key={r.id}
-                  row={r}
-                  isLast={i === rest.length - 1}
-                />
-              ))}
-            </View>
-          ) : null}
-
-          {rows.length > 0 ? (
-            <Text
-              style={{
-                marginTop: 10,
-                paddingHorizontal: 20,
-                fontFamily,
-                fontWeight: fontWeight.medium,
-                fontSize: 11,
-                color: theme.textMuted,
-                textAlign: 'center',
-              }}
-            >
-              Sortiert nach Detektiv-Punkten · Ersparnis als Zusatzinfo
-            </Text>
-          ) : null}
-        </>
-      )}
-
-      {/* ─── Städte-Duell ─── */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 28 }}>
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'baseline',
-            justifyContent: 'space-between',
-          }}
-        >
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 20,
-              color: theme.text,
-              letterSpacing: -0.2,
-            }}
-          >
-            Städte-Duell
-          </Text>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 12,
-              color: theme.textMuted,
-            }}
-          >
-            {period === 'month' ? 'Diesen Monat' : 'Gesamt'}
-          </Text>
+      {/* ─── List (swipeable PagerView) ─── */}
+      <PagerView
+        ref={pagerRef}
+        style={{ height: 720 }}
+        initialPage={0}
+        onPageSelected={onPagerSelected}
+      >
+        <View key="bundesland">
+          <LeaderboardList rows={blRows} />
         </View>
-        <View
-          style={{
-            marginTop: 10,
-            backgroundColor: theme.surface,
-            borderRadius: 14,
-            borderWidth: 1,
-            borderColor: theme.border,
-            padding: 14,
-            paddingBottom: 12,
-          }}
-        >
-          {cityBattle.map((c, i) => {
-            const max = cityBattle[0]?.pts ?? 1;
-            const pct = Math.round((c.pts / max) * 100);
-            const mine = !!userCity && c.city === userCity;
-            const up = c.delta.startsWith('+');
-            return (
-              <View
-                key={c.city}
-                style={{ marginBottom: i === cityBattle.length - 1 ? 0 : 10 }}
-              >
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'baseline',
-                    justifyContent: 'space-between',
-                    marginBottom: 4,
-                  }}
-                >
-                  <View
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 6,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontFamily,
-                        fontWeight: fontWeight.bold,
-                        fontSize: 13,
-                        color: mine ? theme.primary : theme.text,
-                      }}
-                    >
-                      {c.city}
-                    </Text>
-                    {mine ? (
-                      <View
-                        style={{
-                          backgroundColor: theme.primary,
-                          paddingHorizontal: 6,
-                          paddingVertical: 2,
-                          borderRadius: 4,
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontFamily,
-                            fontWeight: fontWeight.extraBold,
-                            fontSize: 9,
-                            color: '#fff',
-                            letterSpacing: 0.4,
-                          }}
-                        >
-                          DU
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-                  <Text
-                    style={{
-                      fontFamily,
-                      fontWeight: fontWeight.medium,
-                      fontSize: 11,
-                      color: up ? '#16a34a' : '#dc2626',
-                    }}
-                  >
-                    {c.delta}
-                  </Text>
-                </View>
-                <View
-                  style={{
-                    height: 6,
-                    backgroundColor: theme.border,
-                    borderRadius: 3,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <View
-                    style={{
-                      width: `${pct}%`,
-                      height: '100%',
-                      backgroundColor: mine ? theme.primary : theme.borderStrong,
-                      borderRadius: 3,
-                    }}
-                  />
-                </View>
-              </View>
-            );
-          })}
+        <View key="stadt">
+          <LeaderboardList rows={cityRows} showBundesland />
         </View>
-      </View>
+      </PagerView>
 
-      {/* ─── Region setup sheet ─── */}
+      {/* ─── Setup sheet ─── */}
       <FilterSheet
         visible={setupOpen}
-        title="Spiel für deine Stadt mit"
+        title="Spiel für deine Stadt"
         onClose={() => setSetupOpen(false)}
       >
         <RegionSetupContent
-          suggestion={suggestion}
+          suggestion={{ city: userCity, bundesland: userBL }}
           onAccept={async () => {
-            if (suggestion.bundesland && suggestion.city) {
-              await saveRegion(suggestion.bundesland, suggestion.city);
+            if (userBL && userCity) {
+              await saveRegion(userBL, userCity);
             }
             setSetupOpen(false);
           }}
           onPickOther={() => {
+            // Picker sheet phase 4 — for now just close.
             setSetupOpen(false);
-            setPickerOpen(true);
           }}
-          onClose={() => setSetupOpen(false)}
         />
-      </FilterSheet>
-
-      {/* ─── Manual Bundesland picker ─── */}
-      <FilterSheet
-        visible={pickerOpen}
-        title="Wähle dein Bundesland"
-        onClose={() => setPickerOpen(false)}
-      >
-        {BUNDESLAENDER.map((bl, i) => (
-          <Pressable
-            key={bl}
-            onPress={async () => {
-              await saveRegion(bl, bl);
-              setPickerOpen(false);
-            }}
-            style={({ pressed }) => ({
-              paddingVertical: 14,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 12,
-              borderTopWidth: i === 0 ? 0 : 1,
-              borderTopColor: theme.border,
-              opacity: pressed ? 0.6 : 1,
-            })}
-          >
-            <MaterialCommunityIcons
-              name="map-marker-outline"
-              size={20}
-              color={theme.primary}
-            />
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.semibold,
-                fontSize: 15,
-                color: theme.text,
-              }}
-            >
-              {bl}
-            </Text>
-          </Pressable>
-        ))}
       </FilterSheet>
     </>
   );
 }
 
-// ─── Status Hero ────────────────────────────────────────────────────────
-// Green-gradient card at the top — user's avatar, current rank in the
-// active scope, Detektiv-Punkte + level progress, streak chips.
+// ─── Sub-pieces ─────────────────────────────────────────────────────────
 
 function StatusHero({
   contribution,
-  rank,
-  totalInList,
-  scopeLabel,
   userNick,
 }: {
-  contribution: {
-    pts: number;
-    eur: number;
-    level: number;
-    nextLevelInPts: number;
-    pctToNext: number;
-    streakDays: number;
-    streakFreezes: number;
-  } | null;
-  rank: number | null;
-  totalInList: number;
-  scopeLabel: string;
+  contribution: ReturnType<typeof userContributionFromProfile>;
   userNick: string | null;
 }) {
+  const pts = contribution?.pts ?? 0;
+  const eur = contribution?.eur ?? 0;
+  const level = contribution?.level ?? 1;
+  const streak = contribution?.streakDays ?? 0;
+  const region = contribution?.city ?? 'Region nicht gesetzt';
   return (
     <LinearGradient
       colors={['#0a6f62', '#0d8575', '#10a18a']}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
-      style={{
-        borderRadius: 20,
-        padding: 18,
-        overflow: 'hidden',
-      }}
+      style={{ borderRadius: 20, padding: 18, overflow: 'hidden' }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <View
           style={{
-            width: 54,
-            height: 54,
-            borderRadius: 27,
+            width: 50,
+            height: 50,
+            borderRadius: 25,
             backgroundColor: '#fff',
             alignItems: 'center',
             justifyContent: 'center',
-            shadowColor: '#000',
-            shadowOpacity: 0.18,
-            shadowRadius: 10,
-            shadowOffset: { width: 0, height: 4 },
           }}
         >
-          <Text style={{ fontSize: 28 }}>🦉</Text>
+          <Text style={{ fontSize: 26 }}>🦉</Text>
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text
@@ -1391,6 +1098,7 @@ function StatusHero({
               color="#ffd44b"
             />
             <Text
+              numberOfLines={1}
               style={{
                 fontFamily,
                 fontWeight: fontWeight.semibold,
@@ -1399,452 +1107,96 @@ function StatusHero({
                 opacity: 0.92,
               }}
             >
-              Level {contribution?.level ?? 1} · {scopeLabel}
+              Level {level} · {region}
             </Text>
           </View>
-        </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'baseline',
-              gap: 2,
-            }}
-          >
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold,
-                fontSize: 14,
-                color: '#fff',
-                opacity: 0.9,
-              }}
-            >
-              #
-            </Text>
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 28,
-                color: '#fff',
-                letterSpacing: -0.6,
-                lineHeight: 30,
-              }}
-            >
-              {rank ?? '–'}
-            </Text>
-          </View>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.semibold,
-              fontSize: 10,
-              color: '#fff',
-              opacity: 0.88,
-              marginTop: 2,
-            }}
-          >
-            {totalInList ? `von ${totalInList}` : scopeLabel}
-          </Text>
         </View>
       </View>
 
-      {/* Pts + progress to next level */}
-      <View style={{ marginTop: 14 }}>
-        <View
-          style={{
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'baseline',
-          }}
-        >
-          <View
-            style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}
-          >
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 26,
-                color: '#fff',
-                letterSpacing: -0.5,
-              }}
-            >
-              {(contribution?.pts ?? 0).toLocaleString('de-DE')}
-            </Text>
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold,
-                fontSize: 11,
-                color: '#fff',
-                opacity: 0.92,
-              }}
-            >
-              Detektiv-Pkt
-            </Text>
-          </View>
-          {contribution ? (
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.semibold,
-                fontSize: 11,
-                color: '#fff',
-                opacity: 0.88,
-              }}
-            >
-              {contribution.nextLevelInPts} bis Lv {contribution.level + 1}
-            </Text>
-          ) : null}
-        </View>
-        <View
-          style={{
-            height: 7,
-            backgroundColor: 'rgba(255,255,255,0.22)',
-            borderRadius: 4,
-            overflow: 'hidden',
-            marginTop: 8,
-          }}
-        >
-          <View
-            style={{
-              width: `${contribution?.pctToNext ?? 0}%`,
-              height: '100%',
-              backgroundColor: '#fff',
-              borderRadius: 4,
-            }}
-          />
-        </View>
-      </View>
-
-      {/* Ersparnis + Streak */}
       <View
         style={{
           flexDirection: 'row',
           gap: 8,
-          marginTop: 12,
-          flexWrap: 'wrap',
+          marginTop: 14,
         }}
       >
-        {contribution ? (
-          <HeroChip
-            icon="💶"
-            label={`${contribution.eur.toFixed(2).replace('.', ',')} €`}
-            sub="gespart"
-          />
-        ) : null}
-        {contribution && contribution.streakDays > 0 ? (
-          <HeroChip
-            icon="🔥"
-            label={`${contribution.streakDays} Tage`}
-            sub="Streak"
-          />
-        ) : null}
-        {contribution && contribution.streakFreezes > 0 ? (
-          <HeroChip
-            icon="❄️"
-            label={`${contribution.streakFreezes}/2`}
-            sub="Freezes"
-          />
+        <HeroStat
+          icon="star-four-points"
+          value={pts.toLocaleString('de-DE')}
+          label="Detektiv-Pkt"
+        />
+        <HeroStat
+          icon="cash"
+          value={`${eur.toFixed(2).replace('.', ',')} €`}
+          label="gespart"
+        />
+        {streak > 0 ? (
+          <HeroStat icon="fire" value={`${streak}`} label="Streak" />
         ) : null}
       </View>
     </LinearGradient>
   );
 }
 
-function HeroChip({
+function HeroStat({
   icon,
+  value,
   label,
-  sub,
 }: {
-  icon: string;
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  value: string;
   label: string;
-  sub?: string;
 }) {
   return (
     <View
       style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
+        flex: 1,
         backgroundColor: 'rgba(255,255,255,0.16)',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 10,
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
       }}
     >
-      <Text style={{ fontSize: 14 }}>{icon}</Text>
-      <View>
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 11,
-            color: '#fff',
-          }}
-        >
-          {label}
-        </Text>
-        {sub ? (
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.semibold,
-              fontSize: 9,
-              color: '#fff',
-              opacity: 0.8,
-              marginTop: 1,
-            }}
-          >
-            {sub}
-          </Text>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-// ─── Top-3 Podium ────────────────────────────────────────────────────────
-
-function Podium({ top3 }: { top3: LbUser[] }) {
-  // Order on screen: 2 · 1 · 3 (so #1 stands tallest in the middle).
-  const layout = [top3[1], top3[0], top3[2]].filter(Boolean) as LbUser[];
-  const heights: Record<number, number> = { 1: 110, 2: 92, 3: 78 };
-  const accents: Record<number, string> = {
-    1: '#f5b301',
-    2: '#9aa6ab',
-    3: '#c98a51',
-  };
-  const { theme } = useTokens();
-
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'flex-end',
-        justifyContent: 'space-between',
-        gap: 8,
-      }}
-    >
-      {layout.map((u) => (
-        <View key={u.id} style={{ flex: 1, alignItems: 'center' }}>
-          {/* Avatar with rank badge */}
-          <View style={{ position: 'relative', marginBottom: 6 }}>
-            <View
-              style={{
-                width: 56,
-                height: 56,
-                borderRadius: 28,
-                backgroundColor: theme.surface,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 2,
-                borderColor: u.isMe ? theme.primary : accents[u.rank],
-              }}
-            >
-              <Text style={{ fontSize: 28 }}>{u.avatar}</Text>
-            </View>
-            <View
-              style={{
-                position: 'absolute',
-                bottom: -4,
-                right: -4,
-                width: 24,
-                height: 24,
-                borderRadius: 12,
-                backgroundColor: accents[u.rank],
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 2,
-                borderColor: theme.bg,
-              }}
-            >
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.extraBold,
-                  fontSize: 11,
-                  color: '#fff',
-                }}
-              >
-                {u.rank}
-              </Text>
-            </View>
-          </View>
-          <Text
-            numberOfLines={1}
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 12,
-              color: u.isMe ? theme.primary : theme.text,
-              maxWidth: '100%',
-            }}
-          >
-            {u.name}
-          </Text>
-          <Text
-            numberOfLines={1}
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.bold,
-              fontSize: 11,
-              color: theme.primary,
-              marginTop: 2,
-            }}
-          >
-            {u.pts.toLocaleString('de-DE')} Pkt
-          </Text>
-          <Text
-            numberOfLines={1}
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 10,
-              color: theme.textMuted,
-              marginTop: 1,
-            }}
-          >
-            {u.eur.toFixed(2).replace('.', ',')} €
-          </Text>
-          {/* Podium block */}
-          <View
-            style={{
-              marginTop: 6,
-              width: '100%',
-              height: heights[u.rank],
-              backgroundColor: u.isMe
-                ? theme.primary
-                : accents[u.rank] + '33',
-              borderTopLeftRadius: 8,
-              borderTopRightRadius: 8,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 18,
-                color: u.isMe ? '#fff' : accents[u.rank],
-              }}
-            >
-              {u.rank}
-            </Text>
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-// ─── User row (4+) ──────────────────────────────────────────────────────
-
-function UserRow({ row, isLast }: { row: LbUser; isLast: boolean }) {
-  const { theme } = useTokens();
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-        borderBottomWidth: isLast ? 0 : 1,
-        borderBottomColor: theme.border,
-        backgroundColor: row.isMe
-          ? theme.primaryContainer ?? theme.surfaceAlt
-          : 'transparent',
-      }}
-    >
+      <MaterialCommunityIcons name={icon} size={14} color="#ffd44b" />
       <Text
+        numberOfLines={1}
         style={{
-          width: 26,
-          textAlign: 'center',
           fontFamily,
           fontWeight: fontWeight.extraBold,
-          fontSize: 13,
-          color: theme.textMuted,
+          fontSize: 16,
+          color: '#fff',
+          marginTop: 4,
         }}
       >
-        {row.rank}
+        {value}
       </Text>
-      <View
+      <Text
         style={{
-          width: 36,
-          height: 36,
-          borderRadius: 18,
-          backgroundColor: theme.surfaceAlt,
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderWidth: row.isMe ? 1.5 : 0,
-          borderColor: row.isMe ? theme.primary : 'transparent',
+          fontFamily,
+          fontWeight: fontWeight.semibold,
+          fontSize: 10,
+          color: '#fff',
+          opacity: 0.8,
+          marginTop: 1,
         }}
       >
-        <Text style={{ fontSize: 18 }}>{row.avatar}</Text>
-      </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text
-          numberOfLines={1}
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.bold,
-            fontSize: 14,
-            color: theme.text,
-          }}
-        >
-          {row.name}
-          {row.isMe ? (
-            <Text style={{ color: theme.primary }}> · Du</Text>
-          ) : null}
-        </Text>
-        <Text
-          numberOfLines={1}
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 11,
-            color: theme.textMuted,
-            marginTop: 1,
-          }}
-        >
-          {row.city}
-        </Text>
-      </View>
-      <View style={{ alignItems: 'flex-end' }}>
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 14,
-            color: theme.text,
-          }}
-        >
-          {row.pts.toLocaleString('de-DE')}
-        </Text>
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 11,
-            color: theme.textMuted,
-            marginTop: 1,
-          }}
-        >
-          {row.eur.toFixed(2).replace('.', ',')} €
-        </Text>
-      </View>
+        {label}
+      </Text>
     </View>
   );
 }
 
-// ─── Setup nudge / placeholders ─────────────────────────────────────────
-
-function SetupNudge({ onPress }: { onPress: () => void }) {
+function SetupNudge({
+  guessedCity,
+  onPress,
+}: {
+  guessedCity: string | null;
+  onPress: () => void;
+}) {
   const { theme } = useTokens();
+  const text = guessedCity
+    ? `Du in ${guessedCity}? Bestätige deine Stadt und sammle für sie.`
+    : 'Wähle deine Stadt und spiel mit deiner Region in der Liga.';
   return (
     <Pressable
       onPress={onPress}
@@ -1883,7 +1235,7 @@ function SetupNudge({ onPress }: { onPress: () => void }) {
             color: theme.text,
           }}
         >
-          Spiel für deine Stadt mit
+          Spiel für deine Stadt
         </Text>
         <Text
           style={{
@@ -1894,7 +1246,7 @@ function SetupNudge({ onPress }: { onPress: () => void }) {
             marginTop: 2,
           }}
         >
-          Verrate uns deine Region und sieh deine Bundesland-Liga
+          {text}
         </Text>
       </View>
       <MaterialCommunityIcons
@@ -1906,225 +1258,375 @@ function SetupNudge({ onPress }: { onPress: () => void }) {
   );
 }
 
-function FriendsEmptyState() {
+function LeaderboardList({
+  rows,
+  showBundesland,
+}: {
+  rows: LbRow[];
+  showBundesland?: boolean;
+}) {
   const { theme } = useTokens();
+  if (rows.length === 0) {
+    return (
+      <View style={{ padding: 40, alignItems: 'center' }}>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 13,
+            color: theme.textMuted,
+          }}
+        >
+          Liga lädt …
+        </Text>
+      </View>
+    );
+  }
+  // Highest pts gets a primary-bar; everyone else scaled relative.
+  const max = rows[0]?.pts || 1;
   return (
     <View
       style={{
         marginHorizontal: 20,
-        marginTop: 24,
-        padding: 24,
+        marginTop: 14,
         backgroundColor: theme.surface,
-        borderRadius: 14,
+        borderRadius: 16,
         borderWidth: 1,
         borderColor: theme.border,
-        alignItems: 'center',
+        overflow: 'hidden',
       }}
     >
-      <MaterialCommunityIcons
-        name="account-group-outline"
-        size={36}
-        color={theme.textMuted}
-      />
-      <Text
-        style={{
-          fontFamily,
-          fontWeight: fontWeight.extraBold,
-          fontSize: 16,
-          color: theme.text,
-          marginTop: 10,
-        }}
-      >
-        Demnächst — Freunde-Liga
-      </Text>
-      <Text
-        style={{
-          fontFamily,
-          fontWeight: fontWeight.medium,
-          fontSize: 12,
-          color: theme.textMuted,
-          marginTop: 4,
-          textAlign: 'center',
-        }}
-      >
-        Lade deine Freunde ein und vergleicht euch direkt. In Kürze.
-      </Text>
+      {rows.map((r, i) => (
+        <RankRow
+          key={r.key}
+          row={r}
+          isLast={i === rows.length - 1}
+          showBundesland={showBundesland}
+          relativePct={Math.max(2, Math.round((r.pts / max) * 100))}
+        />
+      ))}
     </View>
   );
 }
 
-// ─── Region setup sheet content ─────────────────────────────────────────
-// Renders inside the standard FilterSheet — same backdrop, slide and
-// swipe-down-to-dismiss as every other bottom sheet in the app.
-
-function RegionSetupContent({
-  suggestion,
-  onAccept,
-  onPickOther,
-  onClose,
+function RankRow({
+  row,
+  isLast,
+  showBundesland,
+  relativePct,
 }: {
-  suggestion: { city: string | null; bundesland: Bundesland | null };
-  onAccept: () => void;
-  onPickOther: () => void;
-  onClose: () => void;
+  row: LbRow;
+  isLast: boolean;
+  showBundesland?: boolean;
+  relativePct: number;
 }) {
   const { theme } = useTokens();
-  const [showInfo, setShowInfo] = useState(false);
-
-  const city = suggestion.city ?? '';
-  const bl = suggestion.bundesland ?? '';
-
+  const accent = row.rank === 1 ? '#f5b301' : row.rank === 2 ? '#a3adb1' : row.rank === 3 ? '#c98a51' : null;
   return (
-    <View>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-        <MaterialCommunityIcons
-          name="map-marker-radius"
-          size={18}
-          color={theme.primary}
-        />
-        <Text
+    <View
+      style={{
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        borderBottomWidth: isLast ? 0 : 1,
+        borderBottomColor: theme.border,
+        backgroundColor: row.isMe ? theme.primaryContainer ?? theme.surfaceAlt : 'transparent',
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <View
           style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 18,
-            color: theme.text,
-            letterSpacing: -0.2,
-          }}
-        >
-          Hilf {city || 'deiner Stadt'} in der Liga
-        </Text>
-      </View>
-      {city && bl ? (
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 14,
-            lineHeight: 20,
-            color: theme.textSub,
-            marginTop: 6,
-          }}
-        >
-          {city} sammelt diesen Monat schon kräftig — und {bl} liegt vorne
-          unter den Bundesländern. ⚡
-        </Text>
-      ) : (
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 14,
-            lineHeight: 20,
-            color: theme.textSub,
-            marginTop: 6,
-          }}
-        >
-          Sag uns wo du wohnst, und deine Punkte zählen für deine Stadt und
-          dein Bundesland.
-        </Text>
-      )}
-
-      {city && bl ? (
-        <Pressable
-          onPress={onAccept}
-          style={({ pressed }) => ({
-            marginTop: 18,
-            height: 50,
-            borderRadius: 14,
-            backgroundColor: theme.primary,
+            width: 30,
+            height: 30,
+            borderRadius: 15,
             alignItems: 'center',
             justifyContent: 'center',
-            opacity: pressed ? 0.9 : 1,
-          })}
+            backgroundColor: accent ? accent + '22' : theme.surfaceAlt,
+          }}
         >
           <Text
             style={{
               fontFamily,
               fontWeight: fontWeight.extraBold,
-              fontSize: 15,
-              color: '#fff',
-              letterSpacing: 0.2,
+              fontSize: 13,
+              color: accent ?? theme.textMuted,
             }}
           >
-            Für {city} mitspielen
+            {row.rank}
           </Text>
-        </Pressable>
-      ) : null}
-      <Pressable
-        onPress={onPickOther}
-        style={({ pressed }) => ({
-          marginTop: 8,
-          height: 50,
-          borderRadius: 14,
-          backgroundColor: theme.surfaceAlt,
-          alignItems: 'center',
-          justifyContent: 'center',
-          opacity: pressed ? 0.9 : 1,
-        })}
-      >
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 15,
-            color: theme.text,
-          }}
-        >
-          Nein, ich wohne woanders
-        </Text>
-      </Pressable>
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 14,
+                color: theme.text,
+              }}
+            >
+              {row.label}
+            </Text>
+            {row.isMe ? (
+              <View
+                style={{
+                  backgroundColor: theme.primary,
+                  paddingHorizontal: 6,
+                  paddingVertical: 2,
+                  borderRadius: 4,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 9,
+                    letterSpacing: 0.4,
+                    color: '#fff',
+                  }}
+                >
+                  DU
+                </Text>
+              </View>
+            ) : null}
+          </View>
+          {showBundesland && row.bundesland ? (
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 11,
+                color: theme.textMuted,
+                marginTop: 1,
+              }}
+            >
+              {row.bundesland}
+            </Text>
+          ) : null}
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 14,
+              color: theme.text,
+            }}
+          >
+            {row.pts.toLocaleString('de-DE')}
+          </Text>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 11,
+              color: theme.textMuted,
+              marginTop: 1,
+            }}
+          >
+            {row.eur.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} € · {row.users.toLocaleString('de-DE')} User
+          </Text>
+        </View>
+      </View>
 
+      {/* Relative-strength bar */}
       <View
         style={{
-          marginTop: 14,
-          paddingTop: 12,
-          borderTopWidth: 1,
-          borderTopColor: theme.border,
-          flexDirection: 'row',
-          justifyContent: 'space-between',
+          height: 4,
+          backgroundColor: theme.border,
+          borderRadius: 2,
+          overflow: 'hidden',
+          marginTop: 8,
+          marginLeft: 42,
         }}
       >
-        <Pressable onPress={() => setShowInfo((v) => !v)} hitSlop={6}>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.semibold,
-              fontSize: 12,
-              color: theme.textMuted,
-            }}
-          >
-            ⓘ {showInfo ? 'Weniger anzeigen' : 'Mehr Infos'}
-          </Text>
-        </Pressable>
-        <Pressable onPress={onClose} hitSlop={6}>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.semibold,
-              fontSize: 12,
-              color: theme.textMuted,
-            }}
-          >
-            Schließen
-          </Text>
-        </Pressable>
-      </View>
-      {showInfo ? (
-        <Text
+        <View
           style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 11,
-            lineHeight: 16,
-            color: theme.textMuted,
-            marginTop: 10,
+            width: `${relativePct}%`,
+            height: '100%',
+            backgroundColor: row.isMe ? theme.primary : accent ?? theme.borderStrong,
           }}
-        >
-          Dein Display-Name + deine Stadt erscheinen auf der Bestenliste.
-          Aggregierte Statistiken (z. B. Top-Marken pro Stadt) können wir an
-          Händler weitergeben — dabei tauchst du nicht persönlich auf.
-        </Text>
-      ) : null}
+        />
+      </View>
+    </View>
+  );
+}
+
+// ─── Region setup sheet content ─────────────────────────────────────────
+// Friendly opt-in prompt — uses the user's `guessedCity` (lazy-filled
+// from journey history in AuthContext) as the suggestion.
+
+function RegionSetupContent({
+  suggestion,
+  onAccept,
+  onPickOther,
+}: {
+  suggestion: { city: string | null; bundesland: string | null };
+  onAccept: () => void;
+  onPickOther: () => void;
+}) {
+  const { theme } = useTokens();
+  const city = suggestion.city ?? '';
+  const bl = suggestion.bundesland ?? '';
+  return (
+    <View>
+      {city && bl ? (
+        <>
+          <View
+            style={{
+              alignSelf: 'center',
+              width: 56,
+              height: 56,
+              borderRadius: 28,
+              backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 14,
+            }}
+          >
+            <MaterialCommunityIcons
+              name="map-marker-radius"
+              size={28}
+              color={theme.primary}
+            />
+          </View>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 20,
+              color: theme.text,
+              textAlign: 'center',
+              letterSpacing: -0.3,
+            }}
+          >
+            Hilf {city} in der Liga
+          </Text>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 14,
+              lineHeight: 20,
+              color: theme.textSub,
+              textAlign: 'center',
+              marginTop: 6,
+            }}
+          >
+            Wir glauben du wohnst in {city} ({bl}). Stimmt das?
+          </Text>
+          <Pressable
+            onPress={onAccept}
+            style={({ pressed }) => ({
+              marginTop: 18,
+              height: 50,
+              borderRadius: 14,
+              backgroundColor: theme.primary,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.9 : 1,
+            })}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 15,
+                color: '#fff',
+                letterSpacing: 0.2,
+              }}
+            >
+              Ja, für {city} mitspielen
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={onPickOther}
+            style={({ pressed }) => ({
+              marginTop: 8,
+              height: 50,
+              borderRadius: 14,
+              backgroundColor: theme.surfaceAlt,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.9 : 1,
+            })}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 15,
+                color: theme.text,
+              }}
+            >
+              Nein, ich wohne woanders
+            </Text>
+          </Pressable>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 11,
+              lineHeight: 16,
+              color: theme.textMuted,
+              marginTop: 14,
+              textAlign: 'center',
+            }}
+          >
+            Aggregiert anonym in die Stadt-Liga. Du tauchst nirgends einzeln auf.
+          </Text>
+        </>
+      ) : (
+        <>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 20,
+              color: theme.text,
+              textAlign: 'center',
+            }}
+          >
+            Wähle deine Stadt
+          </Text>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 14,
+              lineHeight: 20,
+              color: theme.textSub,
+              textAlign: 'center',
+              marginTop: 6,
+            }}
+          >
+            Damit deine Punkte für deine Region zählen.
+          </Text>
+          <Pressable
+            onPress={onPickOther}
+            style={({ pressed }) => ({
+              marginTop: 18,
+              height: 50,
+              borderRadius: 14,
+              backgroundColor: theme.primary,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.9 : 1,
+            })}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 15,
+                color: '#fff',
+              }}
+            >
+              Stadt wählen
+            </Text>
+          </Pressable>
+        </>
+      )}
     </View>
   );
 }

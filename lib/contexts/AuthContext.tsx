@@ -7,6 +7,7 @@ import achievementService, { setProfileRefreshCallback } from '../services/achie
 import { isAppleAuthAvailable, signInWithApple, signOutApple } from '../services/auth/appleAuth';
 import { signInWithGoogle, signOutGoogle } from '../services/auth/googleAuth';
 import { createUserProfile, getUserProfile, UserProfile } from '../services/userProfile';
+import { scheduleRegionGuess } from '../services/regionGuess';
 
 interface AdditionalProfileData {
   realName?: string;
@@ -434,6 +435,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
 
+
+  // Lazy-fill of guessedCity / guessedBundesland from journey history
+  // — runs once per user when both fields are still empty. Sits as
+  // a separate effect on (uid, profile-region) so it doesn't fire
+  // until the profile load has resolved. The actual work is
+  // deferred via InteractionManager so it never blocks the main
+  // render.
+  useEffect(() => {
+    if (!user?.uid || !userProfile) return;
+    if (userProfile.city || userProfile.guessedCity) return;
+    const handle = scheduleRegionGuess(
+      user.uid,
+      { city: userProfile.city, guessedCity: userProfile.guessedCity },
+      () => refreshUserProfile(),
+    );
+    return () => {
+      try {
+        handle.cancel?.();
+      } catch {}
+    };
+  }, [user?.uid, userProfile?.city, userProfile?.guessedCity, refreshUserProfile]);
 
   const value = {
     user,

@@ -22,10 +22,19 @@ export interface UserProfile {
   favoriteMarket?: string; // Discounter ID
   favoriteMarketName?: string; // Für schnelle Anzeige ohne DB-Lookup
   // Region-Opt-in für die Stadt-/Bundesland-Liga (Phase 3 Rewards).
-  // Werte werden ausschließlich gesetzt nachdem der User aktiv im
-  // Region-Sheet zugestimmt hat — keine stille Befüllung.
+  // `city` / `bundesland` werden ausschließlich gesetzt nachdem der
+  // User aktiv im Region-Sheet zugestimmt hat — keine stille
+  // Befüllung.
   bundesland?: string;
   city?: string;
+  // Übergangs-Felder: aus den Journey-IPs des Users abgeleitete
+  // Vermutung (most-frequent city). Werden vom Lazy-Fill in
+  // AuthContext einmal pro User gesetzt sobald die App das nächste
+  // Mal geöffnet wird, und dienen als Vorschlag im Region-Sheet
+  // sowie als Fallback in der Aggregation BIS der User selber `city`
+  // setzt.
+  guessedCity?: string;
+  guessedBundesland?: string;
 }
 
 /**
