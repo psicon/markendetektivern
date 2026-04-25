@@ -21,6 +21,11 @@ export interface UserProfile {
   lastActivityAt?: Date;
   favoriteMarket?: string; // Discounter ID
   favoriteMarketName?: string; // Für schnelle Anzeige ohne DB-Lookup
+  // Region-Opt-in für die Stadt-/Bundesland-Liga (Phase 3 Rewards).
+  // Werte werden ausschließlich gesetzt nachdem der User aktiv im
+  // Region-Sheet zugestimmt hat — keine stille Befüllung.
+  bundesland?: string;
+  city?: string;
 }
 
 /**

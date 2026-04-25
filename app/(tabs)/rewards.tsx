@@ -2,9 +2,17 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import React, { useCallback, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
 import PagerView from 'react-native-pager-view';
+import { doc, updateDoc } from 'firebase/firestore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
@@ -12,6 +20,17 @@ import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { db } from '@/lib/firebase';
+import {
+  BUNDESLAENDER,
+  type Bundesland,
+  getLeaderboard,
+  getUserContribution,
+  type LbPeriod,
+  type LbRow,
+  type LbScope,
+  suggestRegionFromJourneys,
+} from '@/lib/services/leaderboard';
 
 // ─── Demo data ─────────────────────────────────────────────────────────
 // Lifted directly from `markendetektive_newdesign/project/Rewards.jsx`
@@ -245,11 +264,7 @@ export default function RewardsScreen() {
             }}
             showsVerticalScrollIndicator={false}
           >
-            <PlaceholderSection
-              icon="trophy-outline"
-              title="Bestenliste"
-              body="Leaderboard für Freunde / Bundesland mit Monats- und All-Time-Wertung sowie City-Battle kommen in Phase 3."
-            />
+            <RanksTab />
           </ScrollView>
         </View>
       </PagerView>
@@ -886,64 +901,720 @@ function EarnRow({
   );
 }
 
-function PlaceholderSection({
-  icon,
-  title,
-  body,
+// ────────────────────────────────────────────────────────────────────────
+// BESTENLISTE TAB (Phase 3)
+// ────────────────────────────────────────────────────────────────────────
+//
+// Collective scoring: each user's points are added anonymously to their
+// city + Bundesland counters. Lists rank cities / Bundesländer; users
+// never appear individually. The user's own region row is highlighted
+// and a private "Dein Beitrag"-card shows their personal contribution.
+//
+// Region setup is opt-in via a friendly suggestion sheet — never
+// silent. Picking a Bundesland writes it back to the userProfile and
+// the lists update.
+
+function RanksTab() {
+  const { theme } = useTokens();
+  const { user, userProfile, refreshUserProfile } = useAuth();
+
+  const [scope, setScope] = useState<LbScope>('bundesland');
+  const [period, setPeriod] = useState<LbPeriod>('month');
+
+  const userBL = (userProfile as any)?.bundesland ?? null;
+  const userCity = (userProfile as any)?.city ?? null;
+  const hasRegion = !!userBL;
+
+  const [rows, setRows] = useState<LbRow[]>([]);
+  const [contribution, setContribution] = useState<{
+    pts: number;
+    city: string;
+    bundesland: string;
+  } | null>(null);
+
+  // Region setup sheets
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [suggestion, setSuggestion] = useState<{
+    city: string | null;
+    bundesland: Bundesland | null;
+  }>({ city: null, bundesland: null });
+
+  // Reload ranks whenever scope, period, or the user's region changes.
+  useEffect(() => {
+    let alive = true;
+    getLeaderboard(scope, period, userBL, userCity).then((r) => {
+      if (alive) setRows(r);
+    });
+    getUserContribution(period, userBL, userCity).then((c) => {
+      if (alive) setContribution(c);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [scope, period, userBL, userCity]);
+
+  // Open the suggestion sheet — load a guess from the journey lookup
+  // first, then show. (Today: stub returns München / Bayern.)
+  const openSetup = useCallback(async () => {
+    if (user?.uid) {
+      const s = await suggestRegionFromJourneys(user.uid);
+      setSuggestion(s);
+    }
+    setSetupOpen(true);
+  }, [user?.uid]);
+
+  const saveRegion = useCallback(
+    async (bundesland: string, city: string) => {
+      if (!user?.uid) return;
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          bundesland,
+          city,
+        });
+        await refreshUserProfile();
+      } catch (e) {
+        console.warn('Rewards: saveRegion failed', e);
+      }
+    },
+    [user?.uid, refreshUserProfile],
+  );
+
+  return (
+    <>
+      {/* Personal contribution card OR setup-nudge */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 4 }}>
+        {hasRegion && contribution ? (
+          <ContributionCard
+            contribution={contribution}
+            period={period}
+            onChangeRegion={openSetup}
+          />
+        ) : (
+          <SetupNudge onPress={openSetup} />
+        )}
+      </View>
+
+      {/* Scope tabs (Bundesländer / Städte) — animated pill, but no
+          inner PagerView swipe here: the parent already swipes between
+          Einlösen and Bestenliste, and nesting a second horizontal
+          swipe inside that creates gesture conflicts. The animated
+          pill alone is enough for an inline filter-like switch. */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 16 }}>
+        <SegmentedTabs
+          tabs={[
+            { key: 'bundesland', label: 'Bundesländer' },
+            { key: 'stadt', label: 'Städte' },
+          ] as const}
+          value={scope}
+          onChange={setScope}
+        />
+      </View>
+
+      {/* Period filter */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
+        <SegmentedTabs
+          tabs={[
+            { key: 'month', label: 'Diesen Monat' },
+            { key: 'all', label: 'All-Time' },
+          ] as const}
+          value={period}
+          onChange={setPeriod}
+        />
+      </View>
+
+      {/* Ranked list */}
+      <View
+        style={{
+          marginHorizontal: 20,
+          marginTop: 16,
+          backgroundColor: theme.surface,
+          borderRadius: 16,
+          overflow: 'hidden',
+          borderWidth: 1,
+          borderColor: theme.border,
+        }}
+      >
+        {rows.map((r, i) => (
+          <RankRow key={r.key} row={r} isLast={i === rows.length - 1} />
+        ))}
+      </View>
+
+      {/* Region setup suggestion sheet */}
+      <RegionSetupSheet
+        visible={setupOpen}
+        suggestion={suggestion}
+        onClose={() => setSetupOpen(false)}
+        onAccept={async () => {
+          if (suggestion.bundesland && suggestion.city) {
+            await saveRegion(suggestion.bundesland, suggestion.city);
+          }
+          setSetupOpen(false);
+        }}
+        onPickOther={() => {
+          setSetupOpen(false);
+          setPickerOpen(true);
+        }}
+      />
+
+      {/* Manual Bundesland picker */}
+      <RegionPickerSheet
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={async (bundesland, city) => {
+          await saveRegion(bundesland, city);
+          setPickerOpen(false);
+        }}
+      />
+    </>
+  );
+}
+
+// ─── Sub-pieces of the RanksTab ─────────────────────────────────────────
+
+function ContributionCard({
+  contribution,
+  period,
+  onChangeRegion,
 }: {
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  title: string;
-  body: string;
+  contribution: { pts: number; city: string; bundesland: string };
+  period: LbPeriod;
+  onChangeRegion: () => void;
 }) {
-  const { theme, shadows } = useTokens();
+  const { theme } = useTokens();
   return (
     <View
       style={{
-        marginHorizontal: 20,
-        marginTop: 24,
-        padding: 20,
-        backgroundColor: theme.surface,
-        borderRadius: radii.lg,
+        backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
+        borderRadius: 16,
+        padding: 16,
+        flexDirection: 'row',
         alignItems: 'center',
-        ...shadows.sm,
+        gap: 12,
       }}
     >
       <View
         style={{
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
+          width: 44,
+          height: 44,
+          borderRadius: 22,
+          backgroundColor: theme.surface,
           alignItems: 'center',
           justifyContent: 'center',
-          marginBottom: 14,
         }}
       >
-        <MaterialCommunityIcons name={icon} size={28} color={theme.primary} />
+        <MaterialCommunityIcons
+          name="star-four-points"
+          size={22}
+          color={theme.primary}
+        />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 14,
+            color: theme.text,
+          }}
+        >
+          {period === 'month' ? 'Dein Beitrag diesen Monat' : 'Dein Beitrag insgesamt'}
+        </Text>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 12,
+            color: theme.textSub,
+            marginTop: 2,
+          }}
+        >
+          {contribution.pts.toLocaleString('de-DE')} Punkte für{' '}
+          <Text style={{ fontWeight: fontWeight.bold, color: theme.text }}>
+            {contribution.city}
+          </Text>{' '}
+          ({contribution.bundesland})
+        </Text>
+      </View>
+      <Pressable onPress={onChangeRegion} hitSlop={8}>
+        <MaterialCommunityIcons
+          name="pencil-outline"
+          size={18}
+          color={theme.textMuted}
+        />
+      </Pressable>
+    </View>
+  );
+}
+
+function SetupNudge({ onPress }: { onPress: () => void }) {
+  const { theme } = useTokens();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
+        borderRadius: 16,
+        padding: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        opacity: pressed ? 0.85 : 1,
+      })}
+    >
+      <View
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: 22,
+          backgroundColor: theme.surface,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <MaterialCommunityIcons
+          name="map-marker-radius"
+          size={22}
+          color={theme.primary}
+        />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 14,
+            color: theme.text,
+          }}
+        >
+          Spiel für deine Stadt mit
+        </Text>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 12,
+            color: theme.textSub,
+            marginTop: 2,
+          }}
+        >
+          Verrate uns deine Region und sammle Punkte für deine Stadt
+        </Text>
+      </View>
+      <MaterialCommunityIcons
+        name="chevron-right"
+        size={20}
+        color={theme.textMuted}
+      />
+    </Pressable>
+  );
+}
+
+function RankRow({ row, isLast }: { row: LbRow; isLast: boolean }) {
+  const { theme } = useTokens();
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        borderBottomWidth: isLast ? 0 : 1,
+        borderBottomColor: theme.border,
+        backgroundColor: row.isMe
+          ? theme.primaryContainer ?? theme.surfaceAlt
+          : 'transparent',
+      }}
+    >
+      <View
+        style={{
+          width: 28,
+          alignItems: 'center',
+        }}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 14,
+            color: row.rank <= 3 ? theme.primary : theme.textMuted,
+          }}
+        >
+          {row.rank}
+        </Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text
+          numberOfLines={1}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 14,
+            color: theme.text,
+          }}
+        >
+          {row.label}
+          {row.isMe ? (
+            <Text style={{ color: theme.primary }}> · Du</Text>
+          ) : null}
+        </Text>
+        {row.bundesland ? (
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 11,
+              color: theme.textMuted,
+              marginTop: 2,
+            }}
+          >
+            {row.bundesland}
+          </Text>
+        ) : null}
       </View>
       <Text
         style={{
           fontFamily,
           fontWeight: fontWeight.extraBold,
-          fontSize: 18,
+          fontSize: 14,
           color: theme.text,
-          marginBottom: 6,
         }}
       >
-        {title}
-      </Text>
-      <Text
-        style={{
-          fontFamily,
-          fontWeight: fontWeight.medium,
-          fontSize: 13,
-          lineHeight: 19,
-          color: theme.textMuted,
-          textAlign: 'center',
-        }}
-      >
-        {body}
+        {row.pts.toLocaleString('de-DE')}
       </Text>
     </View>
+  );
+}
+
+// ─── Region setup sheet ─────────────────────────────────────────────────
+// Friendly opt-in flow when the user hasn't set their region yet.
+// Pre-fills the suggestion from journey IP-lookup (stubbed today).
+
+function RegionSetupSheet({
+  visible,
+  suggestion,
+  onClose,
+  onAccept,
+  onPickOther,
+}: {
+  visible: boolean;
+  suggestion: { city: string | null; bundesland: Bundesland | null };
+  onClose: () => void;
+  onAccept: () => void;
+  onPickOther: () => void;
+}) {
+  const { theme } = useTokens();
+  const [showInfo, setShowInfo] = useState(false);
+
+  const city = suggestion.city ?? '';
+  const bl = suggestion.bundesland ?? '';
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <Pressable
+        onPress={onClose}
+        style={{
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.4)',
+          justifyContent: 'flex-end',
+        }}
+      >
+        <Pressable
+          onPress={() => {}}
+          style={{
+            backgroundColor: theme.surface,
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+            paddingTop: 8,
+            paddingBottom: 24,
+          }}
+        >
+          {/* Drag handle */}
+          <View
+            style={{
+              alignSelf: 'center',
+              width: 36,
+              height: 4,
+              borderRadius: 2,
+              backgroundColor: theme.borderStrong,
+              marginBottom: 12,
+            }}
+          />
+
+          <View style={{ paddingHorizontal: 22 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                marginBottom: 6,
+              }}
+            >
+              <MaterialCommunityIcons
+                name="map-marker-radius"
+                size={18}
+                color={theme.primary}
+              />
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 22,
+                  color: theme.text,
+                  letterSpacing: -0.3,
+                }}
+              >
+                Hilf {city || 'deiner Stadt'} in der Liga
+              </Text>
+            </View>
+            {city && bl ? (
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 14,
+                  lineHeight: 20,
+                  color: theme.textSub,
+                  marginTop: 4,
+                }}
+              >
+                {city} sammelt diesen Monat schon kräftig — und {bl} liegt vorne
+                unter den Bundesländern. ⚡
+              </Text>
+            ) : (
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 14,
+                  lineHeight: 20,
+                  color: theme.textSub,
+                  marginTop: 4,
+                }}
+              >
+                Sag uns wo du wohnst, und deine Punkte zählen für deine Stadt
+                und dein Bundesland.
+              </Text>
+            )}
+
+            {/* CTAs */}
+            {city && bl ? (
+              <Pressable
+                onPress={onAccept}
+                style={({ pressed }) => ({
+                  marginTop: 22,
+                  height: 52,
+                  borderRadius: 14,
+                  backgroundColor: theme.primary,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: pressed ? 0.9 : 1,
+                })}
+              >
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 15,
+                    color: '#fff',
+                    letterSpacing: 0.2,
+                  }}
+                >
+                  Für {city} mitspielen
+                </Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={onPickOther}
+              style={({ pressed }) => ({
+                marginTop: 8,
+                height: 52,
+                borderRadius: 14,
+                backgroundColor: theme.surfaceAlt,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.9 : 1,
+              })}
+            >
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 15,
+                  color: theme.text,
+                }}
+              >
+                Nein, ich wohne woanders
+              </Text>
+            </Pressable>
+
+            {/* Footer line — Mehr Infos / Schließen */}
+            <View
+              style={{
+                marginTop: 14,
+                paddingTop: 12,
+                borderTopWidth: 1,
+                borderTopColor: theme.border,
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+              }}
+            >
+              <Pressable onPress={() => setShowInfo((v) => !v)} hitSlop={6}>
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.semibold,
+                    fontSize: 12,
+                    color: theme.textMuted,
+                  }}
+                >
+                  ⓘ {showInfo ? 'Weniger anzeigen' : 'Mehr Infos'}
+                </Text>
+              </Pressable>
+              <Pressable onPress={onClose} hitSlop={6}>
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.semibold,
+                    fontSize: 12,
+                    color: theme.textMuted,
+                  }}
+                >
+                  Schließen
+                </Text>
+              </Pressable>
+            </View>
+            {showInfo ? (
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 11,
+                  lineHeight: 16,
+                  color: theme.textMuted,
+                  marginTop: 10,
+                }}
+              >
+                Wir nutzen deine ungefähre Position aus der App-Nutzung
+                anonym für Stadt- und Bundesland-Statistiken. Du persönlich
+                tauchst dabei nirgends auf — nur Stadt- und Bundesland-Summen.
+                Aggregierte Markt-Insights (z. B. Top-Marken pro Stadt) können
+                wir an Händler weitergeben — auch hier ohne dich persönlich.
+              </Text>
+            ) : null}
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// ─── Region picker sheet ───────────────────────────────────────────────
+// Manual fallback — list of all 16 Bundesländer. City for now is the
+// Bundesland's own name (most users → Bundesland-Liga only). A real
+// city-picker is next iteration.
+
+function RegionPickerSheet({
+  visible,
+  onClose,
+  onPick,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onPick: (bundesland: string, city: string) => void;
+}) {
+  const { theme } = useTokens();
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <Pressable
+        onPress={onClose}
+        style={{
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.4)',
+          justifyContent: 'flex-end',
+        }}
+      >
+        <Pressable
+          onPress={() => {}}
+          style={{
+            backgroundColor: theme.surface,
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+            paddingTop: 8,
+            paddingBottom: 24,
+            maxHeight: '80%',
+          }}
+        >
+          <View
+            style={{
+              alignSelf: 'center',
+              width: 36,
+              height: 4,
+              borderRadius: 2,
+              backgroundColor: theme.borderStrong,
+              marginBottom: 12,
+            }}
+          />
+          <View style={{ paddingHorizontal: 22 }}>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 22,
+                color: theme.text,
+                letterSpacing: -0.3,
+                marginBottom: 12,
+              }}
+            >
+              Wähle dein Bundesland
+            </Text>
+          </View>
+          <ScrollView style={{ maxHeight: 480 }}>
+            {BUNDESLAENDER.map((bl) => (
+              <Pressable
+                key={bl}
+                onPress={() => onPick(bl, bl)}
+                style={({ pressed }) => ({
+                  paddingHorizontal: 22,
+                  paddingVertical: 14,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <MaterialCommunityIcons
+                  name="map-marker-outline"
+                  size={20}
+                  color={theme.primary}
+                />
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.semibold,
+                    fontSize: 15,
+                    color: theme.text,
+                  }}
+                >
+                  {bl}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
