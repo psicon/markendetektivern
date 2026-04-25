@@ -184,10 +184,16 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="more"
+        name="rewards"
         options={{
-          title: 'Mehr',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="line.3.horizontal" color={color} />,
+          title: 'Rewards',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol
+              size={24}
+              name={focused ? 'trophy.fill' : 'trophy'}
+              color={color}
+            />
+          ),
         }}
       />
     </Tabs>
