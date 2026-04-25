@@ -3,14 +3,7 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
-import {
-  Image,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from 'react-native';
+import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -28,46 +21,11 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 const CASHBACK_EUR = 12.4;
 const PAYOUT_THRESHOLD = 15.0;
 
-type CashbackCatKey = 'all' | 'gift' | 'prepaid' | 'money' | 'charity';
-type CashbackCat = {
-  k: CashbackCatKey;
-  l: string;
-  i: keyof typeof MaterialCommunityIcons.glyphMap;
-};
-const CASHBACK_CATS: readonly CashbackCat[] = [
-  { k: 'all', l: 'Alle', i: 'view-grid-outline' },
-  { k: 'gift', l: 'Gutscheine', i: 'ticket-percent' },
-  { k: 'prepaid', l: 'Prepaid', i: 'credit-card-outline' },
-  { k: 'money', l: 'Auszahlung', i: 'cash-multiple' },
-  { k: 'charity', l: 'Spenden', i: 'heart-outline' },
-] as const;
-
-type Reward = {
-  id: string;
-  cat: Exclude<CashbackCatKey, 'all'>;
-  brand: string;
-  value: string;
-  tint: string;
-  short: string;
-  hot?: boolean;
-};
-const CASHBACK_REWARDS: readonly Reward[] = [
-  { id: 'amazon-de', cat: 'gift', brand: 'Amazon.de', value: '15 €', tint: '#ff9900', short: 'a', hot: true },
-  { id: 'rewe', cat: 'gift', brand: 'Rewe', value: '15 €', tint: '#cc071e', short: 'R' },
-  { id: 'kaufland', cat: 'gift', brand: 'Kaufland', value: '15 €', tint: '#e10915', short: 'K' },
-  { id: 'penny', cat: 'gift', brand: 'Penny', value: '15 €', tint: '#d40f14', short: 'P' },
-  { id: 'rossmann', cat: 'gift', brand: 'Rossmann', value: '15 €', tint: '#e3001a', short: 'R' },
-  { id: 'lieferando', cat: 'gift', brand: 'Lieferando', value: '15 €', tint: '#ff8000', short: 'L' },
-  { id: 'amazon-com', cat: 'gift', brand: 'Amazon.com', value: '25 €', tint: '#232f3e', short: 'a' },
-  { id: 'apple', cat: 'gift', brand: 'Apple', value: '25 €', tint: '#000', short: '' },
-  { id: 'google', cat: 'gift', brand: 'Google Play', value: '15 €', tint: '#4285f4', short: 'G' },
-  { id: 'visa-v', cat: 'prepaid', brand: 'Virtual Visa', value: '25 €', tint: '#1a1f71', short: 'VISA' },
-  { id: 'visa-p', cat: 'prepaid', brand: 'Physical Visa', value: '50 €', tint: '#0e164d', short: 'VISA' },
-  { id: 'paypal', cat: 'money', brand: 'PayPal', value: '15 €', tint: '#003087', short: 'P', hot: true },
-  { id: 'msf', cat: 'charity', brand: 'Ärzte ohne Grenzen', value: '15 € Spende', tint: '#c0392b', short: '✚' },
-  { id: 'irc', cat: 'charity', brand: 'Int. Rescue Committee', value: '15 € Spende', tint: '#d4231a', short: 'IRC' },
-  { id: 'stc', cat: 'charity', brand: 'Save the Children', value: '15 € Spende', tint: '#e8384f', short: 'S' },
-];
+// The reward catalogue (15+ partner brands) was previously rendered
+// inline as a 2-column grid here. Per-product UX moved to a single
+// big "Cashback einlösen" CTA below; the catalogue lives behind that
+// button on a third-party provider page (separate flow, not
+// implemented yet).
 
 const RECEIPT_LIMIT = { perWeek: 6, eurEach: 0.08, usedThisWeek: 2 };
 const PHOTO_LIMIT = { perWeek: 20, eurEach: 0.1, usedThisWeek: 14 };
@@ -296,35 +254,44 @@ export default function RewardsScreen() {
         </View>
       </PagerView>
 
-      {/* Chrome — absolute, content scrolls under */}
-      <View
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 10,
-          paddingTop: insets.top,
-        }}
-        pointerEvents="box-none"
-      >
-        {Platform.OS === 'ios' ? (
-          <BlurView tint={scheme === 'dark' ? 'dark' : 'light'} intensity={80}>
-            {ChromeContent}
-          </BlurView>
-        ) : (
-          <View
-            style={{
-              backgroundColor:
-                scheme === 'dark'
-                  ? 'rgba(15,18,20,0.92)'
-                  : 'rgba(245,247,248,0.92)',
-            }}
-          >
-            {ChromeContent}
-          </View>
-        )}
-      </View>
+      {/* Chrome — absolute from y=0 (covers status-bar zone too) so
+          scrolling content doesn't bleed up into the Dynamic Island
+          area. paddingTop applies to the chrome material itself, not
+          a wrapper above it — that was the bug in v1. */}
+      {Platform.OS === 'ios' ? (
+        <BlurView
+          tint={scheme === 'dark' ? 'dark' : 'light'}
+          intensity={80}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 10,
+            paddingTop: insets.top,
+          }}
+        >
+          {ChromeContent}
+        </BlurView>
+      ) : (
+        <View
+          pointerEvents="box-none"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 10,
+            paddingTop: insets.top,
+            backgroundColor:
+              scheme === 'dark'
+                ? 'rgba(15,18,20,0.92)'
+                : 'rgba(245,247,248,0.92)',
+          }}
+        >
+          {ChromeContent}
+        </View>
+      )}
     </View>
   );
 }
@@ -335,11 +302,6 @@ export default function RewardsScreen() {
 
 function RedeemTab() {
   const { theme } = useTokens();
-  const [filter, setFilter] = useState<CashbackCatKey>('all');
-  const items =
-    filter === 'all'
-      ? CASHBACK_REWARDS
-      : CASHBACK_REWARDS.filter((r) => r.cat === filter);
   const pct = Math.min(
     100,
     Math.round((CASHBACK_EUR / PAYOUT_THRESHOLD) * 100),
@@ -542,39 +504,118 @@ function RedeemTab() {
         </View>
       </View>
 
-      {/* ── Reward catalogue ── */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
-        <SectionHeader
-          title="Einlösen"
-          sub={`${CASHBACK_REWARDS.length} Belohnungen`}
-        />
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          scrollsToTop={false}
-          contentContainerStyle={{ paddingVertical: 8, gap: 6 }}
-          style={{ marginHorizontal: -20, paddingHorizontal: 20 }}
-        >
-          {CASHBACK_CATS.map((c) => (
-            <CategoryChip
-              key={c.k}
-              cat={c}
-              active={filter === c.k}
-              onPress={() => setFilter(c.k)}
-            />
-          ))}
-        </ScrollView>
+      {/* ── Einlösen CTA ──
+          Single tile, no in-app catalogue. The actual partner picker
+          (gift cards / PayPal / Visa / charity) lives on a 3rd-party
+          provider page that this button will route to once the
+          integration exists. The button is disabled until the user
+          has hit the PAYOUT_THRESHOLD; the disabled copy explains
+          how much is still missing so the user gets actionable
+          feedback instead of a dead CTA. */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 28, paddingBottom: 8 }}>
         <View
           style={{
-            flexDirection: 'row',
-            flexWrap: 'wrap',
-            gap: 12,
-            marginTop: 4,
+            backgroundColor: theme.surface,
+            borderRadius: 18,
+            padding: 22,
+            borderWidth: 1,
+            borderColor: theme.border,
           }}
         >
-          {items.map((r) => (
-            <RewardCard key={r.id} reward={r} canRedeem={canRedeem} />
-          ))}
+          <View
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 16,
+              backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 14,
+            }}
+          >
+            <MaterialCommunityIcons
+              name="gift-outline"
+              size={28}
+              color={theme.primary}
+            />
+          </View>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 22,
+              color: theme.text,
+              letterSpacing: -0.3,
+            }}
+          >
+            Cashback einlösen
+          </Text>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 14,
+              lineHeight: 20,
+              color: theme.textSub,
+              marginTop: 6,
+            }}
+          >
+            {canRedeem
+              ? 'Tausche deine Cashback-Taler bei unseren Partnern gegen Gutscheine (Amazon, Rewe, Apple…), PayPal-Auszahlung, Visa-Prepaid oder Spenden ein.'
+              : `Sobald du die ${PAYOUT_THRESHOLD.toFixed(2).replace('.', ',')} €-Schwelle erreichst, kannst du deine Taler hier einlösen — bei Gutschein-Partnern, PayPal, Visa-Prepaid oder als Spende.`}
+          </Text>
+
+          <Pressable
+            disabled={!canRedeem}
+            onPress={() => {
+              // 3rd-party provider integration goes here.
+            }}
+            style={({ pressed }) => ({
+              marginTop: 18,
+              height: 52,
+              borderRadius: 14,
+              backgroundColor: canRedeem ? theme.primary : theme.surfaceAlt,
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexDirection: 'row',
+              gap: 8,
+              opacity: pressed && canRedeem ? 0.9 : 1,
+            })}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 15,
+                color: canRedeem ? '#fff' : theme.textMuted,
+                letterSpacing: 0.2,
+              }}
+            >
+              {canRedeem
+                ? 'Jetzt einlösen'
+                : `Noch ${gapEur} € sammeln`}
+            </Text>
+            {canRedeem ? (
+              <MaterialCommunityIcons
+                name="arrow-right"
+                size={18}
+                color="#fff"
+              />
+            ) : null}
+          </Pressable>
+
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 11,
+              color: theme.textMuted,
+              marginTop: 10,
+              textAlign: 'center',
+            }}
+          >
+            Auswahl der Belohnungen erfolgt extern bei unserem Partner.
+          </Text>
         </View>
       </View>
     </>
@@ -840,149 +881,6 @@ function EarnRow({
             </View>
           ) : null}
         </View>
-      </View>
-    </Pressable>
-  );
-}
-
-function CategoryChip({
-  cat,
-  active,
-  onPress,
-}: {
-  cat: CashbackCat;
-  active: boolean;
-  onPress: () => void;
-}) {
-  const { theme } = useTokens();
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        height: 34,
-        paddingHorizontal: 12,
-        borderRadius: 17,
-        backgroundColor: active ? theme.primary : theme.surface,
-        borderWidth: active ? 0 : 1,
-        borderColor: theme.borderStrong,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        opacity: pressed ? 0.85 : 1,
-      })}
-    >
-      <MaterialCommunityIcons
-        name={cat.i}
-        size={14}
-        color={active ? '#fff' : theme.primary}
-      />
-      <Text
-        style={{
-          fontFamily,
-          fontWeight: fontWeight.semibold,
-          fontSize: 12,
-          color: active ? '#fff' : theme.text,
-        }}
-      >
-        {cat.l}
-      </Text>
-    </Pressable>
-  );
-}
-
-function RewardCard({
-  reward,
-  canRedeem,
-}: {
-  reward: Reward;
-  canRedeem: boolean;
-}) {
-  const { theme, shadows } = useTokens();
-  return (
-    <Pressable
-      style={({ pressed }) => ({
-        // Two columns on a 20-px-padded screen with a 12-px gap.
-        // Width formula matches the Stöbern grid math.
-        width: '48.5%',
-        backgroundColor: theme.surface,
-        borderRadius: 14,
-        borderWidth: 1,
-        borderColor: theme.border,
-        overflow: 'hidden',
-        opacity: pressed ? 0.94 : canRedeem ? 1 : 0.88,
-        ...shadows.sm,
-      })}
-    >
-      {reward.hot ? (
-        <View
-          style={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            zIndex: 2,
-            backgroundColor: '#ff3b30',
-            paddingHorizontal: 7,
-            paddingVertical: 3,
-            borderRadius: 6,
-          }}
-        >
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 9,
-              letterSpacing: 0.8,
-              color: '#fff',
-              textTransform: 'uppercase',
-            }}
-          >
-            Beliebt
-          </Text>
-        </View>
-      ) : null}
-      <View
-        style={{
-          height: 80,
-          backgroundColor: reward.tint,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 28,
-            color: '#fff',
-            letterSpacing: -0.5,
-          }}
-        >
-          {reward.short}
-        </Text>
-      </View>
-      <View style={{ padding: 12 }}>
-        <Text
-          numberOfLines={1}
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.bold,
-            fontSize: 13,
-            color: theme.text,
-          }}
-        >
-          {reward.brand}
-        </Text>
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 16,
-            color: theme.primary,
-            marginTop: 2,
-          }}
-        >
-          {reward.value}
-        </Text>
       </View>
     </Pressable>
   );
