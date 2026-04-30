@@ -13,6 +13,7 @@
 //   • white-surface menu cards with soft shadow
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useNavigation } from 'expo-router';
@@ -407,6 +408,70 @@ export default function ProfileScreen() {
       return 'gesehen';
     }
   };
+
+  // ─── Komplett-Reset (Test-User) ────────────────────────────────
+  //
+  // Löscht NUR LOKAL alles was die App gespeichert hat (AsyncStorage)
+  // und meldet den User ab. Beim nächsten App-Tick fängt die
+  // AuthContext-Anonymous-Pipeline einen frischen User mit neuer
+  // UID an → Firebase erstellt automatisch ein leeres User-Doc,
+  // alle Counters/Stats stehen auf 0.
+  //
+  // Wirkung in einem:
+  //   • Onboarding-Flow startet wieder
+  //   • Coachmark-Tours stehen auf "noch nicht gesehen"
+  //   • Level zurück auf 1, 0 Punkte, keine Achievements
+  //   • Lieblingsmarkt + alle Personalisierungen weg
+  //   • Such-Verlauf, Cart, Favoriten weg (sofern lokal cached)
+  //
+  // Was NICHT angefasst wird:
+  //   • Das alte User-Doc auf Firestore — bleibt liegen. Wenn du
+  //     dich später wieder mit Email/Passwort einloggst, sind
+  //     deine echten Daten zurück. Pro Reset-Run ist man halt ein
+  //     anderer anonymer User.
+  //
+  // Nur in __DEV__ verfügbar.
+  const onFullLocalReset = () =>
+    Alert.alert(
+      'Komplett-Reset (lokal)',
+      'Löscht alle lokalen App-Daten und meldet dich ab. Beim nächsten Start bist du ein frischer anonymer Test-User: Level 1, kein Onboarding gemacht, keine Tours gesehen.\n\nDas alte Firestore-Doc bleibt unangetastet — Account-Login wäre wiederherstellbar.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // 1. Firebase auth.signOut. Wichtig BEVOR wir
+              // AsyncStorage löschen, sonst räumt der Firebase
+              // SDK seine Persistenz nicht ordentlich auf.
+              try {
+                await logout();
+              } catch (e) {
+                console.warn('FullReset: logout failed (non-fatal)', e);
+              }
+              // 2. AsyncStorage komplett wegblasen — Onboarding-
+              // Flags, Coachmark-Status, Gamification-Toggle,
+              // Auth-Backups, alles.
+              await AsyncStorage.clear();
+              // 3. Native-Caches (Image-Disk-Cache etc.) lassen
+              // wir liegen — die sind nicht user-spezifisch und
+              // ein "Reset"-Button soll nicht die App-Performance
+              // bei nächsten User torpedieren.
+              Alert.alert(
+                'Erledigt',
+                'Bitte App komplett schließen und neu öffnen — beim nächsten Start bist du frischer Test-User.',
+              );
+            } catch (e: any) {
+              Alert.alert(
+                'Fehler beim Reset',
+                String(e?.message ?? e),
+              );
+            }
+          },
+        },
+      ],
+    );
 
   const onCoachmarkResetAll = () =>
     Alert.alert(
@@ -1309,6 +1374,37 @@ export default function ProfileScreen() {
                 label="Alle Tours zurücksetzen"
                 sub="Setzt Home + Belohnungen auf 'noch nicht gesehen'"
                 onPress={onCoachmarkResetAll}
+                first
+                last
+              />
+            </MenuCard>
+
+            {/* Nuclear Reset — eigener Block ganz unten weil's die
+                aggressivste Aktion ist und nicht aus Versehen
+                getappt werden soll. Setzt den Account praktisch
+                auf null (auf der lokalen Seite), inkl. Auth → der
+                User landet als frischer anonymer Test-User. */}
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 10,
+                color: '#dc2626',
+                letterSpacing: 0.8,
+                textTransform: 'uppercase',
+                marginTop: 18,
+                marginBottom: 8,
+              }}
+            >
+              Test-User · Reset
+            </Text>
+            <MenuCard>
+              <MenuRow
+                icon="nuke"
+                color="#dc2626"
+                label="Komplett-Reset (lokal)"
+                sub="Logout + AsyncStorage wipe → frischer Anonymous-User beim Neustart"
+                onPress={onFullLocalReset}
                 first
                 last
               />
