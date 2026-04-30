@@ -36,7 +36,15 @@ import { CoachmarkService, TourKey } from '@/lib/services/coachmarkService';
 // Mirror der AsyncStorage-Keys aus `onboardingService.ts` damit wir
 // hier nicht abhängig vom Service selbst sind (zirkuläre Imports
 // vermeiden, der Service hat dynamic imports).
+//
+// WICHTIG: User die das Onboarding via "Später"-Button auf dem
+// Hero-Screen skippen, kriegen NUR `onboarding_v1_skipped` gesetzt
+// — NICHT `completed`. Der Hook muss daher BEIDE Flags akzeptieren
+// (entspricht `OnboardingService.hasPassedOnboarding()`-Semantik),
+// sonst sehen Skip-User die Welcome-Tour nie. Das war ein Bug —
+// eine Skip-Geste sollte nicht alle weiteren Tutorials blockieren.
 const ONBOARDING_COMPLETED_KEY = 'onboarding_v1_completed';
+const ONBOARDING_SKIPPED_KEY = 'onboarding_v1_skipped';
 
 export type UseCoachmarkResult = {
   /** Soll das Overlay aktuell sichtbar sein? */
@@ -68,17 +76,31 @@ export function useCoachmark(tour: TourKey): UseCoachmarkResult {
       let cancelled = false;
       (async () => {
         try {
-          const [seen, onboardingDone] = await Promise.all([
+          const [seen, completed, skipped] = await Promise.all([
             CoachmarkService.getSeen(tour),
             AsyncStorage.getItem(ONBOARDING_COMPLETED_KEY),
+            AsyncStorage.getItem(ONBOARDING_SKIPPED_KEY),
           ]);
           if (cancelled || localShown) return;
-          if (onboardingDone !== 'true') return;
+          // Hard-Block: Onboarding muss durch sein (egal ob
+          // abgeschlossen oder geskipped — siehe Block-Kommentar
+          // bei den Konstanten oben).
+          const hasPassedOnboarding =
+            completed === 'true' || skipped === 'true';
+          if (__DEV__) {
+            console.log(
+              `🎯 useCoachmark[${tour}]: seen=${seen} completed=${completed} skipped=${skipped} → hasPassedOnboarding=${hasPassedOnboarding}`,
+            );
+          }
+          if (!hasPassedOnboarding) return;
           if (seen) return;
           // Kleiner Delay damit Screen-Render + Skeletons abklingen
           // bevor wir ein Modal drüberlegen.
           setTimeout(() => {
             if (!cancelled && !localShown) {
+              if (__DEV__) {
+                console.log(`🎯 useCoachmark[${tour}]: opening tour`);
+              }
               setVisible(true);
               setLocalShown(true);
             }
