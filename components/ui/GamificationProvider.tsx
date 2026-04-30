@@ -70,6 +70,15 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   const [bannerAchievement, setBannerAchievement] =
     useState<Achievement | null>(null);
 
+  // Wenn ein Major-Overlay (Achievement-Modal oder Level-Up-Modal)
+  // gerade läuft oder pending ist, darf KEIN subtle Banner parallel
+  // erscheinen — sonst feiern wir gleichzeitig auf zwei Ebenen, was
+  // genau die "Überforderung" ist die wir mit dem Tier-System lösen
+  // wollten. Queue-Logik: wenn beim Banner-Show ein Major aktiv ist,
+  // landet das Achievement hier; nach Major-Close drainen wir es.
+  const [pendingBannerAchievement, setPendingBannerAchievement] =
+    useState<Achievement | null>(null);
+
   // Alte Toast-States entfernt - alles läuft über zentrale Toast-Library
 
   // Queue für Level-Ups (falls Achievement zuerst angezeigt wird)
@@ -99,13 +108,39 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     const tier = getAchievementTier(achievement);
 
     if (tier === 'subtle') {
-      // Subtle: Banner unten, defered. Wenn aktuell schon ein
-      // Banner sichtbar ist, replacen wir ihn (neuestes
-      // Achievement gewinnt — alte Banner verlöscht). Bei mehr
-      // Volumen wäre eine Queue sauberer; aktuell ist die
-      // Frequenz so niedrig dass das egal ist.
+      // Subtle: Banner unten, 1.5 s defered. ABER: wenn beim
+      // Anzeigezeitpunkt ein Major-Overlay aktiv oder pending ist,
+      // queue'n wir den Banner statt ihn dazu zu rendern. Das
+      // Major hat Vorrang — der Banner kommt nach Close.
+      //
+      // Den Check machen wir IM TIMER-CALLBACK (nicht jetzt) damit
+      // wir den aktuellen State sehen, falls in den 1.5 s ein
+      // Major-Overlay dazukommt (= klassischer Race aus dem
+      // Bug-Screenshot).
       setTimeout(() => {
-        setBannerAchievement(achievement);
+        // Setter-Function-Pattern: aktuellen State lesen ohne
+        // dependency-arrays zu pflegen.
+        setLevelUpData(currentLevelUp => {
+          setAchievementData(currentAch => {
+            setPendingLevelUp(currentPendingLevel => {
+              const majorActive =
+                currentLevelUp.visible ||
+                currentAch.visible ||
+                currentPendingLevel !== null;
+              if (majorActive) {
+                console.log(
+                  '🎖️ Major-Overlay aktiv — Banner queued bis Major schließt',
+                );
+                setPendingBannerAchievement(achievement);
+              } else {
+                setBannerAchievement(achievement);
+              }
+              return currentPendingLevel;
+            });
+            return currentAch;
+          });
+          return currentLevelUp;
+        });
       }, 1500);
       return;
     }
@@ -196,6 +231,67 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     };
   }, [registerCallbacks]);
 
+  // 🎖️ Banner-Suppression beim Major-Open
+  //
+  // Wenn ein Major-Overlay (Achievement-Modal oder Level-Up-Modal)
+  // gerade aufgeht, während ein subtle Banner schon sichtbar ist,
+  // ziehen wir den Banner zurück und schieben ihn in die Pending-
+  // Queue. Sonst würden beide gleichzeitig sichtbar sein (siehe
+  // Bug-Screenshot).
+  //
+  // Edge-Case: wenn Banner gleichzeitig mit Major aufgeht (klassisch
+  // bei trackAction wo beide Achievements + Level-Up unlocken),
+  // kommt der Banner-Show-Effect-Timer evtl. erst nach diesem Effect.
+  // Der Show-Logic im achievementHandler-Timer prüft dann selbst
+  // nochmal den Major-State (siehe oben) und queued — das deckt
+  // diesen Race ab.
+  useEffect(() => {
+    if (!bannerAchievement) return;
+    if (
+      levelUpData.visible ||
+      achievementData.visible ||
+      pendingLevelUp !== null
+    ) {
+      console.log('🎖️ Major-Overlay öffnet — aktiver Banner geht in Queue');
+      setPendingBannerAchievement(bannerAchievement);
+      setBannerAchievement(null);
+    }
+  }, [
+    bannerAchievement,
+    levelUpData.visible,
+    achievementData.visible,
+    pendingLevelUp,
+  ]);
+
+  // 🎖️ Banner-Drain nach Major-Close
+  //
+  // Wenn alle Major-Overlays geschlossen sind und ein Pending Banner
+  // wartet, zeigen wir ihn jetzt — mit kurzer Grace-Period damit der
+  // Modal-Close-Animation nicht visuell mit dem Banner-Slide-In
+  // überlappt.
+  useEffect(() => {
+    if (!pendingBannerAchievement) return;
+    if (
+      levelUpData.visible ||
+      achievementData.visible ||
+      pendingLevelUp !== null
+    ) {
+      return; // noch nicht alle Major-Overlays durch
+    }
+    // Grace-Period 400 ms — Modal-Close-Animation läuft etwa
+    // 250-300 ms, danach hat der Screen wieder Ruhe für den Banner.
+    const t = setTimeout(() => {
+      setBannerAchievement(pendingBannerAchievement);
+      setPendingBannerAchievement(null);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [
+    pendingBannerAchievement,
+    levelUpData.visible,
+    achievementData.visible,
+    pendingLevelUp,
+  ]);
+
   // 📱 Periodic check for pending rating - BUT BLOCKED DURING OVERLAYS!
   useEffect(() => {
     console.log('📱 Starting periodic rating check interval...');
@@ -203,10 +299,18 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     
     const checkInterval = setInterval(async () => {
       // 🛡️ CRITICAL: Skip if ANY overlay is active!
-      if (levelUpData.visible || achievementData.visible || showAppRatingModal) {
+      // Banner zählt auch als "active" — sonst öffnet das Rating-
+      // Modal manchmal genau in den 5 s in denen der Banner sichtbar
+      // ist und der User sieht beides parallel.
+      if (
+        levelUpData.visible ||
+        achievementData.visible ||
+        showAppRatingModal ||
+        bannerAchievement !== null
+      ) {
         return; // Skip silently - happens often
       }
-      
+
       checkCount++;
       
       try {
@@ -220,7 +324,12 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
       console.log('📱 Stopping periodic rating check');
       clearInterval(checkInterval);
     };
-  }, [levelUpData.visible, achievementData.visible, showAppRatingModal]);
+  }, [
+    levelUpData.visible,
+    achievementData.visible,
+    showAppRatingModal,
+    bannerAchievement,
+  ]);
 
   // Handler für Overlay-Schließungen
   const handleLevelUpClose = async () => {
