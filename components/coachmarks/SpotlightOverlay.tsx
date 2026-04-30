@@ -67,7 +67,12 @@ const TARGET_PADDING = 8;
 // Target eine dünne weiße Border mit border-radius — das macht den
 // Eindruck eines abgerundeten Lochs auch wenn unterhalb 4 harte
 // Rechtecke liegen.
-const SPOTLIGHT_BORDER_RADIUS = 14;
+//
+// 18 px = matcht den borderRadius der Tooltip-Card unten — User-
+// Feedback: "die corners der hervorhebungen sollen gleich sein
+// wie bei den erklärmessages". Konsistente Eckigkeit zwischen
+// Spotlight und Tooltip wirkt visuell zusammenhängend.
+const SPOTLIGHT_BORDER_RADIUS = 18;
 const TOOLTIP_SIDE_MARGIN = 16;
 const TOOLTIP_GAP = 14;
 // Sweet-Spot für den Backdrop-Tönung — dunkel genug dass das Target

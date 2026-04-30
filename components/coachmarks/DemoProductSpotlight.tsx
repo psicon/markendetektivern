@@ -243,7 +243,10 @@ export function DemoProductSpotlight({
                   bottom: -HALO_PADDING,
                   left: -HALO_PADDING,
                   right: -HALO_PADDING,
-                  borderRadius: 22,
+                  // 18 px matcht die Tooltip-Card-Eckigkeit
+                  // im Rest der Coachmark-Tour (siehe
+                  // SpotlightOverlay.SPOTLIGHT_BORDER_RADIUS).
+                  borderRadius: 18,
                   borderWidth: HALO_BORDER_WIDTH,
                   borderColor: '#fff',
                 },
