@@ -1,7 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BlurView } from 'expo-blur';
 import React from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Extrapolation,
   interpolate,
@@ -22,6 +22,11 @@ type Props = {
   onPressSearch?: () => void;
   onPressScanner?: () => void;
   onPressProfile?: () => void;
+  /** When set, the profile button renders the user's photo
+   *  inside the round 36×36 button instead of the generic
+   *  account-outline icon. Pass null/undefined for anonymous
+   *  users (shows the icon fallback). */
+  profilePhotoUrl?: string | null;
 };
 
 export const MORPHING_HEADER_ROW_HEIGHT = 56;
@@ -43,6 +48,7 @@ export function MorphingHeader({
   onPressSearch,
   onPressScanner,
   onPressProfile,
+  profilePhotoUrl,
 }: Props) {
   const { theme } = useTokens();
   const scheme = useColorScheme() ?? 'light';
@@ -177,9 +183,25 @@ export function MorphingHeader({
 
         <Pressable
           onPress={onPressProfile}
-          style={[styles.iconButton, { backgroundColor: theme.surfaceAlt }]}
+          style={[
+            styles.iconButton,
+            {
+              backgroundColor: theme.surfaceAlt,
+              // Hide the surfaceAlt circle when an avatar fills
+              // the slot — the photo provides its own visual.
+              overflow: 'hidden',
+            },
+          ]}
         >
-          <MaterialCommunityIcons name="account-outline" size={20} color={theme.textMuted} />
+          {profilePhotoUrl ? (
+            <Image
+              source={{ uri: profilePhotoUrl }}
+              style={{ width: '100%', height: '100%' }}
+              resizeMode="cover"
+            />
+          ) : (
+            <MaterialCommunityIcons name="account-outline" size={20} color={theme.textMuted} />
+          )}
         </Pressable>
       </View>
 

@@ -3,6 +3,7 @@ import React from 'react';
 import { Image, Platform, Pressable, Text, View } from 'react-native';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { getProductImage } from '@/lib/utils/productImage';
 
 type Props = {
   title: string;
@@ -10,6 +11,13 @@ type Props = {
   /** Brand/manufacturer logo URL (Firestore `hersteller.bild`). Rendered
    *  as a tiny 16px badge inline to the left of the brand name. */
   brandLogoUri?: string | null;
+  /**
+   * Either pass `product` (preferred — internally calls
+   * `getProductImage()` so the cleaned-WebP variant is used
+   * automatically) OR pass `imageUri` to override (e.g. loading
+   * placeholder). If both are provided, `imageUri` wins.
+   */
+  product?: { bildClean?: string | null; bild?: string | null } | null;
   imageUri?: string | null;
   price: number;
   /** Best-alternative savings (€), optional — shown when known. */
@@ -41,6 +49,7 @@ function BrandCardImpl({
   title,
   brand,
   brandLogoUri,
+  product,
   imageUri,
   price,
   savingsEur,
@@ -50,6 +59,8 @@ function BrandCardImpl({
   onPress,
 }: Props) {
   const { theme, shadows } = useTokens();
+
+  const resolvedImageUri = imageUri ?? getProductImage(product);
 
   return (
     <Pressable
@@ -63,12 +74,12 @@ function BrandCardImpl({
         ...shadows.sm,
       })}
     >
-      <View style={{ position: 'relative', width: '100%', height: 162 }}>
-        {imageUri ? (
+      <View style={{ position: 'relative', width: '100%', height: 162, backgroundColor: '#ffffff' }}>
+        {resolvedImageUri ? (
           <Image
-            source={{ uri: imageUri }}
+            source={{ uri: resolvedImageUri }}
             style={{ width: '100%', height: '100%' }}
-            resizeMode="cover"
+            resizeMode="contain"
           />
         ) : (
           <View

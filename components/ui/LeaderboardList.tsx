@@ -1,3 +1,4 @@
+import { Shimmer } from '@/components/design/Skeletons';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -194,12 +195,39 @@ const LeaderboardList: React.FC<LeaderboardListProps> = ({ type, period }) => {
   };
 
   if (loading) {
+    // Skeleton rows mirror the leaderboard list item layout
+    // (rank badge + avatar + name + points). Replaces the
+    // centered spinner so the eventual data swap doesn't shift
+    // the layout.
     return (
-      <View style={[styles.loading, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.text }]}>
-          Lade Bestenliste...
-        </Text>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.listContent}>
+          {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+            <View
+              key={i}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingVertical: 16,
+                paddingHorizontal: 16,
+                marginBottom: 8,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: colors.border ?? 'rgba(0,0,0,0.06)',
+                backgroundColor: colors.cardBackground,
+              }}
+            >
+              <View style={{ width: 50, alignItems: 'center' }}>
+                <Shimmer width={36} height={36} radius={18} />
+              </View>
+              <View style={{ marginLeft: 12, flex: 1, gap: 6 }}>
+                <Shimmer width="55%" height={14} radius={4} />
+                <Shimmer width="35%" height={11} radius={3} />
+              </View>
+              <Shimmer width={48} height={14} radius={4} />
+            </View>
+          ))}
+        </View>
       </View>
     );
   }

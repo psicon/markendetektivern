@@ -1,892 +1,1744 @@
+// app/profile.tsx
+//
+// Profile screen — redesigned. Combines what used to live on the
+// `(tabs)/more.tsx` (settings, links, toggles, dev tools) with the
+// previous profile content (identity, level + savings hero, menu)
+// into a single screen, matching `markendetektive_newdesign/project/Profile.jsx`.
+//
+// Design rules from CLAUDE.md applied 1:1:
+//   • DetailHeader chrome (back-button + edit-pencil right slot)
+//   • FilterSheet for the "Find us on social media" sheet
+//   • useTokens / fontFamily / fontWeight from design tokens
+//   • level-tinted gradient hero (mirrors levelGradient on rewards)
+//   • white-surface menu cards with soft shadow
 
-import { AuthRequiredModal } from '@/components/ui/AuthRequiredModal';
-import { IconSymbol } from '@/components/ui/IconSymbol';
-import { LevelBadge } from '@/components/ui/LevelBadge';
-import { Colors } from '@/constants/Colors';
-import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { useAuth } from '@/lib/contexts/AuthContext';
-import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation, useRouter } from 'expo-router';
-import React, { useLayoutEffect, useState } from 'react';
+import { router, useNavigation } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from 'react';
 import {
-    Alert,
-    Image,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Alert,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  Switch,
+  Text,
+  Image as RNImage,
+  View,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import {
+  DETAIL_HEADER_ROW_HEIGHT,
+  DetailHeader,
+} from '@/components/design/DetailHeader';
+import { FilterSheet } from '@/components/design/FilterSheet';
+import { AuthRequiredModal } from '@/components/ui/AuthRequiredModal';
+import { SimilarityStagesModal } from '@/components/ui/SimilarityStagesModal';
+import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { useTokens } from '@/hooks/useTokens';
+import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
+import { useTheme } from '@/lib/contexts/ThemeContext';
+import { achievementService } from '@/lib/services/achievementService';
+import {
+  ALL_TOUR_KEYS,
+  CoachmarkService,
+  type TourKey,
+} from '@/lib/services/coachmarkService';
+import { FirestoreService } from '@/lib/services/firestore';
+import type { Level } from '@/lib/types/achievements';
+import {
+  LEVEL_GRADIENT_END,
+  LEVEL_GRADIENT_START,
+  levelGradient,
+  mdiForLevelIcon,
+} from '@/lib/utils/levelIcon';
+
+// `levelGradient` + `mdiForLevelIcon` live in `lib/utils/levelIcon.ts`
+// — shared with home + achievements screens so all three render
+// identical colour + icon identity for the same level.
+
+// ────────────────────────────────────────────────────────────────────
+// Screen
+// ────────────────────────────────────────────────────────────────────
+
 export default function ProfileScreen() {
-  const router = useRouter();
-  const navigation = useNavigation();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
+  const { theme, shadows } = useTokens();
   const insets = useSafeAreaInsets();
-  const { user, userProfile, logout, refreshUserProfile, isAnonymous } = useAuth();
+  const navigation = useNavigation();
+
+  const { user, userProfile, logout, isAnonymous } = useAuth();
   const { isPremium, presentPaywall } = useRevenueCat();
+  const { isDarkMode, toggleDarkMode } = useTheme();
+
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showSocialSheet, setShowSocialSheet] = useState(false);
+  const [showSimilarityModal, setShowSimilarityModal] = useState(false);
+  const [showOnboardingButton, setShowOnboardingButton] = useState(false);
+  const [gamificationDisabled, setGamificationDisabled] = useState(false);
+  const [appVersion, setAppVersion] = useState('1.0.0');
+  // Levels catalogue — loaded from achievementService so the level
+  // card shows the level's actual colour + icon + threshold (same
+  // numbers shown on /achievements + the home-tab card). Without
+  // this we'd fall back to a heuristic (level+1)*1000 estimate that
+  // doesn't match the rest of the app.
+  const [levels, setLevels] = useState<Level[]>([]);
 
-
-  // Helper function to get country flag emoji (copied from explore.tsx)
-  const getCountryFlag = (country: string): string => {
-    const flagMap: {[key: string]: string} = {
-      'Deutschland': '🇩🇪',
-      'DE': '🇩🇪',
-      'Schweiz': '🇨🇭',
-      'CH': '🇨🇭',
-      'Österreich': '🇦🇹',
-      'AT': '🇦🇹',
-      'Austria': '🇦🇹',
-      'Switzerland': '🇨🇭',
-      'Germany': '🇩🇪',
-    };
-    
-    return flagMap[country] || '🏳️';
-  };
-  
-  // Configure header with standard options
+  // Hide native stack header — we render our own DetailHeader.
   useLayoutEffect(() => {
-    navigation.setOptions({
-      ...getNavigationHeaderOptions(colorScheme, 'Profil'),
-      headerRight: () => (
-        <TouchableOpacity
-          onPress={() => {
-            if (isAnonymous) {
-              setShowAuthModal(true);
-            } else {
-              router.push('/edit-profile' as any);
-            }
-          }}
-          style={{ paddingRight: 16 }}
-        >
-          <IconSymbol name="square.and.pencil" size={20} color="white" />
-        </TouchableOpacity>
-      ),
-    });
-  }, [navigation, colorScheme, router, isAnonymous, setShowAuthModal]);
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
 
-  const handlePremiumUpgrade = async () => {
-    try {
-      console.log('🛒 Premium Upgrade button pressed');
-      await presentPaywall();
-    } catch (error) {
-      console.error('❌ Premium Upgrade Paywall error:', error);
-    }
-  };
+  useEffect(() => {
+    const v = Constants.expoConfig?.version || '1.0.0';
+    const b = Constants.expoConfig?.ios?.buildNumber || '0';
+    setAppVersion(`${v}.${b}`);
+  }, []);
 
-  const deleteUserAccount = async () => {
-    if (!user) {
-      Alert.alert('Fehler', 'Kein Benutzer angemeldet');
+  useEffect(() => {
+    let alive = true;
+    achievementService
+      .getAllLevels()
+      .then((ls) => {
+        if (alive) setLevels(ls || []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      (async () => {
+        const { OnboardingService } = await import(
+          '@/lib/services/onboardingService'
+        );
+        const skipped = await OnboardingService.isOnboardingSkipped();
+        const completed = await OnboardingService.isOnboardingCompleted();
+        if (!alive) return;
+        setShowOnboardingButton(skipped && !completed);
+
+        const { gamificationSettingsService } = await import(
+          '@/lib/services/gamificationSettingsService'
+        );
+        const disabled = await gamificationSettingsService.areNotificationsDisabled();
+        if (!alive) return;
+        setGamificationDisabled(disabled);
+      })();
+      return () => {
+        alive = false;
+      };
+    }, []),
+  );
+
+  // Resolved user data
+  const displayName = userProfile?.display_name || user?.displayName || 'Detektiv';
+  const realName = (userProfile as any)?.real_name || '';
+  const email = userProfile?.email || user?.email || '';
+  const photoUrl = (userProfile as any)?.photo_url || user?.photoURL || null;
+  const totalSavings = Number(userProfile?.totalSavings ?? 0);
+  const productsSaved = Number((userProfile as any)?.productsSaved ?? 0);
+  const level = Number(
+    (userProfile as any)?.stats?.currentLevel ??
+      (userProfile as any)?.level ??
+      1,
+  );
+  const points = Number(
+    (userProfile as any)?.stats?.pointsTotal ??
+      (userProfile as any)?.stats?.totalPoints ??
+      0,
+  );
+  const favoriteMarket = (userProfile as any)?.favoriteMarketName || '';
+  const favoriteMarketId = (userProfile as any)?.favoriteMarket || '';
+  // Lieblingsmarkt-Land (Country-Code, z. B. "DE", "AT") wird auf dem
+  // User-Profil NICHT mitgespeichert — nur die ID + der Name sind
+  // gecacht. Wir holen den Discounter beim Mount einmalig per ID nach,
+  // um das Land in Klammern hinter den Namen zu setzen ("LiDL (DE)").
+  // FirestoreService cached Discounter intern (30 Min), das ist also
+  // fast immer ein Cache-Hit.
+  const [favoriteMarketLand, setFavoriteMarketLand] = useState<string>('');
+  useEffect(() => {
+    let alive = true;
+    if (!favoriteMarketId) {
+      setFavoriteMarketLand('');
       return;
     }
+    FirestoreService.getDiscounterById(favoriteMarketId)
+      .then((d: any) => {
+        if (alive) setFavoriteMarketLand(d?.land || '');
+      })
+      .catch(() => {
+        if (alive) setFavoriteMarketLand('');
+      });
+    return () => {
+      alive = false;
+    };
+  }, [favoriteMarketId]);
+  const city =
+    (userProfile as any)?.city ?? (userProfile as any)?.guessedCity ?? '';
+  const bundesland =
+    (userProfile as any)?.bundesland ??
+    (userProfile as any)?.guessedBundesland ??
+    '';
 
+  // Real level info from the catalogue — same source the home
+  // card and the Errungenschaften screen use.
+  const levelInfo = levels.find((l) => l.id === level);
+  const nextLevel = levels.find((l) => l.id === level + 1);
+  const remainingPoints = nextLevel
+    ? Math.max(0, (nextLevel.pointsRequired ?? 0) - points)
+    : 0;
+  const remainingSavings = nextLevel
+    ? Math.max(0, (nextLevel.savingsRequired ?? 0) - totalSavings)
+    : 0;
+  const levelSubtitle = (() => {
+    if (!nextLevel) return 'Maximales Level erreicht!';
+    const eur = remainingSavings.toFixed(2).replace('.', ',') + ' €';
+    const pts = `${remainingPoints.toLocaleString('de-DE')} Pkt`;
+    if (remainingSavings <= 0 && remainingPoints <= 0) {
+      return 'Bereit fürs nächste Level!';
+    }
+    if (remainingSavings <= 0) return `${pts} zum nächsten Level`;
+    if (remainingPoints <= 0) return `${eur} zum nächsten Level`;
+    return `${eur} & ${pts} zum nächsten Level`;
+  })();
+
+  // ── External link helpers ─────────────────────────────────────
+  const openExternal = async (url: string) => {
     try {
-      console.log('🗑️ Starting account deletion for user:', user.uid);
-      
-      // Nur den Firebase Auth Account löschen
-      // Die Firestore-Daten bleiben erhalten für Statistiken/Analytics
-      const { deleteUser } = await import('firebase/auth');
-      await deleteUser(user);
-      console.log('✅ Firebase Auth account deleted');
-      
-      // Erfolg anzeigen und zur Startseite
-      Alert.alert(
-        'Account gelöscht',
-        'Dein Account wurde erfolgreich gelöscht. Deine Daten bleiben für Statistiken anonymisiert erhalten.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Navigation zur Startseite
-              router.replace('/');
-            }
-          }
-        ]
+      await WebBrowser.openBrowserAsync(url, {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.AUTOMATIC,
+        controlsColor: theme.primary,
+        toolbarColor: theme.bg,
+      });
+    } catch {
+      Linking.openURL(url);
+    }
+  };
+
+  const handleShareApp = () =>
+    Share.share({
+      message:
+        'Schau dir die Markendetektive App an! Spare Geld mit NoName-Produkten.',
+      url: 'https://markendetektive.de',
+    });
+
+  const handleRateApp = async () => {
+    try {
+      const { ratingPromptService } = await import(
+        '@/lib/services/ratingPrompt'
       );
-      
-    } catch (error: any) {
-      console.error('❌ Account deletion failed:', error);
-      
-      // Spezifische Fehlerbehandlung
-      if (error.code === 'auth/requires-recent-login') {
-        Alert.alert(
-          'Erneute Anmeldung erforderlich',
-          'Aus Sicherheitsgründen musst du dich erneut anmelden, bevor du deinen Account löschen kannst.',
-          [
-            {
-              text: 'Jetzt anmelden',
-              onPress: () => {
-                logout();
-                router.replace('/auth/login');
-              }
-            },
-            { text: 'Abbrechen', style: 'cancel' }
-          ]
-        );
-      } else {
-        throw error; // Wird vom aufrufenden catch-Block behandelt
-      }
+      const handler: any = (ratingPromptService as any).showRatingModal;
+      if (typeof handler === 'function') handler(true);
+      else Alert.alert('Bewertung', 'Bewertung kann derzeit nicht geöffnet werden.');
+    } catch {
+      Alert.alert('Bewertung', 'Bewertung kann derzeit nicht geöffnet werden.');
     }
   };
 
-  // Note: Profile refresh happens automatically via AuthContext when data changes
-  // Manual refresh is called after profile edits in edit-profile.tsx
-
-  // Get user data
-  const displayName = userProfile?.display_name || user?.displayName || 'Benutzer';
-  const realName = userProfile?.real_name || '';
-  const email = userProfile?.email || user?.email || '';
-  const photoUrl = userProfile?.photo_url || user?.photoURL || null;
-  const totalSavings = userProfile?.totalSavings || 0;
-  const productsSaved = userProfile?.productsSaved || 0;
-  // Level kommt jetzt aus stats.currentLevel (korrekte Berechnung)
-  const level = (userProfile as any)?.stats?.currentLevel || userProfile?.level || 1;
-  const favoriteMarket = userProfile?.favoriteMarketName || '';
-  const favoriteMarketId = userProfile?.favoriteMarket || '';
-  
-  // Get favorite market display with emoji (if available)
-  const getFavoriteMarketDisplay = () => {
-    if (!favoriteMarket) return '';
-    
-    // The favoriteMarketName only contains the market name
-    // We need to get the country from a lookup or pattern matching
-    const marketName = favoriteMarket;
-    let country = 'Deutschland'; // Default
-    
-    // Simple pattern matching based on common market names
-    if (marketName.toLowerCase().includes('spar') || marketName.toLowerCase().includes('billa')) {
-      country = 'Österreich';
-    } else if (marketName.toLowerCase().includes('migros') || marketName.toLowerCase().includes('coop')) {
-      country = 'Schweiz';
+  const handleResumeOnboarding = async () => {
+    try {
+      const { OnboardingService } = await import(
+        '@/lib/services/onboardingService'
+      );
+      await OnboardingService.resetOnboarding();
+      setShowOnboardingButton(false);
+      router.push('/onboarding' as any);
+    } catch (e) {
+      console.warn('Profile: resumeOnboarding failed', e);
     }
-    
-    return `${getCountryFlag(country)} ${marketName}`;
   };
-  
-  // Get stats for level progress
-  const currentPoints = (userProfile as any)?.stats?.totalPoints || 0;
-  const currentSavings = userProfile?.totalSavings || 0;
+
+  const handleGamificationToggle = async (next: boolean) => {
+    try {
+      const { gamificationSettingsService } = await import(
+        '@/lib/services/gamificationSettingsService'
+      );
+      await gamificationSettingsService.setNotificationsDisabled(next);
+      setGamificationDisabled(next);
+    } catch (e) {
+      console.warn('Profile: gamification toggle failed', e);
+    }
+  };
 
   const handleLogout = () => {
     if (isAnonymous) {
-      // Für anonyme User: Zeige Auth Modal für Registrierung
       setShowAuthModal(true);
-    } else {
-      // Für registrierte User: Normaler Logout
-      Alert.alert(
-        'Abmelden',
-        'Möchtest du dich wirklich abmelden?',
-        [
-          {
-            text: 'Abbrechen',
-            style: 'cancel'
-          },
-          {
-            text: 'Abmelden',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                await logout();
-                // Navigation wird automatisch durch AuthContext/Tab Layout gehandelt
-                // Kein manueller Navigation-Call nötig
-              } catch (error) {
-                Alert.alert('Fehler', 'Beim Abmelden ist ein Fehler aufgetreten.');
-              }
-            }
-          }
-        ]
-      );
+      return;
     }
+    Alert.alert('Abmelden', 'Möchtest du dich wirklich abmelden?', [
+      { text: 'Abbrechen', style: 'cancel' },
+      {
+        text: 'Abmelden',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await logout();
+            // Leave the profile route — the registered-only
+            // sections at the bottom (account-löschen, etc.)
+            // don't make sense for the now-anonymous user, and
+            // staying on /profile means we'd render a stale
+            // identity for one frame before the AuthContext
+            // listener fires. `replace` (not `push`) so back-
+            // navigation doesn't return the user here.
+            router.replace('/(tabs)' as any);
+          } catch {
+            Alert.alert('Fehler', 'Beim Abmelden ist ein Fehler aufgetreten.');
+          }
+        },
+      },
+    ]);
   };
 
   const handleDeleteAccount = () => {
     Alert.alert(
       'Account löschen',
-      'Bist du sicher, dass du deinen Account dauerhaft löschen möchtest? Diese Aktion kann nicht rückgängig gemacht werden.',
+      'Bist du sicher? Diese Aktion kann nicht rückgängig gemacht werden.',
       [
-        {
-          text: 'Abbrechen',
-          style: 'cancel'
-        },
+        { text: 'Abbrechen', style: 'cancel' },
         {
           text: 'Account löschen',
           style: 'destructive',
-           onPress: async () => {
-             try {
-               await deleteUserAccount();
-             } catch (error) {
-               console.error('❌ Account deletion error:', error);
-               Alert.alert(
-                 'Fehler', 
-                 'Account konnte nicht gelöscht werden. Bitte versuche es später erneut oder kontaktiere den Support.'
-               );
-             }
-           }
-        }
-      ]
+          onPress: async () => {
+            if (!user) return;
+            try {
+              const { deleteUser } = await import('firebase/auth');
+              await deleteUser(user);
+              router.replace('/');
+            } catch (e: any) {
+              if (e?.code === 'auth/requires-recent-login') {
+                Alert.alert(
+                  'Erneute Anmeldung erforderlich',
+                  'Aus Sicherheitsgründen bitte erneut anmelden.',
+                  [
+                    {
+                      text: 'Anmelden',
+                      onPress: async () => {
+                        await logout();
+                        router.replace('/auth/login' as any);
+                      },
+                    },
+                    { text: 'Abbrechen', style: 'cancel' },
+                  ],
+                );
+              } else {
+                Alert.alert(
+                  'Fehler',
+                  'Account konnte nicht gelöscht werden.',
+                );
+              }
+            }
+          },
+        },
+      ],
     );
   };
 
-  const MenuItem = ({ 
-    icon, 
-    title, 
-    onPress, 
-    showArrow = true, 
-    isFirst = false, 
-    isLast = false,
-    rightElement,
-    iconColor
-  }: any) => (
-    <TouchableOpacity 
-      style={[
-        styles.menuItem,
-        { backgroundColor: colors.cardBackground },
-        isFirst && styles.menuItemFirst,
-        isLast && styles.menuItemLast,
-      ]}
-      onPress={onPress}
-      disabled={!onPress}
-    >
-      <View style={styles.menuItemContent}>
-        <IconSymbol 
-          name={icon} 
-          size={24} 
-          color={iconColor || colors.primary} 
-        />
-        <Text style={[styles.menuText, { color: colors.text }]}>
-          {title}
-        </Text>
-        {rightElement}
-        {showArrow && !rightElement && (
-          <IconSymbol 
-            name="chevron.right" 
-            size={14} 
-            color={colors.icon} 
-          />
-        )}
-      </View>
-      {!isLast && <View style={[styles.separator, { backgroundColor: colors.border }]} />}
-    </TouchableOpacity>
-  );
+  // ─── Coachmark (Per-Screen-Tour) Dev-Tools ──────────────────────
+  //
+  // NICHT zu verwechseln mit dem `onResetOnboardingDev` direkt
+  // darunter — das ist der 9-Step-Daten-Erhebungs-Flow, das hier
+  // sind die kleinen Erklär-Overlays die beim ersten Besuch jeder
+  // Hauptscreen-Seite erscheinen.
 
-  // Für anonyme User: Zeige spezielle Ansicht
-  if (isAnonymous) {
-    return (
-      <>
-        <ScrollView 
-          style={[styles.container, { backgroundColor: colors.background }]}
-          showsVerticalScrollIndicator={false}
+  const COACHMARK_LABELS: Record<TourKey, string> = {
+    home: 'Home (Welcome + Spotlight)',
+    rewards: 'Belohnungen (Karten-Modal)',
+  };
+
+  // Route pro Tour — wird für die "Tour jetzt zeigen"-Aktion benutzt:
+  // wir navigieren zur Seite, warten kurz bis der Screen + Hook
+  // mounten, und feuern dann das Replay-Event.
+  const COACHMARK_ROUTES: Record<TourKey, string> = {
+    home: '/(tabs)',
+    rewards: '/(tabs)/rewards',
+  };
+
+  const [coachmarkStatuses, setCoachmarkStatuses] = useState<
+    Record<TourKey, string | null>
+  >({
+    home: null,
+    rewards: null,
+  });
+
+  const reloadCoachmarkStatuses = useCallback(async () => {
+    const status = await CoachmarkService.getAllStatus();
+    setCoachmarkStatuses(status);
+  }, []);
+
+  useEffect(() => {
+    void reloadCoachmarkStatuses();
+  }, [reloadCoachmarkStatuses]);
+
+  const formatCoachmarkSeen = (iso: string | null) => {
+    if (!iso) return 'noch nicht gesehen';
+    try {
+      const d = new Date(iso);
+      // German short-date format ("30.04.26, 15:23"). Locale-stable
+      // because we pass 'de-DE' explicitly.
+      return `gesehen am ${d.toLocaleDateString('de-DE', {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit',
+      })} ${d.toLocaleTimeString('de-DE', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })}`;
+    } catch {
+      return 'gesehen';
+    }
+  };
+
+  const onCoachmarkResetAll = () =>
+    Alert.alert(
+      'Tours zurücksetzen',
+      'Beim nächsten Besuch von Home und Belohnungen erscheinen die Erklär-Tours erneut.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Zurücksetzen',
+          style: 'destructive',
+          onPress: async () => {
+            await CoachmarkService.resetAll();
+            await reloadCoachmarkStatuses();
+            Alert.alert(
+              'Erledigt',
+              'Alle Tours sind zurückgesetzt — beim nächsten Mount jedes Screens taucht die Tour wieder auf.',
+            );
+          },
+        },
+      ],
+    );
+
+  const onCoachmarkReplayOne = (key: TourKey) => {
+    // Erst zur passenden Seite navigieren, dann nach kurzem Delay
+    // das Replay-Event feuern. Der Delay gibt dem Ziel-Screen
+    // Zeit zu mounten und der useCoachmark-Hook Zeit, sich beim
+    // EventEmitter zu registrieren — sonst geht das Event ins Leere.
+    // 500 ms hat sich in der Praxis als ausreichend erwiesen
+    // (Stack-Animation ~300 ms + Mount-Render ~100-150 ms).
+    router.push(COACHMARK_ROUTES[key] as any);
+    setTimeout(() => {
+      CoachmarkService.requestReplay(key);
+    }, 500);
+  };
+
+  const onResetOnboardingDev = () =>
+    Alert.alert(
+      'Onboarding zurücksetzen',
+      'Beim nächsten App-Start erscheint das Onboarding wieder.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Zurücksetzen',
+          style: 'destructive',
+          onPress: async () => {
+            const { OnboardingService } = await import(
+              '@/lib/services/onboardingService'
+            );
+            await OnboardingService.resetOnboarding();
+            Alert.alert('Erledigt', 'Bitte App neu starten.');
+          },
+        },
+      ],
+    );
+
+  const onConsentForceShow = async () => {
+    try {
+      const { consentService } = await import(
+        '@/lib/services/consentService'
+      );
+      await consentService.forceShowConsentForm();
+    } catch (e: any) {
+      Alert.alert('Fehler', String(e?.message ?? e));
+    }
+  };
+  const onConsentReset = async () => {
+    try {
+      const { consentService } = await import(
+        '@/lib/services/consentService'
+      );
+      await consentService.resetConsent();
+      Alert.alert('Consent zurückgesetzt', 'Erscheint beim nächsten Start neu.');
+    } catch (e: any) {
+      Alert.alert('Fehler', String(e?.message ?? e));
+    }
+  };
+  const onConsentStatus = async () => {
+    try {
+      const { consentService } = await import(
+        '@/lib/services/consentService'
+      );
+      await consentService.initialize();
+      const s = await consentService.getDetailedStatus();
+      Alert.alert(
+        'Consent Status',
+        `Status: ${s.status}\nCan Show Ads: ${s.canShowAds ? '✓' : '✗'}\nPersonalized: ${s.canShowPersonalizedAds ? '✓' : '✗'}`,
+      );
+    } catch (e: any) {
+      Alert.alert('Fehler', String(e?.message ?? e));
+    }
+  };
+  const onResetUnlocks = async () => {
+    try {
+      const { categoryAccessService } = await import(
+        '@/lib/services/categoryAccessService'
+      );
+      await categoryAccessService.resetAllTemporaryUnlocks();
+      Alert.alert('Erledigt', 'Temporäre Kategorie-Freischaltungen entfernt.');
+    } catch (e: any) {
+      Alert.alert('Fehler', String(e?.message ?? e));
+    }
+  };
+
+  // ── Header chrome (DetailHeader, like achievements + product details)
+  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
+  const editAction = () => {
+    if (isAnonymous) setShowAuthModal(true);
+    else router.push('/edit-profile' as any);
+  };
+
+  // ── Single render path for both anonymous + registered. The
+  //    only differences:
+  //      • Identity block: anonymous shows "Anonymer Detektiv"
+  //        placeholder + upgrade CTA tile, registered shows real
+  //        name/email/badges
+  //      • Bottom action: anonymous gets "Mit Account anmelden",
+  //        registered gets Logout + Account-löschen
+  //      • Account löschen: anonymous never shows it (no account)
+  //    Everything else (Level, Savings, Menu sections, Settings
+  //    toggles, Version, DEV tools) is identical so the user can
+  //    fully explore the app even before registering.
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      <ScrollView
+        contentContainerStyle={{
+          paddingTop: chromeHeight,
+          paddingBottom: 60,
+        }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Identity block — adapts to auth state */}
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingTop: 12,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 14,
+          }}
         >
-          {/* Anonymous User Info */}
-          <View style={styles.userSection}>
-            <View style={styles.userInfo}>
-              <View style={[styles.avatar, { borderColor: colors.primary }]}>
-                <IconSymbol name="person.crop.circle.badge.questionmark" size={56} color={colors.primary} />
-              </View>
-              <View style={styles.userDetails}>
-                <Text style={[styles.userName, { color: colors.text }]}>
-                  Anonymer Nutzer
-                </Text>
-                <Text style={[styles.userEmail, { color: colors.icon }]}>
-                  Nicht alle Features verfügbar
-                </Text>
-              </View>
+          {isAnonymous ? (
+            <View
+              style={{
+                width: 72,
+                height: 72,
+                borderRadius: 36,
+                backgroundColor: theme.surfaceAlt,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 2,
+                borderColor: theme.border,
+              }}
+            >
+              <MaterialCommunityIcons
+                name="account-question-outline"
+                size={32}
+                color={theme.textMuted}
+              />
             </View>
+          ) : (
+            <Avatar photoUrl={photoUrl} name={displayName} />
+          )}
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 22,
+                color: theme.text,
+                letterSpacing: -0.3,
+              }}
+            >
+              {isAnonymous ? 'Anonymer Detektiv' : displayName}
+            </Text>
+            {!isAnonymous && realName ? (
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 12,
+                  color: theme.textMuted,
+                  marginTop: 1,
+                }}
+              >
+                {realName}
+              </Text>
+            ) : null}
+            {isAnonymous ? (
+              <Text
+                numberOfLines={2}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 12,
+                  color: theme.textMuted,
+                  marginTop: 2,
+                }}
+              >
+                Nicht alle Features verfügbar — sichere deine Daten mit
+                einem Account.
+              </Text>
+            ) : (
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 11,
+                  color: theme.textMuted,
+                  marginTop: 2,
+                }}
+              >
+                {email}
+              </Text>
+            )}
+            {!isAnonymous && (favoriteMarket || city) ? (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  flexWrap: 'wrap',
+                  gap: 6,
+                  marginTop: 7,
+                }}
+              >
+                {favoriteMarket ? (
+                  <LocBadge
+                    icon="store-outline"
+                    label={`Dein Lieblingsmarkt: ${favoriteMarket}${
+                      favoriteMarketLand ? ` (${favoriteMarketLand})` : ''
+                    }`}
+                  />
+                ) : null}
+                {city ? (
+                  <LocBadge
+                    icon="map-marker-outline"
+                    label={
+                      bundesland ? `${city}, ${bundesland}` : city
+                    }
+                  />
+                ) : null}
+              </View>
+            ) : null}
           </View>
+        </View>
 
-          {/* Subtle Registration CTA - Focus on data security */}
-          <TouchableOpacity 
-            style={[styles.upgradeCard, { borderColor: colors.primary, backgroundColor: colors.cardBackground }]}
-            onPress={() => router.push('/auth/register?from=app')}
-            activeOpacity={0.8}
-          >
-            <View style={styles.upgradeContent}>
-              <IconSymbol name="icloud.and.arrow.up" size={24} color={colors.primary} />
-              <View style={styles.upgradeText}>
-                <Text style={[styles.upgradeTitle, { color: colors.text }]}>
+        {/* For anonymous users: prominent upgrade CTA (replaces the
+            premium banner that only makes sense for logged-in users) */}
+        {isAnonymous ? (
+          <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
+            <Pressable
+              onPress={() => router.push('/auth/register?from=app' as any)}
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+                padding: 14,
+                borderRadius: 14,
+                backgroundColor: theme.surface,
+                borderWidth: 1.5,
+                borderColor: theme.primary,
+                opacity: pressed ? 0.92 : 1,
+              })}
+            >
+              <View
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 12,
+                  backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <MaterialCommunityIcons
+                  name="cloud-upload-outline"
+                  size={22}
+                  color={theme.primary}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 14,
+                    color: theme.text,
+                  }}
+                >
                   Daten sichern & synchronisieren
                 </Text>
-                <Text style={[styles.upgradeSubtitle, { color: colors.icon }]}>
+                <Text
+                  numberOfLines={2}
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 11,
+                    color: theme.textMuted,
+                    marginTop: 2,
+                  }}
+                >
                   Account erstellen für Backup & geräteübergreifenden Sync
                 </Text>
               </View>
-              <IconSymbol name="chevron.right" size={16} color={colors.icon} />
-            </View>
-          </TouchableOpacity>
+              <MaterialCommunityIcons
+                name="chevron-right"
+                size={18}
+                color={theme.textMuted}
+              />
+            </Pressable>
+          </View>
+        ) : null}
 
-          {/* Level Card - Same as registered users */}
-          <TouchableOpacity 
-            style={styles.levelCard}
-            onPress={() => router.push('/achievements')}
-            activeOpacity={0.8}
-          >
-            <LevelBadge 
-              level={level}
-              size="large"
-              showDescription={true}
-            />
-          </TouchableOpacity>
-
-          {/* Savings Card - Same as registered users */}
-          <View style={styles.savingsCard}>
-            <LinearGradient
-              colors={['#FF9800', '#FF5722']}
-              start={{ x: 1, y: 0 }}
-              end={{ x: 0, y: 0 }}
-              style={styles.savingsGradient}
+        {/* Premium banner — only for logged-in non-premium users */}
+        {!isAnonymous && !isPremium ? (
+          <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
+            <Pressable
+              onPress={() => presentPaywall('profile_upgrade')}
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+                padding: 12,
+                borderRadius: 12,
+                backgroundColor: theme.surface,
+                borderWidth: 1.5,
+                borderColor: '#FFC107',
+                opacity: pressed ? 0.92 : 1,
+              })}
             >
-              <View style={styles.savingsContent}>
-                <TouchableOpacity onPress={() => router.push('/achievements' as any)}>
-                  <Text style={styles.savingsLabel}>Deine Gesamtersparnis</Text>
-                  <Text style={styles.savingsAmount}>€ {totalSavings.toFixed(2)}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.productsBadge} onPress={() => router.push('/purchase-history' as any)}>
-                  <IconSymbol name="number" size={14} color={colors.warning} />
-                  <Text style={styles.productsText}>{productsSaved} gekaufte Produkte</Text>
-                </TouchableOpacity>
-              </View>
-            </LinearGradient>
-          </View>
-
-          {/* Menu Section 1 - Same as registered users */}
-          <View style={styles.menuSection}>
-            <MenuItem
-              icon="trophy"
-              title="Levelübersicht & Fortschritt"
-              onPress={() => router.push('/achievements')}
-              isFirst={true}
-              isLast={true}
-            />
-          </View>
-
-          {/* Menu Section 2 - Almost same but no Lieblingsmarkt */}
-          <View style={styles.menuSection}>
-            <MenuItem
-              icon="cart"
-              title="Einkaufszettel"
-              onPress={() => router.push('/shopping-list')}
-              isFirst={true}
-            />
-            <MenuItem
-              icon="heart"
-              title="Deine Lieblingsprodukte"
-              onPress={() => router.push('/favorites' as any)}
-            />
-            <MenuItem
-              icon="clock.badge.checkmark"
-              title="Kaufhistorie"
-              onPress={() => router.push('/purchase-history' as any)}
-            />
-            <MenuItem
-              icon="clock"
-              title="Such- & Scanverlauf"
-              onPress={() => router.push('/history' as any)}
-              isLast={true}
-            />
-          </View>
-
-          {/* Login Button */}
-          <TouchableOpacity 
-            style={[styles.logoutButton, { backgroundColor: colors.cardBackground }]}
-            onPress={() => router.push('/auth/login')}
-          >
-            <Text style={[styles.logoutText, { color: colors.primary }]}>
-              Mit bestehendem Account anmelden
-            </Text>
-          </TouchableOpacity>
-
-          <View style={{ height: 50 }} />
-        </ScrollView>
-
-        {/* Auth Required Modal */}
-        <AuthRequiredModal
-          visible={showAuthModal}
-          onClose={() => setShowAuthModal(false)}
-          feature="Profil bearbeiten"
-          message="Erstelle einen Account um dein Profil vollständig zu bearbeiten und alle Features zu nutzen."
-        />
-      </>
-    );
-  }
-
-  // Normale Ansicht für registrierte User
-  return (
-    <ScrollView 
-      style={[styles.container, { backgroundColor: colors.background }]}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* User Info Section */}
-      <View style={styles.userSection}>
-        <View style={styles.userInfo}>
-          <View style={[styles.avatar, { borderColor: colors.primary }]}>
-            {photoUrl ? (
-              <Image source={{ uri: photoUrl }} style={styles.avatarImage} />
-            ) : (
-              <IconSymbol name="person.circle.fill" size={56} color={colors.primary} />
-            )}
-          </View>
-          <View style={styles.userDetails}>
-            <Text style={[styles.userName, { color: colors.text }]}>
-              {displayName}
-            </Text>
-            {realName && (
-              <Text style={[styles.userRealName, { color: colors.icon }]}>
-                {realName}
+              <MaterialCommunityIcons name="crown" size={22} color="#FFC107" />
+              <Text
+                style={{
+                  flex: 1,
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 14,
+                  color: theme.text,
+                }}
+              >
+                Jetzt Premium-Mitglied werden
               </Text>
-            )}
-            <Text style={[styles.userEmail, { color: colors.icon }]}>
-              {email}
-            </Text>
-            {favoriteMarket && (
-              <View style={styles.favoriteMarketContainer}>
-                <IconSymbol name="storefront" size={16} color={colors.primary} />
-                <Text style={[styles.favoriteMarketText, { color: colors.primary }]}>
-                  {getFavoriteMarketDisplay()}
+              <MaterialCommunityIcons
+                name="chevron-right"
+                size={18}
+                color={theme.textMuted}
+              />
+            </Pressable>
+          </View>
+        ) : null}
+
+        {/* Level card — neutral surface + level-gradient icon
+            circle + single-line "X € & Y Pkt zum nächsten Level"
+            subtitle. Identical pattern to the home-tab level card
+            so both surfaces feel like the same component (and
+            both link to /achievements). No progress bar — the
+            inline subtitle carries the same info more compactly. */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
+          <Pressable
+            onPress={() => router.push('/achievements' as any)}
+            style={({ pressed }) => ({
+              borderRadius: radii.lg,
+              backgroundColor: theme.surface,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 12,
+              opacity: pressed ? 0.94 : 1,
+              ...shadows.sm,
+            })}
+          >
+            <LinearGradient
+              colors={levelGradient(level, levelInfo?.color)}
+              start={LEVEL_GRADIENT_START}
+              end={LEVEL_GRADIENT_END}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <MaterialCommunityIcons
+                name={mdiForLevelIcon(levelInfo?.icon)}
+                size={20}
+                color="#fff"
+              />
+            </LinearGradient>
+
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 14,
+                  color: theme.text,
+                  letterSpacing: -0.2,
+                }}
+              >
+                Level {level}
+                {levelInfo?.name ? ` · ${levelInfo.name}` : ''}
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 12,
+                  color: theme.textMuted,
+                  marginTop: 2,
+                }}
+              >
+                {levelSubtitle}
+              </Text>
+            </View>
+
+            <MaterialCommunityIcons
+              name="chevron-right"
+              size={20}
+              color={theme.textMuted}
+            />
+          </Pressable>
+        </View>
+
+        {/* Savings card — orange gradient, links to purchase history */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
+          <Pressable
+            onPress={() => router.push('/purchase-history' as any)}
+            style={({ pressed }) => ({ opacity: pressed ? 0.92 : 1 })}
+          >
+            <LinearGradient
+              colors={['#f97316', '#ea580c']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={{
+                borderRadius: 14,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.semibold,
+                    fontSize: 10,
+                    color: '#fff',
+                    opacity: 0.9,
+                    letterSpacing: 0.6,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Deine Gesamtersparnis
+                </Text>
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 22,
+                    color: '#fff',
+                    letterSpacing: -0.4,
+                    marginTop: 3,
+                  }}
+                >
+                  {totalSavings.toFixed(2).replace('.', ',')} €
                 </Text>
               </View>
-            )}
-          </View>
+              <View
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 7,
+                  borderRadius: 10,
+                  backgroundColor: 'rgba(255,255,255,0.22)',
+                  alignItems: 'center',
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 16,
+                    color: '#fff',
+                  }}
+                >
+                  {productsSaved}
+                </Text>
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.semibold,
+                    fontSize: 9,
+                    color: '#fff',
+                    opacity: 0.9,
+                  }}
+                >
+                  gekauft
+                </Text>
+              </View>
+            </LinearGradient>
+          </Pressable>
         </View>
-      </View>
 
-      {/* Premium Banner (if not premium) - wie im Mehr-Tab */}
-      {!isPremium && (
-        <TouchableOpacity 
-          style={styles.premiumCard}
-          onPress={handlePremiumUpgrade}
+        {/* Account / Inhalte menu */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 16 }}>
+          <MenuCard>
+            <MenuRow
+              icon="trophy-outline"
+              color="#e0a800"
+              label="Belohnungen & Level"
+              sub={`Level ${level} · ${points.toLocaleString('de-DE')} Pkt`}
+              onPress={() => router.push('/achievements' as any)}
+              first
+            />
+            <MenuRow
+              icon="format-list-checks"
+              color={theme.primary}
+              label="Einkaufszettel"
+              onPress={() => router.push('/shopping-list' as any)}
+            />
+            <MenuRow
+              icon="heart-outline"
+              color="#ef4444"
+              label="Lieblingsprodukte"
+              onPress={() => router.push('/favorites' as any)}
+            />
+            <MenuRow
+              icon="history"
+              color="#8b5cf6"
+              label="Kaufhistorie"
+              onPress={() => router.push('/purchase-history' as any)}
+            />
+            <MenuRow
+              icon="magnify"
+              color="#0ea5e9"
+              label="Such- & Scanverlauf"
+              onPress={() => router.push('/history' as any)}
+            />
+            <MenuRow
+              icon="chart-bar"
+              color="#0d8575"
+              label="Stufensystem erklärt"
+              onPress={() => setShowSimilarityModal(true)}
+            />
+            <MenuRow
+              icon="account-edit-outline"
+              color={theme.textMuted}
+              label="Profil bearbeiten"
+              onPress={() => router.push('/edit-profile' as any)}
+              last
+            />
+          </MenuCard>
+        </View>
+
+        {/* Mehr */}
+        <SectionLabel theme={theme}>Mehr</SectionLabel>
+        <View style={{ paddingHorizontal: 20 }}>
+          <MenuCard>
+            {showOnboardingButton ? (
+              <MenuRow
+                icon="account-plus-outline"
+                color={theme.primary}
+                label="Onboarding abschließen"
+                onPress={handleResumeOnboarding}
+                first
+              />
+            ) : null}
+            <MenuRow
+              icon="lightbulb-on-outline"
+              color={theme.primary}
+              label="Tipps & Tricks"
+              onPress={() => router.push('/tipps-und-tricks' as any)}
+              first={!showOnboardingButton}
+            />
+            <MenuRow
+              icon="newspaper-variant-outline"
+              color={theme.primary}
+              label="Neuigkeiten"
+              onPress={() =>
+                openExternal('https://www.markendetektive.de/blog/')
+              }
+            />
+            <MenuRow
+              icon="account-group-outline"
+              color={theme.primary}
+              label="Find us on Social Media"
+              onPress={() => setShowSocialSheet(true)}
+            />
+            <MenuRow
+              icon="star-outline"
+              color={theme.primary}
+              label="App bewerten"
+              onPress={handleRateApp}
+            />
+            <MenuRow
+              icon="share-variant-outline"
+              color={theme.primary}
+              label="App teilen"
+              onPress={handleShareApp}
+              last
+            />
+          </MenuCard>
+        </View>
+
+        {/* Kontakt & Rechtliches */}
+        <SectionLabel theme={theme}>Kontakt & Rechtliches</SectionLabel>
+        <View style={{ paddingHorizontal: 20 }}>
+          <MenuCard>
+            <MenuRow
+              icon="shield-outline"
+              color={theme.primary}
+              label="Datenschutz & Haftungsausschluss"
+              onPress={() =>
+                openExternal(
+                  'https://www.markendetektive.de/datenschutzerklaerung-haftungsausschluss/',
+                )
+              }
+              first
+            />
+            <MenuRow
+              icon="file-document-outline"
+              color={theme.primary}
+              label="AGB"
+              onPress={() =>
+                openExternal('https://www.markendetektive.de/agb/')
+              }
+            />
+            <MenuRow
+              icon="email-outline"
+              color={theme.primary}
+              label="Kontakt"
+              onPress={() =>
+                openExternal('https://www.markendetektive.de/kontakt/')
+              }
+              last
+            />
+          </MenuCard>
+        </View>
+
+        {/* Einstellungen — toggles */}
+        <SectionLabel theme={theme}>Einstellungen</SectionLabel>
+        <View style={{ paddingHorizontal: 20 }}>
+          <MenuCard>
+            <ToggleRow
+              icon={isDarkMode ? 'weather-night' : 'white-balance-sunny'}
+              label="Dunkler Modus"
+              value={isDarkMode}
+              onChange={toggleDarkMode}
+              first
+            />
+            <ToggleRow
+              icon="bell-off-outline"
+              label="Gamification-Benachrichtigungen deaktivieren"
+              value={gamificationDisabled}
+              onChange={handleGamificationToggle}
+              last
+            />
+          </MenuCard>
+        </View>
+
+        {/* Version */}
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingTop: 18,
+            alignItems: 'center',
+          }}
         >
-          <View style={[styles.premiumCardBorder, { borderColor: colors.secondary }]}>
-            <View style={styles.premiumContent}>
-              <IconSymbol name="crown" size={24} color={colors.secondary} />
-              <Text style={[styles.premiumCardText, { color: colors.text }]}>
-                Jetzt Premium Mitglied werden
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 11,
+              color: theme.textMuted,
+            }}
+          >
+            Version {appVersion}
+          </Text>
+        </View>
+
+        {/* Bottom action — adapts to auth state.
+            • Anonymous: "Mit bestehendem Account anmelden" (primary)
+            • Registered: "Abmelden" (red) + Account-löschen-Link */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
+          {isAnonymous ? (
+            <Pressable
+              onPress={() => router.push('/auth/login' as any)}
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                height: 48,
+                borderRadius: 12,
+                backgroundColor: theme.surface,
+                borderWidth: 1,
+                borderColor: theme.border,
+                opacity: pressed ? 0.9 : 1,
+              })}
+            >
+              <MaterialCommunityIcons
+                name="login"
+                size={17}
+                color={theme.primary}
+              />
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 14,
+                  color: theme.primary,
+                }}
+              >
+                Mit bestehendem Account anmelden
               </Text>
-              <IconSymbol name="star" size={24} color="#F59E0B" />
-            </View>
+            </Pressable>
+          ) : (
+            <>
+              <Pressable
+                onPress={handleLogout}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  height: 48,
+                  borderRadius: 12,
+                  backgroundColor: theme.surface,
+                  borderWidth: 1,
+                  borderColor: 'rgba(220,38,38,0.18)',
+                  opacity: pressed ? 0.9 : 1,
+                })}
+              >
+                <MaterialCommunityIcons
+                  name="logout"
+                  size={17}
+                  color="#dc2626"
+                />
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 14,
+                    color: '#dc2626',
+                  }}
+                >
+                  Abmelden
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={handleDeleteAccount}
+                style={({ pressed }) => ({
+                  alignItems: 'center',
+                  marginTop: 12,
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 12,
+                    color: theme.textMuted,
+                    textDecorationLine: 'underline',
+                  }}
+                >
+                  Account löschen
+                </Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+
+        {/* DEV-only debug actions */}
+        {__DEV__ ? (
+          <View style={{ paddingHorizontal: 20, paddingTop: 24 }}>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 10,
+                color: theme.textMuted,
+                letterSpacing: 0.8,
+                textTransform: 'uppercase',
+                marginBottom: 8,
+              }}
+            >
+              Entwickler · Debug
+            </Text>
+            <MenuCard>
+              <MenuRow
+                icon="restore"
+                color="#dc2626"
+                label="Onboarding zurücksetzen"
+                onPress={onResetOnboardingDev}
+                first
+              />
+              <MenuRow
+                icon="shield-key-outline"
+                color="#0ea5e9"
+                label="Consent-Form anzeigen"
+                onPress={onConsentForceShow}
+              />
+              <MenuRow
+                icon="shield-refresh-outline"
+                color="#8b5cf6"
+                label="Consent zurücksetzen"
+                onPress={onConsentReset}
+              />
+              <MenuRow
+                icon="shield-check-outline"
+                color="#10b981"
+                label="Consent-Status anzeigen"
+                onPress={onConsentStatus}
+              />
+              <MenuRow
+                icon="lock-reset"
+                color="#f59e0b"
+                label="Kategorie-Freischaltungen löschen"
+                onPress={onResetUnlocks}
+                last
+              />
+            </MenuCard>
+
+            {/* Coachmark Dev-Panel — Status pro Screen-Tour + Reset
+                + Per-Tour-Replay. Bewusst eigene Section damit die
+                Trennung zum klassischen Onboarding-Flow auch im UI
+                klar ist. */}
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 10,
+                color: theme.textMuted,
+                letterSpacing: 0.8,
+                textTransform: 'uppercase',
+                marginTop: 18,
+                marginBottom: 8,
+              }}
+            >
+              Erklär-Tours · Status
+            </Text>
+            <MenuCard>
+              {ALL_TOUR_KEYS.map((key, idx) => {
+                const seenAt = coachmarkStatuses[key];
+                const isFirst = idx === 0;
+                const isLast = idx === ALL_TOUR_KEYS.length - 1;
+                return (
+                  <MenuRow
+                    key={`status-${key}`}
+                    icon={seenAt ? 'check-circle' : 'circle-outline'}
+                    color={seenAt ? '#10b981' : '#94a3b8'}
+                    label={COACHMARK_LABELS[key]}
+                    sub={formatCoachmarkSeen(seenAt)}
+                    // Tap auf eine Status-Zeile: Tour direkt zeigen
+                    // (Replay) — bequem zum Iterieren am Inhalt.
+                    onPress={() => onCoachmarkReplayOne(key)}
+                    first={isFirst}
+                    last={isLast}
+                  />
+                );
+              })}
+            </MenuCard>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 10,
+                color: theme.textMuted,
+                letterSpacing: 0.8,
+                textTransform: 'uppercase',
+                marginTop: 18,
+                marginBottom: 8,
+              }}
+            >
+              Erklär-Tours · Aktionen
+            </Text>
+            <MenuCard>
+              <MenuRow
+                icon="restore-alert"
+                color="#dc2626"
+                label="Alle Tours zurücksetzen"
+                sub="Setzt Home + Belohnungen auf 'noch nicht gesehen'"
+                onPress={onCoachmarkResetAll}
+                first
+                last
+              />
+            </MenuCard>
           </View>
-        </TouchableOpacity>
-      )}
+        ) : null}
+      </ScrollView>
 
-      {/* Level Card */}
-      <TouchableOpacity 
-        style={styles.levelCard}
-        onPress={() => router.push('/achievements')}
-        activeOpacity={0.8}
+      {/* Chrome */}
+      <DetailHeader
+        title="Profil"
+        onBack={() => router.back()}
+        right={
+          <Pressable
+            onPress={editAction}
+            hitSlop={6}
+            style={({ pressed }) => ({
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: theme.surfaceAlt,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <MaterialCommunityIcons
+              name="pencil-outline"
+              size={18}
+              color={theme.textMuted}
+            />
+          </Pressable>
+        }
+      />
+
+      {/* Sheets / modals */}
+      <FilterSheet
+        visible={showSocialSheet}
+        title="Folge uns"
+        onClose={() => setShowSocialSheet(false)}
       >
-        <LevelBadge 
-          level={level}
-          size="large"
-          showDescription={true}
+        <SocialMediaSheetContent
+          onPick={(url) => {
+            // Close the sheet first, THEN open the in-app browser.
+            // iOS can't present a SFSafariViewController while
+            // another Modal (the FilterSheet) is still in its
+            // slide-out animation — both block on the same modal
+            // stack and the app freezes. Waiting ~320 ms (sheet
+            // close duration ≈ 260 ms + a safety buffer) ensures
+            // the FilterSheet has fully unmounted before we open
+            // the browser.
+            setShowSocialSheet(false);
+            setTimeout(() => openExternal(url), 320);
+          }}
         />
-      </TouchableOpacity>
+      </FilterSheet>
 
-      {/* Savings Card - ACHIEVEMENTS STIL */}
-      <View style={styles.savingsCard}>
-        <LinearGradient
-          colors={['#FF9800', '#FF5722']}
-          start={{ x: 1, y: 0 }}
-          end={{ x: 0, y: 0 }}
-          style={styles.savingsGradient}
-        >
-          <View style={styles.savingsContent}>
-            <TouchableOpacity onPress={() => router.push('/purchase-history' as any)}>
-              <Text style={styles.savingsLabel}>Deine Gesamtersparnis</Text>
-              <Text style={styles.savingsAmount}>€ {totalSavings.toFixed(2)}</Text>
-              {totalSavings === 0 && (
-                <Text style={styles.emptyStateText}>Starte deine erste Suche und entdecke Ersparnisse!</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.productsBadge} onPress={() => router.push('/purchase-history' as any)}>
-              <IconSymbol name="number" size={14} color={colors.warning} />
-              <Text style={styles.productsText}>
-                {productsSaved === 0 ? 'Noch keine Käufe' : `${productsSaved} gekaufte Produkte`}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </LinearGradient>
-      </View>
+      <SimilarityStagesModal
+        visible={showSimilarityModal}
+        onClose={() => setShowSimilarityModal(false)}
+      />
 
-      {/* Menu Section 1 */}
-      <View style={styles.menuSection}>
-        <MenuItem
-          icon="trophy"
-          title="Levelübersicht & Fortschritt"
-          onPress={() => router.push('/achievements')}
-          isFirst={true}
-          isLast={true}
-        />
-      </View>
-
-      {/* Menu Section 2 */}
-      <View style={styles.menuSection}>
-        <MenuItem
-          icon="cart"
-          title="Einkaufszettel"
-          onPress={() => router.push('/shopping-list')}
-          isFirst={true}
-        />
-        <MenuItem
-          icon="heart"
-          title="Deine Lieblingsprodukte"
-          onPress={() => router.push('/favorites' as any)}
-        />
-        <MenuItem
-          icon="clock.badge.checkmark"
-          title="Kaufhistorie"
-          onPress={() => router.push('/purchase-history' as any)}
-        />
-        <MenuItem
-          icon="clock"
-          title="Such- & Scanverlauf"
-          onPress={() => router.push('/history' as any)}
-          isLast={true}
-        />
-      </View>
-
-
-
-      {/* Logout Button */}
-      <TouchableOpacity 
-        style={[styles.logoutButton, { backgroundColor: colors.cardBackground }]}
-        onPress={handleLogout}
-      >
-        <Text style={[styles.logoutText, { color: colors.error }]}>
-          Abmelden
-        </Text>
-      </TouchableOpacity>
-
-      {/* Delete Account Link */}
-      <TouchableOpacity 
-        style={styles.deleteAccountButton}
-        onPress={handleDeleteAccount}
-      >
-        <Text style={[styles.deleteAccountText, { color: colors.icon }]}>
-          Account löschen
-        </Text>
-      </TouchableOpacity>
-
-      <View style={{ height: 50 }} />
-    </ScrollView>
+      <AuthRequiredModal
+        visible={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        feature="Profil bearbeiten"
+        message="Erstelle einen Account um dein Profil vollständig zu bearbeiten."
+      />
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+// ────────────────────────────────────────────────────────────────────
+// Sub-components
+// ────────────────────────────────────────────────────────────────────
+
+function Avatar({
+  photoUrl,
+  name,
+}: {
+  photoUrl: string | null;
+  name: string;
+}) {
+  const { theme } = useTokens();
+  if (photoUrl) {
+    return (
+      <View
+        style={{
+          width: 72,
+          height: 72,
+          borderRadius: 36,
+          overflow: 'hidden',
+          borderWidth: 2,
+          borderColor: theme.surface,
+        }}
+      >
+        <RNImage
+          source={{ uri: photoUrl }}
+          style={{ width: '100%', height: '100%' }}
+        />
+      </View>
+    );
+  }
+  // Fallback: gradient circle with first initial.
+  const initial = name?.[0]?.toUpperCase() ?? '🦉';
+  return (
+    <LinearGradient
+      colors={['#0a6f62', '#10a18a']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={{
+        width: 72,
+        height: 72,
+        borderRadius: 36,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 3,
+        borderColor: '#fff',
+      }}
+    >
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 32,
+          color: '#fff',
+        }}
+      >
+        {initial}
+      </Text>
+    </LinearGradient>
+  );
+}
+
+function LocBadge({
+  icon,
+  label,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+}) {
+  const { theme } = useTokens();
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 6,
+        backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
+      }}
+    >
+      <MaterialCommunityIcons name={icon} size={11} color={theme.primary} />
+      <Text
+        numberOfLines={1}
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 10,
+          color: theme.primary,
+          letterSpacing: 0.2,
+        }}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+function MenuCard({ children }: { children: React.ReactNode }) {
+  const { theme } = useTokens();
+  return (
+    <View
+      style={{
+        backgroundColor: theme.surface,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: theme.border,
+        overflow: 'hidden',
+      }}
+    >
+      {children}
+    </View>
+  );
+}
+
+function MenuRow({
+  icon,
+  color,
+  label,
+  sub,
+  onPress,
+  first,
+  last,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  color: string;
+  label: string;
+  sub?: string;
+  onPress: () => void;
+  first?: boolean;
+  last?: boolean;
+}) {
+  const { theme } = useTokens();
+  void last;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+        borderTopWidth: first ? 0 : 1,
+        borderTopColor: theme.border,
+        opacity: pressed ? 0.7 : 1,
+      })}
+    >
+      <View
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 9,
+          backgroundColor: color + '22',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <MaterialCommunityIcons name={icon} size={18} color={color} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          numberOfLines={1}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 14,
+            color: theme.text,
+          }}
+        >
+          {label}
+        </Text>
+        {sub ? (
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 11,
+              color: theme.textMuted,
+              marginTop: 1,
+            }}
+          >
+            {sub}
+          </Text>
+        ) : null}
+      </View>
+      <MaterialCommunityIcons
+        name="chevron-right"
+        size={18}
+        color={theme.textMuted}
+      />
+    </Pressable>
+  );
+}
+
+function ToggleRow({
+  icon,
+  label,
+  value,
+  onChange,
+  first,
+  last,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+  first?: boolean;
+  last?: boolean;
+}) {
+  const { theme } = useTokens();
+  void last;
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderTopWidth: first ? 0 : 1,
+        borderTopColor: theme.border,
+      }}
+    >
+      <View
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 9,
+          backgroundColor: theme.primary + '22',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <MaterialCommunityIcons name={icon} size={18} color={theme.primary} />
+      </View>
+      <Text
+        numberOfLines={2}
+        style={{
+          flex: 1,
+          fontFamily,
+          fontWeight: fontWeight.bold,
+          fontSize: 14,
+          color: theme.text,
+        }}
+      >
+        {label}
+      </Text>
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        trackColor={{ false: theme.border, true: theme.primary }}
+        thumbColor={Platform.OS === 'android' ? '#fff' : undefined}
+      />
+    </View>
+  );
+}
+
+function SectionLabel({
+  children,
+  theme,
+}: {
+  children: React.ReactNode;
+  theme: ReturnType<typeof useTokens>['theme'];
+}) {
+  return (
+    <Text
+      style={{
+        paddingHorizontal: 22,
+        paddingTop: 18,
+        paddingBottom: 8,
+        fontFamily,
+        fontWeight: fontWeight.bold,
+        fontSize: 11,
+        color: theme.textMuted,
+        letterSpacing: 0.8,
+        textTransform: 'uppercase',
+      }}
+    >
+      {children}
+    </Text>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Social-media sheet content — replaces the legacy native Alert
+// with a real bottom-sheet (consistent with the rest of the app).
+// ────────────────────────────────────────────────────────────────────
+
+const SOCIAL_LINKS = [
+  {
+    key: 'instagram',
+    icon: 'instagram' as const,
+    color: '#e4405f',
+    label: 'Instagram',
+    url: 'https://instagram.com/markendetektive',
   },
-  userSection: {
-    padding: 16,
-    marginBottom: 8,
+  {
+    key: 'facebook',
+    icon: 'facebook' as const,
+    color: '#1877f2',
+    label: 'Facebook',
+    url: 'https://facebook.com/markendetektive',
   },
-  userInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  {
+    key: 'youtube',
+    icon: 'youtube' as const,
+    color: '#ff0000',
+    label: 'YouTube',
+    url: 'https://www.youtube.com/@markendetektive',
   },
-  avatar: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    borderWidth: 2,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
+  {
+    key: 'tiktok',
+    icon: 'music-note' as const,
+    color: '#000',
+    label: 'TikTok',
+    url: 'https://www.tiktok.com/@markendetektive',
   },
-  avatarImage: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-  },
-  userDetails: {
-    flex: 1,
-  },
-  userName: {
-    fontSize: 24,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 1,
-  },
-  userRealName: {
-    fontSize: 16,
-    fontFamily: 'Nunito_500Medium',
-   },
-  userEmail: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-  },
-  favoriteMarketContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-    gap: 6,
-  },
-  favoriteMarketText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  premiumCard: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-  },
-  premiumCardBorder: {
-    borderRadius: 16,
-    borderWidth: 2,
-    height: 50,
-    justifyContent: 'center',
-  },
-  premiumContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    gap: 12,
-  },
-  premiumCardText: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '500',
-    fontFamily: 'Nunito_500Medium',
-  },
-  levelCard: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 16,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
-  },
-  levelGradient: {
-    padding: 12,
-  },
-  levelContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  levelIcon: {
-    width: 61,
-    height: 61,
-    borderRadius: 30.5,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderWidth: 2,
-    borderColor: 'white',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  levelInfo: {
-    flex: 1,
-  },
-  levelTitle: {
-    color: 'white',
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  levelName: {
-    color: 'white',
-    fontSize: 23,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  levelDescription: {
-    color: 'white',
-    fontSize: 12,
-    fontFamily: 'Nunito_300Light',
-  },
-  infoButton: {
-    padding: 8,
-  },
-  savingsCard: {
-    marginHorizontal: 16,
-    marginBottom: 12, // Reduziert von 25 auf 12 für konsistente Abstände
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.09,
-    shadowRadius: 2,
-    elevation: 2,
-    // KEIN overflow hier - Shadow muss sichtbar bleiben
-  },
-  savingsGradient: {
-    padding: 10,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  savingsContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  savingsLabel: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 2,
-    lineHeight: 16,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  savingsAmount: {
-    color: 'white',
-    fontSize: 23,
-    fontWeight: '600',
-    lineHeight: 26,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  productsBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 6,
-    gap: 2,
-  },
-  productsText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FF9800',
-    lineHeight: 14,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  emptyStateText: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 11,
-    fontFamily: 'Nunito_400Regular',
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
-  menuSection: {
-    marginHorizontal: 16,
-    marginBottom: 12, // Reduziert von 20 auf 12 für konsistente Abstände
-  },
-  menuItem: {
-    minHeight: 50,
-  },
-  menuItemFirst: {
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-  },
-  menuItemLast: {
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
-  },
-  menuItemContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    gap: 12,
-  },
-  menuIcon: {
-    // Gap wird durch das gap-Property im parent gehandhabt
-  },
-  menuText: {
-    flex: 1,
-    fontSize: 16,
-    fontFamily: 'Nunito_400Regular',
-  },
-  separator: {
-    height: 1,
-    marginLeft: 52,
-  },
-  logoutButton: {
-    marginHorizontal: 16,
-    marginBottom: 12, // Reduziert von 20 auf 12 für konsistente Abstände
-    borderRadius: 16,
-    padding: 14,
-    alignItems: 'center',
-  },
-  logoutText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  deleteAccountButton: {
-    alignItems: 'center',
-    marginBottom: 30,
-  },
-  deleteAccountText: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    textDecorationLine: 'underline',
-  },
-  
-  // Anonymous User Styles
-  registrationCTA: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  registrationTitle: {
-    fontSize: 20,
-    fontFamily: 'Nunito_700Bold',
-    color: 'white',
-    marginTop: 12,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  registrationSubtitle: {
-    fontSize: 15,
-    fontFamily: 'Nunito_500Medium',
-    color: 'rgba(255,255,255,0.9)',
-    marginBottom: 12, // Reduziert von 16 auf 12
-    textAlign: 'center',
-  },
-  featureList: {
-    marginBottom: 12, // Reduziert von 20 auf 12
-  },
-  featureItem: {
-    fontSize: 14,
-    fontFamily: 'Nunito_500Medium',
-    color: 'white',
-    marginVertical: 4,
-  },
-  registrationButton: {
-    backgroundColor: 'white',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    marginTop: 8,
-  },
-  registrationButtonText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    color: '#3498db',
-  },
-  
-  // Neue Styles für subtile upgrade CTA
-  upgradeCard: {
-    marginHorizontal: 16,
-    marginBottom: 12, // Reduziert von 16 auf 12 für konsistente Abstände
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  upgradeContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-  },
-  upgradeText: {
-    flex: 1,
-    marginLeft: 12,
-    marginRight: 8,
-  },
-  upgradeTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 2,
-  },
-  upgradeSubtitle: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-  },
-});
+];
+
+function SocialMediaSheetContent({
+  onPick,
+}: {
+  onPick: (url: string) => void;
+}) {
+  const { theme } = useTokens();
+  return (
+    <View>
+      {useMemo(() => SOCIAL_LINKS, []).map((s, i) => (
+        <Pressable
+          key={s.key}
+          onPress={() => onPick(s.url)}
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+            paddingVertical: 14,
+            borderTopWidth: i === 0 ? 0 : 1,
+            borderTopColor: theme.border,
+            opacity: pressed ? 0.7 : 1,
+          })}
+        >
+          <View
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 10,
+              backgroundColor: s.color + '22',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <MaterialCommunityIcons name={s.icon} size={22} color={s.color} />
+          </View>
+          <Text
+            style={{
+              flex: 1,
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 15,
+              color: theme.text,
+            }}
+          >
+            {s.label}
+          </Text>
+          <MaterialCommunityIcons
+            name="open-in-new"
+            size={16}
+            color={theme.textMuted}
+          />
+        </Pressable>
+      ))}
+    </View>
+  );
+}

@@ -1,90 +1,109 @@
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
-import { IconSymbol } from '@/components/ui/IconSymbol';
-import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
-import { LoadingFooterSkeleton, ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
-import { Colors } from '@/constants/Colors';
-import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
-import { useAuth } from '@/lib/contexts/AuthContext';
-import { usePurchaseHistory } from '@/lib/hooks/usePurchaseHistory';
-import { useNavigation, useRouter } from 'expo-router';
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+// app/purchase-history.tsx
+//
+// Kaufhistorie — neu im Design-System:
+//   • DetailHeader (Back + Title)
+//   • SegmentedTabs + PagerView für Marken / NoNames mit Counts
+//   • Crossfade(fillParent) Skeleton während Initial-Load
+//   • FlatList mit Infinite-Scroll-Pagination (onEndReached)
+//   • PurchaseCard: Produktbild + Brand-Eyebrow + Name + Preis-Zeile
+//     mit Kaufdatum (formatRelativeTime, gleicher Helper wie history)
+//   • Tap → product-comparison / noname-detail mit Prefetch
+//   • Footer-Bar: "X von Y Käufen · Chronologisch sortiert"
+//   • Theme-Tokens via useTokens
+
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import * as Haptics from 'expo-haptics';
+import { router, useNavigation } from 'expo-router';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
-    Animated,
-    Dimensions,
-    FlatList,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Pressable,
+  RefreshControl,
+  Text,
+  View,
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const { width: screenWidth } = Dimensions.get('window');
+import {
+  DETAIL_HEADER_ROW_HEIGHT,
+  DetailHeader,
+} from '@/components/design/DetailHeader';
+import { SegmentedTabs } from '@/components/design/SegmentedTabs';
+import { Crossfade, Shimmer } from '@/components/design/Skeletons';
+import { fontFamily, fontWeight } from '@/constants/tokens';
+import { useTokens } from '@/hooks/useTokens';
+import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
+import { useAuth } from '@/lib/contexts/AuthContext';
+import { usePurchaseHistory } from '@/lib/hooks/usePurchaseHistory';
+import { FirestoreService } from '@/lib/services/firestore';
+import { getProductImage } from '@/lib/utils/productImage';
 
-// Skeleton Loader für Kaufhistorie (EXAKT wie Favoriten)
-const PurchaseHistorySkeletonLoader = () => {
-  const colors = Colors[useColorScheme() ?? 'light'];
-  
-  return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Tab Header Skeleton */}
-      <View style={[styles.tabContainer, { backgroundColor: colors.cardBackground }]}>
-        <View style={[styles.tabHeader, { borderBottomColor: colors.border }]}>
-          <ShimmerSkeleton width={100} height={20} borderRadius={4} />
-          <ShimmerSkeleton width={100} height={20} borderRadius={4} />
-        </View>
-      </View>
+type Tab = 'brands' | 'nonames';
 
-      {/* Action Bar Skeleton */}
-      <View style={[styles.actionBar, { backgroundColor: colors.cardBackground, borderTopColor: colors.border }]}>
-        <View style={styles.actionBarContent}>
-          <ShimmerSkeleton width={80} height={16} borderRadius={4} />
-          <View style={styles.actionBarRight}>
-            <ShimmerSkeleton width={120} height={36} borderRadius={18} />
-          </View>
-        </View>
-      </View>
+// ─── Relative timestamp helper ─────────────────────────────────────
+//
+// Identisch zur Logik in app/history.tsx und app/favorites.tsx, damit
+// Datumstexte app-weit gleich aussehen. Ältere Käufe (>7 Tage) fallen
+// auf "DD.MM. um HH:MM" bzw. "DD.MM.YYYY" zurück, was für eine
+// Kaufhistorie der natürliche Default ist.
+function formatPurchaseTime(input: any): string {
+  if (!input) return '';
+  const d = input?.toDate ? input.toDate() : new Date(input);
+  if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  const diffHr = Math.floor(diffMs / 3_600_000);
+  const diffDay = Math.floor(diffMs / 86_400_000);
 
-      {/* Product Cards Skeleton */}
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        {Array.from({ length: 3 }).map((_, index) => (
-          <View key={index} style={[styles.productCard, { backgroundColor: colors.cardBackground }]}>
-            <View style={styles.productContent}>
-              <ShimmerSkeleton width={24} height={24} borderRadius={12} />
-              <ShimmerSkeleton width={80} height={80} borderRadius={12} />
-              <View style={styles.productInfo}>
-                <ShimmerSkeleton width={120} height={16} borderRadius={4} />
-                <ShimmerSkeleton width={160} height={20} borderRadius={4} />
-                <View style={styles.marketInfo}>
-                  <ShimmerSkeleton width={24} height={24} borderRadius={12} />
-                  <ShimmerSkeleton width={100} height={14} borderRadius={4} />
-                </View>
-                <ShimmerSkeleton width={80} height={18} borderRadius={4} />
-              </View>
-            </View>
-          </View>
-        ))}
-      </ScrollView>
-    </View>
-  );
-};
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const MM = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+
+  if (diffMin < 1) return 'gerade gekauft';
+  if (diffHr < 1) return `vor ${diffMin} Min.`;
+
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfDate = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const dayDelta = Math.round((startOfToday - startOfDate) / 86_400_000);
+
+  if (dayDelta === 0) return `heute, ${hh}:${mm}`;
+  if (dayDelta === 1) return `gestern, ${hh}:${mm}`;
+  if (diffDay < 7) return `vor ${dayDelta} Tagen`;
+  if (yyyy === now.getFullYear()) return `${dd}.${MM}.`;
+  return `${dd}.${MM}.${yyyy}`;
+}
+
+// Preis "X,YZ €" mit deutschem Komma + Suffix mit Schmal-Space.
+function formatPrice(value: number | null | undefined): string {
+  const n = typeof value === 'number' && isFinite(value) ? value : 0;
+  return `${n.toFixed(2).replace('.', ',')} €`;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Screen
+// ────────────────────────────────────────────────────────────────────
 
 export default function PurchaseHistoryScreen() {
-  const router = useRouter();
   const navigation = useNavigation();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
-  const { user, userProfile } = useAuth();
+  const { theme } = useTokens();
+  const { user } = useAuth();
   const analytics = useAnalytics();
-  const { 
-    brandPurchases, 
+
+  const {
+    brandPurchases,
     noNamePurchases,
     brandLoading,
     brandLoadingMore,
@@ -95,568 +114,622 @@ export default function PurchaseHistoryScreen() {
     error,
     totalBrandCount,
     totalNoNameCount,
-    totalSavings,
     loadBrandPurchases,
     loadNoNamePurchases,
-    refreshData
+    refreshData,
   } = usePurchaseHistory();
 
-  // UI State
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
-
-  // Filter State
-  const [filterModal, setFilterModal] = useState(false);
-  const [sortBy, setSortBy] = useState<'date' | 'name' | 'price'>('date');
-  const [selectedMarkets, setSelectedMarkets] = useState<string[]>([]);
-  const [availableMarkets, setAvailableMarkets] = useState<any[]>([]);
-
-  // Tab State
-  const [activeTab, setActiveTab] = useState(0);
-  
-  // 🎯 Journey-Tracking für Purchase History
-  // Journey läuft bereits - keine neue starten! // Nur einmal beim Mount
-  const [tabIndicatorPosition] = useState(new Animated.Value(0));
+  const [activeTab, setActiveTab] = useState<Tab>('brands');
   const pagerRef = useRef<PagerView>(null);
 
-  // Toast State
-  const [showToast, setShowToast] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
-  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
-  const [toastActionLabel, setToastActionLabel] = useState<string | undefined>(undefined);
-  const [toastActionPress, setToastActionPress] = useState<(() => void) | undefined>(undefined);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const hasLoadedOnce = useRef(false);
 
-  // Header Configuration (EXAKT wie Favoriten)
   useLayoutEffect(() => {
-    navigation.setOptions({
-      ...getNavigationHeaderOptions(colorScheme, 'Kaufhistorie'),
-    });
-  }, [navigation, colorScheme]);
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
 
-  // Update loading state based on real data
+  // Initial-Loader-Gate: sobald ein Tab seine erste Seite hat (oder
+  // beide leer geliefert haben), Skeleton ausblenden.
   useEffect(() => {
     const isLoading = brandLoading || noNameLoading;
-    if (!isLoading && !hasLoadedOnce) {
-      setHasLoadedOnce(true);
+    if (!isLoading && !hasLoadedOnce.current) {
+      hasLoadedOnce.current = true;
     }
     if (initialLoading && !isLoading) {
       setInitialLoading(false);
     }
-  }, [brandLoading, noNameLoading, hasLoadedOnce, initialLoading]);
+  }, [brandLoading, noNameLoading, initialLoading]);
 
-  // Extract available markets from purchased products
-  useEffect(() => {
-    const allPurchases = [...brandPurchases, ...noNamePurchases];
-    const markets = allPurchases
-      .filter(item => item.discounter)
-      .map(item => item.discounter)
-      .filter((market, index, self) => 
-        index === self.findIndex(m => m.id === market.id)
-      );
-    setAvailableMarkets(markets);
-  }, [brandPurchases, noNamePurchases]);
-
-  // Tab Functions (EXAKT wie Favoriten)
-  const handleTabChange = (tabIndex: number) => {
-    setActiveTab(tabIndex);
-    pagerRef.current?.setPage(tabIndex);
-    
-    Animated.timing(tabIndicatorPosition, {
-      toValue: tabIndex * (screenWidth / 2),
-      duration: 200,
-      useNativeDriver: false,
-    }).start();
+  // ─── Tabs ──────────────────────────────────────────────────────
+  const onTabChange = (next: Tab) => {
+    if (next === activeTab) return;
+    setActiveTab(next);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    pagerRef.current?.setPage(next === 'brands' ? 0 : 1);
+  };
+  const onPageSelected = (e: { nativeEvent: { position: number } }) => {
+    const next: Tab = e.nativeEvent.position === 0 ? 'brands' : 'nonames';
+    setActiveTab((prev) => (prev === next ? prev : next));
   };
 
-  const handlePageSelected = (event: any) => {
-    const position = event.nativeEvent.position;
-    setActiveTab(position);
-    
-    Animated.timing(tabIndicatorPosition, {
-      toValue: position * (screenWidth / 2),
-      duration: 200,
-      useNativeDriver: false,
-    }).start();
-  };
+  // ─── Pull-to-refresh ──────────────────────────────────────────
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refreshData();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshData]);
 
-  // Get Current Data based on Active Tab
-  const getCurrentPurchases = () => {
-    return activeTab === 0 ? brandPurchases : noNamePurchases;
-  };
-
-  // Render Product Card (EXAKT wie Favoriten)
-  const renderProductCard = (item: any, index: number) => {
-    return (
-      <TouchableOpacity
-        style={[styles.productCard, { backgroundColor: colors.cardBackground }]}
-        onPress={() => {
-          // 🎯 Track Product View (Repurchase)
-          const productName = item.name || item.productName || 'Produkt';
-          analytics.trackProductView(
-            item.id,
-            item.type === 'markenprodukt' ? 'brand' : 'noname',
-            productName,
-            'purchase_history',
-            { 
-              repurchase: true,
-              position: index,
-              originalPurchaseDate: item.purchasedAt
-            }
-          );
-          
-          // Navigation zur Produktseite - KORREKTE LOGIK basierend auf Stufe
-          if (item.type === 'markenprodukt') {
-            // Markenprodukte: Immer zu product-comparison
-            router.push(`/product-comparison/${item.id}?type=brand` as any);
-          } else {
-            // NoName-Produkte: Abhängig von Stufe
-            const stufe = parseInt(item.stufe || item.originalCartData?.stufe || item.productData?.stufe || '3') || 3;
-            if (stufe <= 2) {
-              // Stufe 1,2: Zur speziellen NoName-Detailseite
-              router.push(`/noname-detail/${item.id}` as any);
-            } else {
-              // Stufe 3+: Zum normalen Produktvergleich
-              router.push(`/product-comparison/${item.id}?type=noname` as any);
-            }
-          }
-        }}
-        activeOpacity={0.7}
-      >
-        <View style={styles.productContent}>
-          {/* Gekauft Icon */}
-          <View style={styles.purchasedIcon}>
-            <IconSymbol name="checkmark.circle.fill" size={24} color={colors.success} />
-          </View>
-
-          {/* Product Image */}
-          <ImageWithShimmer
-            source={{ uri: item.bild }}
-            style={styles.productImage}
-            shimmerStyle={styles.productImage}
-          />
-
-          {/* Product Info EXAKT wie Favoriten */}
-          <View style={styles.productInfo}>
-            {/* MARKE mit Logo für Markenprodukte */}
-            {item.hersteller?.name && (
-              <View style={styles.brandRow}>
-                {item.hersteller?.bild && (
-                  <ImageWithShimmer
-                    source={{ uri: item.hersteller.bild }}
-                    style={styles.brandLogo}
-                  />
-                )}
-                <Text style={[styles.brandName, { color: colors.primary }]} numberOfLines={1}>
-                  {item.hersteller.name}
-                </Text>
-              </View>
-            )}
-
-            {/* HANDELSMARKE für NoName-Produkte */}
-            {item.type === 'noname' && item.handelsmarke?.bezeichnung && (
-              <Text style={[styles.brandName, { color: colors.primary }]} numberOfLines={1}>
-                {item.handelsmarke.bezeichnung}
-              </Text>
-            )}
-
-            <Text style={[styles.productName, { color: colors.text }]} numberOfLines={2}>
-              {item.name || 'Unbekanntes Produkt'}
-            </Text>
-
-            {/* Discounter Info NUR für NoName-Produkte */}
-            {item.type === 'noname' && item.discounter && (
-              <View style={styles.marketInfo}>
-                {item.discounter?.bild ? (
-                  <ImageWithShimmer 
-                    source={{ uri: item.discounter.bild }} 
-                    style={styles.marketLogo} 
-                  />
-                ) : (
-                  <View style={[styles.marketLogo, styles.marketLogoFallback, { backgroundColor: colors.border }]}>
-                    <IconSymbol name="storefront" size={8} color={colors.icon} />
-                  </View>
-                )}
-                {userProfile?.favoriteMarket === item.discounter?.id && (
-                  <IconSymbol name="heart.fill" size={10} color={colors.primary} style={styles.favoriteMarketIcon} />
-                )}
-                <Text style={[styles.marketName, { color: colors.icon }]} numberOfLines={1}>
-                  {item.discounter?.name || 'Unbekannt'}
-                  {item.discounter?.land && ` (${item.discounter.land})`}
-                </Text>
-              </View>
-            )}
-
-            {/* Preis OHNE Ersparnis */}
-            <View style={styles.priceRow}>
-              <Text style={[styles.productPrice, { color: colors.primary }]}>
-                €{item.preis?.toFixed(2) || '0.00'}
-              </Text>
-            </View>
-
-            {/* Kaufdatum */}
-            <Text style={[styles.purchaseDate, { color: colors.icon }]}>
-              Gekauft: {item.purchasedAt.toLocaleDateString('de-DE')}
-            </Text>
-          </View>
-        </View>
-      </TouchableOpacity>
+  // ─── Item handler ──────────────────────────────────────────────
+  const onItemPress = (item: any, index: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const productName = item.name || 'Produkt';
+    analytics.trackProductView(
+      item.id,
+      item.type === 'markenprodukt' ? 'brand' : 'noname',
+      productName,
+      'purchase_history',
+      {
+        repurchase: true,
+        position: index,
+        originalPurchaseDate: item.purchasedAt,
+      },
     );
+
+    if (item.type === 'markenprodukt') {
+      FirestoreService.prefetchComparisonData(item.id, true);
+      router.push(`/product-comparison/${item.id}?type=brand` as any);
+    } else {
+      const stufe =
+        parseInt(
+          item.stufe ||
+            item.originalCartData?.stufe ||
+            (item as any).productData?.stufe ||
+            '3',
+          10,
+        ) || 3;
+      if (stufe <= 2) {
+        FirestoreService.prefetchProductDetails(item.id);
+        router.push(`/noname-detail/${item.id}` as any);
+      } else {
+        FirestoreService.prefetchComparisonData(item.id, false);
+        router.push(`/product-comparison/${item.id}?type=noname` as any);
+      }
+    }
   };
 
-  // Show initial skeleton loader
-  if (initialLoading && !hasLoadedOnce) {
-    return <PurchaseHistorySkeletonLoader />;
-  }
+  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
 
-  // Show Error State
-  if (error && !hasLoadedOnce) {
+  // Erfolgsfall-Branch oben raus, damit der Render-Tree drunter
+  // sauber bleibt.
+  if (error && !hasLoadedOnce.current) {
     return (
-      <ThemedView style={styles.container}>
-        <View style={styles.centerContent}>
-          <IconSymbol name="exclamationmark.triangle" size={48} color={colors.error} />
-          <ThemedText style={styles.errorText}>{error}</ThemedText>
-          <TouchableOpacity 
-            style={[styles.retryButton, { backgroundColor: colors.primary }]}
-            onPress={() => {
-              setHasLoadedOnce(false);
-              setInitialLoading(true);
+      <View style={{ flex: 1, backgroundColor: theme.bg }}>
+        <View
+          style={{
+            flex: 1,
+            paddingTop: chromeHeight,
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingHorizontal: 32,
+            gap: 12,
+          }}
+        >
+          <MaterialCommunityIcons
+            name="alert-circle-outline"
+            size={48}
+            color={theme.textMuted}
+          />
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.bold,
+              fontSize: 16,
+              color: theme.text,
+              textAlign: 'center',
             }}
           >
-            <ThemedText style={styles.retryButtonText}>Erneut versuchen</ThemedText>
-          </TouchableOpacity>
+            {error}
+          </Text>
+          <Pressable
+            onPress={() => {
+              hasLoadedOnce.current = false;
+              setInitialLoading(true);
+              refreshData();
+            }}
+            style={({ pressed }) => ({
+              marginTop: 8,
+              paddingHorizontal: 18,
+              paddingVertical: 10,
+              borderRadius: 999,
+              backgroundColor: theme.primary,
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 14,
+                color: '#fff',
+              }}
+            >
+              Erneut versuchen
+            </Text>
+          </Pressable>
         </View>
-      </ThemedView>
+        <DetailHeader title="Kaufhistorie" onBack={() => router.back()} />
+      </View>
     );
   }
 
-  const currentData = getCurrentPurchases();
-  const brandCount = totalBrandCount;  // Use total count from server
-  const noNameCount = totalNoNameCount; // Use total count from server
+  const currentCount =
+    activeTab === 'brands' ? brandPurchases.length : noNamePurchases.length;
+  const totalCount =
+    activeTab === 'brands' ? totalBrandCount : totalNoNameCount;
 
   return (
-    <ThemedView style={styles.container}>
-      {/* Tab Container */}
-      <View style={[styles.tabContainer, { backgroundColor: colors.cardBackground }]}>
-        <View style={[styles.tabHeader, { borderBottomColor: colors.border }]}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 0 && { opacity: 1 }]}
-            onPress={() => handleTabChange(0)}
-          >
-            <ThemedText style={[
-              styles.tabText, 
-              { color: activeTab === 0 ? colors.primary : colors.icon }
-            ]}>
-              Marken ({brandCount})
-            </ThemedText>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 1 && { opacity: 1 }]}
-            onPress={() => handleTabChange(1)}
-          >
-            <ThemedText style={[
-              styles.tabText,
-              { color: activeTab === 1 ? colors.primary : colors.icon }
-            ]}>
-              NoNames ({noNameCount})
-            </ThemedText>
-          </TouchableOpacity>
-        </View>
-
-        {/* Tab Indicator */}
-        <Animated.View
-          style={[
-            styles.tabIndicator,
-            { 
-              backgroundColor: colors.primary,
-              transform: [{ translateX: tabIndicatorPosition }]
-            }
-          ]}
-        />
-      </View>
-
-      {/* Content */}
-      {(totalBrandCount + totalNoNameCount) === 0 && hasLoadedOnce ? (
-        <View style={styles.centerContent}>
-          <IconSymbol name="clock.badge.xmark" size={64} color={colors.icon} />
-          <ThemedText style={[styles.emptyTitle, { color: colors.text }]}>
-            Noch keine Käufe
-          </ThemedText>
-          <ThemedText style={[styles.emptySubtitle, { color: colors.icon }]}>
-            Deine gekauften Produkte erscheinen hier nach dem ersten Einkauf
-          </ThemedText>
-        </View>
-      ) : (
-        <PagerView
-          ref={pagerRef}
-          style={styles.pagerView}
-          initialPage={0}
-          onPageSelected={handlePageSelected}
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      {/* Body lebt unter dem Chrome via paddingTop. */}
+      <View style={{ flex: 1, paddingTop: chromeHeight }}>
+        {/* Tabs row */}
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingTop: 12,
+            paddingBottom: 6,
+          }}
         >
-          {/* Marken Tab */}
-          <View key="brands" style={styles.tabPage}>
-            <FlatList
-              data={brandPurchases}
-              keyExtractor={(item, index) => `${item.id}_${index}_${item.purchasedAt?.getTime() || 'unknown'}`}
-              renderItem={({ item, index }) => renderProductCard(item, index)}
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-              onEndReached={() => {
-                if (brandHasMore && !brandLoadingMore && activeTab === 0) {
-                  loadBrandPurchases(false);
-                }
-              }}
-              onEndReachedThreshold={0.5}
-              ListFooterComponent={() =>
-                brandLoadingMore && activeTab === 0 ? (
-                  <LoadingFooterSkeleton />
-                ) : null
-              }
-            />
-          </View>
-
-          {/* NoNames Tab */}
-          <View key="nonames" style={styles.tabPage}>
-            <FlatList
-              data={noNamePurchases}
-              keyExtractor={(item, index) => `${item.id}_${index}_${item.purchasedAt?.getTime() || 'unknown'}`}
-              renderItem={({ item, index }) => renderProductCard(item, index)}
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-              onEndReached={() => {
-                if (noNameHasMore && !noNameLoadingMore && activeTab === 1) {
-                  loadNoNamePurchases(false);
-                }
-              }}
-              onEndReachedThreshold={0.5}
-              ListFooterComponent={() =>
-                noNameLoadingMore && activeTab === 1 ? (
-                  <LoadingFooterSkeleton />
-                ) : null
-              }
-            />
-          </View>
-        </PagerView>
-      )}
-
-      {/* Action Bar */}
-      <View style={[styles.actionBar, { backgroundColor: colors.cardBackground, borderTopColor: colors.border }]}>
-        <View style={styles.actionBarContent}>
-                      <ThemedText style={[styles.actionBarText, { color: colors.text }]}>
-              {currentData.length} von {activeTab === 0 ? totalBrandCount : totalNoNameCount} Käufen
-            </ThemedText>
-          <View style={styles.actionBarRight}>
-            <ThemedText style={[styles.actionBarSubText, { color: colors.icon }]}>
-              Chronologisch sortiert
-            </ThemedText>
-          </View>
+          <SegmentedTabs
+            tabs={[
+              {
+                key: 'brands',
+                label: `Marken (${totalBrandCount.toLocaleString('de-DE')})`,
+              },
+              {
+                key: 'nonames',
+                label: `NoNames (${totalNoNameCount.toLocaleString('de-DE')})`,
+              },
+            ] as const}
+            value={activeTab}
+            onChange={onTabChange}
+          />
         </View>
+
+        {/* Body — Crossfade zwischen Skeleton und PagerView. fillParent
+            ist Pflicht, damit die FlatLists ihren flex:1 bekommen. */}
+        <Crossfade
+          ready={!initialLoading}
+          duration={320}
+          fillParent
+          style={{ flex: 1 }}
+          skeleton={<PurchaseHistorySkeleton />}
+        >
+          <PagerView
+            ref={pagerRef}
+            style={{ flex: 1 }}
+            initialPage={0}
+            onPageSelected={onPageSelected}
+          >
+            {/* Marken */}
+            <View key="brands" style={{ flex: 1 }}>
+              <PurchaseList
+                items={brandPurchases}
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                onEndReached={() => {
+                  if (brandHasMore && !brandLoadingMore) {
+                    loadBrandPurchases(false);
+                  }
+                }}
+                loadingMore={brandLoadingMore}
+                emptyVariant="brands"
+                onItemPress={onItemPress}
+              />
+            </View>
+
+            {/* NoNames */}
+            <View key="nonames" style={{ flex: 1 }}>
+              <PurchaseList
+                items={noNamePurchases}
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                onEndReached={() => {
+                  if (noNameHasMore && !noNameLoadingMore) {
+                    loadNoNamePurchases(false);
+                  }
+                }}
+                loadingMore={noNameLoadingMore}
+                emptyVariant="nonames"
+                onItemPress={onItemPress}
+              />
+            </View>
+          </PagerView>
+        </Crossfade>
+
+        {/* Footer-Bar — "X von Y Käufen · Chronologisch sortiert".
+            Bewusst flach (kein Schatten, nur 1px-Border), damit sie
+            sich als Statusleiste, nicht als ActionBar liest. */}
+        {!initialLoading && (totalBrandCount + totalNoNameCount) > 0 ? (
+          <View
+            style={{
+              paddingHorizontal: 20,
+              paddingTop: 10,
+              paddingBottom: Math.max(insets.bottom, 12),
+              backgroundColor: theme.surface,
+              borderTopWidth: 1,
+              borderTopColor: theme.border,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+            }}
+          >
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.semibold,
+                fontSize: 12,
+                color: theme.text,
+              }}
+            >
+              {currentCount.toLocaleString('de-DE')} von{' '}
+              {totalCount.toLocaleString('de-DE')} Käufen
+            </Text>
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 11,
+                color: theme.textMuted,
+              }}
+            >
+              Chronologisch sortiert
+            </Text>
+          </View>
+        ) : null}
       </View>
 
-      {/* Lokaler Toast entfernt – zentrale Toast-Library übernimmt */}
-    </ThemedView>
+      {/* Chrome */}
+      <DetailHeader title="Kaufhistorie" onBack={() => router.back()} />
+    </View>
   );
 }
 
-// Styles (EXAKT wie Favoriten mit minimalen Anpassungen)
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  tabContainer: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  tabHeader: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 16,
-    alignItems: 'center',
-    opacity: 0.6,
-  },
-  tabText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  tabIndicator: {
-    position: 'absolute',
-    bottom: 0,
-    height: 3,
-    width: screenWidth / 2,
-    borderRadius: 1.5,
-  },
-  pagerView: {
-    flex: 1,
-  },
-  tabPage: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingTop: 16,
-    paddingBottom: Platform.OS === 'ios' ? 100 : 80,
-  },
-  productCard: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  productContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  purchasedIcon: {
-    marginTop: 4,
-  },
-  productImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 12,
-  },
-  productInfo: {
-    flex: 1,
-    gap: 4,
-  },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  brandLogo: {
-    width: 18,
-    height: 18,
-    borderRadius: 2,
-  },
-  brandName: {
-    fontSize: 12,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  productName: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    lineHeight: 20,
-    marginTop: 2,
-  },
-  marketInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 2,
-  },
-  marketLogo: {
-    width: 16,
-    height: 16,
-    borderRadius: 2,
-  },
-  marketLogoFallback: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  favoriteMarketIcon: {
-    marginLeft: -2,
-  },
-  marketName: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-  },
-  priceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  productPrice: {
-    fontSize: 16,
-    fontFamily: 'Nunito_700Bold',
-  },
-  savingsInline: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  purchaseDate: {
-    fontSize: 11,
-    fontFamily: 'Nunito_400Regular',
-    marginTop: 4,
-  },
-  actionBar: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
-  },
-  actionBarContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  actionBarText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-  },
-  actionBarRight: {
-    alignItems: 'flex-end',
-  },
-  actionBarSubText: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-  },
-  savingsInline: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  centerContent: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-    gap: 16,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontFamily: 'Nunito_600SemiBold',
-    textAlign: 'center',
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  errorText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_400Regular',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  retryButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  loadingText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_400Regular',
-    textAlign: 'center',
-    marginTop: 16,
-  },
-});
+// ────────────────────────────────────────────────────────────────────
+// PurchaseList — FlatList per Tab. Empty-State, Pull-to-Refresh,
+// Infinite-Scroll-Pagination via onEndReached + Footer-Spinner.
+// ────────────────────────────────────────────────────────────────────
+
+function PurchaseList({
+  items,
+  refreshing,
+  onRefresh,
+  onEndReached,
+  loadingMore,
+  emptyVariant,
+  onItemPress,
+}: {
+  items: any[];
+  refreshing: boolean;
+  onRefresh: () => void;
+  onEndReached: () => void;
+  loadingMore: boolean;
+  emptyVariant: Tab;
+  onItemPress: (item: any, index: number) => void;
+}) {
+  const { theme } = useTokens();
+
+  if (items.length === 0) {
+    return <PurchaseEmpty variant={emptyVariant} />;
+  }
+
+  return (
+    <FlatList
+      data={items}
+      keyExtractor={(item, index) =>
+        `${item.id}_${index}_${item.purchasedAt?.getTime?.() || 'k'}`
+      }
+      renderItem={({ item, index }) => (
+        <PurchaseCard
+          item={item}
+          onPress={() => onItemPress(item, index)}
+        />
+      )}
+      contentContainerStyle={{
+        paddingHorizontal: 20,
+        paddingTop: 6,
+        paddingBottom: 24,
+        gap: 10,
+      }}
+      ItemSeparatorComponent={null}
+      showsVerticalScrollIndicator={false}
+      onEndReached={onEndReached}
+      onEndReachedThreshold={0.5}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={theme.primary}
+        />
+      }
+      ListFooterComponent={
+        loadingMore ? (
+          <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+            <ActivityIndicator size="small" color={theme.primary} />
+          </View>
+        ) : null
+      }
+    />
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// PurchaseCard — eine Kauf-Position. Layout:
+//   [60×60 Bild]  Eyebrow (Brand / Handelsmarke)
+//                 Produktname (max 2 Zeilen)
+//                 Preis · Gekauft am …
+// ────────────────────────────────────────────────────────────────────
+
+function PurchaseCard({
+  item,
+  onPress,
+}: {
+  item: any;
+  onPress: () => void;
+}) {
+  const { theme, brand, shadows } = useTokens();
+
+  const isMarken = item.type === 'markenprodukt';
+  const eyebrowText: string | null = isMarken
+    ? item.hersteller?.name ?? null
+    : item.handelsmarke?.bezeichnung ?? item.discounter?.name ?? null;
+  const eyebrowLogo: string | null = isMarken
+    ? item.hersteller?.bild ?? null
+    : item.discounter?.bild ?? null;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        padding: 12,
+        borderRadius: 14,
+        backgroundColor: theme.surface,
+        borderWidth: 1,
+        borderColor: theme.border,
+        opacity: pressed ? 0.96 : 1,
+        ...shadows.sm,
+      })}
+    >
+      {/* Produktbild — quadratisch, fallback auf Paket-Glyph. */}
+      <View
+        style={{
+          width: 60,
+          height: 60,
+          borderRadius: 12,
+          backgroundColor: '#ffffff',
+          overflow: 'hidden',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        {getProductImage(item) ? (
+          <Image
+            source={{ uri: getProductImage(item) ?? undefined }}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="contain"
+          />
+        ) : (
+          <MaterialCommunityIcons
+            name="package-variant-closed"
+            size={26}
+            color={theme.textMuted}
+          />
+        )}
+      </View>
+
+      {/* Text-Säule */}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        {eyebrowText ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 5,
+              marginBottom: 3,
+            }}
+          >
+            {eyebrowLogo ? (
+              <View
+                style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: 3,
+                  backgroundColor: '#fff',
+                  overflow: 'hidden',
+                  borderWidth: 0.5,
+                  borderColor: theme.border,
+                }}
+              >
+                <Image
+                  source={{ uri: eyebrowLogo }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="contain"
+                />
+              </View>
+            ) : null}
+            <Text
+              numberOfLines={1}
+              style={{
+                flex: 1,
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 10,
+                color: brand.primary,
+                letterSpacing: 0.4,
+                textTransform: 'uppercase',
+              }}
+            >
+              {eyebrowText}
+            </Text>
+          </View>
+        ) : null}
+
+        <Text
+          numberOfLines={2}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.semibold,
+            fontSize: 14,
+            color: theme.text,
+            lineHeight: 17,
+            marginBottom: 4,
+          }}
+        >
+          {item.name || 'Unbekanntes Produkt'}
+        </Text>
+
+        {/* Preis · Gekauft-Zeile */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 13,
+              color: brand.primary,
+            }}
+          >
+            {formatPrice(item.preis)}
+          </Text>
+          <View
+            style={{
+              width: 3,
+              height: 3,
+              borderRadius: 1.5,
+              backgroundColor: theme.textMuted,
+            }}
+          />
+          <Text
+            numberOfLines={1}
+            style={{
+              flex: 1,
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 11,
+              color: theme.textMuted,
+            }}
+          >
+            {formatPurchaseTime(item.purchasedAt)}
+          </Text>
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// PurchaseEmpty — Empty-State pro Tab.
+// ────────────────────────────────────────────────────────────────────
+
+function PurchaseEmpty({ variant }: { variant: Tab }) {
+  const { theme } = useTokens();
+  return (
+    <View
+      style={{
+        alignItems: 'center',
+        paddingTop: 80,
+        paddingHorizontal: 32,
+        gap: 12,
+      }}
+    >
+      <View
+        style={{
+          width: 64,
+          height: 64,
+          borderRadius: 32,
+          backgroundColor: theme.surfaceAlt,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <MaterialCommunityIcons
+          name="cart-check"
+          size={28}
+          color={theme.textMuted}
+        />
+      </View>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 16,
+          color: theme.text,
+          textAlign: 'center',
+        }}
+      >
+        {variant === 'brands' ? 'Noch keine Markenprodukte' : 'Noch keine NoNames'}
+      </Text>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 13,
+          color: theme.textMuted,
+          textAlign: 'center',
+          lineHeight: 18,
+        }}
+      >
+        {variant === 'brands'
+          ? 'Markenprodukte aus deinen Einkäufen erscheinen hier — markiere sie beim Einkauf als gekauft, dann siehst du sie hier wieder.'
+          : 'NoName-Produkte aus deinen Einkäufen erscheinen hier — markiere sie beim Einkauf als gekauft, dann siehst du sie hier wieder.'}
+      </Text>
+    </View>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// PurchaseHistorySkeleton — Initial-Load-Placeholder. Sechs Reihen,
+// die exakt die Card-Form spiegeln (Image links, zwei Textzeilen +
+// eine Preis/Datum-Zeile rechts).
+// ────────────────────────────────────────────────────────────────────
+
+function PurchaseHistorySkeleton() {
+  const { theme, shadows } = useTokens();
+  return (
+    <View style={{ paddingHorizontal: 20, paddingTop: 6, gap: 10 }}>
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <View
+          key={i}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+            padding: 12,
+            borderRadius: 14,
+            backgroundColor: theme.surface,
+            borderWidth: 1,
+            borderColor: theme.border,
+            ...shadows.sm,
+          }}
+        >
+          <Shimmer width={60} height={60} radius={12} />
+          <View style={{ flex: 1, gap: 6 }}>
+            <Shimmer width="40%" height={10} radius={3} />
+            <Shimmer width="85%" height={13} radius={4} />
+            <Shimmer width="55%" height={11} radius={3} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}

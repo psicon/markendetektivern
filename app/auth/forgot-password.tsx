@@ -1,6 +1,7 @@
 import { ThemedText } from '@/components/ThemedText';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { auth } from '@/lib/firebase';
@@ -114,13 +115,14 @@ export default function ForgotPasswordScreen() {
         locations={[0, 0.3, 0.7, 1]}
         style={[styles.overlay, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}
       >
-        {/* Back Button */}
-        <TouchableOpacity 
-          style={styles.backButtonWithText}
+        {/* Back Button — design-system arrow-left in a 40×40
+            round translucent-white pill. */}
+        <TouchableOpacity
+          style={styles.backButtonRound}
           onPress={() => router.back()}
+          hitSlop={8}
         >
-          <IconSymbol name="chevron.left" size={20} color="white" />
-          <ThemedText style={styles.backButtonText}>Zurück</ThemedText>
+          <MaterialCommunityIcons name="arrow-left" size={22} color="white" />
         </TouchableOpacity>
 
         {/* Logo */}
@@ -225,6 +227,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 20,
     gap: 6,
+    zIndex: 10,
+  },
+  // Design-system back-button: 40×40 round, translucent-white bg.
+  backButtonRound: {
+    position: 'absolute',
+    top: 60,
+    left: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.15)',
     zIndex: 10,
   },
   backButtonText: {

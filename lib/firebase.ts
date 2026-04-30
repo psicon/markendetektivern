@@ -18,7 +18,16 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore
+// Initialize Firestore.
+//
+// NOTE: We deliberately use the plain in-memory cache here.
+// `persistentLocalCache` from firebase/firestore is a web-only
+// API (IndexedDB-backed) and does NOT work in React Native — it
+// triggers a runtime crash via `NativeEventEmitter` when the SDK
+// tries to wire up its sync/storage event paths. The in-memory
+// product-detail cache in `services/firestore.ts` (5-min TTL +
+// inflight-promise dedup) gives us the same UX win for repeat
+// visits within a session.
 export const db = getFirestore(app);
 
 // Initialize Firebase Auth with persistence

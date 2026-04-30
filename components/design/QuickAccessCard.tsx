@@ -16,8 +16,14 @@ type Props = {
 /**
  * Schnellzugriff card on Home. Fixed 112×90.
  * Matches prototype's `Schnellzugriff` items.
+ *
+ * Wrapped in React.memo so the card doesn't re-render when the
+ * Home screen re-renders for unrelated reasons (e.g. scroll
+ * shared-value changes). The 5 cards on Home are otherwise
+ * re-created on every parent render — small alone, but adds up
+ * during scroll.
  */
-export function QuickAccessCard({ icon, label, background, dark, onPress }: Props) {
+function QuickAccessCardImpl({ icon, label, background, dark, onPress }: Props) {
   const { theme } = useTokens();
   const fg = dark ? '#ffffff' : theme.text;
 
@@ -52,3 +58,5 @@ export function QuickAccessCard({ icon, label, background, dark, onPress }: Prop
     </Pressable>
   );
 }
+
+export const QuickAccessCard = React.memo(QuickAccessCardImpl);

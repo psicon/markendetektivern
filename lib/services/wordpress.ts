@@ -43,11 +43,32 @@ export interface WordPressApiResponse {
   totalPages: number;
 }
 
+// ─── In-memory news cache ────────────────────────────────────────
+//
+// The home tab fetches WordPress posts on every mount. The blog
+// updates a few times per week — refetching every tab focus is
+// wasteful and shows up as a slow "Neuigkeiten" skeleton on what
+// should be an instant render. 5-min TTL keeps the section
+// near-instant on revisits without serving stale content for long.
+const NEWS_CACHE_TTL_MS = 5 * 60 * 1000;
+// Hartes Request-Timeout als Schutz gegen "ewig hängenden" Fetch.
+// Wenn die WordPress-API hängt (Server tot, DNS-Stall, Netzwerk weg),
+// würde der News-Skeleton sonst auf dem Home-Tab dauerhaft drehen.
+// 25 s sind großzügig genug, damit die API auch unter Last (mehrere
+// User parallel, Cold-Start am Hosting) durchkommt, und kurz genug,
+// dass der Empty-State irgendwann sichtbar wird statt nie. Wenn die
+// Antwort nach 25 s noch nicht da ist, ist die API faktisch unverfügbar
+// und wir sollten den Empty-State zeigen.
+const NEWS_REQUEST_TIMEOUT_MS = 25_000;
+type NewsCacheEntry = { value: WordPressApiResponse; expiresAt: number };
+const newsCache = new Map<string, NewsCacheEntry>();
+const newsInflight = new Map<string, Promise<WordPressApiResponse>>();
+
 class WordPressService {
   private readonly baseUrl = 'https://markendetektive.de/wp-json/wp/v2';
-  
+
   /**
-   * Holt die neuesten Blog-Posts
+   * Holt die neuesten Blog-Posts (5-min in-memory cache).
    */
   async getLatestPosts(limit: number = 5): Promise<WordPressApiResponse> {
     return this.getLatestPostsPaginated(limit, 1);
@@ -57,44 +78,76 @@ class WordPressService {
    * Holt Blog-Posts mit Pagination
    */
   async getLatestPostsPaginated(limit: number = 5, page: number = 1): Promise<WordPressApiResponse> {
-    try {
+    const cacheKey = `${limit}:${page}`;
 
-      
-      const response = await fetch(
-        `${this.baseUrl}/posts?per_page=${limit}&page=${page}&_embed=wp:featuredmedia&status=publish&orderby=date&order=desc`,
-        {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
+    // Cache hit
+    const hit = newsCache.get(cacheKey);
+    if (hit && Date.now() < hit.expiresAt) return hit.value;
+
+    // Inflight de-dup (parallel callers share one network round-trip)
+    const inflight = newsInflight.get(cacheKey);
+    if (inflight) return inflight;
+
+    const promise = (async () => {
+      // AbortController + setTimeout-basiertes Hard-Timeout.
+      // `signal` wird an `fetch` übergeben — bei Timeout wird die
+      // laufende Connection sauber abgebrochen, RN gibt den Socket
+      // frei und der `await` wirft einen AbortError, den wir unten
+      // gleich wie jeden anderen Fehler behandeln.
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), NEWS_REQUEST_TIMEOUT_MS);
+      try {
+        const response = await fetch(
+          `${this.baseUrl}/posts?per_page=${limit}&page=${page}&_embed=wp:featuredmedia&status=publish&orderby=date&order=desc`,
+          {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`WordPress API error: ${response.status} ${response.statusText}`);
         }
-      );
 
-      if (!response.ok) {
-        throw new Error(`WordPress API error: ${response.status} ${response.statusText}`);
+        const posts: WordPressPost[] = await response.json();
+
+        // Extrahiere Featured Images
+        const postsWithImages = posts.map(post => ({
+          ...post,
+          featured_image_url: this.extractFeaturedImageUrl(post)
+        }));
+
+        const result: WordPressApiResponse = {
+          posts: postsWithImages,
+          total: parseInt(response.headers.get('X-WP-Total') || '0'),
+          totalPages: parseInt(response.headers.get('X-WP-TotalPages') || '0')
+        };
+        newsCache.set(cacheKey, { value: result, expiresAt: Date.now() + NEWS_CACHE_TTL_MS });
+        return result;
+      } catch (error: any) {
+        // AbortError != echter Fehler — nur freundlicher Warn, damit
+        // der Crashlytics-Stream nicht volläuft, wenn WP-API mal
+        // 5+ Sekunden braucht.
+        if (error?.name === 'AbortError') {
+          console.warn(
+            `⏱️ WordPress posts fetch timed out after ${NEWS_REQUEST_TIMEOUT_MS}ms — section will show empty state`,
+          );
+        } else {
+          console.error('❌ Error fetching WordPress posts:', error);
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeoutId);
+        newsInflight.delete(cacheKey);
       }
+    })();
 
-      const posts: WordPressPost[] = await response.json();
-      
-      // Extrahiere Featured Images
-      const postsWithImages = posts.map(post => ({
-        ...post,
-        featured_image_url: this.extractFeaturedImageUrl(post)
-      }));
-
-
-      
-      return {
-        posts: postsWithImages,
-        total: parseInt(response.headers.get('X-WP-Total') || '0'),
-        totalPages: parseInt(response.headers.get('X-WP-TotalPages') || '0')
-      };
-      
-    } catch (error) {
-      console.error('❌ Error fetching WordPress posts:', error);
-      throw error;
-    }
+    newsInflight.set(cacheKey, promise);
+    return promise;
   }
 
   /**

@@ -1,5 +1,7 @@
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { FirestoreService } from '@/lib/services/firestore';
 import searchHistoryService, { PopularSearch, SearchHistoryItem } from '@/lib/services/searchHistoryService';
+import { getProductImage } from '@/lib/utils/productImage';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -28,8 +30,21 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 interface SearchBottomSheetProps {
   visible: boolean;
   onClose: () => void;
-  searchBarY: number;
-  searchBarHeight: number;
+  /** Legacy alignment input — kept for callers that haven't moved
+   *  to `topAnchor` yet. Sheet's top edge lands at
+   *  `searchBarY + searchBarHeight - 170` (magic number that puts
+   *  the sheet's INTERNAL search input at the same Y as the
+   *  caller's search bar, creating a "morph" effect). Don't use
+   *  this for new callers — pass `topAnchor` directly. */
+  searchBarY?: number;
+  searchBarHeight?: number;
+  /** Y coordinate where the SHEET'S INTERNAL search input should
+   *  land — pass the caller's visible search bar TOP Y. The sheet
+   *  positions itself so its own input sits at exactly that
+   *  position, creating a "morph" from the caller's bar to the
+   *  sheet's bar. Takes precedence over the legacy
+   *  `searchBarY`/`searchBarHeight` magic. */
+  topAnchor?: number;
   colors: any;
   onSearch: (term: string) => void;
 }
@@ -39,6 +54,7 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
   onClose,
   searchBarY,
   searchBarHeight,
+  topAnchor,
   colors,
   onSearch,
 }) => {
@@ -66,8 +82,22 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
   // TextInput Reference für Keyboard-Management
   const searchInputRef = useRef<TextInput>(null);
   
-  // Sheet beginnt DIREKT unter dem Suchfeld, nicht darüber
-  const sheetTop = searchBarY + searchBarHeight - 170;
+  // Sheet's internal search input sits this many px below the
+  // sheet's top edge — measured from the styles below:
+  //   header.paddingTop (8) + pullIndicatorArea height (~23 px;
+  //   paddingVertical 8 each + 3 px pullIndicator + 4 px margin)
+  //   = 31 px.
+  // We position the sheet so its input lands EXACTLY at the
+  // caller's `topAnchor` Y → looks like the caller's search bar
+  // morphed in place into the sheet's input.
+  const SHEET_INPUT_OFFSET = 31;
+
+  const sheetTop =
+    topAnchor !== undefined
+      ? topAnchor - SHEET_INPUT_OFFSET
+      // Legacy fallback for callers that haven't moved off the
+      // old `searchBarY` + `searchBarHeight` magic-170 API.
+      : (searchBarY ?? 0) + (searchBarHeight ?? 0) - 170;
   const sheetHeight = SCREEN_HEIGHT - sheetTop;
   
   // Pan Responder für Swipe-to-dismiss
@@ -164,8 +194,26 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
   const loadPopularProducts = async () => {
     setIsLoadingPopular(true);
     try {
-      const popular = await searchHistoryService.getPopularProducts();
-      setPopularSearches(popular);
+      // Selbe Liste wie Home "Top 10 overall" aus dem zentralen
+      // Aggregat. Score-Sortierung kommt aus dem Aggregator (Cloud
+      // Function `top-products-aggregator`), client behält die
+      // Reihenfolge bei. 1 Read/Session, danach Cache-Hit.
+      const data = await FirestoreService.getTopProducts();
+      const popular = (data.overall ?? []).map((it: any, idx: number) => ({
+        id: it.id,
+        term: it.name ?? 'Produkt',
+        productName: it.name ?? 'Produkt',
+        category: it.brandName ?? it.herstellerName ?? '',
+        productImage: getProductImage(it),
+        averageRating: typeof it.avgRating === 'number' ? it.avgRating : 0,
+        count: it.ratingCount ?? 0,
+        isRealProduct: true,
+        productType: it.type === 'marken' ? 'brand' : 'noname',
+        stufe: typeof it.stufe === 'number' ? it.stufe : 3,
+        icon: '⭐',
+        rank: idx + 1,
+      }));
+      setPopularSearches(popular as any);
     } catch (error) {
       console.error('Fehler beim Laden beliebter Produkte:', error);
     } finally {
@@ -489,23 +537,26 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
             )}
           </View>
               
-          {/* Best bewertete NoName-Produkte - Laden dynamisch */}
+          {/* Top 10 overall — selbes Aggregat wie Home, selbe
+              Sortierung. 10 Items in 2-Spalten-Grid. */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                Top NoName-Produkte
+                Top Produkte
               </Text>
               <View style={styles.trendingBadge}>
                 <IconSymbol name="star.fill" size={12} color="#FFD700" />
-                <Text style={[styles.trendingText, { color: colors.text }] }>Top Rated</Text>
+                <Text style={[styles.trendingText, { color: colors.text }]}>Top Rated</Text>
               </View>
             </View>
-            
+
             {isLoadingPopular ? (
               <View style={styles.popularGrid}>
-                {/* 6 Shimmer-Skeletons für Produktkarten */}
-                {[...Array(6)].map((_, index) => (
-                  <View key={`skeleton-${index}`} style={[styles.popularCard, { backgroundColor: colors.cardBackground }]}>
+                {[...Array(10)].map((_, index) => (
+                  <View
+                    key={`skeleton-${index}`}
+                    style={[styles.popularCard, { backgroundColor: colors.cardBackground }]}
+                  >
                     <ShimmerSkeleton width={24} height={24} borderRadius={6} />
                     <View style={styles.popularInfo}>
                       <ShimmerSkeleton width={100} height={13} borderRadius={4} />
@@ -517,61 +568,68 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
               </View>
             ) : popularSearches.length > 0 ? (
               <View style={styles.popularGrid}>
-                {popularSearches.slice(0, 6).map((item, index) => (
+                {popularSearches.slice(0, 10).map((item, index) => (
                   <TouchableOpacity
                     key={item.id || item.term}
                     style={[styles.popularCard, { backgroundColor: colors.cardBackground }]}
                     onPress={() => {
                       if (item.isRealProduct && item.id) {
-                        // Navigiere direkt zum NoName-Produkt
                         Keyboard.dismiss();
                         handleClose();
-                        router.push(`/product-comparison/${item.id}?type=noname` as any);
-                      } else {
-                        // Normale Suche
-                        if (!isSearching) {
-                          handleSearchTerm(item.term);
+                        const it: any = item;
+                        if (it.productType === 'brand') {
+                          router.push(`/product-comparison/${item.id}?type=brand` as any);
+                        } else {
+                          const stufe =
+                            typeof it.stufe === 'number' ? it.stufe : 3;
+                          if (stufe <= 2) {
+                            router.push(`/noname-detail/${item.id}` as any);
+                          } else {
+                            router.push(`/product-comparison/${item.id}?type=noname` as any);
+                          }
                         }
+                      } else if (!isSearching) {
+                        handleSearchTerm(item.term);
                       }
                     }}
                     activeOpacity={0.6}
                   >
-                 
-                    
-                    {/* Echtes Produktbild oder Emoji-Fallback */}
                     {item.isRealProduct && item.productImage ? (
                       <ImageWithShimmer
                         source={{ uri: item.productImage }}
-                        style={styles.popularProductImage}
+                        style={[styles.popularProductImage, { backgroundColor: '#ffffff' }]}
                         fallbackIcon="cube.box"
                         fallbackIconSize={16}
-                        resizeMode="cover"
+                        resizeMode="contain"
                       />
                     ) : (
                       <Text style={styles.popularEmoji}>{item.icon}</Text>
                     )}
-                    
                     <View style={styles.popularInfo}>
-                      <Text style={[styles.popularName, { color: colors.text }]} numberOfLines={1}>
+                      <Text
+                        style={[styles.popularName, { color: colors.text }]}
+                        numberOfLines={1}
+                      >
                         {item.productName || item.term}
                       </Text>
-                      <Text style={[styles.popularCat, { color: colors.icon }]} numberOfLines={1}>
+                      <Text
+                        style={[styles.popularCat, { color: colors.icon }]}
+                        numberOfLines={1}
+                      >
                         {item.category}
                       </Text>
                     </View>
-                    
-                    {/* Rating mit Count in Klammern */}
-                    {item.isRealProduct && item.averageRating !== undefined && item.averageRating > 0 ? (
+                    {/* Rating-Pill — nur Score, kein Count-in-Klammer. */}
+                    {item.isRealProduct &&
+                    item.averageRating !== undefined &&
+                    item.averageRating > 0 ? (
                       <View style={styles.ratingBadge}>
                         <IconSymbol name="star.fill" size={9} color="#FFD700" />
-                        <View style={styles.ratingInfo}>
-                          <Text style={[styles.ratingText, { color: colors.text }]}>
-                            {item.averageRating.toFixed(1)}
-                          </Text>
-                          <Text style={[styles.ratingCount, { color: colors.icon }]}>
-                            ({item.count || 0})
-                          </Text>
-                        </View>
+                        <Text
+                          style={[styles.ratingText, { color: colors.text, marginLeft: 4 }]}
+                        >
+                          {item.averageRating.toFixed(1)}
+                        </Text>
                       </View>
                     ) : (
                       <Text style={[styles.popularRankSmall, { color: colors.primary }]}>
@@ -588,32 +646,38 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
             )}
           </View>
               
-          {/* Quick Actions - Kompakt */}
+          {/* Quick Actions — Favoriten + Einkaufsliste.
+              Replaced the Scanner + Kategorien buttons that lived
+              here before: Scanner has a dedicated icon in the
+              header chrome (always one tap away), and Kategorien
+              is reachable via the Stöbern tab. Favoriten and
+              Einkaufsliste are the destinations a user is much
+              more likely to want shortcuts to from a search-
+              intent context. */}
           <View style={styles.quickActions}>
                 <TouchableOpacity
                   style={[styles.quickAction, { backgroundColor: colors.primary + '10' }]}
                   onPress={() => {
                     handleClose();
-                    router.push('/barcode-scanner' as any);
+                    router.push('/favorites' as any);
                   }}
                 >
-                  <IconSymbol name="barcode" size={16} color={colors.primary} />
+                  <IconSymbol name="heart.fill" size={16} color={colors.primary} />
                   <Text style={[styles.quickActionText, { color: colors.primary }]}>
-                    Scanner
+                    Favoriten
                   </Text>
                 </TouchableOpacity>
-                
+
                 <TouchableOpacity
                   style={[styles.quickAction, { backgroundColor: colors.success + '10' }]}
                   onPress={() => {
                     handleClose();
-                    // Navigation zur Stöbern-Seite mit Kategorien-Tab
-                    router.push('/(tabs)/explore?tab=Kategorien' as any);
+                    router.push('/shopping-list' as any);
                   }}
                 >
-                  <IconSymbol name="square.grid.2x2" size={16} color={colors.success} />
+                  <IconSymbol name="cart.fill" size={16} color={colors.success} />
                   <Text style={[styles.quickActionText, { color: colors.success }]}>
-                    Kategorien
+                    Einkaufsliste
                   </Text>
                 </TouchableOpacity>
               </View>

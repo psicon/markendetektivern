@@ -1,379 +1,348 @@
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
-import BatchActionLoader from '@/components/ui/BatchActionLoader';
-import FixedAndroidModal from '@/components/ui/FixedAndroidModal';
-import { IconSymbol } from '@/components/ui/IconSymbol';
-import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
-import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
-import { Colors } from '@/constants/Colors';
-import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
-import { TOAST_MESSAGES } from '@/constants/ToastMessages';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
-import { useAuth } from '@/lib/contexts/AuthContext';
-import { useFavorites } from '@/lib/hooks/useFavorites';
-import { FirestoreService } from '@/lib/services/firestore';
-import { showCartAddedToast, showFavoriteRemovedToast, showInfoToast } from '@/lib/services/ui/toast';
+// app/favorites.tsx
+//
+// Favoriten-Liste — neu im Design-System:
+//   • DetailHeader (Back + Title + Filter-Slot mit Badge) als chrome
+//   • SegmentedTabs + PagerView für Marken / NoNames
+//   • FilterSheet statt FixedAndroidModal für Filter & Sortierung
+//   • Theme-Tokens via useTokens (statt Colors[colorScheme])
+//   • Saubere Card-Liste mit Image + Eyebrow + Name + Market + Preis
+//   • Sliding Bulk-Action-Bar wenn Produkte selektiert sind
+//   • Crossfade-Skeleton während des Initial-Load
+//   • Tap auf Card → navigiert zur Detail-Seite (mit Prefetch); Bulk-
+//     Selection läuft über die explizite Checkbox links
+
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  Animated,
-  Dimensions,
+  Image,
+  Pressable,
   RefreshControl,
   ScrollView,
-  StyleSheet,
   Text,
-  TouchableOpacity,
-  View
+  View,
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const { width } = Dimensions.get('window');
+import {
+  DETAIL_HEADER_ROW_HEIGHT,
+  DetailHeader,
+} from '@/components/design/DetailHeader';
+import {
+  FilterSheet,
+  OptionList,
+} from '@/components/design/FilterSheet';
+import { SegmentedTabs } from '@/components/design/SegmentedTabs';
+import { Crossfade, Shimmer } from '@/components/design/Skeletons';
+import BatchActionLoader from '@/components/ui/BatchActionLoader';
+import { TOAST_MESSAGES } from '@/constants/ToastMessages';
+import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { useTokens } from '@/hooks/useTokens';
+import { useAuth } from '@/lib/contexts/AuthContext';
+import { useFavorites } from '@/lib/hooks/useFavorites';
+import { FirestoreService } from '@/lib/services/firestore';
+import { getProductImage } from '@/lib/utils/productImage';
+import {
+  showCartAddedToast,
+  showFavoriteRemovedToast,
+  showInfoToast,
+} from '@/lib/services/ui/toast';
 
-// Skeleton Loader EXAKT wie Einkaufszettel
-const FavoritesSkeletonLoader = () => {
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
+type Tab = 'brand' | 'noname';
+type SortBy = 'name' | 'price' | 'newest';
 
-  const SkeletonItem = () => (
-    <View style={[styles.productCard, { backgroundColor: colors.cardBackground }]}>
-      <View style={styles.productContent}>
-        <ShimmerSkeleton width={20} height={20} borderRadius={10} style={{ marginRight: 12 }} />
-        <ShimmerSkeleton width={60} height={60} borderRadius={8} />
-        <View style={styles.productInfo}>
-          <ShimmerSkeleton width={120} height={14} />
-          <ShimmerSkeleton width={200} height={16} style={{ marginTop: 4 }} />
-          <View style={styles.marketInfo}>
-            <ShimmerSkeleton width={16} height={16} borderRadius={2} />
-            <ShimmerSkeleton width={80} height={12} />
-          </View>
-          <ShimmerSkeleton width={60} height={16} />
-        </View>
-        <View style={styles.productActions}>
-          <ShimmerSkeleton width={32} height={32} borderRadius={16} />
-          <ShimmerSkeleton width={32} height={32} borderRadius={16} style={{ marginTop: 6 }} />
-        </View>
-      </View>
-    </View>
-  );
+const SORT_OPTIONS: readonly (readonly [SortBy, string])[] = [
+  ['name', 'Name (A–Z)'],
+  ['price', 'Preis aufsteigend'],
+  ['newest', 'Zuletzt hinzugefügt'],
+] as const;
 
-  return (
-    <View style={styles.productContainer}>
-      {Array.from({ length: 6 }).map((_, index) => (
-        <SkeletonItem key={index} />
-      ))}
-    </View>
-  );
-};
+// ─── Relative date helper ──────────────────────────────────────────
+//
+// Renders the favourite's `addedAt` timestamp as a human-friendly
+// caption. Recent items use a relative phrasing, older ones fall
+// back to a compact absolute date. Returns null if the input is
+// missing/invalid so the caller can short-circuit rendering.
+//
+//   < 1 min   → "gerade eben"
+//   < 1 hour  → "vor X Min."
+//   today     → "heute, HH:MM"
+//   yesterday → "gestern, HH:MM"
+//   < 7 days  → "vor X Tagen"
+//   same year → "12.04. um 14:30"
+//   else      → "12.04.2025"
+function formatAddedAt(input: any): string | null {
+  if (!input) return null;
+  const d = input instanceof Date ? input : new Date(input);
+  if (isNaN(d.getTime())) return null;
+
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  const diffHr = Math.floor(diffMs / 3_600_000);
+  const diffDay = Math.floor(diffMs / 86_400_000);
+
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const MM = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+
+  if (diffMin < 1) return 'gerade eben';
+  if (diffHr < 1) return `vor ${diffMin} Min.`;
+
+  // Today / yesterday detection — calendar-day-based, not raw 24 h.
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfDate = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const dayDelta = Math.round((startOfToday - startOfDate) / 86_400_000);
+
+  if (dayDelta === 0) return `heute, ${hh}:${mm}`;
+  if (dayDelta === 1) return `gestern, ${hh}:${mm}`;
+  if (diffDay < 7) return `vor ${dayDelta} Tagen`;
+  if (yyyy === now.getFullYear()) return `${dd}.${MM}. um ${hh}:${mm}`;
+  return `${dd}.${MM}.${yyyy}`;
+}
 
 export default function FavoritesScreen() {
   const navigation = useNavigation();
   const router = useRouter();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
+  const insets = useSafeAreaInsets();
+  const { theme, shadows, brand } = useTokens();
   const { user, userProfile } = useAuth();
-  const analytics = useAnalytics();
 
-  const { 
-    favoritesWithData, 
-    loading: favoritesLoading, 
-    error, 
-    loadFavoritesWithData, 
-    removeFromFavorites 
+  const {
+    loadFavoritesWithData,
+    removeFromFavorites,
   } = useFavorites();
 
-  const [activeTab, setActiveTab] = useState<'brand' | 'noname'>('brand');
+  // ─── State ─────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<Tab>('brand');
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [isAddingToCart, setIsAddingToCart] = useState(false);
-  
-  // Batch Action Loader States
+  const [refreshing, setRefreshing] = useState(false);
+  const [brandFavorites, setBrandFavorites] = useState<any[]>([]);
+  const [noNameFavorites, setNoNameFavorites] = useState<any[]>([]);
+  // Markets are tracked PER TAB so the filter sheet only shows
+  // markets that exist in the currently active tab. A market that
+  // appears only in NoName-favourites shouldn't show as a chip
+  // when the user is on the Marken tab — it would do nothing.
+  const [brandMarkets, setBrandMarkets] = useState<{ id: string; name: string }[]>([]);
+  const [noNameMarkets, setNoNameMarkets] = useState<{ id: string; name: string }[]>([]);
+
+  const [showFilter, setShowFilter] = useState(false);
+  const [filters, setFilters] = useState<{
+    markets: string[];
+    sortBy: SortBy;
+  }>({ markets: [], sortBy: 'name' });
+
   const [batchLoaderState, setBatchLoaderState] = useState<{
     visible: boolean;
     processedItems: number;
     totalItems: number;
     currentItem: string;
-  }>({
-    visible: false,
-    processedItems: 0,
-    totalItems: 0,
-    currentItem: ''
-  });
-  const [refreshing, setRefreshing] = useState(false);
-  const [brandFavorites, setBrandFavorites] = useState<any[]>([]);
-  const [noNameFavorites, setNoNameFavorites] = useState<any[]>([]);
-  const [availableMarkets, setAvailableMarkets] = useState<{id: string, name: string}[]>([]);
-  
-  // Tab Animation EXAKT wie Einkaufszettel
-  const tabIndicatorPosition = useState(new Animated.Value(0))[0];
-  const pagerRef = useRef<PagerView>(null);
-  
-  // Filter States EXAKT wie Einkaufszettel  
-  const [showFilterModal, setShowFilterModal] = useState(false);
-  const [filters, setFilters] = useState({
-    markets: [] as string[],
-    sortBy: 'name' as 'name' | 'price' | 'newest'
-  });
-  
-  // WICHTIG: Initial loading state um "Noch keine Favoriten" zu vermeiden
+  }>({ visible: false, processedItems: 0, totalItems: 0, currentItem: '' });
+
+  // Initial load — prevents the "no favorites" flash on first paint.
   const [initialLoading, setInitialLoading] = useState(true);
   const hasLoadedOnce = useRef(false);
-  
-  // 🎯 Journey-Tracking für Favorites
-  // Journey läuft bereits - keine neue starten! // Nur einmal beim Mount
-  
-  // Toasts laufen jetzt global über zentrale Toast-Library
 
-  const showGameToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
-    showInfoToast(message, type);
+  // ─── PagerView <-> SegmentedTabs sync ───────────────────────────
+  const pagerRef = useRef<PagerView>(null);
+  const onTabChange = (next: Tab) => {
+    setActiveTab(next);
+    setSelectedProducts([]);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    pagerRef.current?.setPage(next === 'brand' ? 0 : 1);
+  };
+  const onPageSelected = (e: { nativeEvent: { position: number } }) => {
+    const next: Tab = e.nativeEvent.position === 0 ? 'brand' : 'noname';
+    setActiveTab((prev) => (prev === next ? prev : next));
+    if (activeTab !== next) setSelectedProducts([]);
   };
 
-  const showGameToastWithAction = (
-    message: string, 
-    type: 'success' | 'error' | 'info' = 'success'
-  ) => {
-    showCartAddedToast(message, () => router.push('/shopping-list' as any));
-  };
-
-  // Header konfigurieren EXAKT wie Einkaufszettel
+  // ─── Hide native stack header (we render our own DetailHeader) ──
   useLayoutEffect(() => {
-    navigation.setOptions({
-      ...getNavigationHeaderOptions(colorScheme, 'Deine Lieblingsprodukte'),
-      headerRight: () => (
-        selectedProducts.length > 0 && (
-          <TouchableOpacity
-            onPress={handleBulkAddToCart}
-            style={styles.headerButton}
-            disabled={isAddingToCart}
-          >
-            <View style={[styles.headerBadge, { backgroundColor: colors.primary }]}>
-              <IconSymbol name="cart.badge.plus" size={16} color="white" />
-              <ThemedText style={styles.headerBadgeText}>
-                {selectedProducts.length}
-              </ThemedText>
-            </View>
-          </TouchableOpacity>
-        )
-      ),
-    });
-  }, [navigation, colorScheme, selectedProducts.length, isAddingToCart]);
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
 
-  // Initial Load - NUR EINMAL und mit Loading State
+  // ─── Initial Load ───────────────────────────────────────────────
   useEffect(() => {
     if (user?.uid && !hasLoadedOnce.current) {
       hasLoadedOnce.current = true;
       loadInitialData();
+    } else if (!user?.uid) {
+      // No user — nothing to load.
+      setInitialLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
+
+  const splitDataByTab = (data: any[]) => {
+    const brandProducts = data.filter((item: any) => item.type === 'markenprodukt');
+    const noNameProducts = data.filter((item: any) => item.type === 'noname');
+
+    // Build PER-TAB market sets so the filter sheet only ever
+    // shows markets that actually exist on that tab. (A market
+    // present only in NoName favourites would otherwise show up
+    // as a chip on the Marken tab and silently filter to zero.)
+    const brandMarketsMap = new Map<string, { id: string; name: string }>();
+    const noNameMarketsMap = new Map<string, { id: string; name: string }>();
+    data.forEach((item: any) => {
+      if (!item.discounter?.id || !item.discounter?.name) return;
+      const target =
+        item.type === 'markenprodukt' ? brandMarketsMap : noNameMarketsMap;
+      target.set(item.discounter.id, {
+        id: item.discounter.id,
+        name: item.discounter.name,
+      });
+    });
+
+    return {
+      brandProducts,
+      noNameProducts,
+      brandMarkets: Array.from(brandMarketsMap.values()),
+      noNameMarkets: Array.from(noNameMarketsMap.values()),
+    };
+  };
 
   const loadInitialData = async () => {
     setInitialLoading(true);
     try {
       const data = await loadFavoritesWithData();
-      
-      // Trenne die Daten nach Typ EXAKT wie Einkaufszettel
-      const brandProducts = data.filter((item: any) => item.type === 'markenprodukt');
-      const noNameProducts = data.filter((item: any) => item.type === 'noname');
-      
-      setBrandFavorites(brandProducts);
-      setNoNameFavorites(noNameProducts);
-      
-      // Extrahiere unique Markets für Filter aus allen Produkten
-      const uniqueMarkets = new Map();
-      data.forEach((item: any) => {
-        if (item.discounter?.id && item.discounter?.name) {
-          uniqueMarkets.set(item.discounter.id, {
-            id: item.discounter.id,
-            name: item.discounter.name
-          });
-        }
-      });
-      
-      setAvailableMarkets(Array.from(uniqueMarkets.values()));
-    } catch (error) {
-      console.error('Error loading initial data:', error);
+      const split = splitDataByTab(data);
+      setBrandFavorites(split.brandProducts);
+      setNoNameFavorites(split.noNameProducts);
+      setBrandMarkets(split.brandMarkets);
+      setNoNameMarkets(split.noNameMarkets);
+    } catch (e) {
+      console.warn('FavoritesScreen: load failed', e);
     } finally {
       setInitialLoading(false);
     }
   };
 
-  // Tab Change Handler EXAKT wie Einkaufszettel
-  const handleTabChange = (tab: 'brand' | 'noname') => {
-    if (tab === activeTab) return;
-
-    const pageIndex = tab === 'brand' ? 0 : 1;
-    setActiveTab(tab);
-    
-    // WICHTIG: Selektion beim Tab-Wechsel zurücksetzen
-    setSelectedProducts([]);
-    
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    
-    // Animate tab indicator
-    Animated.timing(tabIndicatorPosition, {
-      toValue: tab === 'brand' ? 0 : width / 2,
-      duration: 200,
-      useNativeDriver: true
-    }).start();
-    
-    // Switch PagerView page
-    pagerRef.current?.setPage(pageIndex);
-  };
-
-  const handlePageSelected = (e: any) => {
-    const position = e.nativeEvent.position;
-    const newTab = position === 0 ? 'brand' : 'noname';
-    
-    if (newTab !== activeTab) {
-      setActiveTab(newTab);
-      
-      // WICHTIG: Selektion beim Swipe zurücksetzen
-      setSelectedProducts([]);
-      
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      
-      // Animate tab indicator
-      Animated.timing(tabIndicatorPosition, {
-        toValue: position === 0 ? 0 : width / 2,
-        duration: 200,
-        useNativeDriver: true
-      }).start();
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const data = await loadFavoritesWithData();
+      const split = splitDataByTab(data);
+      setBrandFavorites(split.brandProducts);
+      setNoNameFavorites(split.noNameProducts);
+      setBrandMarkets(split.brandMarkets);
+      setNoNameMarkets(split.noNameMarkets);
+    } finally {
+      setRefreshing(false);
     }
   };
 
-  // Filter Helper Function EXAKT wie Einkaufszettel
+  // ─── Filter helpers ─────────────────────────────────────────────
   const applyFiltersAndSorting = (products: any[]) => {
-    let filtered = [...products];
-    
-    // Market Filter
+    let filtered = products;
     if (filters.markets.length > 0) {
-      filtered = filtered.filter((item: any) => 
-        filters.markets.includes(item.discounter?.id)
+      filtered = filtered.filter((item: any) =>
+        filters.markets.includes(item.discounter?.id),
       );
     }
-    
-    // Sortierung
-    filtered.sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       switch (filters.sortBy) {
         case 'name':
           return (a.name || '').localeCompare(b.name || '');
         case 'price':
           return (a.preis || 0) - (b.preis || 0);
-        case 'newest':
-          const dateA = (a as any).addedAt ? new Date((a as any).addedAt).getTime() : 0;
-          const dateB = (b as any).addedAt ? new Date((b as any).addedAt).getTime() : 0;
-          return dateB - dateA;
+        case 'newest': {
+          const da = (a as any).addedAt ? new Date((a as any).addedAt).getTime() : 0;
+          const db = (b as any).addedAt ? new Date((b as any).addedAt).getTime() : 0;
+          return db - da;
+        }
         default:
           return 0;
       }
     });
-    
-    return filtered;
   };
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    const data = await loadFavoritesWithData();
-    
-    // Trenne die Daten nach Typ
-    const brandProducts = data.filter((item: any) => item.type === 'markenprodukt');
-    const noNameProducts = data.filter((item: any) => item.type === 'noname');
-    
-    setBrandFavorites(brandProducts);
-    setNoNameFavorites(noNameProducts);
-    
-    // Update available markets
-    const uniqueMarkets = new Map();
-    data.forEach((item: any) => {
-      if (item.discounter?.id && item.discounter?.name) {
-        uniqueMarkets.set(item.discounter.id, {
-          id: item.discounter.id,
-          name: item.discounter.name
-        });
-      }
-    });
-    setAvailableMarkets(Array.from(uniqueMarkets.values()));
-    
-    setRefreshing(false);
-  };
-
-  // Filter Functions EXAKT wie Einkaufszettel
   const toggleMarketFilter = (marketId: string) => {
-    setFilters(prev => ({
+    setFilters((prev) => ({
       ...prev,
       markets: prev.markets.includes(marketId)
-        ? prev.markets.filter(id => id !== marketId)
-        : [...prev.markets, marketId]
+        ? prev.markets.filter((id) => id !== marketId)
+        : [...prev.markets, marketId],
     }));
   };
 
-  const setSorting = (sortBy: 'name' | 'price' | 'newest') => {
-    setFilters(prev => ({ ...prev, sortBy }));
-  };
+  const clearAllFilters = () => setFilters({ markets: [], sortBy: 'name' });
 
-  const clearAllFilters = () => {
-    setFilters({
-      markets: [],
-      sortBy: 'name'
-    });
-  };
+  const activeFilterCount =
+    filters.markets.length + (filters.sortBy !== 'name' ? 1 : 0);
 
-  const getActiveFilterCount = () => {
-    let count = 0;
-    if (filters.markets.length > 0) count += filters.markets.length;
-    if (filters.sortBy !== 'name') count += 1;
-    return count;
-  };
+  // ─── Bulk selection ─────────────────────────────────────────────
+  const getCurrentFavorites = () =>
+    activeTab === 'brand' ? brandFavorites : noNameFavorites;
+  const getFilteredFavorites = () =>
+    applyFiltersAndSorting(getCurrentFavorites());
 
   const handleToggleSelect = (productId: string) => {
-    setSelectedProducts(prev => 
-      prev.includes(productId) 
-        ? prev.filter(id => id !== productId)
-        : [...prev, productId]
+    setSelectedProducts((prev) =>
+      prev.includes(productId)
+        ? prev.filter((id) => id !== productId)
+        : [...prev, productId],
     );
-    
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
   const handleToggleSelectAll = () => {
-    const currentFiltered = getFilteredFavorites();
-    if (selectedProducts.length === currentFiltered.length) {
+    const cur = getFilteredFavorites();
+    if (selectedProducts.length === cur.length) {
       setSelectedProducts([]);
     } else {
-      setSelectedProducts(currentFiltered.map(p => p.id));
+      setSelectedProducts(cur.map((p) => p.id));
     }
-    
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  };
+
+  // ─── Card actions ───────────────────────────────────────────────
+  const handleProductPress = (product: any) => {
+    if (product.type === 'markenprodukt') {
+      FirestoreService.prefetchComparisonData(product.id, true);
+      router.push(`/product-comparison/${product.id}?type=brand` as any);
+    } else {
+      const stufe = parseInt((product as any).stufe ?? '1', 10) || 1;
+      if (stufe <= 2) {
+        FirestoreService.prefetchProductDetails(product.id);
+        router.push(`/noname-detail/${product.id}` as any);
+      } else {
+        FirestoreService.prefetchComparisonData(product.id, false);
+        router.push(`/product-comparison/${product.id}?type=noname` as any);
+      }
+    }
   };
 
   const handleRemoveFavorite = async (product: any) => {
     try {
-      // Optimistisch: Sofort aus dem richtigen Array entfernen
+      // Optimistic remove from the right list.
       if (product.type === 'markenprodukt') {
-        setBrandFavorites(prev => prev.filter(p => p.id !== product.id));
+        setBrandFavorites((prev) => prev.filter((p) => p.id !== product.id));
       } else {
-        setNoNameFavorites(prev => prev.filter(p => p.id !== product.id));
+        setNoNameFavorites((prev) => prev.filter((p) => p.id !== product.id));
       }
-      setSelectedProducts(prev => prev.filter(id => id !== product.id));
-      
-      await removeFromFavorites(product.id, product.type);
-      
-      showFavoriteRemovedToast(product.name || product.produktName);
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (error) {
-      console.error('Error removing favorite:', error);
-      showInfoToast(TOAST_MESSAGES.FAVORITES.removeError, 'error');
-      // Bei Fehler: Reload
-      loadInitialData();
-    }
-  };
+      setSelectedProducts((prev) => prev.filter((id) => id !== product.id));
 
-  const handleProductPress = (product: any) => {
-    if (product.type === 'markenprodukt') {
-      router.push(`/product-comparison/${product.id}?type=brand` as any);
-    } else {
-      router.push(`/noname-detail/${product.id}` as any);
+      await removeFromFavorites(product.id, product.type);
+      showFavoriteRemovedToast(product.name || product.produktName);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) {
+      console.warn('FavoritesScreen: remove failed', e);
+      showInfoToast(TOAST_MESSAGES.FAVORITES.removeError, 'error');
+      // On error, reload to re-sync.
+      loadInitialData();
     }
   };
 
@@ -381,983 +350,1091 @@ export default function FavoritesScreen() {
     if (!user?.uid || selectedProducts.length === 0) return;
 
     setIsAddingToCart(true);
-    const selectedFavorites = getFilteredFavorites().filter(p => selectedProducts.includes(p.id));
-    
-    // Show batch loader
+    const selectedFavorites = getFilteredFavorites().filter((p) =>
+      selectedProducts.includes(p.id),
+    );
+
     setBatchLoaderState({
       visible: true,
       processedItems: 0,
       totalItems: selectedFavorites.length,
-      currentItem: ''
+      currentItem: '',
     });
-    
+
     try {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       let successCount = 0;
       let errorCount = 0;
 
       for (let i = 0; i < selectedFavorites.length; i++) {
         const product = selectedFavorites[i];
-        const productName = product.name || product.produktName || 'Unbekanntes Produkt';
-        
-        // Update current item
-        setBatchLoaderState(prev => ({
+        const productName =
+          product.name || product.produktName || 'Unbekanntes Produkt';
+        setBatchLoaderState((prev) => ({
           ...prev,
           currentItem: productName,
-          processedItems: i
+          processedItems: i,
         }));
-        
+
         try {
           const isBrand = product.type === 'markenprodukt';
-          
-          // 🎯 Track Add-to-Cart wird von FirestoreService automatisch gemacht
-          
-          // Preis-Info für Tracking
           const priceInfo = {
             price: product.preis || product.price || 0,
             savings: product.ersparnis || product.savings || 0,
-            comparedProducts: []
+            comparedProducts: [],
           };
-          
           await FirestoreService.addToShoppingCart(
-            user.uid, 
-            product.id, 
-            productName, 
+            user.uid,
+            product.id,
+            productName,
             isBrand,
-            'favorites', // Source
-            { 
+            'favorites',
+            {
               screenName: 'favorites',
               bulkAction: true,
-              batchSize: selectedFavorites.length
+              batchSize: selectedFavorites.length,
             },
-            priceInfo
+            priceInfo,
           );
           successCount++;
-        } catch (error) {
-          console.error('Error adding to cart:', product.id, error);
+        } catch (e) {
+          console.warn('FavoritesScreen: addToCart failed', product.id, e);
           errorCount++;
         }
       }
 
-      // Final update
-      setBatchLoaderState(prev => ({
+      setBatchLoaderState((prev) => ({
         ...prev,
         processedItems: selectedFavorites.length,
-        currentItem: 'Abgeschlossen!'
+        currentItem: 'Abgeschlossen!',
       }));
-      
-      // Wait a moment to show completion
-      await new Promise(resolve => setTimeout(resolve, 500));
 
+      // Brief pause so the user sees the completion frame.
+      await new Promise((r) => setTimeout(r, 500));
       setSelectedProducts([]);
 
       if (errorCount === 0) {
-        showGameToastWithAction(
-          `🛒 ${successCount} ${successCount === 1 ? 'Produkt' : 'Produkte'} hinzugefügt!`,
-          'success'
+        showCartAddedToast(
+          `${successCount} ${successCount === 1 ? 'Produkt' : 'Produkte'} hinzugefügt!`,
+          () => router.push('/shopping-list' as any),
         );
       } else {
-        showGameToast(
-          `⚠️ ${successCount} hinzugefügt, ${errorCount} Fehler`,
-          'info'
+        showInfoToast(
+          `${successCount} hinzugefügt, ${errorCount} Fehler`,
+          'info',
         );
       }
-
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (error) {
-      console.error('Error in bulk add to cart:', error);
-      showInfoToast(TOAST_MESSAGES.SHOPPING.bulkAddError, 'error');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } finally {
       setBatchLoaderState({
         visible: false,
         processedItems: 0,
         totalItems: 0,
-        currentItem: ''
+        currentItem: '',
       });
       setIsAddingToCart(false);
     }
   };
 
-  // Berechne Gesamtersparnis für aktiven Tab
-  const getCurrentFavorites = () => {
-    return activeTab === 'brand' ? brandFavorites : noNameFavorites;
-  };
-
-  const getFilteredFavorites = () => {
-    return applyFiltersAndSorting(getCurrentFavorites());
-  };
-
+  // ─── Derived counts ─────────────────────────────────────────────
   const totalSavings = getFilteredFavorites().reduce((sum, item) => {
-    const savings = typeof item.savings === 'number' ? item.savings : parseFloat(item.savings) || 0;
-    return sum + savings;
+    const s =
+      typeof item.savings === 'number'
+        ? item.savings
+        : parseFloat(item.savings) || 0;
+    return sum + s;
   }, 0);
 
-  // WICHTIG: Initial Loading zeigt NUR Skeleton, NICHT "Noch keine Favoriten"
-  if (initialLoading) {
-    return (
-      <ThemedView style={styles.container}>
-        <FavoritesSkeletonLoader />
-      </ThemedView>
-    );
-  }
+  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
 
+  // ─── Render ─────────────────────────────────────────────────────
   return (
-    <ThemedView style={styles.container}>
-      {/* Tabs with integrated Summary EXAKT wie Einkaufszettel */}
-      <View style={[styles.tabContainer, { backgroundColor: colors.cardBackground }]}>
-        <View style={styles.tabButtons}>
-          <TouchableOpacity style={styles.tab} onPress={() => handleTabChange('brand')}>
-            <Text style={[styles.tabText, { color: activeTab === 'brand' ? colors.primary : colors.icon }]}>
-              Marken ({brandFavorites.length})
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.tab} onPress={() => handleTabChange('noname')}>
-            <Text style={[styles.tabText, { color: activeTab === 'noname' ? colors.primary : colors.icon }]}>
-              NoNames ({noNameFavorites.length})
-            </Text>
-          </TouchableOpacity>
-          
-          <Animated.View
-            style={[styles.tabIndicator, {
-              backgroundColor: colors.primary,
-              transform: [{ translateX: tabIndicatorPosition }]
-            }]}
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      {/* Body lives BEHIND the chrome. The body's first child reserves
+          chromeHeight via a top spacer so SegmentedTabs land just below
+          the DetailHeader regardless of safe-area inset. */}
+      <View style={{ flex: 1, paddingTop: chromeHeight }}>
+        {/* SegmentedTabs row — counts bake into the labels so the user
+            sees how many favourites per type without a separate stat
+            line. */}
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingTop: 12,
+            paddingBottom: 6,
+          }}
+        >
+          <SegmentedTabs
+            tabs={[
+              { key: 'brand', label: `Marken (${brandFavorites.length})` },
+              { key: 'noname', label: `NoNames (${noNameFavorites.length})` },
+            ] as const}
+            value={activeTab}
+            onChange={onTabChange}
           />
         </View>
 
-        {/* Sticky Summary Bar für aktiven Tab */}
-        {getFilteredFavorites().length > 0 && (
-          <LinearGradient
-            colors={['rgba(66, 169, 104, 0.95)', 'rgba(52, 134, 82, 0.95)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.actionBarGradient}
+        {/* Bulk action bar — slides in when at least 1 favourite is
+            selected. Counts + total savings + select-all + add-to-cart
+            in one row. The whole bar lives in normal flow (so the list
+            below shifts down by ~56 px when active); we wrap in
+            Crossfade so the appearance is a smooth fade-in, not a
+            jarring layout snap. */}
+        <SelectionBar
+          visible={selectedProducts.length > 0 || totalSavings > 0}
+          selectedCount={selectedProducts.length}
+          totalCount={getFilteredFavorites().length}
+          totalSavings={totalSavings}
+          activeTab={activeTab}
+          onAddToCart={handleBulkAddToCart}
+          disabled={isAddingToCart}
+        />
+
+        {/* Body — Crossfade between skeleton list (initial load)
+            and the live PagerView. `fillParent` is REQUIRED here:
+            the PagerView has flex:1 and needs the wrapper to
+            propagate height. Without it, both layers collapse to
+            0 and the lists render empty (yes, this caught us once
+            already — see the rule in CLAUDE.md). */}
+        <Crossfade
+          ready={!initialLoading}
+          duration={320}
+          fillParent
+          style={{ flex: 1 }}
+          skeleton={<FavoritesSkeleton />}
+        >
+          <PagerView
+            ref={pagerRef}
+            style={{ flex: 1 }}
+            initialPage={0}
+            onPageSelected={onPageSelected}
           >
-            <View style={styles.actionBarContent}>
-              <View style={styles.actionBarLeft}>
-                <ThemedText style={styles.actionBarTitle}>
-                  {getFilteredFavorites().length} {activeTab === 'brand' ? 'Marken' : 'NoNames'}
-                </ThemedText>
-                <ThemedText style={styles.actionBarSubtitle}>
-                  {selectedProducts.length > 0 
-                    ? `${selectedProducts.length} ausgewählt` 
-                    : totalSavings > 0 
-                      ? `Ersparnis: €${totalSavings.toFixed(2)}`
-                      : 'Zum Auswählen antippen'}
-                </ThemedText>
-              </View>
-              
-              <View style={styles.actionBarRight}>
-                <TouchableOpacity 
-                  style={styles.selectAllButton} 
-                  onPress={handleToggleSelectAll}
-                >
-                  <IconSymbol 
-                    name={selectedProducts.length === getFilteredFavorites().length ? "checkmark.square.fill" : "square"} 
-                    size={18} 
-                    color="white" 
-                  />
-                  <ThemedText style={styles.selectAllText}>
-                    Alle
-                  </ThemedText>
-                </TouchableOpacity>
-                
-                {selectedProducts.length > 0 && (
-                  <TouchableOpacity
-                    style={styles.addToCartButton}
-                    onPress={handleBulkAddToCart}
-                    disabled={isAddingToCart}
-                  >
-                    <IconSymbol name="cart.badge.plus" size={16} color="white" />
-                    <ThemedText style={styles.addToCartText}>
-                      Hinzufügen
-                    </ThemedText>
-                  </TouchableOpacity>
-                )}
-              </View>
+            {/* Page 1: Marken */}
+            <View key="brand" style={{ flex: 1 }}>
+              <FavoritesList
+                items={applyFiltersAndSorting(brandFavorites)}
+                rawCount={brandFavorites.length}
+                emptyVariant="brand"
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                selectedProducts={selectedProducts}
+                onToggleSelect={handleToggleSelect}
+                onPressCard={handleProductPress}
+                onRemove={handleRemoveFavorite}
+                favoriteMarketId={(userProfile as any)?.favoriteMarket}
+              />
             </View>
-          </LinearGradient>
-        )}
+            {/* Page 2: NoNames */}
+            <View key="noname" style={{ flex: 1 }}>
+              <FavoritesList
+                items={applyFiltersAndSorting(noNameFavorites)}
+                rawCount={noNameFavorites.length}
+                emptyVariant="noname"
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                selectedProducts={selectedProducts}
+                onToggleSelect={handleToggleSelect}
+                onPressCard={handleProductPress}
+                onRemove={handleRemoveFavorite}
+                favoriteMarketId={(userProfile as any)?.favoriteMarket}
+              />
+            </View>
+          </PagerView>
+        </Crossfade>
       </View>
 
-      {/* PagerView für Swipeable Tabs EXAKT wie Einkaufszettel */}
-      <PagerView 
-        ref={pagerRef}
-        style={styles.pagerView}
-        initialPage={0}
-        onPageSelected={handlePageSelected}
-      >
-        {/* Page 1: Brand Products */}
-        <View key="brand" style={styles.pageContainer}>
-      <ScrollView 
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-        }
-        showsVerticalScrollIndicator={false}
-      >
-        {applyFiltersAndSorting(brandFavorites).length === 0 ? (
-          <View style={styles.emptyState}>
-            <IconSymbol name="heart" size={64} color={colors.icon} />
-            <ThemedText style={styles.emptyText}>
-              {brandFavorites.length > 0 
-                ? 'Keine Markenprodukte für diese Filter' 
-                : 'Noch keine Marken-Favoriten'}
-            </ThemedText>
-            <ThemedText style={styles.emptySubtext}>
-              {brandFavorites.length > 0 
-                ? 'Passe die Filter an oder entferne sie über den Filter-Button'
-                : 'Tippe auf das ❤️ bei Markenprodukten um sie zu deinen Favoriten hinzuzufügen'}
-            </ThemedText>
-          </View>
-        ) : (
-          <View style={styles.productContainer}>
-            {applyFiltersAndSorting(brandFavorites).map((item) => {
-              const isSelected = selectedProducts.includes(item.id);
-              const savings = typeof item.savings === 'number' ? item.savings : parseFloat(item.savings) || 0;
-              
-              return (
-                <TouchableOpacity 
-                  key={item.id} 
-                  style={[styles.productCard, { backgroundColor: colors.cardBackground }]}
-                  onPress={() => handleToggleSelect(item.id)}
-                  activeOpacity={0.7}
+      {/* Chrome — DetailHeader with persistent "Alle markieren"
+          toggle + filter icon (with badge). Both buttons sit
+          permanently in the right slot so the user can always
+          reach select-all without first having to make a single
+          selection (which the floating bulk-bar approach
+          required). */}
+      <DetailHeader
+        title="Favoriten"
+        onBack={() => router.back()}
+        right={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <SelectAllPill
+              disabled={getFilteredFavorites().length === 0}
+              allSelected={
+                selectedProducts.length > 0 &&
+                selectedProducts.length === getFilteredFavorites().length
+              }
+              someSelected={selectedProducts.length > 0}
+              onPress={handleToggleSelectAll}
+            />
+            <Pressable
+              onPress={() => setShowFilter(true)}
+              hitSlop={6}
+              style={({ pressed }) => ({
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                backgroundColor: theme.surfaceAlt,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <MaterialCommunityIcons
+                name="tune-vertical"
+                size={18}
+                color={theme.textMuted}
+              />
+              {activeFilterCount > 0 ? (
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: -2,
+                    right: -2,
+                    minWidth: 16,
+                    height: 16,
+                    borderRadius: 8,
+                    paddingHorizontal: 4,
+                    backgroundColor: brand.primary,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
                 >
-                  <View style={styles.productContent}>
-                    {/* Selection Checkbox EXAKT wie Einkaufszettel */}
-                    <TouchableOpacity 
-                      style={styles.selectionButton}
-                      onPress={() => handleToggleSelect(item.id)}
-                    >
-                      <IconSymbol 
-                        name={isSelected ? "checkmark.circle.fill" : "circle"} 
-                        size={20} 
-                        color={isSelected ? colors.primary : colors.icon} 
-                      />
-                    </TouchableOpacity>
-
-                    {/* Product Image EXAKT wie Einkaufszettel */}
-                    <ImageWithShimmer
-                      source={{ uri: item.bild || '' }}
-                      style={styles.productImage}
-                      shimmerStyle={styles.productImage}
-                    />
-
-                                            {/* Product Info EXAKT wie Einkaufszettel */}
-                        <View style={styles.productInfo}>
-                          {/* MARKE mit Logo EXAKT wie im Einkaufszettel */}
-                          {item.hersteller?.name && (
-                            <View style={styles.brandRow}>
-                              {item.hersteller?.bild && (
-                                <ImageWithShimmer
-                                  source={{ uri: item.hersteller.bild }}
-                                  style={styles.brandLogo}
-                                />
-                              )}
-                              <Text style={[styles.brandName, { color: colors.primary }]} numberOfLines={1}>
-                                {item.hersteller.name}
-                              </Text>
-                            </View>
-                          )}
-                          
-
-                          
-                          <Text style={[styles.productName, { color: colors.text }]} numberOfLines={2}>
-                            {item.name || item.produktName || 'Unbekanntes Produkt'}
-                          </Text>
-                          
-                          {/* Discounter Info NUR für NoName-Produkte */}
-                          {item.type === 'noname' && (
-                            <View style={styles.marketInfo}>
-                              {item.discounter?.bild ? (
-                                <ImageWithShimmer 
-                                  source={{ uri: item.discounter.bild }} 
-                                  style={styles.marketLogo} 
-                                />
-                              ) : (
-                                <View style={[styles.marketLogo, styles.marketLogoFallback, { backgroundColor: colors.border }]}>
-                                  <IconSymbol name="storefront" size={8} color={colors.icon} />
-                                </View>
-                              )}
-                              {userProfile?.favoriteMarket === item.discounter?.id && (
-                                <IconSymbol name="heart.fill" size={10} color={colors.primary} style={styles.favoriteMarketIcon} />
-                              )}
-                              <Text style={[styles.marketName, { color: colors.icon }]} numberOfLines={1}>
-                                {item.discounter?.name || 'Unbekannt'}
-                                {item.discounter?.land && ` (${item.discounter.land})`}
-                              </Text>
-                            </View>
-                          )}
-
-                      {/* Preis mit Ersparnis EXAKT wie Einkaufszettel */}
-                      <Text style={[styles.productPrice, { color: colors.primary }]}>
-                        €{item.preis?.toFixed(2) || '0.00'}
-                        {savings > 0 && (
-                          <Text style={[styles.savingsInline, { color: colors.primary }]}>
-                            {' '}(- €{savings.toFixed(2)})
-                          </Text>
-                        )}
-                      </Text>
-                    </View>
-
-                    {/* Action Button - NUR LÖSCHEN */}
-                    <View style={styles.productActions}>
-                      <TouchableOpacity 
-                        style={[styles.actionButton, { backgroundColor: colors.error }]}
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          handleRemoveFavorite(item);
-                        }}
-                      >
-                        <IconSymbol name="trash" size={20} color="white" />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        )}
-      </ScrollView>
-        </View>
-
-        {/* Page 2: NoName Products */}
-        <View key="noname" style={styles.pageContainer}>
-          <ScrollView 
-            style={styles.scrollView}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-            }
-            showsVerticalScrollIndicator={false}
-          >
-            {applyFiltersAndSorting(noNameFavorites).length === 0 ? (
-              <View style={styles.emptyState}>
-                <IconSymbol name="heart" size={64} color={colors.icon} />
-                <ThemedText style={styles.emptyText}>
-                  {noNameFavorites.length > 0 
-                    ? 'Keine NoName-Produkte für diese Filter' 
-                    : 'Noch keine NoName-Favoriten'}
-                </ThemedText>
-                <ThemedText style={styles.emptySubtext}>
-                  {noNameFavorites.length > 0 
-                    ? 'Passe die Filter an oder entferne sie über den Filter-Button'
-                    : 'Tippe auf das ❤️ bei NoName-Produkten um sie zu deinen Favoriten hinzuzufügen'}
-                </ThemedText>
-              </View>
-            ) : (
-              <View style={styles.productContainer}>
-                {applyFiltersAndSorting(noNameFavorites).map((item) => {
-                  const isSelected = selectedProducts.includes(item.id);
-                  const savings = typeof item.savings === 'number' ? item.savings : parseFloat(item.savings) || 0;
-                  
-                  return (
-                    <TouchableOpacity 
-                      key={item.id} 
-                      style={[styles.productCard, { backgroundColor: colors.cardBackground }]}
-                      onPress={() => handleToggleSelect(item.id)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.productContent}>
-                        {/* Selection Checkbox EXAKT wie Einkaufszettel */}
-                        <TouchableOpacity 
-                          style={styles.selectionButton}
-                          onPress={() => handleToggleSelect(item.id)}
-                        >
-                          <IconSymbol 
-                            name={isSelected ? "checkmark.circle.fill" : "circle"} 
-                            size={20} 
-                            color={isSelected ? colors.primary : colors.icon} 
-                          />
-                        </TouchableOpacity>
-
-                        {/* Product Image EXAKT wie Einkaufszettel */}
-                        <ImageWithShimmer
-                          source={{ uri: item.bild || '' }}
-                          style={styles.productImage}
-                          shimmerStyle={styles.productImage}
-                        />
-
-                        {/* Product Info für NoName-Produkte */}
-                        <View style={styles.productInfo}>
-                          {/* HANDELSMARKE über Produktname (OHNE Bild wie im Original) */}
-                          {item.handelsmarke?.bezeichnung && (
-                            <Text style={[styles.brandName, { color: colors.primary }]} numberOfLines={1}>
-                              {item.handelsmarke.bezeichnung}
-                            </Text>
-                          )}
-                          
-                          <Text style={[styles.productName, { color: colors.text }]} numberOfLines={2}>
-                            {item.name || item.produktName || 'Unbekanntes Produkt'}
-                          </Text>
-                          
-                          {/* Discounter Info */}
-                          <View style={styles.marketInfo}>
-                            {item.discounter?.bild ? (
-                              <ImageWithShimmer 
-                                source={{ uri: item.discounter.bild }} 
-                                style={styles.marketLogo} 
-                              />
-                            ) : (
-                              <View style={[styles.marketLogo, styles.marketLogoFallback, { backgroundColor: colors.border }]}>
-                                <IconSymbol name="storefront" size={8} color={colors.icon} />
-                              </View>
-                            )}
-                            {userProfile?.favoriteMarket === item.discounter?.id && (
-                              <IconSymbol name="heart.fill" size={10} color={colors.primary} style={styles.favoriteMarketIcon} />
-                            )}
-                            <Text style={[styles.marketName, { color: colors.icon }]} numberOfLines={1}>
-                              {item.discounter?.name || 'Unbekannt'}
-                              {item.discounter?.land && ` (${item.discounter.land})`}
-                            </Text>
-                          </View>
-
-                          {/* Preis mit Ersparnis EXAKT wie Einkaufszettel */}
-                          <Text style={[styles.productPrice, { color: colors.primary }]}>
-                            €{item.preis?.toFixed(2) || '0.00'}
-                            {savings > 0 && (
-                              <Text style={[styles.savingsInline, { color: colors.primary }]}>
-                                {' '}(- €{savings.toFixed(2)})
-                              </Text>
-                            )}
-                          </Text>
-                        </View>
-
-                        {/* Action Button - NUR LÖSCHEN */}
-                        <View style={styles.productActions}>
-                          <TouchableOpacity 
-                            style={[styles.actionButton, { backgroundColor: colors.error }]}
-                            onPress={(e) => {
-                              e.stopPropagation();
-                              handleRemoveFavorite(item);
-                            }}
-                          >
-                            <IconSymbol name="trash" size={20} color="white" />
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-          </ScrollView>
-        </View>
-      </PagerView>
-
-      {/* Floating Filter Button EXAKT wie Einkaufszettel */}
-      {(brandFavorites.length > 0 || noNameFavorites.length > 0) && (
-        <TouchableOpacity 
-          style={[styles.filterFab, { backgroundColor: colors.primary }]}
-          onPress={() => setShowFilterModal(true)}
-        >
-          <IconSymbol name="line.horizontal.3.decrease" size={24} color="white" />
-          {getActiveFilterCount() > 0 && (
-            <View style={[styles.filterBadge, { backgroundColor: colors.error }]}>
-              <Text style={styles.filterBadgeText}>
-                {getActiveFilterCount()}
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      )}
-
-      {/* Filter Modal EXAKT wie Einkaufszettel */}
-      <FixedAndroidModal
-        visible={showFilterModal}
-        onRequestClose={() => setShowFilterModal(false)}
-        isBottomSheet={true}
-      >
-        <View style={[styles.filterModalContainer, { backgroundColor: colors.background }]}>
-          {/* Header */}
-          <View style={styles.filterModalHeader}>
-            
-            <View style={styles.headerRow}>
-              <TouchableOpacity 
-                style={styles.closeButtonLeft}
-                onPress={() => setShowFilterModal(false)}
-              >
-                <IconSymbol name="xmark" size={24} color={colors.icon} />
-              </TouchableOpacity>
-              <View style={styles.titleSection}>
-                <Text style={[styles.filterModalTitle, { color: colors.text }]}>
-                  Filter & Sortierung
-                </Text>
-              </View>
-              <TouchableOpacity 
-                style={styles.clearAllButton}
-                onPress={clearAllFilters}
-              >
-                <Text style={[styles.clearAllText, { color: colors.primary }]}>
-                  Zurücksetzen
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-          
-          <ScrollView style={styles.filterOptions}>
-            {/* Sortierung */}
-            <View style={styles.filterSection}>
-              <Text style={[styles.filterSectionTitle, { color: colors.text }]}>
-                Sortierung
-              </Text>
-              <View style={styles.sortingOptions}>
-                {[
-                  { key: 'name', label: 'Name A-Z', icon: 'textformat.abc' },
-                  { key: 'price', label: 'Preis aufsteigend', icon: 'eurosign' },
-                  { key: 'newest', label: 'Zuletzt hinzugefügt', icon: 'clock' }
-                ].map(option => (
-                  <TouchableOpacity
-                    key={option.key}
-                    style={[
-                      styles.sortingOption,
-                      { 
-                        backgroundColor: filters.sortBy === option.key ? colors.primary : 'transparent',
-                        borderColor: filters.sortBy === option.key ? colors.primary : colors.border
-                      }
-                    ]}
-                    onPress={() => setSorting(option.key as any)}
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.extraBold,
+                      fontSize: 10,
+                      color: '#fff',
+                      lineHeight: 14,
+                    }}
                   >
-                    <IconSymbol 
-                      name={option.icon as any} 
-                      size={16} 
-                      color={filters.sortBy === option.key ? 'white' : colors.icon} 
-                    />
-                    <Text style={[
-                      styles.sortingOptionText,
-                      { color: filters.sortBy === option.key ? 'white' : colors.text }
-                    ]}>
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {/* Märkte */}
-            {availableMarkets.length > 0 && (
-              <View style={styles.filterSection}>
-                <Text style={[styles.filterSectionTitle, { color: colors.text }]}>
-                  Märkte ({availableMarkets.length})
-                </Text>
-                <View style={styles.chipsContainer}>
-                  {availableMarkets.map(market => (
-                    <TouchableOpacity
-                      key={market.id}
-                      style={[
-                        styles.filterChip,
-                        { 
-                          backgroundColor: filters.markets.includes(market.id) ? colors.primary : 'transparent',
-                          borderColor: filters.markets.includes(market.id) ? colors.primary : colors.border
-                        }
-                      ]}
-                      onPress={() => toggleMarketFilter(market.id)}
-                    >
-                      <IconSymbol 
-                        name="storefront" 
-                        size={16} 
-                        color={filters.markets.includes(market.id) ? 'white' : colors.icon} 
-                      />
-                      <Text style={[
-                        styles.chipText,
-                        { color: filters.markets.includes(market.id) ? 'white' : colors.text }
-                      ]}>
-                        {market.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                    {activeFilterCount}
+                  </Text>
                 </View>
-              </View>
-            )}
-          </ScrollView>
-        </View>
-      </FixedAndroidModal>
+              ) : null}
+            </Pressable>
+          </View>
+        }
+      />
 
-      {/* Batch Action Loader */}
+      {/* Filter / Sortierung — FilterSheet replaces FixedAndroidModal */}
+      <FilterSheet
+        visible={showFilter}
+        title="Filter & Sortierung"
+        onClose={() => setShowFilter(false)}
+      >
+        <FilterSheetBody
+          sortBy={filters.sortBy}
+          onChangeSort={(s) => setFilters((prev) => ({ ...prev, sortBy: s }))}
+          markets={activeTab === 'brand' ? brandMarkets : noNameMarkets}
+          selectedMarkets={filters.markets}
+          onToggleMarket={toggleMarketFilter}
+          onClearAll={clearAllFilters}
+          activeCount={activeFilterCount}
+        />
+      </FilterSheet>
+
+      {/* Batch action loader for bulk add-to-cart */}
       <BatchActionLoader
         visible={batchLoaderState.visible}
         title="Zum Einkaufszettel hinzufügen"
         subtitle="Deine Lieblingsprodukte werden hinzugefügt"
         icon="cart.badge.plus"
         gradient={['#4CAF50', '#2E7D32']}
-        progress={batchLoaderState.totalItems > 0 ? batchLoaderState.processedItems / batchLoaderState.totalItems : 0}
+        progress={
+          batchLoaderState.totalItems > 0
+            ? batchLoaderState.processedItems / batchLoaderState.totalItems
+            : 0
+        }
         currentItem={batchLoaderState.currentItem}
         totalItems={batchLoaderState.totalItems}
         processedItems={batchLoaderState.processedItems}
       />
-
-      {/* Lokaler Toast entfernt – zentrale Toast-Library übernimmt */}
-    </ThemedView>
+    </View>
   );
 }
 
-// Styles EXAKT übernommen aus shopping-list.tsx
-const styles = StyleSheet.create({
-  container: { 
-    flex: 1 
-  },
-  scrollView: { 
-    flex: 1 
-  },
+// ────────────────────────────────────────────────────────────────────
+// SelectAllPill — persistent select-all toggle in the header.
+// Three visual states: all selected (filled checkbox + brand bg),
+// some selected (filled-with-minus + brand-tint bg), none selected
+// (outline checkbox + neutral bg). When the active list is empty
+// the pill is rendered disabled (greyed-out, no press handler).
+// ────────────────────────────────────────────────────────────────────
 
-  // Floating Filter Button EXAKT wie Einkaufszettel
-  filterFab: {
-    position: 'absolute',
-    bottom: 120,
-    right: 20,
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-  },
-  filterBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-  },
-  filterBadgeText: {
-    fontSize: 10,
-    fontFamily: 'Nunito_600SemiBold',
-    color: 'white',
-    lineHeight: 12,
-  },
-  
-  // Filter Modal EXAKT wie Einkaufszettel
-  filterModalContainer: {
-    flex: 1,
-    paddingTop: 20,
-  },
-  filterModalHeader: {
-    paddingBottom: 20,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-  },
-  closeButtonLeft: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-  },
-  titleSection: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  filterModalTitle: {
-    fontSize: 18,
-    fontFamily: 'Nunito_700Bold',
-    textAlign: 'center',
-  },
-  clearAllButton: {
-    alignItems: 'flex-end',
-    width: 80,
-  },
-  clearAllText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  filterOptions: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  filterSection: {
-    marginBottom: 24,
-  },
-  filterSectionTitle: {
-    fontSize: 18,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 12,
-  },
-  sortingOptions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  sortingOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    gap: 6,
-  },
-  sortingOptionText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_500Medium',
-  },
-  chipsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    gap: 6,
-  },
-  chipText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_500Medium',
-  },
+function SelectAllPill({
+  allSelected,
+  someSelected,
+  disabled,
+  onPress,
+}: {
+  allSelected: boolean;
+  someSelected: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const { theme, brand } = useTokens();
 
-  // Action Bar EXAKT wie Einkaufszettel Summary
-  actionBarContainer: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  actionBarGradient: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  actionBarContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  actionBarLeft: {
-    flex: 1,
-  },
-  actionBarTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    color: 'white',
-  },
-  actionBarSubtitle: {
-    fontSize: 13,
-    fontFamily: 'Nunito_400Regular',
-    color: 'rgba(255,255,255,0.8)',
-  },
-  actionBarRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  selectAllButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  selectAllText: {
-    color: 'white',
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  addToCartButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
-  },
-  addToCartText: {
-    color: 'white',
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-  },
+  const filled = allSelected;
+  const partial = !allSelected && someSelected;
+  const bg = filled
+    ? brand.primary
+    : partial
+      ? brand.primary + '22'
+      : theme.surfaceAlt;
+  const fg = filled ? '#fff' : partial ? brand.primary : theme.textMuted;
+  const iconName = filled
+    ? 'checkbox-marked'
+    : partial
+      ? 'minus-box'
+      : 'checkbox-blank-outline';
 
-  // Header Badge
-  headerButton: {
-    marginRight: 16,
-  },
-  headerBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
-  },
-  headerBadgeText: {
-    color: 'white',
-    fontSize: 12,
-    fontFamily: 'Nunito_600SemiBold',
-  },
+  return (
+    <Pressable
+      onPress={disabled ? undefined : onPress}
+      hitSlop={6}
+      style={({ pressed }) => ({
+        height: 32,
+        paddingHorizontal: 10,
+        borderRadius: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: bg,
+        opacity: disabled ? 0.4 : pressed ? 0.7 : 1,
+      })}
+    >
+      <MaterialCommunityIcons name={iconName} size={16} color={fg} />
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.bold,
+          fontSize: 12,
+          color: fg,
+          letterSpacing: 0.2,
+        }}
+      >
+        Alle
+      </Text>
+    </Pressable>
+  );
+}
 
-  // Product List EXAKT wie Einkaufszettel
-  productContainer: { 
-    padding: 16 
-  },
-  productCard: {
-    marginBottom: 12,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  productContent: {
-    flexDirection: 'row',
-    padding: 12,
-    alignItems: 'center',
-  },
-  selectionButton: {
-    marginRight: 12,
-    padding: 4,
-  },
-  productImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-  },
-  productInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 2,
-    marginTop: 2,
-    gap: 6,
-  },
-  brandLogo: {
-    width: 16,
-    height: 16,
-    borderRadius: 2,
-  },
-  brandName: {
-    fontSize: 13,
-    fontFamily: 'Nunito_500Medium',
-    flex: 1,
-  },
-  productName: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 4,
-  },
-  marketInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  marketLogo: {
-    width: 16,
-    height: 16,
-    borderRadius: 2,
-    marginRight: 6,
-  },
-  marketLogoFallback: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  favoriteMarketIcon: {
-    marginRight: 4,
-  },
-  marketName: {
-    fontSize: 11,
-    fontFamily: 'Nunito_400Regular',
-    flex: 1,
-  },
-  productPrice: {
-    fontSize: 16,
-    fontFamily: 'Nunito_700Bold',
-  },
-  savingsInline: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-  },
-  productActions: {
-    flexDirection: 'column',
-    gap: 6,
-    marginLeft: 8,
-  },
-  actionButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+// ────────────────────────────────────────────────────────────────────
+// SelectionBar — fades in when selection is active OR when there's
+// total savings to show. Uses Reanimated 3 (UI-thread) for the
+// fade and the optional max-height collapse so the list below
+// reflows without jank. The "Alle"-Toggle that used to live here
+// has moved into the DetailHeader right slot (always visible);
+// this bar now only carries the count + add-to-cart action.
+// ────────────────────────────────────────────────────────────────────
 
-  // Empty State EXAKT wie Einkaufszettel
-  emptyState: { 
-    flex: 1, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    paddingVertical: 80,
-    paddingHorizontal: 32,
-  },
-  emptyText: { 
-    fontSize: 16, 
-    fontFamily: 'Nunito_600SemiBold', 
-    marginTop: 16, 
-    textAlign: 'center' 
-  },
-  emptySubtext: { 
-    fontSize: 14, 
-    fontFamily: 'Nunito_400Regular', 
-    marginTop: 8, 
-    textAlign: 'center', 
-    paddingHorizontal: 32,
-  },
+function SelectionBar({
+  visible,
+  selectedCount,
+  totalCount,
+  totalSavings,
+  activeTab,
+  onAddToCart,
+  disabled,
+}: {
+  visible: boolean;
+  selectedCount: number;
+  totalCount: number;
+  totalSavings: number;
+  activeTab: Tab;
+  onAddToCart: () => void;
+  disabled: boolean;
+}) {
+  const { brand: brandTokens } = useTokens();
+  const t = useSharedValue(visible ? 1 : 0);
 
-  // Tab System EXAKT wie Einkaufszettel
-  tabContainer: {
-    backgroundColor: 'transparent',
-    paddingBottom: 0,
-  },
-  tabButtons: {
-    flexDirection: 'row',
-    position: 'relative',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tabText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    textAlign: 'center',
-  },
-  tabIndicator: {
-    position: 'absolute',
-    bottom: 0,
-    height: 3,
-    width: width / 2,
-    borderRadius: 1.5,
-  },
+  useEffect(() => {
+    t.value = withTiming(visible ? 1 : 0, {
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [visible, t]);
 
-  // PagerView EXAKT wie Einkaufszettel
-  pagerView: {
-    flex: 1,
-  },
-  pageContainer: {
-    flex: 1,
-  },
-});
+  const animStyle = useAnimatedStyle(() => ({
+    opacity: t.value,
+    maxHeight: 64 * t.value,
+    transform: [{ translateY: (1 - t.value) * -8 }],
+  }));
+
+  if (totalCount === 0) return null;
+
+  const subtitle =
+    selectedCount > 0
+      ? `${selectedCount} ausgewählt`
+      : totalSavings > 0
+        ? `Ersparnis: ${totalSavings.toFixed(2).replace('.', ',')} €`
+        : 'Tippe Karten zum Auswählen';
+
+  return (
+    <Animated.View
+      style={[{ marginHorizontal: 20, marginTop: 8, marginBottom: 4, overflow: 'hidden' }, animStyle]}
+    >
+      <LinearGradient
+        colors={[brandTokens.primaryDark, brandTokens.primary]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={{
+          borderRadius: 14,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 13,
+              color: '#fff',
+            }}
+          >
+            {totalCount} {activeTab === 'brand' ? 'Marken' : 'NoNames'}
+          </Text>
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 11,
+              color: 'rgba(255,255,255,0.85)',
+              marginTop: 1,
+            }}
+          >
+            {subtitle}
+          </Text>
+        </View>
+
+        {selectedCount > 0 ? (
+          <Pressable
+            onPress={onAddToCart}
+            disabled={disabled}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 4,
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              borderRadius: 99,
+              backgroundColor: '#fff',
+              opacity: pressed || disabled ? 0.75 : 1,
+            })}
+          >
+            <MaterialCommunityIcons
+              name="cart-plus"
+              size={14}
+              color={brandTokens.primaryDark}
+            />
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 11,
+                color: brandTokens.primaryDark,
+                letterSpacing: 0.2,
+              }}
+            >
+              Liste
+            </Text>
+          </Pressable>
+        ) : null}
+      </LinearGradient>
+    </Animated.View>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// FavoritesList — one tab's body (scrollable list + empty state).
+// Shared between Marken and NoNames; the only difference is the
+// empty-state copy and which fields the cards prefer (Hersteller for
+// Marken, Handelsmarke for NoNames).
+// ────────────────────────────────────────────────────────────────────
+
+function FavoritesList({
+  items,
+  rawCount,
+  emptyVariant,
+  refreshing,
+  onRefresh,
+  selectedProducts,
+  onToggleSelect,
+  onPressCard,
+  onRemove,
+  favoriteMarketId,
+}: {
+  items: any[];
+  rawCount: number;
+  emptyVariant: Tab;
+  refreshing: boolean;
+  onRefresh: () => void;
+  selectedProducts: string[];
+  onToggleSelect: (id: string) => void;
+  onPressCard: (product: any) => void;
+  onRemove: (product: any) => void;
+  favoriteMarketId?: string;
+}) {
+  const { theme } = useTokens();
+
+  return (
+    <ScrollView
+      style={{ flex: 1 }}
+      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 6, paddingBottom: 100 }}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
+      }
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
+      {items.length === 0 ? (
+        <FavoritesEmpty rawCount={rawCount} variant={emptyVariant} />
+      ) : (
+        <View style={{ gap: 10 }}>
+          {items.map((item) => (
+            <FavoriteCard
+              key={item.id}
+              item={item}
+              selected={selectedProducts.includes(item.id)}
+              onToggleSelect={onToggleSelect}
+              onPressCard={onPressCard}
+              onRemove={onRemove}
+              isFavoriteMarket={favoriteMarketId === item.discounter?.id}
+            />
+          ))}
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// FavoriteCard — list item.
+// • 64×64 image left
+// • Eyebrow (Hersteller for Marken / Handelsmarke for NoNames) +
+//   product name + market info row (logo + name)
+// • Price right, with savings underneath if present
+// • Checkbox left for bulk selection (visible only on tap, or
+//   always — currently always so the bulk affordance is discoverable)
+// • Trash button right for remove
+// • Tap on card → navigate to product detail
+// ────────────────────────────────────────────────────────────────────
+
+const PRODUCT_IMAGE_SIZE = 64;
+
+function FavoriteCard({
+  item,
+  selected,
+  onToggleSelect,
+  onPressCard,
+  onRemove,
+  isFavoriteMarket,
+}: {
+  item: any;
+  selected: boolean;
+  onToggleSelect: (id: string) => void;
+  onPressCard: (product: any) => void;
+  onRemove: (product: any) => void;
+  isFavoriteMarket: boolean;
+}) {
+  const { theme, shadows, brand } = useTokens();
+
+  const isMarken = item.type === 'markenprodukt';
+  const eyebrowLogo = isMarken ? item.hersteller?.bild : null;
+  const eyebrowName = isMarken
+    ? item.hersteller?.name
+    : item.handelsmarke?.bezeichnung ?? item.handelsmarke?.name;
+
+  const savings =
+    typeof item.savings === 'number'
+      ? item.savings
+      : parseFloat(item.savings) || 0;
+
+  // Human-readable "added X" caption — null when the data layer
+  // didn't expose `addedAt` (older favourites pre-redesign), so
+  // the row simply omits the right-aligned timestamp.
+  const addedAtLabel = formatAddedAt(item.addedAt);
+
+  return (
+    <Pressable
+      onPress={() => onPressCard(item)}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        padding: 12,
+        borderRadius: 14,
+        backgroundColor: selected ? brand.primary + '12' : theme.surface,
+        borderWidth: selected ? 1.5 : 1,
+        borderColor: selected ? brand.primary : theme.border,
+        opacity: pressed ? 0.96 : 1,
+        ...shadows.sm,
+      })}
+    >
+      {/* Selection checkbox — explicit affordance, lives outside the
+          press-to-navigate area via a separate Pressable that
+          stops propagation. */}
+      <Pressable
+        onPress={() => onToggleSelect(item.id)}
+        hitSlop={8}
+        style={{
+          width: 24,
+          height: 24,
+          borderRadius: 12,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <MaterialCommunityIcons
+          name={selected ? 'checkbox-marked-circle' : 'checkbox-blank-circle-outline'}
+          size={22}
+          color={selected ? brand.primary : theme.borderStrong}
+        />
+      </Pressable>
+
+      {/* Product image. ImageWithShimmer is the legacy variant; here
+          we use a plain Image — the surrounding Crossfade and the
+          Skeleton list cover the loading state. */}
+      <View
+        style={{
+          width: PRODUCT_IMAGE_SIZE,
+          height: PRODUCT_IMAGE_SIZE,
+          borderRadius: 10,
+          overflow: 'hidden',
+          backgroundColor: '#ffffff',
+        }}
+      >
+        {getProductImage(item) ? (
+          <Image
+            source={{ uri: getProductImage(item) ?? undefined }}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="contain"
+          />
+        ) : (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <MaterialCommunityIcons name="package-variant" size={28} color={theme.textMuted} />
+          </View>
+        )}
+      </View>
+
+      <View style={{ flex: 1, minWidth: 0 }}>
+        {/* Eyebrow — small logo + brand/handelsmarke name. */}
+        {eyebrowName ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+            {eyebrowLogo ? (
+              <View
+                style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: 3,
+                  backgroundColor: '#fff',
+                  overflow: 'hidden',
+                  borderWidth: 0.5,
+                  borderColor: theme.border,
+                }}
+              >
+                <Image
+                  source={{ uri: eyebrowLogo }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="contain"
+                />
+              </View>
+            ) : null}
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 10,
+                color: theme.primary,
+                letterSpacing: 0.4,
+                textTransform: 'uppercase',
+                flex: 1,
+              }}
+            >
+              {eyebrowName}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* Product name */}
+        <Text
+          numberOfLines={2}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.semibold,
+            fontSize: 14,
+            color: theme.text,
+            lineHeight: 17,
+          }}
+        >
+          {item.name || item.produktName || 'Unbekanntes Produkt'}
+        </Text>
+
+        {/* Market info — for NoNames AND Marken (whichever has discounter). */}
+        {item.discounter?.name ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 5,
+              marginTop: 4,
+            }}
+          >
+            {item.discounter?.bild ? (
+              <View
+                style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: 3,
+                  backgroundColor: '#fff',
+                  overflow: 'hidden',
+                  borderWidth: 0.5,
+                  borderColor: theme.border,
+                }}
+              >
+                <Image
+                  source={{ uri: item.discounter.bild }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="contain"
+                />
+              </View>
+            ) : null}
+            {isFavoriteMarket ? (
+              <MaterialCommunityIcons name="heart" size={10} color={brand.primary} />
+            ) : null}
+            <Text
+              numberOfLines={1}
+              style={{
+                flex: 1,
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 11,
+                color: theme.textMuted,
+              }}
+            >
+              {item.discounter.name}
+              {item.discounter.land ? ` (${item.discounter.land})` : ''}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* Price + inline savings (left) — Added-at caption (right).
+            One row so card height stays constant. The addedAt
+            timestamp uses a relative phrasing for recent items
+            ("vor X Min." / "heute, 14:30") and a compact absolute
+            date for older ones — see `formatAddedAt`. Skipped if
+            the data layer didn't surface an `addedAt` field. */}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'baseline',
+            marginTop: 4,
+            gap: 6,
+          }}
+        >
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 15,
+              color: theme.text,
+              letterSpacing: -0.2,
+            }}
+          >
+            {(item.preis ?? 0).toFixed(2).replace('.', ',')} €
+          </Text>
+          {savings > 0 ? (
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 11,
+                color: brand.primary,
+              }}
+            >
+              −{savings.toFixed(2).replace('.', ',')} €
+            </Text>
+          ) : null}
+          {addedAtLabel ? (
+            <Text
+              numberOfLines={1}
+              style={{
+                marginLeft: 'auto',
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 10,
+                color: theme.textMuted,
+              }}
+            >
+              {addedAtLabel}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+
+      {/* Remove button — stop propagation so it doesn't navigate. */}
+      <Pressable
+        onPress={(e) => {
+          e.stopPropagation();
+          onRemove(item);
+        }}
+        hitSlop={8}
+        style={({ pressed }) => ({
+          width: 36,
+          height: 36,
+          borderRadius: radii.full,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: theme.surfaceAlt,
+          opacity: pressed ? 0.6 : 1,
+        })}
+      >
+        <MaterialCommunityIcons name="trash-can-outline" size={18} color={theme.textMuted} />
+      </Pressable>
+    </Pressable>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// FavoritesEmpty — empty-state copy. Two variants: "no favourites
+// at all" and "filters too restrictive" — the latter is rendered
+// when the user has favourites but the active filters hide them.
+// ────────────────────────────────────────────────────────────────────
+
+function FavoritesEmpty({
+  rawCount,
+  variant,
+}: {
+  rawCount: number;
+  variant: Tab;
+}) {
+  const { theme } = useTokens();
+  const filteredEmpty = rawCount > 0;
+  const label = variant === 'brand' ? 'Marken-Favoriten' : 'NoName-Favoriten';
+  return (
+    <View style={{ alignItems: 'center', paddingVertical: 80, paddingHorizontal: 32, gap: 12 }}>
+      <View
+        style={{
+          width: 64,
+          height: 64,
+          borderRadius: 32,
+          backgroundColor: theme.surfaceAlt,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <MaterialCommunityIcons name="heart-outline" size={30} color={theme.textMuted} />
+      </View>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 16,
+          color: theme.text,
+          textAlign: 'center',
+        }}
+      >
+        {filteredEmpty ? `Keine ${label} für diese Filter` : `Noch keine ${label}`}
+      </Text>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 13,
+          color: theme.textMuted,
+          textAlign: 'center',
+          lineHeight: 18,
+        }}
+      >
+        {filteredEmpty
+          ? 'Passe die Filter an oder setze sie zurück, um wieder Favoriten zu sehen.'
+          : 'Tippe auf das Herz bei einem Produkt, um es zu deinen Favoriten hinzuzufügen.'}
+      </Text>
+    </View>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// FavoritesSkeleton — shape-matching skeleton list during the
+// initial fetch. Renders 6 placeholder cards with the same
+// dimensions as live FavoriteCards so the swap-in is invisible.
+// ────────────────────────────────────────────────────────────────────
+
+function FavoritesSkeleton() {
+  const { theme, shadows } = useTokens();
+  return (
+    <View style={{ paddingHorizontal: 20, paddingTop: 6, gap: 10 }}>
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <View
+          key={i}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+            padding: 12,
+            borderRadius: 14,
+            backgroundColor: theme.surface,
+            borderWidth: 1,
+            borderColor: theme.border,
+            ...shadows.sm,
+          }}
+        >
+          <Shimmer width={22} height={22} radius={11} />
+          <Shimmer width={PRODUCT_IMAGE_SIZE} height={PRODUCT_IMAGE_SIZE} radius={10} />
+          <View style={{ flex: 1, gap: 6 }}>
+            <Shimmer width={70} height={9} radius={3} />
+            <Shimmer width="90%" height={13} radius={4} />
+            <Shimmer width="55%" height={11} radius={3} />
+            <Shimmer width={50} height={13} radius={4} />
+          </View>
+          <Shimmer width={36} height={36} radius={18} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// FilterSheetBody — content rendered inside FilterSheet.
+// Sortierung (radio-list via OptionList) + Märkte (chip grid).
+// ────────────────────────────────────────────────────────────────────
+
+function FilterSheetBody({
+  sortBy,
+  onChangeSort,
+  markets,
+  selectedMarkets,
+  onToggleMarket,
+  onClearAll,
+  activeCount,
+}: {
+  sortBy: SortBy;
+  onChangeSort: (s: SortBy) => void;
+  markets: { id: string; name: string }[];
+  selectedMarkets: string[];
+  onToggleMarket: (id: string) => void;
+  onClearAll: () => void;
+  activeCount: number;
+}) {
+  const { theme, brand } = useTokens();
+
+  return (
+    <View style={{ paddingBottom: 8 }}>
+      {/* Sortierung */}
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 13,
+          color: theme.textMuted,
+          letterSpacing: 0.4,
+          textTransform: 'uppercase',
+          marginBottom: 6,
+        }}
+      >
+        Sortierung
+      </Text>
+      <OptionList
+        value={sortBy}
+        options={SORT_OPTIONS}
+        onChange={onChangeSort}
+      />
+
+      {/* Märkte */}
+      {markets.length > 0 ? (
+        <View style={{ marginTop: 18 }}>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 13,
+              color: theme.textMuted,
+              letterSpacing: 0.4,
+              textTransform: 'uppercase',
+              marginBottom: 10,
+            }}
+          >
+            Märkte ({markets.length})
+          </Text>
+          <View
+            style={{
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              gap: 8,
+            }}
+          >
+            {markets.map((m) => {
+              const on = selectedMarkets.includes(m.id);
+              return (
+                <Pressable
+                  key={m.id}
+                  onPress={() => onToggleMarket(m.id)}
+                  style={({ pressed }) => ({
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    paddingVertical: 8,
+                    paddingHorizontal: 12,
+                    borderRadius: 99,
+                    backgroundColor: on ? brand.primary : theme.surfaceAlt,
+                    borderWidth: 1,
+                    borderColor: on ? brand.primary : theme.border,
+                    opacity: pressed ? 0.7 : 1,
+                  })}
+                >
+                  <MaterialCommunityIcons
+                    name="storefront-outline"
+                    size={14}
+                    color={on ? '#fff' : theme.textMuted}
+                  />
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.bold,
+                      fontSize: 12,
+                      color: on ? '#fff' : theme.text,
+                    }}
+                  >
+                    {m.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
+
+      {/* Reset all */}
+      {activeCount > 0 ? (
+        <Pressable
+          onPress={onClearAll}
+          style={({ pressed }) => ({
+            marginTop: 22,
+            alignSelf: 'center',
+            paddingHorizontal: 18,
+            paddingVertical: 10,
+            borderRadius: 99,
+            backgroundColor: theme.surfaceAlt,
+            opacity: pressed ? 0.7 : 1,
+          })}
+        >
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.bold,
+              fontSize: 13,
+              color: theme.textMuted,
+            }}
+          >
+            Alle Filter zurücksetzen
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}

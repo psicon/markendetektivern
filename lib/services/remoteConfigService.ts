@@ -46,6 +46,15 @@ class RemoteConfigService {
       // Default-Werte setzen
       this.remoteConfig.defaultConfig = {
         showonboardingpaywall: false, // Default: Paywall nicht anzeigen
+        // Coachmark-Tour: kuratiertes Demo-Produkt für die Home-
+        // Spotlight-Phase. Leer-String = automatischer Fallback auf
+        // den aktuellen Top-Enttarnt-Kandidaten (siehe
+        // HomeWalkthrough.fetchDemoProduct). Setze diesen Wert in
+        // der Firebase-Konsole auf eine konkrete Produkt-objectID
+        // wenn du einen WOW-Vergleich (hohe Stufe + großer
+        // Preisunterschied) als Demo zeigen willst — wirkt
+        // überzeugender als ein zufälliger Treffer.
+        coachmark_home_demo_product_id: '',
       };
 
       // Fetch-Intervall (Development: 0, Production: 12h)

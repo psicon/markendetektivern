@@ -2,34 +2,45 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Image,
+  InteractionManager,
   Pressable,
   ScrollView,
   Text,
   View,
 } from 'react-native';
 import Animated, {
+  Easing,
   Extrapolation,
   interpolate,
   useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
+  withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PagerView from 'react-native-pager-view';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
+import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
+import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
+import { getProductImage } from '@/lib/utils/productImage';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
+import {
+  EnttarnteAlternativesList,
+  type EnttarnteAlternative,
+} from '@/components/design/EnttarnteAlternativesList';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
-import { ProductDetailSkeleton } from '@/components/design/Skeletons';
+import { StufenChips } from '@/components/design/StufenChips';
+import { Crossfade, Shimmer } from '@/components/design/Skeletons';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useFavorites } from '@/lib/hooks/useFavorites';
+import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
+import { isNonFoodCategory } from '@/lib/utils/categoryClassification';
 import {
-  showCartAddedToast,
   showFavoriteAddedToast,
   showFavoriteRemovedToast,
   showInfoToast,
@@ -40,14 +51,19 @@ import type { ProductWithDetails } from '@/lib/types/firestore';
 
 type Tab = 'ingredients' | 'nutrition';
 
+// Stufen-Texte für die "Detektiv-Check"-Zeile auf Stufe-1/2-
+// Detail-Seiten. Wortlaut deckungsgleich zum Stöbern-Filter
+// (`app/(tabs)/explore.tsx` STUFE_INFO) und zum
+// `SimilarityStagesModal`, damit der User in jedem Kontext denselben
+// Satz liest. Wenn der Wortlaut sich ändert, dort mitziehen.
 const STUFE_INFO: Record<1 | 2, { label: string; line: string }> = {
   2: {
-    label: 'Günstige Eigenmarke',
-    line: 'Solides Preis-Leistungs-Verhältnis, vergleichbar mit Standardware.',
+    label: 'Markenhersteller',
+    line: 'Liefert auch Marken — aber kein vergleichbares Produkt.',
   },
   1: {
-    label: 'Einfache Eigenmarke',
-    line: 'Budget-Option mit Basis-Qualität — ideal für den kleinen Geldbeutel.',
+    label: 'NoName-Hersteller',
+    line: 'Produziert ausschließlich Handelsmarken.',
   },
 };
 
@@ -85,17 +101,30 @@ export default function NoNameDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { theme, brand, shadows, stufen } = useTokens();
+  const { theme, brand, shadows } = useTokens();
   const { user } = useAuth();
   const { toggleFavorite } = useFavorites();
 
-  const [loading, setLoading] = useState(true);
+  // ─── Data state ──────────────────────────────────────────────────
+  // One fetch, one state slot. We deliberately wait for the FULL
+  // joined product before flipping `ready` — multiple staggered
+  // pops felt janky. The reveal is then orchestrated visually:
+  // top section crossfades in immediately, bottom section
+  // crossfades in 150 ms later via `Crossfade(delay=…)`. The
+  // DetailHeader chrome renders on the first frame regardless.
   const [error, setError] = useState<string | null>(null);
   const [product, setProduct] = useState<ProductWithDetails | null>(null);
+  const ready = !!product;
 
   const [tab, setTab] = useState<Tab>('ingredients');
   // SegmentedTabs + PagerView combo for tabs (project rule).
   const tabPagerRef = useRef<PagerView | null>(null);
+  // Hero image container ref + FlyToCart imperative handle. The
+  // hero ref is measured at "add-to-cart" time (measureInWindow),
+  // its rect feeds into FlyToCart.fly() which clones the image and
+  // animates it into the floating shopping-list button bottom-right.
+  const heroRef = useRef<View | null>(null);
+  const flyRef = useRef<FlyToCartHandle | null>(null);
   const [tabHeights, setTabHeights] = useState<{
     ingredients?: number;
     nutrition?: number;
@@ -111,6 +140,23 @@ export default function NoNameDetailScreen() {
   const [isFav, setIsFav] = useState(false);
   const [inCart, setInCart] = useState(false);
   const [ratingsOpen, setRatingsOpen] = useState(false);
+  // Connected Brands des Herstellers — separat geladen, weil das
+  // Aggregat im Cloud-Function-Job (`connected-brands-aggregator`)
+  // ein anderes Refresh-Intervall hat als das Produkt selbst.
+  const [connectedBrands, setConnectedBrands] = useState<
+    Array<{
+      id: string;
+      name: string;
+      bild: string | null;
+      source: 'direct' | 'via-markenprodukt';
+    }>
+  >([]);
+  // "Weitere enttarnte Produkte" am Seitenende — andere NoName-
+  // Produkte aus derselben Kategorie, gefiltert auf Stufe 3/4/5
+  // (= solche, die einen echten Markenprodukt-Vergleich verlinkt
+  // haben). Bei Stufe 1/2 ist das die wichtigste Discovery-Brücke,
+  // weil das aktuelle Produkt selber keinen Vergleich anbieten kann.
+  const [alternatives, setAlternatives] = useState<EnttarnteAlternative[]>([]);
   const [ratings, setRatings] = useState<Rating[]>([]);
   const [ratingsLoading, setRatingsLoading] = useState(false);
 
@@ -141,6 +187,17 @@ export default function NoNameDetailScreen() {
   const DOCK_DISTANCE = HERO_SCREEN_Y - NAV_SCREEN_Y;
   const NAV_LEFT_OFFSET = 36;
 
+  // Reveal-fade — opacity sharedValue driven by `ready`. Combined
+  // with the dock-transform inside one worklet so the morph title
+  // fades in at the SAME 320 ms tempo as the hero Crossfade below.
+  const morphFade = useSharedValue(0);
+  useEffect(() => {
+    morphFade.value = withTiming(product ? 1 : 0, {
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [product, morphFade]);
+
   const morphTitleStyle = useAnimatedStyle(() => {
     const s = scrollY.value;
     const t = interpolate(s, [0, DOCK_DISTANCE], [0, 1], Extrapolation.CLAMP);
@@ -149,37 +206,146 @@ export default function NoNameDetailScreen() {
     const scale = 1 - t * (1 - TITLE_SCALE);
     return {
       transform: [{ translateY }, { translateX }, { scale }],
+      opacity: morphFade.value,
     };
   });
 
   useEffect(() => {
+    let alive = true;
+    setError(null);
+    setProduct(null);
     (async () => {
-      setLoading(true);
       try {
         const data = await FirestoreService.getProductWithDetails(String(id));
+        if (!alive) return;
         if (!data) {
           setError('Produkt nicht gefunden');
           return;
         }
         setProduct(data);
+
+        // 🎯 Gamification: track `view_comparison` once the
+        // product loads. This action also triggers the
+        // `first_action_any` achievement on the user's first
+        // visit. Fire-and-forget — must not block the screen.
+        if (user?.uid) {
+          achievementService
+            .trackAction(user.uid, 'view_comparison', {
+              productId: String(id),
+              productType: 'noname',
+            })
+            .catch((err) => {
+              console.warn('view_comparison trackAction failed', err);
+            });
+        }
       } catch (e) {
+        if (!alive) return;
         console.warn('NoNameDetail: load failed', e);
         setError('Fehler beim Laden');
-      } finally {
-        setLoading(false);
       }
     })();
+    return () => {
+      alive = false;
+    };
   }, [id]);
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
-        <ProductDetailSkeleton />
-      </View>
-    );
-  }
+  // Initial-Load des Cart-Status. Ohne diesen useEffect startet
+  // `inCart` immer mit `false`, auch wenn das Produkt schon im
+  // Einkaufszettel liegt — der Toggle-Button zeigt dann den falschen
+  // Zustand und ein erneuter Tap würde das Produkt ein zweites Mal
+  // hinzufügen. Re-runs bei id- und uid-Wechsel.
+  useEffect(() => {
+    let alive = true;
+    if (!user?.uid || !id) {
+      setInCart(false);
+      return;
+    }
+    FirestoreService.isInShoppingCart(user.uid, String(id), false)
+      .then((res) => {
+        if (alive) setInCart(!!res);
+      })
+      .catch(() => {
+        if (alive) setInCart(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id, user?.uid]);
 
-  if (error || !product) {
+  // Connected Brands separat laden, sobald wir die Hersteller-ID
+  // vom Produkt haben. Bewusst ENTKOPPELT vom Product-Cache, damit
+  // ein zwischenzeitlich gelaufener Aggregator-Job direkt sichtbar
+  // wird (siehe Kommentar in firestore.ts → getProductWithDetails).
+  // Service-seitig: 30 Min Cache pro Hersteller-ID, 45 s Empty-Cache
+  // → der nächste App-Tap auf dasselbe Produkt nach Aggregator-Run
+  // findet die Brands.
+  const herstellerIdForFetch = (product as any)?.herstellerId ?? null;
+  useEffect(() => {
+    let alive = true;
+    if (!herstellerIdForFetch) {
+      setConnectedBrands([]);
+      return;
+    }
+    FirestoreService.getConnectedBrandsForHersteller(herstellerIdForFetch)
+      .then((brands) => {
+        if (alive) setConnectedBrands(brands ?? []);
+      })
+      .catch(() => {
+        if (alive) setConnectedBrands([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [herstellerIdForFetch]);
+
+  // "Weitere enttarnte Produkte" — Kategorie-Pool wird gegen den
+  // Namen des aktuellen Produkts gerankt. Toastbrot zeigt zuerst
+  // andere Toastbrote, dann andere Brote, dann Rest-Kategorie.
+  // ID kommt vom expliziten `kategorieId`-Field das wir in
+  // `getProductWithDetails` an die Daten anhängen — die populierte
+  // `kategorie` enthält nur den Inhalt (bezeichnung/bild), keine ID.
+  const categoryIdForAlternatives: string | null =
+    (product as any)?.kategorieId ??
+    (product?.kategorie as any)?.id ??
+    null;
+  useEffect(() => {
+    let alive = true;
+    if (!product?.id) {
+      setAlternatives([]);
+      return;
+    }
+    // Deferred via InteractionManager — der Page-Load (Hero, Tabs,
+    // Stufen-Card) hat Vorrang. Die "Weitere enttarnte Produkte"-
+    // Section sitzt am unteren Ende und ist nicht-blockierend, also
+    // dürfen wir warten bis Animations + Gestures durch sind.
+    const handle = InteractionManager.runAfterInteractions(() => {
+      if (!alive) return;
+      FirestoreService.getEnttarnteAlternatives(
+        {
+          excludeProductId: product.id,
+          kategorieId: categoryIdForAlternatives,
+          productName: (product as any)?.name ?? null,
+          handelsmarkeName:
+            (product as any)?.handelsmarke?.bezeichnung ??
+            (product as any)?.handelsmarke?.name ??
+            null,
+        },
+        5,
+      )
+        .then((items) => {
+          if (alive) setAlternatives(items ?? []);
+        })
+        .catch(() => {
+          if (alive) setAlternatives([]);
+        });
+    });
+    return () => {
+      alive = false;
+      handle.cancel?.();
+    };
+  }, [product?.id, categoryIdForAlternatives]);
+
+  if (error) {
     return (
       <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
         <MaterialCommunityIcons name="alert-circle-outline" size={48} color={theme.textMuted} />
@@ -217,9 +383,21 @@ export default function NoNameDetailScreen() {
   }
 
   // ─── Derived data ─────────────────────────────────────────────────────
+  // `p` is null until the full joined product lands; the page
+  // chrome and skeleton sections render meanwhile. All derived
+  // values use optional chaining so the first paint with `p === null`
+  // doesn't crash; the live values fade in via `Crossfade` once
+  // `ready` flips true.
   const p = product as any;
-  const stufe = parseStufe(p.stufe);
-  const stufeColor = stufen[stufe];
+  const stufe = p ? parseStufe(p.stufe) : 1;
+  // Marken des Herstellers — kommt vom Service als zusätzliches Feld
+  // `herstellerBrands` mitgeladen (siehe getProductWithDetails).
+  // Bei Stufe 2 zeigen wir die als kleine Pills, damit der User
+  // sieht "der Hersteller dieses NoNames produziert auch X, Y, Z".
+  // Defensive: leer-Array wenn kein Hersteller / keine Marken.
+  // Connected-Brands kommen aus dem `connectedBrands`-State weiter
+  // oben (separat geladen via `useEffect` + `getConnectedBrandsFor
+  // Hersteller`). Hier nur die Stufen-Info-Vorbereitung.
   // Only stufes 1-2 have an orphan-specific one-liner; higher stufes
   // fall back to a generic line because they shouldn't really land here.
   const stufeInfo =
@@ -227,24 +405,37 @@ export default function NoNameDetailScreen() {
       ? STUFE_INFO[stufe as 1 | 2]
       : { label: 'Eigenmarke', line: 'Zu diesem Produkt ist aktuell kein Markenoriginal hinterlegt.' };
 
-  const disc = p.discounter as
+  const disc = p?.discounter as
     | { name?: string; color?: string; bild?: string; land?: string }
     | undefined;
-  const hm = p.handelsmarke as { bezeichnung?: string; name?: string } | undefined;
+  const hm = p?.handelsmarke as
+    | { bezeichnung?: string; name?: string; bild?: string }
+    | undefined;
   const handelsmarkeName = hm?.bezeichnung ?? hm?.name ?? null;
-  const herstellerName = p.hersteller?.name ?? p.hersteller?.herstellername ?? null;
-  const categoryName = p.kategorie?.bezeichnung ?? p.kategorie?.name ?? null;
+  const herstellerName =
+    p?.hersteller?.name ?? p?.hersteller?.herstellername ?? null;
+  const categoryName = p?.kategorie?.bezeichnung ?? p?.kategorie?.name ?? null;
+  // Non-Food (Drogerie, Haushalt, Kosmetik, Tier, …): hier sind
+  // weder Inhaltsstoffe (im Sinne von Zutaten) noch Nährwerte
+  // sinnvoll — Tabs werden komplett ausgeblendet.
+  const hideFoodTabs = isNonFoodCategory(categoryName);
 
-  const packInfo = formatPack(
-    p.packSize,
-    p.packTypInfo?.typKurz ?? p.packTypInfo?.typ,
-    p.preis,
-  );
+  const packInfo = p
+    ? formatPack(
+        p.packSize,
+        p.packTypInfo?.typKurz ?? p.packTypInfo?.typ,
+        p.preis,
+      )
+    : null;
 
-  const rating = (p.averageRatingOverall as number | undefined)?.toFixed(1);
+  const rating = (p?.averageRatingOverall as number | undefined)?.toFixed(1);
 
   // ─── Handlers ─────────────────────────────────────────────────────────
+  // All handlers bail early if the basic product hasn't landed yet;
+  // the action buttons render disabled-skeleton circles in that
+  // state so this should never actually fire, but we guard anyway.
   const onFavPress = async () => {
+    if (!p) return;
     setIsFav((v) => !v);
     try {
       const now = await toggleFavorite(p.id, 'noname', p);
@@ -255,16 +446,51 @@ export default function NoNameDetailScreen() {
     }
   };
   const onCartPress = async () => {
+    if (!p) return;
     if (!user?.uid) {
       showInfoToast('Bitte anmelden');
       return;
     }
     if (inCart) {
+      // Optimistisches UI-Update: Button springt sofort auf
+      // "nicht im Wagen", danach Firestore-Delete im Hintergrund.
+      // Bei Fehler revert.
       setInCart(false);
-      showInfoToast('Aus Einkaufsliste entfernt');
+      try {
+        await FirestoreService.removeFromShoppingCartByProductId(
+          user.uid,
+          p.id,
+          false,
+        );
+        // Leading 🗑️ overrides extractEmoji's default ✅ fallback —
+        // a green check on a "removed" toast read like confirmation
+        // that it had been ADDED, not removed.
+        showInfoToast('🗑️ Aus Einkaufsliste entfernt');
+      } catch {
+        setInCart(true);
+        showInfoToast('Fehler — bitte erneut versuchen');
+      }
       return;
     }
     setInCart(true);
+
+    // Fire the fly-to-cart animation in parallel with the Firestore
+    // call. measureInWindow gives us the hero's screen rect; FlyToCart
+    // clones it and animates the clone into the floating cart button.
+    // The clone is `pointerEvents="none"` so taps still hit the page.
+    const flyImageUri = getProductImage(p);
+    if (heroRef.current && flyImageUri) {
+      heroRef.current.measureInWindow((x, y, w, h) => {
+        flyRef.current?.fly({
+          sourceX: x,
+          sourceY: y,
+          sourceW: w,
+          sourceH: h,
+          imageUri: flyImageUri,
+        });
+      });
+    }
+
     try {
       await FirestoreService.addToShoppingCart(
         user.uid,
@@ -275,16 +501,15 @@ export default function NoNameDetailScreen() {
         { screenName: 'noname-detail' },
         { price: p.preis ?? 0, savings: 0 },
       );
-      showCartAddedToast(
-        p.name ?? 'Produkt',
-        () => router.push('/shopping-list' as any),
-      );
+      // No toast on single-add — the FlyToCart animation + the
+      // cart-icon state flip already make the action self-evident.
     } catch {
       setInCart(false);
       showInfoToast('Fehler — bitte erneut versuchen');
     }
   };
   const onRatingsPress = async () => {
+    if (!p) return;
     setRatingsOpen(true);
     setRatingsLoading(true);
     setRatings([]);
@@ -311,9 +536,11 @@ export default function NoNameDetailScreen() {
         onBack={() => router.back()}
       />
 
-      {/* Morphing title — scrolls naturally from hero into the nav bar
-          and pins. zIndex 11 keeps it above the BlurView chrome once
-          docked. pointerEvents="none" so touches fall through. */}
+      {/* Morph title — opacity is driven by morphTitleStyle's
+          `opacity` field (combined with the dock transform in the
+          same worklet) so the reveal is a smooth fade-in instead
+          of a sudden mount. Always mounted; the text reads
+          empty before data arrives but is invisible at opacity 0. */}
       <Animated.View
         pointerEvents="none"
         style={[
@@ -331,11 +558,6 @@ export default function NoNameDetailScreen() {
           morphTitleStyle,
         ]}
       >
-        {/* Stufe 1/2 products come from the discounter's own shelf but
-            rarely belong to a distinct Handelsmarke we have branding
-            for, so the MARKET (discounter) logo is what best identifies
-            them at a glance. Fall back to the Handelsmarke logo only
-            if no discounter logo exists. */}
         {(disc?.bild ?? (hm as any)?.bild) ? (
           <View
             style={{
@@ -355,8 +577,18 @@ export default function NoNameDetailScreen() {
             />
           </View>
         ) : null}
+        {/* Dynamische Title-Größe: kurze Titel rendern in voller
+            22-px-Größe, lange Titel schrumpfen automatisch bis zur
+            Mindestskala (0.65 ≈ 14 px) statt mit "..." abgeschnitten
+            zu werden. `adjustsFontSizeToFit` macht das nativ in RN.
+            Der Scale-Transform aus `morphTitleStyle` schichtet sich
+            sauber drauf — bei langen Titeln ist der gedockte Stand
+            entsprechend kleiner, aber immer lesbar. */}
         <Text
           numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.65}
+          allowFontScaling={false}
           style={{
             flexShrink: 1,
             fontFamily,
@@ -368,7 +600,7 @@ export default function NoNameDetailScreen() {
           }}
         >
           {handelsmarkeName ? `${handelsmarkeName} ` : ''}
-          {p.name}
+          {p?.name ?? ''}
         </Text>
       </Animated.View>
 
@@ -381,47 +613,104 @@ export default function NoNameDetailScreen() {
         }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Title lives outside the ScrollView as the morph element.
-            28 px placeholder reserves vertical space. The Hersteller
-            used to be rendered as a subtitle text under the
-            placeholder — it has been moved to a chip on the hero
-            image (top-left, where the "Exklusiv bei <discounter>"
-            pill used to sit), which matches the design brief and
-            keeps the hero visually weighted. */}
+        {/* Title slot — 28 px reserves vertical space so the morph
+            title (rendered absolutely above) lands at HERO_SCREEN_Y
+            before the rest of the content below. */}
         <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
           <View style={{ height: 28, marginTop: 2 }} />
         </View>
 
-        {/* ─── Hero image with overlays ──────────────────────────── */}
-        <View style={{ paddingHorizontal: 20 }}>
+        {/* ─── Hero — TOP wave (Crossfade, delay 0)
+            Skeleton SHAPES match the live hero exactly: same
+            240 px container, same Hersteller chip pill at
+            top-left, same price pill at bottom-left, same 3
+            action buttons at bottom-right. With matching shapes
+            the crossfade reads as "details fill in", not "thing
+            morphs". Duration 320 ms, single shared value
+            (skeleton 1→0 + content 0→1 sum to opacity 1 every
+            frame → constant brightness, no muddy mid-frame). */}
+        <Crossfade
+          ready={ready}
+          delay={0}
+          duration={320}
+          style={{ paddingHorizontal: 20 }}
+          skeleton={
+            <View
+              style={{
+                position: 'relative',
+                borderRadius: 20,
+                overflow: 'hidden',
+                backgroundColor: theme.surfaceAlt,
+                height: 240,
+              }}
+            >
+              {/* Image skeleton — fills the entire hero slot */}
+              <Shimmer width="100%" height={240} radius={0} />
+
+              {/* Hersteller chip placeholder — neutral grey pill at
+                  the SAME position + dimensions as the real chip
+                  (top-left, padded 6/12, radius 99). No brand
+                  colour during loading; just a calm grey shape so
+                  the page reads as "loading", not "promotional". */}
+              <Shimmer
+                width={140}
+                height={26}
+                radius={99}
+                style={{ position: 'absolute', left: 12, top: 12 }}
+              />
+
+              {/* Price pill placeholder — single Shimmer at the same
+                  outer dimensions + position as the real white
+                  price pill (rounded rect, ~96 × 56). */}
+              <Shimmer
+                width={96}
+                height={56}
+                radius={14}
+                style={{ position: 'absolute', left: 12, bottom: 12 }}
+              />
+
+              {/* Action cluster placeholder — three 48×48 rounded
+                  squares matching the live ActionButtons. */}
+              <View
+                style={{
+                  position: 'absolute',
+                  right: 12,
+                  bottom: 12,
+                  flexDirection: 'row',
+                  gap: 8,
+                }}
+              >
+                {[0, 1, 2].map((i) => (
+                  <Shimmer key={i} width={48} height={48} radius={14} />
+                ))}
+              </View>
+            </View>
+          }
+        >
           <View
+            ref={heroRef}
+            collapsable={false}
             style={{
               position: 'relative',
               borderRadius: 20,
               overflow: 'hidden',
-              backgroundColor: theme.surfaceAlt,
+              backgroundColor: '#ffffff',
               height: 240,
             }}
           >
-            {p.bild ? (
+            {getProductImage(p, 'png') ? (
               <Image
-                source={{ uri: p.bild }}
+                source={{ uri: getProductImage(p, 'png') ?? undefined }}
                 style={{ width: '100%', height: '100%' }}
-                resizeMode="cover"
+                resizeMode="contain"
               />
-            ) : (
+            ) : ready ? (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 <MaterialCommunityIcons name="package-variant" size={64} color={theme.textMuted} />
               </View>
-            )}
+            ) : null}
 
-            {/* Hersteller chip — top-left, replacing the old
-                "Exklusiv bei <discounter>" pill that used to live
-                here. For stufe 1/2 products the user wanted to see
-                WHO makes the Eigenmarke (Ferrero, Nestlé, …) right
-                on the hero, not buried in the info card further
-                down. Market affordance is handled by the logo in
-                the morph title above. */}
+            {/* Hersteller chip — top-left */}
             {herstellerName ? (
               <View
                 style={{
@@ -441,11 +730,12 @@ export default function NoNameDetailScreen() {
                 }}
               >
                 <Text
-                  numberOfLines={1}
+                  numberOfLines={2}
                   style={{
                     fontFamily,
                     fontWeight: fontWeight.extraBold,
                     fontSize: 13,
+                    lineHeight: 16,
                     color: '#fff',
                     letterSpacing: -0.1,
                   }}
@@ -456,316 +746,606 @@ export default function NoNameDetailScreen() {
             ) : null}
 
             {/* Price pill bottom-left */}
+            {p ? (
+              <View
+                style={{
+                  position: 'absolute',
+                  left: 12,
+                  bottom: 12,
+                  backgroundColor: 'rgba(255,255,255,0.95)',
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  borderRadius: 14,
+                  shadowColor: '#000',
+                  shadowOpacity: 0.12,
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowRadius: 8,
+                  elevation: 3,
+                }}
+              >
+                {packInfo ? (
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.medium,
+                      fontSize: 11,
+                      color: '#5c6769',
+                    }}
+                  >
+                    {packInfo}
+                  </Text>
+                ) : null}
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 22,
+                    color: '#191c1d',
+                    letterSpacing: -0.4,
+                    marginTop: packInfo ? 4 : 0,
+                  }}
+                >
+                  {formatEur(p?.preis)}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Action cluster bottom-right */}
+            {p ? (
+              <View style={{ position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', gap: 8 }}>
+                <ActionButton
+                  icon={isFav ? 'heart' : 'heart-outline'}
+                  iconColor={isFav ? '#e53935' : theme.text}
+                  onPress={onFavPress}
+                />
+                <ActionButton
+                  icon={inCart ? 'cart-check' : 'cart-plus'}
+                  iconColor={inCart ? '#fff' : theme.text}
+                  bg={inCart ? brand.primary : undefined}
+                  onPress={onCartPress}
+                />
+                <ActionButton
+                  icon="star"
+                  iconColor="#f5b301"
+                  subLabel={rating}
+                  onPress={onRatingsPress}
+                />
+              </View>
+            ) : null}
+          </View>
+        </Crossfade>
+
+        {/* ─── BOTTOM wave (Crossfade, delay 150 ms)
+            Skeleton mirrors the bottom layout exactly: same info-
+            card surface + radius + padding + divider, same tabs
+            pill + body card, same stufe-row surfaceAlt with
+            S-letter / dots / text positions. Shape-equivalence
+            across the crossfade keeps the transition smooth. The
+            150 ms delay creates a clear "top first, then bottom"
+            cascade — small enough that the two reveals overlap
+            (so it reads as one wave, not two pops). */}
+        <Crossfade
+          ready={ready}
+          delay={150}
+          duration={320}
+          skeleton={
+            <View>
+              {/* Info card skeleton — same surface + radius + padding +
+                  shadow + divider as the live card. Shimmer occupies
+                  the value column at the same height. */}
+              <View
+                style={{
+                  marginHorizontal: 20,
+                  marginTop: 24,
+                  backgroundColor: theme.surface,
+                  borderRadius: 16,
+                  padding: 16,
+                  ...shadows.sm,
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingBottom: 12,
+                    borderBottomWidth: 1,
+                    borderBottomColor: theme.border,
+                  }}
+                >
+                  <Shimmer width={70} height={13} radius={4} />
+                  <Shimmer width={140} height={13} radius={4} />
+                </View>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingTop: 12,
+                  }}
+                >
+                  <Shimmer width={70} height={13} radius={4} />
+                  <Shimmer width={120} height={13} radius={4} />
+                </View>
+              </View>
+
+              {/* Tabs skeleton — same SegmentedTabs height (44 px,
+                  radius 999) and body card (surface, radius 14,
+                  padding 16, shadows.sm). */}
+              <View style={{ marginHorizontal: 20, marginTop: 20 }}>
+                <View
+                  style={{
+                    height: 44,
+                    borderRadius: 999,
+                    backgroundColor: theme.surfaceAlt,
+                    marginBottom: 16,
+                    flexDirection: 'row',
+                    padding: 4,
+                    gap: 4,
+                  }}
+                >
+                  {/* Two equal-width tab placeholders */}
+                  <View style={{ flex: 1, borderRadius: 999, backgroundColor: theme.surface }} />
+                  <View style={{ flex: 1, borderRadius: 999 }} />
+                </View>
+                <View
+                  style={{
+                    backgroundColor: theme.surface,
+                    borderRadius: 14,
+                    padding: 16,
+                    gap: 8,
+                    ...shadows.sm,
+                  }}
+                >
+                  <Shimmer height={12} radius={4} />
+                  <Shimmer width="92%" height={12} radius={4} />
+                  <Shimmer width="78%" height={12} radius={4} />
+                  <Shimmer width="55%" height={12} radius={4} />
+                </View>
+              </View>
+
+              {/* Stufe-row skeleton — same surfaceAlt rounded
+                  container, S-letter slot on the left, text lines
+                  on the right. */}
+              <View
+                style={{
+                  marginHorizontal: 20,
+                  marginTop: 20,
+                  padding: 14,
+                  paddingHorizontal: 16,
+                  borderRadius: 14,
+                  backgroundColor: theme.surfaceAlt,
+                  flexDirection: 'row',
+                  gap: 12,
+                  alignItems: 'flex-start',
+                }}
+              >
+                <View style={{ alignItems: 'center', gap: 4 }}>
+                  <Shimmer width={26} height={20} radius={4} />
+                  <Shimmer width={36} height={6} radius={3} />
+                </View>
+                <View style={{ flex: 1, gap: 6 }}>
+                  <Shimmer width="90%" height={12} radius={4} />
+                  <Shimmer width="75%" height={12} radius={4} />
+                  <Shimmer width="50%" height={12} radius={4} />
+                </View>
+              </View>
+            </View>
+          }
+        >
+          <View>
+            {/* Info card */}
             <View
               style={{
-                position: 'absolute',
-                left: 12,
-                bottom: 12,
-                backgroundColor: 'rgba(255,255,255,0.95)',
-                paddingVertical: 8,
-                paddingHorizontal: 12,
-                borderRadius: 14,
-                shadowColor: '#000',
-                shadowOpacity: 0.12,
-                shadowOffset: { width: 0, height: 2 },
-                shadowRadius: 8,
-                elevation: 3,
+                marginHorizontal: 20,
+                marginTop: 24,
+                backgroundColor: theme.surface,
+                borderRadius: 16,
+                padding: 16,
+                ...shadows.sm,
               }}
             >
-              {packInfo ? (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  paddingBottom: 12,
+                  borderBottomWidth: 1,
+                  borderBottomColor: theme.border,
+                  gap: 12,
+                }}
+              >
                 <Text
                   style={{
                     fontFamily,
                     fontWeight: fontWeight.medium,
-                    fontSize: 11,
-                    color: '#5c6769',
+                    fontSize: 13,
+                    color: theme.textMuted,
+                    paddingTop: 1,
                   }}
                 >
-                  {packInfo}
+                  Hersteller
                 </Text>
-              ) : null}
-              <Text
+                {/* flex:1 + textAlign right + numberOfLines weg —
+                    lange Hersteller-Namen wie "Naabtaler Milchwerke
+                    GmbH & Co." dürfen umbrechen statt mit "..." aus-
+                    geblendet zu werden. */}
+                <Text
+                  style={{
+                    flex: 1,
+                    fontFamily,
+                    fontWeight: fontWeight.bold,
+                    fontSize: 13,
+                    lineHeight: 18,
+                    color: theme.text,
+                    textAlign: 'right',
+                  }}
+                >
+                  {herstellerName ?? '—'}
+                </Text>
+              </View>
+              <View
                 style={{
-                  fontFamily,
-                  fontWeight: fontWeight.extraBold,
-                  fontSize: 22,
-                  color: '#191c1d',
-                  letterSpacing: -0.4,
-                  marginTop: packInfo ? 4 : 0,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingTop: 12,
+                  gap: 12,
+                  alignItems: 'flex-start',
                 }}
               >
-                {formatEur(p.preis)}
-              </Text>
-            </View>
-
-            {/* Action cluster bottom-right */}
-            <View style={{ position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', gap: 8 }}>
-              <ActionButton
-                icon={isFav ? 'heart' : 'heart-outline'}
-                iconColor={isFav ? '#e53935' : theme.text}
-                onPress={onFavPress}
-              />
-              <ActionButton
-                icon={inCart ? 'cart-check' : 'cart-plus'}
-                iconColor={inCart ? '#fff' : theme.text}
-                bg={inCart ? brand.primary : undefined}
-                onPress={onCartPress}
-              />
-              <ActionButton
-                icon="star"
-                iconColor="#f5b301"
-                subLabel={rating}
-                onPress={onRatingsPress}
-              />
-            </View>
-          </View>
-        </View>
-
-        {/* ─── Info card: Hersteller + Kategorie ─────────────────── */}
-        <View
-          style={{
-            marginHorizontal: 20,
-            marginTop: 24,
-            backgroundColor: theme.surface,
-            borderRadius: 16,
-            padding: 16,
-            ...shadows.sm,
-          }}
-        >
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              paddingBottom: 12,
-              borderBottomWidth: 1,
-              borderBottomColor: theme.border,
-            }}
-          >
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.medium,
-                fontSize: 13,
-                color: theme.textMuted,
-              }}
-            >
-              Hersteller
-            </Text>
-            <Text
-              numberOfLines={1}
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold,
-                fontSize: 13,
-                color: theme.text,
-                maxWidth: '60%',
-              }}
-            >
-              {herstellerName ?? '—'}
-            </Text>
-          </View>
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              paddingTop: 12,
-            }}
-          >
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.medium,
-                fontSize: 13,
-                color: theme.textMuted,
-              }}
-            >
-              Kategorie
-            </Text>
-            <Text
-              numberOfLines={1}
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold,
-                fontSize: 13,
-                color: theme.text,
-                maxWidth: '60%',
-              }}
-            >
-              {categoryName ?? '—'}
-            </Text>
-          </View>
-        </View>
-
-        {/* ─── Tabs: Inhaltsstoffe / Nährwerte ─────────────────────
-            SegmentedTabs (animated pill) + PagerView for swipe.
-            Same pattern as Stöbern / Rewards / product-comparison. */}
-        <View style={{ marginHorizontal: 20, marginTop: 20 }}>
-          <SegmentedTabs
-            tabs={[
-              { key: 'ingredients', label: 'Inhaltsstoffe' },
-              { key: 'nutrition', label: 'Nährwerte' },
-            ] as const}
-            value={tab}
-            onChange={onTabChange}
-          />
-        </View>
-
-        {/* PagerView height = max of measured page heights. 220 px
-            fallback so the screen doesn't collapse to 0 before the
-            first onLayout fires. */}
-        <PagerView
-          ref={tabPagerRef}
-          style={{
-            height: Math.max(
-              tabHeights.ingredients ?? 0,
-              tabHeights.nutrition ?? 0,
-              220,
-            ),
-          }}
-          initialPage={0}
-          onPageSelected={onTabPagerSelected}
-        >
-          <View
-            key="ingredients"
-            onLayout={(e) => {
-              // Guard for null nativeEvent.layout — PagerView on the
-              // new architecture sometimes fires onLayout with no
-              // layout payload while recycling pages.
-              const h = e?.nativeEvent?.layout?.height;
-              if (typeof h !== 'number') return;
-              setTabHeights((prev) =>
-                prev.ingredients === h ? prev : { ...prev, ingredients: h },
-              );
-            }}
-          >
-            <SingleInfoCard
-              tab="ingredients"
-              product={p}
-              theme={theme}
-              shadows={shadows}
-            />
-          </View>
-          <View
-            key="nutrition"
-            onLayout={(e) => {
-              const h = e?.nativeEvent?.layout?.height;
-              if (typeof h !== 'number') return;
-              setTabHeights((prev) =>
-                prev.nutrition === h ? prev : { ...prev, nutrition: h },
-              );
-            }}
-          >
-            <SingleInfoCard
-              tab="nutrition"
-              product={p}
-              theme={theme}
-              shadows={shadows}
-            />
-          </View>
-        </PagerView>
-
-        {/* ─── Detektiv-Einordnung row ───────────────────────────── */}
-        <View
-          style={{
-            marginHorizontal: 20,
-            marginTop: 20,
-            padding: 14,
-            paddingHorizontal: 16,
-            borderRadius: 14,
-            backgroundColor: theme.surfaceAlt,
-            flexDirection: 'row',
-            gap: 12,
-            alignItems: 'flex-start',
-          }}
-        >
-          <View style={{ alignItems: 'center' }}>
-            {/* lineHeight must be > fontSize or the extra-bold
-                ascender clips at the top of the line-box ("S" was
-                getting shaved on iOS). */}
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 18,
-                color: stufeColor,
-                lineHeight: 22,
-                includeFontPadding: false,
-              }}
-            >
-              S{stufe}
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 2, marginTop: 4 }}>
-              {[1, 2, 3, 4, 5].map((n) => (
-                <View
-                  key={n}
+                <Text
                   style={{
-                    width: 5,
-                    height: 5,
-                    borderRadius: 3,
-                    backgroundColor: n <= stufe ? stufeColor : theme.borderStrong,
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 13,
+                    color: theme.textMuted,
+                    paddingTop: 1,
                   }}
-                />
-              ))}
+                >
+                  Kategorie
+                </Text>
+                <Text
+                  style={{
+                    flex: 1,
+                    fontFamily,
+                    fontWeight: fontWeight.bold,
+                    fontSize: 13,
+                    lineHeight: 18,
+                    color: theme.text,
+                    textAlign: 'right',
+                  }}
+                >
+                  {categoryName ?? '—'}
+                </Text>
+              </View>
             </View>
+
+            {/* Bekannte Marken des Herstellers — nur bei Stufe 2
+                relevant. Definition Stufe 2: "Markenhersteller ohne
+                vergleichbares Produkt" → der Hersteller produziert
+                auch für bekannte Marken, nur nicht direkt eines, das
+                sich mit diesem NoName-Produkt vergleichen lässt. Das
+                ist genau der Punkt, an dem dieser Block sichtbar
+                wird: er zeigt dem User, welche Marken sonst aus
+                derselben Produktion stammen, damit der Bezug zur
+                "Markenhersteller"-Aussage greifbar ist.
+                Stufe 1 (reiner NoName-Hersteller) hat per Definition
+                keine Marken. */}
+            {/* Verbundene Marken — gleicher Card-Stil wie die
+                Hersteller/Kategorie-Card oberhalb (theme.surface,
+                shadows.sm, 14 px Padding). Label-Stil identisch zu
+                "Hersteller"/"Kategorie": medium 13 px in textMuted,
+                regular case. Darunter wrappen die Marken-Chips. */}
+            {p && stufe === 2 && connectedBrands.length > 0 ? (
+              <View
+                style={{
+                  marginHorizontal: 20,
+                  marginTop: 12,
+                  padding: 14,
+                  paddingHorizontal: 16,
+                  borderRadius: 14,
+                  backgroundColor: theme.surface,
+                  ...shadows.sm,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 13,
+                    color: theme.textMuted,
+                    marginBottom: 10,
+                  }}
+                >
+                  Mit dem Hersteller in Verbindung stehende{' '}
+                  {connectedBrands.length === 1 ? 'Marke' : 'Marken'}
+                </Text>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                  }}
+                >
+                  {connectedBrands.map((b) => {
+                    const label = b.name || '—';
+                    const logoUri = b.bild ?? null;
+                    const initial = (label || '?').trim().charAt(0).toUpperCase();
+                    return (
+                      <View
+                        key={b.id}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 8,
+                          paddingLeft: 4,
+                          paddingRight: 12,
+                          paddingVertical: 4,
+                          borderRadius: 999,
+                          backgroundColor: theme.surfaceAlt,
+                          borderWidth: 1,
+                          borderColor: theme.border,
+                        }}
+                      >
+                        {logoUri ? (
+                          <View
+                            style={{
+                              width: 24,
+                              height: 24,
+                              borderRadius: 12,
+                              backgroundColor: '#fff',
+                              overflow: 'hidden',
+                              borderWidth: 0.5,
+                              borderColor: theme.border,
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <Image
+                              source={{ uri: logoUri }}
+                              style={{ width: '90%', height: '90%' }}
+                              resizeMode="contain"
+                            />
+                          </View>
+                        ) : (
+                          <View
+                            style={{
+                              width: 24,
+                              height: 24,
+                              borderRadius: 12,
+                              backgroundColor: brand.primary + '22',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontFamily,
+                                fontWeight: fontWeight.extraBold,
+                                fontSize: 11,
+                                color: brand.primary,
+                                includeFontPadding: false as any,
+                              }}
+                            >
+                              {initial}
+                            </Text>
+                          </View>
+                        )}
+                        <Text
+                          numberOfLines={1}
+                          style={{
+                            fontFamily,
+                            fontWeight: fontWeight.bold,
+                            fontSize: 13,
+                            color: theme.text,
+                          }}
+                        >
+                          {label}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
+
+            {/* Detektiv-Check-Zeile — ÜBER den Inhaltstabellen, exakt
+                wie auf der Stufe-3/4/5-Seite (product-comparison). Statt
+                der alten "S1 + Punkte"-Custom-Anzeige wird hier die
+                gleiche `StufenChips`-Komponente verwendet, die auch
+                auf den ProductCards und in Stöbern erscheint — eine
+                visuelle Sprache für Stufen app-weit. */}
+            {p ? (
+              <View
+                style={{
+                  marginHorizontal: 20,
+                  marginTop: 20,
+                  padding: 14,
+                  paddingHorizontal: 16,
+                  borderRadius: 14,
+                  backgroundColor: theme.surfaceAlt,
+                  flexDirection: 'row',
+                  gap: 12,
+                  alignItems: 'flex-start',
+                }}
+              >
+                <View style={{ marginTop: 3 }}>
+                  <StufenChips stufe={stufe} size="md" />
+                </View>
+                <Text
+                  style={{
+                    flex: 1,
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 13,
+                    lineHeight: 18,
+                    color: theme.textSub,
+                  }}
+                >
+                  <Text style={{ fontWeight: fontWeight.bold, color: theme.text }}>
+                    Stufe {stufe} — {stufeInfo.label}.
+                  </Text>{' '}
+                  {stufeInfo.line} Kein direktes Markenprodukt zum Vergleich
+                  hinterlegt.
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Tabs: Inhaltsstoffe / Nährwerte. Bei Non-Food-
+                Kategorien (Drogerie, Haushalt, Kosmetik, Tier, …)
+                ergeben Zutaten + Nährwerte keinen Sinn — Tabs +
+                PagerView werden komplett ausgeblendet. */}
+            {p && !hideFoodTabs ? (
+              <>
+                <View style={{ marginHorizontal: 20, marginTop: 20 }}>
+                  <SegmentedTabs
+                    tabs={[
+                      { key: 'ingredients', label: 'Inhaltsstoffe' },
+                      { key: 'nutrition', label: 'Nährwerte' },
+                    ] as const}
+                    value={tab}
+                    onChange={onTabChange}
+                  />
+                </View>
+                <PagerView
+                  ref={tabPagerRef}
+                  style={{
+                    height: Math.max(
+                      tabHeights.ingredients ?? 0,
+                      tabHeights.nutrition ?? 0,
+                      220,
+                    ),
+                  }}
+                  initialPage={0}
+                  onPageSelected={onTabPagerSelected}
+                >
+                  <View
+                    key="ingredients"
+                    onLayout={(e) => {
+                      const h = e?.nativeEvent?.layout?.height;
+                      if (typeof h !== 'number') return;
+                      setTabHeights((prev) =>
+                        prev.ingredients === h ? prev : { ...prev, ingredients: h },
+                      );
+                    }}
+                  >
+                    <SingleInfoCard
+                      tab="ingredients"
+                      product={p}
+                      theme={theme}
+                      shadows={shadows}
+                    />
+                  </View>
+                  <View
+                    key="nutrition"
+                    onLayout={(e) => {
+                      const h = e?.nativeEvent?.layout?.height;
+                      if (typeof h !== 'number') return;
+                      setTabHeights((prev) =>
+                        prev.nutrition === h ? prev : { ...prev, nutrition: h },
+                      );
+                    }}
+                  >
+                    <SingleInfoCard
+                      tab="nutrition"
+                      product={p}
+                      theme={theme}
+                      shadows={shadows}
+                    />
+                  </View>
+                </PagerView>
+              </>
+            ) : null}
+
+            {/* (Detektiv-Check-Zeile sitzt oberhalb der Tabs, siehe
+                weiter oben — sie hatte früher hier am Ende der Page
+                geklebt, wandert jetzt in den Kontext der Inhalts-
+                tabellen damit der User die Einordnung sofort sieht
+                bevor er Inhaltsstoffe/Nährwerte liest.) */}
           </View>
-          <Text
-            style={{
-              flex: 1,
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 12,
-              lineHeight: 18,
-              color: theme.textSub,
-            }}
-          >
-            <Text style={{ fontWeight: fontWeight.bold, color: theme.text }}>
-              Stufe {stufe} — {stufeInfo.label}:
-            </Text>{' '}
-            {stufeInfo.line} Kein direktes Markenprodukt zum Vergleich
-            hinterlegt.
-          </Text>
-        </View>
+        </Crossfade>
+
+        {/* Weitere enttarnte Produkte — vertikale Liste, Stufe 3/4/5
+            aus derselben Kategorie. Tap führt direkt zur jeweiligen
+            product-comparison-Seite (alle hier sind Stufe 3+, haben
+            also ein Markenprodukt zum Vergleich verlinkt). */}
+        <EnttarnteAlternativesList
+          items={alternatives}
+          onItemPress={(altId) => {
+            FirestoreService.prefetchComparisonData(altId, false);
+            router.push(`/product-comparison/${altId}?type=noname` as any);
+          }}
+        />
 
         <View style={{ height: 24 }} />
       </Animated.ScrollView>
 
-      <RatingsSheet
-        visible={ratingsOpen}
-        onClose={() => setRatingsOpen(false)}
-        productName={p.name ?? 'Produkt'}
-        ratings={ratings}
-        loading={ratingsLoading}
-        showSimilarity={false}
-        onSubmit={async (r: SubmittedRating) => {
-          if (!user?.uid) {
-            showInfoToast('Bitte anmelden');
-            throw new Error('not-authenticated');
-          }
-          const now = new Date();
-          await FirestoreService.addProductRating({
-            userID: user.uid,
-            productID: p.id,
-            brandProductID: null,
-            ratingOverall: r.ratingOverall,
-            ratingPriceValue: r.ratingPriceValue ?? null,
-            ratingTasteFunction: r.ratingTasteFunction ?? null,
-            ratingContent: r.ratingContent ?? null,
-            ratingSimilarity: r.ratingSimilarity ?? null,
-            comment: r.comment ?? null,
-            ratedate: now,
-            updatedate: now,
-          });
-          try {
-            const refreshed =
-              await FirestoreService.getProductRatingsWithUserInfo(p.id, true);
-            setRatings(refreshed as any);
-          } catch {
-            /* non-fatal */
-          }
-        }}
-      />
+      {/* RatingsSheet only mounts once the basic product is in
+          state — its action button (and therefore the way to open
+          it) only mounts at the same gate, so this is consistent. */}
+      {p ? (
+        <RatingsSheet
+          visible={ratingsOpen}
+          onClose={() => setRatingsOpen(false)}
+          productName={p.name ?? 'Produkt'}
+          ratings={ratings}
+          loading={ratingsLoading}
+          showSimilarity={false}
+          onSubmit={async (r: SubmittedRating) => {
+            if (!user?.uid) {
+              showInfoToast('Bitte anmelden');
+              throw new Error('not-authenticated');
+            }
+            const now = new Date();
+            await FirestoreService.addProductRating({
+              userID: user.uid,
+              productID: p.id,
+              brandProductID: null,
+              ratingOverall: r.ratingOverall,
+              ratingPriceValue: r.ratingPriceValue ?? null,
+              ratingTasteFunction: r.ratingTasteFunction ?? null,
+              ratingContent: r.ratingContent ?? null,
+              ratingSimilarity: r.ratingSimilarity ?? null,
+              comment: r.comment ?? null,
+              ratedate: now,
+              updatedate: now,
+            });
+
+            // 🎯 Gamification: track `submit_rating` after the
+            // rating is persisted. Fire-and-forget.
+            achievementService
+              .trackAction(user.uid, 'submit_rating', {
+                productId: p.id,
+                productName: p.name,
+                productType: 'noname',
+                rating: r.ratingOverall,
+                commentLength: (r.comment || '').length,
+              })
+              .catch((err) => {
+                console.warn('submit_rating trackAction failed', err);
+              });
+
+            try {
+              const refreshed =
+                await FirestoreService.getProductRatingsWithUserInfo(p.id, true);
+              setRatings(refreshed as any);
+            } catch {
+              /* non-fatal */
+            }
+          }}
+        />
+      ) : null}
+
+      {/* Schwebender Einkaufszettel-FAB. Detail-Seiten haben keine
+          Tab-Bar darunter, also nur safe-area-bottom + 20 px. */}
+      <FloatingShoppingListButton bottomOffset={insets.bottom + 20} />
+
+      {/* Fly-to-cart overlay — clones the hero image and animates it
+          into the floating cart button. Mounted last so it sits on
+          top of the FAB visually. */}
+      <FlyToCart ref={flyRef} />
     </View>
   );
 }

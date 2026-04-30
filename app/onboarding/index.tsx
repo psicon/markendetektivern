@@ -1,4 +1,5 @@
 // Simple Onboarding ohne Hooks-Probleme
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -499,10 +500,78 @@ export default function OnboardingScreen() {
       
       // Vervollständige die Session statt neues Dokument
       await setDoc(doc(db, 'onboardingResultsV5', sessionId), completionData);
-      
+
+      // ─── ALSO mirror the answers onto the user document ───
+      //
+      // The session doc in `onboardingResultsV5` is for analytics
+      // / aggregation; the per-user mirror lives on `users/{uid}`
+      // so screens like Profil, Belohnungen, Einkaufsliste-Filter
+      // etc. can read the user's preferences directly without a
+      // session-by-session lookup. Stored fields:
+      //   • country               'DE' | 'AT' | 'CH'
+      //   • favoriteMarkets       full market objects (with id)
+      //   • primaryMarket         the first selected market — used
+      //                            by the Favoriten card to flag
+      //                            "this is YOUR shop"
+      //   • weeklyBudgetEur       weekly grocery budget (number)
+      //   • priorities            string[] selected priorities
+      //   • acquisitionSource     marketing attribution
+      //   • onboardingCompletedAt server timestamp
+      //
+      // Wrapped in try/catch so a failure here doesn't block the
+      // user from finishing onboarding (the session doc above is
+      // the authoritative copy for our analytics).
+      try {
+        const uid = auth.currentUser?.uid;
+        if (uid) {
+          const userPrefs: any = {
+            country,
+            weeklyBudgetEur: budget,
+            priorities,
+            onboardingCompletedAt: serverTimestamp(),
+          };
+          if (selectedMarkets.length > 0) {
+            userPrefs.favoriteMarkets = completionData.favoriteMarkets;
+            // `favoriteMarket` (singular, just the ID) is what the
+            // Favorites screen reads to flag the heart-icon next
+            // to the user's primary shop on each card.
+            //
+            // `favoriteMarketName` MUSS parallel mitgeschrieben werden
+            // — sonst zeigt die Profil-Stat-Card "Dein Lieblingsmarkt"
+            // gar nichts an (sie liest direkt den Namen-String, nicht
+            // die ID). Bug-Fix: vor dieser Änderung war das Feld
+            // ausschließlich vom Edit-Profil-Screen aus gesetzt
+            // worden, sprich nur User die manuell die Profil-Maske
+            // geöffnet hatten sahen ihren Lieblingsmarkt im Profil
+            // tatsächlich.
+            const primary = completionData.primaryMarket;
+            if (primary?.id) {
+              userPrefs.favoriteMarket = primary.id;
+              userPrefs.favoriteMarketName = primary.name ?? '';
+            }
+            userPrefs.primaryMarket = primary;
+          }
+          if (acquisitionSource) {
+            userPrefs.acquisitionSource = acquisitionSource;
+            if (acquisitionSource === 'sonstiges' && acquisitionOther.trim() !== '') {
+              userPrefs.acquisitionOther = acquisitionOther;
+            }
+          }
+          if (priorities.includes('anderes') && prioritiesOther.trim() !== '') {
+            userPrefs.prioritiesOther = prioritiesOther;
+          }
+          // Merge so we don't clobber unrelated fields on the user
+          // doc (level, points, displayName, photo_url, …).
+          await setDoc(doc(db, 'users', uid), userPrefs, { merge: true });
+          console.log('✅ Onboarding answers mirrored to users/' + uid);
+        }
+      } catch (mirrorErr) {
+        console.warn('⚠️ Failed to mirror onboarding answers to user doc:', mirrorErr);
+      }
+
       const AsyncStorage = await import('@react-native-async-storage/async-storage');
       await AsyncStorage.default.setItem('onboarding_v1_completed', 'true');
-      
+
       console.log('✅ Onboarding completed with session:', sessionId);
       
       // Verwende bereits gecheckte Premium-Status wenn verfügbar
@@ -796,7 +865,26 @@ export default function OnboardingScreen() {
           <View style={styles.mainContent}>
             <Text style={styles.stepTitle}>Wo kaufst du am liebsten ein?</Text>
              <Text style={styles.counter}>{selectedMarkets.length}/3 ausgewählt</Text>
-            
+             {/* Hinweis dass der ERSTE ausgewählte Markt zum Lieblingsmarkt
+                 wird. Sichtbar erst nachdem mindestens ein Markt
+                 selektiert ist — sonst zeigt der Satz ins Leere. Der
+                 Code unten setzt zusätzlich ein gold-Heart-Badge auf
+                 selectedMarkets[0], sodass der Zusammenhang
+                 "erster = Liebling" auch visuell verankert ist. */}
+             {selectedMarkets.length > 0 ? (
+               <View style={styles.primaryMarketHintRow}>
+                 <MaterialCommunityIcons
+                   name="heart"
+                   size={13}
+                   color={Colors.light.tint}
+                   style={{ marginRight: 6 }}
+                 />
+                 <Text style={styles.primaryMarketHint}>
+                   Dein zuerst gewählter Markt wird zu deinem Lieblingsmarkt
+                 </Text>
+               </View>
+             ) : null}
+
             <FlatList
               data={markets}
               numColumns={2}
@@ -805,11 +893,16 @@ export default function OnboardingScreen() {
               renderItem={({ item }) => {
                 const isSelected = selectedMarkets.some(m => m.id === item.id);
                 const isDisabled = !isSelected && selectedMarkets.length >= 3;
-                
+                // Lieblingsmarkt = der ERSTE im Array. Wenn der User
+                // den deselektiert und einen anderen wählt, wandert
+                // das Heart-Badge automatisch mit, weil
+                // selectedMarkets[0] sich ändert.
+                const isPrimary = isSelected && selectedMarkets[0]?.id === item.id;
+
                 return (
                   <TouchableOpacity
                     style={[
-                      styles.marketOption, 
+                      styles.marketOption,
                       isSelected && styles.optionSelected,
                       isDisabled && styles.optionDisabled
                     ]}
@@ -830,9 +923,9 @@ export default function OnboardingScreen() {
                     ) : (
                       <Text style={styles.optionIcon}>{item.logo || '🛒'}</Text>
                     )}
-                    <Text 
+                    <Text
                       style={[
-                        styles.marketText, 
+                        styles.marketText,
                         isSelected && styles.optionTextSelected,
                         isDisabled && styles.optionTextDisabled
                       ]}
@@ -840,7 +933,20 @@ export default function OnboardingScreen() {
                     >
                       {item.name}
                     </Text>
-                    {isSelected && <Text style={styles.checkmark}>✓</Text>}
+                    {/* Selected-Indikator: für den primary-Markt
+                        ein Heart-Badge (visuelle Doppelaufgabe:
+                        "ausgewählt" UND "Liebling"), für alle
+                        weiteren Selected-Tiles der bisherige
+                        Checkmark. Ein Tile bekommt also genau EINE
+                        Auszeichnung — niemals beide gleichzeitig —
+                        damit's nicht doppelt-tagged wirkt. */}
+                    {isPrimary ? (
+                      <View style={styles.primaryHeartBadge}>
+                        <MaterialCommunityIcons name="heart" size={14} color="#fff" />
+                      </View>
+                    ) : isSelected ? (
+                      <Text style={styles.checkmark}>✓</Text>
+                    ) : null}
                   </TouchableOpacity>
                 );
               }}
@@ -1769,7 +1875,45 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     fontFamily: 'Nunito_600SemiBold',
     color: Colors.light.tint,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 8,
+  },
+  primaryMarketHintRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 24,
+  },
+  primaryMarketHint: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+    opacity: 0.7,
+    textAlign: 'center',
+  },
+  // Gold-tönend, klar abgesetzt vom primary-Tint Checkmark der
+  // Standard-Selected-Tiles. Macht den Lieblingsmarkt-Status
+  // unverkennbar — Form (Heart vs. Check) UND Farbe (gold vs.
+  // primary) differenzieren.
+  primaryHeartBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#E91E63',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.18,
+        shadowRadius: 2,
+      },
+      android: { elevation: 2 },
+    }),
   },
   checkmark: {
     position: 'absolute',

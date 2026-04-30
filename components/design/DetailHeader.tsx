@@ -28,6 +28,10 @@ type Props = {
   /** Scroll offset at which the title-swap completes. Default 120. */
   swapAt?: number;
   onBack?: () => void;
+  /** Optional right-side slot — rendered after the title with the
+   *  same vertical alignment as the back button. Use for screen
+   *  actions (info, share, settings, …). */
+  right?: React.ReactNode;
 };
 
 /** Height of the row below the safe-area inset. Used by screens to pad
@@ -50,6 +54,7 @@ export function DetailHeader({
   scrollY,
   swapAt = 120,
   onBack,
+  right,
 }: Props) {
   const { theme } = useTokens();
   const scheme = useColorScheme() ?? 'light';
@@ -205,6 +210,7 @@ export function DetailHeader({
           </Animated.View>
         ) : null}
       </View>
+      {right ? <View style={{ marginLeft: 4 }}>{right}</View> : null}
     </View>
   );
 

@@ -4,7 +4,6 @@ import {
   Dimensions,
   Modal,
   Pressable,
-  ScrollView,
   Text,
   TextInput,
   View,
@@ -17,6 +16,7 @@ import {
 import Animated, {
   Easing,
   runOnJS,
+  useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -154,14 +154,88 @@ export function RatingsSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
+  // Body ScrollView height cap (in PX, not %) — the trick that
+  // makes both "size-to-content for short lists" AND "scroll past
+  // cap for long lists" work reliably. Same pattern as FilterSheet.
+  // Subtractions: paddingTop (10) + drag handle + margin (17) +
+  // title row (~52) + footer (~61) + safe-area-bottom padding.
+  const bodyMaxHeight =
+    SCREEN_HEIGHT * 0.9 -
+    (10 + 17 + 52 + 61 + Math.max(32, insets.bottom + 20));
+
+  // ─── Scroll-to-dismiss wiring ───────────────────────────────────
+  // Native iOS bottom sheets keep dismissing when the user keeps
+  // pulling down past the top of the inner ScrollView. We mirror
+  // that with three shared values and a Pan + Native gesture pair:
+  //
+  //   • `scrollY`     — current ScrollView contentOffset.y (UI thread).
+  //   • `wasAtTop`    — whether `scrollY` was <= 0 at the previous
+  //                     onUpdate tick. Used to detect the moment the
+  //                     user transitions from in-list scrolling to
+  //                     at-top-overscroll (so we can capture an
+  //                     offset and avoid a visual jump).
+  //   • `dragOffset`  — the absolute pan translationY at the moment
+  //                     `wasAtTop` flipped to true. Subsequent sheet
+  //                     translation = translationY − dragOffset, so
+  //                     the sheet stays at 0 px when scroll first
+  //                     reaches the top and only starts moving as
+  //                     the user keeps pulling.
+  const scrollY = useSharedValue(0);
+  const wasAtTop = useSharedValue(true);
+  const dragOffset = useSharedValue(0);
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      scrollY.value = e.contentOffset.y;
+    },
+  });
+
+  // Native gesture handle for the ScrollView's internal scroll. The
+  // outer Pan gesture marks itself simultaneous with this so they
+  // don't compete for touches — Pan handles sheet translation, the
+  // native ScrollView handles list scrolling, and both run together.
+  const nativeScroll = Gesture.Native();
+
   const panGesture = Gesture.Pan()
-    .activeOffsetY(10)
+    // Activate only on DOWNWARD drags ≥ 5 px. Upward drags never
+    // claim the gesture so the ScrollView always wins on a scroll-up.
+    .activeOffsetY([-Number.MAX_SAFE_INTEGER, 5])
+    .simultaneousWithExternalGesture(nativeScroll)
+    .onStart(() => {
+      'worklet';
+      // Capture initial state so the first onUpdate tick has a clean
+      // baseline. If the user starts the drag with the list already
+      // at the top, no offset to subtract — the sheet starts panning
+      // immediately.
+      wasAtTop.value = scrollY.value <= 0;
+      dragOffset.value = 0;
+    })
     .onUpdate((e) => {
-      if (e.translationY > 0) translateY.value = e.translationY;
+      'worklet';
+      const atTop = scrollY.value <= 0;
+      if (atTop) {
+        if (!wasAtTop.value) {
+          // The user just transitioned from scrolling-the-list to
+          // overscrolling-from-the-top. Capture the current pan
+          // translation so we don't jump the sheet to that value —
+          // we want it to stay at 0 px and start moving from here.
+          dragOffset.value = e.translationY;
+          wasAtTop.value = true;
+        }
+        const sheetDelta = e.translationY - dragOffset.value;
+        translateY.value = sheetDelta > 0 ? sheetDelta : 0;
+      } else {
+        // Mid-list — the ScrollView handles the gesture. Make sure
+        // the sheet stays pinned (no leftover translateY from a
+        // previous overscroll-then-scroll-back sequence).
+        wasAtTop.value = false;
+        translateY.value = 0;
+      }
     })
     .onEnd((e) => {
       const close =
-        translateY.value > SWIPE_CLOSE_THRESHOLD || e.velocityY > SWIPE_CLOSE_VELOCITY;
+        translateY.value > SWIPE_CLOSE_THRESHOLD ||
+        (scrollY.value <= 0 && e.velocityY > SWIPE_CLOSE_VELOCITY);
       if (close) {
         runOnJS(onClose)();
       } else {
@@ -232,85 +306,112 @@ export function RatingsSheet({
       statusBarTranslucent
     >
       <GestureHandlerRootView style={{ flex: 1 }}>
+        {/* Backdrop layers — Animated.View for the visual fade,
+            Pressable as ABSOLUTE-FILL SIBLING for tap-to-dismiss.
+            They are siblings of the sheet (NOT wrapping it) so the
+            sheet's children — including the ScrollView — receive
+            touches uninterrupted. Same pattern as FilterSheet. */}
         <Animated.View
+          pointerEvents="none"
           style={[
             { ...StyleAbsoluteFill, backgroundColor: theme.overlay },
             backdropStyle,
           ]}
         />
-        <Pressable
-          onPress={onClose}
+        <Pressable onPress={onClose} style={StyleAbsoluteFill} />
+
+        {/* Sheet anchor — `box-none` so taps in the empty area
+            above the sheet pass through to the backdrop Pressable.
+            The sheet itself catches its own touches. */}
+        <View
+          pointerEvents="box-none"
           style={{ flex: 1, justifyContent: 'flex-end' }}
         >
-          <GestureDetector gesture={panGesture}>
-            <Animated.View
-              onStartShouldSetResponder={() => true}
-              style={[
-                sheetStyle,
-                {
-                  backgroundColor: theme.surface,
-                  borderTopLeftRadius: 22,
-                  borderTopRightRadius: 22,
-                  paddingTop: 10,
-                  paddingBottom: Math.max(32, insets.bottom + 20),
-                  maxHeight: '90%',
-                },
-              ]}
-            >
-              {/* Drag handle */}
-              <View
-                style={{
-                  width: 44,
-                  height: 5,
-                  borderRadius: 3,
-                  backgroundColor: theme.borderStrong,
-                  alignSelf: 'center',
-                  marginBottom: 12,
-                }}
-              />
+          <Animated.View
+            style={[
+              sheetStyle,
+              {
+                backgroundColor: theme.surface,
+                borderTopLeftRadius: 22,
+                borderTopRightRadius: 22,
+                paddingTop: 10,
+                paddingBottom: Math.max(32, insets.bottom + 20),
+                // No maxHeight here — sheet sizes to content.
+                // The ScrollView below carries the pixel cap so RN/
+                // Yoga reliably bounds it.
+              },
+            ]}
+          >
+            {/* Pan gesture wraps the WHOLE sheet (chrome + body +
+                footer). It runs simultaneously with the inner
+                ScrollView's native scroll gesture (`nativeScroll`),
+                so:
+                  • Chrome / footer drags     → sheet pans down
+                  • Body drag while mid-list  → ScrollView scrolls
+                  • Body drag while at top    → sheet pans down
+                The conditional logic in panGesture.onUpdate switches
+                between "pan the sheet" and "let scroll happen"
+                based on the live scroll offset. */}
+            <GestureDetector gesture={panGesture}>
+              <View>
+                {/* Drag handle */}
+                <View
+                  style={{
+                    width: 44,
+                    height: 5,
+                    borderRadius: 3,
+                    backgroundColor: theme.borderStrong,
+                    alignSelf: 'center',
+                    marginBottom: 12,
+                  }}
+                />
 
-              {/* Title row */}
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  paddingHorizontal: 20,
-                  marginBottom: 10,
-                }}
-              >
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text
-                    style={{
-                      fontFamily,
-                      fontWeight: fontWeight.semibold,
-                      fontSize: 11,
-                      color: theme.textMuted,
-                      letterSpacing: 1.2,
-                      textTransform: 'uppercase',
-                    }}
-                  >
-                    {view === 'submit' ? 'Deine Bewertung' : 'Bewertungen'}
-                  </Text>
-                  <Text
-                    numberOfLines={1}
-                    style={{
-                      fontFamily,
-                      fontWeight: fontWeight.extraBold,
-                      fontSize: 18,
-                      color: theme.text,
-                      marginTop: 2,
-                    }}
-                  >
-                    {productName}
-                  </Text>
+                {/* Title row */}
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingHorizontal: 20,
+                    marginBottom: 10,
+                  }}
+                >
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.semibold,
+                        fontSize: 11,
+                        color: theme.textMuted,
+                        letterSpacing: 1.2,
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      {view === 'submit' ? 'Deine Bewertung' : 'Bewertungen'}
+                    </Text>
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.extraBold,
+                        fontSize: 18,
+                        color: theme.text,
+                        marginTop: 2,
+                      }}
+                    >
+                      {productName}
+                    </Text>
+                  </View>
+                  <Pressable onPress={onClose} hitSlop={8} style={{ marginLeft: 12 }}>
+                    <MaterialCommunityIcons name="close" size={22} color={theme.textMuted} />
+                  </Pressable>
                 </View>
-                <Pressable onPress={onClose} hitSlop={8} style={{ marginLeft: 12 }}>
-                  <MaterialCommunityIcons name="close" size={22} color={theme.textMuted} />
-                </Pressable>
-              </View>
 
-              {/* View body */}
+                {/* View body — INSIDE the outer pan GestureDetector
+                    so chrome+body share the pan. ScrollViews below
+                    are wrapped in their own inner GestureDetector
+                    with the `nativeScroll` gesture so the native
+                    scroll cooperates simultaneously with the pan. */}
               {view === 'submitted' ? (
                 <View
                   style={{
@@ -357,13 +458,19 @@ export function RatingsSheet({
                   </Text>
                 </View>
               ) : view === 'submit' ? (
-                <ScrollView
+                <GestureDetector gesture={nativeScroll}>
+                <Animated.ScrollView
+                  style={{ maxHeight: bodyMaxHeight }}
                   contentContainerStyle={{
                     paddingHorizontal: 20,
                     paddingBottom: 20,
                   }}
                   keyboardShouldPersistTaps="handled"
                   showsVerticalScrollIndicator={false}
+                  onScroll={scrollHandler}
+                  scrollEventThrottle={1}
+                  bounces={false}
+                  overScrollMode="never"
                 >
                   <StarPicker
                     label="Gesamt"
@@ -438,14 +545,21 @@ export function RatingsSheet({
                       {comment.length}/600
                     </Text>
                   </View>
-                </ScrollView>
+                </Animated.ScrollView>
+                </GestureDetector>
               ) : (
-                <ScrollView
+                <GestureDetector gesture={nativeScroll}>
+                <Animated.ScrollView
+                  style={{ maxHeight: bodyMaxHeight }}
                   contentContainerStyle={{
                     paddingHorizontal: 20,
                     paddingBottom: 20,
                   }}
                   showsVerticalScrollIndicator={false}
+                  onScroll={scrollHandler}
+                  scrollEventThrottle={1}
+                  bounces={false}
+                  overScrollMode="never"
                 >
                   {/* Loading skeletons */}
                   {loading ? (
@@ -601,7 +715,8 @@ export function RatingsSheet({
                       </Text>
                     </View>
                   )}
-                </ScrollView>
+                </Animated.ScrollView>
+                </GestureDetector>
               )}
 
               {/* Footer CTA — only in list/submit views */}
@@ -699,9 +814,10 @@ export function RatingsSheet({
                   )}
                 </View>
               )}
-            </Animated.View>
-          </GestureDetector>
-        </Pressable>
+              </View>
+            </GestureDetector>
+          </Animated.View>
+        </View>
       </GestureHandlerRootView>
     </Modal>
   );

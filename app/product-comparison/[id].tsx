@@ -3,36 +3,48 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Dimensions,
   Image,
+  InteractionManager,
   Pressable,
   ScrollView,
   Text,
   View,
 } from 'react-native';
 import Animated, {
+  Easing,
   Extrapolation,
   interpolate,
   useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
+  withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PagerView from 'react-native-pager-view';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
+import {
+  EnttarnteAlternativesList,
+  type EnttarnteAlternative,
+} from '@/components/design/EnttarnteAlternativesList';
+import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
+import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
+import { ImageZoomModal, type SourceRect } from '@/components/design/ImageZoomModal';
+import { getProductImage } from '@/lib/utils/productImage';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
-import { ProductDetailSkeleton } from '@/components/design/Skeletons';
+import { Crossfade, Shimmer } from '@/components/design/Skeletons';
 import { StufenChips } from '@/components/design/StufenChips';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useFavorites } from '@/lib/hooks/useFavorites';
+import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
+import { isNonFoodCategory } from '@/lib/utils/categoryClassification';
 import {
-  showCartAddedToast,
   showFavoriteAddedToast,
   showFavoriteRemovedToast,
   showInfoToast,
@@ -108,8 +120,14 @@ function formatPackParts(
 }
 
 function savings(brand: { preis?: number } | undefined, nn: { preis?: number } | undefined) {
+  // Returns SIGNED values:
+  //   • pct > 0 → noname is cheaper → user saves money (badge green)
+  //   • pct < 0 → noname is more expensive → markup (badge red)
+  //   • pct === 0 → identical price → no badge
+  // Previously the eur delta was clipped to 0, hiding the rare
+  // "eigenmarke costs MORE" case under the same green-savings UI.
   if (!brand?.preis || !nn?.preis) return { eur: 0, pct: 0 };
-  const eur = Math.max(0, brand.preis - nn.preis);
+  const eur = brand.preis - nn.preis;
   const pct = Math.round((eur / brand.preis) * 100);
   return { eur, pct };
 }
@@ -125,24 +143,50 @@ export default function ProductComparisonScreen() {
   const { theme, brand, shadows, stufen } = useTokens();
   const { user } = useAuth();
   const { toggleFavorite } = useFavorites();
+  const analytics = useAnalytics();
 
-  const isMarkenProdukt = type === 'markenprodukt';
+  // Different callers across the app push either `?type=markenprodukt`
+  // (home, explore, comparison-alternatives) or `?type=brand` (search-
+  // results, history, purchase-history, favorites, barcode-scanner).
+  // Both refer to the same thing — accept both so navigation from
+  // any entry point works.
+  const isMarkenProdukt = type === 'markenprodukt' || type === 'brand';
 
-  // ─── Data ─────────────────────────────────────────────────────────────
-  const [loading, setLoading] = useState(true);
+  // ─── Data state ──────────────────────────────────────────────────
+  // Two readiness flags drive the on-screen reveal:
+  //   • `mainReady`    — brand product fully resolved → hero block
+  //                      crossfades in (Crossfade, delay 0).
+  //   • `nonamesReady` — related no-name products query landed →
+  //                      carousel block crossfades in (Crossfade,
+  //                      delay 0; the stagger comes from the natural
+  //                      data delta since the related-products query
+  //                      starts AFTER the brand product resolves on
+  //                      the Firestore side).
+  // No `onBasic` callback any more — staggered partial reveals
+  // felt like multiple little pops; one clean crossfade per
+  // section is much smoother.
   const [error, setError] = useState<string | null>(null);
   const [mainProduct, setMainProduct] = useState<MarkenProduktWithDetails | null>(null);
   const [nonames, setNonames] = useState<ProductWithDetails[]>([]);
+  const [nonamesReady, setNonamesReady] = useState(false);
   const [pickedId, setPickedId] = useState<string | null>(null);
+  const mainReady = !!mainProduct;
 
   useEffect(() => {
+    let alive = true;
+    setError(null);
+    setMainProduct(null);
+    setNonames([]);
+    setNonamesReady(false);
+    setPickedId(null);
+
     (async () => {
-      setLoading(true);
       try {
         const data = await FirestoreService.getProductComparisonData(
           String(id),
           isMarkenProdukt,
         );
+        if (!alive) return;
         if (!data) {
           setError('Produkt nicht gefunden');
           return;
@@ -155,60 +199,142 @@ export default function ProductComparisonScreen() {
           return ((a as any).preis ?? 0) - ((b as any).preis ?? 0);
         });
         setNonames(sorted);
+        setNonamesReady(true);
         setPickedId(
           !data.clickedWasNoName ? (sorted[0]?.id ?? null) : data.clickedProductId,
         );
+
+        // 📊 Analytics — comparison view (matches old behaviour from
+        // app/product-comparison/[id].tsx in main branch). Fires once
+        // per comparison-data-load with the main product ID and the
+        // list of related NoName products being compared against.
+        if (analytics?.trackProductComparison && data.mainProduct?.id) {
+          const compared = sorted.map((p: any) => ({
+            productId: p.id,
+            productName: p.name || p.produktName || 'NoName Produkt',
+            productType: 'noname' as const,
+            price: p.preis || 0,
+            savings: p.ersparnis || 0,
+          }));
+          analytics.trackProductComparison(
+            data.mainProduct.id,
+            (data.mainProduct as any).name || (data.mainProduct as any).produktName || 'Produkt',
+            isMarkenProdukt ? 'brand' : 'noname',
+            compared,
+          );
+        }
+
+        // Cart-Status für die geladenen Produkte (Hauptmarke + alle
+        // verwandten NoNames) initialisieren. Ohne diesen Schritt
+        // startet `cartMap` leer und der Toggle-Button zeigt für ein
+        // bereits im Wagen liegendes Produkt fälschlich "hinzufügen".
+        // Eine einzelne Query lädt alle offenen Cart-Items des Users
+        // — billiger als N parallele isInShoppingCart-Calls.
+        if (user?.uid && alive) {
+          try {
+            const items = await FirestoreService.getShoppingCartItems(user.uid);
+            if (!alive) return;
+            const inCartIds = new Set<string>();
+            for (const it of items as any[]) {
+              const pid = it?.markenProdukt?.id || it?.handelsmarkenProdukt?.id;
+              if (pid) inCartIds.add(pid);
+            }
+            const next: Record<string, boolean> = {};
+            if (data.mainProduct?.id && inCartIds.has(data.mainProduct.id)) {
+              next[data.mainProduct.id] = true;
+            }
+            for (const nn of sorted) {
+              if (nn.id && inCartIds.has(nn.id)) next[nn.id] = true;
+            }
+            // Funktional setzen, damit User-getriggerte Toggles, die
+            // zwischen den Awaits passiert sind, nicht überschrieben
+            // werden.
+            setCartMap((prev) => ({ ...prev, ...next }));
+          } catch {
+            /* non-fatal — cartMap bleibt im aktuellen Stand */
+          }
+        }
+
+        // 🎯 Gamification: track `view_comparison` once data is in
+        // hand. This action also fires the `first_action_any`
+        // achievement on the user's first visit. Fire-and-forget —
+        // failures must not block the screen from rendering.
+        if (user?.uid) {
+          achievementService
+            .trackAction(user.uid, 'view_comparison', {
+              productId: String(id),
+              productType: type ?? (isMarkenProdukt ? 'markenprodukt' : 'noname'),
+            })
+            .catch((err) => {
+              console.warn('view_comparison trackAction failed', err);
+            });
+        }
       } catch (e) {
+        if (!alive) return;
         console.warn('ProductComparison: load failed', e);
         setError('Fehler beim Laden');
-      } finally {
-        setLoading(false);
       }
     })();
-  }, [id, isMarkenProdukt]);
+    return () => {
+      alive = false;
+    };
+  }, [id, isMarkenProdukt, type, user?.uid]);
 
   const picked = useMemo(
     () => nonames.find((p) => p.id === pickedId) ?? nonames[0] ?? null,
     [nonames, pickedId],
   );
 
-  // "Gute Alternativen" — simple: 5 random products from the same
-  // Kategorie, minus the main product itself. Similarity scoring kept
-  // producing empty sections on product names where no other
-  // candidate shared meaningful word stems (proprietary brand names
-  // like "Nutella"), so we fall back to the straightforward
-  // approach until we have richer product metadata to work with.
+  // "Weitere enttarnte Produkte" — gleiche Logik wie auf
+  // noname-detail. Ranking nach Name-Ähnlichkeit zum AKTUELL
+  // gepickten NoName (das ist die Bezugs-Identität der Page,
+  // nicht das Markenprodukt). Ausschluss ist das gepickte NoName
+  // selbst — sonst würde es in der eigenen "Weitere"-Liste landen.
   useEffect(() => {
+    let alive = true;
     if (!mainProduct) return;
-    const catId =
+    const excludeId = picked?.id ?? mainProduct.id;
+    // ID kommt vorrangig vom expliziten `kategorieId`-Feld das wir
+    // in `getMarkenProduktWithDetails` an die Daten anhängen — die
+    // populierte `kategorie` enthält nicht zuverlässig eine ID.
+    const kategorieId =
+      (mainProduct as any).kategorieId ??
       (mainProduct as any).kategorie?.id ??
-      ((mainProduct as any).kategorie && typeof (mainProduct as any).kategorie === 'object'
-        ? undefined
-        : (mainProduct as any).kategorie);
-    (async () => {
-      try {
-        const res = await FirestoreService.getMarkenproduktePaginated(
-          15,
-          null,
-          (catId ? { categoryFilters: [catId] } : {}) as any,
-        );
-        const pool = (res.products ?? []).filter(
-          (p: any) => p.id !== mainProduct.id,
-        );
-        // Fisher-Yates shuffle, then slice — picks 5 random from the
-        // pool. Avoids always showing the same 5 for the same main
-        // product, which makes the section feel static on repeat
-        // visits.
-        for (let i = pool.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [pool[i], pool[j]] = [pool[j], pool[i]];
-        }
-        setAlternatives(pool.slice(0, 5));
-      } catch (e) {
-        console.warn('ProductComparison: alternatives load failed', e);
-      }
-    })();
-  }, [mainProduct]);
+      (typeof (mainProduct as any).kategorie === 'string'
+        ? (mainProduct as any).kategorie
+        : null);
+    const refName: string | null =
+      (picked as any)?.name ?? (mainProduct as any)?.name ?? null;
+    const refHandelsmarke: string | null =
+      (picked as any)?.handelsmarke?.bezeichnung ??
+      (picked as any)?.handelsmarke?.name ??
+      null;
+    // Deferred via InteractionManager — der Page-Load + Carousel-
+    // Animations haben Vorrang vor der unten am Ende sitzenden
+    // "Weitere enttarnte Produkte"-Liste.
+    const handle = InteractionManager.runAfterInteractions(() => {
+      if (!alive) return;
+      FirestoreService.getEnttarnteAlternatives(
+        {
+          excludeProductId: excludeId,
+          kategorieId,
+          productName: refName,
+          handelsmarkeName: refHandelsmarke,
+        },
+        5,
+      )
+        .then((items) => {
+          if (alive) setAlternatives(items ?? []);
+        })
+        .catch(() => {
+          if (alive) setAlternatives([]);
+        });
+    });
+    return () => {
+      alive = false;
+      handle.cancel?.();
+    };
+  }, [mainProduct, picked]);
 
   // ─── UI state ─────────────────────────────────────────────────────────
   const [tab, setTab] = useState<Tab>('ingredients');
@@ -229,6 +355,15 @@ export default function ProductComparisonScreen() {
   };
   const [carouselIdx, setCarouselIdx] = useState(0);
   const carouselRef = useRef<ScrollView | null>(null);
+  // FlyToCart wiring — one ref to drive the overlay, plus a Map of
+  // product-image refs keyed by productId. We measure the relevant
+  // image at "add to cart" time and pass its rect into the overlay.
+  const flyRef = useRef<FlyToCartHandle | null>(null);
+  const productImageRefs = useRef<Map<string, View | null>>(new Map());
+  const setProductImageRef = (productId: string, ref: View | null) => {
+    if (ref) productImageRefs.current.set(productId, ref);
+    else productImageRefs.current.delete(productId);
+  };
   const [favMap, setFavMap] = useState<Record<string, boolean>>({});
   const [cartMap, setCartMap] = useState<Record<string, boolean>>({});
   const [ratingsSheet, setRatingsSheet] = useState<{
@@ -238,8 +373,65 @@ export default function ProductComparisonScreen() {
   } | null>(null);
   const [ratings, setRatings] = useState<Rating[]>([]);
   const [ratingsLoading, setRatingsLoading] = useState(false);
+
+  // ─── Image zoom (Stufe 3/4/5: tap any product photo → fullscreen zoom)
+  // Variant choice:
+  //   • `bildClean`    (≤512 px WebP, ~10-20 KB)  → on-screen thumb
+  //   • `bildCleanPng` (≤1024 px PNG, ~80-150 KB) → zoom view
+  //   • `bildCleanHq`  (≤1600 px PNG, ~150-300 KB) → unused (too slow)
+  // Using the MID 1024 px PNG for zoom keeps pinch-zoom acceptably
+  // sharp through ~3× while loading ~5× faster than the HQ variant.
+  // The modal also shows a spinner while the PNG is fetching, so
+  // the user gets immediate feedback on tap even if the network is
+  // slow.
+  //
+  // For the open animation: we measure the tapped thumb's window-
+  // coordinate rect via `View.measureInWindow` and pass it to the
+  // modal as `sourceRect`. The modal then performs a shared-element
+  // transition — the picture's bounding rect interpolates from
+  // the thumb's exact dimensions to fullscreen, so the morph is
+  // pixel-clean (no white flash, no aspect mismatch).
+  const [zoomUri, setZoomUri] = useState<string | null>(null);
+  const [zoomRect, setZoomRect] = useState<SourceRect | null>(null);
+  const openZoom = (
+    p:
+      | {
+          id?: string;
+          bildClean?: string | null;
+          bildCleanPng?: string | null;
+        }
+      | undefined
+      | null,
+  ) => {
+    if (!p?.id) return;
+    // Prefer the mid PNG variant; fall back to WebP if the product
+    // hasn't been re-processed yet (e.g. an older doc still on
+    // pre-v8 fields where bildCleanPng might be missing).
+    const url = getProductImage(p as any, 'png') ?? getProductImage(p as any);
+    if (!url) return;
+    const ref = productImageRefs.current.get(p.id);
+    if (ref) {
+      // measureInWindow → absolute screen coords incl. translucent
+      // status-bar offset, which is what the modal needs.
+      ref.measureInWindow((x, y, width, height) => {
+        setZoomRect({ x, y, width, height });
+        setZoomUri(url);
+      });
+    } else {
+      // No measured rect — modal falls back to a soft scale-fade.
+      setZoomRect(null);
+      setZoomUri(url);
+    }
+  };
+  const closeZoom = () => {
+    setZoomUri(null);
+    // `zoomRect` is intentionally NOT cleared here — the modal
+    // animates 1→0 over ~220 ms and reads zoomRect for the fly-back.
+    // Clearing it now would snap the close to a generic fade. The
+    // next `openZoom` overwrites it with the next thumb's rect.
+  };
   // Bottom "Gute Alternativen" — other brand products from the same category.
-  const [alternatives, setAlternatives] = useState<any[]>([]);
+  const [alternatives, setAlternatives] = useState<EnttarnteAlternative[]>([]);
 
   // Scroll tracking — drives the large-title → nav-title fade in the
   // DetailHeader. Everything reads `scrollY.value` from the UI thread,
@@ -282,6 +474,17 @@ export default function ProductComparisonScreen() {
   const DOCK_DISTANCE = HERO_SCREEN_Y - NAV_SCREEN_Y;
   const NAV_LEFT_OFFSET = 36; // hero padding 20 → nav after back btn (56)
 
+  // Reveal-fade — combined with the dock-transform inside the
+  // morphTitleStyle worklet so the title fades in at the SAME
+  // 320 ms tempo as the hero Crossfade below.
+  const morphFade = useSharedValue(0);
+  useEffect(() => {
+    morphFade.value = withTiming(mainProduct ? 1 : 0, {
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [mainProduct, morphFade]);
+
   const morphTitleStyle = useAnimatedStyle(() => {
     const s = scrollY.value;
     const t = interpolate(s, [0, DOCK_DISTANCE], [0, 1], Extrapolation.CLAMP);
@@ -294,6 +497,7 @@ export default function ProductComparisonScreen() {
     const scale = 1 - t * (1 - TITLE_SCALE);
     return {
       transform: [{ translateY }, { translateX }, { scale }],
+      opacity: morphFade.value,
     };
   });
 
@@ -335,16 +539,11 @@ export default function ProductComparisonScreen() {
     }
   };
 
-  // ─── Loading / Error ──────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
-        <ProductDetailSkeleton />
-      </View>
-    );
-  }
-
-  if (error || !mainProduct) {
+  // ─── Error branch ─────────────────────────────────────────────────
+  // We deliberately do NOT short-circuit the render on `loading` —
+  // the rest of the body renders chrome + skeletons until each
+  // stage of data lands (heroReady / detailsReady / nonamesReady).
+  if (error) {
     return (
       <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
         <MaterialCommunityIcons name="alert-circle-outline" size={48} color={theme.textMuted} />
@@ -361,7 +560,7 @@ export default function ProductComparisonScreen() {
           {error ?? 'Produkt nicht verfügbar'}
         </Text>
         <Pressable
-          onPress={() => router.back()}
+          onPress={handleBack}
           style={({ pressed }) => ({
             marginTop: 20,
             height: 44,
@@ -382,17 +581,23 @@ export default function ProductComparisonScreen() {
   }
 
   // ─── Derived data ─────────────────────────────────────────────────────
+  // `mp` is null until the brand product fully resolves; the page
+  // chrome and skeleton sections render meanwhile. Live values
+  // fade in via `Crossfade` once `mainReady` flips true.
+  const mp = mainProduct;
   const brandName =
-    (mainProduct.hersteller as any)?.herstellername
-    ?? (mainProduct.hersteller as any)?.name
+    (mp?.hersteller as any)?.herstellername
+    ?? (mp?.hersteller as any)?.name
     ?? '';
-  const brandLogoUri = (mainProduct.hersteller as any)?.bild as string | undefined;
+  const brandLogoUri = (mp?.hersteller as any)?.bild as string | undefined;
 
-  const brandPackInfo = formatPack(
-    (mainProduct as any).packSize,
-    (mainProduct as any).packTypInfo?.typKurz ?? (mainProduct as any).packTypInfo?.typ,
-    (mainProduct as any).preis,
-  );
+  const brandPackInfo = mp
+    ? formatPack(
+        (mp as any).packSize,
+        (mp as any).packTypInfo?.typKurz ?? (mp as any).packTypInfo?.typ,
+        (mp as any).preis,
+      )
+    : null;
 
   const pickedStufe = picked ? parseStufe((picked as any).stufe) : 1;
   const pickedInfo = STUFE_INFO[pickedStufe];
@@ -423,10 +628,57 @@ export default function ProductComparisonScreen() {
       return;
     }
     const already = !!cartMap[productId];
+    // Optimistisches Toggle der UI, danach Firestore-Sync. Bei Fehler
+    // revert.
     setCartMap((prev) => ({ ...prev, [productId]: !already }));
+
+    // Fly-to-cart animation only on the ADD path. Measure the
+    // product's image rect (main hero or alt thumbnail) and clone
+    // it into the floating cart button. Runs in parallel with the
+    // Firestore call.
+    // 📊 Analytics — comparison-end with a chosen product (the one
+    // the user adds to cart). Only fires on the ADD path; remove
+    // doesn't count as resolution. Note: `productId` here is the
+    // PICKED product (could be the main brand or any NoName alt),
+    // mp.id is the comparison's main product (the entry point).
+    if (!already && analytics?.trackComparisonEnd && mp?.id) {
+      analytics.trackComparisonEnd(
+        mp.id,
+        productId, // the product the user actually added to cart
+        undefined, // no abandonment — comparison was resolved
+      );
+    }
+
+    const flyImageUri = getProductImage(productData);
+    if (!already && flyImageUri) {
+      const imgRef = productImageRefs.current.get(productId);
+      if (imgRef) {
+        imgRef.measureInWindow((x, y, w, h) => {
+          flyRef.current?.fly({
+            sourceX: x,
+            sourceY: y,
+            sourceW: w,
+            sourceH: h,
+            imageUri: flyImageUri,
+          });
+        });
+      }
+    }
+
     try {
       if (already) {
-        showInfoToast('Aus Einkaufsliste entfernt');
+        // Tatsächlich aus Firestore entfernen — vorher hat der
+        // Toggle-Off-Path nur den lokalen State geflippt und beim
+        // nächsten Page-Reload tauchte der Eintrag wieder auf.
+        await FirestoreService.removeFromShoppingCartByProductId(
+          user.uid,
+          productId,
+          productType === 'markenprodukt',
+        );
+        // Leading 🗑️ overrides extractEmoji's default ✅ fallback —
+        // a green check on a "removed" toast read as confirmation that
+        // it had been ADDED, not removed.
+        showInfoToast('🗑️ Aus Einkaufsliste entfernt');
       } else {
         await FirestoreService.addToShoppingCart(
           user.uid,
@@ -440,10 +692,10 @@ export default function ProductComparisonScreen() {
             savings: 0,
           },
         );
-        showCartAddedToast(
-          productData?.name ?? 'Produkt',
-          () => router.push('/shopping-list' as any),
-        );
+        // No toast on single-add — the FlyToCart animation + the
+        // cart-icon state flip already make the action self-evident.
+        // Toast stays for the favorites BULK action where there's
+        // no fly-to-cart hand-off.
       }
     } catch (e) {
       setCartMap((prev) => ({ ...prev, [productId]: already }));
@@ -472,6 +724,22 @@ export default function ProductComparisonScreen() {
     }
   };
 
+  // 📊 Analytics — track comparison-end when the user navigates AWAY
+  // from this screen without explicitly resolving the comparison
+  // (i.e. without tapping cart-add). Mirrors the OLD behaviour where
+  // a comparison-end event was fired on app-close / screen-leave so
+  // we can measure abandonment vs. resolution rates in the funnel.
+  const handleBack = () => {
+    if (analytics?.trackComparisonEnd && mp?.id) {
+      analytics.trackComparisonEnd(
+        mp.id,
+        undefined, // no product picked → abandoned
+        'app_closed',
+      );
+    }
+    router.back();
+  };
+
   // ─── Render ───────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -488,18 +756,13 @@ export default function ProductComparisonScreen() {
         title="Produktdetails"
         scrollY={scrollY}
         swapAt={DOCK_DISTANCE}
-        onBack={() => router.back()}
+        onBack={handleBack}
       />
 
-      {/* ─── Morphing product title ─────────────────────────────────
-          Single Animated.View containing the brand logo + product name.
-          At the top of the scroll it sits in the hero position at 26 px;
-          as the user scrolls it translates up with the content and
-          simultaneously shrinks + slides right. Once it reaches the nav
-          bar height (scroll = DOCK_DISTANCE) it pins there at 17 px,
-          sitting exactly where the nav title would normally live —
-          giving the iOS "large title docks into the nav bar" feel.
-          zIndex 11 keeps it above the blur chrome once docked. */}
+      {/* Morph title — opacity-fades in via morphTitleStyle's
+          combined transform+opacity worklet, in lockstep with the
+          hero crossfade below. Always mounted so the absolute
+          positioning maths stays consistent. */}
       <Animated.View
         pointerEvents="none"
         style={[
@@ -512,8 +775,6 @@ export default function ProductComparisonScreen() {
             alignItems: 'center',
             gap: 8,
             zIndex: 11,
-            // top-left origin means scale shrinks toward the anchor
-            // point (the start of the text), not toward the centre.
             transformOrigin: 'top left',
           },
           morphTitleStyle,
@@ -538,8 +799,15 @@ export default function ProductComparisonScreen() {
             />
           </View>
         ) : null}
+        {/* Dynamische Title-Größe: kurze Titel rendern in voller
+            22-px-Größe, lange Titel schrumpfen automatisch bis zur
+            Mindestskala (0.65 ≈ 14 px) statt mit "..." abgeschnitten
+            zu werden. Native `adjustsFontSizeToFit` von RN. */}
         <Text
           numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.65}
+          allowFontScaling={false}
           style={{
             flexShrink: 1,
             fontFamily,
@@ -550,7 +818,7 @@ export default function ProductComparisonScreen() {
             letterSpacing: -0.3,
           }}
         >
-          {mainProduct.name}
+          {mp?.name ?? ''}
         </Text>
       </Animated.View>
 
@@ -564,10 +832,8 @@ export default function ProductComparisonScreen() {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* Title lives outside the ScrollView as the morph element
-            (see morphTitleStyle). The 28 px placeholder reserves
-            vertical space for the title at its hero size so the hero
-            image below doesn't jump when the morph starts. */}
+        {/* Title row: "Das Original" eyebrow + 28 px slot reserved
+            for the morph title (rendered absolutely above). */}
         <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
           <Text
             style={{
@@ -584,33 +850,97 @@ export default function ProductComparisonScreen() {
           <View style={{ height: 28, marginTop: 2 }} />
         </View>
 
-        {/* ─── Hero image with overlays ──────────────────────────── */}
-        <View style={{ paddingHorizontal: 20 }}>
+        {/* ─── Hero — TOP wave (Crossfade, gated on `mainReady`)
+            Skeleton mirrors the live hero exactly: same 240 px
+            container, same Hersteller pill at top-left, same
+            price pill at bottom-left, same 3 action buttons at
+            bottom-right. Shape-equivalence keeps the crossfade
+            smooth — looks like "details fill in", not "thing
+            morphs". */}
+        <Crossfade
+          ready={mainReady}
+          delay={0}
+          duration={320}
+          style={{ paddingHorizontal: 20 }}
+          skeleton={
+            <View
+              style={{
+                position: 'relative',
+                borderRadius: 20,
+                overflow: 'hidden',
+                backgroundColor: theme.surfaceAlt,
+                height: 240,
+              }}
+            >
+              <Shimmer width="100%" height={240} radius={0} />
+
+              {/* Hersteller pill placeholder — neutral grey pill at
+                  the same position + dimensions as the real
+                  chip. No brand colour during loading. */}
+              <Shimmer
+                width={140}
+                height={26}
+                radius={99}
+                style={{ position: 'absolute', left: 12, top: 12 }}
+              />
+
+              {/* Price pill placeholder — single Shimmer at the same
+                  outer dimensions + position as the real price pill. */}
+              <Shimmer
+                width={96}
+                height={56}
+                radius={14}
+                style={{ position: 'absolute', left: 12, bottom: 12 }}
+              />
+
+              {/* Action cluster placeholder — three 48×48 rounded
+                  squares matching the live ActionButtons. */}
+              <View
+                style={{
+                  position: 'absolute',
+                  right: 12,
+                  bottom: 12,
+                  flexDirection: 'row',
+                  gap: 8,
+                }}
+              >
+                {[0, 1, 2].map((i) => (
+                  <Shimmer key={i} width={48} height={48} radius={14} />
+                ))}
+              </View>
+            </View>
+          }
+        >
           <View
+            ref={(r) => mp && setProductImageRef(mp.id, r as any)}
+            collapsable={false}
             style={{
               position: 'relative',
               borderRadius: 20,
               overflow: 'hidden',
-              backgroundColor: theme.surfaceAlt,
+              backgroundColor: '#ffffff',
               height: 240,
             }}
           >
-            {mainProduct.bild ? (
-              <Image
-                source={{ uri: mainProduct.bild }}
+            {getProductImage(mp as any, 'png') ? (
+              <Pressable
+                onPress={() => openZoom(mp)}
+                accessibilityRole="imagebutton"
+                accessibilityLabel="Bild vergrößern"
                 style={{ width: '100%', height: '100%' }}
-                resizeMode="cover"
-              />
-            ) : (
+              >
+                <Image
+                  source={{ uri: getProductImage(mp as any, 'png') ?? undefined }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="contain"
+                />
+              </Pressable>
+            ) : mainReady ? (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 <MaterialCommunityIcons name="package-variant" size={64} color={theme.textMuted} />
               </View>
-            )}
+            ) : null}
 
-            {/* Hersteller pill — top-left. No brand logo inside: the
-                morph title directly above the hero already shows it,
-                and repeating it here looks redundant. Only the
-                Hersteller name remains. */}
             {brandName ? (
               <View
                 style={{
@@ -630,11 +960,12 @@ export default function ProductComparisonScreen() {
                 }}
               >
                 <Text
-                  numberOfLines={1}
+                  numberOfLines={2}
                   style={{
                     fontFamily,
                     fontWeight: fontWeight.extraBold,
                     fontSize: 13,
+                    lineHeight: 16,
                     color: '#fff',
                     letterSpacing: -0.1,
                   }}
@@ -644,77 +975,188 @@ export default function ProductComparisonScreen() {
               </View>
             ) : null}
 
-            {/* Price + size — bottom-left */}
-            <View
-              style={{
-                position: 'absolute',
-                left: 12,
-                bottom: 12,
-                backgroundColor: 'rgba(255,255,255,0.95)',
-                paddingVertical: 8,
-                paddingHorizontal: 12,
-                borderRadius: 14,
-                shadowColor: '#000',
-                shadowOpacity: 0.12,
-                shadowOffset: { width: 0, height: 2 },
-                shadowRadius: 8,
-                elevation: 3,
-              }}
-            >
-              {brandPackInfo ? (
+            {mp ? (
+              <View
+                style={{
+                  position: 'absolute',
+                  left: 12,
+                  bottom: 12,
+                  backgroundColor: 'rgba(255,255,255,0.95)',
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  borderRadius: 14,
+                  shadowColor: '#000',
+                  shadowOpacity: 0.12,
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowRadius: 8,
+                  elevation: 3,
+                }}
+              >
+                {brandPackInfo ? (
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.medium,
+                      fontSize: 11,
+                      color: '#5c6769',
+                    }}
+                  >
+                    {brandPackInfo}
+                  </Text>
+                ) : null}
                 <Text
                   style={{
                     fontFamily,
-                    fontWeight: fontWeight.medium,
-                    fontSize: 11,
-                    color: '#5c6769',
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 22,
+                    color: '#191c1d',
+                    letterSpacing: -0.4,
+                    marginTop: brandPackInfo ? 4 : 0,
                   }}
                 >
-                  {brandPackInfo}
+                  {formatEur((mp as any).preis)}
                 </Text>
-              ) : null}
-              <Text
+              </View>
+            ) : null}
+
+            {mp ? (
+              <View style={{ position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', gap: 8 }}>
+                <ActionButton
+                  icon={favMap[mp.id] ? 'heart' : 'heart-outline'}
+                  iconColor={favMap[mp.id] ? '#e53935' : theme.text}
+                  onPress={() => onToggleFav(mp.id, 'markenprodukt', mp)}
+                />
+                <ActionButton
+                  icon={cartMap[mp.id] ? 'cart-check' : 'cart-plus'}
+                  iconColor={cartMap[mp.id] ? '#fff' : theme.text}
+                  bg={cartMap[mp.id] ? brand.primary : undefined}
+                  onPress={() => onToggleCart(mp.id, 'markenprodukt', mp)}
+                />
+                <ActionButton
+                  icon="star"
+                  iconColor="#f5b301"
+                  subLabel={
+                    (mp as any).averageRatingOverall
+                      ? ((mp as any).averageRatingOverall as number).toFixed(1)
+                      : undefined
+                  }
+                  onPress={() => onOpenRatings(mp.id, mp.name ?? 'Produkt', true)}
+                />
+              </View>
+            ) : null}
+          </View>
+        </Crossfade>
+
+        {/* ─── BOTTOM wave (Crossfade, gated on `nonamesReady`)
+            Skeleton mirrors the bottom layout: section header
+            placeholder + 2 alternativen-card shapes + tabs pill
+            + body card. Renders once the related-products query
+            lands (≈ 200-400 ms after mainReady). The natural
+            Firestore round-trip delta creates the visible "top
+            first, bottom second" cascade with no artificial
+            delay needed. */}
+        <Crossfade
+          ready={nonamesReady}
+          delay={0}
+          duration={320}
+          skeleton={
+            <View>
+              {/* Section header placeholder */}
+              <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
+                <Shimmer width="70%" height={20} radius={6} />
+              </View>
+              {/* Two alternativen-card placeholders matching the
+                  live carousel card shape (NN_CARD_WIDTH × variable
+                  height). */}
+              <View
                 style={{
-                  fontFamily,
-                  fontWeight: fontWeight.extraBold,
-                  fontSize: 22,
-                  color: '#191c1d',
-                  letterSpacing: -0.4,
-                  marginTop: brandPackInfo ? 4 : 0,
+                  flexDirection: 'row',
+                  paddingHorizontal: 20,
+                  paddingTop: 12,
+                  gap: NN_CARD_GAP,
                 }}
               >
-                {formatEur((mainProduct as any).preis)}
-              </Text>
+                {[0, 1].map((i) => (
+                  <View
+                    key={i}
+                    style={{
+                      width: NN_CARD_WIDTH,
+                      backgroundColor: theme.surface,
+                      borderRadius: 18,
+                      padding: 12,
+                      ...shadows.md,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      <Shimmer width={76} height={76} radius={10} />
+                      <View style={{ flex: 1, gap: 6 }}>
+                        <Shimmer width={90} height={11} radius={3} />
+                        <Shimmer width="100%" height={14} radius={4} />
+                        <Shimmer width="80%" height={14} radius={4} />
+                      </View>
+                    </View>
+                    <View
+                      style={{
+                        height: 1,
+                        backgroundColor: theme.border,
+                        marginVertical: 12,
+                      }}
+                    />
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'flex-end',
+                        justifyContent: 'space-between',
+                      }}
+                    >
+                      <View style={{ gap: 6 }}>
+                        <Shimmer width={80} height={10} radius={3} />
+                        <Shimmer width={70} height={20} radius={4} />
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <Shimmer width={48} height={48} radius={14} />
+                        <Shimmer width={48} height={48} radius={14} />
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </View>
+              {/* Tabs skeleton — same SegmentedTabs height + body card
+                  shape as the live tabs section. */}
+              <View style={{ marginHorizontal: 20, marginTop: 24 }}>
+                <View
+                  style={{
+                    height: 44,
+                    borderRadius: 999,
+                    backgroundColor: theme.surfaceAlt,
+                    marginBottom: 16,
+                    flexDirection: 'row',
+                    padding: 4,
+                    gap: 4,
+                  }}
+                >
+                  <View style={{ flex: 1, borderRadius: 999, backgroundColor: theme.surface }} />
+                  <View style={{ flex: 1, borderRadius: 999 }} />
+                </View>
+                <View
+                  style={{
+                    backgroundColor: theme.surface,
+                    borderRadius: 14,
+                    padding: 16,
+                    gap: 8,
+                    ...shadows.sm,
+                  }}
+                >
+                  <Shimmer height={12} radius={4} />
+                  <Shimmer width="92%" height={12} radius={4} />
+                  <Shimmer width="78%" height={12} radius={4} />
+                  <Shimmer width="55%" height={12} radius={4} />
+                </View>
+              </View>
             </View>
-
-            {/* Action cluster — bottom-right */}
-            <View style={{ position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', gap: 8 }}>
-              <ActionButton
-                icon={favMap[mainProduct.id] ? 'heart' : 'heart-outline'}
-                iconColor={favMap[mainProduct.id] ? '#e53935' : theme.text}
-                onPress={() => onToggleFav(mainProduct.id, 'markenprodukt', mainProduct)}
-              />
-              <ActionButton
-                icon={cartMap[mainProduct.id] ? 'cart-check' : 'cart-plus'}
-                iconColor={cartMap[mainProduct.id] ? '#fff' : theme.text}
-                bg={cartMap[mainProduct.id] ? brand.primary : undefined}
-                onPress={() => onToggleCart(mainProduct.id, 'markenprodukt', mainProduct)}
-              />
-              <ActionButton
-                icon="star"
-                iconColor="#f5b301"
-                subLabel={
-                  (mainProduct as any).averageRatingOverall
-                    ? ((mainProduct as any).averageRatingOverall as number).toFixed(1)
-                    : undefined
-                }
-                onPress={() => onOpenRatings(mainProduct.id, mainProduct.name ?? 'Produkt', true)}
-              />
-            </View>
-          </View>
-        </View>
-
-        {/* ─── Alternativen vom gleichen Hersteller ──────────────── */}
+          }
+        >
+          <View>
         {nonames.length > 0 ? (
           <>
             <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
@@ -791,39 +1233,46 @@ export default function ProductComparisonScreen() {
                       ...shadows.md,
                     })}
                   >
-                    {/* Discount flag — top-right corner */}
-                    {sv.pct > 0 ? (
-                      <View
-                        style={{
-                          position: 'absolute',
-                          top: 0,
-                          right: 0,
-                          backgroundColor: '#e53935',
-                          paddingVertical: 7,
-                          paddingHorizontal: 12,
-                          borderTopRightRadius: 16,
-                          borderBottomLeftRadius: 14,
-                          zIndex: 2,
-                          shadowColor: '#e53935',
-                          shadowOpacity: 0.35,
-                          shadowOffset: { width: 0, height: 4 },
-                          shadowRadius: 10,
-                          elevation: 3,
-                        }}
-                      >
-                        <Text
+                    {/* Price-delta flag — top-right corner.
+                        • Savings (pct > 0) → primary green, "−X%"
+                        • Markup  (pct < 0) → red,           "+X%"
+                        • Equal   (pct == 0) → no badge */}
+                    {sv.pct !== 0 ? (() => {
+                      const isSaving = sv.pct > 0;
+                      const flagColor = isSaving ? brand.primary : '#e53935';
+                      return (
+                        <View
                           style={{
-                            fontFamily,
-                            fontWeight: fontWeight.extraBold,
-                            fontSize: 13,
-                            color: '#fff',
-                            letterSpacing: -0.1,
+                            position: 'absolute',
+                            top: 0,
+                            right: 0,
+                            backgroundColor: flagColor,
+                            paddingVertical: 7,
+                            paddingHorizontal: 12,
+                            borderTopRightRadius: 16,
+                            borderBottomLeftRadius: 14,
+                            zIndex: 2,
+                            shadowColor: flagColor,
+                            shadowOpacity: 0.35,
+                            shadowOffset: { width: 0, height: 4 },
+                            shadowRadius: 10,
+                            elevation: 3,
                           }}
                         >
-                          −{sv.pct}%
-                        </Text>
-                      </View>
-                    ) : null}
+                          <Text
+                            style={{
+                              fontFamily,
+                              fontWeight: fontWeight.extraBold,
+                              fontSize: 13,
+                              color: '#fff',
+                              letterSpacing: -0.1,
+                            }}
+                          >
+                            {isSaving ? '−' : '+'}{Math.abs(sv.pct)}%
+                          </Text>
+                        </View>
+                      );
+                    })() : null}
 
                     <View style={{ flexDirection: 'row', padding: 12, gap: 12, alignItems: 'stretch' }}>
                       {/* Thumb — 76×76 so its height roughly matches the
@@ -833,20 +1282,35 @@ export default function ProductComparisonScreen() {
                           next to the text, which was the point of the
                           "passt zur höhe"-request. */}
                       <View
+                        ref={(r) => setProductImageRef(nn.id, r as any)}
+                        collapsable={false}
                         style={{
                           width: 76,
                           height: 76,
                           borderRadius: 10,
                           overflow: 'hidden',
-                          backgroundColor: theme.surfaceAlt,
+                          backgroundColor: '#ffffff',
                         }}
                       >
-                        {(nn as any).bild ? (
-                          <Image
-                            source={{ uri: (nn as any).bild }}
+                        {getProductImage(nn as any) ? (
+                          <Pressable
+                            onPress={(e) => {
+                              // Inner Pressable wins over the card-
+                              // level "set picked" tap → opens zoom
+                              // for THIS NoName's HQ image.
+                              e.stopPropagation?.();
+                              openZoom(nn as any);
+                            }}
+                            accessibilityRole="imagebutton"
+                            accessibilityLabel="Bild vergrößern"
                             style={{ width: '100%', height: '100%' }}
-                            resizeMode="cover"
-                          />
+                          >
+                            <Image
+                              source={{ uri: getProductImage(nn as any) ?? undefined }}
+                              style={{ width: '100%', height: '100%' }}
+                              resizeMode="contain"
+                            />
+                          </Pressable>
                         ) : (
                           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                             <MaterialCommunityIcons
@@ -869,7 +1333,7 @@ export default function ProductComparisonScreen() {
                         style={{
                           flex: 1,
                           minWidth: 0,
-                          paddingRight: sv.pct > 0 ? 50 : 0,
+                          paddingRight: sv.pct !== 0 ? 50 : 0,
                         }}
                       >
                         {/* Handelsmarke eyebrow — ALWAYS pinned to the
@@ -1253,172 +1717,101 @@ export default function ProductComparisonScreen() {
         )}
 
         {/* ─── Tabs: Inhaltsstoffe / Nährwerte ─────────────────────
-            SegmentedTabs (animated pill) drives a PagerView so
-            users can also swipe horizontally between the two
-            sections. Same pattern as Stöbern / Rewards. */}
-        <View style={{ marginHorizontal: 20, marginTop: 24 }}>
-          <SegmentedTabs
-            tabs={[
-              { key: 'ingredients', label: 'Inhaltsstoffe' },
-              { key: 'nutrition', label: 'Nährwerte' },
-            ] as const}
-            value={tab}
-            onChange={onTabChange}
-          />
-        </View>
+            Inside the same bottom Crossfade — the tabs reveal in
+            the same wave as the carousel above so the eye sees one
+            top→bottom fade-in. Only mounted when `mp` is non-null
+            (IngredientsMatch / NutritionTable both require a non-
+            null brandProduct).
+            Bei Non-Food-Kategorien (Drogerie, Haushalt, Kosmetik,
+            Tier, …) macht weder "Inhaltsstoffe" (= Zutaten) noch
+            "Nährwerte" Sinn → Tabs werden ausgeblendet. */}
+        {mp && !isNonFoodCategory(
+          (mp as any)?.kategorie?.bezeichnung ?? (mp as any)?.kategorie?.name ?? null,
+        ) ? (
+          <>
+            <View style={{ marginHorizontal: 20, marginTop: 24 }}>
+              <SegmentedTabs
+                tabs={[
+                  { key: 'ingredients', label: 'Inhaltsstoffe' },
+                  { key: 'nutrition', label: 'Nährwerte' },
+                ] as const}
+                value={tab}
+                onChange={onTabChange}
+              />
+            </View>
 
-        {/* PagerView height = the larger of the two pages' measured
-            heights. Falls back to a minHeight while we wait for the
-            first onLayout, so the screen doesn't jump from 0 → real
-            on first paint. */}
-        <PagerView
-          ref={tabPagerRef}
-          style={{
-            height: Math.max(
-              tabHeights.ingredients ?? 0,
-              tabHeights.nutrition ?? 0,
-              280,
-            ),
-          }}
-          initialPage={0}
-          onPageSelected={onTabPagerSelected}
-        >
-          <View
-            key="ingredients"
-            onLayout={(e) => {
-              // PagerView on the new architecture occasionally fires
-              // onLayout with a null nativeEvent.layout while it
-              // recycles pages — guard so we don't crash on
-              // `null.height`.
-              const h = e?.nativeEvent?.layout?.height;
-              if (typeof h !== 'number') return;
-              setTabHeights((prev) =>
-                prev.ingredients === h ? prev : { ...prev, ingredients: h },
-              );
-            }}
-          >
-            <IngredientsMatch brandProduct={mainProduct} noname={picked} theme={theme} />
-          </View>
-          <View
-            key="nutrition"
-            onLayout={(e) => {
-              const h = e?.nativeEvent?.layout?.height;
-              if (typeof h !== 'number') return;
-              setTabHeights((prev) =>
-                prev.nutrition === h ? prev : { ...prev, nutrition: h },
-              );
-            }}
-          >
-            <NutritionTable
-              brandProduct={mainProduct}
-              noname={picked}
-              theme={theme}
-              primary={brand.primary}
-            />
-          </View>
-        </PagerView>
-
-        {/* ─── Gute Alternativen ──────────────────────────────────── */}
-        {alternatives.length > 0 ? (
-          <View style={{ marginTop: 28 }}>
-            <View
+            {/* PagerView height = the larger of the two pages' measured
+                heights. Falls back to a minHeight while we wait for the
+                first onLayout, so the screen doesn't jump from 0 → real
+                on first paint. */}
+            <PagerView
+              ref={tabPagerRef}
               style={{
-                flexDirection: 'row',
-                alignItems: 'baseline',
-                justifyContent: 'space-between',
-                paddingHorizontal: 20,
-                marginBottom: 14,
+                height: Math.max(
+                  tabHeights.ingredients ?? 0,
+                  tabHeights.nutrition ?? 0,
+                  280,
+                ),
               }}
+              initialPage={0}
+              onPageSelected={onTabPagerSelected}
             >
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.extraBold,
-                  fontSize: 20,
-                  color: theme.text,
-                  letterSpacing: -0.2,
+              <View
+                key="ingredients"
+                onLayout={(e) => {
+                  // PagerView on the new architecture occasionally fires
+                  // onLayout with a null nativeEvent.layout while it
+                  // recycles pages — guard so we don't crash on
+                  // `null.height`.
+                  const h = e?.nativeEvent?.layout?.height;
+                  if (typeof h !== 'number') return;
+                  setTabHeights((prev) =>
+                    prev.ingredients === h ? prev : { ...prev, ingredients: h },
+                  );
                 }}
               >
-                Gute Alternativen
-              </Text>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              scrollsToTop={false}
-              contentContainerStyle={{ paddingHorizontal: 20, gap: 14, paddingBottom: 4 }}
-            >
-              {alternatives.map((ap: any) => (
-                <Pressable
-                  key={ap.id}
-                  onPress={() =>
-                    router.push(
-                      `/product-comparison/${ap.id}?type=markenprodukt` as any,
-                    )
-                  }
-                  style={({ pressed }) => ({
-                    width: 140,
-                    backgroundColor: theme.surface,
-                    borderRadius: 14,
-                    overflow: 'hidden',
-                    opacity: pressed ? 0.92 : 1,
-                    ...shadows.sm,
-                  })}
-                >
-                  <View
-                    style={{
-                      width: '100%',
-                      height: 110,
-                      backgroundColor: theme.surfaceAlt,
-                    }}
-                  >
-                    {ap.bild ? (
-                      <Image
-                        source={{ uri: ap.bild }}
-                        style={{ width: '100%', height: '100%' }}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                        <MaterialCommunityIcons
-                          name="package-variant"
-                          size={30}
-                          color={theme.textMuted}
-                        />
-                      </View>
-                    )}
-                  </View>
-                  <View style={{ padding: 10, paddingBottom: 12 }}>
-                    <Text
-                      numberOfLines={2}
-                      style={{
-                        fontFamily,
-                        fontWeight: fontWeight.semibold,
-                        fontSize: 13,
-                        lineHeight: 16,
-                        color: theme.text,
-                        minHeight: 32,
-                      }}
-                    >
-                      {ap.name ?? ''}
-                    </Text>
-                    <Text
-                      style={{
-                        fontFamily,
-                        fontWeight: fontWeight.bold,
-                        fontSize: 13,
-                        color: theme.text,
-                        marginTop: 4,
-                      }}
-                    >
-                      {formatEur(ap.preis)}
-                    </Text>
-                  </View>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
+                <IngredientsMatch brandProduct={mp} noname={picked} theme={theme} />
+              </View>
+              <View
+                key="nutrition"
+                onLayout={(e) => {
+                  const h = e?.nativeEvent?.layout?.height;
+                  if (typeof h !== 'number') return;
+                  setTabHeights((prev) =>
+                    prev.nutrition === h ? prev : { ...prev, nutrition: h },
+                  );
+                }}
+              >
+                <NutritionTable
+                  brandProduct={mp}
+                  noname={picked}
+                  theme={theme}
+                  primary={brand.primary}
+                />
+              </View>
+            </PagerView>
+          </>
         ) : null}
+          </View>
+        </Crossfade>
+
+        {/* ─── Weitere enttarnte Produkte ──────────────────────────
+            Vertikale Liste, identisch zur Section auf der
+            noname-detail-Seite (Stufe 1/2). Zeigt andere NoName-
+            Produkte derselben Kategorie mit Stufe 3/4/5 — also
+            solche, die einen echten Markenprodukt-Vergleich
+            verlinkt haben. Tap führt direkt zum Vergleichs-Pfad,
+            mit `replace` damit der Back-Stack flach bleibt
+            (Fan-Out-Exploration, kein Drill-Down). */}
+        <EnttarnteAlternativesList
+          items={alternatives}
+          onItemPress={(altId) => {
+            FirestoreService.prefetchComparisonData(altId, false);
+            router.replace(
+              `/product-comparison/${altId}?type=noname` as any,
+            );
+          }}
+        />
 
         <View style={{ height: 24 }} />
       </Animated.ScrollView>
@@ -1452,6 +1845,22 @@ export default function ProductComparisonScreen() {
             ratedate: now,
             updatedate: now,
           });
+
+          // 🎯 Gamification: track `submit_rating` after the rating
+          // is persisted. Fire-and-forget — failures must not
+          // affect the rating UX.
+          achievementService
+            .trackAction(user.uid, 'submit_rating', {
+              productId: ratingsSheet.productId,
+              productName: ratingsSheet.productName,
+              productType: ratingsSheet.isMarke ? 'markenprodukt' : 'noname',
+              rating: r.ratingOverall,
+              commentLength: (r.comment || '').length,
+            })
+            .catch((err) => {
+              console.warn('submit_rating trackAction failed', err);
+            });
+
           // Refresh the list so the new review shows up.
           try {
             const refreshed = await FirestoreService.getProductRatingsWithUserInfo(
@@ -1463,6 +1872,26 @@ export default function ProductComparisonScreen() {
             /* non-fatal */
           }
         }}
+      />
+
+      {/* Schwebender Einkaufszettel-FAB. Detail-Seite ohne Tab-Bar
+          → nur safe-area-bottom + 20 px Atemraum. */}
+      <FloatingShoppingListButton bottomOffset={insets.bottom + 20} />
+
+      {/* Fly-to-cart overlay — clones the tapped product image and
+          animates it into the floating cart button. Mounted last so
+          it sits visually on top of the FAB at landing time. */}
+      <FlyToCart ref={flyRef} />
+
+      {/* Fullscreen image zoom (pinch / pan / double-tap / swipe-down).
+          Highest in the tree → sits above the FAB and any sheets.
+          Shared-element transition flies the image from the tapped
+          thumbnail to centre and back. */}
+      <ImageZoomModal
+        visible={!!zoomUri}
+        uri={zoomUri}
+        sourceRect={zoomRect}
+        onClose={closeZoom}
       />
     </View>
   );

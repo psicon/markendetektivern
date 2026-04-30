@@ -1,6 +1,6 @@
 import { Tabs, useRouter, useSegments } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Text, TouchableOpacity, View } from 'react-native';
+import { Keyboard, KeyboardAvoidingView, Platform, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/HapticTab';
@@ -85,21 +85,35 @@ export default function TabLayout() {
     };
   }, []);
 
-  // Loading screen while auto-anonymous login happens
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors[colorScheme ?? 'light'].background }}>
-        <ActivityIndicator size="large" color={Colors[colorScheme ?? 'light'].primary} />
-      </View>
-    );
-  }
+  // Escape-hatch — if auth resolved (loading done) but the user
+  // is null, the auto-anonymous-login refused (e.g. registered
+  // backup exists in AsyncStorage and Firebase didn't restore the
+  // session). Without an explicit redirect the tab layout would
+  // render a blank background forever. Push the user to the
+  // welcome screen so they can log in, register, or skip to
+  // anonymous mode — anything but stuck.
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace('/auth/welcome' as any);
+    }
+  }, [loading, user, router]);
 
-  // Fallback: Falls auto-anonymous login fehlschlägt
-  if (!user) {
+  // Auto-anonymous login typically resolves in <300 ms. We
+  // deliberately do NOT show a centered ActivityIndicator here —
+  // it flashes as a "spinner on the homepage" because the native
+  // splash has just faded and the user expects content. Instead,
+  // render a quiet themed background while we wait. If the wait
+  // is short (the hot path), this is invisible — first paint is
+  // the actual home tab. If the wait is long, the user sees a
+  // calm coloured screen, not a noisy spinner.
+  if (loading || !user) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors[colorScheme ?? 'light'].background }}>
-        <ActivityIndicator size="large" color={Colors[colorScheme ?? 'light'].primary} />
-      </View>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: Colors[colorScheme ?? 'light'].background,
+        }}
+      />
     );
   }
 
@@ -112,13 +126,22 @@ export default function TabLayout() {
     >
       <Tabs
         screenOptions={{
-        // Pre-mount every tab on app start instead of lazily mounting
-        // the first time the user taps the tab button. Stöbern in
-        // particular carries a heavy JSX tree (filter sheets, pager
-        // view, grids) whose first mount added a noticeable lag to
-        // the first Stöbern tap. Warming all tabs up front trades a
-        // tiny amount of cold-start work for instant tab switches.
-        lazy: false,
+        // Lazy mount — nur Home rendert beim App-Start. Stöbern und
+        // Rewards mounten erst beim ersten Tap des jeweiligen Tabs.
+        //
+        // Hintergrund: `lazy: false` warmte zwar den JSX-Tree
+        // vor (kürzerer Tab-Switch-Lag beim ersten Tap), feuerte
+        // aber AUCH alle useEffects der inaktiven Tabs sofort —
+        // das waren ~1.000+ zusätzliche Firestore-Reads pro Cold-
+        // Start für User die andere Tabs nie besuchten. Plus: Home
+        // konkurrierte beim Mount mit Stöbern/Rewards um Firestore-
+        // Reads und JS-Thread-Zeit.
+        //
+        // Mit `lazy: true` rendert Home schnell, andere Tabs lazy.
+        // Skeletons in jeder Section federn den ~100-200ms-JSX-
+        // Mount-Lag beim ersten Stöbern-Tap visuell ab — der User
+        // sieht sofort Shimmer, dann Daten.
+        lazy: true,
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tabIconSelected,
         tabBarInactiveTintColor: Colors[colorScheme ?? 'light'].tabIconDefault,
         headerShown: false,

@@ -1,1712 +1,1311 @@
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+// app/achievements.tsx
+//
+// Errungenschaften & Level — same design language as the Belohnungen
+// tab so this screen reads as part of the same product:
+//   • Custom chrome (BlurView on iOS, tinted View on Android), back
+//     button + title + info — NO native stack header.
+//   • Level-hero up top (gradient card, fixed HERO_HEIGHT, mirrors
+//     the StatusHero pattern from the Rewards tab).
+//   • Two horizontal-scroll rows below: Levels + Errungenschaften.
+// Top sections from the legacy screen (savings card, leaderboard
+// button, streak card) are intentionally GONE — the Belohnungen
+// StatusHero already owns those, this screen is the deep-dive.
+
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router, useNavigation } from 'expo-router';
+import LottieView from 'lottie-react-native';
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from 'react';
+import {
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import {
+  DETAIL_HEADER_ROW_HEIGHT,
+  DetailHeader,
+} from '@/components/design/DetailHeader';
+import { FilterSheet } from '@/components/design/FilterSheet';
+import { AchievementsSkeleton } from '@/components/design/Skeletons';
 import AchievementUnlockOverlay from '@/components/ui/AchievementUnlockOverlay';
-import FixedAndroidModal from '@/components/ui/FixedAndroidModal';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import LevelUpOverlay from '@/components/ui/LevelUpOverlay';
-import { Colors } from '@/constants/Colors';
-import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
-import { useColorScheme } from '@/hooks/useColorScheme';
+import { fontFamily, fontWeight } from '@/constants/tokens';
+import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useAchievements } from '@/lib/hooks/useAchievements';
 import { achievementService } from '@/lib/services/achievementService';
-import { overlayManager } from '@/lib/services/overlayManager';
-import { Level } from '@/lib/types/achievements';
-import * as Haptics from 'expo-haptics';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation, useRouter } from 'expo-router';
-import LottieView from 'lottie-react-native';
-import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
-} from 'react-native';
+  LEVEL_GRADIENT_END,
+  LEVEL_GRADIENT_START,
+  levelGradient,
+  mdiForLevelIcon,
+} from '@/lib/utils/levelIcon';
+import { overlayManager } from '@/lib/services/overlayManager';
+import type { Achievement, Level } from '@/lib/types/achievements';
 
-const { width: screenWidth } = Dimensions.get('window');
+// ────────────────────────────────────────────────────────────────────
+// Design helpers — identical to the Rewards screen (single source of
+// visual truth; eventually extracted to a shared util file).
+// ────────────────────────────────────────────────────────────────────
 
-// Text Shimmer Component für Kategorie-Belohnungen (Best Practice)
-const TextShimmer: React.FC<{ children: React.ReactNode; isShimmering: boolean }> = ({ 
-  children, 
-  isShimmering 
-}) => {
-  const [shimmerAnim] = useState(new Animated.Value(0));
-  
-  useEffect(() => {
-    if (isShimmering) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(shimmerAnim, {
-            toValue: 1,
-            duration: 1500,
-            useNativeDriver: false, // Für opacity changes
-          }),
-          Animated.timing(shimmerAnim, {
-            toValue: 0,
-            duration: 1500,
-            useNativeDriver: false,
-          }),
-        ])
-      ).start();
+const HERO_HEIGHT = 144;
+
+// `levelGradient` lives in `lib/utils/levelIcon.ts` — shared with
+// the home-tab level card so both surfaces render identical colour
+// transitions for the same level.
+
+function difficultyFor(points: number): { label: string; color: string } {
+  if (points <= 10) return { label: 'Einfach', color: '#2196F3' };
+  if (points <= 20) return { label: 'Mittel', color: '#4CAF50' };
+  if (points <= 25) return { label: 'Schwer', color: '#FF9800' };
+  return { label: 'Meister', color: '#F44336' };
+}
+
+// Format an achievement progress value for display. Most actions
+// produce integer counts ("scan 5 products" → 0/5/10), but
+// `savings_total` is in € and arrives as a float that needs both
+// rounding (so we don't render "31.9099999999999990") and a € suffix.
+function formatProgress(value: number, action: string | undefined): string {
+  if (action === 'savings_total') {
+    return `${value.toFixed(2).replace('.', ',')} €`;
+  }
+  // Integer-by-default — Math.round catches floating-point noise
+  // from any other action without changing meaningful values.
+  return Math.round(value).toLocaleString('de-DE');
+}
+
+function lottieFor(a: Achievement) {
+  try {
+    switch (a.trigger?.action) {
+      case 'first_action_any':
+        return require('@/assets/lottie/rocket.json');
+      case 'daily_streak':
+        return a.trigger.target >= 7
+          ? require('@/assets/lottie/streak-fire.json')
+          : require('@/assets/lottie/streak-bonus.json');
+      case 'view_comparison':
+        return require('@/assets/lottie/comparison.json');
+      case 'complete_shopping':
+        return require('@/assets/lottie/task.json');
+      case 'search_product':
+        return require('@/assets/lottie/search.json');
+      case 'submit_rating':
+        return require('@/assets/lottie/ratingsthumbsup.json');
+      case 'create_list':
+        return require('@/assets/lottie/task.json');
+      case 'convert_product':
+        return require('@/assets/lottie/swap.json');
+      case 'share_app':
+        return require('@/assets/lottie/review.json');
+      case 'submit_product':
+        return require('@/assets/lottie/favorites.json');
+      case 'save_product':
+        return require('@/assets/lottie/favorites2.json');
+      case 'savings_total':
+        return require('@/assets/lottie/savings.json');
+      default:
+        return require('@/assets/lottie/confetti.json');
     }
-  }, [isShimmering, shimmerAnim]);
+  } catch {
+    return require('@/assets/lottie/confetti.json');
+  }
+}
 
-  const animatedStyle = isShimmering 
-    ? {
-        opacity: shimmerAnim.interpolate({
-          inputRange: [0, 0.5, 1],
-          outputRange: [0.6, 1, 0.6], // Deutlicherer Kontrast
-        }),
-        transform: [{
-          scale: shimmerAnim.interpolate({
-            inputRange: [0, 0.5, 1],
-            outputRange: [1, 1.02, 1], // Leichte Größenänderung
-          })
-        }]
-      }
-    : {};
+// MDI icon glyph for a Firestore-stored level icon name. Shared
+// helper so the home-tab level card and this screen render the
+// same icon for the same level — see `lib/utils/levelIcon.ts`.
 
-  return (
-    <Animated.View style={animatedStyle}>
-      {children}
-    </Animated.View>
-  );
+// ────────────────────────────────────────────────────────────────────
+// Screen
+// ────────────────────────────────────────────────────────────────────
+
+type ProgressedAchievement = Achievement & {
+  progress: number;
+  maxProgress: number;
+  isCompleted: boolean;
+  completedAt?: Date;
 };
 
 export default function AchievementsScreen() {
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
+  const { theme } = useTokens();
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const router = useRouter();
   const { user, userProfile } = useAuth();
-  const { 
-    achievements, 
-    userStats, 
-    loading: achievementsLoading,
+  const {
+    achievements,
+    userStats,
     getAchievementWithProgress,
-    checkDailyStreak 
+    loading: achievementsLoading,
   } = useAchievements();
 
-  // Header-Optionen sofort setzen mit useLayoutEffect
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      ...getNavigationHeaderOptions(colorScheme, 'Level & Errungenschaften'),
-      headerRight: () => (
-        <TouchableOpacity
-          onPress={() => setShowInfoSheet(true)}
-          style={{ marginRight: 16 }}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <IconSymbol name="info.circle" size={24} color="white" />
-        </TouchableOpacity>
-      ),
-    });
-  }, [navigation, colorScheme, colors]);
-
-  // Animation values
-  const [shimmerAnim] = useState(new Animated.Value(0));
-  const [fadeAnim] = useState(new Animated.Value(0));
-  
-  // Gamification State
   const [levels, setLevels] = useState<Level[]>([]);
   const [levelsLoading, setLevelsLoading] = useState(true);
-  const [showInfoSheet, setShowInfoSheet] = useState(false);
-  
-  // Overlay States
-  const [showLevelUpOverlay, setShowLevelUpOverlay] = useState(false);
-  const [levelUpData, setLevelUpData] = useState<{ newLevel: number; oldLevel: number } | null>(null);
-  const [showAchievementUnlock, setShowAchievementUnlock] = useState({
-    visible: false,
-    achievement: null as any
-  });
+  const [showInfo, setShowInfo] = useState(false);
 
-  // Lade Levels aus Firebase
+  const [showLevelUp, setShowLevelUp] = useState(false);
+  const [levelUpData, setLevelUpData] = useState<{
+    newLevel: number;
+    oldLevel: number;
+  } | null>(null);
+  const [showAchUnlock, setShowAchUnlock] = useState<{
+    visible: boolean;
+    achievement: ProgressedAchievement | null;
+  }>({ visible: false, achievement: null });
+
+  // Hide the native stack header — we render our own chrome below
+  // (BlurView/tinted) so the screen visually matches the Rewards
+  // tab (no abrupt "tinted bar at the top → white content" jump).
+  useLayoutEffect(() => {
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
+
   useEffect(() => {
-    const loadLevels = async () => {
-      if (!user) {
-        setLevelsLoading(false);
-        return;
-      }
-
-      try {
-        setLevelsLoading(true);
-        const loadedLevels = await achievementService.getAllLevels();
-        setLevels(loadedLevels);
-      } catch (error) {
-        console.error('Fehler beim Laden der Levels:', error);
-      } finally {
-        setLevelsLoading(false);
-      }
+    if (!user) {
+      setLevelsLoading(false);
+      return;
+    }
+    let alive = true;
+    achievementService
+      .getAllLevels()
+      .then((ls) => {
+        if (!alive) return;
+        setLevels(ls || []);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setLevelsLoading(false);
+      });
+    return () => {
+      alive = false;
     };
-
-    loadLevels();
   }, [user]);
 
-  useEffect(() => {
-    // Shimmer animation
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(shimmerAnim, {
-          toValue: 1,
-          duration: 2500,
-          useNativeDriver: true,
-        }),
-        Animated.timing(shimmerAnim, {
-          toValue: 0,
-          duration: 0,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
+  const currentLevel: number =
+    userStats?.currentLevel ??
+    (userProfile as any)?.stats?.currentLevel ??
+    (userProfile as any)?.level ??
+    1;
+  const currentLevelInfo = levels.find((l) => l.id === currentLevel);
+  const nextLevel = levels.find((l) => l.id === currentLevel + 1);
 
-    // Fade in animation
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 600,
-      useNativeDriver: true,
-    }).start();
-  }, []);
+  const pts = Number(
+    userStats?.pointsTotal ?? (userProfile as any)?.stats?.pointsTotal ?? 0,
+  );
+  const eur = Number(
+    (userProfile as any)?.totalSavings ??
+      (userProfile as any)?.stats?.savingsTotal ??
+      0,
+  );
 
-  // Get real user data
-  const currentSavings = userProfile?.totalSavings || 0;
-  const currentPoints = userStats?.pointsTotal || userStats?.totalPoints || 0;
-  const purchasedProducts = userProfile?.productsSaved || 0;
-  // Verwende stats.currentLevel wenn vorhanden, sonst level aus userProfile, sonst berechne es
-  // WICHTIG: Berechne Level basierend auf aktuellen Daten um "Popping" zu vermeiden
-  const currentLevel = (() => {
-    // Verwende userStats (über useAchievements geladen) als primäre Quelle
-    if (userStats?.currentLevel) {
-      return userStats.currentLevel;
-    }
-    
-    // Fallback: stats aus userProfile
-    if ((userProfile as any)?.stats?.currentLevel) {
-      return (userProfile as any).stats.currentLevel;
-    }
-    
-    // Fallback: legacy level
-    if (userProfile?.level) {
-      return userProfile.level;
-    }
-    
-    // Letzte Option: Berechne Level basierend auf verfügbaren Daten
-    const points = userStats?.pointsTotal || userStats?.totalPoints || (userProfile as any)?.stats?.pointsTotal || (userProfile as any)?.stats?.totalPoints || 0;
-    const savings = userProfile?.totalSavings || (userProfile as any)?.stats?.savingsTotal || 0;
-    
-    for (let i = levels.length - 1; i >= 0; i--) {
-      const level = levels[i];
-      if (points >= level.pointsRequired && savings >= level.savingsRequired) {
-        console.log(`🔄 Level berechnet: ${level.id} (${points} Punkte, €${savings} Ersparnis)`);
-        return level.id;
-      }
-    }
-    
-    return 1;
-  })();
-  const currentStreak = userStats?.currentStreak || 0;
-  
-  // Get current level info
-  const currentLevelInfo = levels.find(l => l.id === currentLevel) || levels[0];
-  const nextLevel = levels.find(l => l.id === currentLevel + 1);
-  
-  // Calculate levels with unlock status
-  const levelsWithStatus = levels.map(level => ({
-    ...level,
-    isActive: level.id === currentLevel,
-    isUnlocked: level.id <= currentLevel || 
-                (currentSavings >= level.savingsRequired && currentPoints >= level.pointsRequired),
-    hasNewCategory: [4, 6, 8, 10].includes(level.id) // Kategorie-Level hervorheben
-  }));
-  
-  // Helper function to get color based on points
-  const getAchievementColor = (points: number, isCompleted: boolean) => {
-    if (isCompleted) {
-      // Completed achievements keep their difficulty color but slightly golden
-      if (points <= 10) return '#4A90E2'; // Blau
-      if (points <= 20) return '#7ED321'; // Grün
-      if (points <= 25) return '#F5A623'; // Orange
-      return '#D0021B'; // Rot
-    } else {
-      // Non-completed achievements use muted versions
-      if (points <= 10) return '#B3D1F5'; // Helles Blau
-      if (points <= 20) return '#C8E6C9'; // Helles Grün  
-      if (points <= 25) return '#FFE0B2'; // Helles Orange
-      return '#FFCDD2'; // Helles Rot
-    }
-  };
+  const requiredPts = nextLevel?.pointsRequired ?? 0;
+  const requiredEur = nextLevel?.savingsRequired ?? 0;
+  const ptsPct =
+    requiredPts > 0
+      ? Math.min(100, Math.max(0, Math.round((pts / requiredPts) * 100)))
+      : 100;
+  const eurPct =
+    requiredEur > 0
+      ? Math.min(100, Math.max(0, Math.round((eur / requiredEur) * 100)))
+      : 100;
 
-  // Process achievements with progress
-  const processedAchievements = achievements && achievements.length > 0
-    ? achievements
-        .sort((a, b) => a.points - b.points) // Sortierung nach Punkten (aufsteigend)
-        .map(achievement => {
-          const withProgress = getAchievementWithProgress(achievement);
-          return {
-            ...withProgress,
-            color: getAchievementColor(achievement.points, withProgress.isCompleted)
-          };
-        })
-    : [];
+  const processed: ProgressedAchievement[] = useMemo(() => {
+    return (achievements || [])
+      .filter((a) => a.isActive !== false)
+      .map((a) => getAchievementWithProgress(a) as ProgressedAchievement)
+      .sort((a, b) => {
+        // Primary: by difficulty (points) ascending — Einfach
+        // (≤10) first, then Mittel (≤20), Schwer (≤25), Meister.
+        if (a.points !== b.points) return a.points - b.points;
+        // Secondary within same difficulty: in-progress first
+        // (motivating), then completed wins, then untouched.
+        const aActive = !a.isCompleted && a.progress > 0;
+        const bActive = !b.isCompleted && b.progress > 0;
+        if (aActive !== bActive) return aActive ? -1 : 1;
+        if (a.isCompleted !== b.isCompleted) return a.isCompleted ? -1 : 1;
+        return 0;
+      });
+  }, [achievements, getAchievementWithProgress]);
 
-  const ProgressBar = ({ progress, maxProgress, color }: { progress: number; maxProgress: number; color: string }) => {
-    const percentage = Math.min(progress / maxProgress, 1);
-    
-    return (
-      <View style={styles.progressBarContainer}>
-        <View style={[styles.progressBarBackground, { backgroundColor: 'rgba(255,255,255,0.3)' }]}>
-          <View 
-            style={[
-              styles.progressBarFill, 
-              { 
-                backgroundColor: color,
-                width: `${percentage * 100}%`,
-              }
-            ]} 
-          />
-        </View>
-      </View>
-    );
-  };
+  const completedCount = processed.filter((p) => p.isCompleted).length;
 
-  const shimmerTranslateX = shimmerAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-screenWidth, screenWidth],
-  });
+  // Chrome height — same row metric as the rest of the app's
+  // detail screens (DetailHeader uses DETAIL_HEADER_ROW_HEIGHT
+  // below the safe-area inset).
+  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
 
-  // Streak Helper Functions
-  const getStreakGradient = (days: number) => {
-    if (days >= 28) return ['#FFD700', '#FFA500']; // Gold
-    if (days >= 21) return ['#9C27B0', '#673AB7']; // Purple
-    if (days >= 14) return ['#FF6B35', '#FF4E00']; // Orange
-    if (days >= 7) return ['#4CAF50', '#2E7D32']; // Green
-    return ['#2196F3', '#1976D2']; // Blue
-  };
-
-  // 🎬 Achievement Lottie Source Helper (wie in AchievementUnlockOverlay)
-  const getAchievementLottieSource = (achievement: any) => {
-    try {
-      // Intelligente Zuordnung basierend auf Action-Type (mit vorhandenen Files)
-      switch (achievement.trigger?.action) {
-        case 'first_action_any':
-          return require('@/assets/lottie/rocket.json');
-         
-        case 'daily_streak':
-          if (achievement.trigger.target >= 7) {
-            return require('@/assets/lottie/streak-fire.json');
-          }
-          return require('@/assets/lottie/streak-bonus.json');
-          
-        case 'scan_product':
-          return require('@/assets/lottie/scanner-line.json');  
-        case 'view_comparison': 
-          return require('@/assets/lottie/comparison.json');
-        case 'complete_shopping':
-          return require('@/assets/lottie/task.json');
-        case 'search_product':
-          return require('@/assets/lottie/search.json');
-        case 'submit_rating':
-          return require('@/assets/lottie/ratingsthumbsup.json');
-        case 'create_list':
-          return require('@/assets/lottie/task.json');
-        case 'convert_product':
-          return require('@/assets/lottie/swap.json');
-        case 'share_app':
-          return require('@/assets/lottie/review.json');
-        case 'submit_product':
-          return require('@/assets/lottie/favorites.json');
-        case 'save_product':
-          return require('@/assets/lottie/favorites2.json');
-        case 'mission_daily_done':
-          return require('@/assets/lottie/mission-daily.json');
-        case 'mission_weekly_done':
-          return require('@/assets/lottie/mission-weekly.json');
-        case 'savings_total':
-          return require('@/assets/lottie/savings.json');
-        default:
-          return require('@/assets/lottie/confetti.json');
-      }
-    } catch (error) {
-      console.log(`⚠️ Achievement Lottie loading failed, using fallback`);
-      return require('@/assets/lottie/confetti.json');
-    }
-  };
-
-
-
-  // Zeige Loading wenn Levels noch nicht geladen sind
-  if (levelsLoading || levels.length === 0) {
-    return (
-      <ThemedView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color={colors.tint} />
-        <ThemedText style={{ marginTop: 16, color: colors.text }}>Lade Level-System...</ThemedText>
-      </ThemedView>
-    );
-  }
+  // Loading state: render the chrome + a skeleton body instead of a
+  // centered ActivityIndicator. Two reasons:
+  //   1. The DetailHeader stays visible immediately (no abrupt
+  //      "spinner → header pops in" jump) — same pattern the
+  //      product-detail / comparison screens use.
+  //   2. The skeleton mirrors the page layout (hero card + 2 card
+  //      rows) so the eventual data swap doesn't shift content.
+  const isLoading = levelsLoading || achievementsLoading;
 
   return (
-    <ThemedView style={styles.container}>
-
-
-      <ScrollView 
-        style={styles.scrollView}
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      <ScrollView
+        contentContainerStyle={{
+          paddingTop: chromeHeight,
+          paddingBottom: 40,
+        }}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        scrollEnabled={!isLoading}
       >
-
-
-        {/* Savings Card with Shimmer */}
-        <Animated.View style={[styles.savingsCard, { opacity: fadeAnim }]}>
-          <LinearGradient
-            colors={['#FF9800', '#FF5722']}
-            start={{ x: 1, y: 0 }}
-            end={{ x: 0, y: 0 }}
-            style={styles.gradientCard}
-          >
-            <TouchableOpacity onPress={() => router.push('/purchase-history' as any)} style={styles.savingsContent}>
-              <View style={styles.savingsLeft}>
-                <ThemedText style={styles.savingsLabel}>Deine Gesamtersparnis</ThemedText>
-                <ThemedText style={styles.savingsAmount}>{`€ ${currentSavings.toFixed(2)}`}</ThemedText>
-              </View>
-              <View style={styles.savingsRight}>
-                <View style={styles.productsBadge}>
-                  <IconSymbol name="number" size={14} color={colors.warning} />
-                  <ThemedText style={styles.productsBadgeText}>{`${purchasedProducts} gekaufte Produkte`}</ThemedText>
-                </View>
-              </View>
-            </TouchableOpacity>
-            
-            {/* Shimmer Effect */}
-            <Animated.View 
-              style={[
-                styles.shimmerOverlay,
-                {
-                  transform: [{ translateX: shimmerTranslateX }],
-                }
-              ]}
-            >
-              <LinearGradient
-                colors={['transparent', 'rgba(255, 255, 255, 0.23)', 'transparent']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.shimmerGradient}
-              />
-            </Animated.View>
-          </LinearGradient>
-        </Animated.View>
-
-        {/* Current Level Card */}
-        <Animated.View style={[styles.levelCard, { opacity: fadeAnim }]}>
-          <LinearGradient
-            colors={(() => {
-              // Level-spezifische Farben (Gradient mit dunklerer Version)
-              const baseColor = currentLevelInfo.color;
-              switch(currentLevel) {
-                case 1: return [baseColor, '#9E6B50']; // Braun
-                case 2: return [baseColor, '#FF9800']; // Orange
-                case 3: return [baseColor, '#4CAF50']; // Grün
-                case 4: return [baseColor, '#FFC107']; // Gold
-                case 5: return [baseColor, '#FF5252']; // Rot
-                default: return [baseColor, '#9E6B50'];
-              }
-            })()}
-            start={{ x: -1, y: 0.34 }}
-            end={{ x: 1, y: -0.34 }}
-            style={styles.gradientCard}
-          >
-            <View style={styles.levelHeader}>
-              <View style={styles.levelIcon}>
-              <IconSymbol name={currentLevelInfo.icon as any} size={30} color="white" />
-              </View>
-              <View style={styles.levelInfo}>
-              <ThemedText style={styles.levelNumber}>{`Level ${currentLevel}`}</ThemedText>
-              <ThemedText style={styles.levelName}>{currentLevelInfo.name}</ThemedText>
-              <ThemedText style={styles.levelDescription}>{currentLevelInfo.description}</ThemedText>
-              </View>
-            </View>
-
-            {/* Reward Badge */}
-            <View style={styles.rewardBadge}>
-              <IconSymbol name="gift" size={16} color="white" />
-              <ThemedText style={styles.rewardText}>
-                {`Belohnung: ${currentLevelInfo.reward}`}
-              </ThemedText>
-            </View>
-
-            {/* Progress Section (elegant überarbeitet) */}
-            {nextLevel && (
-            <View style={styles.levelProgressSection}>
-                <ThemedText style={styles.levelProgressTitle}>
-                  {`Fortschritt zu Level ${nextLevel.id} (${nextLevel.name})`}
-                </ThemedText>
-                
-                {/* Ersparnis Progress (wenn erforderlich) */}
-                {nextLevel.savingsRequired > 0 && (
-                  <View style={styles.levelProgressItem}>
-                    <View style={styles.levelProgressHeader}>
-                      <View style={styles.levelProgressLabelRow}>
-                        <IconSymbol name="eurosign.circle.fill" size={14} color="white" />
-                        <ThemedText style={styles.levelProgressLabel}>Ersparnis</ThemedText>
-              </View>
-                      <ThemedText style={styles.levelProgressCounter}>
-                        {`€${currentSavings.toFixed(2)} / €${nextLevel.savingsRequired}`}
-                      </ThemedText>
-                    </View>
-                    <ProgressBar progress={currentSavings} maxProgress={nextLevel.savingsRequired} color="white" />
-                  </View>
-                )}
-              
-                {/* Punkte Progress */}
-                <View style={styles.levelProgressItem}>
-                  <View style={styles.levelProgressHeader}>
-                    <View style={styles.levelProgressLabelRow}>
-                      <IconSymbol name="star.fill" size={14} color="white" />
-                      <ThemedText style={styles.levelProgressLabel}>Punkte</ThemedText>
-              </View>
-                    <ThemedText style={styles.levelProgressCounter}>
-                      {`${currentPoints} / ${nextLevel.pointsRequired}`}
-                    </ThemedText>
-                  </View>
-                  <ProgressBar progress={currentPoints} maxProgress={nextLevel.pointsRequired} color="white" />
-                </View>
-                
-                <ThemedText style={styles.levelRemainingText}>
-                  {nextLevel.savingsRequired > 0 
-                    ? `Noch €${Math.max(0, nextLevel.savingsRequired - currentSavings).toFixed(2)} & ${Math.max(0, nextLevel.pointsRequired - currentPoints)} Punkte zum nächsten Level`
-                    : `Noch ${Math.max(0, nextLevel.pointsRequired - currentPoints)} Punkte zum nächsten Level`
-                  }
-              </ThemedText>
-            </View>
-            )}
-            {!nextLevel && (
-              <View style={styles.progressSection}>
-                <ThemedText style={[styles.progressLabel, {fontSize: 16, textAlign: 'center'}]}>🏆 Maximales Level erreicht! 🏆</ThemedText>
-                <ThemedText style={[styles.remainingText, {textAlign: 'center'}]}>Du bist ein wahrer MarkenDetektiv!</ThemedText>
-              </View>
-            )}
-          </LinearGradient>
-        </Animated.View>
-
-        {/* Bestenlisten Button */}
-        <Animated.View style={[
-          styles.levelListCard, 
-          { 
-            opacity: fadeAnim,
-            backgroundColor: colors.cardBackground,
-            marginBottom: 16,
-          }
-        ]}>
-          <TouchableOpacity 
-            style={styles.levelListContent}
-            onPress={() => router.push('/leaderboard' as any)}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.levelListIcon, { backgroundColor: colors.primary }]}>
-              <IconSymbol name="trophy" size={20} color="white" />
-            </View>
-            
-            <View style={styles.levelListInfo}>
-              <View style={styles.levelListHeader}>
-                <ThemedText style={[styles.levelListName, { color: colors.text }]}>
-                  Bestenlisten
-                </ThemedText>
-              </View>
-              <ThemedText style={styles.levelListDescription}>
-                <Text>Vergleiche dich mit anderen Sparfüchsen! 🏆</Text>
-              </ThemedText>
-            </View>
-
-            <View style={styles.levelStatus}>
-              <IconSymbol name="chevron.right" size={24} color={colors.icon} />
-            </View>
-          </TouchableOpacity>
-        </Animated.View>
-
-        {/* Streak Display - nutze levelListCard wie andere Level auch */}
-        {currentStreak > 0 && (
-          <Animated.View style={[
-            styles.levelListCard, 
-            { 
-              opacity: fadeAnim,
-              backgroundColor: colors.cardBackground,
-              marginBottom: 16,
-            }
-          ]}>
-            <View style={styles.levelListContent}>
-              <View style={[styles.levelListIcon, { backgroundColor: getStreakGradient(currentStreak)[0] }]}>
-                <IconSymbol name="flame.fill" size={20} color="white" />
-              </View>
-              
-              <View style={styles.levelListInfo}>
-                <View style={styles.levelListHeader}>
-                  <ThemedText style={[styles.levelListName, { color: colors.text }]}>
-                    {`${currentStreak} ${currentStreak === 1 ? 'Tag' : 'Tage'} Streak!`}
-                  </ThemedText>
-                </View>
-                <ThemedText style={styles.levelListDescription}>
-                  <Text>{currentStreak >= 7 ? 'Du bist richtig auf Feuer! 🎯' : 'Weiter so! 💪'}</Text>
-                </ThemedText>
-                <ThemedText style={styles.levelListDescription}>
-                  <Text>{`${userStats?.freezeTokens || 0}❄️ Freeze-Token verfügbar`}</Text>
-                </ThemedText>
-              </View>
-
-              <View style={styles.levelStatus}>
-                <IconSymbol name="checkmark.circle.fill" size={24} color={getStreakGradient(currentStreak)[0]} />
-              </View>
-            </View>
-            
-          </Animated.View>
-        )}
-
-        {/* All Levels Section */}
-        <ThemedText style={styles.sectionTitle}>Alle Level</ThemedText>
-        
-        {levelsWithStatus.map((level, index) => (
-          <TouchableOpacity
-            key={level.id} 
-            onPress={() => {
-              if (level.isUnlocked) {
-                // 🎉 Zeige Level-Up Overlay für erreichte Level
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                
-                // Verwende OverlayManager um Konflikte zu vermeiden
-                overlayManager.showOverlay(() => {
-                  setLevelUpData({ newLevel: level.id, oldLevel: level.id - 1 });
-                  setShowLevelUpOverlay(true);
-                });
-              }
-            }}
-            activeOpacity={level.isUnlocked ? 0.7 : 1}
-            disabled={!level.isUnlocked}
-          >
-            <Animated.View 
-            style={[
-              styles.levelListCard,
-              { backgroundColor: level.isUnlocked ? colors.cardBackground : (colorScheme === 'dark' ? colors.cardBackground : '#F5F5F5') },
-                level.isActive && { borderColor: level.color, borderWidth: 2 },
-                level.isUnlocked && !level.isActive && { 
-                  borderColor: colors.success + '40', 
-                  borderWidth: 1,
-                  backgroundColor: colors.cardBackground // Weiß im Light Mode, dunkel im Dark Mode
-                },
-                !level.isUnlocked && level.hasNewCategory && {
-                  opacity: 0.95 // Besserer Kontrast für goldene Level
-                },
-                !level.isUnlocked && !level.hasNewCategory && { opacity: 0.75 } // Besserer Kontrast
-            ]}
-          >
-            <View style={styles.levelListContent}>
-              <View style={[
-                styles.levelListIcon, 
-                { 
-                  backgroundColor: level.isUnlocked ? level.color : colors.border,
-                  opacity: level.isUnlocked ? 1 : 0.5
-                }
-              ]}>
-                <IconSymbol 
-                  name={level.icon as any} 
-                  size={20} 
-                  color={level.isUnlocked ? 'white' : colors.icon} 
-                />
-              </View>
-              
-              <View style={styles.levelListInfo}>
-                <View style={styles.levelListHeader}>
-                  <ThemedText style={[
-                    styles.levelListName, 
-                    level.isActive && { color: colors.text, fontFamily: 'Nunito_700Bold' },
-                    level.isUnlocked && !level.isActive && { color: colors.icon, fontFamily: 'Nunito' },
-                    !level.isUnlocked && { opacity: 0.4 } // Besserer Kontrast - GLEICH für alle
-                  ]}>
-                    {`Level ${level.id} ${level.name}`}
-                  </ThemedText>
-                </View>
-                <ThemedText style={[
-                  styles.levelListDescription,
-                  level.isUnlocked && !level.isActive && { color: colors.success + 'AA' },
-                  !level.isUnlocked && { opacity: 0.6 } // Besserer Kontrast - GLEICH für alle
-                ]}>
-                  {level.description}
-                </ThemedText>
-                <View style={styles.rewardRow}>
-                  <TextShimmer 
-                    isShimmering={!level.isUnlocked}
-                  >
-                    <View style={styles.rewardContent}>
-                      <IconSymbol 
-                        name="gift" 
-                        size={12} 
-                        color={
-                          level.isActive ? level.color : 
-                          level.isUnlocked ? colors.success :
-                          !level.isUnlocked ? '#FFD54F' : colors.icon
-                        } 
-                      />
-                      <ThemedText style={[
-                        styles.rewardRowText, 
-                        level.isActive && { color: level.color },
-                        level.isUnlocked && !level.isActive && { color: colors.success },
-                        !level.isUnlocked && { 
-                          fontFamily: 'Nunito_700Bold', // Fett für alle gesperrten Level
-                          opacity: 0.9, 
-                          color: colors.text // Dunkler + kontrastreicher
-                        }
-                      ]}>
-                    {level.reward}
-                  </ThemedText>
-                    </View>
-                  </TextShimmer>
-                </View>
-              </View>
-              
-              <View style={styles.levelStatus}>
-                {level.isActive ? (
-                  <IconSymbol name="star.fill" size={24} color={colors.warning} />
-                ) : level.isUnlocked ? (
-                  <IconSymbol name="checkmark.circle.fill" size={24} color={colors.success} />
-                ) : (
-                  <IconSymbol name="lock" size={24} color={colors.icon} />
-                )}
-              </View>
-            </View>
-          </Animated.View>
-          </TouchableOpacity>
-        ))}
-
-        {/* STREAK-ANZEIGE ENTFERNT - War die Ursache für den Crash */}
-
-        {/* Achievements Section */}
-        <ThemedText style={[styles.sectionTitle, { marginTop: 15 }]}>Errungenschaften</ThemedText>
-        
-        {achievementsLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={colors.primary} />
-          </View>
+        {isLoading ? (
+          <AchievementsSkeleton />
         ) : (
-          processedAchievements.map((achievement, index) => (
-          <TouchableOpacity
-            key={achievement.id}
-            onPress={() => {
-              if (achievement.isCompleted) {
-                // 🏆 Zeige Achievement Unlock Overlay für erreichte Achievements
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                
-                // Verwende OverlayManager um Konflikte zu vermeiden
-                overlayManager.showOverlay(() => {
-                  setShowAchievementUnlock({
-                    visible: true,
-                    achievement: achievement
+        <>
+        {/* ── Current Level Hero ── */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 4 }}>
+          <CurrentLevelHero
+            level={currentLevelInfo}
+            levelId={currentLevel}
+            nextLevel={nextLevel}
+            pts={pts}
+            eur={eur}
+            requiredPts={requiredPts}
+            requiredEur={requiredEur}
+            ptsPct={ptsPct}
+            eurPct={eurPct}
+            streak={userStats?.currentStreak ?? 0}
+            freezeTokens={userStats?.freezeTokens ?? 0}
+          />
+        </View>
+
+        <View style={{ height: 22 }} />
+
+        {/* ── Levels ── */}
+        <Section
+          title="Levels"
+          subtitle={`Level ${currentLevel} / ${levels.length}`}
+        >
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
+          >
+            {levels.map((level) => (
+              <LevelCard
+                key={level.id}
+                level={level}
+                isActive={level.id === currentLevel}
+                isUnlocked={level.id <= currentLevel}
+                onPress={() => {
+                  if (level.id > currentLevel) return;
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  overlayManager.showOverlay(() => {
+                    setLevelUpData({
+                      newLevel: level.id,
+                      oldLevel: Math.max(0, level.id - 1),
+                    });
+                    setShowLevelUp(true);
                   });
-                });
-              }
-            }}
-            activeOpacity={achievement.isCompleted ? 0.7 : 1}
-            disabled={!achievement.isCompleted}
-          >
-            <Animated.View 
-            style={[
-              styles.achievementCard,
-              { backgroundColor: achievement.isCompleted ? colors.cardBackground : (colorScheme === 'dark' ? colors.cardBackground : '#F5F5F5') },
-                achievement.isCompleted && styles.completedAchievementCard,
-            ]}
-          >
-            <View style={styles.achievementContent}>
-              {/* 🎬 LOTTIE-ICON (größer) + Schwierigkeit darunter */}
-              <View style={styles.achievementIconSection}>
-                <View style={[
-                  styles.achievementIconLarge, 
-                  { 
-                    backgroundColor: achievement.isCompleted ? '#FFD700' : achievement.color,
-                    borderWidth: achievement.isCompleted ? 3 : 0,
-                    borderColor: '#FFA500'
-                  }
-                ]}>
-                  {achievement.isCompleted ? (
-                    <LottieView
-                      source={getAchievementLottieSource(achievement)}
-                      style={{ width: 36, height: 36 }}
-                      autoPlay={true}
-                      loop={true}
-                      speed={0.8}
-                    />
-                  ) : (
-                    <IconSymbol 
-                      name={achievement.icon as any} 
-                      size={28} 
-                      color="white" 
-                    />
-                  )}
-                </View>
-                
-                {/* Schwierigkeitsanzeige unter dem Icon */}
-                <View style={[styles.difficultyChip, { 
-                  backgroundColor: achievement.points <= 10 ? '#2196F3' : 
-                                 achievement.points <= 20 ? '#4CAF50' : 
-                                 achievement.points <= 25 ? '#FF9800' : '#F44336'
-                }]}>
-                  <ThemedText style={styles.difficultyChipText}>
-                    {achievement.points <= 10 ? 'Einfach' : 
-                     achievement.points <= 20 ? 'Mittel' : 
-                     achievement.points <= 25 ? 'Schwer' : 'Meister'}
-                  </ThemedText>
-                </View>
-              </View>
-              
-              <View style={styles.achievementInfo}>
-                <View style={styles.achievementHeader}>
-                  <View style={styles.achievementTitleRow}>
-                    <ThemedText style={[
-                      styles.levelListName, // 🎯 Gleiche Schriftgröße wie Level-Cards
-                      achievement.isCompleted && { color: colors.text, fontFamily: 'Nunito_700Bold' },
-                      !achievement.isCompleted && { opacity: 0.4, fontFamily: 'Nunito' } // 🎯 Grau wie nicht erreichte Level
-                    ]}>
-                      {achievement.name}
-                    </ThemedText>
-                    
-                    {/* Punkte Badge (einheitliche Farben) */}
-                    <View style={[styles.pointsChip, { 
-                      backgroundColor: achievement.points <= 10 ? '#2196F3' : 
-                                     achievement.points <= 20 ? '#4CAF50' : 
-                                     achievement.points <= 25 ? '#FF9800' : '#F44336'
-                    }]}>
-                      <IconSymbol name="star.fill" size={12} color="white" />
-                      <ThemedText style={styles.pointsChipText}>
-                        {achievement.points} Punkte
-                      </ThemedText>
-                    </View>
-                  </View>
-                </View>
-                
-                <ThemedText style={[
-                  styles.levelListDescription, // 🎯 Gleiche Schriftgröße wie Level-Cards
-                  achievement.isCompleted && { color: colors.success + 'AA' },
-                  !achievement.isCompleted && { opacity: 0.6 } // 🎯 Grau wie nicht erreichte Level-Beschreibungen
-                ]}>
-                  {achievement.description}
-                </ThemedText>
-                
-                {/* Progress Section (elegant integriert) */}
-                <View style={styles.achievementProgressSection}>
-                  {achievement.isCompleted ? (
-                    <View style={styles.completedIndicator}>
-                      <IconSymbol name="checkmark.circle.fill" size={18} color="#4CAF50" />
-                      <ThemedText style={styles.completedText}>Abgeschlossen!</ThemedText>
-                    </View>
-                  ) : (
-                    <View style={styles.progressContainer}>
-                      <View style={styles.progressHeader}>
-                        <ThemedText style={[styles.progressLabel, { color: colors.text }]}>
-                          Fortschritt
-                        </ThemedText>
-                        <ThemedText style={[styles.progressCounter, { color: colors.text }]}>
-                          {`${achievement.progress}/${achievement.maxProgress}`}
-                        </ThemedText>
-                      </View>
-                      <View style={styles.progressBarContainer}>
-                      <ProgressBar 
-                          progress={Math.max(achievement.progress, 0.02)} 
-                        maxProgress={achievement.maxProgress} 
-                        color={achievement.color} 
-                      />
-                    </View>
-                    </View>
-                )}
-                  </View>
-              </View>
+                }}
+              />
+            ))}
+          </ScrollView>
+        </Section>
+
+        <View style={{ height: 22 }} />
+
+        {/* ── Errungenschaften ── */}
+        <Section
+          title="Errungenschaften"
+          subtitle={`${completedCount} / ${processed.length}`}
+        >
+          {processed.length === 0 ? (
+            <View
+              style={{ paddingHorizontal: 20, paddingVertical: 24 }}
+            >
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 13,
+                  color: theme.textMuted,
+                  textAlign: 'center',
+                }}
+              >
+                Errungenschaften werden geladen …
+              </Text>
             </View>
-          </Animated.View>
-          </TouchableOpacity>
-        ))
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
+            >
+              {processed.map((a) => (
+                <AchievementCard
+                  key={a.id}
+                  achievement={a}
+                  onPress={() => {
+                    if (!a.isCompleted) return;
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    overlayManager.showOverlay(() => {
+                      setShowAchUnlock({ visible: true, achievement: a });
+                    });
+                  }}
+                />
+              ))}
+            </ScrollView>
+          )}
+        </Section>
+        </>
         )}
       </ScrollView>
-      
-      {/* Info Sheet Modal - Natives iOS Sheet */}
-      <FixedAndroidModal
-        visible={showInfoSheet}
-        onRequestClose={() => setShowInfoSheet(false)}
-        isBottomSheet={true}
-      >
-        <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
-          {/* Bottom Sheet Header */}
-          <View style={styles.bottomSheetHeader}>
-            
-            <View style={styles.headerRow}>
-              <TouchableOpacity 
-                style={styles.closeButtonLeft}
-                onPress={() => setShowInfoSheet(false)}
-              >
-                <IconSymbol name="xmark" size={24} color={colors.icon} />
-              </TouchableOpacity>
-              <View style={styles.titleSection}>
-                <ThemedText style={styles.bottomSheetTitle}>🎮 Level-System & Belohnungen</ThemedText>
-                <ThemedText style={[styles.bottomSheetSubtitle, { color: colors.primary }]}>
-                  Sammle Punkte und schalte Kategorien frei
-                </ThemedText>
-              </View>
-              </View>
-            </View>
-            
-          <ScrollView 
-            style={styles.bottomSheetContent}
-            showsVerticalScrollIndicator={false}
+
+      {/* Chrome — shared `DetailHeader` (BlurView on iOS, tinted
+          View on Android, arrow-left back button, optional right
+          slot). One header pattern across all detail screens. */}
+      <DetailHeader
+        title="Errungenschaften"
+        onBack={() => router.back()}
+        right={
+          <Pressable
+            onPress={() => setShowInfo(true)}
+            hitSlop={6}
+            style={({ pressed }) => ({
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: theme.surfaceAlt,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.7 : 1,
+            })}
           >
-            {/* Welcome Message */}
-            <View style={[styles.welcomeCard, { backgroundColor: colors.cardBackground }]}>
-              <ThemedText style={styles.welcomeTitle}>
-                🕵️‍♂️ Willkommen in der Welt von MarkenDetektive 🕵️‍♀️
-              </ThemedText>
-              <ThemedText style={[styles.welcomeText, { color: colors.text }]}>
-                Stell dir vor, MarkenDetektive ist nicht nur eine App, sondern ein{' '}
-                <Text style={[styles.welcomeHighlight, { color: colors.primary }]}>Spiel, das nie endet</Text>.
-              </ThemedText>
-              <ThemedText style={[styles.welcomeText, { color: colors.text }]}>
-                Das Ziel: <Text style={[styles.welcomeHighlight, { color: colors.primary }]}>Geld sparen, Spaß haben und Punkte sammeln</Text>, während du uns nebenbei hilfst, geheime Infos über Produkte zu sammeln und Licht ins Dunkel der Hersteller- und Markenverstrickungen zu bringen.
-              </ThemedText>
-          </View>
+            <MaterialCommunityIcons
+              name="information-outline"
+              size={18}
+              color={theme.textMuted}
+            />
+          </Pressable>
+        }
+      />
 
-            {/* Level System Explanation */}
-            <View style={styles.infoSection}>
-              <View style={styles.infoSectionHeader}>
-                <IconSymbol name="star.fill" size={20} color={colors.warning} />
-                <ThemedText style={styles.sectionHeaderText}>Level & coole Titel</ThemedText>
-              </View>
-              <ThemedText style={styles.infoText}>
-                Du sammelst Punkte für verschiedene Aktionen und steigst dadurch im Level auf. Je höher dein Level, desto cooler dein Titel - vom "Sparanfänger" zum "Einkaufsdetektiv"!
-              </ThemedText>
-            </View>
-            
-            {/* Categories unlock info */}
-            <View style={styles.infoSection}>
-              <View style={styles.infoSectionHeader}>
-                <IconSymbol name="folder.fill" size={20} color={colors.primary} />
-                <ThemedText style={styles.sectionHeaderText}>Kategorien freischalten</ThemedText>
-              </View>
-              <ThemedText style={styles.infoText}>
-                Das Beste: Mit höheren Leveln schaltest du neue Produktkategorien frei! Dadurch findest du immer mehr verschiedene NoName-Alternativen.
-              </ThemedText>
-              <ThemedText style={[styles.infoText, { marginTop: 8, fontWeight: '600', color: colors.primary }]}>
-                🔓 Je höher dein Level, desto mehr Produktbereiche werden verfügbar!
-              </ThemedText>
-            </View>
-            
-            {/* How to earn points */}
-            <View style={styles.infoSection}>
-              <View style={styles.infoSectionHeader}>
-                <IconSymbol name="plus.circle.fill" size={20} color={colors.success} />
-                <ThemedText style={styles.sectionHeaderText}>So sammelst du Punkte</ThemedText>
-              </View>
-              <View style={styles.pointsList}>
-                <View style={styles.pointsItem}>
-                  <IconSymbol name="camera.fill" size={16} color={colors.primary} />
-                  <Text style={[styles.pointsText, { color: colors.text }]}>Produkt scannen: <Text style={styles.pointsValue}>+2 Punkte</Text></Text>
-                </View>
-                <View style={styles.pointsItem}>
-                  <IconSymbol name="magnifyingglass" size={16} color={colors.primary} />
-                  <Text style={[styles.pointsText, { color: colors.text }]}>Produkt suchen: <Text style={styles.pointsValue}>+1 Punkt</Text></Text>
-                </View>
-                <View style={styles.pointsItem}>
-                  <IconSymbol name="chart.bar.fill" size={16} color={colors.primary} />
-                  <Text style={[styles.pointsText, { color: colors.text }]}>Vergleich anschauen: <Text style={styles.pointsValue}>+3 Punkte</Text></Text>
-                </View>
-                <View style={styles.pointsItem}>
-                  <IconSymbol name="list.bullet" size={16} color={colors.primary} />
-                  <Text style={[styles.pointsText, { color: colors.text }]}>Einkaufszettel abschließen: <Text style={styles.pointsValue}>+5 Punkte</Text></Text>
-                </View>
-                <View style={styles.pointsItem}>
-                  <IconSymbol name="star.fill" size={16} color={colors.warning} />
-                  <Text style={[styles.pointsText, { color: colors.text }]}>Bewertung schreiben: <Text style={styles.pointsValue}>+2 Punkte</Text></Text>
-                </View>
-                <View style={styles.pointsItem}>
-                  <IconSymbol name="trophy.fill" size={16} color={colors.warning} />
-                  <Text style={[styles.pointsText, { color: colors.text }]}>Erste Aktion: <Text style={styles.pointsValue}>+10 Punkte</Text></Text>
-                </View>
-              </View>
-            </View>
-            
-            {/* Achievements explanation */}
-            <View style={styles.infoSection}>
-              <View style={styles.infoSectionHeader}>
-                <IconSymbol name="trophy.fill" size={20} color={colors.warning} />
-                <ThemedText style={styles.sectionHeaderText}>Errungenschaften sammeln</ThemedText>
-              </View>
-              <ThemedText style={styles.infoText}>
-                Errungenschaften sind besondere Herausforderungen. Du schaltest sie frei, indem du bestimmte Aufgaben erfüllst - zum Beispiel 5 Produkte scannen oder deinen ersten Einkaufszettel abschließen.
-              </ThemedText>
-              <ThemedText style={[styles.infoText, { marginTop: 8, fontWeight: '600', color: colors.primary }]}>
-                💡 Tipp: Manche Achievements brauchen Zeit - scanne weiter, nutze die App regelmäßig und du wirst mehr freischalten!
-              </ThemedText>
-            </View>
-            
-            {/* Level progression with examples */}
-            <View style={styles.infoSection}>
-              <View style={styles.infoSectionHeader}>
-                <IconSymbol name="chart.line.uptrend.xyaxis" size={20} color={colors.primary} />
-                <ThemedText style={styles.sectionHeaderText}>Level-Aufstieg</ThemedText>
-              </View>
-              <ThemedText style={styles.infoText}>
-                Die ersten Level sind schnell erreicht, aber später brauchst du mehr Punkte. Ab Level 4 musst du auch Geld sparen, um aufzusteigen!
-              </ThemedText>
-              <View style={styles.levelExample}>
-                <Text style={[styles.levelText, { color: colors.text }]}>Level 1 → 2: 10 Punkte</Text>
-                <Text style={[styles.levelText, { color: colors.text }]}>Level 2 → 3: 25 Punkte</Text>
-                <Text style={[styles.levelText, { color: colors.text }]}>Level 3 → 4: 50 Punkte + 10€ sparen</Text>
-                <Text style={[styles.levelText, { color: colors.text }]}>Level 4 → 5: 100 Punkte + 50€ sparen</Text>
-              </View>
-            </View>
-            
-            {/* Fair Play */}
-            <View style={[styles.infoSection, { paddingBottom: 40 }]}>
-              <View style={styles.infoSectionHeader}>
-                <IconSymbol name="clock.fill" size={20} color={colors.secondary} />
-                <ThemedText style={styles.sectionHeaderText}>Fair Play Limits</ThemedText>
-              </View>
-              <ThemedText style={styles.infoText}>
-                Damit es fair bleibt, gibt es Tageslimits:
-              </ThemedText>
-              <View style={styles.limitsList}>
-                <Text style={[styles.limitText, { color: colors.text }]}>• Max. 10 Scans pro Tag</Text>
-                <Text style={[styles.limitText, { color: colors.text }]}>• Max. 10 Vergleiche pro Tag</Text>
-                <Text style={[styles.limitText, { color: colors.text }]}>• Max. 5 Einkaufszettel pro Woche</Text>
-              </View>
-              <ThemedText style={[styles.infoText, { marginTop: 8, fontSize: 12, color: colors.icon }]}>
-                So wird verhindert, dass jemand zu schnell durch die Level rast!
-              </ThemedText>
-            </View>
-      </ScrollView>
-        </View>
-      </FixedAndroidModal>
+      {/* Info bottom-sheet — same `FilterSheet` component used
+          for the Region-Setup on the Belohnungen tab so all sheets
+          share the slide-up animation, drag handle, backdrop fade
+          and pan-to-dismiss gesture. */}
+      <FilterSheet
+        visible={showInfo}
+        title="Level & Errungenschaften"
+        onClose={() => setShowInfo(false)}
+      >
+        <InfoSheetContent />
+      </FilterSheet>
 
-      {/* Level-Up Overlay */}
-      {showLevelUpOverlay && levelUpData && (
+      {/* Overlays */}
+      {showLevelUp && levelUpData ? (
         <LevelUpOverlay
-          visible={showLevelUpOverlay}
+          visible={showLevelUp}
           newLevel={levelUpData.newLevel}
           oldLevel={levelUpData.oldLevel}
           onClose={() => {
-            setShowLevelUpOverlay(false);
+            setShowLevelUp(false);
             setLevelUpData(null);
           }}
         />
-      )}
-
-      {/* Achievement Unlock Overlay */}
-      {showAchievementUnlock.visible && showAchievementUnlock.achievement && (
+      ) : null}
+      {showAchUnlock.visible && showAchUnlock.achievement ? (
         <AchievementUnlockOverlay
-          visible={showAchievementUnlock.visible}
-          achievement={showAchievementUnlock.achievement}
-          onClose={() => setShowAchievementUnlock({ visible: false, achievement: null })}
+          visible={showAchUnlock.visible}
+          achievement={showAchUnlock.achievement}
+          onClose={() =>
+            setShowAchUnlock({ visible: false, achievement: null })
+          }
         />
-      )}
-    </ThemedView>
+      ) : null}
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 50,
-  },
+// ────────────────────────────────────────────────────────────────────
+// CurrentLevelHero — rich level showcase. Taller than the Rewards
+// StatusHero (this screen IS about the level, so it gets more
+// vertical real estate). Layout:
+//   ┌────────────────────────────────────────────┐
+//   │ [icon 64]  ⭐ AKTUELL · LV 3                │
+//   │            Actionmaestro                   │
+//   │            "Jetzt geht es erst richtig…"   │
+//   │                                            │
+//   │ ⭐ Lv 4 · Preisjäger          50 / 100      │
+//   │ ▰▰▰▰▰▱▱▱▱▱                                 │
+//   │ 💵 Ersparnis            32,44 / 20,00 €    │
+//   │ ▰▰▰▰▰▰▰▰▰▰                                 │
+//   │                                            │
+//   │ ✨ Noch X Pkt & Y € bis Lv N+1!            │
+//   └────────────────────────────────────────────┘
+// "Reward / category-unlock" chip dropped per design feedback —
+// the level identity (number, name, character description) is the
+// hero content; the levels-list below covers the rest of the
+// catalogue.
+// ────────────────────────────────────────────────────────────────────
 
-  // Level Progress Styles (schöner integriert)
-  levelProgressSection: {
-    marginTop: 4,
-    paddingTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.2)',
-  },
-  levelProgressTitle: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 4,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  levelProgressItem: {
-    marginBottom: 6,
-  },
-  levelProgressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  levelProgressLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  levelProgressLabel: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '500',
-    opacity: 1,
-  },
-  levelProgressCounter: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '700',
-    fontFamily: 'Nunito_700Bold',
-  },
-  levelRemainingText: {
-    color: 'white',
-    fontSize: 12,
-    textAlign: 'center',
-    marginTop: 8,
-        fontFamily: 'Nunito_700Bold',
-    lineHeight: 16,
-  },
+function CurrentLevelHero({
+  level,
+  levelId,
+  nextLevel,
+  pts,
+  eur,
+  requiredPts,
+  requiredEur,
+  ptsPct,
+  eurPct,
+  streak,
+  freezeTokens,
+}: {
+  level: Level | undefined;
+  levelId: number;
+  nextLevel: Level | undefined;
+  pts: number;
+  eur: number;
+  requiredPts: number;
+  requiredEur: number;
+  ptsPct: number;
+  eurPct: number;
+  streak: number;
+  freezeTokens: number;
+}) {
+  const gradient = levelGradient(levelId, level?.color);
+  const mdiIcon = mdiForLevelIcon(level?.icon);
+  const levelName = level?.name ?? `Level ${levelId}`;
+  const description = level?.description ?? '';
 
-  // Savings Card
-  savingsCard: {
-    marginBottom: 12,
-    borderRadius: 16,
-    ...Platform.select({
-      ios: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.09,
-    shadowRadius: 2,
-      },
-      android: {
-        elevation: 0, // Kein Schatten auf Android
-        borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.1)',
-      },
-    }),
-    // KEIN overflow hier - Shadow muss sichtbar bleiben
-  },
-  gradientCard: {
-    padding: 10,          // Reduziert von 12
-    position: 'relative',
-    borderRadius: 16,     // Abrundung für Gradient
-    overflow: 'hidden',   // Gradient wird abgerundet
-  },
-  savingsContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  savingsLeft: {
-    flex: 1,
-  },
-  savingsLabel: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 2,
-    lineHeight: 16,
-  },
-  savingsAmount: {
-    color: 'white',
-    fontSize: 23,
-    fontWeight: '600',
-    lineHeight: 26,
-  },
-  savingsRight: {
-    alignItems: 'flex-end',
-  },
-  productsBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 6,
-    gap: 2,
-  },
-  productsBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FF9800',
-    lineHeight: 14,
-  },
-  shimmerOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    width: 100,
-  },
-  shimmerGradient: {
-    flex: 1,
-    width: '100%',
-  },
+  // Footer copy — only relevant when we know what's missing.
+  const ptsRemaining = Math.max(0, requiredPts - pts);
+  const eurRemaining = Math.max(0, requiredEur - eur);
+  const showFooter = !!nextLevel && (ptsRemaining > 0 || eurRemaining > 0);
+  const footer = (() => {
+    if (!showFooter) return '';
+    const bits: string[] = [];
+    if (ptsRemaining > 0) bits.push(`${ptsRemaining.toLocaleString('de-DE')} Pkt`);
+    if (eurRemaining > 0) bits.push(`${eurRemaining.toFixed(2).replace('.', ',')} €`);
+    return `Noch ${bits.join(' & ')} bis Lv ${levelId + 1}!`;
+  })();
 
-  // Level Card
-  levelCard: {
-    marginBottom: 25,
-    borderRadius: 16,
-    ...Platform.select({
-      ios: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.09,
-    shadowRadius: 2,
-      },
-      android: {
-        elevation: 0, // Kein Schatten auf Android
-        borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.1)',
-      },
-    }),
-  },
-  levelHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,       // Reduziert von 12
-    gap: 8,
-  },
-  levelIcon: {
-    width: 61,
-    height: 61,
-    borderRadius: 30.5,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderWidth: 2,
-    borderColor: 'white',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  levelInfo: {
-    flex: 1,
-  },
-  levelNumber: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-    lineHeight: 15,        // Reduziert von 16
-    marginBottom: 2,       // Weniger Abstand
-  },
-  levelName: {
-    color: 'white',
-    fontSize: 22,          // Reduziert von 23
-    fontWeight: '600',
-    lineHeight: 24,        // Reduziert von 26
-    marginBottom: 2,       // Weniger Abstand
-  },
-  levelDescription: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '300',
-    lineHeight: 13,        // Reduziert von 14
-  },
-  rewardBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    paddingHorizontal: 8,
-    paddingVertical: 6,    // Reduziert von 8
-    borderRadius: 6,
-    marginBottom: 8,       // Reduziert von 12
-    gap: 6,               // Reduziert von 8
-  },
-  rewardText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
-    flex: 1,
-    lineHeight: 13,        // Reduziert von 14
-  },
-  progressSection: {
-    gap: 4,               // Reduziert von 6
-  },
-  progressLabel: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
-    lineHeight: 13,        // Reduziert von 14
-  },
-  progressRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  progressText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
-    lineHeight: 13,        // Reduziert von 14
-  },
-  pointsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 4,          // Reduziert von 6
-  },
-  remainingText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '300',
-    marginTop: 2,          // Reduziert von 3
-    lineHeight: 13,        // Reduziert von 14
-  },
+  return (
+    <LinearGradient
+      colors={gradient}
+      start={{ x: -1, y: 0.34 }}
+      end={{ x: 1, y: -0.34 }}
+      style={{
+        borderRadius: 18,
+        paddingHorizontal: 16,
+        paddingVertical: 16,
+        overflow: 'hidden',
+      }}
+    >
+      {/* Identity row — icon + LV pill + name + description */}
+      <View style={{ flexDirection: 'row', gap: 14, marginBottom: 12 }}>
+        <View
+          style={{
+            width: 64,
+            height: 64,
+            borderRadius: 32,
+            backgroundColor: 'rgba(255,255,255,0.22)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 2,
+            borderColor: 'rgba(255,255,255,0.55)',
+          }}
+        >
+          <MaterialCommunityIcons name={mdiIcon} size={32} color="#fff" />
+        </View>
+        <View style={{ flex: 1, minWidth: 0, justifyContent: 'center' }}>
+          <View style={{ alignSelf: 'flex-start', marginBottom: 4 }}>
+            <HeroPill
+              icon="star-circle"
+              label={`AKTUELL · LV ${levelId}`}
+            />
+          </View>
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 22,
+              color: '#fff',
+              letterSpacing: -0.4,
+              lineHeight: 26,
+            }}
+          >
+            {levelName}
+          </Text>
+          {description ? (
+            <Text
+              numberOfLines={2}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 12,
+                color: '#fff',
+                opacity: 0.92,
+                lineHeight: 15,
+                marginTop: 2,
+              }}
+            >
+              {description}
+            </Text>
+          ) : null}
+        </View>
+      </View>
 
-  // Progress Bar
-  progressBarContainer: {
-    marginVertical: 4,     // Reduziert von 6
-  },
-  progressBarBackground: {
-    height: 12,
-    borderRadius: 6,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    borderRadius: 6,
-  },
+      {/* Progress bars to next level */}
+      {nextLevel ? (
+        <View style={{ gap: 8 }}>
+          <ProgressBar
+            icon="star-four-points"
+            label={`Lv ${levelId + 1} · ${nextLevel.name}`}
+            current={pts.toLocaleString('de-DE')}
+            required={requiredPts.toLocaleString('de-DE')}
+            pct={requiredPts > 0 ? ptsPct : 100}
+          />
+          {requiredEur > 0 ? (
+            <ProgressBar
+              icon="cash"
+              label="Ersparnis"
+              current={`${eur.toFixed(2).replace('.', ',')} €`}
+              required={`${requiredEur.toFixed(2).replace('.', ',')} €`}
+              pct={eurPct}
+            />
+          ) : null}
+        </View>
+      ) : (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            paddingVertical: 10,
+            paddingHorizontal: 12,
+            borderRadius: 10,
+            backgroundColor: 'rgba(255,255,255,0.18)',
+          }}
+        >
+          <MaterialCommunityIcons name="trophy" size={18} color="#ffd44b" />
+          <Text
+            style={{
+              flex: 1,
+              fontFamily,
+              fontWeight: fontWeight.bold,
+              fontSize: 13,
+              color: '#fff',
+            }}
+          >
+            Maximales Level erreicht — du bist ein wahrer MarkenDetektiv!
+          </Text>
+        </View>
+      )}
 
-  // Section Title
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 8,
-    marginLeft: 10,
-    lineHeight: 16,
-  },
+      {/* Footer status row — three pills in the SAME HeroPill style,
+          horizontal with flex-wrap so they reflow gracefully on
+          narrow widths instead of overflowing:
+            🚀 Noch X Pkt / Y € bis Lv N+1
+            🔥 X Tag(e) Streak
+            ❄ X/2 Freezes
+          Single visual rhythm replaces the old mix of one
+          "footer banner" + two stranded top-row pills. */}
+      {showFooter || streak > 0 || freezeTokens > 0 ? (
+        <View
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 6,
+            marginTop: 12,
+          }}
+        >
+          {showFooter ? (
+            <HeroPill icon="rocket-launch" label={footer} />
+          ) : null}
+          <HeroPill
+            icon="fire"
+            label={`${streak} ${streak === 1 ? 'TAG' : 'TAGE'} STREAK`}
+          />
+          <HeroPill
+            icon="snowflake"
+            label={`${freezeTokens}/2 FREEZES`}
+          />
+        </View>
+      ) : null}
+    </LinearGradient>
+  );
+}
 
-  // Level List Cards
-  levelListCard: {
-    borderRadius: 16,
-    padding: 8,
-    marginBottom: 6,
-    ...Platform.select({
-      ios: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-      },
-      android: {
-        elevation: 0, // Kein Schatten auf Android
-        borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.1)',
-      },
-    }),
-  },
-  levelListContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 8,
-    gap: 8,
-    
-  },
-  levelListIcon: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  levelListInfo: {
-    flex: 1,
-  },
-  levelListHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 2,
-  },
-  levelListName: {
-    fontSize: 14,
-    fontWeight: '600',
-    lineHeight: 16,
-  },
-  levelListDescription: {
-    fontSize: 12,
-    fontWeight: '300',
-    opacity: 0.7,
-    marginBottom: 2,
-    lineHeight: 14,
-  },
-  rewardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  rewardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  rewardRowText: {
-    fontSize: 12,
-    fontWeight: '600',
-    lineHeight: 14,
-  },
-  levelStatus: {
-    padding: 4,
-  },
+// ────────────────────────────────────────────────────────────────────
+// Hero-card sub-components — same shape + style as on Rewards.
+// ────────────────────────────────────────────────────────────────────
 
-  // Achievement Cards
-  achievementCard: {
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  firstAchievementCard: {
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-  },
-  lastAchievementCard: {
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
-    marginBottom: 25,
-  },
-  achievementContent: {
-    flexDirection: 'row',
-    padding: 9,
-    paddingTop: 11,
-    gap: 8,
-  },
-  achievementIcon: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  achievementInfo: {
-    flex: 1,
-  },
-  achievementHeader: {
-    flexDirection: 'column',
-    marginBottom: 4,
-  },
-  achievementTitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 4,
-  },
-  achievementName: {
-    fontSize: 14,
-    fontWeight: '600',
-    lineHeight: 16,
-    flex: 1,
-  },
-  difficultyIndicator: {
-    marginLeft: 8,
-  },
-  difficultyText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  pointsBadge: {
-    paddingHorizontal: 5,
-    paddingVertical: 3,
-    borderRadius: 14,
-  },
-  pointsBadgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: '600',
-    lineHeight: 12,
-  },
-  achievementDescription: {
-    fontSize: 12,
-    fontWeight: '300',
-    opacity: 0.7,
-    marginBottom: 6,
-    lineHeight: 14,
-  },
-  achievementProgressBar: {
-    marginBottom: 3,
-  },
-  progressTextRow: {
-    alignItems: 'flex-end',
-  },
-  progressValue: {
-    fontSize: 12,
-    fontWeight: '300',
-    opacity: 0.7,
-    lineHeight: 14,
-  },
-  completedBadge: {
-    alignSelf: 'flex-end',
-    marginTop: 8,
-  },
-  divider: {
-    height: 1,
-    marginHorizontal: 8,
-  },
+function HeroPill({
+  icon,
+  label,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+}) {
+  return (
+    <View
+      style={{
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 10,
+        backgroundColor: 'rgba(255,255,255,0.22)',
+      }}
+    >
+      <MaterialCommunityIcons name={icon} size={11} color="#ffd44b" />
+      <Text
+        numberOfLines={1}
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 10,
+          color: '#fff',
+          letterSpacing: 0.4,
+        }}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
 
-  loadingContainer: {
-    padding: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+function ProgressBar({
+  icon,
+  label,
+  current,
+  required,
+  pct,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+  current: string;
+  required: string;
+  pct: number;
+}) {
+  return (
+    <View>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          marginBottom: 5,
+        }}
+      >
+        <MaterialCommunityIcons
+          name={icon}
+          size={13}
+          color="#fff"
+          style={{ opacity: 0.95 }}
+        />
+        <Text
+          numberOfLines={1}
+          style={{
+            flex: 1,
+            marginLeft: 6,
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 12,
+            color: '#fff',
+            opacity: 0.95,
+          }}
+        >
+          {label}
+        </Text>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 12,
+            color: '#fff',
+          }}
+        >
+          {current} / {required}
+        </Text>
+      </View>
+      <View
+        style={{
+          height: 5,
+          backgroundColor: 'rgba(255,255,255,0.22)',
+          borderRadius: 3,
+          overflow: 'hidden',
+        }}
+      >
+        <View
+          style={{
+            width: `${Math.max(0, Math.min(100, pct))}%`,
+            height: '100%',
+            backgroundColor: '#fff',
+            borderRadius: 3,
+          }}
+        />
+      </View>
+    </View>
+  );
+}
 
-  // Native iOS Bottom Sheet Styles
-  bottomSheetContainer: {
-    flex: 1,
-  },
-  bottomSheetHeader: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 16,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  closeButtonLeft: {
-    padding: 8,
-    marginRight: 12,
-    marginTop: -4,
-  },
-  titleSection: {
-    flex: 1,
-  },
-  bottomSheetTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  bottomSheetSubtitle: {
-    fontSize: 14,
-    opacity: 0.8,
-  },
-  bottomSheetContent: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
+// ────────────────────────────────────────────────────────────────────
+// Section header
+// ────────────────────────────────────────────────────────────────────
 
-  // Achievement-spezifische Styles (Gamification Best Practice)
-  achievementCard: {
-    marginBottom: 16,
-    borderRadius: 16,
-    padding: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 0, // Kein Schatten auf Android
-        borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.1)',
-      },
-    }),
-  },
-  completedAchievementCard: {
-    borderWidth: 2,
-    borderColor: '#4CAF50',
-    // backgroundColor entfernt - wird inline auf #FFFFFF gesetzt
-  },
-  achievementContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  achievementIconSection: {
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  achievementIconLarge: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 4,
-  },
-  achievementInfo: {
-    flex: 1,
-  },
-  achievementHeader: {
-    marginBottom: 4,
-  },
-  achievementTitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  achievementTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    flex: 1,
-    marginRight: 8, 
-  },
-  pointsChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
-  },
-  pointsChipText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: 'white',
-    fontFamily: 'Nunito_700Bold',
-  },
-  difficultyChip: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    minWidth: 60,
-    alignItems: 'center',
-  },
-  difficultyChipText: {
-    fontSize: 11,
-    fontWeight: '600',
-    fontFamily: 'Nunito_600SemiBold',
-    color: 'white',
-  },
-  achievementDescription: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 12,
-  },
-  achievementProgressSection: {
-    marginTop: 8,
-  },
-  progressContainer: {
-    backgroundColor: 'rgba(0,0,0,0.05)',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.08)',
-  },
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  progressLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    opacity: 0.9,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  progressCounter: {
-    fontSize: 12,
-    fontWeight: '600',
-    opacity: 0.9,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  progressBarContainer: {
-    // Keine extra margin, direkt in Container
-  },
-  completedIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  completedText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4CAF50',
-    fontFamily: 'Nunito_600SemiBold',
-  },
+function Section({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  const { theme } = useTokens();
+  return (
+    <View>
+      <View
+        style={{
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'baseline',
+          paddingHorizontal: 20,
+          marginBottom: 10,
+        }}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 20,
+            color: theme.text,
+            letterSpacing: -0.2,
+          }}
+        >
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 12,
+              color: theme.textMuted,
+            }}
+          >
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+      {children}
+    </View>
+  );
+}
 
-  // Welcome Card Styles
-  welcomeCard: {
-    borderRadius: 16,
-    padding: 20,
-    marginTop: 8,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.05)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  welcomeTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'left',
-    marginBottom: 12,
-    lineHeight: 20,
-  },
-  welcomeText: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 8,
-    opacity: 0.85,
-  },
-  welcomeHighlight: {
-    fontWeight: '600',
-  },
+// ────────────────────────────────────────────────────────────────────
+// LevelCard — horizontal scroll item.
+// White surface card with level color as accent. NO reward chip
+// anymore (the "Veggie und Vegan freigeschaltet" type lines were
+// removed per design feedback) — instead the level's motivational
+// description is shown so each card carries personality.
+// ────────────────────────────────────────────────────────────────────
 
-  infoSection: {
-    paddingVertical: 16,
-  },
-  infoSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-    gap: 8,
-  },
-  sectionHeaderText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  infoText: {
-    fontSize: 14,
-    lineHeight: 20,
-    opacity: 0.8,
-  },
-  pointsList: {
-    gap: 8,
-    marginTop: 8,
-  },
-  pointsItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 4,
-  },
-  pointsText: {
-    fontSize: 14,
-    flex: 1,
-  },
-  pointsValue: {
-    fontWeight: '600',
-    color: '#4CAF50',
-  },
-  limitsList: {
-    marginTop: 8,
-    paddingLeft: 8,
-  },
-  limitText: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 2,
-  },
-  levelExample: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(0,0,0,0.05)',
-  },
-  levelText: {
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 2,
-    fontFamily: 'monospace',
-  },
-});
+const LEVEL_CARD_W = 168;
+const LEVEL_CARD_H = 184;
+
+function LevelCard({
+  level,
+  isActive,
+  isUnlocked,
+  onPress,
+}: {
+  level: Level;
+  isActive: boolean;
+  isUnlocked: boolean;
+  onPress: () => void;
+}) {
+  const { theme, shadows } = useTokens();
+  const isLocked = !isUnlocked;
+  const mdiIcon = mdiForLevelIcon(level.icon);
+  const accent = level.color || '#FFA500';
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={isLocked}
+      style={({ pressed }) => ({
+        opacity: pressed && !isLocked ? 0.92 : 1,
+      })}
+    >
+      <View
+        style={{
+          width: LEVEL_CARD_W,
+          height: LEVEL_CARD_H,
+          borderRadius: 14,
+          padding: 14,
+          backgroundColor: theme.surface,
+          borderWidth: isActive ? 2 : 1,
+          borderColor: isActive
+            ? accent
+            : isUnlocked
+              ? accent + '40'
+              : theme.border,
+          ...(isActive || isUnlocked ? shadows.sm : {}),
+        }}
+      >
+        {/* Top: icon + status indicator */}
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 10,
+          }}
+        >
+          <View
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              backgroundColor: isLocked ? theme.surfaceAlt : accent + '22',
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: isLocked ? 0.55 : 1,
+            }}
+          >
+            <MaterialCommunityIcons
+              name={mdiIcon}
+              size={24}
+              color={isLocked ? theme.textMuted : accent}
+            />
+          </View>
+          {isActive ? (
+            <View
+              style={{
+                paddingHorizontal: 7,
+                paddingVertical: 3,
+                borderRadius: 6,
+                backgroundColor: accent,
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 9,
+                  color: '#fff',
+                  letterSpacing: 0.5,
+                }}
+              >
+                AKTUELL
+              </Text>
+            </View>
+          ) : isUnlocked ? (
+            <MaterialCommunityIcons
+              name="check-circle"
+              size={20}
+              color="#4CAF50"
+            />
+          ) : (
+            <MaterialCommunityIcons
+              name="lock"
+              size={18}
+              color={theme.textMuted}
+            />
+          )}
+        </View>
+
+        {/* LV badge */}
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 10,
+            color: isLocked ? theme.textMuted : accent,
+            letterSpacing: 0.6,
+            marginBottom: 2,
+          }}
+        >
+          LV {level.id}
+        </Text>
+
+        {/* Name */}
+        <Text
+          numberOfLines={1}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 15,
+            color: isLocked ? theme.textMuted : theme.text,
+            lineHeight: 18,
+            letterSpacing: -0.2,
+            opacity: isLocked ? 0.65 : 1,
+            marginBottom: 6,
+          }}
+        >
+          {level.name}
+        </Text>
+
+        {/* Description (replaces the old reward chip) */}
+        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Text
+            numberOfLines={3}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 11,
+              color: isLocked ? theme.textMuted : theme.textSub,
+              lineHeight: 14,
+              opacity: isLocked ? 0.55 : 0.9,
+            }}
+          >
+            {level.description || ''}
+          </Text>
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// AchievementCard — horizontal scroll item.
+//
+// White surface card with difficulty colour as accent. Two states:
+//   • Done: gold-ringed Lottie animation autoplay + "+X Pkt"
+//   • In-progress: difficulty-tinted IconSymbol (renders the SF
+//     symbol stored in `achievement.icon` from Firestore — same
+//     icons the legacy screen used) + progress bar
+//
+// The achievement DESCRIPTION is shown directly under the title so
+// the user sees what the task actually is — was missing in the
+// previous version.
+// ────────────────────────────────────────────────────────────────────
+
+const ACH_CARD_W = 168;
+const ACH_CARD_H = 184;
+
+function AchievementCard({
+  achievement,
+  onPress,
+}: {
+  achievement: ProgressedAchievement;
+  onPress: () => void;
+}) {
+  const { theme, shadows } = useTokens();
+  const diff = difficultyFor(achievement.points);
+  const unlocked = achievement.isCompleted;
+  const pct =
+    achievement.maxProgress > 0
+      ? Math.min(
+          100,
+          Math.round((achievement.progress / achievement.maxProgress) * 100),
+        )
+      : 0;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({ opacity: pressed ? 0.92 : 1 })}
+    >
+      <View
+        style={{
+          width: ACH_CARD_W,
+          height: ACH_CARD_H,
+          borderRadius: 14,
+          padding: 14,
+          backgroundColor: theme.surface,
+          borderWidth: unlocked ? 2 : 1,
+          borderColor: unlocked ? '#FFA500' : theme.border,
+          ...shadows.sm,
+        }}
+      >
+        {/* Top: icon + difficulty pill */}
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 10,
+          }}
+        >
+          <View
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              backgroundColor: unlocked ? '#FFD700' : diff.color + '22',
+              borderWidth: unlocked ? 2 : 0,
+              borderColor: '#FFA500',
+              alignItems: 'center',
+              justifyContent: 'center',
+              overflow: 'hidden',
+            }}
+          >
+            {unlocked ? (
+              <LottieView
+                source={lottieFor(achievement)}
+                style={{ width: 38, height: 38 }}
+                autoPlay
+                loop
+                speed={0.8}
+              />
+            ) : (
+              <IconSymbol
+                name={(achievement.icon || 'star.fill') as any}
+                size={22}
+                color={diff.color}
+              />
+            )}
+          </View>
+          <View
+            style={{
+              paddingHorizontal: 7,
+              paddingVertical: 3,
+              borderRadius: 6,
+              backgroundColor: diff.color,
+            }}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 9,
+                color: '#fff',
+                letterSpacing: 0.5,
+              }}
+            >
+              {diff.label}
+            </Text>
+          </View>
+        </View>
+
+        {/* Title */}
+        <Text
+          numberOfLines={1}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 15,
+            color: theme.text,
+            lineHeight: 18,
+            letterSpacing: -0.2,
+          }}
+        >
+          {achievement.name}
+        </Text>
+
+        {/* Description */}
+        <Text
+          numberOfLines={3}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 11,
+            color: theme.textSub ?? theme.textMuted,
+            lineHeight: 14,
+            marginTop: 3,
+          }}
+        >
+          {achievement.description}
+        </Text>
+
+        {/* Bottom: done state OR progress.
+            Was `flex: 1, justifyContent: flex-end` which pushed
+            the progress block hard against the card bottom and
+            left a big air gap below the description. Tighter
+            stack now: just a small marginTop after the
+            description so the eye flows description → progress
+            without the awkward void between them. */}
+        <View style={{ marginTop: 8 }}>
+          {unlocked ? (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <MaterialCommunityIcons
+                name="check-circle"
+                size={14}
+                color="#4CAF50"
+              />
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 11,
+                  color: '#4CAF50',
+                }}
+              >
+                +{achievement.points} Pkt
+              </Text>
+            </View>
+          ) : (
+            <View>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'baseline',
+                  marginBottom: 4,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.bold,
+                    fontSize: 9,
+                    color: theme.textMuted,
+                    letterSpacing: 0.4,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Fortschritt
+                </Text>
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 11,
+                    color: theme.text,
+                  }}
+                >
+                  {/* For savings achievements the target (100 €) is
+                      already in the achievement name + description, so
+                      "/ 100,00 €" is just clutter. Show only the
+                      current value. For count targets ("Scanne 50
+                      Produkte") the "X / Y" reading carries
+                      proportional info the user actually needs. */}
+                  {achievement.trigger?.action === 'savings_total'
+                    ? formatProgress(
+                        achievement.progress,
+                        achievement.trigger?.action,
+                      )
+                    : `${formatProgress(
+                        achievement.progress,
+                        achievement.trigger?.action,
+                      )} / ${formatProgress(
+                        achievement.maxProgress,
+                        achievement.trigger?.action,
+                      )}`}
+                </Text>
+              </View>
+              <View
+                style={{
+                  height: 5,
+                  borderRadius: 3,
+                  backgroundColor: theme.border,
+                  overflow: 'hidden',
+                }}
+              >
+                <View
+                  style={{
+                    width: `${Math.max(2, pct)}%`,
+                    height: '100%',
+                    backgroundColor: diff.color,
+                    borderRadius: 3,
+                  }}
+                />
+              </View>
+            </View>
+          )}
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Info bottom-sheet content — rendered inside `FilterSheet` (which
+// provides the chrome: title, close button, drag handle, backdrop,
+// animations). This component just hosts the four info blocks.
+// ────────────────────────────────────────────────────────────────────
+
+function InfoSheetContent() {
+  return (
+    <View style={{ paddingBottom: 8 }}>
+      <InfoBlock
+        icon="star-circle"
+        title="Levels"
+        body="Sammle Punkte und Ersparnisse, um aufzusteigen. Jedes neue Level schaltet weitere Produktkategorien frei (Veggie & Vegan, Getränke, Baby, …)."
+      />
+      <InfoBlock
+        icon="trophy-outline"
+        title="Errungenschaften"
+        body={
+          'Besondere Aufgaben — z. B. „5 Vergleiche ansehen" oder „erste Bewertung schreiben" — geben Bonus-Punkte. Sortiert nach Schwierigkeit (Einfach → Meister).'
+        }
+      />
+      <InfoBlock
+        icon="plus-circle-outline"
+        title="So sammelst du Punkte"
+        body="Produkt scannen +2 · Suchen +1 · Vergleich anschauen +3 · Einkaufszettel abschließen +5 · Bewertung schreiben +2 · erste Aktion +10."
+      />
+      <InfoBlock
+        icon="clock-outline"
+        title="Fair-Play-Limits"
+        body="Max. 10 Scans + 10 Vergleiche pro Tag, max. 5 Einkaufszettel pro Woche — damit niemand durch die Level rast."
+      />
+    </View>
+  );
+}
+
+function InfoBlock({
+  icon,
+  title,
+  body,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  title: string;
+  body: string;
+}) {
+  const { theme } = useTokens();
+  return (
+    <View style={{ marginBottom: 14 }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 4,
+        }}
+      >
+        <MaterialCommunityIcons name={icon} size={16} color={theme.primary} />
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 14,
+            color: theme.text,
+          }}
+        >
+          {title}
+        </Text>
+      </View>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 13,
+          lineHeight: 18,
+          color: theme.textSub ?? theme.textMuted,
+        }}
+      >
+        {body}
+      </Text>
+    </View>
+  );
+}

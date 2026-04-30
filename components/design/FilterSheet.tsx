@@ -125,84 +125,119 @@ export function FilterSheet({
       statusBarTranslucent
     >
       <GestureHandlerRootView style={{ flex: 1 }}>
-        {/* Animated backdrop — fades in/out independently of the sheet. */}
+        {/* Backdrop — TWO layers stacked at absolute-fill:
+              1. Animated.View for the visual overlay (opacity fade)
+              2. Pressable on top for the tap-to-dismiss behaviour
+            Both ABSOLUTE-FILL so the sheet container above isn't
+            wrapped by them. THIS IS THE FIX: the previous version
+            wrapped the sheet inside the Pressable and used
+            `onStartShouldSetResponder={() => true}` to swallow
+            touches — which also blocked the ScrollView's native
+            scroll gesture. Backdrop and sheet are siblings now;
+            the sheet's children (incl. ScrollView) get touches
+            uninterrupted. */}
         <Animated.View
+          pointerEvents="none"
           style={[
-            {
-              ...StyleAbsoluteFill,
-              backgroundColor: theme.overlay,
-            },
+            { ...StyleAbsoluteFill, backgroundColor: theme.overlay },
             backdropStyle,
           ]}
         />
         <Pressable
           onPress={onClose}
+          style={StyleAbsoluteFill}
+        />
+
+        {/* Sheet container — anchored to the bottom, taps in empty
+            area pass through (`pointerEvents="box-none"` on the
+            wrapper) to the backdrop Pressable below. The sheet
+            itself catches its own touches. */}
+        <View
+          pointerEvents="box-none"
           style={{ flex: 1, justifyContent: 'flex-end' }}
         >
-          <GestureDetector gesture={panGesture}>
-            <Animated.View
-              onStartShouldSetResponder={() => true}
-              style={[
-                sheetStyle,
-                {
-                  backgroundColor: theme.surface,
-                  borderTopLeftRadius: 22,
-                  borderTopRightRadius: 22,
-                  paddingTop: 10,
-                  paddingBottom: Math.max(32, insets.bottom + 20),
-                  maxHeight: `${maxHeightRatio * 100}%` as any,
-                },
-              ]}
-            >
-              {/* Drag handle */}
-              <View
-                style={{
-                  width: 44,
-                  height: 5,
-                  borderRadius: 3,
-                  backgroundColor: theme.borderStrong,
-                  alignSelf: 'center',
-                  marginBottom: 14,
-                }}
-              />
-
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  paddingHorizontal: 20,
-                  marginBottom: 14,
-                }}
-              >
-                <Text
+          <Animated.View
+            style={[
+              sheetStyle,
+              {
+                backgroundColor: theme.surface,
+                borderTopLeftRadius: 22,
+                borderTopRightRadius: 22,
+                paddingTop: 10,
+                paddingBottom: Math.max(32, insets.bottom + 20),
+                // No height/maxHeight here — sheet sizes to content.
+                // The maxHeight cap lives on the ScrollView below
+                // (in pixels) so RN/Yoga reliably bounds it.
+              },
+            ]}
+          >
+            {/* Pan gesture only on the chrome (drag handle + title
+                row), NOT on the ScrollView. RNGH gestures vs.
+                ScrollView native scroll on the same View battle for
+                the touch and ScrollView always loses on iOS. */}
+            <GestureDetector gesture={panGesture}>
+              <View>
+                <View
                   style={{
-                    fontFamily,
-                    fontWeight: fontWeight.extraBold,
-                    fontSize: 18,
-                    color: theme.text,
+                    width: 44,
+                    height: 5,
+                    borderRadius: 3,
+                    backgroundColor: theme.borderStrong,
+                    alignSelf: 'center',
+                    marginBottom: 14,
+                  }}
+                />
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingHorizontal: 20,
+                    marginBottom: 14,
                   }}
                 >
-                  {title}
-                </Text>
-                <Pressable onPress={onClose} hitSlop={8}>
-                  <MaterialCommunityIcons
-                    name="close"
-                    size={20}
-                    color={theme.textMuted}
-                  />
-                </Pressable>
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.extraBold,
+                      fontSize: 18,
+                      color: theme.text,
+                    }}
+                  >
+                    {title}
+                  </Text>
+                  <Pressable onPress={onClose} hitSlop={8}>
+                    <MaterialCommunityIcons
+                      name="close"
+                      size={20}
+                      color={theme.textMuted}
+                    />
+                  </Pressable>
+                </View>
               </View>
+            </GestureDetector>
 
-              <ScrollView
-                contentContainerStyle={{ paddingHorizontal: 20 }}
-                keyboardShouldPersistTaps="handled"
-              >
-                {children}
-              </ScrollView>
-            </Animated.View>
-          </GestureDetector>
-        </Pressable>
+            {/* `maxHeight` in pixels on the ScrollView itself
+                (not the parent) is the trick that makes both
+                "size-to-content for short bodies" AND "scroll past
+                cap for long bodies" work in one component. */}
+            <ScrollView
+              style={{
+                maxHeight:
+                  SCREEN_HEIGHT * maxHeightRatio -
+                  (10 + 19 + 50 + Math.max(32, insets.bottom + 20)),
+              }}
+              contentContainerStyle={{
+                paddingHorizontal: 20,
+                paddingBottom: 8,
+              }}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {children}
+            </ScrollView>
+          </Animated.View>
+        </View>
       </GestureHandlerRootView>
     </Modal>
   );

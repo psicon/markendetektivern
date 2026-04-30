@@ -15,9 +15,12 @@ import PagerView from 'react-native-pager-view';
 import { doc, updateDoc } from 'firebase/firestore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CoachmarkOverlay } from '@/components/coachmarks/CoachmarkOverlay';
+import { getTour } from '@/components/coachmarks/tours';
 import { FilterSheet } from '@/components/design/FilterSheet';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { useCoachmark } from '@/hooks/useCoachmark';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -27,10 +30,15 @@ import {
   getBundeslandRanks,
   getCityRanks,
   getOverallUsers,
+  getUserPosition,
+  type LbPosition,
   type LbRow,
   type LbUser,
   userContributionFromProfile,
 } from '@/lib/services/leaderboard';
+import { useAchievements } from '@/lib/hooks/useAchievements';
+import { achievementService } from '@/lib/services/achievementService';
+import type { Level } from '@/lib/types/achievements';
 
 // ─── Demo data ─────────────────────────────────────────────────────────
 // Lifted directly from `markendetektive_newdesign/project/Rewards.jsx`
@@ -39,6 +47,12 @@ import {
 // Cashback-Taler model — until then this is hard-coded.
 const CASHBACK_EUR = 12.4;
 const PAYOUT_THRESHOLD = 15.0;
+
+// Shared height for both hero cards (Cashback in Einlösen +
+// StatusHero in Bestenliste). Fixed so the page geometry doesn't
+// jump on tab swipe. Tuned to fit a TopRow (52 px avatar) +
+// gap + up to two ProgressBars + breathing room.
+const HERO_HEIGHT = 144;
 
 // The reward catalogue (15+ partner brands) was previously rendered
 // inline as a 2-column grid here. Per-product UX moved to a single
@@ -120,10 +134,41 @@ export default function RewardsScreen() {
   const { theme } = useTokens();
   const scheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
+
+  // Per-Screen Coachmark.
+  const rewardsCoachmark = useCoachmark('rewards');
 
   const [tab, setTab] = useState<RewardsTab>('redeem');
   const pagerRef = useRef<PagerView | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  // Lifted from RanksTab so the floating PositionStickyBar (rendered
+  // OUTSIDE the ScrollView, as a screen-fixed overlay) knows whether
+  // to show the user's individual standing or their region's
+  // standing. RanksTab still owns all the leaderboard fetching;
+  // these two values just decide which "slice" the sticky bar reads.
+  const [outerScope, setOuterScope] = useState<LbScopeOuter>('overall');
+  const [geo, setGeo] = useState<RegionGeo>('bundesland');
+
+  // Level + userStats lifted up too so both StatusHero (inside
+  // RanksTab) AND PositionStickyBar (outside the ScrollView) can
+  // colour-tint themselves with the user's current level. Single
+  // fetch shared between both.
+  const { userStats } = useAchievements();
+  const [levels, setLevels] = useState<Level[]>([]);
+  useEffect(() => {
+    let alive = true;
+    achievementService
+      .getAllLevels()
+      .then((ls) => {
+        if (alive) setLevels(ls || []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Tap on a pill → drive PagerView to the matching page (animated
   // page-swipe — UIPageViewController on iOS, ViewPager2 on Android).
@@ -167,9 +212,7 @@ export default function RewardsScreen() {
         </Text>
 
         <Pressable
-          onPress={() => {
-            // RewardsHelp sheet wires up in Phase 4.
-          }}
+          onPress={() => setHelpOpen(true)}
           style={({ pressed }) => ({
             height: 34,
             paddingHorizontal: 12,
@@ -210,14 +253,25 @@ export default function RewardsScreen() {
             backgroundColor: theme.surfaceAlt,
             alignItems: 'center',
             justifyContent: 'center',
+            overflow: 'hidden',
             opacity: pressed ? 0.7 : 1,
           })}
         >
-          <MaterialCommunityIcons
-            name="account-outline"
-            size={20}
-            color={theme.textMuted}
-          />
+          {(userProfile as any)?.photo_url || user?.photoURL ? (
+            <RNImage
+              source={{
+                uri: ((userProfile as any)?.photo_url || user?.photoURL) as string,
+              }}
+              style={{ width: '100%', height: '100%' }}
+              resizeMode="cover"
+            />
+          ) : (
+            <MaterialCommunityIcons
+              name="account-outline"
+              size={20}
+              color={theme.textMuted}
+            />
+          )}
         </Pressable>
       </View>
 
@@ -260,14 +314,39 @@ export default function RewardsScreen() {
             scrollsToTop={tab === 'ranks'}
             contentContainerStyle={{
               paddingTop: chromeHeight,
-              paddingBottom: 120,
+              // Extra room at the bottom: the floating
+              // PositionStickyBar sits ~95 px above the safe-area
+              // (tab bar + raised Stöbern button), and is itself
+              // ~50 px tall. 220 keeps the last list row visible
+              // above the bar.
+              paddingBottom: 220,
             }}
             showsVerticalScrollIndicator={false}
           >
-            <RanksTab />
+            <RanksTab
+              outerScope={outerScope}
+              setOuterScope={setOuterScope}
+              geo={geo}
+              setGeo={setGeo}
+              userStats={userStats}
+              levels={levels}
+            />
           </ScrollView>
         </View>
       </PagerView>
+
+      {/* Floating "Deine Position" — only on the Bestenliste tab.
+          Rendered as a sibling of the PagerView so it stays put
+          against the screen, not the scroll content. */}
+      {tab === 'ranks' && userProfile ? (
+        <PositionStickyBar
+          userProfile={userProfile}
+          outerScope={outerScope}
+          geo={geo}
+          userStats={userStats}
+          levels={levels}
+        />
+      ) : null}
 
       {/* Chrome — absolute from y=0 (covers status-bar zone too) so
           scrolling content doesn't bleed up into the Dynamic Island
@@ -307,6 +386,25 @@ export default function RewardsScreen() {
           {ChromeContent}
         </View>
       )}
+
+      {/* "So geht's" help sheet — same FilterSheet component used
+          for the Region-Setup + Achievements info, so all bottom
+          sheets in the app share the slide-up animation, drag
+          handle, backdrop fade and pan-to-dismiss gesture. */}
+      <FilterSheet
+        visible={helpOpen}
+        title="So funktioniert's"
+        onClose={() => setHelpOpen(false)}
+      >
+        <RewardsHelpContent />
+      </FilterSheet>
+
+      {/* Per-Screen Coachmark (Belohnungen). */}
+      <CoachmarkOverlay
+        tour={getTour('rewards')}
+        visible={rewardsCoachmark.visible}
+        onDismiss={rewardsCoachmark.dismiss}
+      />
     </View>
   );
 }
@@ -328,149 +426,155 @@ function RedeemTab() {
 
   return (
     <>
-      {/* ── Hero: Cashback-Taler ── */}
+      {/* ── Hero: Cashback-Taler ──
+          1:1 mirror of the StatusHero on the Bestenliste tab so the
+          two heroes have IDENTICAL height + structure (no layout
+          jump on tab swipe, both cards read the same way):
+            • 52 px circle on the left (money icon ↔ user avatar)
+            • Middle column: title + status chip
+            • Right column: big number + matching "currency pill"
+            • One progress bar (here: payout threshold)
+            • Bottom row of three info chips
+          The currency pill (💰 CASHBACK-TALER) sits where the
+          STATUS-PKT pill sits on the StatusHero — same shape, same
+          position, so the user pattern-matches between the two. */}
       <View style={{ paddingHorizontal: 20, paddingTop: 4 }}>
         <LinearGradient
           colors={['#0a6f62', '#0d8575', '#10a18a']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
+          start={{ x: -1, y: 0.34 }}
+          end={{ x: 1, y: -0.34 }}
           style={{
-            borderRadius: 20,
-            padding: 18,
-            paddingBottom: 20,
+            borderRadius: 18,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
             overflow: 'hidden',
+            // Fixed hero height — locks the Cashback hero (Einlösen
+            // tab) and the StatusHero (Bestenliste tab) to the SAME
+            // total height so the layout doesn't jump on tab swipe.
+            // Content inside uses `justifyContent: space-between` so
+            // the TopRow sits at the top and the progress bar(s)
+            // sit at the bottom, regardless of how much content
+            // each card actually has.
+            height: HERO_HEIGHT,
           }}
-        >
-          <View
-            style={{
-              alignSelf: 'flex-start',
-              backgroundColor: 'rgba(255,255,255,0.18)',
-              paddingVertical: 4,
-              paddingHorizontal: 10,
-              borderRadius: 20,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <MaterialCommunityIcons
-              name="treasure-chest"
-              size={12}
-              color="#ffd44b"
-            />
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold,
-                fontSize: 10,
-                color: '#fff',
-                letterSpacing: 1,
-                textTransform: 'uppercase',
-              }}
-            >
-              Cashback-Taler
-            </Text>
-          </View>
-
+        ><View style={{ flex: 1, justifyContent: 'space-between' }}>
+          {/* Top row: 52 px money-icon-circle | title + status chip
+              | big balance + currency pill — mirrors StatusHero's
+              "avatar | name+level chip | big pts + label" layout. */}
+          {/* `alignItems: stretch` makes both content columns
+              fill the row's height (= 52 from the avatar). Each
+              column then uses `justifyContent: space-between` so
+              its pill sits at the BOTTOM. Both pills end up on
+              the same baseline → guaranteed alignment. */}
           <View
             style={{
               flexDirection: 'row',
-              alignItems: 'baseline',
-              gap: 4,
-              marginTop: 10,
-            }}
-          >
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 48,
-                lineHeight: 50,
-                letterSpacing: -1,
-                color: '#fff',
-              }}
-            >
-              {CASHBACK_EUR.toFixed(2).replace('.', ',')}
-            </Text>
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 22,
-                color: '#fff',
-                opacity: 0.95,
-              }}
-            >
-              €
-            </Text>
-          </View>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 12,
-              color: '#fff',
-              opacity: 0.92,
-              marginTop: 8,
-            }}
-          >
-            {canRedeem ? (
-              'Bereit zur Auszahlung'
-            ) : (
-              <>
-                Noch{' '}
-                <Text style={{ fontWeight: fontWeight.bold }}>{gapEur} €</Text>{' '}
-                bis zur nächsten Auszahlung
-              </>
-            )}
-          </Text>
-          <View
-            style={{
-              height: 8,
-              backgroundColor: 'rgba(255,255,255,0.22)',
-              borderRadius: 4,
-              overflow: 'hidden',
-              marginTop: 10,
+              alignItems: 'stretch',
+              gap: 12,
+              minHeight: 52,
             }}
           >
             <View
               style={{
-                width: `${pct}%`,
-                height: '100%',
-                backgroundColor: theme.surface,
-                borderRadius: 4,
+                width: 52,
+                height: 52,
+                borderRadius: 26,
+                backgroundColor: 'rgba(255,255,255,0.22)',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 2,
+                borderColor: 'rgba(255,255,255,0.55)',
               }}
-            />
+            >
+              <MaterialCommunityIcons
+                name="cash-multiple"
+                size={26}
+                color="#ffd44b"
+              />
+            </View>
+            <View
+              style={{
+                flex: 1,
+                minWidth: 0,
+                justifyContent: 'space-between',
+              }}
+            >
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 17,
+                  color: '#fff',
+                  letterSpacing: -0.2,
+                }}
+              >
+                Cashback-Konto
+              </Text>
+              <HeroPill
+                icon={canRedeem ? 'gift-outline' : 'progress-clock'}
+                label={
+                  canRedeem
+                    ? 'Bereit zur Auszahlung'
+                    : `Noch ${gapEur} € bis Auszahlung`
+                }
+              />
+            </View>
+            <View
+              style={{
+                alignItems: 'flex-end',
+                justifyContent: 'space-between',
+              }}
+            >
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'flex-end',
+                  gap: 2,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 24,
+                    lineHeight: 28,
+                    letterSpacing: -0.4,
+                    color: '#fff',
+                  }}
+                >
+                  {CASHBACK_EUR.toFixed(2).replace('.', ',')}
+                </Text>
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 14,
+                    lineHeight: 20,
+                    color: '#fff',
+                    opacity: 0.95,
+                    marginBottom: 1,
+                  }}
+                >
+                  €
+                </Text>
+              </View>
+              <HeroPill icon="cash" label="Cashback-Taler" />
+            </View>
           </View>
-          <View
-            style={{
-              flexDirection: 'row',
-              justifyContent: 'space-between',
-              marginTop: 6,
-            }}
-          >
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.semibold,
-                fontSize: 10,
-                color: '#fff',
-                opacity: 0.85,
-              }}
-            >
-              0 €
-            </Text>
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.semibold,
-                fontSize: 10,
-                color: '#fff',
-                opacity: 0.85,
-              }}
-            >
-              Schwelle 15 €
-            </Text>
+
+          {/* Progress bar to next payout — uses the same `ProgressBar`
+              helper as the StatusHero so the two cards literally
+              share their progress visual. */}
+          <ProgressBar
+            icon="gift-outline"
+            label={
+              canRedeem ? 'Bereit zur Auszahlung' : 'Auszahlungs-Schwelle'
+            }
+            current={`${CASHBACK_EUR.toFixed(2).replace('.', ',')} €`}
+            required={`${PAYOUT_THRESHOLD.toFixed(2).replace('.', ',')} €`}
+            pct={pct}
+          />
           </View>
         </LinearGradient>
       </View>
@@ -634,6 +738,195 @@ function RedeemTab() {
         </View>
       </View>
     </>
+  );
+}
+
+// ─── "So geht's" help sheet content ─────────────────────────────────────
+//
+// Rendered inside the shared `FilterSheet` (which provides chrome:
+// drag handle, title row, animations, backdrop). The body is split
+// into TWO sections matching the screen's two tabs:
+//   • Einlösen — Cashback-Taler model + earn methods + payout
+//   • Bestenliste — Detektiv-Punkte, Levels, Streak, Liga
+// Each section gets a small icon-prefix header so the user can
+// jump straight to the half they care about.
+
+function RewardsHelpContent() {
+  return (
+    <View style={{ paddingBottom: 8 }}>
+      {/* ── Einlösen / Cashback-Taler ── */}
+      <HelpSectionHeader
+        icon="treasure-chest"
+        title="Einlösen — Cashback-Taler"
+      />
+      <HelpBlock
+        icon="treasure-chest"
+        iconColor="#0d8575"
+        title="Cashback-Taler"
+        body="Sammle Cashback-Taler bei jeder Aktion (Bons hochladen, Produktbilder einreichen, Umfragen beantworten). Ab 15 € Guthaben kannst du auszahlen lassen."
+      />
+      <HelpBlock
+        icon="receipt"
+        iconColor="#95cfc4"
+        title="Kassenbon hochladen"
+        body="0,08 € pro Bon, max. 6 Bons pro Woche. Wir erkennen automatisch den Markt und die gekauften Produkte für unsere Markt-Insights."
+      />
+      <HelpBlock
+        icon="camera-outline"
+        iconColor="#a89cdf"
+        title="Produktbilder einreichen"
+        body="0,10 € pro Produkt-Set (7 Fotos: Front, Rückseite, Barcode, Zutaten, Nährwerte, Hersteller, Preis). Hilft uns, die Datenbank vollständig zu halten."
+      />
+      <HelpBlock
+        icon="poll"
+        iconColor="#dde2e4"
+        title="Umfragen"
+        body="0,20 € – 2,00 € je nach Länge. Nur verfügbar, wenn gerade eine passende Umfrage aktiv ist — wir benachrichtigen dich automatisch."
+      />
+      <HelpBlock
+        icon="gift-outline"
+        iconColor="#0d8575"
+        title="Auszahlung"
+        body="Tausche dein Cashback bei unseren Partnern in Gutscheine (Amazon, Rewe, Apple…), eine PayPal-Auszahlung, eine Visa-Prepaid oder eine Spende um."
+      />
+
+      {/* ── Bestenliste / Detektiv-Punkte ── */}
+      <HelpSectionHeader
+        icon="trophy-outline"
+        title="Bestenliste — Detektiv-Punkte"
+      />
+      <HelpBlock
+        icon="star-four-points"
+        iconColor="#f5b301"
+        title="Detektiv-Punkte sammeln"
+        body="Produkt scannen +2 · Suchen +1 · Vergleich anschauen +3 · Einkaufszettel abschließen +5 · Bewertung schreiben +2 · erste Aktion +10."
+      />
+      <HelpBlock
+        icon="star-circle"
+        iconColor="#bf8636"
+        title="Levels & Aufstieg"
+        body="Mit Punkten und Ersparnissen steigst du im Level auf. Jedes Level schaltet eine neue Produktkategorie frei (Veggie, Getränke, Baby, …)."
+      />
+      <HelpBlock
+        icon="fire"
+        iconColor="#ffb84a"
+        title="Streak & Freezes"
+        body="Sei jeden Tag aktiv und deine Streak wächst. Verpasst du einen Tag, schützt dich ein Freeze-Token (alle 14 Tage gibt's einen, max. 2 gleichzeitig)."
+      />
+      <HelpBlock
+        icon="map-marker-radius"
+        iconColor="#0d6efd"
+        title="Liga & Region"
+        body="In der Bestenliste vergleichst du dich mit ganz Deutschland — als einzelner Detektiv (Overall) oder als Region (Bundesländer + Städte). Wird täglich aktualisiert."
+      />
+    </View>
+  );
+}
+
+function HelpSectionHeader({
+  icon,
+  title,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  title: string;
+}) {
+  const { theme } = useTokens();
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 14,
+        // Extra top-margin only when this header doesn't sit at the
+        // very top of the sheet (i.e. for the second section). The
+        // first one already has padding via FilterSheet content.
+        marginTop: 4,
+      }}
+    >
+      <MaterialCommunityIcons name={icon} size={16} color={theme.primary} />
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 13,
+          color: theme.primary,
+          letterSpacing: 0.5,
+          textTransform: 'uppercase',
+        }}
+      >
+        {title}
+      </Text>
+      <View
+        style={{
+          flex: 1,
+          height: 1,
+          backgroundColor: theme.border,
+          marginLeft: 4,
+        }}
+      />
+    </View>
+  );
+}
+
+function HelpBlock({
+  icon,
+  iconColor,
+  title,
+  body,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  iconColor: string;
+  title: string;
+  body: string;
+}) {
+  const { theme } = useTokens();
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        gap: 12,
+        marginBottom: 14,
+      }}
+    >
+      <View
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 10,
+          backgroundColor: theme.surfaceAlt,
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginTop: 1,
+        }}
+      >
+        <MaterialCommunityIcons name={icon} size={18} color={iconColor} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 14,
+            color: theme.text,
+            marginBottom: 2,
+          }}
+        >
+          {title}
+        </Text>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 12,
+            lineHeight: 17,
+            color: theme.textSub ?? theme.textMuted,
+          }}
+        >
+          {body}
+        </Text>
+      </View>
+    </View>
   );
 }
 
@@ -933,9 +1226,31 @@ function EarnRow({
 type LbScopeOuter = 'overall' | 'region';
 type OverallMetric = 'pts' | 'eur';
 type RegionGeo = 'bundesland' | 'stadt';
-type Period = 'all' | 'year' | 'month' | 'week';
+// 'year' (Champion) was dropped — month + week cover the
+// motivational use case, year would duplicate lifetime visually.
+type Period = 'all' | 'month' | 'week';
 
-function RanksTab() {
+// How many overall-users to show on first paint. "Mehr laden" reveals
+// the next chunk in 10-row jumps. Lifetime list goes up to top-100;
+// live week/month lists are capped at 50 server-side.
+const INITIAL_VISIBLE = 10;
+const LOAD_MORE_STEP = 10;
+
+function RanksTab({
+  outerScope,
+  setOuterScope,
+  geo,
+  setGeo,
+  userStats,
+  levels,
+}: {
+  outerScope: LbScopeOuter;
+  setOuterScope: (v: LbScopeOuter) => void;
+  geo: RegionGeo;
+  setGeo: (v: RegionGeo) => void;
+  userStats: ReturnType<typeof useAchievements>['userStats'];
+  levels: Level[];
+}) {
   const { theme } = useTokens();
   const { user, userProfile, refreshUserProfile } = useAuth();
 
@@ -950,41 +1265,46 @@ function RanksTab() {
   const userNick = userProfile?.display_name ?? null;
   const hasExplicitCity = !!(userProfile as any)?.city;
 
-  // ─── Outer scope: Overall | Regionenkampf (PagerView) ──────────
-  const [outerScope, setOuterScope] = useState<LbScopeOuter>('overall');
-  const outerPagerRef = useRef<PagerView | null>(null);
+  // ─── Outer scope: Overall | Regionenkampf ──────────
+  // `outerScope`/`geo` are controlled from RewardsScreen so the
+  // floating PositionStickyBar (rendered outside this ScrollView)
+  // can read them. Pure state-driven (no inner PagerView).
   const onOuterChange = (next: LbScopeOuter) => {
     setOuterScope(next);
-    outerPagerRef.current?.setPage(next === 'overall' ? 0 : 1);
-  };
-  const onOuterPagerSelected = (e: { nativeEvent: { position: number } }) => {
-    const next: LbScopeOuter = e.nativeEvent.position === 0 ? 'overall' : 'region';
-    setOuterScope((prev) => (prev === next ? prev : next));
   };
 
   // ─── Overall: metric + period ─────────────────────────────────
   const [metric, setMetric] = useState<OverallMetric>('pts');
   const [overallPeriod, setOverallPeriod] = useState<Period>('all');
 
-  // ─── Regionenkampf: geo + period ──────────────────────────────
-  const [geo, setGeo] = useState<RegionGeo>('bundesland');
-  const [regionPeriod, setRegionPeriod] = useState<Period>('all');
+  // ─── Regionenkampf: metric ────────────────────────────────────
+  // No period switcher here — region duels are always lifetime
+  // ("Aller Zeiten"). The two axes the user wants to compare are
+  // BL vs City (lifted state) and Punkte vs Ersparnis (local).
+  const [regionMetric, setRegionMetric] = useState<OverallMetric>('pts');
 
   // ─── Data ─────────────────────────────────────────────────────
+  // The user's own percentile + motivational message used to live
+  // here so the StatusHero could show it. Now that it lives only in
+  // the floating PositionStickyBar (which fetches it itself), we
+  // don't need the state in this tab anymore.
   const [overallUsers, setOverallUsers] = useState<LbUser[]>([]);
   const [blRows, setBlRows] = useState<LbRow[]>([]);
   const [cityRows, setCityRows] = useState<LbRow[]>([]);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  // How many of the overall-list rows are revealed. Reset whenever
+  // the metric/period changes so we don't carry over a "show all"
+  // state into a list that doesn't have those rows yet.
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE);
+  }, [metric, overallPeriod]);
 
   useEffect(() => {
     let alive = true;
-    if (overallPeriod === 'all') {
-      getOverallUsers(userNick, 'all', metric).then(
-        (r) => alive && setOverallUsers(r),
-      );
-    } else {
-      setOverallUsers([]);
-    }
+    getOverallUsers(userNick, overallPeriod, metric).then(
+      (r) => alive && setOverallUsers(r),
+    );
     return () => {
       alive = false;
     };
@@ -992,21 +1312,19 @@ function RanksTab() {
 
   useEffect(() => {
     let alive = true;
-    if (regionPeriod === 'all') {
-      if (geo === 'bundesland') {
-        getBundeslandRanks(userBL, 'all', 'pts').then(
-          (r) => alive && setBlRows(r),
-        );
-      } else {
-        getCityRanks(userCity, 'all', 'pts').then(
-          (r) => alive && setCityRows(r),
-        );
-      }
+    if (geo === 'bundesland') {
+      getBundeslandRanks(userBL, 'all', regionMetric).then(
+        (r) => alive && setBlRows(r),
+      );
+    } else {
+      getCityRanks(userCity, 'all', regionMetric).then(
+        (r) => alive && setCityRows(r),
+      );
     }
     return () => {
       alive = false;
     };
-  }, [userBL, userCity, geo, regionPeriod]);
+  }, [userBL, userCity, geo, regionMetric]);
 
   useEffect(() => {
     getAggregateUpdatedAt().then(setUpdatedAt);
@@ -1028,22 +1346,41 @@ function RanksTab() {
     [user?.uid, refreshUserProfile],
   );
 
-  // The user's rank within the active list — used by the
-  // "Deine Position" card to show their global position even if
-  // they're outside the top-50.
-  const userOverallRank = overallUsers.find((u) => u.isMe)?.rank ?? null;
+  // The user's rank within the region lists — used by the
+  // "Deine Position" card on the Regionenkampf side. Overall uses
+  // `position` from getUserPosition() instead, which can interpolate
+  // beyond the top-100.
   const userBLRank = blRows.find((r) => r.isMe)?.rank ?? null;
   const userCityRank = cityRows.find((r) => r.isMe)?.rank ?? null;
 
   return (
     <>
+      {/* ─── Status-Hero: user's own level / pts / streak ───
+          The first thing on the Bestenliste page so the user is
+          oriented to THEIR own context before scanning the rankings.
+          Mirrors the prototype's green status card.
+
+          Reads from the SAME sources as the legacy /achievements
+          screen: `useAchievements()` for currentLevel/streak/freeze,
+          `achievementService.getAllLevels()` for the next-level
+          threshold so the progress bar reflects the real curve. */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 4 }}>
+        <StatusHero
+          name={userProfile?.display_name ?? 'Detektiv'}
+          photoUrl={(userProfile as any)?.photo_url ?? null}
+          userStats={userStats}
+          userProfile={userProfile}
+          levels={levels}
+        />
+      </View>
+
       {/* ─── Outer scope: 2 SCOPE-CARDS (NOT pills) ───
           Card-style selector visually distinct from the parent
           "Einlösen | Bestenliste" pill, so we don't have stacked
           identical-looking tab rows. Same family as the period
           cards below. */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>
-        <View style={{ flexDirection: 'row', gap: 10 }}>
+      <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
           <ScopeCard
             active={outerScope === 'overall'}
             onPress={() => onOuterChange('overall')}
@@ -1065,7 +1402,7 @@ function RanksTab() {
           works without it via guessedCity, but the user gets a softer
           "Wo wohnst du?" hint that gives them a better DU-highlight.) */}
       {!hasExplicitCity ? (
-        <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
+        <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>
           <SetupNudge
             guessedCity={userCity}
             onPress={() => setSetupOpen(true)}
@@ -1074,28 +1411,18 @@ function RanksTab() {
       ) : null}
 
       {/* ─── Outer pager (Overall / Regionenkampf) ─── */}
-      <PagerView
-        ref={outerPagerRef}
-        style={{ height: 1100 }}
-        initialPage={0}
-        onPageSelected={onOuterPagerSelected}
-      >
-        {/* ════ PAGE 1 — Overall ════ */}
-        <View key="overall">
-          {/* Period cards (4 items, horizontal scroll) — same family
-              as the scope cards above. */}
-          <View style={{ paddingTop: 14 }}>
+      {/* No inner PagerView — its fixed height was clipping content
+          and swallowing the parent ScrollView's vertical gesture, so
+          users couldn't scroll the leaderboard. ScopeCards above
+          drive `outerScope` directly via state. */}
+      {outerScope === 'overall' ? (
+        <View>
+          <View style={{ paddingTop: 10 }}>
             <PeriodSwitcher value={overallPeriod} onChange={setOverallPeriod} />
           </View>
-
           <HeroBanner
             icon={metric === 'pts' ? 'trophy' : 'cash-multiple'}
             title={metric === 'pts' ? 'Punkte Bestenliste' : 'Ersparnis-Bestenliste'}
-            subtitle={
-              metric === 'pts'
-                ? 'Wer sammelt die meisten Punkte?'
-                : 'Wer hat am meisten gespart?'
-            }
             inlineSelector={
               <InlineToggle
                 value={metric}
@@ -1107,66 +1434,56 @@ function RanksTab() {
               />
             }
           />
-
-          {overallPeriod !== 'all' ? (
-            <PeriodComingSoon period={overallPeriod} />
-          ) : (
-            <UserBoard
-              users={overallUsers}
-              metric={metric}
-              userRank={userOverallRank}
-              myEntry={
-                userOverallRank !== null
-                  ? overallUsers.find((u) => u.isMe) ?? null
-                  : null
-              }
-              userMetricValue={metric === 'pts' ? contribution?.pts ?? 0 : contribution?.eur ?? 0}
-              totalUsers={overallUsers.length}
-            />
-          )}
-
-          <RefreshHint updatedAt={updatedAt} />
+          <UserBoard
+            users={overallUsers}
+            metric={metric}
+            period={overallPeriod}
+            visibleCount={visibleCount}
+            onLoadMore={() =>
+              setVisibleCount((c) =>
+                Math.min(c + LOAD_MORE_STEP, overallUsers.length),
+              )
+            }
+          />
         </View>
-
-        {/* ════ PAGE 2 — Regionenkampf ════ */}
-        <View key="region">
-          <View style={{ paddingTop: 14 }}>
-            <PeriodSwitcher value={regionPeriod} onChange={setRegionPeriod} />
+      ) : (
+        <View>
+          {/* BL vs Städte — primary axis. Pill row at the top of
+              the region tab, replacing the period switcher (region
+              duels are always lifetime). */}
+          <View style={{ paddingTop: 10, paddingHorizontal: 20 }}>
+            <RegionGeoSwitch value={geo} onChange={setGeo} />
           </View>
           <HeroBanner
-            icon={geo === 'bundesland' ? 'map' : 'city'}
+            icon={geo === 'bundesland' ? '🗺️' : '🏙️'}
             title={geo === 'bundesland' ? 'Bundesländer-Liga' : 'Städte-Liga'}
             inlineSelector={
               <InlineToggle
-                value={geo}
-                onChange={setGeo}
+                value={regionMetric}
+                onChange={setRegionMetric}
                 options={[
-                  { key: 'bundesland', label: 'Bundesländer' },
-                  { key: 'stadt', label: 'Städte' },
+                  { key: 'pts', label: 'Punkte' },
+                  { key: 'eur', label: 'Ersparnisse' },
                 ]}
               />
             }
-            subtitle={
-              geo === 'bundesland'
-                ? 'Welche Region sammelt am meisten Punkte?'
-                : 'Welche Stadt liegt vorne?'
-            }
           />
-
-          {regionPeriod !== 'all' ? (
-            <PeriodComingSoon period={regionPeriod} />
-          ) : (
-            <RegionBoard
-              rows={geo === 'bundesland' ? blRows : cityRows}
-              showBundesland={geo === 'stadt'}
-              myRank={geo === 'bundesland' ? userBLRank : userCityRank}
-              myLabel={geo === 'bundesland' ? userBL : userCity}
-            />
-          )}
-
-          <RefreshHint updatedAt={updatedAt} />
+          <RegionBoard
+            rows={geo === 'bundesland' ? blRows : cityRows}
+            metric={regionMetric}
+            showBundesland={geo === 'stadt'}
+            myRank={geo === 'bundesland' ? userBLRank : userCityRank}
+            myLabel={geo === 'bundesland' ? userBL : userCity}
+          />
         </View>
-      </PagerView>
+      )}
+
+      {/* Errungenschaften leben jetzt komplett auf /achievements
+          (erreichbar über den StatusHero oben). Hält die Bestenliste
+          fokussiert auf die Liga und vermeidet eine zweite schwere
+          Sektion mit Lottie-Loops auf demselben Screen. */}
+
+      <RefreshHint updatedAt={updatedAt} />
 
       {/* ─── Region-Setup-Sheet ─── */}
       <FilterSheet
@@ -1270,104 +1587,33 @@ function PeriodSwitcher({
   value: Period;
   onChange: (p: Period) => void;
 }) {
-  const { theme, shadows } = useTokens();
-  const items: {
-    key: Period;
-    icon: string;
-    title: string;
-    sub: string;
-    iconColor: string;
-    bg: string;
-  }[] = [
-    {
-      key: 'all',
-      icon: '👑',
-      title: 'Legendär',
-      sub: 'Aller Zeiten',
-      iconColor: '#f5b301',
-      bg: '#fff3c2',
-    },
-    {
-      key: 'year',
-      icon: '🏆',
-      title: 'Champion',
-      sub: 'Dieses Jahr',
-      iconColor: '#bf8636',
-      bg: '#fff0d0',
-    },
-    {
-      key: 'month',
-      icon: '⭐',
-      title: 'Rising Star',
-      sub: 'Dieser Monat',
-      iconColor: '#f5b301',
-      bg: '#fff7d8',
-    },
-    {
-      key: 'week',
-      icon: '🔥',
-      title: 'On Fire',
-      sub: 'Diese Woche',
-      iconColor: '#e64f1f',
-      bg: '#ffe3d6',
-    },
+  // Same `ScopeCard` design as Outer-Scope (Overall/Regionenkampf)
+  // and RegionGeoSwitch (Bundesländer/Städte). One selector, three
+  // contexts — guarantees consistency across the page.
+  const items: { key: Period; emoji: string; title: string; sub: string }[] = [
+    { key: 'all', emoji: '👑', title: 'Legendär', sub: 'Aller Zeiten' },
+    { key: 'month', emoji: '⭐', title: 'Rising Star', sub: 'Dieser Monat' },
+    { key: 'week', emoji: '🔥', title: 'On Fire', sub: 'Diese Woche' },
   ];
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      scrollsToTop={false}
-      contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}
+    <View
+      style={{
+        flexDirection: 'row',
+        gap: 8,
+        paddingHorizontal: 20,
+      }}
     >
-      {items.map((it) => {
-        const on = value === it.key;
-        return (
-          <Pressable
-            key={it.key}
-            onPress={() => onChange(it.key)}
-            style={({ pressed }) => ({
-              minWidth: 150,
-              height: 64,
-              borderRadius: 14,
-              paddingHorizontal: 14,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 10,
-              backgroundColor: on ? it.bg : theme.surface,
-              borderWidth: on ? 0 : 1,
-              borderColor: theme.border,
-              opacity: pressed ? 0.9 : 1,
-              ...(on ? shadows.sm : {}),
-            })}
-          >
-            <Text style={{ fontSize: 22 }}>{it.icon}</Text>
-            <View>
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.extraBold,
-                  fontSize: 14,
-                  color: on ? '#191c1d' : theme.text,
-                }}
-              >
-                {it.title}
-              </Text>
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.medium,
-                  fontSize: 11,
-                  color: on ? '#6b6b6b' : theme.textMuted,
-                  marginTop: 1,
-                }}
-              >
-                {it.sub}
-              </Text>
-            </View>
-          </Pressable>
-        );
-      })}
-    </ScrollView>
+      {items.map((it) => (
+        <ScopeCard
+          key={it.key}
+          active={value === it.key}
+          onPress={() => onChange(it.key)}
+          icon={it.emoji}
+          title={it.title}
+          sub={it.sub}
+        />
+      ))}
+    </View>
   );
 }
 
@@ -1379,9 +1625,15 @@ function HeroBanner({
   subtitle,
   inlineSelector,
 }: {
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  /** Either an MDI icon name OR an emoji string. Emojis read more
+   *  consistently with the rest of the page (period switcher,
+   *  podium medals, etc.); MDI is kept for legacy callers. */
+  icon: keyof typeof MaterialCommunityIcons.glyphMap | string;
   title: string;
-  subtitle: string;
+  /** Optional one-liner under the title. Omit when the title +
+   *  selector together already make the context clear (the
+   *  selector labels say "Punkte / Ersparnisse" anyway). */
+  subtitle?: string;
   /** Optional inline metric/geo selector rendered at the bottom of
    *  the hero — keeps the metric-switch in context without a third
    *  separate tab row. */
@@ -1394,46 +1646,68 @@ function HeroBanner({
       end={{ x: 1, y: 1 }}
       style={{
         marginHorizontal: 20,
-        marginTop: 16,
-        borderRadius: 16,
-        paddingVertical: 16,
-        paddingHorizontal: 16,
+        marginTop: 10,
+        borderRadius: 14,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
       }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <MaterialCommunityIcons name={icon} size={28} color="#5a3500" />
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        {/* Heuristic: short non-MDI strings are treated as emoji.
+            All MDI glyph names contain a hyphen ("trophy-outline",
+            "cash-multiple", "map-marker-radius", …) so anything
+            without one is rendered as text. */}
+        {typeof icon === 'string' && !icon.includes('-') && icon.length <= 4 ? (
+          <Text style={{ fontSize: 18 }}>{icon}</Text>
+        ) : (
+          <MaterialCommunityIcons
+            name={icon as keyof typeof MaterialCommunityIcons.glyphMap}
+            size={20}
+            color="#5a3500"
+          />
+        )}
         <View style={{ flex: 1 }}>
           <Text
+            numberOfLines={1}
             style={{
               fontFamily,
               fontWeight: fontWeight.extraBold,
-              fontSize: 17,
+              fontSize: 14,
               color: '#1a1a1a',
-              letterSpacing: -0.2,
+              letterSpacing: -0.1,
             }}
           >
             {title}
           </Text>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 12,
-              color: '#3a3a3a',
-              marginTop: 2,
-            }}
-          >
-            {subtitle}
-          </Text>
+          {subtitle ? (
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 11,
+                color: '#3a3a3a',
+                marginTop: 1,
+              }}
+            >
+              {subtitle}
+            </Text>
+          ) : null}
         </View>
       </View>
-      {inlineSelector ? <View style={{ marginTop: 12 }}>{inlineSelector}</View> : null}
+      {inlineSelector ? <View style={{ marginTop: 8 }}>{inlineSelector}</View> : null}
     </LinearGradient>
   );
 }
 
 // ─── Scope card (Overall / Regionenkampf top selector) ──────────────────
 
+// Single selector card used by EVERY selector on the rewards
+// screen (Outer scope: Overall/Regionenkampf, Period:
+// Legendär/Rising Star/On Fire, Region geo: Bundesländer/Städte).
+// Accepts either an MDI icon name (rendered in a coloured circle)
+// or a short emoji string (rendered as plain text). One component
+// → one design, no visual drift between selectors.
 function ScopeCard({
   active,
   onPress,
@@ -1443,19 +1717,25 @@ function ScopeCard({
 }: {
   active: boolean;
   onPress: () => void;
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  /** MDI glyph name (contains a hyphen, e.g. "map-marker-radius")
+   *  → rendered in a coloured icon-circle. Otherwise treated as
+   *  a literal emoji string (e.g. "👑", "🔥") → rendered as text. */
+  icon: keyof typeof MaterialCommunityIcons.glyphMap | string;
   title: string;
   sub: string;
 }) {
   const { theme, shadows } = useTokens();
+  const isEmoji =
+    typeof icon === 'string' && !icon.includes('-') && icon.length <= 4;
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => ({
         flex: 1,
-        minHeight: 76,
-        borderRadius: 14,
-        padding: 12,
+        minHeight: 50,
+        borderRadius: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
         backgroundColor: active
           ? theme.primaryContainer ?? theme.surfaceAlt
           : theme.surface,
@@ -1466,40 +1746,47 @@ function ScopeCard({
       })}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <View
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 16,
-            backgroundColor: active ? theme.primary : theme.surfaceAlt,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <MaterialCommunityIcons
-            name={icon}
-            size={18}
-            color={active ? '#fff' : theme.primary}
-          />
-        </View>
+        {isEmoji ? (
+          <Text style={{ fontSize: 18 }}>{icon as string}</Text>
+        ) : (
+          <View
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: 12,
+              backgroundColor: active ? theme.primary : theme.surfaceAlt,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <MaterialCommunityIcons
+              name={icon as keyof typeof MaterialCommunityIcons.glyphMap}
+              size={14}
+              color={active ? '#fff' : theme.primary}
+            />
+          </View>
+        )}
         <Text
+          numberOfLines={1}
           style={{
             fontFamily,
             fontWeight: fontWeight.extraBold,
-            fontSize: 14,
+            fontSize: 13,
             color: theme.text,
+            flex: 1,
           }}
         >
           {title}
         </Text>
       </View>
       <Text
+        numberOfLines={1}
         style={{
           fontFamily,
           fontWeight: fontWeight.medium,
-          fontSize: 11,
+          fontSize: 10,
           color: theme.textMuted,
-          marginTop: 6,
+          marginTop: 2,
         }}
       >
         {sub}
@@ -1567,11 +1854,6 @@ function InlineToggle<T extends string>({
 function PeriodComingSoon({ period }: { period: Exclude<Period, 'all'> }) {
   const { theme } = useTokens();
   const COPY: Record<Exclude<Period, 'all'>, { icon: string; title: string; body: string }> = {
-    year: {
-      icon: '🏆',
-      title: 'Champion-Liga öffnet bald',
-      body: 'Mit dem nächsten Jahres-Reset startet die Champion-Liga. Sammle ab jetzt Punkte fürs Jahresergebnis.',
-    },
     month: {
       icon: '⭐',
       title: 'Rising-Star-Liga öffnet bald',
@@ -1677,20 +1959,30 @@ function RefreshHint({ updatedAt }: { updatedAt: Date | null }) {
 function UserBoard({
   users,
   metric,
-  userRank,
-  myEntry,
-  userMetricValue,
-  totalUsers,
+  period,
+  visibleCount,
+  onLoadMore,
 }: {
   users: LbUser[];
   metric: OverallMetric;
-  userRank: number | null;
-  myEntry: LbUser | null;
-  userMetricValue: number;
-  totalUsers: number;
+  period: Period;
+  /** Total visible rows including the top-3 podium (so 10 means
+   *  podium for #1–3 + list rows #4–10). */
+  visibleCount: number;
+  onLoadMore: () => void;
 }) {
   const { theme } = useTokens();
   if (users.length === 0) {
+    // For lifetime ('all') we treat empty as "still loading" — the
+    // doc fetch in fetchSnapshot is in-flight. For period-windowed
+    // lists, empty is a valid state (no activity in that window
+    // for anyone) — say so honestly so the user doesn't think the
+    // UI is broken.
+    const periodLabels: Record<Period, string> = {
+      all: 'Liga lädt …',
+      month: 'Noch keine Aktivität in diesem Monat.',
+      week: 'Noch keine Aktivität in dieser Woche.',
+    };
     return (
       <View style={{ padding: 40, alignItems: 'center' }}>
         <Text
@@ -1699,33 +1991,75 @@ function UserBoard({
             fontWeight: fontWeight.medium,
             fontSize: 13,
             color: theme.textMuted,
+            textAlign: 'center',
           }}
         >
-          Liga lädt …
+          {periodLabels[period]}
         </Text>
       </View>
     );
   }
+  const hasPodium = users.length >= 3;
+  const top3 = hasPodium ? users.slice(0, 3) : [];
+  const rest = hasPodium ? users.slice(3, visibleCount) : users.slice(0, visibleCount);
+  const canLoadMore = visibleCount < users.length;
+  const remaining = users.length - visibleCount;
   return (
     <>
+      {hasPodium ? <Podium top3={top3} metric={metric} /> : null}
       <View
         style={{
           marginHorizontal: 20,
-          marginTop: 14,
+          marginTop: hasPodium ? 18 : 14,
           gap: 10,
         }}
       >
-        {users.map((u) => (
+        {rest.map((u) => (
           <UserCard key={u.id} user={u} metric={metric} />
         ))}
       </View>
-      <DeinePositionCard
-        rank={userRank}
-        totalUsers={totalUsers}
-        metric={metric}
-        myValue={userMetricValue}
-        inList={!!myEntry}
-      />
+      {canLoadMore ? (
+        <View style={{ paddingHorizontal: 20, marginTop: 14 }}>
+          <Pressable
+            onPress={onLoadMore}
+            style={({ pressed }) => ({
+              height: 46,
+              borderRadius: 12,
+              backgroundColor: theme.surface,
+              borderWidth: 1,
+              borderColor: theme.border,
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexDirection: 'row',
+              gap: 6,
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 13,
+                color: theme.primary,
+              }}
+            >
+              Mehr laden
+            </Text>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 11,
+                color: theme.textMuted,
+              }}
+            >
+              · noch {remaining}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {/* "Deine Position" lives in the floating PositionStickyBar
+          at the bottom of the page — see RewardsScreen render. */}
     </>
   );
 }
@@ -1935,13 +2269,19 @@ function RankBadge({ rank }: { rank: number }) {
 
 // ─── Region leaderboard ─────────────────────────────────────────────────
 
+// Top-N region rows shown (incl. the 3 podium rows). Bundesländer
+// max out at 16 anyway — the slice is a no-op for that scope.
+const REGION_TOP_N = 20;
+
 function RegionBoard({
   rows,
+  metric,
   showBundesland,
   myRank,
   myLabel,
 }: {
   rows: LbRow[];
+  metric: OverallMetric;
   showBundesland?: boolean;
   myRank: number | null;
   myLabel: string | null;
@@ -1963,17 +2303,29 @@ function RegionBoard({
       </View>
     );
   }
+  const visible = rows.slice(0, REGION_TOP_N);
+  const hasPodium = visible.length >= 3;
+  const top3 = hasPodium ? visible.slice(0, 3) : [];
+  const rest = hasPodium ? visible.slice(3) : visible;
   return (
     <>
+      {hasPodium ? (
+        <RegionPodium top3={top3} metric={metric} isCity={!!showBundesland} />
+      ) : null}
       <View
         style={{
           marginHorizontal: 20,
-          marginTop: 14,
+          marginTop: hasPodium ? 18 : 14,
           gap: 10,
         }}
       >
-        {rows.map((r) => (
-          <RegionCard key={r.key} row={r} showBundesland={showBundesland} />
+        {rest.map((r) => (
+          <RegionCard
+            key={r.key}
+            row={r}
+            metric={metric}
+            showBundesland={showBundesland}
+          />
         ))}
       </View>
       <DeinePositionRegionCard
@@ -1985,14 +2337,274 @@ function RegionBoard({
   );
 }
 
+// ─── Bundesländer | Städte primary switcher ─────────────────────────────
+//
+// Two equal-width pills at the top of the region tab. Visually
+// distinct from the inline pts/eur toggle inside the HeroBanner so
+// the user reads the hierarchy "first WHO is competing, then WHAT
+// metric we're comparing".
+
+function RegionGeoSwitch({
+  value,
+  onChange,
+}: {
+  value: RegionGeo;
+  onChange: (v: RegionGeo) => void;
+}) {
+  // Same `ScopeCard` design as the other selectors on the page.
+  const items: { key: RegionGeo; emoji: string; title: string; sub: string }[] =
+    [
+      {
+        key: 'bundesland',
+        emoji: '🗺️',
+        title: 'Bundesländer',
+        sub: '16 Bundesländer',
+      },
+      { key: 'stadt', emoji: '🏙️', title: 'Städte', sub: 'Top 20' },
+    ];
+  return (
+    <View style={{ flexDirection: 'row', gap: 8 }}>
+      {items.map((it) => (
+        <ScopeCard
+          key={it.key}
+          active={value === it.key}
+          onPress={() => onChange(it.key)}
+          icon={it.emoji}
+          title={it.title}
+          sub={it.sub}
+        />
+      ))}
+    </View>
+  );
+}
+
+// ─── Region podium (same look as user podium, but for cities/BL) ────────
+//
+// Same visual grammar as `Podium` (avatars row + pastel cards row),
+// just adapted for region rows: the "avatar" is a coloured circle
+// with the region's emoji/initial and a medal coin, the cards show
+// pts + Detektive count instead of pts + €. Keeps the design
+// language consistent across Overall and Regionenkampf.
+
+function RegionPodium({
+  top3,
+  metric,
+  isCity,
+}: {
+  top3: LbRow[];
+  metric: OverallMetric;
+  isCity?: boolean;
+}) {
+  if (top3.length < 3) return null;
+  const r1 = top3[0];
+  const r2 = top3[1];
+  const r3 = top3[2];
+  return (
+    <View style={{ marginHorizontal: 20, marginTop: 18 }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          marginBottom: 8,
+        }}
+      >
+        <RegionPodiumAvatar row={r2} medalRank={2} isCity={isCity} />
+        <RegionPodiumAvatar row={r1} medalRank={1} isCity={isCity} />
+        <RegionPodiumAvatar row={r3} medalRank={3} isCity={isCity} />
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
+        <RegionPodiumCard row={r2} medalRank={2} metric={metric} height={108} />
+        <RegionPodiumCard row={r1} medalRank={1} metric={metric} height={134} />
+        <RegionPodiumCard row={r3} medalRank={3} metric={metric} height={96} />
+      </View>
+    </View>
+  );
+}
+
+function RegionPodiumAvatar({
+  row,
+  medalRank,
+  isCity,
+}: {
+  row: LbRow;
+  medalRank: 1 | 2 | 3;
+  /** Cities use 🏙️, Bundesländer use 🗺️ — keeps the selector ↔
+   *  podium ↔ row visual chain consistent. */
+  isCity?: boolean;
+}) {
+  const ring =
+    medalRank === 1 ? '#f5b301' : medalRank === 2 ? '#b9c2c6' : '#d99966';
+  const size = medalRank === 1 ? 66 : 52;
+  const lift = medalRank === 1 ? 0 : 10;
+  const coin = medalRank === 1 ? '🥇' : medalRank === 2 ? '🥈' : '🥉';
+  const emoji = isCity ? '🏙️' : '🗺️';
+  return (
+    <View
+      style={{
+        flex: medalRank === 1 ? 1.15 : 1,
+        alignItems: 'center',
+        marginTop: lift,
+      }}
+    >
+      <View style={{ position: 'relative' }}>
+        <View
+          style={{
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            borderWidth: 3,
+            borderColor: ring,
+            padding: 2,
+            backgroundColor: '#fff',
+          }}
+        >
+          <View
+            style={{
+              width: size - 10,
+              height: size - 10,
+              borderRadius: (size - 10) / 2,
+              backgroundColor: '#f4f6f7',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ fontSize: Math.round((size - 10) * 0.55) }}>
+              {emoji}
+            </Text>
+          </View>
+        </View>
+        <Text
+          style={{
+            position: 'absolute',
+            right: -6,
+            bottom: -2,
+            fontSize: medalRank === 1 ? 22 : 18,
+          }}
+        >
+          {coin}
+        </Text>
+      </View>
+      <Text
+        numberOfLines={1}
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: medalRank === 1 ? 13 : 12,
+          color: '#191c1d',
+          marginTop: 8,
+          maxWidth: '100%',
+          textAlign: 'center',
+        }}
+      >
+        {row.label}
+      </Text>
+    </View>
+  );
+}
+
+function RegionPodiumCard({
+  row,
+  medalRank,
+  metric,
+  height,
+}: {
+  row: LbRow;
+  medalRank: 1 | 2 | 3;
+  metric: OverallMetric;
+  height: number;
+}) {
+  const bg =
+    medalRank === 1 ? '#fff3c2' : medalRank === 2 ? '#e9edef' : '#fbe4d2';
+  const border =
+    medalRank === 1 ? '#f5b301' : medalRank === 2 ? '#cdd3d6' : '#e6b18c';
+  // Headline + sub follow the chosen metric. We DROP the
+  // "X Detektive" line entirely (per request) and instead show the
+  // OTHER metric as the sub so both numbers stay visible.
+  const headline =
+    metric === 'pts'
+      ? `${row.pts.toLocaleString('de-DE')} Pkt`
+      : `${row.eur.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} €`;
+  const sub =
+    metric === 'pts'
+      ? `${row.eur.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} € gespart`
+      : `${row.pts.toLocaleString('de-DE')} Pkt`;
+  return (
+    <View
+      style={{
+        flex: medalRank === 1 ? 1.15 : 1,
+        height,
+        borderRadius: 16,
+        backgroundColor: bg,
+        borderWidth: 1,
+        borderColor: border,
+        paddingVertical: 12,
+        paddingHorizontal: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: medalRank === 1 ? 28 : 22,
+          color: '#191c1d',
+          letterSpacing: -0.3,
+          lineHeight: medalRank === 1 ? 32 : 26,
+        }}
+      >
+        {medalRank}
+      </Text>
+      <Text
+        numberOfLines={1}
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: medalRank === 1 ? 14 : 13,
+          color: '#191c1d',
+          marginTop: 4,
+        }}
+      >
+        {headline}
+      </Text>
+      <Text
+        numberOfLines={1}
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 10,
+          color: '#666',
+          marginTop: 2,
+        }}
+      >
+        {sub}
+      </Text>
+    </View>
+  );
+}
+
 function RegionCard({
   row,
+  metric,
   showBundesland,
 }: {
   row: LbRow;
+  metric: OverallMetric;
   showBundesland?: boolean;
 }) {
   const { theme, shadows } = useTokens();
+  // Headline value follows the chosen metric. Sub-line shows the
+  // OTHER value as a comparison (so the user always has both
+  // numbers in view — that's the whole point of the metric switch).
+  const headline =
+    metric === 'pts'
+      ? `${row.pts.toLocaleString('de-DE')} Pkt`
+      : `${row.eur.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} €`;
+  const sub =
+    metric === 'pts'
+      ? `${row.eur.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} € gespart`
+      : `${row.pts.toLocaleString('de-DE')} Pkt`;
   return (
     <View
       style={{
@@ -2034,8 +2646,7 @@ function RegionCard({
           }}
         >
           {showBundesland && row.bundesland ? `${row.bundesland} · ` : ''}
-          {row.users.toLocaleString('de-DE')} Detektive ·{' '}
-          {row.eur.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} € gespart
+          {sub}
         </Text>
       </View>
       <Text
@@ -2046,99 +2657,12 @@ function RegionCard({
           color: theme.primary,
         }}
       >
-        {row.pts.toLocaleString('de-DE')} Pkt
+        {headline}
       </Text>
     </View>
   );
 }
 
-// ─── Deine Position card (sticky-ish at end of list) ────────────────────
-
-function DeinePositionCard({
-  rank,
-  totalUsers,
-  metric,
-  myValue,
-  inList,
-}: {
-  rank: number | null;
-  totalUsers: number;
-  metric: OverallMetric;
-  myValue: number;
-  inList: boolean;
-}) {
-  // Encouraging line — tiered by approximate percentile, since we
-  // don't know the EXACT global rank for users outside the top-50.
-  let tagline = 'Sammle Punkte und mach mit!';
-  if (inList && rank !== null) {
-    if (rank === 1) tagline = '🏆 Du bist die Nr. 1 — unfassbar!';
-    else if (rank <= 3) tagline = '🥇 Auf dem Treppchen — stark!';
-    else if (rank <= 10) tagline = '🔥 Top 10 — du jagst die Spitze!';
-    else tagline = '💪 In den Top 50 — bleib dran!';
-  } else if (myValue > 0) {
-    tagline = '🚀 Sammle weiter — die Top 50 sind dein Ziel!';
-  } else {
-    tagline = '🎯 Erste Punkte sammeln und einsteigen!';
-  }
-  return (
-    <LinearGradient
-      colors={['#0d8575', '#10a18a']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={{
-        marginHorizontal: 20,
-        marginTop: 16,
-        borderRadius: 16,
-        padding: 16,
-      }}
-    >
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'baseline',
-          justifyContent: 'space-between',
-        }}
-      >
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 16,
-            color: '#fff',
-          }}
-        >
-          Deine Position
-        </Text>
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 18,
-            color: '#fff',
-          }}
-        >
-          {rank !== null ? `Platz ${rank}` : 'Außerhalb Top 50'}
-        </Text>
-      </View>
-      <Text
-        style={{
-          fontFamily,
-          fontWeight: fontWeight.medium,
-          fontSize: 13,
-          color: '#fff',
-          opacity: 0.95,
-          marginTop: 4,
-        }}
-      >
-        {tagline}
-        {' · '}
-        {metric === 'pts'
-          ? `${myValue.toLocaleString('de-DE')} Pkt`
-          : `${myValue.toFixed(2).replace('.', ',')} € gespart`}
-      </Text>
-    </LinearGradient>
-  );
-}
 
 function DeinePositionRegionCard({
   rank,
@@ -2221,6 +2745,886 @@ function DeinePositionRegionCard({
       </Text>
     </LinearGradient>
   );
+}
+
+// ─── Status-Hero (own level / pts / streak) ─────────────────────────────
+//
+// Green-gradient card that anchors the Bestenliste page to the user's
+// own context. All numbers come from the SAME sources the legacy
+// /achievements screen uses, so the level / streak / freeze /
+// progress numbers stay in sync between the two screens:
+//   • level + streak + freezeTokens → useAchievements().userStats
+//   • level NAME ("Möchtegern-Detektiv" / "Sparfuchs" / …) and the
+//     pts/savings thresholds → achievementService.getAllLevels()
+// We never invent thresholds — falling back gracefully when the
+// levels list hasn't loaded yet (first paint / offline).
+
+// Level-tinted gradient colours, matching the legacy /achievements
+// screen exactly so the user sees the SAME card colour in both
+// places. The base tone comes from `currentLevelInfo.color`
+// (Firestore-defined, per level), the second stop is a hand-picked
+// accent that gives each level a distinct visual identity:
+//   1 = brown, 2 = orange, 3 = green, 4 = gold, 5 = red, 6+ = brown.
+// Falls back to the original mark-detective green when no level
+// info has loaded yet (first paint / offline).
+function levelGradient(levelId: number, baseColor?: string): [string, string] {
+  const fallback: [string, string] = ['#0a6f62', '#10a18a'];
+  if (!baseColor) return fallback;
+  switch (levelId) {
+    case 1: return [baseColor, '#9E6B50']; // Braun
+    case 2: return [baseColor, '#FF9800']; // Orange
+    case 3: return [baseColor, '#4CAF50']; // Grün
+    case 4: return [baseColor, '#FFC107']; // Gold
+    case 5: return [baseColor, '#FF5252']; // Rot
+    default: return [baseColor, '#9E6B50'];
+  }
+}
+
+function StatusHero({
+  name,
+  photoUrl,
+  userStats,
+  userProfile,
+  levels,
+}: {
+  name: string;
+  photoUrl: string | null;
+  userStats: { currentLevel?: number; currentStreak?: number; freezeTokens?: number; pointsTotal?: number } | null;
+  userProfile: any;
+  levels: Level[];
+}) {
+  // Resolve all values from the real data sources. Fallbacks mirror
+  // the cascade used in app/achievements.tsx:
+  //   userStats → userProfile.stats → userProfile.level → 1
+  const level: number =
+    userStats?.currentLevel ??
+    userProfile?.stats?.currentLevel ??
+    userProfile?.level ??
+    1;
+  const pts: number =
+    userStats?.pointsTotal ??
+    userProfile?.stats?.pointsTotal ??
+    0;
+  const eur: number =
+    Number(userProfile?.totalSavings ?? userProfile?.stats?.savingsTotal ?? 0);
+  // streak / freezeTokens are intentionally not surfaced in this
+  // card anymore — they live on /achievements (the card is a
+  // tap-target into that screen). Keeps the hero focused on the
+  // single thing that matters here: progress to the next level.
+
+  // Pull current + next level from the real Firestore-loaded list.
+  const currentLevelInfo = levels.find((l) => l.id === level);
+  const nextLevel = levels.find((l) => l.id === level + 1);
+
+  // Progress numbers for the next level. From level 3 onwards the
+  // legacy `/achievements` screen also requires savings (€) to
+  // unlock — we mirror that here so the user sees BOTH gates.
+  const requiredPts = nextLevel?.pointsRequired || 0;
+  const requiredEur = nextLevel?.savingsRequired || 0;
+  const ptsPct =
+    requiredPts > 0
+      ? Math.min(100, Math.max(0, Math.round((pts / requiredPts) * 100)))
+      : 100;
+  const eurPct =
+    requiredEur > 0
+      ? Math.min(100, Math.max(0, Math.round((eur / requiredEur) * 100)))
+      : 100;
+  const ptsRemaining = Math.max(0, requiredPts - pts);
+  const eurRemaining = Math.max(0, requiredEur - eur);
+  const levelName = currentLevelInfo?.name ?? '';
+  // Gradient colours follow the user's CURRENT level — exact same
+  // mapping as the legacy /achievements screen so the card colour
+  // is consistent between the two screens. (Diagonal start/end
+  // tweaked to match the legacy card too.)
+  const gradient = levelGradient(level, currentLevelInfo?.color);
+
+  // The whole card is the entry-point to the dedicated
+  // /achievements screen — that's where Errungenschaften, full level
+  // catalogue, lottie animations and progress live. Keeping that off
+  // the Bestenliste avoids stacking two heavy sections on one screen.
+  const onPress = () => router.push('/achievements' as any);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        opacity: pressed ? 0.92 : 1,
+        borderRadius: 20,
+      })}
+    >
+    <LinearGradient
+      colors={gradient}
+      start={{ x: -1, y: 0.34 }}
+      end={{ x: 1, y: -0.34 }}
+      style={{
+        borderRadius: 18,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        overflow: 'hidden',
+        // Locked to the same height as the Cashback hero on the
+        // Einlösen tab — see HERO_HEIGHT for the rationale.
+        height: HERO_HEIGHT,
+      }}
+    >
+      <View style={{ flex: 1, justifyContent: 'space-between' }}>
+      {/* Same alignment trick as the Cashback hero: stretch the
+          row to the avatar's height, then space-between in each
+          content column → both pills sit at the bottom of the
+          row on the same baseline. */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'stretch',
+          gap: 12,
+          minHeight: 52,
+        }}
+      >
+        {/* Avatar */}
+        {photoUrl ? (
+          <View
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: 26,
+              overflow: 'hidden',
+              borderWidth: 2,
+              borderColor: 'rgba(255,255,255,0.55)',
+            }}
+          >
+            <RNImage
+              source={{ uri: photoUrl }}
+              style={{ width: '100%', height: '100%' }}
+            />
+          </View>
+        ) : (
+          <View
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: 26,
+              backgroundColor: 'rgba(255,255,255,0.22)',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderWidth: 2,
+              borderColor: 'rgba(255,255,255,0.55)',
+            }}
+          >
+            <Text style={{ fontSize: 26 }}>🦉</Text>
+          </View>
+        )}
+        <View
+          style={{
+            flex: 1,
+            minWidth: 0,
+            justifyContent: 'space-between',
+          }}
+        >
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 17,
+              color: '#fff',
+              letterSpacing: -0.2,
+            }}
+          >
+            {name}
+          </Text>
+          <HeroPill
+            icon="star-circle"
+            label={`Level ${level}${levelName ? ` · ${levelName}` : ''}`}
+          />
+        </View>
+        <View
+          style={{
+            alignItems: 'flex-end',
+            justifyContent: 'space-between',
+          }}
+        >
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 24,
+              lineHeight: 28,
+              color: '#fff',
+              letterSpacing: -0.4,
+            }}
+          >
+            {pts.toLocaleString('de-DE')}
+          </Text>
+          <HeroPill icon="star-four-points" label="Detektiv-Punkte" />
+        </View>
+      </View>
+
+      {/* Progress bars — Pkt always, € only when the next level
+          actually requires savings (Level 3+). Two compact 21 px
+          rows max. No extra "motivation banner" / chip row below
+          on this card — the bars ARE the content. */}
+      {nextLevel ? (
+        <View style={{ marginTop: 12, gap: 7 }}>
+          <ProgressBar
+            icon="star-four-points"
+            label={`Lv ${level + 1} · ${nextLevel.name}`}
+            current={pts.toLocaleString('de-DE')}
+            required={requiredPts.toLocaleString('de-DE')}
+            pct={requiredPts > 0 ? ptsPct : 100}
+          />
+          {requiredEur > 0 ? (
+            <ProgressBar
+              icon="cash"
+              label="Ersparnis"
+              current={`${eur.toFixed(2).replace('.', ',')} €`}
+              required={`${requiredEur.toFixed(2).replace('.', ',')} €`}
+              pct={eurPct}
+            />
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* No dedicated "Errungenschaften & Level →" affordance row
+          anymore — the whole card is a Pressable, the press
+          feedback (opacity 0.92) signals tap-ability. */}
+      </View>
+    </LinearGradient>
+    </Pressable>
+  );
+}
+
+// ─── StatusHero progress bar + chip ─────────────────────────────────────
+//
+// `ProgressBar` is a single 18 px row: icon + label on the left,
+// "current / required" counter on the right, thin 4 px fill bar
+// below. Designed to be stackable so we can show both pts and €
+// gates without doubling the StatusHero height.
+//
+// `Chip` is a tiny inline label with icon — used in the bottom row
+// for Streak / Freezes / Gespart. No background, just icon + text,
+// so the row reads as informational rather than another set of
+// "buttons" the user has to parse.
+
+// ─── HeroPill ──────────────────────────────────────────────────────────
+//
+// One pill, four use-sites: the level chip + the Detektiv-Punkte
+// currency label on the StatusHero, and the status chip +
+// Cashback-Taler currency label on the Cashback hero. Single
+// component → all four pills are visually identical (same padding,
+// radius, font-size, icon-size, gold accent). One source of truth
+// for the "white-on-gradient hero pill" design.
+function HeroPill({
+  icon,
+  label,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+}) {
+  return (
+    <View
+      style={{
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 10,
+        backgroundColor: 'rgba(255,255,255,0.22)',
+      }}
+    >
+      <MaterialCommunityIcons name={icon} size={11} color="#ffd44b" />
+      <Text
+        numberOfLines={1}
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 10,
+          color: '#fff',
+          letterSpacing: 0.4,
+        }}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+function ProgressBar({
+  icon,
+  label,
+  current,
+  required,
+  pct,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+  current: string;
+  required: string;
+  pct: number;
+}) {
+  return (
+    <View>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          marginBottom: 5,
+        }}
+      >
+        <MaterialCommunityIcons
+          name={icon}
+          size={13}
+          color="#fff"
+          style={{ opacity: 0.95 }}
+        />
+        <Text
+          numberOfLines={1}
+          style={{
+            flex: 1,
+            marginLeft: 6,
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 12,
+            color: '#fff',
+            opacity: 0.95,
+          }}
+        >
+          {label}
+        </Text>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 12,
+            color: '#fff',
+          }}
+        >
+          {current} / {required}
+        </Text>
+      </View>
+      <View
+        style={{
+          height: 5,
+          backgroundColor: 'rgba(255,255,255,0.22)',
+          borderRadius: 3,
+          overflow: 'hidden',
+        }}
+      >
+        <View
+          style={{
+            width: `${Math.max(0, Math.min(100, pct))}%`,
+            height: '100%',
+            backgroundColor: '#fff',
+            borderRadius: 3,
+          }}
+        />
+      </View>
+    </View>
+  );
+}
+
+function Chip({
+  icon,
+  iconColor,
+  label,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  iconColor: string;
+  label: string;
+}) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+      <MaterialCommunityIcons name={icon} size={12} color={iconColor} />
+      <Text
+        numberOfLines={1}
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.bold,
+          fontSize: 11,
+          color: '#fff',
+        }}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+
+// ─── Podium (top-3, prototype-aligned) ──────────────────────────────────
+//
+// Layout:
+//   row 1 — three avatars in colored medal-rings, names underneath
+//           (rank-2 left, rank-1 centre+higher, rank-3 right)
+//   row 2 — three soft pastel cards, height-stepped:
+//             rank 2 short (gray),
+//             rank 1 tall  (gold),
+//             rank 3 short (peach)
+//           Each card shows: big rank number, points, € savings.
+//
+// No bold gradients on the cards — they're flat pastel surfaces so
+// the avatars + names dominate visually.
+
+function Podium({ top3, metric }: { top3: LbUser[]; metric: OverallMetric }) {
+  if (top3.length < 3) return null;
+  const r1 = top3[0];
+  const r2 = top3[1];
+  const r3 = top3[2];
+
+  return (
+    <View style={{ marginHorizontal: 20, marginTop: 18 }}>
+      {/* Avatar row — rank-1 floats higher and bigger in the middle. */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          marginBottom: 8,
+        }}
+      >
+        <PodiumAvatar user={r2} medalRank={2} />
+        <PodiumAvatar user={r1} medalRank={1} />
+        <PodiumAvatar user={r3} medalRank={3} />
+      </View>
+
+      {/* Card row — soft pastel, height-stepped. */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'flex-end',
+          gap: 8,
+        }}
+      >
+        <PodiumCard user={r2} medalRank={2} metric={metric} height={108} />
+        <PodiumCard user={r1} medalRank={1} metric={metric} height={134} />
+        <PodiumCard user={r3} medalRank={3} metric={metric} height={96} />
+      </View>
+    </View>
+  );
+}
+
+function PodiumAvatar({
+  user,
+  medalRank,
+}: {
+  user: LbUser;
+  medalRank: 1 | 2 | 3;
+}) {
+  // Ring colours per medal — matches the pastel cards below.
+  const ring =
+    medalRank === 1 ? '#f5b301' : medalRank === 2 ? '#b9c2c6' : '#d99966';
+  // Rank-1 floats higher and is larger. The other two share a smaller
+  // size so the centre dominates the row visually.
+  const size = medalRank === 1 ? 66 : 52;
+  const lift = medalRank === 1 ? 0 : 10;
+  const coin = medalRank === 1 ? '🥇' : medalRank === 2 ? '🥈' : '🥉';
+  return (
+    <View
+      style={{
+        flex: medalRank === 1 ? 1.15 : 1,
+        alignItems: 'center',
+        marginTop: lift,
+      }}
+    >
+      <View style={{ position: 'relative' }}>
+        <View
+          style={{
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            borderWidth: 3,
+            borderColor: ring,
+            padding: 2,
+            backgroundColor: '#fff',
+          }}
+        >
+          <PodiumAvatarInner
+            name={user.name}
+            photoUrl={user.photoUrl}
+            size={size - 10}
+          />
+        </View>
+        {/* Floating medal coin */}
+        <Text
+          style={{
+            position: 'absolute',
+            right: -6,
+            bottom: -2,
+            fontSize: medalRank === 1 ? 22 : 18,
+          }}
+        >
+          {coin}
+        </Text>
+      </View>
+      <Text
+        numberOfLines={1}
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: medalRank === 1 ? 14 : 12,
+          color: '#191c1d',
+          marginTop: 8,
+          maxWidth: '100%',
+          textAlign: 'center',
+        }}
+      >
+        {user.name}
+      </Text>
+    </View>
+  );
+}
+
+function PodiumAvatarInner({
+  name,
+  photoUrl,
+  size,
+}: {
+  name: string;
+  photoUrl: string | null;
+  size: number;
+}) {
+  if (photoUrl) {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          overflow: 'hidden',
+          backgroundColor: '#eee',
+        }}
+      >
+        <RNImage
+          source={{ uri: photoUrl }}
+          style={{ width: '100%', height: '100%' }}
+        />
+      </View>
+    );
+  }
+  const initial = name?.[0]?.toUpperCase() ?? '?';
+  const palette = ['#0d8575', '#1f5e96', '#a32d6f', '#c2462b', '#7a4a9a', '#345a3a'];
+  const idx = (initial.charCodeAt(0) || 0) % palette.length;
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: palette[idx],
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: Math.round(size * 0.42),
+          color: '#fff',
+        }}
+      >
+        {initial}
+      </Text>
+    </View>
+  );
+}
+
+function PodiumCard({
+  user,
+  medalRank,
+  metric,
+  height,
+}: {
+  user: LbUser;
+  medalRank: 1 | 2 | 3;
+  metric: OverallMetric;
+  height: number;
+}) {
+  // Soft pastel surface colours — flat, NO gradient, to match the
+  // prototype. Border is a slightly deeper version for definition.
+  const bg =
+    medalRank === 1 ? '#fff3c2' : medalRank === 2 ? '#e9edef' : '#fbe4d2';
+  const border =
+    medalRank === 1 ? '#f5b301' : medalRank === 2 ? '#cdd3d6' : '#e6b18c';
+  const valueText =
+    metric === 'pts'
+      ? `${user.pts.toLocaleString('de-DE')} Pkt`
+      : `${user.eur.toFixed(2).replace('.', ',')} €`;
+  const subText =
+    metric === 'pts'
+      ? `${user.eur.toFixed(2).replace('.', ',')} € gespart`
+      : `${user.pts.toLocaleString('de-DE')} Pkt`;
+  return (
+    <View
+      style={{
+        flex: medalRank === 1 ? 1.15 : 1,
+        height,
+        borderRadius: 16,
+        backgroundColor: bg,
+        borderWidth: 1,
+        borderColor: border,
+        paddingVertical: 12,
+        paddingHorizontal: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: medalRank === 1 ? 28 : 22,
+          color: '#191c1d',
+          letterSpacing: -0.3,
+          lineHeight: medalRank === 1 ? 32 : 26,
+        }}
+      >
+        {medalRank}
+      </Text>
+      <Text
+        numberOfLines={1}
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: medalRank === 1 ? 14 : 13,
+          color: '#191c1d',
+          marginTop: 4,
+        }}
+      >
+        {valueText}
+      </Text>
+      <Text
+        numberOfLines={1}
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 10,
+          color: '#666',
+          marginTop: 2,
+        }}
+      >
+        {subText}
+      </Text>
+    </View>
+  );
+}
+
+// ─── Floating "Deine Position" sticky bar ───────────────────────────────
+//
+// Compact, always-visible at the page's bottom edge so the user
+// never has to scroll to see their standing.
+//
+// Two modes, driven by the same `outerScope` the user picked above:
+//   • `outerScope === 'overall'` → user's individual percentile
+//     ("Top 50! Greif ganz oben an", "Du gehörst zu den besten 5%",
+//     "Besser als 50% aller Detektive", …) — see motivationalLine()
+//     in the leaderboard service.
+//   • `outerScope === 'region'`  → the user's OWN region's rank in
+//     its league (e.g. "Bayern · Platz 3 — stark!"). Switches between
+//     Bundesland and Stadt with the `geo` prop, mirroring the Region-
+//     Tab toggle.
+// Both modes share the same compact layout: badge + one-line message.
+
+function PositionStickyBar({
+  userProfile,
+  outerScope,
+  geo,
+  userStats,
+  levels,
+}: {
+  userProfile: any;
+  outerScope: LbScopeOuter;
+  geo: RegionGeo;
+  userStats: ReturnType<typeof useAchievements>['userStats'];
+  levels: Level[];
+}) {
+  const insets = useSafeAreaInsets();
+  // Level-tinted gradient — same colour the user sees on the
+  // StatusHero card above. Single source of truth: levelGradient().
+  const userLevel: number =
+    userStats?.currentLevel ??
+    userProfile?.stats?.currentLevel ??
+    userProfile?.level ??
+    1;
+  const userLevelInfo = levels.find((l) => l.id === userLevel);
+  const gradient = levelGradient(userLevel, userLevelInfo?.color);
+
+  // ── Overall mode — user's personal percentile / rank ──
+  const userPts = Number(userProfile?.stats?.pointsTotal ?? 0);
+  const userNick: string | null = userProfile?.display_name ?? null;
+  const [position, setPosition] = useState<LbPosition | null>(null);
+  useEffect(() => {
+    if (outerScope !== 'overall') return;
+    let alive = true;
+    getUserPosition(userPts, userNick).then((p) => alive && setPosition(p));
+    return () => {
+      alive = false;
+    };
+  }, [outerScope, userPts, userNick]);
+
+  // ── Region mode — find the user's OWN BL/Stadt in the league ──
+  const userBL: string | null =
+    (userProfile as any)?.bundesland ??
+    (userProfile as any)?.guessedBundesland ??
+    null;
+  const userCity: string | null =
+    (userProfile as any)?.city ??
+    (userProfile as any)?.guessedCity ??
+    null;
+  const [regionRow, setRegionRow] = useState<LbRow | null>(null);
+  const [regionTotal, setRegionTotal] = useState(0);
+  useEffect(() => {
+    if (outerScope !== 'region') return;
+    let alive = true;
+    const target = geo === 'bundesland' ? userBL : userCity;
+    const fetcher =
+      geo === 'bundesland'
+        ? getBundeslandRanks(target, 'all', 'pts')
+        : getCityRanks(target, 'all', 'pts');
+    fetcher.then((rows) => {
+      if (!alive) return;
+      setRegionTotal(rows.length);
+      // The list is already sorted+ranked by the service; the user's
+      // row carries `isMe: true` thanks to the target arg above.
+      setRegionRow(rows.find((r) => r.isMe) ?? null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [outerScope, geo, userBL, userCity]);
+
+  // ── Render ──
+  let badge: string;
+  let message: string;
+  if (outerScope === 'region') {
+    const target = geo === 'bundesland' ? userBL : userCity;
+    if (!target) {
+      badge = geo === 'bundesland' ? 'Bundesland' : 'Stadt';
+      message =
+        geo === 'bundesland'
+          ? '🗺️ Setze dein Bundesland um in der Liga mitzuspielen!'
+          : '🏙️ Setze deine Stadt um in der Liga mitzuspielen!';
+    } else if (!regionRow) {
+      badge = target;
+      message =
+        geo === 'bundesland'
+          ? '🗺️ Sammle Punkte für dein Bundesland!'
+          : '🏙️ Sammle Punkte für deine Stadt!';
+    } else {
+      badge =
+        regionRow.rank <= 3
+          ? `Platz ${regionRow.rank}`
+          : `Platz ${regionRow.rank}/${regionTotal}`;
+      message = regionMessage(regionRow.rank, regionTotal, target, geo);
+    }
+  } else {
+    if (!position) return null;
+    if (position.rank !== null && position.rank <= 50) {
+      badge = `Top ${position.rank}`;
+    } else if (position.rank !== null) {
+      badge = `Platz ${position.rank}`;
+    } else if (position.approxRank) {
+      badge = `Platz ~${position.approxRank.toLocaleString('de-DE')}`;
+    } else if (userPts > 0) {
+      badge = `${userPts.toLocaleString('de-DE')} Pkt`;
+    } else {
+      badge = 'Liga';
+    }
+    message = position.message;
+  }
+
+  return (
+    <View
+      pointerEvents="box-none"
+      style={{
+        position: 'absolute',
+        left: 12,
+        right: 12,
+        // Tab bar (~49 px) + safe-area + extra clearance for the
+        // raised "Stöbern" floating button in the centre of our tab
+        // bar (sits ~25 px above the bar baseline). Total offset:
+        // safe-area + ~95 px — keeps the bar visible without
+        // overlapping the elevated button.
+        bottom: insets.bottom + 95,
+        zIndex: 20,
+      }}
+    >
+      <LinearGradient
+        colors={gradient}
+        start={{ x: -1, y: 0.34 }}
+        end={{ x: 1, y: -0.34 }}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+          borderRadius: 14,
+          shadowColor: '#000',
+          shadowOpacity: 0.22,
+          shadowOffset: { width: 0, height: 6 },
+          shadowRadius: 12,
+          elevation: 6,
+        }}
+      >
+        <View
+          style={{
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            borderRadius: 8,
+            backgroundColor: 'rgba(255,255,255,0.22)',
+          }}
+        >
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 12,
+              color: '#fff',
+              letterSpacing: 0.2,
+            }}
+          >
+            {badge}
+          </Text>
+        </View>
+        <Text
+          numberOfLines={2}
+          style={{
+            flex: 1,
+            fontFamily,
+            fontWeight: fontWeight.semibold,
+            fontSize: 11,
+            lineHeight: 14,
+            color: '#fff',
+          }}
+        >
+          {message}
+        </Text>
+      </LinearGradient>
+    </View>
+  );
+}
+
+// Region-side motivational copy. Symmetric to motivationalLine()
+// in the leaderboard service but tied to the user's BL/Stadt rank
+// inside its own league (16 BLs / top-50 cities).
+function regionMessage(
+  rank: number,
+  total: number,
+  name: string,
+  geo: RegionGeo,
+): string {
+  const noun = geo === 'bundesland' ? 'Bundesland' : 'Stadt';
+  if (rank === 1) return `🥇 ${name} — auf Platz 1! Verteidige die Spitze!`;
+  if (rank === 2) return `🥈 ${name} — Silber, der Thron ist nah!`;
+  if (rank === 3) return `🥉 ${name} — auf dem Treppchen, stark!`;
+  if (rank <= 5) return `🔥 ${name} ist Top 5 — sammle weiter Punkte!`;
+  if (rank <= 10) return `💪 ${name} ist Top 10 — die Spitze ist in Sicht!`;
+  // Out of top 10: include the position fraction so the user knows
+  // how far they are from the front.
+  return `🚀 Sammle Punkte und bring dein${
+    geo === 'bundesland' ? '' : 'e'
+  } ${noun} ${name} weiter nach oben!`;
 }
 
 // ─── Region setup sheet content (kept) ──────────────────────────────────

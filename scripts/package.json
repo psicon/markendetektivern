@@ -10,7 +10,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@imgly/background-removal-node": "^1.4.5",
     "dotenv": "^17.2.1",
-    "firebase-admin": "^13.4.0"
+    "firebase-admin": "^13.4.0",
+    "openai": "^6.35.0",
+    "replicate": "^1.4.0",
+    "sharp": "^0.33.5"
   }
 }

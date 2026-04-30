@@ -170,20 +170,68 @@ async function aggregateUsers(userCity) {
     lastDoc = snap.docs[snap.docs.length - 1];
   }
 
-  const topUsers = userCandidates
-    .sort((a, b) => b.pts - a.pts || b.eur - a.eur)
-    .slice(0, 50)
+  // Sort all candidates once — used for both the topUsers slice and
+  // for percentile thresholds.
+  const sorted = userCandidates.sort(
+    (a, b) => b.pts - a.pts || b.eur - a.eur,
+  );
+  const topUsers = sorted
+    .slice(0, 100)
     .map((u, i) => ({ ...u, rank: i + 1 }));
 
-  return { blAgg, cityAgg, topUsers };
+  // Percentile thresholds across all users with points > 0. The
+  // client uses these to render a motivational "Better than X%"
+  // line for users outside the top-100. Thresholds are pts-values:
+  // a user with pts >= thresholds.p90 is in the top 10%, etc.
+  const totalWithPts = sorted.length;
+  const ptsAt = (p) => {
+    if (totalWithPts === 0) return 0;
+    // p is the "top X%" cutoff — index from the top.
+    const idx = Math.min(
+      totalWithPts - 1,
+      Math.max(0, Math.floor((p / 100) * totalWithPts)),
+    );
+    return sorted[idx].pts;
+  };
+  const percentileThresholds = {
+    p1: ptsAt(1),    // top 1%
+    p5: ptsAt(5),    // top 5%
+    p10: ptsAt(10),
+    p25: ptsAt(25),
+    p50: ptsAt(50),
+    p75: ptsAt(75),
+    p90: ptsAt(90),
+  };
+
+  return {
+    blAgg,
+    cityAgg,
+    topUsers,
+    totalUsersWithPts: totalWithPts,
+    percentileThresholds,
+  };
 }
+
 
 async function buildAndWrite() {
   console.log('aggregateLeaderboard: starting');
   const userCity = await streamUserCities();
   console.log(`  userCity map size: ${userCity.size}`);
-  const { blAgg, cityAgg, topUsers } = await aggregateUsers(userCity);
-  console.log(`  bl: ${blAgg.size}, cities: ${cityAgg.size}, topUsers: ${topUsers.length}`);
+  const { blAgg, cityAgg, topUsers, totalUsersWithPts, percentileThresholds } =
+    await aggregateUsers(userCity);
+  console.log(
+    `  bl: ${blAgg.size}, cities: ${cityAgg.size}, topUsers: ${topUsers.length}, totalUsersWithPts: ${totalUsersWithPts}`,
+  );
+
+  // Period-windowed leaderboards (week / month) are NOT built here.
+  // They run as live Firestore queries from the app against the
+  // existing `leaderboards` collection that the legacy
+  // `leaderboardService.updateUserStats(...)` already keeps
+  // up-to-date on every points/savings event. One indexed query per
+  // user session (`orderBy('stats.points.weekly').limit(25)`) reads
+  // ~25 docs and costs effectively nothing. Year ("Champion") is
+  // dropped from the period switcher entirely. Lifetime ("Aller
+  // Zeiten") continues to be served from this aggregator.
 
   const blRows = BUNDESLAENDER
     .map((name) => {
@@ -200,12 +248,14 @@ async function buildAndWrite() {
     .map((r, i) => ({ ...r, rank: i + 1 }));
 
   await db.collection('aggregates').doc('leaderboard_v1').set({
-    version: 3,
+    version: 4,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     bundesland: blRows,
     cities: cityRows,
     topUsers,
     totalUsersWithRegion: blRows.reduce((s, r) => s + r.users, 0),
+    totalUsersWithPts,
+    percentileThresholds,
   });
   console.log('aggregateLeaderboard: done');
 }
