@@ -34,8 +34,10 @@ import { ImageZoomModal, type SourceRect } from '@/components/design/ImageZoomMo
 import { getProductImage } from '@/lib/utils/productImage';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
+import { CoachmarkScrollProvider } from '@/components/coachmarks/CoachmarkScrollContext';
 import {
   PRODUCT_DETAIL_ANCHOR_CART,
+  PRODUCT_DETAIL_ANCHOR_CONTEXT,
   PRODUCT_DETAIL_ANCHOR_FAVORITE,
   PRODUCT_DETAIL_ANCHOR_RATING,
   ProductDetailWalkthrough,
@@ -158,11 +160,17 @@ export default function ProductComparisonScreen() {
   // sitzen unten an den drei Hero-Cluster ActionButtons des
   // MARKENPRODUKTS (oben), NICHT an den NoName-Card-Buttons im
   // Carousel — hätten wir doppelte Anchor-IDs, würde der Spotlight
-  // auf den jeweils zuletzt-gemounteten zeigen.
+  // auf den jeweils zuletzt-gemounteten zeigen. ScrollView-Ref
+  // braucht's für den Scroll-Lock während Spotlights aktiv sind.
   const detailCoachmark = useCoachmark('product-detail');
   const cartAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_CART);
   const favAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_FAVORITE);
   const ratingAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_RATING);
+  // Auf product-comparison zeigt Context auf den NoName-Carousel —
+  // letzte Spotlight-Phase erklärt dass das die Alternativen vom
+  // gleichen Hersteller sind und wie die Stufen 3-5 zu lesen sind.
+  const contextAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_CONTEXT);
+  const detailScrollRef = useRef<ScrollView>(null);
 
   // Different callers across the app push either `?type=markenprodukt`
   // (home, explore, comparison-alternatives) or `?type=brand` (search-
@@ -842,6 +850,7 @@ export default function ProductComparisonScreen() {
       </Animated.View>
 
       <Animated.ScrollView
+        ref={detailScrollRef}
         onScroll={scrollHandler}
         scrollEventThrottle={16}
         contentContainerStyle={{
@@ -1211,7 +1220,12 @@ export default function ProductComparisonScreen() {
               </Text>
             </View>
 
-            <View style={{ position: 'relative' }}>
+            <View
+              ref={contextAnchor.ref}
+              onLayout={contextAnchor.onLayout}
+              collapsable={false}
+              style={{ position: 'relative' }}
+            >
             <ScrollView
               ref={carouselRef}
               horizontal
@@ -1920,14 +1934,21 @@ export default function ProductComparisonScreen() {
           it sits visually on top of the FAB at landing time. */}
       <FlyToCart ref={flyRef} />
 
-      {/* ProductDetail-Walkthrough — Welcome-Card + 3 Spotlights
-          (Cart/Favorit/Rating). Gleiche Tour-Key 'product-detail'
-          wie noname-detail; wenn der User dort schon durch war,
-          taucht sie hier nicht mehr auf. */}
-      <ProductDetailWalkthrough
-        visible={detailCoachmark.visible}
-        onDismiss={detailCoachmark.dismiss}
-      />
+      {/* ProductDetail-Walkthrough — Welcome-Card + Spotlights.
+          Gleiche Tour-Key 'product-detail' wie noname-detail.
+          CoachmarkScrollProvider gibt der Spotlight-Engine den
+          ScrollView-Ref → Scroll wird gesperrt während Spotlight
+          aktiv ist. */}
+      <CoachmarkScrollProvider
+        scrollY={scrollY}
+        scrollViewRef={detailScrollRef}
+      >
+        <ProductDetailWalkthrough
+          visible={detailCoachmark.visible}
+          onDismiss={detailCoachmark.dismiss}
+          screenType="comparison"
+        />
+      </CoachmarkScrollProvider>
 
       {/* Fullscreen image zoom (pinch / pan / double-tap / swipe-down).
           Highest in the tree → sits above the FAB and any sheets.

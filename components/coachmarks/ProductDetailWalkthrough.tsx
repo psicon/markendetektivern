@@ -44,14 +44,33 @@ import { SpotlightOverlay } from './SpotlightOverlay';
 export const PRODUCT_DETAIL_ANCHOR_CART = 'product.cart';
 export const PRODUCT_DETAIL_ANCHOR_FAVORITE = 'product.favorite';
 export const PRODUCT_DETAIL_ANCHOR_RATING = 'product.rating';
+// Context-Spotlight (5. Phase) — pointet auf etwas screen-
+// spezifisches: auf product-comparison ist's der NoName-Carousel,
+// auf noname-detail ist's der Stufe-Indicator-Bereich.
+export const PRODUCT_DETAIL_ANCHOR_CONTEXT = 'product.context';
 
-type Phase = 'welcome' | 'cart' | 'favorite' | 'rating';
+type Phase = 'welcome' | 'cart' | 'favorite' | 'rating' | 'context';
 
-const PHASES_ORDER: Phase[] = ['welcome', 'cart', 'favorite', 'rating'];
+const PHASES_ORDER: Phase[] = [
+  'welcome',
+  'cart',
+  'favorite',
+  'rating',
+  'context',
+];
+
+export type ProductDetailScreenType = 'noname' | 'comparison';
 
 export type ProductDetailWalkthroughProps = {
   visible: boolean;
   onDismiss: () => void;
+  /**
+   * Welcher Detail-Screen mountet die Tour. Beeinflusst die letzte
+   * 'context'-Phase: auf 'comparison' erklären wir den NoName-
+   * Carousel + Stufen 3-5; auf 'noname' erklären wir was Stufen 1-2
+   * bedeuten und dass es bei höheren Stufen Markenvergleiche gibt.
+   */
+  screenType: ProductDetailScreenType;
 };
 
 const COMPARISON_LOTTIE = require('@/assets/lottie/comparison.json');
@@ -59,6 +78,7 @@ const COMPARISON_LOTTIE = require('@/assets/lottie/comparison.json');
 export function ProductDetailWalkthrough({
   visible,
   onDismiss,
+  screenType,
 }: ProductDetailWalkthroughProps) {
   const [phase, setPhase] = useState<Phase>('welcome');
 
@@ -85,10 +105,11 @@ export function ProductDetailWalkthrough({
   }
 
   // Spotlight-Phasen — gleicher Tooltip-Style, nur unterschiedlicher
-  // Anchor + Text. Step-Counter (X/3) im primaryLabel macht klar
+  // Anchor + Text. Step-Counter (X/4) im primaryLabel macht klar
   // wieviel noch kommt.
-  const stepIndex = PHASES_ORDER.indexOf(phase); // 1, 2, 3
-  const totalSteps = PHASES_ORDER.length - 1; // = 3 (welcome zählt nicht)
+  const stepIndex = PHASES_ORDER.indexOf(phase); // 1, 2, 3, 4
+  const totalSteps = PHASES_ORDER.length - 1; // = 4 (welcome zählt nicht)
+  const isLastStep = stepIndex === totalSteps;
 
   if (phase === 'cart') {
     return (
@@ -120,16 +141,58 @@ export function ProductDetailWalkthrough({
     );
   }
 
-  // phase === 'rating'
+  if (phase === 'rating') {
+    return (
+      <SpotlightOverlay
+        visible
+        anchorId={PRODUCT_DETAIL_ANCHOR_RATING}
+        title="Bewertung"
+        body="Tippe um das Produkt zu bewerten oder zu sehen was andere Detektive davon halten."
+        onSkip={onDismiss}
+        skipLabel="Tour beenden"
+        onPrimary={advance}
+        primaryLabel={`Weiter (${stepIndex}/${totalSteps})`}
+      />
+    );
+  }
+
+  // phase === 'context' — letzte Phase, screen-spezifisch.
+  //
+  // Auf product-comparison: spotlight auf den NoName-Carousel,
+  // erklärt dass das die Alternativen sind und wie die
+  // Stufen 3-5 zu lesen sind. Erwähnt kurz die niedrigeren Stufen
+  // damit der User das Gesamtbild kriegt.
+  //
+  // Auf noname-detail: spotlight auf den Stufen-Indicator,
+  // erklärt dass dieses NoName-Produkt von einem Hersteller kommt
+  // der auch Markenprodukte macht (Stufe 2) oder reiner NoName
+  // ist (Stufe 1). Erwähnt, dass es bei höheren Stufen direkte
+  // Vergleiche zu Markenprodukten gibt.
+  if (screenType === 'comparison') {
+    return (
+      <SpotlightOverlay
+        visible
+        anchorId={PRODUCT_DETAIL_ANCHOR_CONTEXT}
+        title="NoName-Alternativen"
+        body="Hier siehst du die NoName-Produkte, die zu diesem Markenprodukt passen — vom selben Hersteller produziert. Stufe 5 = identisch, 4 = sehr ähnlich, 3 = vergleichbar. Stufen 1-2 (reine NoName-Hersteller ohne Marken-Original) findest du beim Stöbern."
+        onSkip={onDismiss}
+        skipLabel="Tour beenden"
+        onPrimary={onDismiss}
+        primaryLabel={isLastStep ? 'Fertig' : `Weiter (${stepIndex}/${totalSteps})`}
+      />
+    );
+  }
+
+  // screenType === 'noname'
   return (
     <SpotlightOverlay
       visible
-      anchorId={PRODUCT_DETAIL_ANCHOR_RATING}
-      title="Bewertung"
-      body="Tippe um das Produkt zu bewerten oder zu sehen was andere Detektive davon halten."
+      anchorId={PRODUCT_DETAIL_ANCHOR_CONTEXT}
+      title="Ähnlichkeitsstufe"
+      body="Stufen 1 und 2 stehen für reine NoName-Hersteller bzw. Hersteller, die nebenbei auch Markenprodukte produzieren — ohne direkten Marken-Vergleich. Bei Stufen 3-5 findest du das passende Markenprodukt + günstigere Alternativen."
       onSkip={onDismiss}
       skipLabel="Tour beenden"
-      onPrimary={advance}
+      onPrimary={onDismiss}
       primaryLabel="Fertig"
     />
   );

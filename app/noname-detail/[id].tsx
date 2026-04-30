@@ -32,8 +32,10 @@ import {
 } from '@/components/design/EnttarnteAlternativesList';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { StufenChips } from '@/components/design/StufenChips';
+import { CoachmarkScrollProvider } from '@/components/coachmarks/CoachmarkScrollContext';
 import {
   PRODUCT_DETAIL_ANCHOR_CART,
+  PRODUCT_DETAIL_ANCHOR_CONTEXT,
   PRODUCT_DETAIL_ANCHOR_FAVORITE,
   PRODUCT_DETAIL_ANCHOR_RATING,
   ProductDetailWalkthrough,
@@ -116,11 +118,18 @@ export default function NoNameDetailScreen() {
   // ─── Coachmark Walkthrough ───────────────────────────────────
   // Tour 'product-detail' fires beim ersten Aufruf einer Detail-
   // Seite. Anchors sitzen unten auf den drei ActionButtons in der
-  // Hero-Bottom-Right-Cluster.
+  // Hero-Bottom-Right-Cluster. ScrollView-Ref braucht's für den
+  // Scroll-Lock während Spotlights aktiv sind (siehe SpotlightOverlay).
   const detailCoachmark = useCoachmark('product-detail');
   const cartAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_CART);
   const favAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_FAVORITE);
   const ratingAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_RATING);
+  // Auf noname-detail zeigt der Context-Anchor auf die Detektiv-
+  // Check-Zeile (Stufe + Erklärungstext) — der zeigt die Stufe
+  // visuell und bietet sich als "Hier wird's konzeptionell
+  // erklärt"-Anker an.
+  const contextAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_CONTEXT);
+  const detailScrollRef = useRef<ScrollView>(null);
 
   // ─── Data state ──────────────────────────────────────────────────
   // One fetch, one state slot. We deliberately wait for the FULL
@@ -622,6 +631,7 @@ export default function NoNameDetailScreen() {
       </Animated.View>
 
       <Animated.ScrollView
+        ref={detailScrollRef}
         onScroll={scrollHandler}
         scrollEventThrottle={16}
         contentContainerStyle={{
@@ -1197,9 +1207,17 @@ export default function NoNameDetailScreen() {
                 der alten "S1 + Punkte"-Custom-Anzeige wird hier die
                 gleiche `StufenChips`-Komponente verwendet, die auch
                 auf den ProductCards und in Stöbern erscheint — eine
-                visuelle Sprache für Stufen app-weit. */}
+                visuelle Sprache für Stufen app-weit.
+
+                Coachmark-Anchor 'product.context' liegt auf dieser
+                Zeile — die letzte Spotlight-Phase der ProductDetail-
+                Tour erklärt hier die Stufen 1-2 und referenziert
+                die höheren Stufen. */}
             {p ? (
               <View
+                ref={contextAnchor.ref}
+                onLayout={contextAnchor.onLayout}
+                collapsable={false}
                 style={{
                   marginHorizontal: 20,
                   marginTop: 20,
@@ -1388,14 +1406,27 @@ export default function NoNameDetailScreen() {
           top of the FAB visually. */}
       <FlyToCart ref={flyRef} />
 
-      {/* ProductDetail-Walkthrough — Welcome-Card + 3 Spotlights
-          (Cart/Favorit/Rating). Fires beim ERSTEN Aufruf irgendeiner
-          Detail-Seite (egal noname-detail oder product-comparison —
-          beide nutzen dieselbe Tour-Key 'product-detail'). */}
-      <ProductDetailWalkthrough
-        visible={detailCoachmark.visible}
-        onDismiss={detailCoachmark.dismiss}
-      />
+      {/* ProductDetail-Walkthrough — Welcome-Card + Spotlights.
+          CoachmarkScrollProvider gibt der SpotlightOverlay-Engine
+          den ScrollView-Ref → solange ein Spotlight sichtbar ist,
+          ist Scroll gesperrt (Anchor wandert sonst weg).
+
+          scrollY ist hier nicht aktiv genutzt — wir geben einen
+          dummy SharedValue rein, weil das Provider-Schema es
+          verlangt. Die Spotlights für die Detail-Buttons brauchen
+          kein scroll-tracking weil die Buttons sowieso fixed im
+          oberen Hero sitzen und beim Spotlight-Mount eh am
+          richtigen Y stehen (Scroll ist gleich gesperrt). */}
+      <CoachmarkScrollProvider
+        scrollY={scrollY}
+        scrollViewRef={detailScrollRef}
+      >
+        <ProductDetailWalkthrough
+          visible={detailCoachmark.visible}
+          onDismiss={detailCoachmark.dismiss}
+          screenType="noname"
+        />
+      </CoachmarkScrollProvider>
     </View>
   );
 }

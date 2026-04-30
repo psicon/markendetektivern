@@ -122,6 +122,84 @@ export function SpotlightOverlay({
     return off;
   }, [anchorId, visible]);
 
+  // ─── Auto-Scroll zum Anchor falls off-screen ─────────────────
+  //
+  // Wenn das Anchor-Element unterhalb des aktuellen Sichtbereichs
+  // liegt (z.B. NoName-Carousel auf product-comparison, der erst
+  // nach 600+ px Scroll sichtbar wird), würde die Spotlight-
+  // Maske ins Leere zeigen — backdrop überall, aber kein Cutout
+  // sichtbar. Wir scrollen daher die parent ScrollView
+  // programmatisch dahin BEVOR der scroll-lock greift.
+  //
+  // scrollTo() ist nicht von scrollEnabled=false betroffen
+  // (das blockiert nur Gesten), also klappt's auch wenn der
+  // Lock-Effect parallel läuft.
+  //
+  // Layout-Space-Coords required (ohne Provider gibt's keinen
+  // sinnvollen Scroll-Target).
+  useEffect(() => {
+    if (!visible || !rect) return;
+    if (rect.space !== 'layout') return;
+    const sv = ctx?.scrollViewRef?.current as any;
+    if (!sv?.scrollTo) return;
+
+    const currentY = ctx?.scrollY?.value ?? 0;
+    // Window-Y des Anchors bei aktuellem Scroll
+    const winY = rect.y - currentY + scrollViewWindowOffsetY;
+    const VIEW_TOP_BUFFER = 120; // unter Status-Bar + Chrome
+    const VIEW_BOTTOM_BUFFER = 220; // über Tab-Bar + Tooltip
+
+    const isOffscreen =
+      winY < VIEW_TOP_BUFFER ||
+      winY + rect.height + VIEW_BOTTOM_BUFFER > SCREEN_H;
+    if (!isOffscreen) return;
+
+    // Ziel: Anchor in obere 25 % des Viewports bringen.
+    const targetScroll = Math.max(
+      0,
+      rect.y - SCREEN_H * 0.25,
+    );
+    try {
+      sv.scrollTo({ y: targetScroll, animated: true });
+    } catch (e) {
+      console.warn('Spotlight auto-scroll failed (non-fatal):', e);
+    }
+  }, [visible, rect, ctx, scrollViewWindowOffsetY, SCREEN_H]);
+
+  // ─── Scroll-Lock während Spotlight aktiv ───────────────────
+  //
+  // Default-Verhalten: Cutout-Bereich des Spotlights lässt Touches
+  // durch zur darunterliegenden ScrollView. Bei Pan-Gestures
+  // innerhalb des Cutouts kann der User damit die ScrollView
+  // scrollen und das Anchor-Target wandert weg — Spotlight zeigt
+  // dann ins Leere.
+  //
+  // Fix: solange der Spotlight sichtbar ist, sperren wir die
+  // parent ScrollView via setNativeProps({scrollEnabled: false}).
+  // Beim Unmount/Hide entsperrt automatisch.
+  //
+  // Vorgehen über CoachmarkScrollContext.scrollViewRef. Wenn kein
+  // Provider darüber sitzt, machen wir nichts (Caller hat sich
+  // dagegen entschieden — vermutlich kein Scroll-Konflikt zu
+  // erwarten).
+  useEffect(() => {
+    if (!visible) return;
+    const sv = ctx?.scrollViewRef?.current as any;
+    if (!sv?.setNativeProps) return;
+    try {
+      sv.setNativeProps({ scrollEnabled: false });
+    } catch (e) {
+      console.warn('Spotlight scroll-lock failed (non-fatal):', e);
+    }
+    return () => {
+      try {
+        sv.setNativeProps({ scrollEnabled: true });
+      } catch (e) {
+        console.warn('Spotlight scroll-unlock failed (non-fatal):', e);
+      }
+    };
+  }, [visible, ctx]);
+
   // ─── Fade-In für den ganzen Overlay ──────────────────────────
   const fade = useSharedValue(0);
   useEffect(() => {
