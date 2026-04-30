@@ -27,6 +27,7 @@ import React, {
 } from 'react';
 import {
   Alert,
+  DevSettings,
   Linking,
   Platform,
   Pressable,
@@ -412,13 +413,13 @@ export default function ProfileScreen() {
   // ─── Komplett-Reset (Test-User) ────────────────────────────────
   //
   // Löscht NUR LOKAL alles was die App gespeichert hat (AsyncStorage)
-  // und meldet den User ab. Beim nächsten App-Tick fängt die
-  // AuthContext-Anonymous-Pipeline einen frischen User mit neuer
-  // UID an → Firebase erstellt automatisch ein leeres User-Doc,
-  // alle Counters/Stats stehen auf 0.
+  // und meldet den User ab. Auf __DEV__-Builds triggern wir
+  // anschließend `DevSettings.reload()` → JS-Bundle reboots
+  // automatisch, frische AuthContext-Pipeline läuft an, anonymer
+  // User mit neuer UID, Level 1, kein Onboarding-Flag.
   //
   // Wirkung in einem:
-  //   • Onboarding-Flow startet wieder
+  //   • Onboarding-Flow (9-Step) startet wieder bei Schritt 1
   //   • Coachmark-Tours stehen auf "noch nicht gesehen"
   //   • Level zurück auf 1, 0 Punkte, keine Achievements
   //   • Lieblingsmarkt + alle Personalisierungen weg
@@ -442,22 +443,54 @@ export default function ProfileScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              // 1. Firebase auth.signOut. Wichtig BEVOR wir
-              // AsyncStorage löschen, sonst räumt der Firebase
-              // SDK seine Persistenz nicht ordentlich auf.
+              // 1. Logout zuerst, damit Firebase seine Persistenz
+              // ordentlich räumt bevor wir AsyncStorage wegblasen.
               try {
                 await logout();
               } catch (e) {
                 console.warn('FullReset: logout failed (non-fatal)', e);
               }
-              // 2. AsyncStorage komplett wegblasen — Onboarding-
-              // Flags, Coachmark-Status, Gamification-Toggle,
-              // Auth-Backups, alles.
+
+              // 2. AsyncStorage komplett wegblasen.
               await AsyncStorage.clear();
-              // 3. Native-Caches (Image-Disk-Cache etc.) lassen
-              // wir liegen — die sind nicht user-spezifisch und
-              // ein "Reset"-Button soll nicht die App-Performance
-              // bei nächsten User torpedieren.
+
+              // 3. Belt-and-suspenders: explizit nochmal die
+              // bekannten Onboarding/Coachmark-Keys droppen,
+              // falls AsyncStorage.clear() aus irgendeinem Grund
+              // einzelne Keys nicht abgeräumt hat. (Hatten wir in
+              // der Praxis schon — irgendein Native-Cache hielt
+              // 'onboarding_v1_completed' fest.)
+              await AsyncStorage.multiRemove([
+                'onboarding_v1_completed',
+                'onboarding_v1_skipped',
+                'onboarding_v1_progress',
+                '@gamification_notifications_disabled',
+                'coachmark/v1/home',
+                'coachmark/v1/rewards',
+                '@auth_user_id_backup',
+                '@auth_user_email_backup',
+                '@auth_last_login',
+              ]);
+
+              // 4. Kurz warten damit AsyncStorage native flush
+              // durch ist (sonst könnte ein DevSettings.reload()
+              // das JS bevor die Schreibvorgänge committed sind
+              // re-hochfahren).
+              await new Promise((resolve) => setTimeout(resolve, 200));
+
+              // 5. App reload. In __DEV__ programmatic via
+              // DevSettings → JS-Bundle reboots, frische
+              // AuthContext-Pipeline → /onboarding/hero. In
+              // Production-Build ist das nicht verfügbar →
+              // Fallback auf Alert.
+              if (__DEV__) {
+                try {
+                  DevSettings.reload();
+                  return; // Kein Alert mehr, App lädt gerade neu
+                } catch (e) {
+                  console.warn('DevSettings.reload failed:', e);
+                }
+              }
               Alert.alert(
                 'Erledigt',
                 'Bitte App komplett schließen und neu öffnen — beim nächsten Start bist du frischer Test-User.',

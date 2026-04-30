@@ -1,39 +1,27 @@
-// AchievementUnlockBanner — kompakter Slide-In-Banner für die
-// "subtle"-Tier Celebrations (Achievements UND niedrigschwellige
-// Level-Ups, siehe getAchievementTier in gamificationSettingsService
-// und die Routing-Logik im GamificationProvider).
+// AchievementUnlockBanner — Slide-In-Banner für die "subtle"-Tier
+// Celebrations (Achievements UND niedrigschwellige Level-Ups).
 //
-// ─── Visuelle Sprache ────────────────────────────────────────────
+// ─── Visuelle Sprache (v2) ──────────────────────────────────────
 //
 //   • Slidet von unten ein, sitzt knapp oberhalb der Tab-Bar
-//   • Surface mit soft Shadow + tiefem accent-stripe LINKS
-//     (4 px solid in der Tier-Farbe) → unverkennbar als
-//     "celebration", auch auf hellem Untergrund
-//   • Icon-Circle 44 px mit MaterialCommunityIcon (NICHT Lottie —
-//     Lottie an 48 px renderten zu detailarm und wurden auf weiß
-//     manchmal kaum sichtbar; ein satter MDI-Icon liest sich
-//     immer)
-//   • Title (extraBold 14) + Subtitle (medium 12, 2 Zeilen)
-//   • Optionale Punkte-Pill rechts ("+5 Pkt" in primary tint)
-//   • KEIN ✕-Button — auto-dismiss nach 5 s, swipe-down dismissed,
-//     tap auf den Body navigiert (siehe onTap-Prop). Drei Wege
-//     reichen, ein viertes Element nimmt visuelle Ruhe weg.
-//   • Auto-dismiss-Timer pausiert während Pan-Geste damit der User
-//     den Banner mit Geste verzögern kann
+//   • LinearGradient-Hintergrund: tinted-color auf der linken
+//     Seite, fading zu theme.surface rechts → Banner pop'ed
+//     deutlich auf weißem Untergrund, nicht mehr "unsichtbar"
+//   • 4 px Accent-Stripe LINKS in tier-color als zusätzliche
+//     Identifikation als Celebration
+//   • Lottie 64×64 LINKS — sichtbar, animiert, festlich
+//   • Title (extraBold 15) + Subtitle (medium 12, 2 Zeilen)
+//   • Optionale Punkte-Pill rechts ("+5 Pkt")
+//   • Auto-dismiss nach 5 s, swipe-down dismissed, tap → onTap
+//   • HAPTIC FEEDBACK beim Erscheinen — Success-Notification
+//     unterstreicht das Reward-Gefühl ohne aufdringlich zu sein
 //
-// ─── Datenmodell ─────────────────────────────────────────────────
-//
-// Banner ist GENERISCH — er kennt keine Achievement-Datei oder
-// Level-Up-Datei direkt. Caller (GamificationProvider) baut eine
-// `BannerData` aus seinen Sources zusammen. Das macht den Banner
-// für künftige Use-Cases reusable (Streak-Banner, Cashback-Erinnerung
-// etc.) ohne Schema-Änderungen.
-//
-// Mechanik: Reanimated 3 Worklets (UI-thread, kein JS-Bridge-Toll),
-// `withSpring` Entry, `withTiming` Exit, Pan-Geste via
-// react-native-gesture-handler.
+// Banner ist GENERISCH — kennt keine Achievement-Datei direkt.
+// Caller (GamificationProvider) baut BannerData zusammen.
 
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
+import LottieView from 'lottie-react-native';
 import React, { useCallback, useEffect, useRef } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
@@ -54,29 +42,28 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 
-// Tab-Bar-Höhe inkl. safe-area. iOS 90 px ist Standard, Android
-// 62 + bottom inset. Banner sitzt 12 px drüber.
 const TAB_BAR_HEIGHT_IOS = 90;
 const TAB_BAR_HEIGHT_ANDROID_BASE = 62;
 const HIDDEN_OFFSET = 200;
 const AUTO_DISMISS_MS = 5000;
+const BANNER_HEIGHT = 96;
+const LOTTIE_SIZE = 72;
 
 export type BannerData = {
-  /** Headline. extraBold, 14 px. */
+  /** Headline. extraBold, 15 px. */
   title: string;
   /** Sub-Zeile. medium, 12 px, 2 Zeilen max. */
   subtitle: string;
-  /** Optionale Punkte für die Pill rechts. Wenn 0/undefined → keine Pill. */
+  /** Optionale Punkte für die Pill rechts. */
   points?: number;
-  /** MDI-Glyph. Beispiele: 'rocket-launch-outline', 'fire',
-   *  'trophy-outline', 'cash-multiple', 'medal-outline'. */
-  icon: string;
-  /** Tier-Farbe — bestimmt den linken Stripe und den Icon-Circle-
-   *  Hintergrund. Empfehlung: Achievement.color, Level-Color, oder
-   *  brand.primary als Fallback. */
+  /** Lottie-Source via require(). Wird vom Caller (Provider)
+   *  gepickt — siehe lottieForAchievementAction in
+   *  GamificationProvider. NICHT ein Pfad-String, sondern das
+   *  bereits erforderte Modul. */
+  lottie: any;
+  /** Tier-Farbe — bestimmt Stripe + Gradient-Tönung. */
   tint: string;
-  /** Optional: Tap aufs Body (z.B. Navigation zur Errungenschaften-
-   *  Seite). Wenn weggelassen, ist der Banner nur dismissable. */
+  /** Optional: Tap aufs Body. */
   onTap?: () => void;
 };
 
@@ -96,6 +83,8 @@ export function AchievementUnlockBanner({
 
   const translateY = useSharedValue(HIDDEN_OFFSET);
   const opacity = useSharedValue(0);
+  // Subtle scale-Pop beim Entry — verstärkt "celebration"-Feel.
+  const scale = useSharedValue(0.92);
 
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -115,16 +104,36 @@ export function AchievementUnlockBanner({
     );
   }, [translateY, opacity, onDismiss]);
 
+  // Haptic-Feedback wird VOR dem Spring-Entry ausgelöst — der
+  // taktile Impuls korreliert dann zeitlich mit dem visuellen
+  // Auftauchen.
+  const triggerHaptic = useCallback(() => {
+    try {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      // Haptic API nicht verfügbar (z.B. Web-Build, älteres Android) →
+      // schluck stillschweigend, ist eh nur ein Bonus.
+    }
+  }, []);
+
   useEffect(() => {
     if (visible) {
       translateY.value = HIDDEN_OFFSET;
       opacity.value = 0;
+      scale.value = 0.92;
+      // Haptik sofort beim Mount feuern, ParallelEntry mit Spring.
+      triggerHaptic();
       translateY.value = withSpring(0, {
-        damping: 20,
+        damping: 18,
         stiffness: 180,
         mass: 0.7,
       });
       opacity.value = withTiming(1, { duration: 220 });
+      scale.value = withSpring(1, {
+        damping: 14,
+        stiffness: 150,
+        mass: 0.6,
+      });
       if (dismissTimer.current) clearTimeout(dismissTimer.current);
       dismissTimer.current = setTimeout(() => {
         animateOut();
@@ -141,9 +150,8 @@ export function AchievementUnlockBanner({
         dismissTimer.current = null;
       }
     };
-  }, [visible, translateY, opacity, animateOut]);
+  }, [visible, translateY, opacity, scale, triggerHaptic, animateOut]);
 
-  // Pan-Down zum Dismissen. Threshold 50 px ODER >500 px/s Velocity.
   const panGesture = Gesture.Pan()
     .activeOffsetY([5, 9999])
     .onUpdate((e) => {
@@ -162,19 +170,19 @@ export function AchievementUnlockBanner({
     });
 
   const containerStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
+    transform: [
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
     opacity: opacity.value,
   }));
 
   const handleTapBody = useCallback(() => {
     if (dismissTimer.current) clearTimeout(dismissTimer.current);
     if (data?.onTap) {
-      // onTap-Caller dismissed im Regelfall mit (siehe Provider-
-      // Implementation). Falls nicht: animateOut als Sicherheit.
       data.onTap();
       animateOut();
     } else {
-      // Kein Tap-Handler → Tap = Dismiss.
       animateOut();
     }
   }, [data, animateOut]);
@@ -186,6 +194,13 @@ export function AchievementUnlockBanner({
       ? TAB_BAR_HEIGHT_IOS
       : TAB_BAR_HEIGHT_ANDROID_BASE + Math.max(0, insets.bottom);
   const bottomOffset = tabBarH + 12;
+
+  // Gradient-Stops: links sat-getintet (~28% opacity), rechts
+  // theme.surface (= weiß). Der Übergang läuft horizontal über
+  // ~60% der Breite damit die rechte Pille noch lesbar bleibt.
+  const gradientLeft = data.tint + '40'; // 25% Opacity
+  const gradientMid = data.tint + '14'; // 8% Opacity
+  const gradientRight = theme.surface;
 
   return (
     <GestureHandlerRootView
@@ -211,115 +226,117 @@ export function AchievementUnlockBanner({
               accessibilityRole="button"
               accessibilityLabel={data.title}
               style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 12,
-                backgroundColor: theme.surface,
+                opacity: pressed ? 0.94 : 1,
                 borderRadius: 18,
-                // Linker Accent-Stripe wird per leftStripe-Inset
-                // realisiert (siehe absolute-View unten). Padding-
-                // left muss daher größer sein um nicht überlappt
-                // zu werden.
-                paddingLeft: 18,
-                paddingRight: 14,
-                paddingVertical: 12,
-                borderWidth: 1,
-                borderColor: theme.border,
-                opacity: pressed ? 0.92 : 1,
                 overflow: 'hidden',
                 ...(shadows.lg as object),
               })}
             >
-              {/* Linker Accent-Stripe — solid in der Tier-Farbe.
-                  Macht den Banner unverkennbar als Celebration und
-                  hebt ihn von gewöhnlichen Toasts ab. */}
-              <View
-                pointerEvents="none"
+              {/* Gradient-Backdrop füllt die ganze Karte */}
+              <LinearGradient
+                colors={[gradientLeft, gradientMid, gradientRight]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
                 style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: 4,
-                  backgroundColor: data.tint,
-                }}
-              />
-
-              {/* Icon-Circle — 44×44, satte Tönung in der Tier-
-                  Farbe. MaterialCommunityIcon (kein Lottie) damit
-                  der Glyph auch an dieser Größe klar liest. */}
-              <View
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: 14,
-                  backgroundColor: data.tint + '26',
+                  flexDirection: 'row',
                   alignItems: 'center',
-                  justifyContent: 'center',
+                  gap: 12,
+                  paddingLeft: 16,
+                  paddingRight: 14,
+                  paddingVertical: 12,
+                  minHeight: BANNER_HEIGHT,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                  borderRadius: 18,
                 }}
               >
-                <MaterialCommunityIcons
-                  // `as any` weil der Caller den Glyph-Namen als
-                  // generischen string liefert; MDI prüft zur
-                  // Render-Zeit selbst.
-                  name={data.icon as any}
-                  size={22}
-                  color={data.tint}
+                {/* Linker Accent-Stripe — solid in der Tier-Farbe.
+                    Macht den Banner unverkennbar als Celebration. */}
+                <View
+                  pointerEvents="none"
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 4,
+                    backgroundColor: data.tint,
+                  }}
                 />
-              </View>
 
-              {/* Text-Spalte */}
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.extraBold,
-                    fontSize: 14,
-                    letterSpacing: -0.1,
-                    color: theme.text,
-                  }}
-                >
-                  {data.title}
-                </Text>
-                <Text
-                  numberOfLines={2}
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.medium,
-                    fontSize: 12,
-                    lineHeight: 16,
-                    color: theme.textMuted,
-                    marginTop: 1,
-                  }}
-                >
-                  {data.subtitle}
-                </Text>
-              </View>
-
-              {/* Punkte-Pill — nur wenn data.points > 0. */}
-              {data.points && data.points > 0 ? (
+                {/* Lottie-Slot — 72×72, ohne Background-Circle damit
+                    die Animation freier wirkt. Tönung kommt vom
+                    Gradient drunter. */}
                 <View
                   style={{
-                    paddingHorizontal: 9,
-                    paddingVertical: 4,
-                    borderRadius: 10,
-                    backgroundColor: brand.primary + '18',
+                    width: LOTTIE_SIZE,
+                    height: LOTTIE_SIZE,
+                    alignItems: 'center',
+                    justifyContent: 'center',
                   }}
                 >
+                  <LottieView
+                    source={data.lottie}
+                    autoPlay
+                    loop
+                    speed={0.85}
+                    style={{ width: LOTTIE_SIZE, height: LOTTIE_SIZE }}
+                  />
+                </View>
+
+                {/* Text-Spalte */}
+                <View style={{ flex: 1, minWidth: 0 }}>
                   <Text
+                    numberOfLines={1}
                     style={{
                       fontFamily,
                       fontWeight: fontWeight.extraBold,
-                      fontSize: 11,
-                      letterSpacing: 0.2,
-                      color: brand.primary,
+                      fontSize: 15,
+                      letterSpacing: -0.1,
+                      color: theme.text,
                     }}
                   >
-                    +{data.points} Pkt
+                    {data.title}
+                  </Text>
+                  <Text
+                    numberOfLines={2}
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.medium,
+                      fontSize: 12,
+                      lineHeight: 16,
+                      color: theme.textMuted,
+                      marginTop: 2,
+                    }}
+                  >
+                    {data.subtitle}
                   </Text>
                 </View>
-              ) : null}
+
+                {/* Punkte-Pill rechts — nur wenn data.points > 0 */}
+                {data.points && data.points > 0 ? (
+                  <View
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                      borderRadius: 12,
+                      backgroundColor: brand.primary,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.extraBold,
+                        fontSize: 12,
+                        letterSpacing: 0.2,
+                        color: '#fff',
+                      }}
+                    >
+                      +{data.points}
+                    </Text>
+                  </View>
+                ) : null}
+              </LinearGradient>
             </Pressable>
           </Animated.View>
         </GestureDetector>

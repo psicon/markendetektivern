@@ -47,41 +47,45 @@ interface AchievementData {
 
 // ─── Banner-Data-Adapter ─────────────────────────────────────────
 //
-// Wandeln Achievement-Daten in das generische BannerData-Schema um.
-// Reusable falls wir später noch mehr Subtle-Sources rein bringen
-// (z.B. Streak-Hinweise, Cashback-Erinnerungen).
-
-function mdiForAchievementAction(action: string | undefined): string {
-  // Mapping action → MDI-Glyph. Mirror der Lottie-Auswahl in
-  // app/achievements.tsx, aber mit statischen Icons die auch an
-  // 22 px klar lesen.
-  switch (action) {
-    case 'first_action_any':
-      return 'rocket-launch-outline';
-    case 'daily_streak':
-      return 'fire';
-    case 'view_comparison':
-      return 'compare-horizontal';
-    case 'complete_shopping':
-      return 'cart-check';
-    case 'search_product':
-      return 'magnify';
-    case 'submit_rating':
-      return 'star-outline';
-    case 'create_list':
-      return 'format-list-checks';
-    case 'convert_product':
-      return 'swap-horizontal';
-    case 'share_app':
-      return 'share-variant-outline';
-    case 'submit_product':
-      return 'plus-box-outline';
-    case 'save_product':
-      return 'heart-outline';
-    case 'savings_total':
-      return 'cash-multiple';
-    default:
-      return 'medal-outline';
+// Wandeln Achievement-/LevelUp-Daten ins generische BannerData-
+// Schema um (Reanimated-friendly, mit Lottie). Reusable falls wir
+// später weitere Subtle-Sources rein bringen.
+//
+// Lottie-Mapping spiegelt `lottieFor` aus app/achievements.tsx —
+// gleiche Animation pro Action damit der visuelle Eindruck zwischen
+// Detail-Page und Banner konsistent ist.
+function lottieForAchievementAction(action: string | undefined): any {
+  try {
+    switch (action) {
+      case 'first_action_any':
+        return require('@/assets/lottie/rocket.json');
+      case 'daily_streak':
+        return require('@/assets/lottie/streak-fire.json');
+      case 'view_comparison':
+        return require('@/assets/lottie/comparison.json');
+      case 'complete_shopping':
+        return require('@/assets/lottie/task.json');
+      case 'search_product':
+        return require('@/assets/lottie/search.json');
+      case 'submit_rating':
+        return require('@/assets/lottie/ratingsthumbsup.json');
+      case 'create_list':
+        return require('@/assets/lottie/task.json');
+      case 'convert_product':
+        return require('@/assets/lottie/swap.json');
+      case 'share_app':
+        return require('@/assets/lottie/review.json');
+      case 'submit_product':
+        return require('@/assets/lottie/favorites.json');
+      case 'save_product':
+        return require('@/assets/lottie/favorites2.json');
+      case 'savings_total':
+        return require('@/assets/lottie/savings.json');
+      default:
+        return require('@/assets/lottie/confetti.json');
+    }
+  } catch {
+    return require('@/assets/lottie/confetti.json');
   }
 }
 
@@ -90,9 +94,9 @@ function bannerDataFromAchievement(achievement: Achievement): BannerData {
     title: achievement.name,
     subtitle: achievement.description,
     points: achievement.points,
-    icon: mdiForAchievementAction(achievement.trigger?.action as string),
+    lottie: lottieForAchievementAction(achievement.trigger?.action as string),
     // Tier-Farbe: bevorzugt achievement.color (Firestore-konfiguriert),
-    // sonst ein gold-ish Fallback der für "Erfolg" steht.
+    // sonst gold als Fallback ("Erfolg/Belohnung"-Konnotation).
     tint: (achievement.color as string) || '#F0A030',
     onTap: () => {
       try {
@@ -109,17 +113,26 @@ function bannerDataFromLevelUp(
   oldLevel: number,
   unlockedCategory?: { id: string; name: string; imageUrl: string },
 ): BannerData {
-  // Subtitle wählt: wenn Kategorie freigeschaltet, dann das ist die
-  // Headline-News. Sonst nur "Du bist jetzt auf Level X".
+  // Subtitle: bei Kategorie-Unlock ist DAS die Headline-News
+  // (handlungsrelevant — User kann jetzt die Kategorie stöbern).
+  // Sonst nur "Du bist jetzt auf Level X".
   const subtitle = unlockedCategory
-    ? `Neue Kategorie: ${unlockedCategory.name}`
+    ? `Neue Kategorie verfügbar: ${unlockedCategory.name}`
     : `Du bist jetzt auf Level ${newLevel}`;
   return {
     title: `Level ${newLevel} erreicht`,
     subtitle,
-    icon: 'trophy-outline',
-    // Level-Up-Tönung: warmes gold, hebt sich vom standardmäßigen
-    // primary-grün ab (das brauchen wir für Punkte-Toasts).
+    // Trophy-Lottie für Level-Ups, ist allgemeiner als ein
+    // konkretes Action-Lottie. confetti.json würde auch passen,
+    // aber 'achievement-unlock' wäre noch besser. Wir nehmen
+    // 'lvlup.json' falls vorhanden, sonst confetti als Fallback.
+    lottie: (() => {
+      try {
+        return require('@/assets/lottie/lvlup.json');
+      } catch {
+        return require('@/assets/lottie/confetti.json');
+      }
+    })(),
     tint: '#F0A030',
     onTap: () => {
       try {
