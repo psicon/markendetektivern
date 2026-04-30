@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import {
@@ -14,7 +15,10 @@ import { ratingPromptService } from '@/lib/services/ratingPrompt';
 import { showPointsToast, showStreakToast as showStreakToastNew } from '@/lib/services/ui/toast';
 import { Achievement } from '@/lib/types/achievements';
 import React, { useCallback, useEffect, useState } from 'react';
-import { AchievementUnlockBanner } from './AchievementUnlockBanner';
+import {
+  AchievementUnlockBanner,
+  type BannerData,
+} from './AchievementUnlockBanner';
 import { AchievementUnlockOverlay } from './AchievementUnlockOverlay';
 import { AppRatingModal } from './AppRatingModal';
 import { LevelUpOverlay } from './LevelUpOverlay';
@@ -41,6 +45,110 @@ interface AchievementData {
   autoHide?: boolean;      // Für Achievement + Level-Up Sequencing
 }
 
+// ─── Banner-Data-Adapter ─────────────────────────────────────────
+//
+// Wandeln Achievement-Daten in das generische BannerData-Schema um.
+// Reusable falls wir später noch mehr Subtle-Sources rein bringen
+// (z.B. Streak-Hinweise, Cashback-Erinnerungen).
+
+function mdiForAchievementAction(action: string | undefined): string {
+  // Mapping action → MDI-Glyph. Mirror der Lottie-Auswahl in
+  // app/achievements.tsx, aber mit statischen Icons die auch an
+  // 22 px klar lesen.
+  switch (action) {
+    case 'first_action_any':
+      return 'rocket-launch-outline';
+    case 'daily_streak':
+      return 'fire';
+    case 'view_comparison':
+      return 'compare-horizontal';
+    case 'complete_shopping':
+      return 'cart-check';
+    case 'search_product':
+      return 'magnify';
+    case 'submit_rating':
+      return 'star-outline';
+    case 'create_list':
+      return 'format-list-checks';
+    case 'convert_product':
+      return 'swap-horizontal';
+    case 'share_app':
+      return 'share-variant-outline';
+    case 'submit_product':
+      return 'plus-box-outline';
+    case 'save_product':
+      return 'heart-outline';
+    case 'savings_total':
+      return 'cash-multiple';
+    default:
+      return 'medal-outline';
+  }
+}
+
+function bannerDataFromAchievement(achievement: Achievement): BannerData {
+  return {
+    title: achievement.name,
+    subtitle: achievement.description,
+    points: achievement.points,
+    icon: mdiForAchievementAction(achievement.trigger?.action as string),
+    // Tier-Farbe: bevorzugt achievement.color (Firestore-konfiguriert),
+    // sonst ein gold-ish Fallback der für "Erfolg" steht.
+    tint: (achievement.color as string) || '#F0A030',
+    onTap: () => {
+      try {
+        router.push('/achievements' as any);
+      } catch (e) {
+        console.warn('Achievement banner nav failed (non-fatal):', e);
+      }
+    },
+  };
+}
+
+function bannerDataFromLevelUp(
+  newLevel: number,
+  oldLevel: number,
+  unlockedCategory?: { id: string; name: string; imageUrl: string },
+): BannerData {
+  // Subtitle wählt: wenn Kategorie freigeschaltet, dann das ist die
+  // Headline-News. Sonst nur "Du bist jetzt auf Level X".
+  const subtitle = unlockedCategory
+    ? `Neue Kategorie: ${unlockedCategory.name}`
+    : `Du bist jetzt auf Level ${newLevel}`;
+  return {
+    title: `Level ${newLevel} erreicht`,
+    subtitle,
+    icon: 'trophy-outline',
+    // Level-Up-Tönung: warmes gold, hebt sich vom standardmäßigen
+    // primary-grün ab (das brauchen wir für Punkte-Toasts).
+    tint: '#F0A030',
+    onTap: () => {
+      try {
+        router.push('/achievements' as any);
+      } catch (e) {
+        console.warn('LevelUp banner nav failed (non-fatal):', e);
+      }
+    },
+  };
+}
+
+// Level-Up Tier-Heuristik. Welche Stufen-Übergänge sind "subtle"
+// (Banner) vs. "major" (Modal mit Konfetti)?
+//
+//   • Level 1 → 2: SUBTLE. Das ist das "ich mache zum ersten Mal
+//     was, krieg automatisch Level 2"-Erlebnis. Ein Modal hier
+//     wäre schon das dritte aufgeplöppte Element (Punkte-Toast +
+//     evtl. Achievement-Banner + jetzt Modal) und würde den User
+//     beim ersten Produkt-Tap überlasten.
+//   • Level 2 → 3: SUBTLE. Auch noch warm-up phase.
+//   • Level 3+: MAJOR. Echte Meilensteine, Modal lohnt sich.
+//
+// Wenn du das Verhalten ändern willst (z.B. Level 2 schon zu major
+// machen weil du Drogerie-Unlock feiern willst): Schwelle hier
+// hochziehen.
+function isSubtleLevelUp(newLevel: number): boolean {
+  return newLevel <= 3;
+}
+
 // Alte Interfaces entfernt - zentrale Toast-Library verwendet
 
 /**
@@ -63,21 +171,19 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     autoHide: false
   });
 
-  // Subtle-Tier Achievements landen im Banner statt im Modal —
-  // siehe getAchievementTier in gamificationSettingsService. Banner
-  // ist self-dismissing nach 5 s, deshalb braucht's hier nur einen
-  // simplen "currently shown" State, kein autoHide-Flag.
-  const [bannerAchievement, setBannerAchievement] =
-    useState<Achievement | null>(null);
+  // Subtle-Tier Celebrations landen im Banner statt im Modal —
+  // sowohl Achievements als auch Level-Ups (Level 1→2). Banner
+  // arbeitet mit generischer BannerData (siehe AchievementUnlockBanner)
+  // → wir transformieren Achievement / LevelUp am Caller-Ort.
+  const [bannerData, setBannerData] = useState<BannerData | null>(null);
 
   // Wenn ein Major-Overlay (Achievement-Modal oder Level-Up-Modal)
   // gerade läuft oder pending ist, darf KEIN subtle Banner parallel
   // erscheinen — sonst feiern wir gleichzeitig auf zwei Ebenen, was
   // genau die "Überforderung" ist die wir mit dem Tier-System lösen
   // wollten. Queue-Logik: wenn beim Banner-Show ein Major aktiv ist,
-  // landet das Achievement hier; nach Major-Close drainen wir es.
-  const [pendingBannerAchievement, setPendingBannerAchievement] =
-    useState<Achievement | null>(null);
+  // landet die BannerData hier; nach Major-Close drainen wir sie.
+  const [pendingBannerData, setPendingBannerData] = useState<BannerData | null>(null);
 
   // Alte Toast-States entfernt - alles läuft über zentrale Toast-Library
 
@@ -115,11 +221,9 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
       //
       // Den Check machen wir IM TIMER-CALLBACK (nicht jetzt) damit
       // wir den aktuellen State sehen, falls in den 1.5 s ein
-      // Major-Overlay dazukommt (= klassischer Race aus dem
-      // Bug-Screenshot).
+      // Major-Overlay dazukommt.
+      const data = bannerDataFromAchievement(achievement);
       setTimeout(() => {
-        // Setter-Function-Pattern: aktuellen State lesen ohne
-        // dependency-arrays zu pflegen.
         setLevelUpData(currentLevelUp => {
           setAchievementData(currentAch => {
             setPendingLevelUp(currentPendingLevel => {
@@ -131,9 +235,9 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
                 console.log(
                   '🎖️ Major-Overlay aktiv — Banner queued bis Major schließt',
                 );
-                setPendingBannerAchievement(achievement);
+                setPendingBannerData(data);
               } else {
-                setBannerAchievement(achievement);
+                setBannerData(data);
               }
               return currentPendingLevel;
             });
@@ -174,16 +278,52 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     if (unlockedCategory) {
       console.log(`🎁 Mit freigeschalteter Kategorie: ${unlockedCategory.name}`);
     }
-    
-    // Prüfe ob Benachrichtigungen deaktiviert sind
-    const notificationsDisabled = await gamificationSettingsService.areNotificationsDisabled();
+
+    const notificationsDisabled =
+      await gamificationSettingsService.areNotificationsDisabled();
     if (notificationsDisabled) {
-      console.log('🔕 Level-Up Overlay unterdrückt (Benachrichtigungen deaktiviert)');
+      console.log('🔕 Level-Up UI unterdrückt (Spielerische Inhalte deaktiviert)');
       return;
     }
-    
+
+    // ─── Tier-Routing ────────────────────────────────────────
+    //
+    // Frühe Level (1→2, 2→3) gehen in den Banner statt ins
+    // Konfetti-Modal — User soll beim ersten Produkt-Tap nicht von
+    // einem vollformatigen "Du bist Level 2!"-Spektakel erschlagen
+    // werden. Das Modal kommt erst ab Level 4+ wo der User
+    // bewiesen hat dass er aktiv genug für eine echte Feier ist.
+    if (isSubtleLevelUp(newLevel)) {
+      console.log('🎯 Level-Up tier=subtle → Banner statt Modal');
+      const data = bannerDataFromLevelUp(newLevel, oldLevel, unlockedCategory);
+      // Gleiche Queue-Logik wie für Achievement-Banner: bei aktivem
+      // Major-Overlay queuen wir.
+      setTimeout(() => {
+        setLevelUpData(currentLevelUp => {
+          setAchievementData(currentAch => {
+            setPendingLevelUp(currentPendingLevel => {
+              const majorActive =
+                currentLevelUp.visible ||
+                currentAch.visible ||
+                currentPendingLevel !== null;
+              if (majorActive) {
+                setPendingBannerData(data);
+              } else {
+                setBannerData(data);
+              }
+              return currentPendingLevel;
+            });
+            return currentAch;
+          });
+          return currentLevelUp;
+        });
+      }, 1500);
+      return;
+    }
+
+    // ─── Major: bestehender Modal-Flow ───────────────────────
     const newLevelData = { visible: true, newLevel, oldLevel, unlockedCategory };
-    
+
     // Verwende OverlayManager um Konflikte zu vermeiden
     overlayManager.showOverlay(() => {
       // Prüfe ob bereits ein Achievement angezeigt wird - verwende aktuellen State
@@ -191,15 +331,11 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         if (currentAchievement.visible) {
           console.log('🏆 Achievement aktiv - Level-Up wird in Queue gestellt');
           setPendingLevelUp(newLevelData);
-          
-          // KEIN Auto-Close mehr! User muss Achievement manuell schließen
-          // Level-Up wird erst nach manuellem Achievement-Close gezeigt
-          
-          return currentAchievement; // Unverändert, kein autoHide
+          return currentAchievement;
         } else {
           // Kein Achievement aktiv - Level-Up direkt anzeigen
           setLevelUpData(newLevelData);
-          return currentAchievement; // Unchanged
+          return currentAchievement;
         }
       });
     });
@@ -246,18 +382,18 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   // nochmal den Major-State (siehe oben) und queued — das deckt
   // diesen Race ab.
   useEffect(() => {
-    if (!bannerAchievement) return;
+    if (!bannerData) return;
     if (
       levelUpData.visible ||
       achievementData.visible ||
       pendingLevelUp !== null
     ) {
       console.log('🎖️ Major-Overlay öffnet — aktiver Banner geht in Queue');
-      setPendingBannerAchievement(bannerAchievement);
-      setBannerAchievement(null);
+      setPendingBannerData(bannerData);
+      setBannerData(null);
     }
   }, [
-    bannerAchievement,
+    bannerData,
     levelUpData.visible,
     achievementData.visible,
     pendingLevelUp,
@@ -270,23 +406,21 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   // Modal-Close-Animation nicht visuell mit dem Banner-Slide-In
   // überlappt.
   useEffect(() => {
-    if (!pendingBannerAchievement) return;
+    if (!pendingBannerData) return;
     if (
       levelUpData.visible ||
       achievementData.visible ||
       pendingLevelUp !== null
     ) {
-      return; // noch nicht alle Major-Overlays durch
+      return;
     }
-    // Grace-Period 400 ms — Modal-Close-Animation läuft etwa
-    // 250-300 ms, danach hat der Screen wieder Ruhe für den Banner.
     const t = setTimeout(() => {
-      setBannerAchievement(pendingBannerAchievement);
-      setPendingBannerAchievement(null);
+      setBannerData(pendingBannerData);
+      setPendingBannerData(null);
     }, 400);
     return () => clearTimeout(t);
   }, [
-    pendingBannerAchievement,
+    pendingBannerData,
     levelUpData.visible,
     achievementData.visible,
     pendingLevelUp,
@@ -306,7 +440,7 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         levelUpData.visible ||
         achievementData.visible ||
         showAppRatingModal ||
-        bannerAchievement !== null
+        bannerData !== null
       ) {
         return; // Skip silently - happens often
       }
@@ -328,7 +462,7 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     levelUpData.visible,
     achievementData.visible,
     showAppRatingModal,
-    bannerAchievement,
+    bannerData,
   ]);
 
   // Handler für Overlay-Schließungen
@@ -402,15 +536,16 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         autoHide={achievementData.autoHide}
       />
 
-      {/* Achievement Banner - dezenter Slide-In für 'subtle'-Tier
-          Achievements (first_action_any, niedrigschwellige Trivial-
-          Punkte). Sitzt knapp über der Tab-Bar, auto-dismisst
-          nach 5 s, swipe-down/✕ zum sofortigen Schließen, Tap
-          aufs Body navigiert zur Errungenschaften-Seite. */}
+      {/* Subtle-Tier Banner — sowohl für Achievements als auch
+          für Level-Ups (Level 1-3). Sitzt knapp über der Tab-
+          Bar, auto-dismisst nach 5 s, swipe-down zum sofortigen
+          Schließen, Tap aufs Body navigiert zur Errungenschaften-
+          Seite. Generische BannerData (siehe AchievementUnlockBanner)
+          → der Provider transformiert seine Sources am Caller-Ort. */}
       <AchievementUnlockBanner
-        visible={!!bannerAchievement}
-        achievement={bannerAchievement}
-        onDismiss={() => setBannerAchievement(null)}
+        visible={!!bannerData}
+        data={bannerData}
+        onDismiss={() => setBannerData(null)}
       />
 
       {/* App Rating Modal - Nach Login/Level-Up */}
