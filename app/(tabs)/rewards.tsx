@@ -22,6 +22,7 @@ import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useCoachmark } from '@/hooks/useCoachmark';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useGamificationEnabled } from '@/hooks/useGamificationEnabled';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { db } from '@/lib/firebase';
@@ -139,7 +140,24 @@ export default function RewardsScreen() {
   // Per-Screen Coachmark.
   const rewardsCoachmark = useCoachmark('rewards');
 
+  // Spielerische Inhalte-Toggle. Wenn aus, blenden wir die
+  // Bestenliste-Tab + die Position-Sticky-Bar aus. Cashback-
+  // Auszahlung (Einlösen-Tab) bleibt sichtbar — das ist echtes
+  // Geld, kein Spielelement.
+  const gamificationEnabled = useGamificationEnabled();
+
   const [tab, setTab] = useState<RewardsTab>('redeem');
+
+  // Wenn der User die Toggle deaktiviert während er gerade auf
+  // dem ranks-Tab ist, sollen wir ihn sanft zurück auf redeem
+  // schubsen. Sonst wäre der ranks-Page-Slot leer und der
+  // Pager visuell konfus.
+  useEffect(() => {
+    if (!gamificationEnabled && tab === 'ranks') {
+      setTab('redeem');
+      pagerRef.current?.setPage(0);
+    }
+  }, [gamificationEnabled, tab]);
   const pagerRef = useRef<PagerView | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
 
@@ -275,26 +293,37 @@ export default function RewardsScreen() {
         </Pressable>
       </View>
 
-      <SegmentedTabs
-        tabs={[
-          { key: 'redeem', label: 'Einlösen' },
-          { key: 'ranks', label: 'Bestenliste' },
-        ] as const}
-        value={tab}
-        onChange={onTabChange}
-      />
+      {/* SegmentedTabs nur wenn Gamification aktiv ist — sonst gibt's
+          nur den Einlösen-Tab und ein 1-Item-Segmented-Control wäre
+          visuelles Theater. Das chromeHeight bleibt unverändert
+          damit das ScrollView-Padding stabil bleibt; statt der Tabs
+          ist da einfach nur Atemraum. */}
+      {gamificationEnabled ? (
+        <SegmentedTabs
+          tabs={[
+            { key: 'redeem', label: 'Einlösen' },
+            { key: 'ranks', label: 'Bestenliste' },
+          ] as const}
+          value={tab}
+          onChange={onTabChange}
+        />
+      ) : null}
     </View>
   );
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* Two pages, native swipe between them. The Bestenliste page is
-          a placeholder until Phase 3. */}
+      {/* Pages: Einlösen (Cashback — IMMER sichtbar, echtes Geld)
+          + Bestenliste (nur wenn Spielerische Inhalte aktiv).
+          Wenn aus, läuft PagerView mit nur einem Child — kein
+          horizontales Wischen mehr, was richtig ist (es gibt ja
+          nichts zum Wischen). */}
       <PagerView
         ref={pagerRef}
         style={{ flex: 1 }}
         initialPage={0}
         onPageSelected={onPageSelected}
+        scrollEnabled={gamificationEnabled}
       >
         <View key="redeem" style={{ flex: 1 }}>
           <ScrollView
@@ -309,6 +338,7 @@ export default function RewardsScreen() {
           </ScrollView>
         </View>
 
+        {gamificationEnabled ? (
         <View key="ranks" style={{ flex: 1 }}>
           <ScrollView
             scrollsToTop={tab === 'ranks'}
@@ -333,12 +363,15 @@ export default function RewardsScreen() {
             />
           </ScrollView>
         </View>
+        ) : null}
       </PagerView>
 
       {/* Floating "Deine Position" — only on the Bestenliste tab.
           Rendered as a sibling of the PagerView so it stays put
-          against the screen, not the scroll content. */}
-      {tab === 'ranks' && userProfile ? (
+          against the screen, not the scroll content.
+          Wenn Gamification aus, ist Bestenliste eh weg → die
+          Sticky-Bar muss auch verschwinden. */}
+      {gamificationEnabled && tab === 'ranks' && userProfile ? (
         <PositionStickyBar
           userProfile={userProfile}
           outerScope={outerScope}

@@ -47,6 +47,7 @@ import { FilterSheet } from '@/components/design/FilterSheet';
 import { AuthRequiredModal } from '@/components/ui/AuthRequiredModal';
 import { SimilarityStagesModal } from '@/components/ui/SimilarityStagesModal';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { useGamificationEnabled } from '@/hooks/useGamificationEnabled';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
@@ -77,6 +78,10 @@ import {
 export default function ProfileScreen() {
   const { theme, shadows } = useTokens();
   const insets = useSafeAreaInsets();
+  // Spielerische Inhalte-Toggle. Wenn aus → Level-Card, Punkte-
+  // Stats, "Belohnungen & Level"-Menüeintrag werden ausgeblendet.
+  // Cashback (€) bleibt sichtbar weil das echtes Geld ist.
+  const gamificationEnabled = useGamificationEnabled();
   const navigation = useNavigation();
 
   const { user, userProfile, logout, isAnonymous } = useAuth();
@@ -759,7 +764,10 @@ export default function ProfileScreen() {
             subtitle. Identical pattern to the home-tab level card
             so both surfaces feel like the same component (and
             both link to /achievements). No progress bar — the
-            inline subtitle carries the same info more compactly. */}
+            inline subtitle carries the same info more compactly.
+            Komplett versteckt wenn Spielerische Inhalte deaktiviert
+            sind. */}
+        {gamificationEnabled ? (
         <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
           <Pressable
             onPress={() => router.push('/achievements' as any)}
@@ -830,6 +838,7 @@ export default function ProfileScreen() {
             />
           </Pressable>
         </View>
+        ) : null}
 
         {/* Savings card — orange gradient, links to purchase history */}
         <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
@@ -915,19 +924,26 @@ export default function ProfileScreen() {
         {/* Account / Inhalte menu */}
         <View style={{ paddingHorizontal: 20, paddingTop: 16 }}>
           <MenuCard>
-            <MenuRow
-              icon="trophy-outline"
-              color="#e0a800"
-              label="Belohnungen & Level"
-              sub={`Level ${level} · ${points.toLocaleString('de-DE')} Pkt`}
-              onPress={() => router.push('/achievements' as any)}
-              first
-            />
+            {/* "Belohnungen & Level"-Eintrag führt zur Errungenschaften-
+                Seite — rein spielerischer Inhalt, daher hinter dem
+                Toggle. Wenn versteckt rückt die Einkaufszettel-Row in
+                die `first`-Position (kein Top-Border mehr). */}
+            {gamificationEnabled ? (
+              <MenuRow
+                icon="trophy-outline"
+                color="#e0a800"
+                label="Belohnungen & Level"
+                sub={`Level ${level} · ${points.toLocaleString('de-DE')} Pkt`}
+                onPress={() => router.push('/achievements' as any)}
+                first
+              />
+            ) : null}
             <MenuRow
               icon="format-list-checks"
               color={theme.primary}
               label="Einkaufszettel"
               onPress={() => router.push('/shopping-list' as any)}
+              first={!gamificationEnabled}
             />
             <MenuRow
               icon="heart-outline"
@@ -1061,7 +1077,7 @@ export default function ProfileScreen() {
             />
             <ToggleRow
               icon="bell-off-outline"
-              label="Gamification-Benachrichtigungen deaktivieren"
+              label="Spielerische Inhalte ausblenden"
               value={gamificationDisabled}
               onChange={handleGamificationToggle}
               last

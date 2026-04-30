@@ -5,12 +5,16 @@ import {
   setLevelUpHandler,
   setPointsEarnedHandler
 } from '@/lib/services/achievementService';
-import { gamificationSettingsService } from '@/lib/services/gamificationSettingsService';
+import {
+  gamificationSettingsService,
+  getAchievementTier,
+} from '@/lib/services/gamificationSettingsService';
 import { overlayManager } from '@/lib/services/overlayManager';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
 import { showPointsToast, showStreakToast as showStreakToastNew } from '@/lib/services/ui/toast';
 import { Achievement } from '@/lib/types/achievements';
 import React, { useCallback, useEffect, useState } from 'react';
+import { AchievementUnlockBanner } from './AchievementUnlockBanner';
 import { AchievementUnlockOverlay } from './AchievementUnlockOverlay';
 import { AppRatingModal } from './AppRatingModal';
 import { LevelUpOverlay } from './LevelUpOverlay';
@@ -59,6 +63,13 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     autoHide: false
   });
 
+  // Subtle-Tier Achievements landen im Banner statt im Modal —
+  // siehe getAchievementTier in gamificationSettingsService. Banner
+  // ist self-dismissing nach 5 s, deshalb braucht's hier nur einen
+  // simplen "currently shown" State, kein autoHide-Flag.
+  const [bannerAchievement, setBannerAchievement] =
+    useState<Achievement | null>(null);
+
   // Alte Toast-States entfernt - alles läuft über zentrale Toast-Library
 
   // Queue für Level-Ups (falls Achievement zuerst angezeigt wird)
@@ -68,35 +79,44 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   const [showAppRatingModal, setShowAppRatingModal] = useState(false);
 
   // 🎯 Stabile Callback-Funktionen mit useCallback
+  //
+  // Tier-Routing: subtle → Banner unten, major → Modal vollformat.
+  // Subtle-Banner kriegt zudem 1.5 s Delay damit er nicht direkt
+  // beim Mount eines Detail-Screens loswackelt — der User soll
+  // erst die Inhalte aufnehmen können bevor Reward-Feedback kommt.
+  // Track-Side bleibt unangetastet (Daten-Updates sofort) — nur
+  // die Banner-DARSTELLUNG ist defered.
   const achievementHandler = useCallback(async (achievement: Achievement) => {
     console.log('🏆 Achievement Unlock UI triggered:', achievement.name);
-    
-    // Prüfe ob Benachrichtigungen deaktiviert sind
-    const notificationsDisabled = await gamificationSettingsService.areNotificationsDisabled();
+
+    const notificationsDisabled =
+      await gamificationSettingsService.areNotificationsDisabled();
     if (notificationsDisabled) {
-      console.log('🔕 Achievement Overlay unterdrückt (Benachrichtigungen deaktiviert)');
+      console.log('🔕 Achievement-UI unterdrückt (Spielerische Inhalte deaktiviert)');
       return;
     }
-    
-    // Verwende OverlayManager um Konflikte zu vermeiden
+
+    const tier = getAchievementTier(achievement);
+
+    if (tier === 'subtle') {
+      // Subtle: Banner unten, defered. Wenn aktuell schon ein
+      // Banner sichtbar ist, replacen wir ihn (neuestes
+      // Achievement gewinnt — alte Banner verlöscht). Bei mehr
+      // Volumen wäre eine Queue sauberer; aktuell ist die
+      // Frequenz so niedrig dass das egal ist.
+      setTimeout(() => {
+        setBannerAchievement(achievement);
+      }, 1500);
+      return;
+    }
+
+    // Major: bestehender Modal-Flow via overlayManager.
     overlayManager.showOverlay(() => {
-      // Verwende aktuellen State über Setter-Function
-      setAchievementData(prev => {
-        setPendingLevelUp(currentPending => {
-          const hasLevelUpPending = currentPending !== null;
-          
-          // Level-Up wird erst nach manuellem Achievement-Close angezeigt
-          // Kein Auto-Close mehr!
-          
-          return currentPending; // Unchanged
-        });
-        
-        return {
-          visible: true,
-          achievement: achievement,
-          autoHide: false  // Nie auto-hide - immer manuell
-        };
-      });
+      setAchievementData(() => ({
+        visible: true,
+        achievement: achievement,
+        autoHide: false,
+      }));
     });
   }, []);
 
@@ -263,12 +283,25 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         onClose={handleLevelUpClose}
       />
 
-      {/* Achievement Unlock Overlay - Prominente Achievement-Darstellung */}
+      {/* Achievement Unlock Overlay - Prominente Achievement-Darstellung
+          (für 'major'-Tier — savings_total ≥ 50 €, Level-Hochstufungen,
+          7-Tage-Streak etc.) */}
       <AchievementUnlockOverlay
         visible={achievementData.visible}
         achievement={achievementData.achievement}
         onClose={handleAchievementClose}
         autoHide={achievementData.autoHide}
+      />
+
+      {/* Achievement Banner - dezenter Slide-In für 'subtle'-Tier
+          Achievements (first_action_any, niedrigschwellige Trivial-
+          Punkte). Sitzt knapp über der Tab-Bar, auto-dismisst
+          nach 5 s, swipe-down/✕ zum sofortigen Schließen, Tap
+          aufs Body navigiert zur Errungenschaften-Seite. */}
+      <AchievementUnlockBanner
+        visible={!!bannerAchievement}
+        achievement={bannerAchievement}
+        onDismiss={() => setBannerAchievement(null)}
       />
 
       {/* App Rating Modal - Nach Login/Level-Up */}

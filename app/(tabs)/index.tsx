@@ -45,6 +45,7 @@ import {
 } from '@/lib/utils/levelIcon';
 import { useCoachmark } from '@/hooks/useCoachmark';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useGamificationEnabled } from '@/hooks/useGamificationEnabled';
 import { useTokens } from '@/hooks/useTokens';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -76,6 +77,11 @@ export default function HomeScreen() {
   // im Modal) statt ein Element auf dem Home-Screen zu spotlighten —
   // Layout-Shifts durch Ads etc. sind damit irrelevant.
   const homeCoachmark = useCoachmark('home');
+
+  // Spielerische Inhalte-Toggle — wenn aus, blenden wir die Level-
+  // Card aus. Cashback / Sparpotenzial / Neue Funde bleiben
+  // sichtbar (echter App-Inhalt, nicht Spielelement).
+  const gamificationEnabled = useGamificationEnabled();
 
   // Scroll-driven header
   const scrollY = useSharedValue(0);
@@ -679,8 +685,10 @@ export default function HomeScreen() {
             circle on the left and a single-line "remaining" caption.
             No progress bar — the inline "X € & Y Pkt zum nächsten
             Level" copy is more informative and lets the card sit
-            shorter (≈ 64 px instead of the previous ~88 px). */}
-        {levelsLoading || levels.length === 0 ? (
+            shorter (≈ 64 px instead of the previous ~88 px).
+            Wird komplett ausgeblendet wenn der User die
+            spielerischen Inhalte deaktiviert hat (Profil-Toggle). */}
+        {!gamificationEnabled ? null : levelsLoading || levels.length === 0 ? (
           <View
             style={{
               marginHorizontal: 20,
