@@ -45,7 +45,10 @@ import { useTokens } from '@/hooks/useTokens';
 const TAB_BAR_HEIGHT_IOS = 90;
 const TAB_BAR_HEIGHT_ANDROID_BASE = 62;
 const HIDDEN_OFFSET = 200;
-const AUTO_DISMISS_MS = 5000;
+// Erhöht von 5 → 7 s. User-Feedback: 5 s sind zu knapp um die
+// Lottie zu würdigen + den Text zu lesen + zu entscheiden ob man
+// zur Errungenschaften-Seite tippen will.
+const AUTO_DISMISS_MS = 7000;
 const BANNER_HEIGHT = 96;
 const LOTTIE_SIZE = 72;
 
@@ -229,6 +232,13 @@ export function AchievementUnlockBanner({
                 opacity: pressed ? 0.94 : 1,
                 borderRadius: 18,
                 overflow: 'hidden',
+                // SOLID surface BACKDROP — sonst durchsichtig auf dem
+                // Screen-Inhalt (siehe User-Bug-Screenshot wo
+                // "Inhaltsstoffe/Nährwerte"-Tabs durchschimmerten).
+                // Der LinearGradient drüber arbeitet mit semi-
+                // transparenten Stops, braucht also einen opaken
+                // Untergrund.
+                backgroundColor: theme.surface,
                 ...(shadows.lg as object),
               })}
             >

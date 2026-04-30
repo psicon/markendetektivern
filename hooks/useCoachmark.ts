@@ -2,32 +2,35 @@
 // JETZT angezeigt werden soll, und an die Replay-Bridge des
 // CoachmarkService anbindet.
 //
-// Verhaltensregeln:
+// ─── Verhaltensregeln ────────────────────────────────────────────
 //
-// 1. **Nur ein Coachmark pro Screen-Mount automatisch öffnen.**
-//    Beim ersten Mount wird AsyncStorage gelesen; wenn die Tour
-//    noch NICHT gesehen wurde UND das bestehende Onboarding
-//    abgeschlossen ist, geht `visible: true` ON.
+// 1. **Auto-open Re-Check via useFocusEffect.** Bei JEDEM Focus
+//    des Screens prüft der Hook, ob die Tour aktuell gezeigt
+//    werden soll. Das ist robuster als ein One-Shot-Mount-Effekt:
+//    wenn der User aus dem Onboarding kommt und Home ZUM ERSTEN
+//    MAL fokussiert wird, war Home evtl. vorher schon mal kurz
+//    gemountet (z.B. als Default-Tab unter dem Onboarding-Stack)
+//    und ein One-Shot-Effekt wäre da schon "verbrannt" worden,
+//    bevor die Onboarding-Completion-Bedingung gilt.
+//
+//    `localShown` (session-state) verhindert, dass der Hook bei
+//    jedem Tab-Wechsel die Tour neu öffnet — er feuert genau
+//    EINMAL pro Mount-Lifecycle, aber ERST DANN wenn alle
+//    Bedingungen erfüllt sind.
 //
 // 2. **Hard-Block via Onboarding-Status.** Wenn das ältere
-//    `onboarding_v1_completed`-Flag NICHT gesetzt ist (User hat das
-//    Daten-Erhebungs-Onboarding noch nicht durch), zeigen wir KEINE
-//    Coachmarks. Sonst spielt der User parallel zwei Tutorials.
-//    Wer das Onboarding via "Später"-Button skippt, fällt auch in
-//    diesen Block — ist gewollt: Skip-Quitter wollen typischerweise
-//    auch keine UI-Tutorials.
+//    `onboarding_v1_completed`-Flag NICHT gesetzt ist, zeigen wir
+//    KEINE Coachmarks. Sonst spielt der User parallel zwei
+//    Tutorials.
 //
-// 3. **Replay-Channel:** der Profil-Dev-Panel kann per
-//    `CoachmarkService.requestReplay('home')` einen Hook der gerade
-//    montiert ist zum sofortigen Anzeigen zwingen — auch wenn die
-//    Tour als gesehen markiert ist.
-//
-// 4. **Keine `await import('react-native')`** — alle RN-imports
-//    statisch (siehe CLAUDE.md, der Trick crasht via
-//    PushNotificationIOS-getter).
+// 3. **Replay-Channel.** Der Profil-Dev-Panel kann per
+//    `CoachmarkService.requestReplay('home')` einen Hook der
+//    gerade montiert ist zum sofortigen Anzeigen zwingen — auch
+//    wenn die Tour als gesehen markiert ist.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { CoachmarkService, TourKey } from '@/lib/services/coachmarkService';
 
 // Mirror der AsyncStorage-Keys aus `onboardingService.ts` damit wir
@@ -40,69 +43,72 @@ export type UseCoachmarkResult = {
   visible: boolean;
   /** Schließt das Overlay UND markiert als gesehen. */
   dismiss: () => void;
-  /**
-   * Schließt das Overlay OHNE als gesehen zu markieren —
-   * bewusst nur intern verwendet (z.B. wenn User die App pausiert).
-   * Aktuell nicht exposed; wird im Profil-Dev-Panel-Replay-Path
-   * relevant wenn wir entscheiden dass Replays nicht "doppelt
-   * markieren" sollen.
-   */
+  /** Schließt OHNE als gesehen zu markieren. Aktuell unused. */
   forceClose: () => void;
 };
 
 export function useCoachmark(tour: TourKey): UseCoachmarkResult {
   const [visible, setVisible] = useState(false);
-  // Verhindert doppeltes "auto-open" wenn der Effect aus irgendeinem
-  // Grund neu feuert (HMR, dependencies-Änderung). Auto-Open passiert
-  // genau einmal pro Mount-Lifecycle; danach geht's nur noch über
-  // Replay-Events oder dismiss/forceClose.
-  const autoOpenedRef = useRef(false);
+  // "Local" = innerhalb dieses Mount-Lifecycle. Wenn wir die Tour
+  // einmal gezeigt haben (egal ob durch Auto-Open oder Replay),
+  // sperren wir Auto-Open für die Dauer dieses Mounts. Bei einem
+  // Unmount/Remount-Zyklus startet das wieder bei false → wir
+  // lesen erneut AsyncStorage.
+  const [localShown, setLocalShown] = useState(false);
 
-  // ─── Auto-Open beim ersten Mount ─────────────────────────────────
-  useEffect(() => {
-    if (autoOpenedRef.current) return;
-    autoOpenedRef.current = true;
+  // ─── Auto-Open mit Re-Check via Focus ────────────────────────
+  //
+  // useFocusEffect läuft bei jedem Screen-Focus. Wir prüfen die
+  // AsyncStorage-Bedingungen erneut — falls der User in der
+  // Zwischenzeit das Onboarding abgeschlossen hat (Übergang
+  // null → 'true'), greift das hier.
+  useFocusEffect(
+    useCallback(() => {
+      if (localShown) return;
+      let cancelled = false;
+      (async () => {
+        try {
+          const [seen, onboardingDone] = await Promise.all([
+            CoachmarkService.getSeen(tour),
+            AsyncStorage.getItem(ONBOARDING_COMPLETED_KEY),
+          ]);
+          if (cancelled || localShown) return;
+          if (onboardingDone !== 'true') return;
+          if (seen) return;
+          // Kleiner Delay damit Screen-Render + Skeletons abklingen
+          // bevor wir ein Modal drüberlegen.
+          setTimeout(() => {
+            if (!cancelled && !localShown) {
+              setVisible(true);
+              setLocalShown(true);
+            }
+          }, 600);
+        } catch (e) {
+          console.warn('useCoachmark auto-open check failed (non-fatal):', e);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [tour, localShown]),
+  );
 
-    let cancelled = false;
-    (async () => {
-      try {
-        const [seen, onboardingDone] = await Promise.all([
-          CoachmarkService.getSeen(tour),
-          AsyncStorage.getItem(ONBOARDING_COMPLETED_KEY),
-        ]);
-        if (cancelled) return;
-        // Hard-Block: nur wenn Onboarding wirklich abgeschlossen ist.
-        if (onboardingDone !== 'true') return;
-        if (seen) return;
-        // Kleiner Delay damit Screen-Render + Skeletons abklingen
-        // bevor wir ein Modal drüberlegen — kein Frame-Konflikt mit
-        // dem Crossfade aus den Detail-Screens.
-        setTimeout(() => {
-          if (!cancelled) setVisible(true);
-        }, 600);
-      } catch (e) {
-        console.warn('useCoachmark auto-open check failed (non-fatal):', e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [tour]);
-
-  // ─── Replay-Listener ─────────────────────────────────────────────
+  // ─── Replay-Listener ─────────────────────────────────────────
+  //
+  // Replay zwingt das Overlay auf, unabhängig vom Seen-Status oder
+  // localShown. Setzt aber localShown = true sodass Auto-Open
+  // danach nicht erneut feuert (sonst doppelte Show-Animation).
   useEffect(() => {
     const off = CoachmarkService.onReplayRequest((requested) => {
       if (requested !== tour) return;
-      // Replay zwingt das Overlay auf, unabhängig vom Seen-Status.
-      // Wenn es schon offen ist, bleibt es offen (kein Toggle).
       setVisible(true);
+      setLocalShown(true);
     });
     return off;
   }, [tour]);
 
   const dismiss = useCallback(() => {
     setVisible(false);
-    // markSeen async — kein await, UX soll direkt schließen.
     void CoachmarkService.markSeen(tour);
   }, [tour]);
 
