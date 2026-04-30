@@ -32,8 +32,16 @@ import {
 } from '@/components/design/EnttarnteAlternativesList';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { StufenChips } from '@/components/design/StufenChips';
+import {
+  PRODUCT_DETAIL_ANCHOR_CART,
+  PRODUCT_DETAIL_ANCHOR_FAVORITE,
+  PRODUCT_DETAIL_ANCHOR_RATING,
+  ProductDetailWalkthrough,
+} from '@/components/coachmarks/ProductDetailWalkthrough';
 import { Crossfade, Shimmer } from '@/components/design/Skeletons';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { useCoachmark } from '@/hooks/useCoachmark';
+import { useCoachmarkAnchor } from '@/hooks/useCoachmarkAnchor';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useFavorites } from '@/lib/hooks/useFavorites';
@@ -104,6 +112,15 @@ export default function NoNameDetailScreen() {
   const { theme, brand, shadows } = useTokens();
   const { user } = useAuth();
   const { toggleFavorite } = useFavorites();
+
+  // ─── Coachmark Walkthrough ───────────────────────────────────
+  // Tour 'product-detail' fires beim ersten Aufruf einer Detail-
+  // Seite. Anchors sitzen unten auf den drei ActionButtons in der
+  // Hero-Bottom-Right-Cluster.
+  const detailCoachmark = useCoachmark('product-detail');
+  const cartAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_CART);
+  const favAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_FAVORITE);
+  const ratingAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_RATING);
 
   // ─── Data state ──────────────────────────────────────────────────
   // One fetch, one state slot. We deliberately wait for the FULL
@@ -790,26 +807,50 @@ export default function NoNameDetailScreen() {
               </View>
             ) : null}
 
-            {/* Action cluster bottom-right */}
+            {/* Action cluster bottom-right.
+                Jeder Button ist in ein <View> mit
+                useCoachmarkAnchor-Ref/onLayout gewickelt damit der
+                ProductDetailWalkthrough-Spotlight den jeweiligen
+                Button targeten kann. Die Wrapper-Views sind
+                visuell unsichtbar (kein Padding/Margin), nur
+                measureInWindow + onLayout machen ihren Job. */}
             {p ? (
               <View style={{ position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', gap: 8 }}>
-                <ActionButton
-                  icon={isFav ? 'heart' : 'heart-outline'}
-                  iconColor={isFav ? '#e53935' : theme.text}
-                  onPress={onFavPress}
-                />
-                <ActionButton
-                  icon={inCart ? 'cart-check' : 'cart-plus'}
-                  iconColor={inCart ? '#fff' : theme.text}
-                  bg={inCart ? brand.primary : undefined}
-                  onPress={onCartPress}
-                />
-                <ActionButton
-                  icon="star"
-                  iconColor="#f5b301"
-                  subLabel={rating}
-                  onPress={onRatingsPress}
-                />
+                <View
+                  ref={favAnchor.ref}
+                  onLayout={favAnchor.onLayout}
+                  collapsable={false}
+                >
+                  <ActionButton
+                    icon={isFav ? 'heart' : 'heart-outline'}
+                    iconColor={isFav ? '#e53935' : theme.text}
+                    onPress={onFavPress}
+                  />
+                </View>
+                <View
+                  ref={cartAnchor.ref}
+                  onLayout={cartAnchor.onLayout}
+                  collapsable={false}
+                >
+                  <ActionButton
+                    icon={inCart ? 'cart-check' : 'cart-plus'}
+                    iconColor={inCart ? '#fff' : theme.text}
+                    bg={inCart ? brand.primary : undefined}
+                    onPress={onCartPress}
+                  />
+                </View>
+                <View
+                  ref={ratingAnchor.ref}
+                  onLayout={ratingAnchor.onLayout}
+                  collapsable={false}
+                >
+                  <ActionButton
+                    icon="star"
+                    iconColor="#f5b301"
+                    subLabel={rating}
+                    onPress={onRatingsPress}
+                  />
+                </View>
               </View>
             ) : null}
           </View>
@@ -1346,6 +1387,15 @@ export default function NoNameDetailScreen() {
           into the floating cart button. Mounted last so it sits on
           top of the FAB visually. */}
       <FlyToCart ref={flyRef} />
+
+      {/* ProductDetail-Walkthrough — Welcome-Card + 3 Spotlights
+          (Cart/Favorit/Rating). Fires beim ERSTEN Aufruf irgendeiner
+          Detail-Seite (egal noname-detail oder product-comparison —
+          beide nutzen dieselbe Tour-Key 'product-detail'). */}
+      <ProductDetailWalkthrough
+        visible={detailCoachmark.visible}
+        onDismiss={detailCoachmark.dismiss}
+      />
     </View>
   );
 }

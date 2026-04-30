@@ -25,25 +25,28 @@ export const COACHMARK_VERSION = 'v1';
 
 // Tour-Inventar — bewusst klein gehalten:
 //
-//   • 'home'    — Welcome-Card + Spotlight auf erste Enttarnt-Karte.
-//                 User tappt die Karte (durch Spotlight-Cutout) →
-//                 navigiert zum Detail/Vergleich → Tour ist fertig.
-//                 Aktiviert "Activation Through First Successful
-//                 Action"-Pattern: User erlebt direkt was die App
-//                 macht statt es zu lesen.
-//   • 'rewards' — 3-Karten-Modal beim ersten Tap auf Belohnungen.
-//                 Erklärt Punkte vs. Taler, Auszahlung, Bestenliste.
-//                 Eigenes Stück weil das Konzept tiefer ist als
-//                 ein Spotlight tragen kann.
+//   • 'home'           — Welcome-Card + Spotlight auf erste
+//                        Enttarnt-Karte. User tippt die Karte →
+//                        navigiert zum Detail → Tour ist fertig.
+//   • 'product-detail' — feuert beim ERSTEN Aufruf eines Produkt-
+//                        Detail-Screens (egal ob NoName-Detail
+//                        oder Product-Comparison). Welcome-Card
+//                        erklärt die Detail-Seite kurz, dann
+//                        Spotlight nacheinander auf Cart-Button,
+//                        Favorite-Button, Rating-Button.
+//   • 'rewards'        — 3-Karten-Modal beim ersten Tap auf
+//                        Belohnungen.
 //
 // Keine Touren auf Stöbern / Einkaufszettel / Errungenschaften —
-// die Screens sind selbsterklärend genug, und mehr Tutorials =
-// mehr Wartung + niedrigere Completion-Rate (siehe NN/g-Research).
-// Kontextuelle Hints inline (z.B. Swipe-Erinnerung im Cart) wären
-// die Best-Practice-Ergänzung — separat von dieser Service-Schicht.
-export type TourKey = 'home' | 'rewards';
+// selbsterklärend genug, mehr Tutorials = niedrigere Completion-
+// Rate (NN/g-Research).
+export type TourKey = 'home' | 'product-detail' | 'rewards';
 
-export const ALL_TOUR_KEYS: TourKey[] = ['home', 'rewards'];
+export const ALL_TOUR_KEYS: TourKey[] = [
+  'home',
+  'product-detail',
+  'rewards',
+];
 
 // Storage-Key-Präfix — Namespace ist bewusst NICHT `onboarding/*`
 // damit Search/Grep für Onboarding-Code keinen Treffer hier

@@ -34,9 +34,17 @@ import { ImageZoomModal, type SourceRect } from '@/components/design/ImageZoomMo
 import { getProductImage } from '@/lib/utils/productImage';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
+import {
+  PRODUCT_DETAIL_ANCHOR_CART,
+  PRODUCT_DETAIL_ANCHOR_FAVORITE,
+  PRODUCT_DETAIL_ANCHOR_RATING,
+  ProductDetailWalkthrough,
+} from '@/components/coachmarks/ProductDetailWalkthrough';
 import { Crossfade, Shimmer } from '@/components/design/Skeletons';
 import { StufenChips } from '@/components/design/StufenChips';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { useCoachmark } from '@/hooks/useCoachmark';
+import { useCoachmarkAnchor } from '@/hooks/useCoachmarkAnchor';
 import { useTokens } from '@/hooks/useTokens';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -144,6 +152,17 @@ export default function ProductComparisonScreen() {
   const { user } = useAuth();
   const { toggleFavorite } = useFavorites();
   const analytics = useAnalytics();
+
+  // ─── Coachmark Walkthrough ───────────────────────────────────
+  // Tour 'product-detail' — gemeinsam mit noname-detail. Anchors
+  // sitzen unten an den drei Hero-Cluster ActionButtons des
+  // MARKENPRODUKTS (oben), NICHT an den NoName-Card-Buttons im
+  // Carousel — hätten wir doppelte Anchor-IDs, würde der Spotlight
+  // auf den jeweils zuletzt-gemounteten zeigen.
+  const detailCoachmark = useCoachmark('product-detail');
+  const cartAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_CART);
+  const favAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_FAVORITE);
+  const ratingAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_RATING);
 
   // Different callers across the app push either `?type=markenprodukt`
   // (home, explore, comparison-alternatives) or `?type=brand` (search-
@@ -1021,27 +1040,45 @@ export default function ProductComparisonScreen() {
 
             {mp ? (
               <View style={{ position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', gap: 8 }}>
-                <ActionButton
-                  icon={favMap[mp.id] ? 'heart' : 'heart-outline'}
-                  iconColor={favMap[mp.id] ? '#e53935' : theme.text}
-                  onPress={() => onToggleFav(mp.id, 'markenprodukt', mp)}
-                />
-                <ActionButton
-                  icon={cartMap[mp.id] ? 'cart-check' : 'cart-plus'}
-                  iconColor={cartMap[mp.id] ? '#fff' : theme.text}
-                  bg={cartMap[mp.id] ? brand.primary : undefined}
-                  onPress={() => onToggleCart(mp.id, 'markenprodukt', mp)}
-                />
-                <ActionButton
-                  icon="star"
-                  iconColor="#f5b301"
-                  subLabel={
-                    (mp as any).averageRatingOverall
-                      ? ((mp as any).averageRatingOverall as number).toFixed(1)
-                      : undefined
-                  }
-                  onPress={() => onOpenRatings(mp.id, mp.name ?? 'Produkt', true)}
-                />
+                <View
+                  ref={favAnchor.ref}
+                  onLayout={favAnchor.onLayout}
+                  collapsable={false}
+                >
+                  <ActionButton
+                    icon={favMap[mp.id] ? 'heart' : 'heart-outline'}
+                    iconColor={favMap[mp.id] ? '#e53935' : theme.text}
+                    onPress={() => onToggleFav(mp.id, 'markenprodukt', mp)}
+                  />
+                </View>
+                <View
+                  ref={cartAnchor.ref}
+                  onLayout={cartAnchor.onLayout}
+                  collapsable={false}
+                >
+                  <ActionButton
+                    icon={cartMap[mp.id] ? 'cart-check' : 'cart-plus'}
+                    iconColor={cartMap[mp.id] ? '#fff' : theme.text}
+                    bg={cartMap[mp.id] ? brand.primary : undefined}
+                    onPress={() => onToggleCart(mp.id, 'markenprodukt', mp)}
+                  />
+                </View>
+                <View
+                  ref={ratingAnchor.ref}
+                  onLayout={ratingAnchor.onLayout}
+                  collapsable={false}
+                >
+                  <ActionButton
+                    icon="star"
+                    iconColor="#f5b301"
+                    subLabel={
+                      (mp as any).averageRatingOverall
+                        ? ((mp as any).averageRatingOverall as number).toFixed(1)
+                        : undefined
+                    }
+                    onPress={() => onOpenRatings(mp.id, mp.name ?? 'Produkt', true)}
+                  />
+                </View>
               </View>
             ) : null}
           </View>
@@ -1882,6 +1919,15 @@ export default function ProductComparisonScreen() {
           animates it into the floating cart button. Mounted last so
           it sits visually on top of the FAB at landing time. */}
       <FlyToCart ref={flyRef} />
+
+      {/* ProductDetail-Walkthrough — Welcome-Card + 3 Spotlights
+          (Cart/Favorit/Rating). Gleiche Tour-Key 'product-detail'
+          wie noname-detail; wenn der User dort schon durch war,
+          taucht sie hier nicht mehr auf. */}
+      <ProductDetailWalkthrough
+        visible={detailCoachmark.visible}
+        onDismiss={detailCoachmark.dismiss}
+      />
 
       {/* Fullscreen image zoom (pinch / pan / double-tap / swipe-down).
           Highest in the tree → sits above the FAB and any sheets.

@@ -364,14 +364,17 @@ export default function ProfileScreen() {
 
   const COACHMARK_LABELS: Record<TourKey, string> = {
     home: 'Home (Welcome + Spotlight)',
+    'product-detail': 'Produktdetail (Welcome + 3 Spotlights)',
     rewards: 'Belohnungen (Karten-Modal)',
   };
 
-  // Route pro Tour — wird für die "Tour jetzt zeigen"-Aktion benutzt:
-  // wir navigieren zur Seite, warten kurz bis der Screen + Hook
-  // mounten, und feuern dann das Replay-Event.
+  // Route pro Tour — wird für die "Tour jetzt zeigen"-Aktion benutzt.
+  // Für 'product-detail' brauchen wir eine konkrete Produkt-ID; wir
+  // verwenden den ersten enttarnten Top-Treffer als Demo-Ziel
+  // (siehe `replayProductDetail` unten — async Lookup).
   const COACHMARK_ROUTES: Record<TourKey, string> = {
     home: '/(tabs)',
+    'product-detail': '', // dynamisch aufgelöst, siehe onCoachmarkReplayOne
     rewards: '/(tabs)/rewards',
   };
 
@@ -379,6 +382,7 @@ export default function ProfileScreen() {
     Record<TourKey, string | null>
   >({
     home: null,
+    'product-detail': null,
     rewards: null,
   });
 
@@ -527,17 +531,46 @@ export default function ProfileScreen() {
       ],
     );
 
-  const onCoachmarkReplayOne = (key: TourKey) => {
+  const onCoachmarkReplayOne = async (key: TourKey) => {
     // Erst zur passenden Seite navigieren, dann nach kurzem Delay
     // das Replay-Event feuern. Der Delay gibt dem Ziel-Screen
     // Zeit zu mounten und der useCoachmark-Hook Zeit, sich beim
     // EventEmitter zu registrieren — sonst geht das Event ins Leere.
     // 500 ms hat sich in der Praxis als ausreichend erwiesen
     // (Stack-Animation ~300 ms + Mount-Render ~100-150 ms).
-    router.push(COACHMARK_ROUTES[key] as any);
+    if (key === 'product-detail') {
+      // Demo-Ziel: erstes top-enttarntes Produkt für die Detail-
+      // Tour. Dynamisch weil's keine feste Produkt-ID gibt.
+      try {
+        const top = await FirestoreService.getTopEnttarnteProdukteRandomized(
+          10,
+          1,
+        );
+        const productId = top?.[0]?.id;
+        if (!productId) {
+          Alert.alert(
+            'Kein Demo-Produkt',
+            'Konnte kein Demo-Produkt für die Detail-Tour finden.',
+          );
+          return;
+        }
+        // Stufe < 3 → noname-detail, sonst product-comparison.
+        const stufe = parseInt(String((top[0] as any).stufe ?? '1')) || 1;
+        const route =
+          stufe <= 2
+            ? `/noname-detail/${productId}`
+            : `/product-comparison/${productId}?type=noname`;
+        router.push(route as any);
+      } catch (e) {
+        Alert.alert('Fehler', String((e as any)?.message ?? e));
+        return;
+      }
+    } else {
+      router.push(COACHMARK_ROUTES[key] as any);
+    }
     setTimeout(() => {
       CoachmarkService.requestReplay(key);
-    }, 500);
+    }, 600);
   };
 
   const onResetOnboardingDev = () =>
