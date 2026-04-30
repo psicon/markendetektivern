@@ -39,6 +39,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { CoachmarkService } from '@/lib/services/coachmarkService';
 import { FirestoreService } from '@/lib/services/firestore';
 import { remoteConfigService } from '@/lib/services/remoteConfigService';
 import type { FirestoreDocument, Produkte } from '@/lib/types/firestore';
@@ -144,6 +145,17 @@ export function HomeWalkthrough({
   // mitten im Spotlight ohne Kontext.
   useEffect(() => {
     if (visible) setPhase('welcome');
+  }, [visible]);
+
+  // Walkthrough-Active-Tracking — sodass GamificationProvider
+  // seine Notifications (Banner, Level-Up-Modal, Punkte-Toasts)
+  // queued und erst NACH Tour-Ende fired. Sonst gehen sie unter
+  // dem Welcome-Modal-Backdrop unter.
+  useEffect(() => {
+    CoachmarkService.setActive('home', visible);
+    return () => {
+      CoachmarkService.setActive('home', false);
+    };
   }, [visible]);
 
   // Wenn der Fetch gescheitert ist UND wir gerade die Spotlight-

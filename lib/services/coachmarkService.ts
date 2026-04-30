@@ -179,4 +179,60 @@ export const CoachmarkService = {
       listeners.delete(listener);
     };
   },
+
+  // ─── Walkthrough Activity Tracking ─────────────────────────────
+  //
+  // Walkthroughs (Welcome + Spotlights) wollen exklusive Bühne —
+  // wenn eine Tour läuft sollen Gamification-Notifications (Banner,
+  // Level-Up-Modal, Punkte-Toasts) NICHT parallel feuern, sondern
+  // queuen und nach Tour-Ende fired werden. Sonst sieht der User
+  // die Reward-Feedbacks gar nicht weil sie unter dem
+  // Walkthrough-Backdrop versteckt sind.
+  //
+  // Jeder Walkthrough-Component meldet sich beim Mount mit
+  // setActive(id, true) an, beim Unmount mit setActive(id, false).
+  // GamificationProvider subscribed via onActivityChange und
+  // queued seine Notifications wenn isAnyActive() === true.
+
+  setActive(id: string, isActive: boolean): void {
+    if (isActive) {
+      activeWalkthroughs.add(id);
+    } else {
+      activeWalkthroughs.delete(id);
+    }
+    const any = activeWalkthroughs.size > 0;
+    for (const fn of Array.from(activityListeners)) {
+      try {
+        fn(any);
+      } catch (e) {
+        console.warn('Coachmark activity listener threw (non-fatal):', e);
+      }
+    }
+  },
+
+  isAnyActive(): boolean {
+    return activeWalkthroughs.size > 0;
+  },
+
+  onActivityChange(listener: (anyActive: boolean) => void): () => void {
+    activityListeners.add(listener);
+    // Initial-push: aktueller State sofort an Listener
+    try {
+      listener(activeWalkthroughs.size > 0);
+    } catch (e) {
+      console.warn('Coachmark activity initial-push threw (non-fatal):', e);
+    }
+    return () => {
+      activityListeners.delete(listener);
+    };
+  },
 };
+
+// ─── Walkthrough-Activity globaler State ──────────────────────────
+//
+// Set statt Boolean weil mehrere Walkthroughs theoretisch parallel
+// mounten könnten (z.B. wenn jemand schnell zwischen Tabs wechselt).
+// `isAnyActive` ist die Frage die uns interessiert.
+const activeWalkthroughs = new Set<string>();
+type ActivityListener = (anyActive: boolean) => void;
+const activityListeners = new Set<ActivityListener>();

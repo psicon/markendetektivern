@@ -6,6 +6,7 @@ import {
   setLevelUpHandler,
   setPointsEarnedHandler
 } from '@/lib/services/achievementService';
+import { CoachmarkService } from '@/lib/services/coachmarkService';
 import {
   gamificationSettingsService,
   getAchievementTier,
@@ -206,6 +207,42 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   // 📱 App Rating Modal State
   const [showAppRatingModal, setShowAppRatingModal] = useState(false);
 
+  // ─── Walkthrough-Active Tracking ──────────────────────────────
+  //
+  // Wenn ein Walkthrough (HomeWalkthrough oder ProductDetail-
+  // Walkthrough) sichtbar ist, sollen ALLE Gamification-
+  // Notifications (Banner, Level-Up-Modal, Achievement-Modal,
+  // Punkte-Toasts, Streak-Toasts) NICHT parallel feuern, sondern
+  // queuen und nach Tour-Ende abarbeiten. Sonst gehen sie unter
+  // dem Tour-Backdrop unter und der User sieht seine Belohnung
+  // nicht.
+  //
+  // Subscribe via CoachmarkService.onActivityChange (Modul-Singleton).
+  // Walkthroughs registrieren sich mit setActive(id, true/false).
+  const [walkthroughActive, setWalkthroughActive] = useState(false);
+  useEffect(() => {
+    const off = CoachmarkService.onActivityChange((any) => {
+      setWalkthroughActive(any);
+    });
+    return off;
+  }, []);
+
+  // Pending-Queues für Toasts. Banner und Level-Up haben schon
+  // eigene Pending-States; Toasts werden bisher synchron gefeuert
+  // → wir brauchen jetzt explizite Queues damit sie defered
+  // werden können.
+  const [pendingPointsToasts, setPendingPointsToasts] = useState<
+    Array<{ points: number; message: string }>
+  >([]);
+  const [pendingStreakToasts, setPendingStreakToasts] = useState<
+    Array<{ streakDays: number; bonusPoints?: number }>
+  >([]);
+  // Major-Achievement-Modal kann auch gequeued werden falls ein
+  // Walkthrough aktiv ist (das volle Konfetti-Modal soll nicht
+  // unter dem Tour-Backdrop verschwinden).
+  const [pendingMajorAchievement, setPendingMajorAchievement] =
+    useState<Achievement | null>(null);
+
   // 🎯 Stabile Callback-Funktionen mit useCallback
   //
   // Tier-Routing: subtle → Banner unten, major → Modal vollformat.
@@ -227,16 +264,15 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     const tier = getAchievementTier(achievement);
 
     if (tier === 'subtle') {
-      // Subtle: Banner unten, 1.5 s defered. ABER: wenn beim
-      // Anzeigezeitpunkt ein Major-Overlay aktiv oder pending ist,
-      // queue'n wir den Banner statt ihn dazu zu rendern. Das
-      // Major hat Vorrang — der Banner kommt nach Close.
-      //
-      // Den Check machen wir IM TIMER-CALLBACK (nicht jetzt) damit
-      // wir den aktuellen State sehen, falls in den 1.5 s ein
-      // Major-Overlay dazukommt.
+      // Subtle: Banner unten, 1.5 s defered. Queue wenn beim
+      // Anzeigezeitpunkt ein Major-Overlay läuft ODER ein
+      // Walkthrough aktiv ist.
       const data = bannerDataFromAchievement(achievement);
       setTimeout(() => {
+        // Walkthrough-Check direkt am Service-Singleton — der
+        // useState-walkthroughActive ist evtl. stale wenn der
+        // Setter noch nicht durch den React-Cycle ist.
+        const walkthroughOn = CoachmarkService.isAnyActive();
         setLevelUpData(currentLevelUp => {
           setAchievementData(currentAch => {
             setPendingLevelUp(currentPendingLevel => {
@@ -244,9 +280,9 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
                 currentLevelUp.visible ||
                 currentAch.visible ||
                 currentPendingLevel !== null;
-              if (majorActive) {
+              if (majorActive || walkthroughOn) {
                 console.log(
-                  '🎖️ Major-Overlay aktiv — Banner queued bis Major schließt',
+                  `🎖️ Banner queued (major=${majorActive}, walkthrough=${walkthroughOn})`,
                 );
                 setPendingBannerData(data);
               } else {
@@ -262,7 +298,14 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
       return;
     }
 
-    // Major: bestehender Modal-Flow via overlayManager.
+    // Major: bestehender Modal-Flow via overlayManager. Auch hier
+    // queuen wir wenn ein Walkthrough aktiv ist — das Modal soll
+    // nicht parallel zur Tour aufploppen.
+    if (CoachmarkService.isAnyActive()) {
+      console.log('🏆 Major Achievement queued — Walkthrough läuft');
+      setPendingMajorAchievement(achievement);
+      return;
+    }
     overlayManager.showOverlay(() => {
       setAchievementData(() => ({
         visible: true,
@@ -273,17 +316,19 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   }, []);
 
   const pointsHandler = useCallback(async (points: number, action: string, message: string) => {
-    if (points > 0) {
-      // Prüfe ob Benachrichtigungen deaktiviert sind
-      const notificationsDisabled = await gamificationSettingsService.areNotificationsDisabled();
-      if (notificationsDisabled) {
-        console.log('🔕 Punkte Toast unterdrückt (Benachrichtigungen deaktiviert)');
-        return;
-      }
-      
-      // Neue Toast-Bibliothek: stapelbar, top-position, swipe dismiss, theme-aware
-      showPointsToast(message, points, colorScheme || 'light');
+    if (points <= 0) return;
+    const notificationsDisabled = await gamificationSettingsService.areNotificationsDisabled();
+    if (notificationsDisabled) {
+      console.log('🔕 Punkte Toast unterdrückt (Spielerische Inhalte deaktiviert)');
+      return;
     }
+    // Walkthrough-Active → queuen, drainen nach Tour-Ende.
+    if (CoachmarkService.isAnyActive()) {
+      console.log('🎯 Punkte-Toast queued — Walkthrough läuft');
+      setPendingPointsToasts((prev) => [...prev, { points, message }]);
+      return;
+    }
+    showPointsToast(message, points, colorScheme || 'light');
   }, [colorScheme]);
 
   const levelUpHandler = useCallback(async (newLevel: number, oldLevel: number, unlockedCategory?: { id: string; name: string; imageUrl: string }) => {
@@ -309,9 +354,8 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     if (isSubtleLevelUp(newLevel)) {
       console.log('🎯 Level-Up tier=subtle → Banner statt Modal');
       const data = bannerDataFromLevelUp(newLevel, oldLevel, unlockedCategory);
-      // Gleiche Queue-Logik wie für Achievement-Banner: bei aktivem
-      // Major-Overlay queuen wir.
       setTimeout(() => {
+        const walkthroughOn = CoachmarkService.isAnyActive();
         setLevelUpData(currentLevelUp => {
           setAchievementData(currentAch => {
             setPendingLevelUp(currentPendingLevel => {
@@ -319,7 +363,7 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
                 currentLevelUp.visible ||
                 currentAch.visible ||
                 currentPendingLevel !== null;
-              if (majorActive) {
+              if (majorActive || walkthroughOn) {
                 setPendingBannerData(data);
               } else {
                 setBannerData(data);
@@ -335,18 +379,23 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     }
 
     // ─── Major: bestehender Modal-Flow ───────────────────────
+    //
+    // Walkthrough-Active hat Vorrang: Major-Modal queuen, nach
+    // Tour-Ende drainen (siehe drain-Effects unten).
     const newLevelData = { visible: true, newLevel, oldLevel, unlockedCategory };
+    if (CoachmarkService.isAnyActive()) {
+      console.log('🎯 Level-Up Major queued — Walkthrough läuft');
+      setPendingLevelUp(newLevelData);
+      return;
+    }
 
-    // Verwende OverlayManager um Konflikte zu vermeiden
     overlayManager.showOverlay(() => {
-      // Prüfe ob bereits ein Achievement angezeigt wird - verwende aktuellen State
       setAchievementData(currentAchievement => {
         if (currentAchievement.visible) {
           console.log('🏆 Achievement aktiv - Level-Up wird in Queue gestellt');
           setPendingLevelUp(newLevelData);
           return currentAchievement;
         } else {
-          // Kein Achievement aktiv - Level-Up direkt anzeigen
           setLevelUpData(newLevelData);
           return currentAchievement;
         }
@@ -399,9 +448,10 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     if (
       levelUpData.visible ||
       achievementData.visible ||
-      pendingLevelUp !== null
+      pendingLevelUp !== null ||
+      walkthroughActive
     ) {
-      console.log('🎖️ Major-Overlay öffnet — aktiver Banner geht in Queue');
+      console.log('🎖️ Major/Walkthrough öffnet — aktiver Banner geht in Queue');
       setPendingBannerData(bannerData);
       setBannerData(null);
     }
@@ -410,20 +460,22 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     levelUpData.visible,
     achievementData.visible,
     pendingLevelUp,
+    walkthroughActive,
   ]);
 
-  // 🎖️ Banner-Drain nach Major-Close
+  // 🎖️ Banner-Drain nach Major-/Walkthrough-Close
   //
-  // Wenn alle Major-Overlays geschlossen sind und ein Pending Banner
-  // wartet, zeigen wir ihn jetzt — mit kurzer Grace-Period damit der
-  // Modal-Close-Animation nicht visuell mit dem Banner-Slide-In
-  // überlappt.
+  // Wenn alle Major-Overlays geschlossen sind UND kein Walkthrough
+  // läuft, zeigen wir den Pending-Banner jetzt — mit kurzer Grace-
+  // Period damit Close-Animationen nicht mit dem Banner-Slide-In
+  // überlappen.
   useEffect(() => {
     if (!pendingBannerData) return;
     if (
       levelUpData.visible ||
       achievementData.visible ||
-      pendingLevelUp !== null
+      pendingLevelUp !== null ||
+      walkthroughActive
     ) {
       return;
     }
@@ -437,7 +489,94 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     levelUpData.visible,
     achievementData.visible,
     pendingLevelUp,
+    walkthroughActive,
   ]);
+
+  // 🏆 Major-Achievement-Drain nach Walkthrough-Close
+  //
+  // Major-Achievement-Modal wartet auch auf Walkthrough-Ende.
+  // Sobald Tour weg, fired über den OverlayManager (gleiche Logik
+  // wie der direkte Pfad).
+  useEffect(() => {
+    if (!pendingMajorAchievement) return;
+    if (walkthroughActive) return;
+    if (
+      levelUpData.visible ||
+      achievementData.visible ||
+      pendingLevelUp !== null
+    ) {
+      return;
+    }
+    const t = setTimeout(() => {
+      const ach = pendingMajorAchievement;
+      setPendingMajorAchievement(null);
+      overlayManager.showOverlay(() => {
+        setAchievementData(() => ({
+          visible: true,
+          achievement: ach,
+          autoHide: false,
+        }));
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [
+    pendingMajorAchievement,
+    walkthroughActive,
+    levelUpData.visible,
+    achievementData.visible,
+    pendingLevelUp,
+  ]);
+
+  // 🎯 Pending Level-Up-Drain bei Walkthrough-Ende
+  //
+  // levelUpHandler queued bei aktivem Walkthrough in pendingLevelUp.
+  // Sobald Walkthrough weg + kein anderes Major aktiv → fire'n.
+  // (Bestehender Achievement→LevelUp-Drain in handleAchievementClose
+  //  bleibt unverändert — sequenziert weiterhin nach Achievement.)
+  useEffect(() => {
+    if (!pendingLevelUp) return;
+    if (walkthroughActive) return;
+    if (achievementData.visible || levelUpData.visible) return;
+    const t = setTimeout(() => {
+      setLevelUpData(pendingLevelUp);
+      setPendingLevelUp(null);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [
+    pendingLevelUp,
+    walkthroughActive,
+    achievementData.visible,
+    levelUpData.visible,
+  ]);
+
+  // 🟡 Pending Punkte/Streak-Toasts-Drain bei Walkthrough-Ende
+  //
+  // Toasts sind brief (3-4 s) und stack-bar (zentrale Toast-Lib).
+  // Sobald Tour weg → alle pending toasts sequentiell mit kurzem
+  // Stagger feuern damit sie nicht alle auf einmal kommen.
+  useEffect(() => {
+    if (walkthroughActive) return;
+    if (pendingPointsToasts.length === 0) return;
+    const queue = pendingPointsToasts;
+    setPendingPointsToasts([]);
+    queue.forEach((t, idx) => {
+      setTimeout(() => {
+        showPointsToast(t.message, t.points, colorScheme || 'light');
+      }, 300 + idx * 200);
+    });
+  }, [walkthroughActive, pendingPointsToasts, colorScheme]);
+
+  useEffect(() => {
+    if (walkthroughActive) return;
+    if (pendingStreakToasts.length === 0) return;
+    const queue = pendingStreakToasts;
+    setPendingStreakToasts([]);
+    queue.forEach((t, idx) => {
+      setTimeout(() => {
+        showStreakToastNew(t.streakDays, t.bonusPoints, colorScheme || 'light');
+      }, 600 + idx * 200);
+    });
+  }, [walkthroughActive, pendingStreakToasts, colorScheme]);
 
   // 📱 Periodic check for pending rating - BUT BLOCKED DURING OVERLAYS!
   useEffect(() => {
@@ -512,8 +651,12 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   // Funktion zum Anzeigen der Streak Toast (nutzt neue Toast-Library mit STREAK-Farbe)
   const showStreakToast = useCallback((streakDays: number, bonusPoints?: number) => {
     console.log(`🔥 Streak Toast triggered: ${streakDays} Tage (${bonusPoints || 0} Punkte)`);
-    
-    // Verwende neue Toast-Library mit konfigurierbarer STREAK-Farbe (orange), theme-aware
+    // Walkthrough-Active → queuen.
+    if (CoachmarkService.isAnyActive()) {
+      console.log('🎯 Streak-Toast queued — Walkthrough läuft');
+      setPendingStreakToasts((prev) => [...prev, { streakDays, bonusPoints }]);
+      return;
+    }
     showStreakToastNew(streakDays, bonusPoints, colorScheme || 'light');
   }, [colorScheme]);
 

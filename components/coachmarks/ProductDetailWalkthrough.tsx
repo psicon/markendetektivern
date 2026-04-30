@@ -37,6 +37,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { CoachmarkService } from '@/lib/services/coachmarkService';
 import { SpotlightOverlay } from './SpotlightOverlay';
 
 // Anchor-IDs — exportiert sodass die Detail-Screens sie EXAKT
@@ -86,6 +87,15 @@ export function ProductDetailWalkthrough({
   // sonst landet ein Replay aus dem Dev-Panel mitten in der Tour.
   useEffect(() => {
     if (visible) setPhase('welcome');
+  }, [visible]);
+
+  // Walkthrough-Active-Tracking — Gamification-Notifications
+  // queued solange Tour läuft, fired danach.
+  useEffect(() => {
+    CoachmarkService.setActive('product-detail', visible);
+    return () => {
+      CoachmarkService.setActive('product-detail', false);
+    };
   }, [visible]);
 
   const advance = useCallback(() => {
