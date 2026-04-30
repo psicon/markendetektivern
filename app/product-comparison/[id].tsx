@@ -39,6 +39,7 @@ import {
   PRODUCT_DETAIL_ANCHOR_CART,
   PRODUCT_DETAIL_ANCHOR_CONTEXT,
   PRODUCT_DETAIL_ANCHOR_FAVORITE,
+  PRODUCT_DETAIL_ANCHOR_HERO,
   PRODUCT_DETAIL_ANCHOR_RATING,
   ProductDetailWalkthrough,
 } from '@/components/coachmarks/ProductDetailWalkthrough';
@@ -163,12 +164,11 @@ export default function ProductComparisonScreen() {
   // auf den jeweils zuletzt-gemounteten zeigen. ScrollView-Ref
   // braucht's für den Scroll-Lock während Spotlights aktiv sind.
   const detailCoachmark = useCoachmark('product-detail');
+  const heroAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_HERO);
   const cartAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_CART);
   const favAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_FAVORITE);
   const ratingAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_RATING);
-  // Auf product-comparison zeigt Context auf den NoName-Carousel —
-  // letzte Spotlight-Phase erklärt dass das die Alternativen vom
-  // gleichen Hersteller sind und wie die Stufen 3-5 zu lesen sind.
+  // Auf product-comparison zeigt Context auf den NoName-Carousel.
   const contextAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_CONTEXT);
   const detailScrollRef = useRef<ScrollView>(null);
 
@@ -939,6 +939,13 @@ export default function ProductComparisonScreen() {
             </View>
           }
         >
+          {/* Coachmark-Anchor 'product.hero' wrappt das Markenprodukt-
+              Hero — Spotlight-Phase 1 hebt das ganze Hero hervor. */}
+          <View
+            ref={heroAnchor.ref}
+            onLayout={heroAnchor.onLayout}
+            collapsable={false}
+          >
           <View
             ref={(r) => mp && setProductImageRef(mp.id, r as any)}
             collapsable={false}
@@ -1091,6 +1098,7 @@ export default function ProductComparisonScreen() {
               </View>
             ) : null}
           </View>
+          </View>{/* /heroAnchor wrapper */}
         </Crossfade>
 
         {/* ─── BOTTOM wave (Crossfade, gated on `nonamesReady`)

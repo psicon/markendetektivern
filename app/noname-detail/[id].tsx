@@ -37,6 +37,7 @@ import {
   PRODUCT_DETAIL_ANCHOR_CART,
   PRODUCT_DETAIL_ANCHOR_CONTEXT,
   PRODUCT_DETAIL_ANCHOR_FAVORITE,
+  PRODUCT_DETAIL_ANCHOR_HERO,
   PRODUCT_DETAIL_ANCHOR_RATING,
   ProductDetailWalkthrough,
 } from '@/components/coachmarks/ProductDetailWalkthrough';
@@ -121,6 +122,7 @@ export default function NoNameDetailScreen() {
   // Hero-Bottom-Right-Cluster. ScrollView-Ref braucht's für den
   // Scroll-Lock während Spotlights aktiv sind (siehe SpotlightOverlay).
   const detailCoachmark = useCoachmark('product-detail');
+  const heroAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_HERO);
   const cartAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_CART);
   const favAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_FAVORITE);
   const ratingAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_RATING);
@@ -714,6 +716,13 @@ export default function NoNameDetailScreen() {
             </View>
           }
         >
+          {/* Coachmark-Anchor 'product.hero' wrappt den Hero —
+              Spotlight-Phase 1 hebt das ganze Hero hervor. */}
+          <View
+            ref={heroAnchor.ref}
+            onLayout={heroAnchor.onLayout}
+            collapsable={false}
+          >
           <View
             ref={heroRef}
             collapsable={false}
@@ -864,6 +873,7 @@ export default function NoNameDetailScreen() {
               </View>
             ) : null}
           </View>
+          </View>{/* /heroAnchor wrapper */}
         </Crossfade>
 
         {/* ─── BOTTOM wave (Crossfade, delay 150 ms)
