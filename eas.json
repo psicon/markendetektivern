@@ -30,6 +30,13 @@
       "android": {
         "serviceAccountKeyPath": "./markendetektive-895f7-58c0a81f4613.json"
       }
+    },
+    "openTesting": {
+      "android": {
+        "serviceAccountKeyPath": "./markendetektive-895f7-58c0a81f4613.json",
+        "track": "beta",
+        "releaseStatus": "completed"
+      }
     }
   }
 }
