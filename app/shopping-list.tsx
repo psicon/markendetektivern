@@ -68,6 +68,7 @@ import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
 import { TOAST_MESSAGES } from '@/constants/ToastMessages';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { getProductImage } from '@/lib/utils/productImage';
+import { calculateSavings } from '@/lib/utils/savings';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
@@ -138,39 +139,20 @@ const SORT_OPTIONS_NONAME: readonly (readonly [SortBy, string])[] = [
 
 // ─── Helpers ───────────────────────────────────────────────────────
 
-// Optimierte Ersparnis-Berechnung (nutzt serverseitige Felder wenn verfügbar)
+// Ersparnis-Berechnung delegiert an den shared util
+// `lib/utils/savings.ts`. Vorher hatten product-comparison und
+// shopping-list zwei verschiedene Implementierungen — der eine
+// rechnete absolute Preise, der andere per-pack-unit. Resultat:
+// dasselbe Produkt zeigte je nach Screen unterschiedliche
+// Ersparnis-Werte. Jetzt single source of truth.
 const getSavingsData = (
   brandProduct: any,
   noNameProduct: any,
 ): { savingsEur: number; savingsPercent: number } => {
-  if (
-    noNameProduct?.ersparnis !== undefined &&
-    noNameProduct?.ersparnisProz !== undefined
-  ) {
-    return {
-      savingsEur: parseFloat(String(noNameProduct.ersparnis || 0)),
-      savingsPercent: parseInt(String(noNameProduct.ersparnisProz || 0)),
-    };
-  }
-  if (
-    !brandProduct?.preis ||
-    !noNameProduct?.preis ||
-    !brandProduct?.packSize ||
-    !noNameProduct?.packSize
-  ) {
-    return { savingsEur: 0, savingsPercent: 0 };
-  }
-  const brandPricePerUnit = brandProduct.preis / brandProduct.packSize;
-  const noNamePricePerUnit = noNameProduct.preis / noNameProduct.packSize;
-  const savingsPercent =
-    ((brandPricePerUnit - noNamePricePerUnit) / brandPricePerUnit) * 100;
-  const savingsEur = Math.max(
-    0,
-    (brandPricePerUnit - noNamePricePerUnit) * noNameProduct.packSize,
-  );
+  const r = calculateSavings(brandProduct, noNameProduct);
   return {
-    savingsEur: Math.round(savingsEur * 100) / 100,
-    savingsPercent: Math.max(0, Math.round(savingsPercent)),
+    savingsEur: Math.round(r.eur * 100) / 100,
+    savingsPercent: r.pct,
   };
 };
 

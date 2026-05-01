@@ -32,6 +32,7 @@ import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
 import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
 import { ImageZoomModal, type SourceRect } from '@/components/design/ImageZoomModal';
 import { getProductImage } from '@/lib/utils/productImage';
+import { calculateSavings } from '@/lib/utils/savings';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { CoachmarkScrollProvider } from '@/components/coachmarks/CoachmarkScrollContext';
@@ -130,17 +131,27 @@ function formatPackParts(
   return { sizeLabel, unitPrice };
 }
 
-function savings(brand: { preis?: number } | undefined, nn: { preis?: number } | undefined) {
-  // Returns SIGNED values:
-  //   • pct > 0 → noname is cheaper → user saves money (badge green)
-  //   • pct < 0 → noname is more expensive → markup (badge red)
-  //   • pct === 0 → identical price → no badge
-  // Previously the eur delta was clipped to 0, hiding the rare
-  // "eigenmarke costs MORE" case under the same green-savings UI.
-  if (!brand?.preis || !nn?.preis) return { eur: 0, pct: 0 };
-  const eur = brand.preis - nn.preis;
-  const pct = Math.round((eur / brand.preis) * 100);
-  return { eur, pct };
+// Savings-Berechnung nutzt jetzt den shared util
+// `lib/utils/savings.ts` (Drei-Stufen-Resolver: precomputed
+// Firestore-Felder → per-pack-unit-Vergleich → absolute Preise).
+// Vorher war die Funktion hier eine simple Absolutpreis-Subtraktion,
+// die bei unterschiedlichen Pack-Größen (z.B. Brand 150g/0,79€ vs
+// NoName 400g/1,19€) irreführende "+51% Markup"-Badges produzierte
+// obwohl per Kg der NoName 44 % günstiger war. Markups (negative
+// Ersparnis) werden vom Util auf 0 geclamped — wir zeigen nur
+// echte Savings, keine roten +%-Banner mehr.
+function savings(
+  brand: { preis?: number; packSize?: number } | undefined,
+  nn:
+    | {
+        preis?: number;
+        packSize?: number;
+        ersparnis?: number;
+        ersparnisProz?: number;
+      }
+    | undefined,
+) {
+  return calculateSavings(brand, nn);
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -1299,46 +1310,43 @@ export default function ProductComparisonScreen() {
                       ...shadows.md,
                     })}
                   >
-                    {/* Price-delta flag — top-right corner.
-                        • Savings (pct > 0) → primary green, "−X%"
-                        • Markup  (pct < 0) → red,           "+X%"
-                        • Equal   (pct == 0) → no badge */}
-                    {sv.pct !== 0 ? (() => {
-                      const isSaving = sv.pct > 0;
-                      const flagColor = isSaving ? brand.primary : '#e53935';
-                      return (
-                        <View
+                    {/* Savings-Badge — top-right corner. Wird nur
+                        gezeigt wenn echte Ersparnis > 0 vorliegt
+                        (calculateSavings returned 0 wenn NoName
+                        per-Unit teurer wäre — Markups blenden wir
+                        aus, sauberere UX). */}
+                    {sv.pct > 0 ? (
+                      <View
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          right: 0,
+                          backgroundColor: brand.primary,
+                          paddingVertical: 7,
+                          paddingHorizontal: 12,
+                          borderTopRightRadius: 16,
+                          borderBottomLeftRadius: 14,
+                          zIndex: 2,
+                          shadowColor: brand.primary,
+                          shadowOpacity: 0.35,
+                          shadowOffset: { width: 0, height: 4 },
+                          shadowRadius: 10,
+                          elevation: 3,
+                        }}
+                      >
+                        <Text
                           style={{
-                            position: 'absolute',
-                            top: 0,
-                            right: 0,
-                            backgroundColor: flagColor,
-                            paddingVertical: 7,
-                            paddingHorizontal: 12,
-                            borderTopRightRadius: 16,
-                            borderBottomLeftRadius: 14,
-                            zIndex: 2,
-                            shadowColor: flagColor,
-                            shadowOpacity: 0.35,
-                            shadowOffset: { width: 0, height: 4 },
-                            shadowRadius: 10,
-                            elevation: 3,
+                            fontFamily,
+                            fontWeight: fontWeight.extraBold,
+                            fontSize: 13,
+                            color: '#fff',
+                            letterSpacing: -0.1,
                           }}
                         >
-                          <Text
-                            style={{
-                              fontFamily,
-                              fontWeight: fontWeight.extraBold,
-                              fontSize: 13,
-                              color: '#fff',
-                              letterSpacing: -0.1,
-                            }}
-                          >
-                            {isSaving ? '−' : '+'}{Math.abs(sv.pct)}%
-                          </Text>
-                        </View>
-                      );
-                    })() : null}
+                          −{sv.pct}%
+                        </Text>
+                      </View>
+                    ) : null}
 
                     <View style={{ flexDirection: 'row', padding: 12, gap: 12, alignItems: 'stretch' }}>
                       {/* Thumb — 76×76 so its height roughly matches the
@@ -1399,7 +1407,7 @@ export default function ProductComparisonScreen() {
                         style={{
                           flex: 1,
                           minWidth: 0,
-                          paddingRight: sv.pct !== 0 ? 50 : 0,
+                          paddingRight: sv.pct > 0 ? 50 : 0,
                         }}
                       >
                         {/* Handelsmarke eyebrow — ALWAYS pinned to the

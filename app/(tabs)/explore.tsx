@@ -2065,33 +2065,16 @@ export default function ExploreScreen() {
           // the user instant feedback on where their hits live.
           // Browse mode keeps the labels bare to avoid a noisy
           // tab bar with arbitrary "all-products" totals.
+          // Tab-Labels: keine Counts mehr, auch nicht bei aktiver
+          // Suche. User-Feedback "bei suchergebnissen keine anzahl
+          // im tab anzeigen" — die Counts wirkten unruhig + lenkten
+          // vom eigentlichen Such-Result-Grid ab.
           tabs={
-            searchActiveQuery
-              ? ([
-                  // Counts reflect what the user ACTUALLY sees after the
-                  // currently-active filter chips are applied — not the
-                  // raw Algolia totals. Matches browse mode's behaviour
-                  // where chips immediately rewrite the visible grid,
-                  // and prevents the confusing "tab says 77 but I see 3"
-                  // mismatch when filters knock most hits out.
-                  {
-                    key: 'alle',
-                    label: `Alle (${filteredSearchEigen.length + filteredSearchMarken.length})`,
-                  },
-                  {
-                    key: 'eigen',
-                    label: `Eigenmarken (${filteredSearchEigen.length})`,
-                  },
-                  {
-                    key: 'marken',
-                    label: `Marken (${filteredSearchMarken.length})`,
-                  },
-                ] as const)
-              : ([
-                  { key: 'alle', label: 'Alle' },
-                  { key: 'eigen', label: 'Eigenmarken' },
-                  { key: 'marken', label: 'Marken' },
-                ] as const)
+            [
+              { key: 'alle', label: 'Alle' },
+              { key: 'eigen', label: 'Eigenmarken' },
+              { key: 'marken', label: 'Marken' },
+            ] as const
           }
           value={tab}
           onChange={switchTab}
