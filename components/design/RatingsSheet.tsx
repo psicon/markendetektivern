@@ -131,6 +131,25 @@ export function RatingsSheet({
     setComment(existingRating?.comment ?? '');
   };
 
+  // Sync das Formular IMMER wenn `existingRating` sich ändert:
+  //   • Late-Arrival vom Parent (Fetch landet nach dem Sheet-Open)
+  //     → Formular füllt sich auf
+  //   • Wechsel zwischen Produkten OHNE Schließen des Sheets (z.B.
+  //     Alt-Card-Picker) → Formular reflektiert das neue Produkt
+  //   • existingRating wechselt zu null (User hatte das alte
+  //     Produkt bewertet, das neue noch nicht) → Formular auf 0
+  // Dep-Key kombiniert .id mit einem "none"-Sentinel damit auch der
+  // null-Übergang ein Re-Run triggert.
+  useEffect(() => {
+    setOverall(existingRating?.ratingOverall ?? 0);
+    setTaste(existingRating?.ratingTasteFunction ?? 0);
+    setPriceVal(existingRating?.ratingPriceValue ?? 0);
+    setContent(existingRating?.ratingContent ?? 0);
+    setSimilarity(existingRating?.ratingSimilarity ?? 0);
+    setComment(existingRating?.comment ?? '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingRating?.id ?? 'none']);
+
   // Slide-up + backdrop fade animation. Sheet stays mounted through the
   // out-animation so the close gesture is actually visible.
   const [mounted, setMounted] = useState(visible);
@@ -763,7 +782,9 @@ export function RatingsSheet({
                           color: '#fff',
                         }}
                       >
-                        Bewertung schreiben
+                        {isEditing
+                          ? 'Bewertung aktualisieren'
+                          : 'Bewertung schreiben'}
                       </Text>
                     </Pressable>
                   ) : (
