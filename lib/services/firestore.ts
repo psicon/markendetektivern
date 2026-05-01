@@ -514,19 +514,31 @@ export class FirestoreService {
         const productWithDetails: FirestoreDocument<Produkte> & {
           discounter?: Discounter;
           handelsmarke?: Handelsmarken;
+          hersteller?: any;
         } = {
           id: docSnap.id,
           ...productData
         };
 
         // Populate references parallel für UI-Daten
-        const [discounter, handelsmarke] = await Promise.all([
+        // hersteller_new ist neu dabei — UI zeigt seinen `name` als
+        // zweite Zeile unter dem Produkttitel auf NoName-Karten
+        // (Stöbern, shopping-list, comparison alt-cards). Cost: +1
+        // ref-fetch pro Produkt — aber `getDocumentByReference` cacht
+        // 30 min sessionsweit, und viele Produkte teilen denselben
+        // Hersteller (e.g. "Andechser Molkerei" für 50 Produkte) →
+        // praktisch fast immer Cache-Hits nach dem ersten Load.
+        const [discounter, handelsmarke, hersteller] = await Promise.all([
           this.getDocumentByReference<Discounter>(productData.discounter),
-          this.getDocumentByReference<Handelsmarken>(productData.handelsmarke)
+          this.getDocumentByReference<Handelsmarken>(productData.handelsmarke),
+          (productData as any).hersteller
+            ? this.getDocumentByReference<any>((productData as any).hersteller)
+            : Promise.resolve(null),
         ]);
 
         if (discounter) productWithDetails.discounter = discounter;
         if (handelsmarke) productWithDetails.handelsmarke = handelsmarke;
+        if (hersteller) productWithDetails.hersteller = hersteller;
 
         return productWithDetails;
       });
