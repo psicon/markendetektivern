@@ -1509,7 +1509,13 @@ export default function ProductComparisonScreen() {
                           fontSize: 11,
                           color: '#5c6769',
                           paddingHorizontal: 14,
-                          paddingTop: 10,
+                          // Vorher 10 — User-Feedback: "abstand zwischen
+                          // packpreis und preis ist bei den unteren
+                          // cards größer als bei der oberen". Hero-Pill
+                          // hat compactes paddingVertical:8 + marginTop:4.
+                          // Hier 6 above pack + 0 zwischen pack/price-Row
+                          // bringt die visuelle Dichte in Einklang.
+                          paddingTop: 6,
                         }}
                       >
                         {nnPackParts.unitPrice
@@ -1523,7 +1529,10 @@ export default function ProductComparisonScreen() {
                         flexDirection: 'row',
                         alignItems: 'center',
                         padding: 14,
-                        paddingTop: nnPackParts ? 2 : 12,
+                        // 2 → 0 wenn Pack-Text drüber, sodass der Gap
+                        // pack→price minimal ist (matched die Hero-
+                        // Pill-Compactness).
+                        paddingTop: nnPackParts ? 0 : 12,
                         gap: 10,
                       }}
                     >
