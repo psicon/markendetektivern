@@ -167,7 +167,21 @@ export default function ExploreScreen() {
   const { theme, brand, shadows, stufen } = useTokens();
   const scheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ tab?: string; categoryFilter?: string; markeFilter?: string }>();
+  const params = useLocalSearchParams<{
+    tab?: string;
+    categoryFilter?: string;
+    markeFilter?: string;
+    query?: string;
+  }>();
+  // Initial-Query aus den Route-Params. Wenn von Home aus mit
+  // `?query=...&tab=alle` aufgerufen, ist das DER Wert mit dem
+  // Stöbern beim Mount sofort starten soll — kein "erst Browse-Mode
+  // Flash dann Search-Mode Switch", sondern direkt im Search-Mode.
+  const initialQuery =
+    typeof params.query === 'string' && params.query.trim().length > 0
+      ? params.query.trim()
+      : '';
+  const hasInitialQuery = initialQuery.length > 0;
   const { userProfile } = useAuth();
   const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
@@ -191,8 +205,22 @@ export default function ExploreScreen() {
   const pageIndexShared = useSharedValue(0);
 
   // ─── UI state ──────────────────────────────────────────────────────────
-  const [tab, setTab] = useState<Tab>('eigen');
-  const [query, setQuery] = useState('');
+  //
+  // Initial-Tab + Initial-Query werden LAZY aus den Route-Params
+  // gelesen (nicht via useEffect später nachgeschoben). Damit:
+  //   • erste Render-Frame zeigt schon die Alle-Tab als aktiv (kein
+  //     Tab-Swipe-Animation von Eigenmarken auf Alle)
+  //   • PagerView's initialPage matcht den Tab-State (kein Mount-
+  //     Sprung)
+  //   • search-mode UI (Active-Query-Chip, Search-Mode Render) ist
+  //     ab Frame 1 da — kein Flash von Browse-Mode-Inhalten
+  const [tab, setTab] = useState<Tab>(() => {
+    if (hasInitialQuery) return 'alle';
+    if (params.tab === 'alle') return 'alle';
+    if (params.tab === 'markenprodukte') return 'marken';
+    return 'eigen';
+  });
+  const [query, setQuery] = useState(initialQuery);
   const [market, setMarket] = useState<string>('all');
   // Country filter inside the Markt sheet — default DE.
   const [marketCountry, setMarketCountry] = useState<string>('DE');
@@ -248,12 +276,21 @@ export default function ExploreScreen() {
   // `getProductWithDetails` / `getMarkenProduktWithDetails` which
   // already memoise + dedupe inflight, so subsequent renders /
   // tab-switches reuse the cached resolutions.
-  const [searchActiveQuery, setSearchActiveQuery] = useState<string | null>(null);
+  // searchActiveQuery wird ebenfalls lazy aus den Params gesetzt —
+  // damit der erste Frame schon im Search-Modus ist (Active-Query-
+  // Chip im Filter-Rail sichtbar, Render-Pfad wählt searchHits...
+  // statt browse).
+  const [searchActiveQuery, setSearchActiveQuery] = useState<string | null>(
+    hasInitialQuery ? initialQuery : null,
+  );
   const [searchHitsEigen, setSearchHitsEigen] = useState<AlgoliaSearchResult[]>([]);
   const [searchHitsMarken, setSearchHitsMarken] = useState<AlgoliaSearchResult[]>([]);
   const [searchTotalEigen, setSearchTotalEigen] = useState(0);
   const [searchTotalMarken, setSearchTotalMarken] = useState(0);
-  const [searchLoading, setSearchLoading] = useState(false);
+  // searchLoading initial true wenn wir mit Query mounten — der
+  // erste Frame zeigt dann sofort den Skeleton-Grid (statt eines
+  // Browse-Mode "Keine Treffer"-Flashes oder leeren Frames).
+  const [searchLoading, setSearchLoading] = useState(hasInitialQuery);
   const [searchLoadingMore, setSearchLoadingMore] = useState(false);
   // Algolia pages already fetched per index, used to derive the
   // next page number on infinite-scroll. Reset on every fresh
@@ -275,38 +312,46 @@ export default function ExploreScreen() {
 
   // ─── Route param handling (from Home quick-access) ─────────────────────
   useEffect(() => {
-    // Helper: switch tab + bring the PagerView along. Params-driven
-    // navigation must move BOTH state and the pager — without the
-    // setPage call the chip highlights the new tab while the swipe
-    // viewport still shows the old one.
-    const goTo = (next: Tab) => {
-      setTab(next);
-      const targetPage = PAGE_AT_TAB[next];
-      // The pager may not be mounted yet on initial render — schedule
-      // the sync for the next frame; setPage is a no-op once already
-      // there.
+    // Initial-Tab + Initial-Query sind bereits im useState-Initializer
+    // gesetzt (siehe oben) — wir müssen hier KEINE goTo-RAF mehr feuern,
+    // PagerView mountet schon auf der richtigen Page und der State ist
+    // synchron. Was DIESER Effect noch macht:
+    //
+    //   • Wenn Stöbern bereits gemounted ist und der User über eine
+    //     externe Quelle (z.B. History) erneut mit anderem Param
+    //     reinkommt, sollten Tab + Query updaten. Daher der Tab-
+    //     Sync via setPage hier (re-mount-fall).
+    //   • runSearch ausführen — der eigentliche Algolia-Call. Auf
+    //     dem Initial-Mount mit Pre-Fetch (Home → searchAll fired
+    //     fire-and-forget) hängt sich runSearch via inflight-cache
+    //     an die laufende Promise statt einen zweiten Roundtrip zu
+    //     schicken.
+    //
+    // Tab-Mapping nur wenn Param explizit anders als der schon
+    // gesetzte Tab.
+    let nextTab: Tab | null = null;
+    if (params.tab === 'nonames') nextTab = 'eigen';
+    else if (params.tab === 'markenprodukte') nextTab = 'marken';
+    else if (params.tab === 'alle') nextTab = 'alle';
+    if (typeof params.query === 'string' && params.query.trim()) nextTab = 'alle';
+
+    if (nextTab && nextTab !== tab) {
+      setTab(nextTab);
+      const targetPage = PAGE_AT_TAB[nextTab];
       requestAnimationFrame(() => {
         pagerRef.current?.setPage(targetPage);
       });
-    };
-    if (params.tab === 'nonames') goTo('eigen');
-    if (params.tab === 'markenprodukte') goTo('marken');
-    if (params.tab === 'alle') goTo('alle');
-    // If we arrive with a `query` param (from Home, History, etc.),
-    // pre-fill the input, jump to the Alle tab, and fire the search
-    // immediately. `runSearch` takes the query directly so we don't
-    // have to wait for state to settle.
+    }
+
     if (typeof params.query === 'string' && params.query.trim()) {
       const q = params.query.trim();
-      setQuery(q);
-      goTo('alle');
+      if (q !== query) setQuery(q);
       void runSearch(q);
     }
     if (params.categoryFilter) setCat(String(params.categoryFilter));
     if (params.markeFilter) setBrandId(String(params.markeFilter));
-    // `runSearch` intentionally NOT in deps — it changes every render
-    // (closure over `tab` etc.) and would re-fire the auto-search
-    // every keystroke. We want exactly one search per route arrival.
+    // `runSearch` + `tab` + `query` intentionally NOT in deps — wir
+    // wollen exakt einmal pro Route-Param-Änderung feuern.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.tab, params.categoryFilter, params.markeFilter, params.query]);
 
@@ -1835,7 +1880,11 @@ export default function ExploreScreen() {
       <PagerView
         ref={pagerRef}
         style={{ flex: 1 }}
-        initialPage={1}
+        // Initial-Page matcht den initial-Tab (siehe useState
+        // oben). Bei Aufruf via Suche von Home (?query=...) ist
+        // tab='alle', PagerView mountet direkt auf Page 0 — kein
+        // Tab-Swipe-Animation von Eigenmarken auf Alle nach Mount.
+        initialPage={PAGE_AT_TAB[tab]}
         onPageSelected={onPageSelected}
       >
         {/* ─── Page 0 — Alle (merged eigen + marken) ──────────────────

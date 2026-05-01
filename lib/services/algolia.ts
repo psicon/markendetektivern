@@ -85,6 +85,21 @@ function getOrCreateAnonToken(): string {
   return anonUserToken;
 }
 
+// ─── Inflight-Promise-Dedup ───────────────────────────────────────
+//
+// Wenn ZWEI Aufrufer gleichzeitig (oder kurz nacheinander) dieselbe
+// Suche starten — z.B. Home prefetcht beim Submit, Stöbern called
+// dann beim Mount nochmal — gibt es zwei parallele HTTP-Requests
+// auf Algolia. Mit dem In-Flight-Cache hier wird der zweite Aufruf
+// auf die Promise des ersten gepinnt → ein einziger Request, beide
+// Caller bekommen dasselbe Ergebnis.
+//
+// Wichtig fürs Pre-Fetch-Pattern: Home feuert searchAll(query, 0, 40)
+// VOR der Navigation, fire-and-forget. Bis Stöbern mountet ist die
+// Promise im Map. Stöbern's runSearch ruft searchAll auf → findet
+// die Promise → wartet darauf → kein Doppel-Roundtrip.
+const inflightSearchAll = new Map<string, Promise<SearchAllResult>>();
+
 function writeSearchCache(key: string, value: SearchAllResult) {
   searchCache.set(key, {
     value,
@@ -299,34 +314,47 @@ export class AlgoliaService {
       return cached;
     }
 
+    // 2. Inflight dedup: wenn dieselbe Suche schon unterwegs ist,
+    // hängen wir uns dran statt einen zweiten HTTP-Request zu
+    // feuern. Wichtig fürs Home→Stöbern-Pre-Fetch-Pattern: Home
+    // startet searchAll, kurz darauf startet Stöbern dieselbe
+    // Suche → zweiter Aufruf erbt die Promise.
+    const inflight = inflightSearchAll.get(cacheKey);
+    if (inflight) {
+      console.log(`🔗 Algolia: inflight HIT for "${query}" — joining existing promise`);
+      return inflight;
+    }
+
+    const promise = (async (): Promise<SearchAllResult> => {
+      try {
+        const hitsPerIndex = Math.ceil(hitsPerPage / 2);
+        console.log(`🔍 Algolia: Searching products for "${query}" (page: ${page}, ${hitsPerIndex} per index)`);
+
+        const [noNameResults, markenproduktResults] = await Promise.all([
+          this.searchNoNameProducts(query, page, hitsPerIndex),
+          this.searchMarkenprodukte(query, page, hitsPerIndex),
+        ]);
+
+        const totalHits = noNameResults.nbHits + markenproduktResults.nbHits;
+        console.log(`✅ Algolia: Found ${totalHits} total products (${noNameResults.nbHits} NoName + ${markenproduktResults.nbHits} Markenprodukte)`);
+
+        const result: SearchAllResult = {
+          noNameResults,
+          markenproduktResults,
+          totalHits,
+          queryIdEigen: noNameResults.queryID,
+          queryIdMarken: markenproduktResults.queryID,
+        };
+        writeSearchCache(cacheKey, result);
+        return result;
+      } finally {
+        inflightSearchAll.delete(cacheKey);
+      }
+    })();
+    inflightSearchAll.set(cacheKey, promise);
+
     try {
-      // Split hitsPerPage between both indices
-      const hitsPerIndex = Math.ceil(hitsPerPage / 2);
-
-      console.log(`🔍 Algolia: Searching products for "${query}" (page: ${page}, ${hitsPerIndex} per index)`);
-
-      // OPTIMIERT: Nur noch direkte Produktsuche - keine extra Marken/Hersteller-Anfragen!
-      const [noNameResults, markenproduktResults] = await Promise.all([
-        this.searchNoNameProducts(query, page, hitsPerIndex),
-        this.searchMarkenprodukte(query, page, hitsPerIndex)
-      ]);
-
-      const totalHits = noNameResults.nbHits + markenproduktResults.nbHits;
-      console.log(`✅ Algolia: Found ${totalHits} total products (${noNameResults.nbHits} NoName + ${markenproduktResults.nbHits} Markenprodukte)`);
-
-      const result: SearchAllResult = {
-        noNameResults,
-        markenproduktResults,
-        totalHits,
-        // Algolia liefert `queryID` per Index-Response — wir hieven
-        // ihn auf die SearchAllResult-Ebene, damit der Caller
-        // (Stöbern) ihn ins eigene State einspeichern kann ohne
-        // selbst beide Index-Responses zu inspizieren.
-        queryIdEigen: noNameResults.queryID,
-        queryIdMarken: markenproduktResults.queryID,
-      };
-      writeSearchCache(cacheKey, result);
-      return result;
+      return await promise;
 
     } catch (error) {
       console.error('Error searching all products:', error);

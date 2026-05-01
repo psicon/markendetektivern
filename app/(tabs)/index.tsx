@@ -51,6 +51,7 @@ import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { achievementService } from '@/lib/services/achievementService';
+import { AlgoliaService } from '@/lib/services/algolia';
 import { FirestoreService } from '@/lib/services/firestore';
 import searchHistoryService from '@/lib/services/searchHistoryService';
 import WordPressService, { WordPressPost } from '@/lib/services/wordpress';
@@ -431,6 +432,16 @@ export default function HomeScreen() {
     const t = term.trim();
     if (!t || t.length < 3) return;
     if (user?.uid) await searchHistoryService.saveSearchTerm(user.uid, t);
+
+    // Pre-Fetch: Algolia-Call fire-and-forget BEVOR die Navigation
+    // läuft. Die Promise sitzt im inflight-Cache der AlgoliaService.
+    // Bis Stöbern mountet (~200-300 ms später) ist der Roundtrip
+    // schon halb durch. Stöbern's runSearch hängt sich an dieselbe
+    // Promise statt einen zweiten HTTP-Request zu schicken — sieht
+    // für den User aus als wäre die Suche "schon da" wenn er
+    // ankommt, statt "Skeleton → Spinner → Pop".
+    void AlgoliaService.searchAll(t, 0, 40);
+
     // Search is now in-place inside Stöbern (see explore.tsx). The
     // `query` param triggers an auto-submit + lands on the Alle
     // tab with merged Eigenmarken + Marken hits.
