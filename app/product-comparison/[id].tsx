@@ -89,13 +89,18 @@ const NN_CARD_GAP = 12;
 // Auf false setzen rollbackt das Feature komplett ohne Code-Diff.
 const STUFE_IN_CARD = true;
 
-// Labels + one-liners for each similarity level (matches prototype).
-const STUFE_INFO: Record<1 | 2 | 3 | 4 | 5, { label: string; line: string }> = {
+// Hardcoded Fallback-Texte für die Stufen 0-5 — werden NUR genutzt
+// wenn Remote Config offline ist (Expo Go) oder ein bestimmter Key
+// noch leer ist. Single source of truth für die Tier-Copy ist
+// Firebase Remote Config: tier0header / tier0description …
+// tier5header / tier5description.
+const STUFE_INFO: Record<0 | 1 | 2 | 3 | 4 | 5, { label: string; line: string }> = {
   5: { label: 'Identisch', line: 'Wird am selben Band mit identischer Rezeptur produziert.' },
   4: { label: 'Nahezu identisch', line: 'Gleicher Hersteller, minimal abweichende Rezeptur.' },
   3: { label: 'Ähnlich', line: 'Gleicher Hersteller, angepasste Rezeptur — sehr ähnlich im Geschmack.' },
   2: { label: 'Verwandt', line: 'Anderer Hersteller, aber vergleichbare Qualität & Zutaten.' },
   1: { label: 'Alternative', line: 'Günstige Alternative mit abweichender Rezeptur.' },
+  0: { label: 'Produkt (noch) unbekannt', line: 'Stufe und Hersteller sind uns noch nicht bekannt.' },
 };
 
 // ────────────────────────────────────────────────────────────────────────
@@ -105,8 +110,14 @@ const STUFE_INFO: Record<1 | 2 | 3 | 4 | 5, { label: string; line: string }> = {
 const formatEur = (v?: number | null) =>
   v == null ? '—' : `${v.toFixed(2).replace('.', ',')}€`;
 
-const parseStufe = (s: any): 1 | 2 | 3 | 4 | 5 => {
-  const n = parseInt(String(s)) || 1;
+const parseStufe = (s: any): 0 | 1 | 2 | 3 | 4 | 5 => {
+  // Stufe 0 = "Produkt unbekannt" (Hersteller/Stufe noch nicht
+  // erfasst). Wir respektieren explizit den Wert "0" aus den Daten.
+  // Alles andere Garbage/undefined fällt auf 1 zurück (bestehendes
+  // Verhalten: Default = "Alternative").
+  const raw = String(s ?? '').trim();
+  if (raw === '0') return 0;
+  const n = parseInt(raw) || 1;
   return Math.min(5, Math.max(1, n)) as 1 | 2 | 3 | 4 | 5;
 };
 
@@ -426,25 +437,36 @@ export default function ProductComparisonScreen() {
   // null = zu, Object = sichtbar mit den jeweiligen Daten.
   const [infoSheet, setInfoSheet] = useState<{ title: string; body: string } | null>(null);
 
-  // ─── Stufen-Texte aus Remote Config (tier1header / tier1description
-  //     ... tier5header / tier5description). Fallback ist das hard-
-  //     coded STUFE_INFO am Modul-Top — wenn Remote Config offline ist
-  //     oder ein Key noch leer ist, lesen wir den Default. Loaded
-  //     einmal pro Mount; remoteConfigService cacht intern.
-  const [tierCopy, setTierCopy] = useState<Record<1 | 2 | 3 | 4 | 5, { label: string; line: string }> | null>(null);
+  // ─── Stufen-Texte aus Remote Config: tier0header / tier0description
+  //     ... tier5header / tier5description (sechs Tiers, 0 = "Produkt
+  //     unbekannt"). Fallback ist STUFE_INFO am Modul-Top — wenn
+  //     Remote Config offline ist (Expo Go) oder ein Key noch leer
+  //     ist, lesen wir den Default.
+  //
+  //     WICHTIG: vor dem Lesen wird `remoteConfigService.fetchAndActivate()`
+  //     erzwungen. Ohne den Call hängt das Device unter Umständen auf den
+  //     beim letzten App-Start gefetchten Werten (Default-Fetch-Intervall
+  //     ist in Production 12 h). User-Bug: "die stufen beschreibung wird
+  //     aber noch nicht aus remoteconfig gezogen?" — fix dafür.
+  const [tierCopy, setTierCopy] = useState<Record<0 | 1 | 2 | 3 | 4 | 5, { label: string; line: string }> | null>(null);
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const fetches = ([1, 2, 3, 4, 5] as const).flatMap((t) => [
+        // Force-fetch damit publizierte RC-Updates auch ohne 12 h
+        // Cache-TTL beim User landen.
+        await remoteConfigService.fetchAndActivate();
+        const tiers = [0, 1, 2, 3, 4, 5] as const;
+        const fetches = tiers.flatMap((t) => [
           remoteConfigService.getValue(`tier${t}header`),
           remoteConfigService.getValue(`tier${t}description`),
         ]);
         const results = await Promise.all(fetches);
         if (cancelled) return;
-        const next = {} as Record<1 | 2 | 3 | 4 | 5, { label: string; line: string }>;
-        for (let i = 0; i < 5; i++) {
-          const tier = (i + 1) as 1 | 2 | 3 | 4 | 5;
+        const next = {} as Record<0 | 1 | 2 | 3 | 4 | 5, { label: string; line: string }>;
+        let appliedCount = 0;
+        for (let i = 0; i < tiers.length; i++) {
+          const tier = tiers[i];
           const headerRaw = results[i * 2];
           const descRaw = results[i * 2 + 1];
           const header = typeof headerRaw === 'string' && headerRaw.trim().length > 0
@@ -453,11 +475,20 @@ export default function ProductComparisonScreen() {
           const desc = typeof descRaw === 'string' && descRaw.trim().length > 0
             ? descRaw.trim()
             : STUFE_INFO[tier].line;
+          if (header !== STUFE_INFO[tier].label || desc !== STUFE_INFO[tier].line) {
+            appliedCount += 1;
+          }
           next[tier] = { label: header, line: desc };
         }
+        // Nutzbar im Console um zu sehen ob RC tatsächlich Werte liefert.
+        // 0 applied = alle Werte kamen identisch zum Hardcoded-Fallback
+        // zurück (typisch in Expo Go ohne Native-Firebase).
+        // eslint-disable-next-line no-console
+        console.log(`📡 RC tier copy: ${appliedCount}/12 keys applied from remote`);
         setTierCopy(next);
-      } catch {
-        /* keep null → fall back to STUFE_INFO */
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('📡 RC tier copy fetch failed, using STUFE_INFO fallback', err);
       }
     })();
     return () => {
@@ -468,7 +499,7 @@ export default function ProductComparisonScreen() {
   // Helper: liefert Remote-Config-Copy wenn vorhanden, sonst Fallback.
   // Wird in JEDER Stelle aufgerufen die früher direkt STUFE_INFO[s]
   // gelesen hat — single source of truth für Stufe-Header/Description.
-  const getStufeInfo = (s: 1 | 2 | 3 | 4 | 5) => tierCopy?.[s] ?? STUFE_INFO[s];
+  const getStufeInfo = (s: 0 | 1 | 2 | 3 | 4 | 5) => tierCopy?.[s] ?? STUFE_INFO[s];
 
   // ─── Image zoom (Stufe 3/4/5: tap any product photo → fullscreen zoom)
   // Variant choice:
