@@ -45,6 +45,10 @@ type FadingImageProps = Omit<ImageProps, 'source' | 'onLoad'> & {
   /** Children rendered on top of image (e.g. badges). */
   children?: React.ReactNode;
   containerStyle?: ViewStyle;
+  /** Fade-in duration in ms when the image lands. Default 360 ms —
+   *  langsamer als instinktiv 220 ms damit der Übergang nicht als
+   *  "Pop" sondern als "fließendes Einfließen" gelesen wird. */
+  fadeDuration?: number;
 };
 
 export function FadingImage({
@@ -53,6 +57,7 @@ export function FadingImage({
   children,
   containerStyle,
   style,
+  fadeDuration = 360,
   ...rest
 }: FadingImageProps) {
   const sourceKey =
@@ -84,7 +89,7 @@ export function FadingImage({
           source={source}
           onLoad={() => {
             opacity.value = withTiming(1, {
-              duration: 220,
+              duration: fadeDuration,
               easing: Easing.out(Easing.cubic),
             });
           }}

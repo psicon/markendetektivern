@@ -59,7 +59,7 @@ function BrandCardImpl({
   unitPriceLabel,
   onPress,
 }: Props) {
-  const { theme, shadows } = useTokens();
+  const { theme, shadows, isDark } = useTokens();
 
   const resolvedImageUri = imageUri ?? getProductImage(product);
 
@@ -95,6 +95,22 @@ function BrandCardImpl({
             <MaterialCommunityIcons name="tag-outline" size={44} color={theme.textMuted} />
           </View>
         )}
+
+        {/* Dark-Mode Image-Tint (siehe ProductCard für Reasoning). */}
+        {isDark ? (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.28)',
+            }}
+          />
+        ) : null}
+
         {alternativeCount > 0 ? (
           <View
             style={{

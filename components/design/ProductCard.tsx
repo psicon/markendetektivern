@@ -103,7 +103,7 @@ function ProductCardImpl({
   imageOverlayBottomLeft,
   footer,
 }: Props) {
-  const { theme, shadows } = useTokens();
+  const { theme, shadows, isDark } = useTokens();
 
   const isHorizontal = variant === 'horizontal';
   const imageHeight = isHorizontal ? 135 : 162;
@@ -148,6 +148,26 @@ function ProductCardImpl({
             <Text style={{ fontSize: imageHeight * 0.4 }}>📦</Text>
           </View>
         )}
+
+        {/* Dark-Mode Image-Tint: weiße Produktfotos (PNGs auf weißem
+            Studio-Hintergrund) stechen sonst als grelle Fenster aus
+            der dunklen Card heraus. 28% schwarzes Overlay liest sich
+            als "ins Theme integriert" ohne Farben kaputt zu machen.
+            pointerEvents:none damit Taps durchschlagen. Sitzt VOR den
+            Stufen-/Rank-Pills im JSX → die Pills überlagern sauber. */}
+        {isDark ? (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.28)',
+            }}
+          />
+        ) : null}
 
         {/* Stufen chips on a translucent white pill so they stay legible no
             matter what the product image behind looks like. Subtle shadow

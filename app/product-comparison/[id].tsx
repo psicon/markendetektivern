@@ -163,7 +163,7 @@ export default function ProductComparisonScreen() {
   const { id, type } = useLocalSearchParams<{ id: string; type?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { theme, brand, shadows, stufen } = useTokens();
+  const { theme, brand, shadows, stufen, isDark } = useTokens();
   const { user } = useAuth();
   const { toggleFavorite } = useFavorites();
   const analytics = useAnalytics();
@@ -825,7 +825,8 @@ export default function ProductComparisonScreen() {
               width: 26,
               height: 26,
               borderRadius: 6,
-              backgroundColor: '#ffffff',
+              // Theme-aware (siehe noname-detail für Reasoning).
+              backgroundColor: theme.surfaceAlt,
               borderWidth: 0.5,
               borderColor: theme.border,
               overflow: 'hidden',
@@ -969,7 +970,9 @@ export default function ProductComparisonScreen() {
               position: 'relative',
               borderRadius: 20,
               overflow: 'hidden',
-              backgroundColor: '#ffffff',
+              // Theme-aware: in Dark Mode dunkler Hintergrund hinter
+              // dem Produktbild (statt PURE white). Sieh noname-detail.
+              backgroundColor: theme.surfaceAlt,
               height: 240,
             }}
           >
@@ -980,16 +983,31 @@ export default function ProductComparisonScreen() {
                 accessibilityLabel="Bild vergrößern"
                 style={{ width: '100%', height: '100%' }}
               >
-                <Image
+                <FadingImage
                   source={{ uri: getProductImage(mp as any, 'png') ?? undefined }}
-                  style={{ width: '100%', height: '100%' }}
                   resizeMode="contain"
+                  placeholderColor={theme.surfaceAlt}
                 />
               </Pressable>
             ) : mainReady ? (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 <MaterialCommunityIcons name="package-variant" size={64} color={theme.textMuted} />
               </View>
+            ) : null}
+
+            {/* Dark-Mode Image-Tint: siehe ProductCard. */}
+            {isDark ? (
+              <View
+                pointerEvents="none"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(0,0,0,0.28)',
+                }}
+              />
             ) : null}
 
             {brandName ? (
