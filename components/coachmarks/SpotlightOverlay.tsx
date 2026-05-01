@@ -120,7 +120,7 @@ export function SpotlightOverlay({
   primaryLabel,
 }: SpotlightOverlayProps) {
   const { theme, brand, shadows } = useTokens();
-  const { height: SCREEN_H } = useWindowDimensions();
+  const { width: SCREEN_W, height: SCREEN_H } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const ctx = useCoachmarkScrollContext();
   const [rect, setRect] = useState<AnchorRect | null>(null);
