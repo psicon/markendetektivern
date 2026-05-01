@@ -48,6 +48,7 @@ import {
 } from 'react-native';
 import Animated, {
   Easing,
+  useAnimatedProps,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
@@ -56,6 +57,10 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path, Rect } from 'react-native-svg';
+
+const AnimatedPath = Animated.createAnimatedComponent(Path);
+const AnimatedRect = Animated.createAnimatedComponent(Rect);
 
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
@@ -307,86 +312,62 @@ export function SpotlightOverlay({
   // scrollView X-Offset (= 0 für full-width).
   const winX = useDerivedValue(() => ax.value);
 
-  // ─── Backdrop-Rechtecke ──────────────────────────────────────
+  // ─── SVG-Maske mit echtem rounded-rect Cutout ────────────────
   //
-  // Top-Rectangle reicht von y=0 bis y=winY-padding. Wenn winY < 0
-  // (Anchor offscreen oben) → Höhe 0 (kein top-Rect rendern).
-  // Bottom-Rectangle ab y=winY+winH+padding bis Screen-Bottom.
-  // Wenn winY+winH > screenH → bottom-Höhe ggf. 0.
-  // Left/Right-Rectangles spannen NUR die Y-Höhe des Targets.
-  const topRectStyle = useAnimatedStyle(() => ({
-    height: Math.max(0, winY.value - TARGET_PADDING),
-  }));
-  const bottomRectStyle = useAnimatedStyle(() => ({
-    top: winY.value + ah.value + TARGET_PADDING,
-  }));
-  const leftRectStyle = useAnimatedStyle(() => ({
-    top: winY.value - TARGET_PADDING,
-    height: ah.value + TARGET_PADDING * 2,
-    width: Math.max(0, winX.value - TARGET_PADDING),
-  }));
-  const rightRectStyle = useAnimatedStyle(() => ({
-    top: winY.value - TARGET_PADDING,
-    height: ah.value + TARGET_PADDING * 2,
-    left: winX.value + aw.value + TARGET_PADDING,
-  }));
+  // Vorher: 4 dunkle Rechtecke + 4 Eck-Caps — produzierte sichtbare
+  // "Zähne"/"Wings" an den Ecken weil die Eck-Caps optisch nicht mit
+  // dem Backdrop verschmolzen sind. User: "die ecken sind nach innen
+  // gewölbt".
+  //
+  // Jetzt: ein SVG-Path der das gesamte Window dunkel füllt und
+  // an der Target-Position eine ECHTE rounded-rect-Aussparung hat.
+  // fill-rule="evenodd" sorgt dafür, dass die innere Form als Loch
+  // gilt. Animiert via useAnimatedProps — der Path-d-String wird
+  // pro Frame aus den shared values neu gebaut → Spring-Slide
+  // funktioniert smooth zwischen Phasen.
+  const animatedPathProps = useAnimatedProps(() => {
+    const x = winX.value - TARGET_PADDING;
+    const y = winY.value - TARGET_PADDING;
+    const w = aw.value + TARGET_PADDING * 2;
+    const h = ah.value + TARGET_PADDING * 2;
+    const r = Math.min(SPOTLIGHT_BORDER_RADIUS, w / 2, h / 2);
+    const right = x + w;
+    const bottom = y + h;
+    // Äußeres Vollbild-Rechteck + inneres rounded-rect als zweite
+    // Sub-Path. Mit even-odd-Fill-Rule wird der innere als Loch
+    // ausgespart.
+    const d =
+      `M0 0 L${SCREEN_W} 0 L${SCREEN_W} ${SCREEN_H} L0 ${SCREEN_H} Z ` +
+      `M${x + r} ${y} ` +
+      `L${right - r} ${y} ` +
+      `A${r} ${r} 0 0 1 ${right} ${y + r} ` +
+      `L${right} ${bottom - r} ` +
+      `A${r} ${r} 0 0 1 ${right - r} ${bottom} ` +
+      `L${x + r} ${bottom} ` +
+      `A${r} ${r} 0 0 1 ${x} ${bottom - r} ` +
+      `L${x} ${y + r} ` +
+      `A${r} ${r} 0 0 1 ${x + r} ${y} Z`;
+    return { d };
+  });
 
-  // Outline um das Spotlight — dünne weiße Border + border-radius.
-  // Liegt OBEN auf dem Target, ist NICHT tappable. Pulst in Opacity
-  // (siehe pulse SharedValue) zwischen 0.45 und 1.0 für Hover-
-  // Effekt.
-  const outlineStyle = useAnimatedStyle(() => ({
-    left: winX.value - TARGET_PADDING,
-    top: winY.value - TARGET_PADDING,
-    width: aw.value + TARGET_PADDING * 2,
-    height: ah.value + TARGET_PADDING * 2,
-    opacity: 0.45 + pulse.value * 0.55,
-  }));
-
-  // ─── Eck-Caps für gerundetes Hole ────────────────────────────
-  //
-  // Die 4 backdrop-Rechtecke (top/bottom/left/right) bilden ein
-  // rechteckiges Loch um das Target. Damit das Loch RUND wirkt
-  // (matcht den outline-borderRadius), legen wir an jeder Ecke
-  // einen kleinen dunklen Cap-View, dessen INNERE Ecke (Richtung
-  // Loch-Mitte) abgerundet ist. Effekt: das Loch hat in den 4
-  // Ecken eine viertel-Kreis-Auflage, das Sichtfenster wird dort
-  // konkav abgerundet — visuell ist das eine runde Ecke.
-  //
-  // Geometrie pro Cap (z.B. TL):
-  //   • Position: an der TL-Ecke des Loches
-  //   • Größe: SPOTLIGHT_BORDER_RADIUS × SPOTLIGHT_BORDER_RADIUS
-  //   • borderBottomRightRadius (Innen-Ecke des Caps)
-  //
-  // Andere Ecken analog mit jeweils anderen border-radius-Sides.
-  const cornerTopLeftStyle = useAnimatedStyle(() => ({
-    left: winX.value - TARGET_PADDING,
-    top: winY.value - TARGET_PADDING,
-    width: SPOTLIGHT_BORDER_RADIUS,
-    height: SPOTLIGHT_BORDER_RADIUS,
-  }));
-  const cornerTopRightStyle = useAnimatedStyle(() => ({
-    left:
-      winX.value + aw.value + TARGET_PADDING - SPOTLIGHT_BORDER_RADIUS,
-    top: winY.value - TARGET_PADDING,
-    width: SPOTLIGHT_BORDER_RADIUS,
-    height: SPOTLIGHT_BORDER_RADIUS,
-  }));
-  const cornerBottomLeftStyle = useAnimatedStyle(() => ({
-    left: winX.value - TARGET_PADDING,
-    top:
-      winY.value + ah.value + TARGET_PADDING - SPOTLIGHT_BORDER_RADIUS,
-    width: SPOTLIGHT_BORDER_RADIUS,
-    height: SPOTLIGHT_BORDER_RADIUS,
-  }));
-  const cornerBottomRightStyle = useAnimatedStyle(() => ({
-    left:
-      winX.value + aw.value + TARGET_PADDING - SPOTLIGHT_BORDER_RADIUS,
-    top:
-      winY.value + ah.value + TARGET_PADDING - SPOTLIGHT_BORDER_RADIUS,
-    width: SPOTLIGHT_BORDER_RADIUS,
-    height: SPOTLIGHT_BORDER_RADIUS,
-  }));
+  // Outline-Pulse — als animierter <Rect> auf dem SVG, weißer
+  // Stroke um das Hole, Opacity-Pulse via animatedProps.
+  const animatedOutlineProps = useAnimatedProps(() => {
+    const x = winX.value - TARGET_PADDING;
+    const y = winY.value - TARGET_PADDING;
+    const w = aw.value + TARGET_PADDING * 2;
+    const h = ah.value + TARGET_PADDING * 2;
+    const r = Math.min(SPOTLIGHT_BORDER_RADIUS, w / 2, h / 2);
+    return {
+      x,
+      y,
+      width: w,
+      height: h,
+      rx: r,
+      ry: r,
+      opacity: 0.45 + pulse.value * 0.55,
+    } as any;
+  });
 
   // ─── Tooltip-Position ────────────────────────────────────────
   //
@@ -441,88 +422,30 @@ export function SpotlightOverlay({
       pointerEvents="box-none"
       style={[StyleSheet.absoluteFillObject, fadeStyle, { zIndex: 9999 }]}
     >
-      {/* TOP — von 0 bis Target.top */}
-      <Animated.View
+      {/* SVG-Backdrop mit echtem rounded-rect Cutout. Animated
+          path-d wird pro Frame aus den shared values gebaut →
+          Spring-Slide zwischen Phasen läuft auf UI-Thread. */}
+      <Svg
         pointerEvents="auto"
-        style={[
-          styles.backdrop,
-          { top: 0, left: 0, right: 0 },
-          topRectStyle,
-        ]}
-      />
-      {/* BOTTOM — von Target.bottom bis Screen.bottom */}
-      <Animated.View
-        pointerEvents="auto"
-        style={[
-          styles.backdrop,
-          { left: 0, right: 0, bottom: 0 },
-          bottomRectStyle,
-        ]}
-      />
-      {/* LEFT — Streifen links neben dem Target */}
-      <Animated.View
-        pointerEvents="auto"
-        style={[styles.backdrop, { left: 0 }, leftRectStyle]}
-      />
-      {/* RIGHT — Streifen rechts neben dem Target */}
-      <Animated.View
-        pointerEvents="auto"
-        style={[styles.backdrop, { right: 0 }, rightRectStyle]}
-      />
-
-      {/* ─── Eck-Caps für gerundetes Hole ────────────────────────
-          Jede Cap füllt eine Ecke des rechteckigen Holes mit einer
-          konkav-abgerundeten Innen-Kante → das sichtbare Loch hat
-          dadurch in den 4 Ecken eine echte Rundung statt 90°-
-          Kanten. pointerEvents='auto' wie die Backdrop-Rects damit
-          das Tap-Through-Verhalten konsistent bleibt. */}
-      <Animated.View
-        pointerEvents="auto"
-        style={[
-          styles.cornerCap,
-          { borderBottomRightRadius: SPOTLIGHT_BORDER_RADIUS },
-          cornerTopLeftStyle,
-        ]}
-      />
-      <Animated.View
-        pointerEvents="auto"
-        style={[
-          styles.cornerCap,
-          { borderBottomLeftRadius: SPOTLIGHT_BORDER_RADIUS },
-          cornerTopRightStyle,
-        ]}
-      />
-      <Animated.View
-        pointerEvents="auto"
-        style={[
-          styles.cornerCap,
-          { borderTopRightRadius: SPOTLIGHT_BORDER_RADIUS },
-          cornerBottomLeftStyle,
-        ]}
-      />
-      <Animated.View
-        pointerEvents="auto"
-        style={[
-          styles.cornerCap,
-          { borderTopLeftRadius: SPOTLIGHT_BORDER_RADIUS },
-          cornerBottomRightStyle,
-        ]}
-      />
-
-      {/* Spotlight-Outline (dünner Glow um's Target) — pointerEvents
-          off, damit Taps durchs Cutout zum echten UI gehen. */}
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          {
-            position: 'absolute',
-            borderRadius: SPOTLIGHT_BORDER_RADIUS,
-            borderWidth: 2,
-            borderColor: 'rgba(255,255,255,0.55)',
-          },
-          outlineStyle,
-        ]}
-      />
+        width={SCREEN_W}
+        height={SCREEN_H}
+        style={StyleSheet.absoluteFillObject}
+      >
+        <AnimatedPath
+          animatedProps={animatedPathProps}
+          fill="black"
+          fillOpacity={BACKDROP_OPACITY}
+          fillRule="evenodd"
+        />
+        {/* Outline-Rect direkt im selben SVG — Stroke um das
+            Loch, pulst in Opacity (siehe pulse SharedValue). */}
+        <AnimatedRect
+          animatedProps={animatedOutlineProps}
+          fill="transparent"
+          stroke="rgba(255,255,255,0.85)"
+          strokeWidth={2}
+        />
+      </Svg>
 
       {/* Tooltip-Card — STATISCHER View, nicht animiert (Position-
           Switching von top↔bottom verträgt sich nicht mit
@@ -644,16 +567,5 @@ export function SpotlightOverlay({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    position: 'absolute',
-    backgroundColor: `rgba(0,0,0,${BACKDROP_OPACITY})`,
-  },
-  // Eck-Cap — selbe Tönung wie der Backdrop. Jeweils EINE der vier
-  // border*Radius-Sides wird inline gesetzt (siehe Render) damit
-  // die innere Ecke richtung Hole-Mitte abgerundet ist.
-  cornerCap: {
-    position: 'absolute',
-    backgroundColor: `rgba(0,0,0,${BACKDROP_OPACITY})`,
-  },
-});
+// Keine Stylesheet-Einträge mehr — die Maske wird komplett vom SVG
+// gerendert (siehe animatedPathProps + Path-Element im Render).
