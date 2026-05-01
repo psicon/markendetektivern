@@ -1487,7 +1487,7 @@ function ActionButton({ icon, iconColor, bg, subLabel, onPress }: ActionButtonPr
           style={{
             fontFamily,
             fontWeight: fontWeight.extraBold,
-            fontSize: 12,
+            fontSize: 11,
             lineHeight: 13,
             color: filled ? '#fff' : theme.text,
             marginTop: 2,

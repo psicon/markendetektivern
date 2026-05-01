@@ -1338,9 +1338,9 @@ export default function ProductComparisonScreen() {
                           style={{
                             fontFamily,
                             fontWeight: fontWeight.extraBold,
-                            fontSize: 13,
+                            fontSize: 11,
                             color: '#fff',
-                            letterSpacing: -0.1,
+                            letterSpacing: 0.2,
                           }}
                         >
                           −{sv.pct}%
@@ -1471,8 +1471,8 @@ export default function ProductComparisonScreen() {
                             style={{
                               fontFamily,
                               fontWeight: fontWeight.bold,
-                              fontSize: 15,
-                              lineHeight: 19,
+                              fontSize: 14,
+                              lineHeight: 18,
                               color: theme.text,
                             }}
                           >
@@ -1778,8 +1778,8 @@ export default function ProductComparisonScreen() {
                 flex: 1,
                 fontFamily,
                 fontWeight: fontWeight.medium,
-                fontSize: 12,
-                lineHeight: 17,
+                fontSize: 13,
+                lineHeight: 18,
                 color: theme.textSub,
               }}
             >
@@ -2030,7 +2030,7 @@ function ActionButton({ icon, iconColor, bg, subLabel, onPress }: ActionButtonPr
           style={{
             fontFamily,
             fontWeight: fontWeight.extraBold,
-            fontSize: 12,
+            fontSize: 11,
             lineHeight: 13,
             color: filled ? '#fff' : theme.text,
             marginTop: 2,
