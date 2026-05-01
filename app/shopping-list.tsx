@@ -2417,6 +2417,10 @@ export default function ShoppingListScreen() {
           }
           showsVerticalScrollIndicator={false}
           scrollIndicatorInsets={{ top: chromeHeight + SEG_BAR_HEIGHT }}
+          // Nur die aktive PagerView-Page claimt iOS-Status-Bar-Tap-
+          // Scroll-to-Top — sonst deaktiviert iOS das Feature weil
+          // mehrere ScrollViews auf scrollsToTop=true (Default) wären.
+          scrollsToTop={activeTab === variant}
         >
           {!isPremium ? (
             <View style={{ marginHorizontal: 16, marginTop: 6, marginBottom: 4 }}>

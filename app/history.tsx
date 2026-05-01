@@ -283,6 +283,7 @@ export default function HistoryScreen() {
                 emptyVariant="search"
                 onClearAll={clearSearchHistory}
                 clearLabel="Suchverlauf löschen"
+                isActive={activeTab === 'search'}
                 renderItem={(item) => (
                   <SearchCard
                     key={(item as SearchHistoryItem).id || (item as SearchHistoryItem).searchTerm}
@@ -302,6 +303,7 @@ export default function HistoryScreen() {
                 emptyVariant="scan"
                 onClearAll={clearScanHistory}
                 clearLabel="Scanverlauf löschen"
+                isActive={activeTab === 'scan'}
                 renderItem={(item) => (
                   <ScanCard
                     key={(item as ScanHistoryItem).id}
@@ -337,6 +339,7 @@ function HistoryList({
   onClearAll,
   clearLabel,
   renderItem,
+  isActive,
 }: {
   items: any[];
   refreshing: boolean;
@@ -345,6 +348,7 @@ function HistoryList({
   onClearAll: () => void;
   clearLabel: string;
   renderItem: (item: any) => React.ReactNode;
+  isActive: boolean;
 }) {
   const { theme, shadows } = useTokens();
   return (
@@ -355,6 +359,10 @@ function HistoryList({
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
       }
       showsVerticalScrollIndicator={false}
+      // iOS: nur die aktive PagerView-Page claimt status-bar-tap.
+      // Wenn beide Pages scrollsToTop=true (Default!) hätten, würde
+      // iOS das Feature für beide deaktivieren.
+      scrollsToTop={isActive}
     >
       {items.length === 0 ? (
         <HistoryEmpty variant={emptyVariant} />

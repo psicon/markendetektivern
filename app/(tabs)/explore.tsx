@@ -273,6 +273,25 @@ export default function ExploreScreen() {
   // null = zu, Object = sichtbar mit den jeweiligen Daten.
   const [infoSheet, setInfoSheet] = useState<{ title: string; body: string } | null>(null);
 
+  // Lazy-Mount für BannerAd. Vorher mounteten 3 BannerAds (einer pro
+  // PagerView-Page) gleichzeitig auf dem ersten Frame und feuerten
+  // jeweils 2 dynamic imports (onboardingService, consentService) +
+  // AdMob-init parallel. Auf Android saturierte das den JS-Thread
+  // und blockte den First-Paint. Jetzt:
+  //   • adsReady startet false → keine BannerAd-Instanzen
+  //   • 1500 ms nach Mount flippt es auf true → 1 BannerAd-Instanz
+  //     auf der aktiven Tab-Page mountet
+  //   • Tab-Wechsel mountet/entmounted die Banner entsprechend
+  // Premium-User sehen weiterhin keine Ads.
+  const [adsReady, setAdsReady] = useState(false);
+  useEffect(() => {
+    if (isPremium) return;
+    const t = setTimeout(() => setAdsReady(true), 1500);
+    return () => clearTimeout(t);
+  }, [isPremium]);
+  const showBannerOn = (forTab: Tab) =>
+    !isPremium && adsReady && tab === forTab;
+
   // ─── Reference data (filters + card lookup) ───────────────────────────
   const [discounter, setDiscounter] = useState<FirestoreDocument<Discounter>[]>([]);
   const [handelsmarken, setHandelsmarken] = useState<FirestoreDocument<Handelsmarken>[]>([]);
@@ -1802,15 +1821,17 @@ export default function ExploreScreen() {
             key={`ad-${index}`}
             style={{
               width: '100%',
-              height: 70,
-              marginTop: 4,
-              marginBottom: 4,
+              height: adsReady ? 70 : 0,
+              marginTop: adsReady ? 4 : 0,
+              marginBottom: adsReady ? 4 : 0,
               alignItems: 'center',
               justifyContent: 'center',
               overflow: 'hidden',
             }}
           >
-            <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
+            {adsReady ? (
+              <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
+            ) : null}
           </View>,
         );
       }
@@ -2121,7 +2142,7 @@ export default function ExploreScreen() {
               paddingBottom: 120,
             }}
           >
-            {!isPremium ? (
+            {showBannerOn('alle') ? (
               <View
                 style={{
                   marginTop: 12,
@@ -2169,7 +2190,7 @@ export default function ExploreScreen() {
               paddingBottom: 120,
             }}
           >
-            {!isPremium ? (
+            {showBannerOn('eigen') ? (
               <View
                 style={{
                   marginTop: 12,
@@ -2211,7 +2232,7 @@ export default function ExploreScreen() {
               paddingBottom: 120,
             }}
           >
-            {!isPremium ? (
+            {showBannerOn('marken') ? (
               <View
                 style={{
                   marginTop: 12,
