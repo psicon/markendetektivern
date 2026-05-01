@@ -2458,18 +2458,28 @@ export default function ShoppingListScreen() {
               null
             }
             onInfoPress={() => {
-              const text =
-                (item.product as any)?.hersteller?.infos ??
-                (item.product as any)?.infos ??
-                null;
+              const h = (item.product as any)?.hersteller;
+              const raw = h?.infos ?? (item.product as any)?.infos;
+              const infosText =
+                typeof raw === 'string' && raw.trim().length > 0
+                  ? raw.trim()
+                  : null;
+              const fallbackLines = [
+                h?.adresse ? String(h.adresse) : null,
+                [h?.plz, h?.stadt].filter(Boolean).join(' ') || null,
+                h?.land ? String(h.land) : null,
+              ].filter(Boolean) as string[];
+              const body =
+                infosText ??
+                (fallbackLines.length > 0
+                  ? fallbackLines.join('\n')
+                  : 'Zu dieser Marke sind aktuell keine Zusatz-Informationen hinterlegt.');
               const title =
-                (item.product as any)?.hersteller?.name ??
+                h?.name ??
                 item.name ??
                 item.product?.name ??
                 'Info';
-              if (typeof text === 'string' && text.trim().length > 0) {
-                setInfoSheet({ title, body: text.trim() });
-              }
+              setInfoSheet({ title, body });
             }}
           />
         </SwipeRow>

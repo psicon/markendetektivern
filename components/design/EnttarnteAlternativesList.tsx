@@ -106,49 +106,24 @@ function AlternativeRow({ item, onPress }: RowProps) {
 
       {/* Text-Säule */}
       <View style={{ flex: 1, minWidth: 0 }}>
+        {/* User-Feedback: "bei weitere enttarnte produkte sollte
+            kein icon für die handelsmarke angezeigt werden". Logo
+            entfernt — Handelsmarke nur noch als Text-Zeile. */}
         {item.handelsmarkeName ? (
-          <View
+          <Text
+            numberOfLines={1}
             style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 5,
+              fontFamily,
+              fontWeight: fontWeight.bold,
+              fontSize: 10,
+              color: brand.primary,
+              letterSpacing: 0.4,
+              textTransform: 'uppercase',
               marginBottom: 3,
             }}
           >
-            {item.handelsmarkeLogo ? (
-              <View
-                style={{
-                  width: 14,
-                  height: 14,
-                  borderRadius: 3,
-                  backgroundColor: '#fff',
-                  overflow: 'hidden',
-                  borderWidth: 0.5,
-                  borderColor: theme.border,
-                }}
-              >
-                <Image
-                  source={{ uri: item.handelsmarkeLogo }}
-                  style={{ width: '100%', height: '100%' }}
-                  resizeMode="contain"
-                />
-              </View>
-            ) : null}
-            <Text
-              numberOfLines={1}
-              style={{
-                flex: 1,
-                fontFamily,
-                fontWeight: fontWeight.bold,
-                fontSize: 10,
-                color: brand.primary,
-                letterSpacing: 0.4,
-                textTransform: 'uppercase',
-              }}
-            >
-              {item.handelsmarkeName}
-            </Text>
-          </View>
+            {item.handelsmarkeName}
+          </Text>
         ) : null}
 
         <Text

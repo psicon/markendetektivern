@@ -189,11 +189,12 @@ function BrandCardImpl({
             >
               {brand}
             </Text>
-            {/* (i)-Info-Icon — wenn `infos`-Text + Handler vom Caller
-                gesetzt sind. Eigene Pressable damit Card-onPress
-                nicht mit feuert (stopPropagation). brand.primary
-                statt Mute-Grau, damit das Icon klar sichtbar ist. */}
-            {infos && onInfoPress ? (
+            {/* (i)-Info-Icon — IMMER sichtbar wenn der Caller einen
+                onInfoPress-Handler liefert (war vorher gated auf
+                `infos`-Wert, was bei leerem Feld zu unsichtbarem
+                Icon führte). Sheet-Handler entscheidet ob es Infos
+                gibt oder einen Fallback-Text zeigt. */}
+            {onInfoPress ? (
               <Pressable
                 onPress={(e) => {
                   e.stopPropagation?.();

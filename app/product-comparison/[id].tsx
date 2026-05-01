@@ -1048,26 +1048,32 @@ export default function ProductComparisonScreen() {
 
             {brandName ? (() => {
               // Hersteller-Infos können auf zwei Wegen reinkommen:
-              // direkt am MarkenProdukt-Doc oder am hersteller_new-Join.
-              // Wir lesen beide defensiv via `as any`, weil das Feld
-              // im TS-Typ HerstellerNew nicht explizit deklariert ist.
-              const infos =
-                (mp as any)?.hersteller?.infos ??
-                (mp as any)?.infos ??
-                null;
-              const hasInfos = typeof infos === 'string' && infos.trim().length > 0;
+              // direkt am MarkenProdukt-Doc oder am hersteller-Join
+              // (= "marken"-Collection in User-Terminologie).
+              const h = (mp as any)?.hersteller;
+              const rawInfos = h?.infos ?? (mp as any)?.infos;
+              const infosText =
+                typeof rawInfos === 'string' && rawInfos.trim().length > 0
+                  ? rawInfos.trim()
+                  : null;
+              // Fallback-Body wenn `infos` leer: Adresse / Land
+              // damit der User bei Tap auf das Icon zumindest etwas
+              // Zusatz-Info sieht (statt "nichts da").
+              const fallbackLines = [
+                h?.adresse ? String(h.adresse) : null,
+                [h?.plz, h?.stadt].filter(Boolean).join(' ') || null,
+                h?.land ? String(h.land) : null,
+              ].filter(Boolean) as string[];
+              const sheetBody =
+                infosText ??
+                (fallbackLines.length > 0
+                  ? fallbackLines.join('\n')
+                  : 'Zu dieser Marke sind aktuell keine Zusatz-Informationen hinterlegt.');
               return (
                 <Pressable
-                  onPress={
-                    hasInfos
-                      ? () =>
-                          setInfoSheet({
-                            title: brandName,
-                            body: String(infos).trim(),
-                          })
-                      : undefined
+                  onPress={() =>
+                    setInfoSheet({ title: brandName, body: sheetBody })
                   }
-                  disabled={!hasInfos}
                   style={({ pressed }) => ({
                     position: 'absolute',
                     left: 12,
@@ -1085,7 +1091,7 @@ export default function ProductComparisonScreen() {
                     shadowOffset: { width: 0, height: 2 },
                     shadowRadius: 6,
                     elevation: 3,
-                    opacity: pressed && hasInfos ? 0.88 : 1,
+                    opacity: pressed ? 0.88 : 1,
                   })}
                 >
                   <Text
@@ -1102,13 +1108,14 @@ export default function ProductComparisonScreen() {
                   >
                     {brandName}
                   </Text>
-                  {hasInfos ? (
-                    <MaterialCommunityIcons
-                      name="information-outline"
-                      size={14}
-                      color="rgba(255,255,255,0.85)"
-                    />
-                  ) : null}
+                  {/* Info-Icon IMMER sichtbar — User-Anforderung "bei
+                      der marke oben infos per info button". Sheet zeigt
+                      `infos` oder Fallback-Adresse falls leer. */}
+                  <MaterialCommunityIcons
+                    name="information"
+                    size={15}
+                    color="#fff"
+                  />
                 </Pressable>
               );
             })() : null}

@@ -1809,16 +1809,30 @@ export default function ExploreScreen() {
               onPress={() => openBrand(m, index)}
               infos={(m as any).hersteller?.infos ?? (m as any).infos ?? null}
               onInfoPress={() => {
-                const text =
-                  (m as any).hersteller?.infos ??
-                  (m as any).infos ??
-                  null;
-                if (typeof text === 'string' && text.trim().length > 0) {
-                  setInfoSheet({
-                    title: marke || m.name || 'Info',
-                    body: text.trim(),
-                  });
-                }
+                const h = (m as any).hersteller;
+                const raw = h?.infos ?? (m as any).infos;
+                const infosText =
+                  typeof raw === 'string' && raw.trim().length > 0
+                    ? raw.trim()
+                    : null;
+                // Wenn `infos` vorhanden → das ist der primäre Body.
+                // Sonst Fallback mit den verfügbaren Hersteller-Daten
+                // (Adresse / Land), damit der User bei einem Tap auf
+                // das Icon ZUMINDEST etwas sieht.
+                const fallbackLines = [
+                  h?.adresse ? String(h.adresse) : null,
+                  [h?.plz, h?.stadt].filter(Boolean).join(' ') || null,
+                  h?.land ? String(h.land) : null,
+                ].filter(Boolean) as string[];
+                const body =
+                  infosText ??
+                  (fallbackLines.length > 0
+                    ? fallbackLines.join('\n')
+                    : 'Zu dieser Marke sind aktuell keine Zusatz-Informationen hinterlegt.');
+                setInfoSheet({
+                  title: marke || m.name || 'Info',
+                  body,
+                });
               }}
             />
           </View>,
