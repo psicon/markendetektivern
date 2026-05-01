@@ -282,6 +282,10 @@ export default function HomeScreen() {
     import('@/lib/services/remoteConfigService').then(m =>
       m.remoteConfigService.initialize().catch(() => {})
     );
+    // Stufe-Copy aus Remote Config bei App-Boot vorwärmen — damit
+    // die Comparison-Page beim ersten Aufruf bereits die RC-Werte
+    // im Cache hat und nicht erst Fallback → RC switchen muss.
+    import('@/lib/utils/stufeCopy').then(m => m.loadStufeCopy().catch(() => {}));
 
     let cancelled = false;
 

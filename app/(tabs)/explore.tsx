@@ -30,6 +30,7 @@ import { ProductCard } from '@/components/design/ProductCard';
 import { SearchableOptionList } from '@/components/design/SearchableOptionList';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { Crossfade, ProductCardSkeleton } from '@/components/design/Skeletons';
+import { getStufeCopy, loadStufeCopy } from '@/lib/utils/stufeCopy';
 import { StufenChips } from '@/components/design/StufenChips';
 import { collection, getDocs } from 'firebase/firestore';
 
@@ -381,6 +382,21 @@ export default function ExploreScreen() {
     // wollen exakt einmal pro Route-Param-Änderung feuern.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.tab, params.categoryFilter, params.markeFilter, params.query]);
+
+  // ─── Stufe-Copy aus Remote Config nachladen
+  // `loadStufeCopy()` ist idempotent (Modul-Cache + inflight dedup).
+  // setLoadTick triggert Re-Render des Filter-Sheets mit den frischen
+  // RC-Werten sobald der Fetch durch ist.
+  const [, setLoadTick] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    void loadStufeCopy().then(() => {
+      if (!cancelled) setLoadTick((n) => n + 1);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ─── Load reference data once (sorted A–Z for stable filter UX) ──────
   useEffect(() => {
@@ -2502,7 +2518,10 @@ export default function ExploreScreen() {
         <View style={{ gap: 8, marginBottom: 18 }}>
           {([5, 4, 3, 2, 1] as const).map((n) => {
             const selected = stufeSelection.includes(n);
-            const info = STUFE_INFO[n];
+            // Stufe-Copy aus dem zentralen stufeCopy-Modul (Remote
+            // Config + Hardcoded-Fallback). Modul-lokales STUFE_INFO
+            // weiter unten ist nicht mehr aktiv.
+            const info = getStufeCopy(n);
             const tint = stufen[n];
             return (
               <Pressable
