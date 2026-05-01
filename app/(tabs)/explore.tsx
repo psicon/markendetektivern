@@ -274,23 +274,33 @@ export default function ExploreScreen() {
   // null = zu, Object = sichtbar mit den jeweiligen Daten.
   const [infoSheet, setInfoSheet] = useState<{ title: string; body: string } | null>(null);
 
-  // Lazy-Mount für BannerAd. User-Feedback: "die ads machen das
-  // scrollen sehr unperformant. stell das hinten an. usability und
-  // performance ist top 1!" — daher gehen die Banner JETZT ERST nach
-  // 3500 ms (statt 1500) live, und auch dann nur EINER auf der
-  // aktiven Tab-Page (nicht 3 parallel).
+  // Lazy-Mount für BannerAd. User-Feedback (mehrfach): "die ads
+  // machen das scrollen sehr unperformant. stell das hinten an.
+  // usability und performance ist top 1!"
   //
-  // Plus: wir warten zusätzlich auf den ersten Daten-Load (nonames
-  // oder markenprodukte enthalten Items), damit die Banner-Init nicht
-  // mit dem Initial-Fetch konkurriert. Das schützt die First-Paint-
-  // Pipeline auf Android wo die Web-SDK-Firebase-Verbindung
-  // ohnehin saturiert ist.
+  // Verschärfte Strategie:
+  //   1) Banner mounten erst NACH dem ersten erfolgreichen Daten-
+  //      Load (nonames ODER markenprodukte haben Items oder Search-
+  //      Hits sind da). Das stellt sicher dass Banner-Init nicht
+  //      mit dem Initial-Firebase-Roundtrip konkurriert.
+  //   2) ZUSÄTZLICH 2000 ms Buffer NACH dem Daten-Load — gibt der
+  //      First-Render-Pipeline Zeit zu settlen bevor wir die
+  //      AdMob-SDK-Init und native AdView-Spawn-Workload starten.
+  //   3) Pro Tab-Page nur EIN Banner (siehe showBannerOn) statt
+  //      drei parallel mounted.
+  // Premium-User sehen weiterhin keine Ads (early-return).
   const [adsReady, setAdsReady] = useState(false);
+  const dataReady =
+    nonames.length > 0 ||
+    markenprodukte.length > 0 ||
+    searchHitsEigen.length > 0 ||
+    searchHitsMarken.length > 0;
   useEffect(() => {
     if (isPremium) return;
-    const t = setTimeout(() => setAdsReady(true), 3500);
+    if (!dataReady) return; // Warte auf Daten
+    const t = setTimeout(() => setAdsReady(true), 2000);
     return () => clearTimeout(t);
-  }, [isPremium]);
+  }, [isPremium, dataReady]);
   const showBannerOn = (forTab: Tab) =>
     !isPremium && adsReady && tab === forTab;
 
@@ -439,16 +449,20 @@ export default function ExploreScreen() {
 
   // ─── Stufe-Copy aus Remote Config nachladen
   // `loadStufeCopy()` ist idempotent (Modul-Cache + inflight dedup).
-  // setLoadTick triggert Re-Render des Filter-Sheets mit den frischen
-  // RC-Werten sobald der Fetch durch ist.
+  // In InteractionManager.runAfterInteractions gewrapped damit der
+  // RC-Fetch (Network-Roundtrip!) nicht mit dem Initial-Firestore-
+  // Roundtrip um die HTTP/2-Connection auf Android konkurriert.
   const [, setLoadTick] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    void loadStufeCopy().then(() => {
-      if (!cancelled) setLoadTick((n) => n + 1);
+    const handle = InteractionManager.runAfterInteractions(() => {
+      void loadStufeCopy().then(() => {
+        if (!cancelled) setLoadTick((n) => n + 1);
+      });
     });
     return () => {
       cancelled = true;
+      handle.cancel();
     };
   }, []);
 
@@ -1844,33 +1858,15 @@ export default function ExploreScreen() {
           </View>,
         );
       }
-      // Insert a banner row after every AD_EVERY products. Reserve a fixed
-      // 70-px slot regardless of whether the ad fills — otherwise a no-fill
-      // collapses the slot to 0 and everything below jumps up during scroll.
-      if (
-        !isPremium &&
-        (index + 1) % AD_EVERY === 0 &&
-        index < items.length - 1
-      ) {
-        nodes.push(
-          <View
-            key={`ad-${index}`}
-            style={{
-              width: '100%',
-              height: adsReady ? 70 : 0,
-              marginTop: adsReady ? 4 : 0,
-              marginBottom: adsReady ? 4 : 0,
-              alignItems: 'center',
-              justifyContent: 'center',
-              overflow: 'hidden',
-            }}
-          >
-            {adsReady ? (
-              <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-            ) : null}
-          </View>,
-        );
-      }
+      // Inline-Grid-Ad-Row deaktiviert. User-Feedback: "die ads
+      // machen das scrollen sehr unperformant". Ein zweiter
+      // BannerAd alle 20 Produkte spawnt zusätzliche native AdView-
+      // Container die jedes Scroll-Frame neu vermessen werden.
+      // Top-Banner pro Tab (siehe showBannerOn) reicht für AdMob-
+      // Revenue, ohne den Scroll zu strangulieren.
+      // Wenn Inline-Ads später wieder rein sollen: hier den
+      // gestrichenen Push-Block reaktivieren — der adsReady-Gate
+      // ist bereits weiter oben in renderGrid bekannt.
     });
 
     // Crossfade-Wrap: wenn wir im Such-Modus sind und gerade Karten
