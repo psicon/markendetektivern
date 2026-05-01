@@ -290,17 +290,12 @@ export default function ExploreScreen() {
   //      drei parallel mounted.
   // Premium-User sehen weiterhin keine Ads (early-return).
   const [adsReady, setAdsReady] = useState(false);
-  const dataReady =
-    nonames.length > 0 ||
-    markenprodukte.length > 0 ||
-    searchHitsEigen.length > 0 ||
-    searchHitsMarken.length > 0;
-  useEffect(() => {
-    if (isPremium) return;
-    if (!dataReady) return; // Warte auf Daten
-    const t = setTimeout(() => setAdsReady(true), 2000);
-    return () => clearTimeout(t);
-  }, [isPremium, dataReady]);
+  // Ad-Gating-useEffect ist UNTEN nach den State-Deklarationen
+  // platziert — sonst trifft die `nonames.length`-Lesung in den
+  // Temporal-Dead-Zone der noch nicht deklarierten useState-Hooks
+  // (App crasht in Production-Builds mit
+  // "Cannot read property 'length' of undefined" beim Stöbern-Mount).
+  // Siehe weiter unten nach `searchHitsMarken`-Init.
   const showBannerOn = (forTab: Tab) =>
     !isPremium && adsReady && tab === forTab;
 
@@ -357,6 +352,30 @@ export default function ExploreScreen() {
   );
   const [searchHitsEigen, setSearchHitsEigen] = useState<AlgoliaSearchResult[]>([]);
   const [searchHitsMarken, setSearchHitsMarken] = useState<AlgoliaSearchResult[]>([]);
+
+  // Ad-Gating: BannerAd mountet erst NACH dem ersten Daten-Load
+  // (irgendeine der vier Listen hat Items) PLUS 2 s Buffer. Steht
+  // bewusst HIER hinter den State-Deklarationen, sonst Temporal-
+  // Dead-Zone-Crash beim Stöbern-Mount in Production-Builds.
+  // Premium-User sehen weiterhin keine Ads (early-return).
+  useEffect(() => {
+    if (isPremium) return;
+    const dataReady =
+      nonames.length > 0 ||
+      markenprodukte.length > 0 ||
+      searchHitsEigen.length > 0 ||
+      searchHitsMarken.length > 0;
+    if (!dataReady) return;
+    const t = setTimeout(() => setAdsReady(true), 2000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isPremium,
+    nonames.length,
+    markenprodukte.length,
+    searchHitsEigen.length,
+    searchHitsMarken.length,
+  ]);
   const [searchTotalEigen, setSearchTotalEigen] = useState(0);
   const [searchTotalMarken, setSearchTotalMarken] = useState(0);
   // searchLoading initial true wenn wir mit Query mounten — der
