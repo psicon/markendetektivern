@@ -27,6 +27,10 @@
   },
   "submit": {
     "production": {
+      "ios": {
+        "appleId": "patrick@markendetektive.de",
+        "appleTeamId": "MZD2N2F887"
+      },
       "android": {
         "serviceAccountKeyPath": "./markendetektive-895f7-58c0a81f4613.json"
       }
