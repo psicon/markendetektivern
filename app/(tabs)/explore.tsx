@@ -1,10 +1,11 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BlurView } from 'expo-blur';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
   Image,
+  InteractionManager,
   Platform,
   Pressable,
   ScrollView,
@@ -195,6 +196,7 @@ export default function ExploreScreen() {
   const { theme, brand, shadows, stufen } = useTokens();
   const scheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
   const params = useLocalSearchParams<{
     tab?: string;
     categoryFilter?: string;
@@ -220,6 +222,14 @@ export default function ExploreScreen() {
   // refocus the input (lets the user immediately tweak their query
   // instead of clearing-then-retyping).
   const searchInputRef = useRef<TextInput | null>(null);
+  // Per-Page-ScrollView-Refs für tap-on-tab Scroll-to-Top. iOS
+  // status-bar-tap (`scrollsToTop` Prop) handled das system-seitig,
+  // aber wir wollen ZUSÄTZLICH dass ein Re-Tap auf das Stöbern-Icon
+  // im Tab-Bar die aktive Page zum Anfang scrollt. Wird via
+  // `navigation.addListener('tabPress')` weiter unten gewired.
+  const alleScrollRef = useRef<Animated.ScrollView | null>(null);
+  const eigenScrollRef = useRef<Animated.ScrollView | null>(null);
+  const markenScrollRef = useRef<Animated.ScrollView | null>(null);
 
   // Reanimated shared values — per-page scroll offset so the tab-bar
   // collapse state snaps to the active page (if you scrolled down in
@@ -341,6 +351,26 @@ export default function ExploreScreen() {
   // ─── Locked category gate (Alkohol) ────────────────────────────────────
   const [lockedCategory, setLockedCategory] = useState<FirestoreDocument<Kategorien> | null>(null);
 
+  // ─── Tab-Re-Press Scroll-to-Top ──────────────────────────────────────
+  // Re-Tap auf das Stöbern-Icon im Tab-Bar scrollt die aktive Page zum
+  // Anfang. Mirror-Behavior zu iOS-Status-Bar-Tap (`scrollsToTop`-Prop)
+  // und macht das Pattern auch auf Android verfügbar wo es kein
+  // System-Pendant gibt. `tabPress` feuert auch beim Erst-Tap auf den
+  // Tab — mit `navigation.isFocused()` filtern wir auf den Re-Tap-Fall.
+  useEffect(() => {
+    const unsub = (navigation as any).addListener?.('tabPress', () => {
+      if (!(navigation as any).isFocused?.()) return;
+      const ref =
+        tab === 'alle'
+          ? alleScrollRef
+          : tab === 'eigen'
+            ? eigenScrollRef
+            : markenScrollRef;
+      ref.current?.scrollTo({ y: 0, animated: true });
+    });
+    return unsub;
+  }, [navigation, tab]);
+
   // ─── Route param handling (from Home quick-access) ─────────────────────
   useEffect(() => {
     // Initial-Tab + Initial-Query sind bereits im useState-Initializer
@@ -409,7 +439,12 @@ export default function ExploreScreen() {
         'de',
         { sensitivity: 'base' },
       );
-    (async () => {
+    // runAfterInteractions: Reference-Data-Fetch erst NACH dem ersten
+    // Render-Frame starten. Die Filter-Chips zeigen Default-State
+    // ("Alle Märkte", "Alle Kategorien") bis die echten Listen da
+    // sind — visuell unauffällig, aber freier UI-Thread für den
+    // First-Paint von Skeleton + Chrome.
+    const handle = InteractionManager.runAfterInteractions(async () => {
       try {
         const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
         // Mount-Time: nur die schlanken Reference-Daten, die für die
@@ -445,7 +480,8 @@ export default function ExploreScreen() {
       } catch (e) {
         console.warn('Explore: failed to load reference data', e);
       }
-    })();
+    });
+    return () => handle.cancel();
   }, [userProfile, isPremium]);
 
   // Marken-Liste lazy laden — erst wenn der User den Marken-Filter
@@ -510,8 +546,18 @@ export default function ExploreScreen() {
       }
     };
     if (delay === 0) {
-      fire();
-      return;
+      // Erst-Mount: Skeleton + Chrome zuerst rendern (UI-Thread frei),
+      // DANACH die Firestore-Queries feuern. Vorher liefen Reference-
+      // Data-Fetch + 2× Product-Page-Fetch + StufeCopy-RC-Fetch +
+      // AdMob-Init alle gleichzeitig auf der Mount-Frame — auf Android
+      // mit Firebase-Web-SDK saturierte das die HTTP/2-Verbindung und
+      // blockte den First-Paint bis zu 10 s. Mit
+      // runAfterInteractions: First-Paint sofort (Skeleton sichtbar),
+      // Daten-Fetches starten 1 Frame später ohne Render zu blocken.
+      const handle = InteractionManager.runAfterInteractions(() => {
+        if (reloadSeq.current === mySeq) fire();
+      });
+      return () => handle.cancel();
     }
     const t = setTimeout(fire, delay);
     return () => clearTimeout(t);
@@ -2057,6 +2103,7 @@ export default function ExploreScreen() {
             the SegmentedTabs visual order. */}
         <View key="alle" style={{ flex: 1 }}>
           <Animated.ScrollView
+            ref={alleScrollRef}
             onScroll={scrollHandlerAlle}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
@@ -2105,6 +2152,7 @@ export default function ExploreScreen() {
             UIScrollView behaviour when multiple responders exist). */}
         <View key="eigen" style={{ flex: 1 }}>
           <Animated.ScrollView
+            ref={eigenScrollRef}
             onScroll={scrollHandlerEigen}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
@@ -2145,6 +2193,7 @@ export default function ExploreScreen() {
         {/* ─── Page 2 — Marken ──────────────────────────────────────── */}
         <View key="marken" style={{ flex: 1 }}>
           <Animated.ScrollView
+            ref={markenScrollRef}
             onScroll={scrollHandlerMarken}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
