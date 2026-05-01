@@ -80,6 +80,13 @@ const NN_CARD_WIDTH = 280;
 const NN_CARD_WIDTH_SINGLE = SCREEN_WIDTH - 40;
 const NN_CARD_GAP = 12;
 
+// Feature-Flag: Stufe-Indikator INSIDE jeder Alt-Card statt als
+// globale Detektiv-Check-Row unter dem Carousel. true = neues
+// Verhalten (Stufe in jeder Card + globale Row ausgeblendet),
+// false = Original-Verhalten (nur globale Row unter dem Carousel).
+// Auf false setzen rollbackt das Feature komplett ohne Code-Diff.
+const STUFE_IN_CARD = true;
+
 // Labels + one-liners for each similarity level (matches prototype).
 const STUFE_INFO: Record<1 | 2 | 3 | 4 | 5, { label: string; line: string }> = {
   5: { label: 'Identisch', line: 'Wird am selben Band mit identischer Rezeptur produziert.' },
@@ -1572,6 +1579,60 @@ export default function ProductComparisonScreen() {
                         />
                       </View>
                     </View>
+
+                    {/* Per-Card-Stufe-Row — gated by STUFE_IN_CARD am
+                        Modul-Top. Wenn aktiviert, zeigt jede Alt-Card
+                        ihre eigene Stufe + One-Line-Label. Die globale
+                        Detektiv-Check-Row unter dem Carousel wird dann
+                        ausgeblendet (siehe `!STUFE_IN_CARD && picked`
+                        weiter unten). */}
+                    {STUFE_IN_CARD ? (() => {
+                      const nnStufe = parseStufe((nn as any).stufe);
+                      const nnInfo = STUFE_INFO[nnStufe];
+                      return (
+                        <View>
+                          <View
+                            style={{
+                              height: 1,
+                              backgroundColor: theme.border,
+                              marginHorizontal: 14,
+                            }}
+                          />
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 8,
+                              paddingHorizontal: 14,
+                              paddingVertical: 10,
+                            }}
+                          >
+                            <StufenChips stufe={nnStufe} size="sm" />
+                            <Text
+                              numberOfLines={1}
+                              style={{
+                                flex: 1,
+                                fontFamily,
+                                fontWeight: fontWeight.medium,
+                                fontSize: 11,
+                                color: theme.textSub,
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  fontWeight: fontWeight.bold,
+                                  color: theme.text,
+                                }}
+                              >
+                                Stufe {nnStufe}
+                              </Text>
+                              {' — '}
+                              {nnInfo.label}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })() : null}
                   </Pressable>
                 );
               })}
@@ -1719,8 +1780,11 @@ export default function ProductComparisonScreen() {
 
             {/* Detektiv-Check row — directly below the active NoName card so
                 the stufe explanation reads as context for the carousel pick
-                rather than as a global footer. */}
-            {picked ? (
+                rather than as a global footer.
+                Bei aktivem STUFE_IN_CARD-Flag (Modul-Top) wird diese
+                globale Row ausgeblendet, weil dann jede Alt-Card ihre
+                eigene Stufe inline trägt. */}
+            {!STUFE_IN_CARD && picked ? (
               <View
                 style={{
                   marginHorizontal: 20,
