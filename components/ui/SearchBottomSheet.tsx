@@ -270,46 +270,46 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
     await handleSearchTerm(trimmedTerm);
   }, []);
   
-  const handleSearchTerm = useCallback(async (term: string) => {
+  const handleSearchTerm = useCallback((term: string) => {
     if (isSearching) return; // Verhindere mehrfache Aufrufe
-    
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    
+
     // Tastatur schließen
     Keyboard.dismiss();
-    
-    // Zeige Loading State
+
+    // SOFORT: Sheet schließen + Navigation parallel feuern.
+    //
+    // Vorher: setIsSearching(true) → Loading-Overlay "Suche
+    // gestartet..." → await onSearch() → 300 ms artificial delay
+    // → Sheet-Slide-Out. Das war der "Spinner vor Page-Wechsel"
+    // den der User gesehen hat. Total: ~500-800 ms Spinner-Phase
+    // bevor überhaupt navigiert wurde.
+    //
+    // Jetzt: onSearch() fire-and-forget (Home pusht synchron) +
+    // Sheet-Slide-Out (200 ms) parallel. Keine Loading-Karte mehr.
+    // Stöbern fängt das Loading mit seinem eigenen Skeleton-Grid
+    // ab — der User sieht durchgängig Inhalt, nie eine Spinner-
+    // Insel.
     setIsSearching(true);
-    
-    try {
-      // Starte Navigation (async)
-      await onSearch(term);
-      
-      // Warte kurz für bessere UX
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // Schließe Sheet erst NACH erfolgreicher Navigation
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(backdropAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        onClose();
-        setIsSearching(false);
-      });
-      
-    } catch (error) {
-      console.error('Search navigation failed:', error);
+    onSearch(term);
+
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      onClose();
       setIsSearching(false);
-    }
-  }, [onSearch, onClose, isSearching]);
+    });
+  }, [onSearch, onClose, isSearching, slideAnim, backdropAnim]);
   
   const handleDeleteSearchItem = async (itemId: string) => {
     if (!user?.uid || !itemId) return;
@@ -683,17 +683,9 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
               </View>
         </ScrollView>
         
-        {/* Loading Overlay */}
-        {isSearching && (
-          <View style={styles.loadingOverlay}>
-            <View style={[styles.loadingCard, { backgroundColor: colors.cardBackground }]}>
-              <ActivityIndicator size="large" color={colors.primary} />
-              <Text style={[styles.loadingText, { color: colors.text }]}>
-                Suche gestartet...
-              </Text>
-            </View>
-          </View>
-        )}
+        {/* Loading-Overlay entfernt — siehe handleSearchTerm.
+            Das Sheet schließt sich jetzt sofort, das Skeleton-Grid
+            in Stöbern übernimmt die Loading-Phase nahtlos. */}
       </Animated.View>
     </>
   );

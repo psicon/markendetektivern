@@ -30,7 +30,7 @@ import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
 import { ProductCard } from '@/components/design/ProductCard';
 import { SearchableOptionList } from '@/components/design/SearchableOptionList';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
-import { ProductCardSkeleton } from '@/components/design/Skeletons';
+import { Crossfade, ProductCardSkeleton } from '@/components/design/Skeletons';
 import { StufenChips } from '@/components/design/StufenChips';
 import { collection, getDocs } from 'firebase/firestore';
 
@@ -1562,25 +1562,32 @@ export default function ExploreScreen() {
           : markenLoading;
     const empty = !loading && items.length === 0;
 
-    // First-load shimmer — never flash a blank screen. Six skeletons ≈ 3 rows
-    // of the final grid, enough to hint at the layout on any phone.
+    // Skeleton-Grid: 6 Karten, identische Paddings + Spacing wie der
+    // echte Grid → Crossfade zwischen ihnen liest sich als "Karten
+    // füllen sich auf", kein Pop. Wird sowohl beim Initial-Load
+    // (loading=true, items=[]) als unter-Layer verwendet, als auch
+    // mid-fade während items reinkommen.
+    const skeletonGrid = (
+      <View
+        style={{
+          paddingHorizontal: 20,
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 12,
+        }}
+      >
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <View key={i} style={{ width: GRID_ITEM_WIDTH }}>
+            <ProductCardSkeleton />
+          </View>
+        ))}
+      </View>
+    );
+
+    // First-load: kein Inhalt da → Skeleton solo (kein Crossfade
+    // nötig, da nichts zum Drüberblenden).
     if (loading && items.length === 0) {
-      return (
-        <View
-          style={{
-            paddingHorizontal: 20,
-            flexDirection: 'row',
-            flexWrap: 'wrap',
-            gap: 12,
-          }}
-        >
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <View key={i} style={{ width: GRID_ITEM_WIDTH }}>
-              <ProductCardSkeleton />
-            </View>
-          ))}
-        </View>
-      );
+      return skeletonGrid;
     }
 
     if (empty) {
@@ -1703,7 +1710,14 @@ export default function ExploreScreen() {
       }
     });
 
-    return (
+    // Crossfade-Wrap: wenn wir im Such-Modus sind und gerade Karten
+    // bekommen haben (häufigster Pop-Fall: Home → Stöbern Initial-
+    // Search), liegen Skeleton + Karten kurz übereinander und cross-
+    // faden über 320 ms. Nach Abschluss unmountet das Skeleton.
+    // Browse-Modus + spätere Search-Updates rendern den Grid direkt
+    // (ohne Crossfade-Wrap), damit Pagination-Updates kein Flash
+    // verursachen.
+    const cardsGrid = (
       <View
         style={{
           paddingHorizontal: 20,
@@ -1715,6 +1729,21 @@ export default function ExploreScreen() {
         {nodes}
       </View>
     );
+
+    if (inSearch) {
+      // ready = "wir haben Inhalt zum Anzeigen". Sobald die ersten
+      // Karten reinkommen, läuft die Crossfade einmal. Bei späteren
+      // Re-Searches (loading=true, items=[old]) bleibt ready=true,
+      // damit das Skeleton NICHT rückwärts über die alten Ergebnisse
+      // gelegt wird (das wäre ein "Loading-Pop" auf dem Re-Submit).
+      return (
+        <Crossfade ready={items.length > 0} skeleton={skeletonGrid}>
+          {cardsGrid}
+        </Crossfade>
+      );
+    }
+
+    return cardsGrid;
   };
 
   // JS-side loadMore helpers — called from the worklet via runOnJS when

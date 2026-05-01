@@ -428,10 +428,17 @@ export default function HomeScreen() {
   }, [newsStageDone]);
 
   // ─── Handlers ───────────────────────────────────────────────────────────────
-  const handleSearch = async (term: string) => {
+  const handleSearch = (term: string) => {
     const t = term.trim();
     if (!t || t.length < 3) return;
-    if (user?.uid) await searchHistoryService.saveSearchTerm(user.uid, t);
+
+    // History-Save fire-and-forget — kein await, damit der
+    // router.push synchron im selben Frame wie der Sheet-Close
+    // feuert. Search-History ist ein "nice to have", darf nie
+    // den Such-Flow blockieren.
+    if (user?.uid) {
+      void searchHistoryService.saveSearchTerm(user.uid, t);
+    }
 
     // Pre-Fetch: Algolia-Call fire-and-forget BEVOR die Navigation
     // läuft. Die Promise sitzt im inflight-Cache der AlgoliaService.
