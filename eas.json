@@ -45,6 +45,13 @@
         "track": "beta",
         "releaseStatus": "completed"
       }
+    },
+    "internalTesting": {
+      "android": {
+        "serviceAccountKeyPath": "./markendetektive-895f7-ee3923910ddd.json",
+        "track": "internal",
+        "releaseStatus": "completed"
+      }
     }
   }
 }
