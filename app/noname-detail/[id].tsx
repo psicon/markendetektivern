@@ -22,7 +22,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PagerView from 'react-native-pager-view';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
-import { FadingImage } from '@/components/design/FadingImage';
 import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
 import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
 import { getProductImage } from '@/lib/utils/productImage';
@@ -113,7 +112,7 @@ export default function NoNameDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { theme, brand, shadows, isDark } = useTokens();
+  const { theme, brand, shadows } = useTokens();
   const { user } = useAuth();
   const { toggleFavorite } = useFavorites();
 
@@ -593,9 +592,7 @@ export default function NoNameDetailScreen() {
               width: 26,
               height: 26,
               borderRadius: 6,
-              // Theme-aware: kein hardcoded white mehr — surfaceAlt
-              // ist im Light Mode hellgrau, im Dark Mode dunkel.
-              backgroundColor: theme.surfaceAlt,
+              backgroundColor: '#ffffff',
               borderWidth: 0.5,
               borderColor: theme.border,
               overflow: 'hidden',
@@ -740,42 +737,20 @@ export default function NoNameDetailScreen() {
               position: 'relative',
               borderRadius: 20,
               overflow: 'hidden',
-              // Theme-aware: in Dark Mode dunkler Hintergrund hinter
-              // dem Produktbild, statt PURE white. Das Foto liegt
-              // dann nicht als grelle Fläche auf der Detail-Page.
-              backgroundColor: theme.surfaceAlt,
+              backgroundColor: '#ffffff',
               height: 240,
             }}
           >
             {getProductImage(p, 'png') ? (
-              <FadingImage
+              <Image
                 source={{ uri: getProductImage(p, 'png') ?? undefined }}
+                style={{ width: '100%', height: '100%' }}
                 resizeMode="contain"
-                placeholderColor={theme.surfaceAlt}
               />
             ) : ready ? (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 <MaterialCommunityIcons name="package-variant" size={64} color={theme.textMuted} />
               </View>
-            ) : null}
-
-            {/* Dark-Mode Image-Tint: siehe ProductCard. Subtiles
-                Schwarz-Overlay damit das weiße Studio-Foto nicht
-                aus der Detail-Page rausstrahlt. Hersteller- und
-                Preis-Pills kommen darunter im JSX → werden
-                überlagert (saubere Lesbarkeit). */}
-            {isDark ? (
-              <View
-                pointerEvents="none"
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: 'rgba(0,0,0,0.28)',
-                }}
-              />
             ) : null}
 
             {/* Hersteller chip — top-left */}
