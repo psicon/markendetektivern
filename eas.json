@@ -29,7 +29,8 @@
     "production": {
       "ios": {
         "appleId": "patrick@markendetektive.de",
-        "appleTeamId": "MZD2N2F887"
+        "appleTeamId": "MZD2N2F887",
+        "ascAppId": "6471081082"
       },
       "android": {
         "serviceAccountKeyPath": "./markendetektive-895f7-58c0a81f4613.json"
