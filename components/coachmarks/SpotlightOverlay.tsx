@@ -287,6 +287,51 @@ export function SpotlightOverlay({
     height: ah.value + TARGET_PADDING * 2,
   }));
 
+  // ─── Eck-Caps für gerundetes Hole ────────────────────────────
+  //
+  // Die 4 backdrop-Rechtecke (top/bottom/left/right) bilden ein
+  // rechteckiges Loch um das Target. Damit das Loch RUND wirkt
+  // (matcht den outline-borderRadius), legen wir an jeder Ecke
+  // einen kleinen dunklen Cap-View, dessen INNERE Ecke (Richtung
+  // Loch-Mitte) abgerundet ist. Effekt: das Loch hat in den 4
+  // Ecken eine viertel-Kreis-Auflage, das Sichtfenster wird dort
+  // konkav abgerundet — visuell ist das eine runde Ecke.
+  //
+  // Geometrie pro Cap (z.B. TL):
+  //   • Position: an der TL-Ecke des Loches
+  //   • Größe: SPOTLIGHT_BORDER_RADIUS × SPOTLIGHT_BORDER_RADIUS
+  //   • borderBottomRightRadius (Innen-Ecke des Caps)
+  //
+  // Andere Ecken analog mit jeweils anderen border-radius-Sides.
+  const cornerTopLeftStyle = useAnimatedStyle(() => ({
+    left: winX.value - TARGET_PADDING,
+    top: winY.value - TARGET_PADDING,
+    width: SPOTLIGHT_BORDER_RADIUS,
+    height: SPOTLIGHT_BORDER_RADIUS,
+  }));
+  const cornerTopRightStyle = useAnimatedStyle(() => ({
+    left:
+      winX.value + aw.value + TARGET_PADDING - SPOTLIGHT_BORDER_RADIUS,
+    top: winY.value - TARGET_PADDING,
+    width: SPOTLIGHT_BORDER_RADIUS,
+    height: SPOTLIGHT_BORDER_RADIUS,
+  }));
+  const cornerBottomLeftStyle = useAnimatedStyle(() => ({
+    left: winX.value - TARGET_PADDING,
+    top:
+      winY.value + ah.value + TARGET_PADDING - SPOTLIGHT_BORDER_RADIUS,
+    width: SPOTLIGHT_BORDER_RADIUS,
+    height: SPOTLIGHT_BORDER_RADIUS,
+  }));
+  const cornerBottomRightStyle = useAnimatedStyle(() => ({
+    left:
+      winX.value + aw.value + TARGET_PADDING - SPOTLIGHT_BORDER_RADIUS,
+    top:
+      winY.value + ah.value + TARGET_PADDING - SPOTLIGHT_BORDER_RADIUS,
+    width: SPOTLIGHT_BORDER_RADIUS,
+    height: SPOTLIGHT_BORDER_RADIUS,
+  }));
+
   // ─── Tooltip-Position ────────────────────────────────────────
   //
   // Berechnet aus dem AKTUELLEN rect (nicht via Worklet — der
@@ -367,6 +412,45 @@ export function SpotlightOverlay({
       <Animated.View
         pointerEvents="auto"
         style={[styles.backdrop, { right: 0 }, rightRectStyle]}
+      />
+
+      {/* ─── Eck-Caps für gerundetes Hole ────────────────────────
+          Jede Cap füllt eine Ecke des rechteckigen Holes mit einer
+          konkav-abgerundeten Innen-Kante → das sichtbare Loch hat
+          dadurch in den 4 Ecken eine echte Rundung statt 90°-
+          Kanten. pointerEvents='auto' wie die Backdrop-Rects damit
+          das Tap-Through-Verhalten konsistent bleibt. */}
+      <Animated.View
+        pointerEvents="auto"
+        style={[
+          styles.cornerCap,
+          { borderBottomRightRadius: SPOTLIGHT_BORDER_RADIUS },
+          cornerTopLeftStyle,
+        ]}
+      />
+      <Animated.View
+        pointerEvents="auto"
+        style={[
+          styles.cornerCap,
+          { borderBottomLeftRadius: SPOTLIGHT_BORDER_RADIUS },
+          cornerTopRightStyle,
+        ]}
+      />
+      <Animated.View
+        pointerEvents="auto"
+        style={[
+          styles.cornerCap,
+          { borderTopRightRadius: SPOTLIGHT_BORDER_RADIUS },
+          cornerBottomLeftStyle,
+        ]}
+      />
+      <Animated.View
+        pointerEvents="auto"
+        style={[
+          styles.cornerCap,
+          { borderTopLeftRadius: SPOTLIGHT_BORDER_RADIUS },
+          cornerBottomRightStyle,
+        ]}
       />
 
       {/* Spotlight-Outline (dünner Glow um's Target) — pointerEvents
@@ -506,6 +590,13 @@ export function SpotlightOverlay({
 
 const styles = StyleSheet.create({
   backdrop: {
+    position: 'absolute',
+    backgroundColor: `rgba(0,0,0,${BACKDROP_OPACITY})`,
+  },
+  // Eck-Cap — selbe Tönung wie der Backdrop. Jeweils EINE der vier
+  // border*Radius-Sides wird inline gesetzt (siehe Render) damit
+  // die innere Ecke richtung Hole-Mitte abgerundet ist.
+  cornerCap: {
     position: 'absolute',
     backgroundColor: `rgba(0,0,0,${BACKDROP_OPACITY})`,
   },
