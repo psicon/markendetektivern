@@ -4,7 +4,6 @@ import { Image, Platform, Pressable, Text, View } from 'react-native';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { getProductImage } from '@/lib/utils/productImage';
-import { FadingImage } from './FadingImage';
 
 type Props = {
   title: string;
@@ -75,20 +74,28 @@ function BrandCardImpl({
         ...shadows.sm,
       })}
     >
-      <View style={{ position: 'relative', width: '100%', height: 162 }}>
+      <View
+        style={{
+          position: 'relative',
+          width: '100%',
+          height: 162,
+          backgroundColor: theme.surface,
+        }}
+      >
         {resolvedImageUri ? (
-          <FadingImage
+          // Plain RN-Image — siehe ProductCard für die Performance-
+          // Begründung gegen FadingImage in der Grid-Zelle.
+          <Image
             source={{ uri: resolvedImageUri }}
+            style={{ width: '100%', height: '100%' }}
             resizeMode="contain"
-            // theme.surface (siehe ProductCard für Reasoning).
-            placeholderColor={theme.surface}
+            fadeDuration={200}
           />
         ) : (
           <View
             style={{
               width: '100%',
               height: '100%',
-              backgroundColor: theme.surface,
               alignItems: 'center',
               justifyContent: 'center',
             }}

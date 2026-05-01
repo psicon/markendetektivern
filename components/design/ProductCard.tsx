@@ -8,7 +8,6 @@ import {
 } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { getProductImage } from '@/lib/utils/productImage';
-import { FadingImage } from './FadingImage';
 import { Shimmer } from './Skeletons';
 import { StufenChips } from './StufenChips';
 
@@ -128,25 +127,37 @@ function ProductCardImpl({
         ...shadows.sm,
       })}
     >
-      <View style={{ position: 'relative', width: '100%', height: imageHeight }}>
+      <View
+        style={{
+          position: 'relative',
+          width: '100%',
+          height: imageHeight,
+          // theme.surface = pure white im Light Mode, dunkel im Dark
+          // Mode. Liegt hinter dem freigestellten Produktfoto.
+          backgroundColor: theme.surface,
+        }}
+      >
         {resolvedImageUri ? (
-          <FadingImage
+          // Plain RN-Image (KEIN Reanimated-Wrapper hier!) — wir
+          // hatten kurzzeitig ein FadingImage mit useSharedValue +
+          // useAnimatedStyle pro Karte. Bei 20-40 mounted Karten in 3
+          // PagerView-Pages = 60-120 Worklets, kombiniert mit Scroll-
+          // Handler-Worklets + Chrome-Collapse-Animations + Shadows
+          // = spürbares Scroll-Stocking. RNs `fadeDuration`-Prop
+          // macht den Soft-Fade auf Android nativ (kein JS/Worklet),
+          // iOS dekodiert Bilder so schnell dass kein expliziter
+          // Fade nötig ist.
+          <Image
             source={{ uri: resolvedImageUri }}
+            style={{ width: '100%', height: '100%' }}
             resizeMode="contain"
-            // theme.surface = pure white im Light Mode (matcht den
-            // Card-Body), dunkel im Dark Mode. Damit ist der Bereich
-            // hinter dem freigestellten Produktbild im Dark Mode
-            // dunkel und im Light Mode glatt weiß — nicht das hellgraue
-            // surfaceAlt das der User als "leicht ausgegraut" empfunden
-            // hat.
-            placeholderColor={theme.surface}
+            fadeDuration={200}
           />
         ) : (
           <View
             style={{
               width: '100%',
               height: '100%',
-              backgroundColor: theme.surface,
               alignItems: 'center',
               justifyContent: 'center',
             }}

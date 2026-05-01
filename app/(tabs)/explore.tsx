@@ -2027,7 +2027,13 @@ export default function ExploreScreen() {
             onScroll={scrollHandlerAlle}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            removeClippedSubviews
+            // removeClippedSubviews ENTFERNT — bekannt-problematisch
+            // bei ScrollViews mit Reanimated-Childs / Image-Childs:
+            // bei jedem Off-/On-Screen-Wechsel werden native Views
+            // de-/re-attached → spürbares Scroll-Stocking. Mit
+            // <100 Karten in einem memoized-React-Tree ist der
+            // Memory-Vorteil minimal, aber der Scroll-Smoothness-
+            // Verlust ist signifikant.
             overScrollMode="auto"
             scrollsToTop={tab === 'alle'}
             contentContainerStyle={{
@@ -2109,7 +2115,13 @@ export default function ExploreScreen() {
             onScroll={scrollHandlerMarken}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            removeClippedSubviews
+            // removeClippedSubviews ENTFERNT — bekannt-problematisch
+            // bei ScrollViews mit Reanimated-Childs / Image-Childs:
+            // bei jedem Off-/On-Screen-Wechsel werden native Views
+            // de-/re-attached → spürbares Scroll-Stocking. Mit
+            // <100 Karten in einem memoized-React-Tree ist der
+            // Memory-Vorteil minimal, aber der Scroll-Smoothness-
+            // Verlust ist signifikant.
             overScrollMode="auto"
             scrollsToTop={tab === 'marken'}
             contentContainerStyle={{
