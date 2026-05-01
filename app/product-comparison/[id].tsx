@@ -1412,7 +1412,11 @@ export default function ProductComparisonScreen() {
                         <Text
                           style={{
                             fontFamily,
-                            fontWeight: fontWeight.extraBold,
+                            // fontWeight.black (900) — heavier als
+                            // extraBold (800), damit "−X%" auch bei
+                            // 11 px optisch sattfett auf der grünen
+                            // Pill liegt.
+                            fontWeight: fontWeight.black,
                             fontSize: 11,
                             color: '#fff',
                             letterSpacing: 0.2,
