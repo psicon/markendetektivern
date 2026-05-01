@@ -37,7 +37,7 @@
 // Position. Statisch, keine Scroll-Verfolgung.
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -51,6 +51,8 @@ import Animated, {
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
+  withRepeat,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -230,14 +232,65 @@ export function SpotlightOverlay({
   // damit der Worklet drauf zugreifen kann ohne JS-Bridge.
   const isLayoutSpace = useSharedValue(0); // 0 = window, 1 = layout
 
+  // Erste rect-Setzung pro Show-Lifecycle direkt (kein Slide
+  // von 0,0,0,0 — das wäre ein "wachsen-aus-Ecke"-Effekt der
+  // wie ein Bug aussähe). Folgende Updates animiert mit Spring:
+  // wenn der Caller die Phase wechselt (z.B. ProductDetail-
+  // Walkthrough von 'cart' → 'favorite'), gleitet die Maske smooth
+  // zur neuen Anchor-Position.
+  const hasInitialRectRef = useRef(false);
+  useEffect(() => {
+    if (!visible) {
+      hasInitialRectRef.current = false;
+    }
+  }, [visible]);
+
   useEffect(() => {
     if (!rect) return;
-    ax.value = rect.x;
-    ay.value = rect.y;
-    aw.value = rect.width;
-    ah.value = rect.height;
+    if (!hasInitialRectRef.current) {
+      ax.value = rect.x;
+      ay.value = rect.y;
+      aw.value = rect.width;
+      ah.value = rect.height;
+      hasInitialRectRef.current = true;
+    } else {
+      // Spring-Slide. Damping 22 + stiffness 220 = "satt aber
+      // nicht überschwingend" — feels intentional, nicht
+      // springy-cartoonisch.
+      const opts = { damping: 22, stiffness: 220, mass: 0.7 };
+      ax.value = withSpring(rect.x, opts);
+      ay.value = withSpring(rect.y, opts);
+      aw.value = withSpring(rect.width, opts);
+      ah.value = withSpring(rect.height, opts);
+    }
     isLayoutSpace.value = rect.space === 'layout' ? 1 : 0;
   }, [rect, ax, ay, aw, ah, isLayoutSpace]);
+
+  // ─── Hover-Pulse auf Outline + Caps ──────────────────────────
+  //
+  // Subtiler Atem-Effekt: die weiße Outline pulst zwischen 0.45
+  // und 1.0 Opacity, ~1.6 s pro Halbwelle. Macht den Spotlight
+  // "lebendig" statt statisch und zieht den Blick auf das Target
+  // ohne aufdringlich zu sein.
+  //
+  // KEIN Scale-Pulse (würde mit den Cap-Geometrien kollidieren) —
+  // nur Opacity. Reicht völlig für den Hover-Eindruck.
+  const pulse = useSharedValue(0);
+  useEffect(() => {
+    if (visible) {
+      pulse.value = 0;
+      pulse.value = withRepeat(
+        withTiming(1, {
+          duration: 1600,
+          easing: Easing.inOut(Easing.ease),
+        }),
+        -1,
+        true,
+      );
+    } else {
+      pulse.value = 0;
+    }
+  }, [visible, pulse]);
 
   // Window-Y des Anchors. Bei layout-space: layoutY - scrollY +
   // scrollViewOffsetY. Bei window-space: einfach Y.
@@ -279,12 +332,15 @@ export function SpotlightOverlay({
   }));
 
   // Outline um das Spotlight — dünne weiße Border + border-radius.
-  // Liegt OBEN auf dem Target, ist NICHT tappable.
+  // Liegt OBEN auf dem Target, ist NICHT tappable. Pulst in Opacity
+  // (siehe pulse SharedValue) zwischen 0.45 und 1.0 für Hover-
+  // Effekt.
   const outlineStyle = useAnimatedStyle(() => ({
     left: winX.value - TARGET_PADDING,
     top: winY.value - TARGET_PADDING,
     width: aw.value + TARGET_PADDING * 2,
     height: ah.value + TARGET_PADDING * 2,
+    opacity: 0.45 + pulse.value * 0.55,
   }));
 
   // ─── Eck-Caps für gerundetes Hole ────────────────────────────
