@@ -20,6 +20,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import {
   collection,
   doc,
@@ -98,7 +99,7 @@ export function FloatingShoppingListButton({
 
   const onPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push('/shopping-list' as any);
+    safePush('/shopping-list');
   };
 
   return (

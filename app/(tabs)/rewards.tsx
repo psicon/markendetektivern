@@ -2,6 +2,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Image as RNImage,
@@ -262,7 +263,7 @@ export default function RewardsScreen() {
 
         <Pressable
           onPress={() =>
-            router.push(user ? ('/profile' as any) : ('/auth/welcome' as any))
+            safePush(user ? ('/profile' as any) : ('/auth/welcome' as any))
           }
           style={({ pressed }) => ({
             width: 34,
@@ -1007,7 +1008,7 @@ function QuickActionTile({ action }: { action: QuickAction }) {
   return (
     <Pressable
       onPress={() => {
-        if (action.k === 'receipt') router.push('/barcode-scanner' as any);
+        if (action.k === 'receipt') safePush('/barcode-scanner' as any);
         // photo + survey wire up later
       }}
       style={({ pressed }) => ({
@@ -1088,7 +1089,7 @@ function EarnRow({
   return (
     <Pressable
       onPress={() => {
-        if (action.k === 'receipt') router.push('/barcode-scanner' as any);
+        if (action.k === 'receipt') safePush('/barcode-scanner' as any);
       }}
       style={({ pressed }) => ({
         flexDirection: 'row',
@@ -2875,7 +2876,7 @@ function StatusHero({
   // /achievements screen — that's where Errungenschaften, full level
   // catalogue, lottie animations and progress live. Keeping that off
   // the Bestenliste avoids stacking two heavy sections on one screen.
-  const onPress = () => router.push('/achievements' as any);
+  const onPress = () => safePush('/achievements' as any);
 
   return (
     <Pressable

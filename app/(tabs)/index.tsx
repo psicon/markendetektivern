@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -456,7 +457,7 @@ export default function HomeScreen() {
     // Search is now in-place inside Stöbern (see explore.tsx). The
     // `query` param triggers an auto-submit + lands on the Alle
     // tab with merged Eigenmarken + Marken hits.
-    router.push(
+    safePush(
       `/(tabs)/explore?query=${encodeURIComponent(t)}&tab=alle` as any,
     );
   };
@@ -473,10 +474,10 @@ export default function HomeScreen() {
     // typically renders with data on its first paint.
     if (stufe <= 2) {
       FirestoreService.prefetchProductDetails(product.id);
-      router.push(`/noname-detail/${product.id}` as any);
+      safePush(`/noname-detail/${product.id}` as any);
     } else {
       FirestoreService.prefetchComparisonData(product.id, false);
-      router.push(`/product-comparison/${product.id}?type=noname` as any);
+      safePush(`/product-comparison/${product.id}?type=noname` as any);
     }
   };
 
@@ -501,7 +502,7 @@ export default function HomeScreen() {
     if (item.type === 'marken') {
       analytics.trackProductViewWithJourney(item.id, 'brand', productName, 0);
       FirestoreService.prefetchComparisonData(item.id, true);
-      router.push(`/product-comparison/${item.id}?type=brand` as any);
+      safePush(`/product-comparison/${item.id}?type=brand` as any);
       return;
     }
     analytics.trackProductViewWithJourney(item.id, 'noname', productName, 0);
@@ -509,10 +510,10 @@ export default function HomeScreen() {
       item.stufe ?? parseInt(item.product?.stufe ?? '3', 10) ?? 3;
     if (stufe <= 2) {
       FirestoreService.prefetchProductDetails(item.id);
-      router.push(`/noname-detail/${item.id}` as any);
+      safePush(`/noname-detail/${item.id}` as any);
     } else {
       FirestoreService.prefetchComparisonData(item.id, false);
-      router.push(`/product-comparison/${item.id}?type=noname` as any);
+      safePush(`/product-comparison/${item.id}?type=noname` as any);
     }
   };
 
@@ -584,14 +585,14 @@ export default function HomeScreen() {
   // change; otherwise we'd re-render five cards on every scroll
   // tick.
   const schnellzugriff = useMemo(() => [
-    { icon: 'receipt' as const, label: 'Kassenbon\nscannen', background: '#95cfc4', dark: true as const,  onPress: () => router.push('/achievements' as any) },
-    { icon: 'camera-plus-outline'  as const, label: 'Produkte\neinreichen', background: '#a89cdf', dark: true as const,  onPress: () => router.push('/achievements' as any) },
-    { icon: 'heart-outline'        as const, label: 'Deine\nFavoriten',    background: theme.surfaceAlt, dark: false as const, onPress: () => router.push('/favorites' as any) },
-    { icon: 'poll'                 as const, label: 'Umfragen',            background: theme.surfaceAlt, dark: false as const, onPress: () => router.push('/achievements' as any) },
+    { icon: 'receipt' as const, label: 'Kassenbon\nscannen', background: '#95cfc4', dark: true as const,  onPress: () => safePush('/achievements' as any) },
+    { icon: 'camera-plus-outline'  as const, label: 'Produkte\neinreichen', background: '#a89cdf', dark: true as const,  onPress: () => safePush('/achievements' as any) },
+    { icon: 'heart-outline'        as const, label: 'Deine\nFavoriten',    background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/favorites' as any) },
+    { icon: 'poll'                 as const, label: 'Umfragen',            background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/achievements' as any) },
     // Cart-Glyph (gefüllt) — entspricht dem `cart.fill` der alten
     // Homepage und matcht den schwebenden Einkaufszettel-FAB rechts
     // unten, sodass Schnellzugriff + FAB visuell verbunden sind.
-    { icon: 'cart'                 as const, label: 'Einkaufs-\nliste',    background: theme.surfaceAlt, dark: false as const, onPress: () => router.push('/shopping-list' as any) },
+    { icon: 'cart'                 as const, label: 'Einkaufs-\nliste',    background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/shopping-list' as any) },
   ], [theme.surfaceAlt]);
 
   return (
@@ -600,8 +601,8 @@ export default function HomeScreen() {
         scrollY={scrollY}
         insetTop={insetTop}
         onPressSearch={openSearchSheet}
-        onPressScanner={() => router.push('/barcode-scanner')}
-        onPressProfile={() => router.push(user ? ('/profile' as any) : ('/auth/welcome' as any))}
+        onPressScanner={() => safePush('/barcode-scanner')}
+        onPressProfile={() => safePush(user ? ('/profile' as any) : ('/auth/welcome' as any))}
         profilePhotoUrl={
           (userProfile as any)?.photo_url || user?.photoURL || null
         }
@@ -661,7 +662,7 @@ export default function HomeScreen() {
               bigScanIconAnimStyle,
             ]}
           >
-            <Pressable onPress={() => router.push('/barcode-scanner')} hitSlop={10}>
+            <Pressable onPress={() => safePush('/barcode-scanner')} hitSlop={10}>
               <MaterialCommunityIcons name="barcode-scan" size={20} color={theme.primary} />
             </Pressable>
           </Animated.View>
@@ -733,7 +734,7 @@ export default function HomeScreen() {
           </View>
         ) : (
           <Pressable
-            onPress={() => router.push('/achievements' as any)}
+            onPress={() => safePush('/achievements' as any)}
             style={({ pressed }) => ({
               marginHorizontal: 20,
               marginTop: 20,
@@ -856,7 +857,7 @@ export default function HomeScreen() {
             >
               Für dich enttarnt
             </Text>
-            <Pressable onPress={() => router.push('/(tabs)/explore' as any)}>
+            <Pressable onPress={() => safePush('/(tabs)/explore' as any)}>
               <Text
                 style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 13, color: theme.primary }}
               >
@@ -1021,7 +1022,7 @@ export default function HomeScreen() {
             style={{ borderRadius: radii.xl, overflow: 'hidden', ...shadows.fab }}
           >
             <Pressable
-              onPress={() => router.push('/barcode-scanner' as any)}
+              onPress={() => safePush('/barcode-scanner' as any)}
               style={{ padding: 24 }}
             >
               <View style={{ opacity: 0.18, position: 'absolute', right: -30, bottom: -20 }}>

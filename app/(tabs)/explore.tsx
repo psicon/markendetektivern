@@ -1,6 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BlurView } from 'expo-blur';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
@@ -1085,10 +1086,10 @@ export default function ExploreScreen() {
       // render — no skeleton phase, no fade-in pop.
       if (stufeNum <= 2) {
         FirestoreService.prefetchProductDetails(p.id);
-        router.push(`/noname-detail/${p.id}` as any);
+        safePush(`/noname-detail/${p.id}` as any);
       } else {
         FirestoreService.prefetchComparisonData(p.id, false);
-        router.push(`/product-comparison/${p.id}?type=noname` as any);
+        safePush(`/product-comparison/${p.id}?type=noname` as any);
       }
     },
     [analytics, searchActiveQuery, searchQueryIdEigen, userProfile?.uid],
@@ -1112,7 +1113,7 @@ export default function ExploreScreen() {
         });
       }
       FirestoreService.prefetchComparisonData(m.id, true);
-      router.push(`/product-comparison/${m.id}?type=markenprodukt` as any);
+      safePush(`/product-comparison/${m.id}?type=markenprodukt` as any);
     },
     [analytics, searchActiveQuery, searchQueryIdMarken, userProfile?.uid],
   );
@@ -2741,7 +2742,7 @@ export default function ExploreScreen() {
           onClose={() => setLockedCategory(null)}
           onNavigateToLevels={() => {
             setLockedCategory(null);
-            router.push('/achievements' as any);
+            safePush('/achievements' as any);
           }}
           onUnlockSuccess={() => {
             setLockedCategory(null);

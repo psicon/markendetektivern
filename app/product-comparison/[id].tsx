@@ -1,6 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { safeReplace } from '@/lib/utils/safeNav';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
@@ -2067,9 +2068,7 @@ export default function ProductComparisonScreen() {
           items={alternatives}
           onItemPress={(altId) => {
             FirestoreService.prefetchComparisonData(altId, false);
-            router.replace(
-              `/product-comparison/${altId}?type=noname` as any,
-            );
+            safeReplace(`/product-comparison/${altId}?type=noname`);
           }}
         />
 

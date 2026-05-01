@@ -15,6 +15,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Image,
@@ -312,15 +313,15 @@ export default function FavoritesScreen() {
   const handleProductPress = (product: any) => {
     if (product.type === 'markenprodukt') {
       FirestoreService.prefetchComparisonData(product.id, true);
-      router.push(`/product-comparison/${product.id}?type=brand` as any);
+      safePush(`/product-comparison/${product.id}?type=brand` as any);
     } else {
       const stufe = parseInt((product as any).stufe ?? '1', 10) || 1;
       if (stufe <= 2) {
         FirestoreService.prefetchProductDetails(product.id);
-        router.push(`/noname-detail/${product.id}` as any);
+        safePush(`/noname-detail/${product.id}` as any);
       } else {
         FirestoreService.prefetchComparisonData(product.id, false);
-        router.push(`/product-comparison/${product.id}?type=noname` as any);
+        safePush(`/product-comparison/${product.id}?type=noname` as any);
       }
     }
   };
@@ -416,7 +417,7 @@ export default function FavoritesScreen() {
       if (errorCount === 0) {
         showCartAddedToast(
           `${successCount} ${successCount === 1 ? 'Produkt' : 'Produkte'} hinzugefügt!`,
-          () => router.push('/shopping-list' as any),
+          () => safePush('/shopping-list' as any),
         );
       } else {
         showInfoToast(

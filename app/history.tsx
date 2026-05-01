@@ -13,6 +13,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect, useNavigation } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, {
   useCallback,
   useLayoutEffect,
@@ -219,7 +220,7 @@ export default function HistoryScreen() {
     // Search is now in-place inside Stöbern (see explore.tsx). The
     // `query` param triggers an auto-submit + lands on the Alle
     // tab with merged Eigenmarken + Marken hits.
-    router.push(
+    safePush(
       `/(tabs)/explore?query=${encodeURIComponent(item.searchTerm)}&tab=alle` as any,
     );
   };
@@ -228,10 +229,10 @@ export default function HistoryScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (item.productType === 'noname') {
       FirestoreService.prefetchComparisonData(item.productId, false);
-      router.push(`/product-comparison/${item.productId}?type=noname` as any);
+      safePush(`/product-comparison/${item.productId}?type=noname` as any);
     } else {
       FirestoreService.prefetchComparisonData(item.productId, true);
-      router.push(`/product-comparison/${item.productId}?type=brand` as any);
+      safePush(`/product-comparison/${item.productId}?type=brand` as any);
     }
   };
 

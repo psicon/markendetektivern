@@ -350,14 +350,25 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
 
   const onLayout = useCallback(
     (e: any) => {
+      // Re-measure auf jedem Layout-Pass während die Row IDLE ist
+      // (= nicht im Collapse). Damit reflektiert measuredHeight die
+      // tatsächliche aktuelle Höhe — z.B. wenn der User eine
+      // BrandCard ausklappt und die Inner-Content von 80 auf 280 px
+      // wächst. Während des Collapse-Übergangs ignorieren wir
+      // Layout-Updates, sonst springt die Animation mid-flight.
+      //
+      // User-Bug-Report (vorher "Capture once"): "beim einkaufszettel
+      // kann ich nicht mehr ausklappen bei marken — er toggelt aber
+      // es ist nichts zu sehen". Der Inhalt wurde gerendert, aber
+      // die SwipeRow-Wrapper-Höhe blieb auf dem initial gemessenen
+      // collapsed-Wert geklemmt → expand wurde gechlippt.
+      if (phase !== 'idle') return;
       const h = e.nativeEvent.layout.height;
-      // Capture once, ignore later layout passes (e.g. expand/collapse
-      // of brand cards) — we don't want the height to "snap" mid-row.
-      if (measuredHeight === 0 && h > 0) {
+      if (h > 0 && h !== measuredHeight) {
         setMeasuredHeight(h);
       }
     },
-    [measuredHeight],
+    [measuredHeight, phase],
   );
 
   const enterCollapse = () => setPhase('collapsing');
@@ -442,10 +453,15 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
   }));
 
   // Wrapper animates height + marginBottom + opacity together, so the
-  // row collapses into the gap and the rows below slide up smoothly.
+  // row collapses into the gap und die rows below sliden hoch.
+  //
+  // Wichtig: nur DURING dem Collapse (collapse.value > 0) klemmen wir
+  // die Höhe auf measuredHeight. Im Idle-State (collapse.value === 0)
+  // lassen wir die Höhe frei — sonst würde ein expanded BrandCard
+  // (Inner-Content wächst) auf den initial gemessenen Wert geclippt.
   const wrapperStyle = useAnimatedStyle(() => {
-    if (measuredHeight === 0) {
-      // Until we've measured, let layout flow naturally.
+    if (measuredHeight === 0 || collapse.value === 0) {
+      // Nicht messbar oder im Idle: natürliches Layout, kein Clamp.
       return { marginBottom: ROW_GAP, opacity: 1 };
     }
     return {
@@ -830,6 +846,11 @@ type BrandCardProps = {
   favoriteMarketId?: string;
   /** When false, expandable section is hidden (used in "Alle"-Tab to keep simple). */
   allowExpand?: boolean;
+  /** Hersteller-`infos` Text — wenn vorhanden zeigt die Card ein
+   *  (i)-Icon neben dem Hersteller-Namen. Tap triggert
+   *  `onInfoPress` — Parent öffnet ein FilterSheet mit dem Text. */
+  infos?: string | null;
+  onInfoPress?: () => void;
 };
 
 function BrandCard({
@@ -846,6 +867,8 @@ function BrandCard({
   loadingConvert,
   favoriteMarketId,
   allowExpand = true,
+  infos,
+  onInfoPress,
 }: BrandCardProps) {
   const { theme, brand } = useTokens();
   const product = item.product;
@@ -899,10 +922,30 @@ function BrandCard({
                   fontSize: 11,
                   color: brand.primary,
                   letterSpacing: 0.1,
+                  flexShrink: 1,
                 }}
               >
                 {product.hersteller.name}
               </Text>
+              {infos && onInfoPress ? (
+                <Pressable
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    onInfoPress();
+                  }}
+                  hitSlop={8}
+                  style={({ pressed }) => ({
+                    padding: 1,
+                    opacity: pressed ? 0.6 : 1,
+                  })}
+                >
+                  <MaterialCommunityIcons
+                    name="information-outline"
+                    size={13}
+                    color={brand.primary}
+                  />
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
           <Text
@@ -1260,6 +1303,22 @@ function NoNameCard({
         >
           {p?.name || p?.produktName || 'Unbekanntes Produkt'}
         </Text>
+        {/* Hersteller-Zeile (hersteller_new) direkt unter dem Titel —
+            zeigt dem User wer den NoName tatsächlich produziert. */}
+        {p?.hersteller?.name ? (
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 11,
+              color: theme.textMuted,
+              marginTop: 2,
+            }}
+          >
+            {p.hersteller.name}
+          </Text>
+        ) : null}
         <View
           style={{
             flexDirection: 'row',
@@ -1503,6 +1562,9 @@ export default function ShoppingListScreen() {
   const [brandProducts, setBrandProducts] = useState<EnrichedItem[]>([]);
   const [noNameProducts, setNoNameProducts] = useState<EnrichedItem[]>([]);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
+  // Marken-Info-Sheet — getriggered vom (i)-Icon im Hersteller-Chip
+  // einer BrandCard. null = zu, Object = sichtbar.
+  const [infoSheet, setInfoSheet] = useState<{ title: string; body: string } | null>(null);
   const [selectedConversions, setSelectedConversions] = useState<ProductToConvert[]>([]);
   const [totalPotentialSavings, setTotalPotentialSavings] = useState(0);
   const [totalActualSavings, setTotalActualSavings] = useState(0);
@@ -1638,7 +1700,7 @@ export default function ShoppingListScreen() {
               const ref = (item as any).handelsmarkenProdukt;
               const productData = await FirestoreService.getDocumentByReference<Produkte>(ref);
               if (!productData) return null;
-              const [handelsmarkeData, discounterData, markenProdukt] = await Promise.all([
+              const [handelsmarkeData, discounterData, markenProdukt, herstellerData] = await Promise.all([
                 (productData as any).handelsmarke
                   ? FirestoreService.getDocumentByReference(
                       (productData as any).handelsmarke,
@@ -1652,6 +1714,13 @@ export default function ShoppingListScreen() {
                 (productData as any).markenProdukt
                   ? FirestoreService.getDocumentByReference<MarkenProdukte>(
                       (productData as any).markenProdukt,
+                    ).catch(() => null)
+                  : Promise.resolve(null),
+                // hersteller_new für die "tatsächlicher Hersteller"-
+                // Zeile unter dem Produktnamen — siehe NoNameCard.
+                (productData as any).hersteller
+                  ? FirestoreService.getDocumentByReference(
+                      (productData as any).hersteller,
                     ).catch(() => null)
                   : Promise.resolve(null),
               ]);
@@ -1677,6 +1746,7 @@ export default function ShoppingListScreen() {
                     ...productData,
                     handelsmarke: handelsmarkeData,
                     discounter: finalDiscounter,
+                    hersteller: herstellerData,
                   },
                   savings,
                   // preserve journey info for bulk purchase
@@ -2369,6 +2439,25 @@ export default function ShoppingListScreen() {
             loadingConvert={loadingConvert}
             favoriteMarketId={favoriteMarketId}
             allowExpand={opts.allowExpand}
+            infos={
+              (item.product as any)?.hersteller?.infos ??
+              (item.product as any)?.infos ??
+              null
+            }
+            onInfoPress={() => {
+              const text =
+                (item.product as any)?.hersteller?.infos ??
+                (item.product as any)?.infos ??
+                null;
+              const title =
+                (item.product as any)?.hersteller?.name ??
+                item.name ??
+                item.product?.name ??
+                'Info';
+              if (typeof text === 'string' && text.trim().length > 0) {
+                setInfoSheet({ title, body: text.trim() });
+              }
+            }}
           />
         </SwipeRow>
       );
@@ -2712,6 +2801,27 @@ export default function ShoppingListScreen() {
           brandCount={brandProducts.length}
           noNameCount={noNameProducts.length}
         />
+      </FilterSheet>
+
+      {/* Marken-Info-Sheet — getriggert vom (i)-Icon im
+          Hersteller-Chip einer BrandCard. */}
+      <FilterSheet
+        visible={!!infoSheet}
+        title={infoSheet?.title ?? ''}
+        onClose={() => setInfoSheet(null)}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.regular,
+            fontSize: 14,
+            lineHeight: 21,
+            color: theme.text,
+            paddingBottom: 8,
+          }}
+        >
+          {infoSheet?.body ?? ''}
+        </Text>
       </FilterSheet>
 
       {/* Batch loaders */}

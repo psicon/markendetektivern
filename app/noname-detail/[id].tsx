@@ -1,5 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Image,
@@ -1365,7 +1366,7 @@ export default function NoNameDetailScreen() {
           items={alternatives}
           onItemPress={(altId) => {
             FirestoreService.prefetchComparisonData(altId, false);
-            router.push(`/product-comparison/${altId}?type=noname` as any);
+            safePush(`/product-comparison/${altId}?type=noname`);
           }}
         />
 
