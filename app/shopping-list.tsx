@@ -1354,40 +1354,6 @@ function NoNameCard({
             </Text>
           ) : null}
         </View>
-        {/* Hersteller-Pill am Bottom — `hersteller_new.herstellername`
-            (Fallback `.name`). hersteller_new-Docs haben primär
-            `herstellername`-Feld. */}
-        {(() => {
-          const herstellerLabel =
-            p?.hersteller?.herstellername ?? p?.hersteller?.name ?? null;
-          if (!herstellerLabel) return null;
-          return (
-            <View
-              style={{
-                alignSelf: 'flex-start',
-                backgroundColor: theme.surfaceAlt,
-                paddingHorizontal: 8,
-                paddingVertical: 3,
-                borderRadius: 6,
-                marginTop: 6,
-                maxWidth: '100%',
-              }}
-            >
-              <Text
-                numberOfLines={1}
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.semibold,
-                  fontSize: 10,
-                  color: theme.textSub,
-                  letterSpacing: 0.3,
-                }}
-              >
-                {herstellerLabel}
-              </Text>
-            </View>
-          );
-        })()}
       </View>
       <RowActions
         onCheck={onCheck}

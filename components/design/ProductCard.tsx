@@ -344,37 +344,6 @@ function ProductCardImpl({
           ) : null}
         </View>
 
-        {/* Hersteller-Pill am unteren Card-Ende — kompakte Chip mit
-            surfaceAlt-bg und kleiner Caps-Schrift, zeigt den
-            tatsächlichen `hersteller_new.name`. Bei Top-Rated-Cards
-            (kein hersteller-Prop durchgereicht) entfällt die Pill. */}
-        {hersteller ? (
-          <View
-            style={{
-              alignSelf: 'flex-start',
-              backgroundColor: theme.surfaceAlt,
-              paddingHorizontal: 8,
-              paddingVertical: 3,
-              borderRadius: 6,
-              marginTop: 8,
-              maxWidth: '100%',
-            }}
-          >
-            <Text
-              numberOfLines={1}
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.semibold,
-                fontSize: 10,
-                color: theme.textSub,
-                letterSpacing: 0.3,
-              }}
-            >
-              {hersteller}
-            </Text>
-          </View>
-        ) : null}
-
         {/* Optionaler Footer — z.B. Rating + Kommentar-Vorschau bei
             der Top-Rated-Liste auf Home. */}
         {footer ?? null}

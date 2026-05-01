@@ -1746,44 +1746,6 @@ export default function ProductComparisonScreen() {
                       );
                     })() : null}
 
-                    {/* Hersteller-Pill am Card-Bottom — kompakte Chip
-                        mit `hersteller_new.herstellername` (Fallback
-                        auf `.name`). hersteller_new-Docs haben
-                        primär `herstellername`-Feld; `name` ist eher
-                        bei marke-Docs. */}
-                    {(() => {
-                      const h = (nn as any).hersteller;
-                      const herstellerLabel =
-                        h?.herstellername ?? h?.name ?? null;
-                      if (!herstellerLabel) return null;
-                      return (
-                        <View
-                          style={{
-                            alignSelf: 'flex-start',
-                            marginHorizontal: 14,
-                            marginBottom: 10,
-                            backgroundColor: theme.surfaceAlt,
-                            paddingHorizontal: 8,
-                            paddingVertical: 3,
-                            borderRadius: 6,
-                            maxWidth: '90%',
-                          }}
-                        >
-                          <Text
-                            numberOfLines={1}
-                            style={{
-                              fontFamily,
-                              fontWeight: fontWeight.semibold,
-                              fontSize: 10,
-                              color: theme.textSub,
-                              letterSpacing: 0.3,
-                            }}
-                          >
-                            {herstellerLabel}
-                          </Text>
-                        </View>
-                      );
-                    })()}
                   </Pressable>
                 );
               })}
