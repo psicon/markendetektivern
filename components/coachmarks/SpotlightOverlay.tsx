@@ -333,11 +333,19 @@ export function SpotlightOverlay({
     const r = Math.min(SPOTLIGHT_BORDER_RADIUS, w / 2, h / 2);
     const right = x + w;
     const bottom = y + h;
-    // Äußeres Vollbild-Rechteck + inneres rounded-rect als zweite
-    // Sub-Path. Mit even-odd-Fill-Rule wird der innere als Loch
-    // ausgespart.
+    // Äußeres Rechteck mit "ausreichend großen" Bounds (-9999..9999)
+    // statt SCREEN_W/SCREEN_H — der SVG-Viewport clippt auf die
+    // tatsächliche Screen-Größe. Wir vermeiden damit dass das
+    // Reanimated-Worklet auf JS-side Dimensions (useWindowDimensions)
+    // zugreifen muss — der Babel-Plugin kann destrukturierte Values
+    // aus Hooks nicht zuverlässig in den Worklet-Closure capturen,
+    // was zur Render-Error "Property 'SCREEN_W' doesn't exist"
+    // geführt hat.
+    //
+    // Inner Rounded-Rect als zweiter Sub-Path. fill-rule="evenodd"
+    // (am Path-Element) macht den inneren zum Loch.
     const d =
-      `M0 0 L${SCREEN_W} 0 L${SCREEN_W} ${SCREEN_H} L0 ${SCREEN_H} Z ` +
+      'M-9999 -9999 L9999 -9999 L9999 9999 L-9999 9999 Z ' +
       `M${x + r} ${y} ` +
       `L${right - r} ${y} ` +
       `A${r} ${r} 0 0 1 ${right} ${y + r} ` +
