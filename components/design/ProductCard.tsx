@@ -307,25 +307,6 @@ function ProductCardImpl({
           {title}
         </Text>
 
-        {/* Hersteller-Zeile aus dem populated `hersteller_new`-Join.
-            Nur gerendert wenn der Caller hersteller mitgibt — bei
-            Markenprodukten oder Top-Rated-Cards ohne hersteller-Daten
-            entfällt die Zeile sauber. */}
-        {hersteller ? (
-          <Text
-            numberOfLines={1}
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 11,
-              color: theme.textMuted,
-              marginTop: 2,
-            }}
-          >
-            {hersteller}
-          </Text>
-        ) : null}
-
         <View
           style={{
             flexDirection: 'row',
@@ -362,6 +343,37 @@ function ProductCardImpl({
             </Text>
           ) : null}
         </View>
+
+        {/* Hersteller-Pill am unteren Card-Ende — kompakte Chip mit
+            surfaceAlt-bg und kleiner Caps-Schrift, zeigt den
+            tatsächlichen `hersteller_new.name`. Bei Top-Rated-Cards
+            (kein hersteller-Prop durchgereicht) entfällt die Pill. */}
+        {hersteller ? (
+          <View
+            style={{
+              alignSelf: 'flex-start',
+              backgroundColor: theme.surfaceAlt,
+              paddingHorizontal: 8,
+              paddingVertical: 3,
+              borderRadius: 6,
+              marginTop: 8,
+              maxWidth: '100%',
+            }}
+          >
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.semibold,
+                fontSize: 10,
+                color: theme.textSub,
+                letterSpacing: 0.3,
+              }}
+            >
+              {hersteller}
+            </Text>
+          </View>
+        ) : null}
 
         {/* Optionaler Footer — z.B. Rating + Kommentar-Vorschau bei
             der Top-Rated-Liste auf Home. */}

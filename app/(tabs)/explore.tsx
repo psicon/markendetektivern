@@ -274,20 +274,21 @@ export default function ExploreScreen() {
   // null = zu, Object = sichtbar mit den jeweiligen Daten.
   const [infoSheet, setInfoSheet] = useState<{ title: string; body: string } | null>(null);
 
-  // Lazy-Mount für BannerAd. Vorher mounteten 3 BannerAds (einer pro
-  // PagerView-Page) gleichzeitig auf dem ersten Frame und feuerten
-  // jeweils 2 dynamic imports (onboardingService, consentService) +
-  // AdMob-init parallel. Auf Android saturierte das den JS-Thread
-  // und blockte den First-Paint. Jetzt:
-  //   • adsReady startet false → keine BannerAd-Instanzen
-  //   • 1500 ms nach Mount flippt es auf true → 1 BannerAd-Instanz
-  //     auf der aktiven Tab-Page mountet
-  //   • Tab-Wechsel mountet/entmounted die Banner entsprechend
-  // Premium-User sehen weiterhin keine Ads.
+  // Lazy-Mount für BannerAd. User-Feedback: "die ads machen das
+  // scrollen sehr unperformant. stell das hinten an. usability und
+  // performance ist top 1!" — daher gehen die Banner JETZT ERST nach
+  // 3500 ms (statt 1500) live, und auch dann nur EINER auf der
+  // aktiven Tab-Page (nicht 3 parallel).
+  //
+  // Plus: wir warten zusätzlich auf den ersten Daten-Load (nonames
+  // oder markenprodukte enthalten Items), damit die Banner-Init nicht
+  // mit dem Initial-Fetch konkurriert. Das schützt die First-Paint-
+  // Pipeline auf Android wo die Web-SDK-Firebase-Verbindung
+  // ohnehin saturiert ist.
   const [adsReady, setAdsReady] = useState(false);
   useEffect(() => {
     if (isPremium) return;
-    const t = setTimeout(() => setAdsReady(true), 1500);
+    const t = setTimeout(() => setAdsReady(true), 3500);
     return () => clearTimeout(t);
   }, [isPremium]);
   const showBannerOn = (forTab: Tab) =>
@@ -1777,6 +1778,20 @@ export default function ExploreScreen() {
         // `hersteller` is populated full object — read .name + .bild directly.
         const marke = m.hersteller?.name ?? '';
         const brandLogoUri = m.hersteller?.bild ?? null;
+        // Diagnose-Log einmalig pro Session: zeigt welche Felder das
+        // populated `hersteller`-Object hat. User-Bug: "info-icon
+        // erscheint nicht" → mit dem Log lässt sich verifizieren ob
+        // `infos` der korrekte Feldname ist und mit Daten gefüllt ist.
+        if (__DEV__ && m.hersteller && !(globalThis as any).__loggedMarkeHersteller) {
+          (globalThis as any).__loggedMarkeHersteller = true;
+          // eslint-disable-next-line no-console
+          console.log(
+            '🔍 Markenprodukt.hersteller fields:',
+            Object.keys(m.hersteller),
+            '| infos value:',
+            JSON.stringify(m.hersteller?.infos ?? '(missing)'),
+          );
+        }
         const packTypId = m.packTyp?.id;
         const unit = packTypId ? packungstypenMap[packTypId] : undefined;
         const { sizeLabel, unitPriceLabel } = formatPack(m.packSize, unit, m.preis);

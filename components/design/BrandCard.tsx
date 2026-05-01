@@ -189,26 +189,26 @@ function BrandCardImpl({
             >
               {brand}
             </Text>
-            {/* (i)-Info-Icon — nur wenn infos-Text + Handler vom
-                Caller geliefert wurden. Eigene Pressable damit der
-                Card-onPress NICHT mit feuert (stopPropagation via
-                event.stopPropagation()). */}
+            {/* (i)-Info-Icon — wenn `infos`-Text + Handler vom Caller
+                gesetzt sind. Eigene Pressable damit Card-onPress
+                nicht mit feuert (stopPropagation). brand.primary
+                statt Mute-Grau, damit das Icon klar sichtbar ist. */}
             {infos && onInfoPress ? (
               <Pressable
                 onPress={(e) => {
                   e.stopPropagation?.();
                   onInfoPress();
                 }}
-                hitSlop={8}
+                hitSlop={10}
                 style={({ pressed }) => ({
                   padding: 2,
                   opacity: pressed ? 0.6 : 1,
                 })}
               >
                 <MaterialCommunityIcons
-                  name="information-outline"
-                  size={14}
-                  color={theme.textMuted}
+                  name="information"
+                  size={16}
+                  color={theme.primary}
                 />
               </Pressable>
             ) : null}

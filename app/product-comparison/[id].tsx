@@ -1574,25 +1574,6 @@ export default function ProductComparisonScreen() {
                           >
                             {(nn as any).name}
                           </Text>
-                          {/* Hersteller-Zeile direkt unter dem Produkt-
-                              namen — aus dem populated `hersteller_new`-
-                              Join. User: "schreibe bei nonames unter
-                              den produktnamen noch den hersteller". */}
-                          {(nn as any).hersteller?.name ? (
-                            <Text
-                              numberOfLines={2}
-                              style={{
-                                fontFamily,
-                                fontWeight: fontWeight.medium,
-                                fontSize: 11,
-                                lineHeight: 15,
-                                color: theme.textMuted,
-                                marginTop: 4,
-                              }}
-                            >
-                              {(nn as any).hersteller.name}
-                            </Text>
-                          ) : null}
                         </View>
                       </View>
                     </View>
@@ -1741,6 +1722,37 @@ export default function ProductComparisonScreen() {
                         </View>
                       );
                     })() : null}
+
+                    {/* Hersteller-Pill am Card-Bottom — kompakte Chip
+                        mit `hersteller_new.name`. User: "in kleiner
+                        pill unter dem produktnamen (bottom)". */}
+                    {(nn as any).hersteller?.name ? (
+                      <View
+                        style={{
+                          alignSelf: 'flex-start',
+                          marginHorizontal: 14,
+                          marginBottom: 10,
+                          backgroundColor: theme.surfaceAlt,
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 6,
+                          maxWidth: '90%',
+                        }}
+                      >
+                        <Text
+                          numberOfLines={1}
+                          style={{
+                            fontFamily,
+                            fontWeight: fontWeight.semibold,
+                            fontSize: 10,
+                            color: theme.textSub,
+                            letterSpacing: 0.3,
+                          }}
+                        >
+                          {(nn as any).hersteller.name}
+                        </Text>
+                      </View>
+                    ) : null}
                   </Pressable>
                 );
               })}

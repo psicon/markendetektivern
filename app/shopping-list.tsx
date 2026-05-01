@@ -1303,22 +1303,6 @@ function NoNameCard({
         >
           {p?.name || p?.produktName || 'Unbekanntes Produkt'}
         </Text>
-        {/* Hersteller-Zeile (hersteller_new) direkt unter dem Titel —
-            zeigt dem User wer den NoName tatsächlich produziert. */}
-        {p?.hersteller?.name ? (
-          <Text
-            numberOfLines={1}
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 11,
-              color: theme.textMuted,
-              marginTop: 2,
-            }}
-          >
-            {p.hersteller.name}
-          </Text>
-        ) : null}
         <View
           style={{
             flexDirection: 'row',
@@ -1370,6 +1354,35 @@ function NoNameCard({
             </Text>
           ) : null}
         </View>
+        {/* Hersteller-Pill am Bottom — `hersteller_new.name`, kompakte
+            Chip mit surfaceAlt-bg. User: "in kleiner pill unter dem
+            produktnamen (bottom)". */}
+        {p?.hersteller?.name ? (
+          <View
+            style={{
+              alignSelf: 'flex-start',
+              backgroundColor: theme.surfaceAlt,
+              paddingHorizontal: 8,
+              paddingVertical: 3,
+              borderRadius: 6,
+              marginTop: 6,
+              maxWidth: '100%',
+            }}
+          >
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.semibold,
+                fontSize: 10,
+                color: theme.textSub,
+                letterSpacing: 0.3,
+              }}
+            >
+              {p.hersteller.name}
+            </Text>
+          </View>
+        ) : null}
       </View>
       <RowActions
         onCheck={onCheck}
