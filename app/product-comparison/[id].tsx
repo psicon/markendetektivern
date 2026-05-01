@@ -782,6 +782,7 @@ export default function ProductComparisonScreen() {
     }
   };
 
+  const [existingRating, setExistingRating] = useState<Rating | null>(null);
   const onOpenRatings = async (
     productId: string,
     productName: string,
@@ -790,12 +791,23 @@ export default function ProductComparisonScreen() {
     setRatingsSheet({ productId, productName, isMarke });
     setRatingsLoading(true);
     setRatings([]);
+    setExistingRating(null);
     try {
-      const data = await FirestoreService.getProductRatingsWithUserInfo(
-        productId,
-        !isMarke,
-      );
+      // Parallel: alle Ratings + die eigene Bewertung dieses Users
+      // (für Submit-Form-Prefill, damit kein Spam-Submit möglich
+      // ist).
+      const [data, mine] = await Promise.all([
+        FirestoreService.getProductRatingsWithUserInfo(productId, !isMarke),
+        user?.uid
+          ? FirestoreService.getUserRatingForProduct(
+              user.uid,
+              productId,
+              !isMarke,
+            )
+          : Promise.resolve(null),
+      ]);
       setRatings(data as any);
+      setExistingRating((mine ?? null) as Rating | null);
     } catch (e) {
       console.warn('ProductComparison: ratings load failed', e);
     } finally {
@@ -2096,6 +2108,7 @@ export default function ProductComparisonScreen() {
         ratings={ratings}
         loading={ratingsLoading}
         showSimilarity={!ratingsSheet?.isMarke}
+        existingRating={existingRating}
         onSubmit={async (r: SubmittedRating) => {
           if (!user?.uid || !ratingsSheet) {
             showInfoToast('Bitte anmelden');
@@ -2138,6 +2151,19 @@ export default function ProductComparisonScreen() {
               !ratingsSheet.isMarke,
             );
             setRatings(refreshed as any);
+
+            // Eigene Bewertung lokal aktualisieren damit der Sheet
+            // beim nächsten Open mit den neuen Werten vorbefüllt.
+            setExistingRating({
+              id: (existingRating as any)?.id,
+              userID: user.uid,
+              ratingOverall: r.ratingOverall,
+              ratingPriceValue: r.ratingPriceValue ?? undefined,
+              ratingTasteFunction: r.ratingTasteFunction ?? undefined,
+              ratingSimilarity: r.ratingSimilarity ?? undefined,
+              ratingContent: r.ratingContent ?? undefined,
+              comment: r.comment ?? undefined,
+            } as any);
 
             // Optimistic local average — patcht das passende
             // Produkt-State-Objekt damit der ⭐-ActionButton-SubLabel

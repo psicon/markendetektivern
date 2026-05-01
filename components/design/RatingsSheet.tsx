@@ -75,6 +75,14 @@ type Props = {
   showSimilarity?: boolean;
   /** True while the parent is fetching ratings — renders skeleton cards. */
   loading?: boolean;
+  /**
+   * Bestehende Bewertung des aktuellen Users für dieses Produkt
+   * (sofern vorhanden). Wenn gesetzt, wird das Submit-Formular mit
+   * den Werten vorbefüllt und der CTA zeigt "Bewertung
+   * aktualisieren" statt "Bewertung absenden". Verhindert dass der
+   * User aus Versehen seine alte Bewertung "doppelt" abgibt.
+   */
+  existingRating?: Rating | null;
   /** Called when the user taps Submit in the write view. Resolved promise
    *  means the sheet switches back to the list; rejection keeps the form
    *  open so the user can retry. */
@@ -96,8 +104,10 @@ export function RatingsSheet({
   totalCount,
   showSimilarity = false,
   loading = false,
+  existingRating,
   onSubmit,
 }: Props) {
+  const isEditing = !!existingRating;
   const { theme, brand, shadows } = useTokens();
   const insets = useSafeAreaInsets();
 
@@ -111,12 +121,14 @@ export function RatingsSheet({
   const [submitting, setSubmitting] = useState(false);
 
   const resetForm = () => {
-    setOverall(0);
-    setTaste(0);
-    setPriceVal(0);
-    setContent(0);
-    setSimilarity(0);
-    setComment('');
+    // Wenn der User bereits eine Bewertung hat, prefillen wir das
+    // Formular mit deren Werten — sonst Reset auf 0.
+    setOverall(existingRating?.ratingOverall ?? 0);
+    setTaste(existingRating?.ratingTasteFunction ?? 0);
+    setPriceVal(existingRating?.ratingPriceValue ?? 0);
+    setContent(existingRating?.ratingContent ?? 0);
+    setSimilarity(existingRating?.ratingSimilarity ?? 0);
+    setComment(existingRating?.comment ?? '');
   };
 
   // Slide-up + backdrop fade animation. Sheet stays mounted through the
@@ -807,7 +819,11 @@ export function RatingsSheet({
                             color: '#fff',
                           }}
                         >
-                          {submitting ? 'Speichern …' : 'Absenden'}
+                          {submitting
+                            ? 'Speichern …'
+                            : isEditing
+                              ? 'Aktualisieren'
+                              : 'Absenden'}
                         </Text>
                       </Pressable>
                     </View>

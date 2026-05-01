@@ -537,14 +537,24 @@ export default function NoNameDetailScreen() {
       showInfoToast('Fehler — bitte erneut versuchen');
     }
   };
+  const [existingRating, setExistingRating] = useState<Rating | null>(null);
   const onRatingsPress = async () => {
     if (!p) return;
     setRatingsOpen(true);
     setRatingsLoading(true);
     setRatings([]);
+    setExistingRating(null);
     try {
-      const data = await FirestoreService.getProductRatingsWithUserInfo(p.id, true);
+      // Parallel: alle Ratings für die Liste-View + die ggf.
+      // existierende Rating dieses Users für den Submit-Prefill.
+      const [data, mine] = await Promise.all([
+        FirestoreService.getProductRatingsWithUserInfo(p.id, true),
+        user?.uid
+          ? FirestoreService.getUserRatingForProduct(user.uid, p.id, true)
+          : Promise.resolve(null),
+      ]);
       setRatings(data as any);
+      setExistingRating((mine ?? null) as Rating | null);
     } catch (e) {
       console.warn('NoNameDetail: ratings load failed', e);
     } finally {
@@ -1373,6 +1383,7 @@ export default function NoNameDetailScreen() {
           ratings={ratings}
           loading={ratingsLoading}
           showSimilarity={false}
+          existingRating={existingRating}
           onSubmit={async (r: SubmittedRating) => {
             if (!user?.uid) {
               showInfoToast('Bitte anmelden');
@@ -1411,6 +1422,20 @@ export default function NoNameDetailScreen() {
               const refreshed =
                 await FirestoreService.getProductRatingsWithUserInfo(p.id, true);
               setRatings(refreshed as any);
+
+              // Eigene Bewertung aktualisieren damit beim nächsten
+              // Sheet-Open der Submit-View mit den neuen Werten
+              // vorbefüllt wird.
+              setExistingRating({
+                id: (existingRating as any)?.id,
+                userID: user.uid,
+                ratingOverall: r.ratingOverall,
+                ratingPriceValue: r.ratingPriceValue ?? undefined,
+                ratingTasteFunction: r.ratingTasteFunction ?? undefined,
+                ratingSimilarity: r.ratingSimilarity ?? undefined,
+                ratingContent: r.ratingContent ?? undefined,
+                comment: r.comment ?? undefined,
+              } as any);
 
               // Optimistic local average so der ⭐-ActionButton-
               // SubLabel sofort die neue Bewertung reflektiert.

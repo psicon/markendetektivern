@@ -3215,7 +3215,7 @@ export class FirestoreService {
    */
   static async addProductRating(ratingData: {
     productID: string | null;           // NoName product ID
-    brandProductID: string | null;      // Brand product ID  
+    brandProductID: string | null;      // Brand product ID
     userID: string;                     // User ID
     ratingOverall: number;              // 1-5 Gesamtbewertung (Pflicht)
     ratingPriceValue?: number | null;   // 1-5 Preis-Leistung (Optional)
@@ -3228,7 +3228,7 @@ export class FirestoreService {
   }): Promise<string> {
     try {
       console.log('💾 Saving product rating to Firestore:', ratingData);
-      
+
       // Validate required fields
       if (!ratingData.userID) {
         throw new Error('userID is required');
@@ -3238,6 +3238,51 @@ export class FirestoreService {
       }
       if (!ratingData.productID && !ratingData.brandProductID) {
         throw new Error('Either productID or brandProductID must be provided');
+      }
+
+      // 🛡️ One-rating-per-user-per-product enforcement.
+      //
+      // User-Bug-Report (alte Version vor UI-Refactor):
+      // anonyme User konnten via Submit-Spam unbegrenzt viele
+      // productRatings-Docs für dasselbe Produkt erzeugen — unter
+      // anderem weil das UI die Submit-Action nicht mit einem
+      // Has-User-Already-Rated-Check gegated hat. Vor dem Insert
+      // schauen wir jetzt nach einer bestehenden Bewertung dieses
+      // Users für dieses Produkt; wenn vorhanden, wird sie
+      // ge-updated statt eine zweite parallel anzulegen.
+      const productKeyId = ratingData.productID || ratingData.brandProductID!;
+      const isNoName = !!ratingData.productID;
+      try {
+        const existing = await this.getUserRatingForProduct(
+          ratingData.userID,
+          productKeyId,
+          isNoName,
+        );
+        if (existing?.id) {
+          console.log(
+            '↩️ addProductRating: existing rating gefunden — updating statt inserting',
+            existing.id,
+          );
+          await this.updateProductRating(existing.id, {
+            ratingOverall: ratingData.ratingOverall,
+            ratingPriceValue: ratingData.ratingPriceValue ?? null,
+            ratingTasteFunction: ratingData.ratingTasteFunction ?? null,
+            ratingSimilarity: ratingData.ratingSimilarity ?? null,
+            ratingContent: ratingData.ratingContent ?? null,
+            comment: ratingData.comment ?? null,
+            updatedate: ratingData.updatedate,
+          });
+          return existing.id;
+        }
+      } catch (err) {
+        // Wenn der Existing-Check fehlschlägt (Network-Glitch),
+        // fallen wir defensiv auf den klassischen Insert-Pfad
+        // zurück — schlechter als Update, aber besser als gar keine
+        // Bewertung.
+        console.warn(
+          'addProductRating: existing-rating check failed, fallback to insert',
+          err,
+        );
       }
 
       // Create product references if IDs are provided
@@ -3263,10 +3308,10 @@ export class FirestoreService {
 
       // Add to productRatings collection
       const docRef = await addDoc(collection(db, 'productRatings'), firestoreData);
-      
+
       console.log('✅ Product rating saved with ID:', docRef.id);
       return docRef.id;
-      
+
     } catch (error) {
       console.error('Error adding product rating:', error);
       throw error;
