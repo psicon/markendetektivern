@@ -259,6 +259,9 @@ export default function ExploreScreen() {
   const [brandId, setBrandId] = useState<string>('all');
   const [sort, setSort] = useState<SortKey>('name');
   const [sheet, setSheet] = useState<SheetKey>(null);
+  // Marken-Info-Sheet — getriggered vom (i)-Icon auf einer BrandCard.
+  // null = zu, Object = sichtbar mit den jeweiligen Daten.
+  const [infoSheet, setInfoSheet] = useState<{ title: string; body: string } | null>(null);
 
   // ─── Reference data (filters + card lookup) ───────────────────────────
   const [discounter, setDiscounter] = useState<FirestoreDocument<Discounter>[]>([]);
@@ -1691,6 +1694,7 @@ export default function ExploreScreen() {
             <ProductCard
               title={p.name ?? ''}
               brand={handelsmarkeName ?? null}
+              hersteller={(p as any).hersteller?.name ?? null}
               eyebrowLogoUri={disc?.bild ?? null}
               product={p}
               price={p.preis ?? 0}
@@ -1722,6 +1726,19 @@ export default function ExploreScreen() {
               unitPriceLabel={unitPriceLabel}
               alternativeCount={m.relatedProdukteIDs?.length ?? 0}
               onPress={() => openBrand(m, index)}
+              infos={(m as any).hersteller?.infos ?? (m as any).infos ?? null}
+              onInfoPress={() => {
+                const text =
+                  (m as any).hersteller?.infos ??
+                  (m as any).infos ??
+                  null;
+                if (typeof text === 'string' && text.trim().length > 0) {
+                  setInfoSheet({
+                    title: marke || m.name || 'Info',
+                    body: text.trim(),
+                  });
+                }
+              }}
             />
           </View>,
         );
@@ -2667,6 +2684,28 @@ export default function ExploreScreen() {
           }}
         />
       ) : null}
+
+      {/* Marken-Info-Sheet — getriggered vom (i)-Icon auf einer
+          BrandCard. Zeigt den Hersteller/Discounter-Infos-Text in
+          einem scrollbaren Body. */}
+      <FilterSheet
+        visible={!!infoSheet}
+        title={infoSheet?.title ?? ''}
+        onClose={() => setInfoSheet(null)}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.regular,
+            fontSize: 14,
+            lineHeight: 21,
+            color: theme.text,
+            paddingBottom: 8,
+          }}
+        >
+          {infoSheet?.body ?? ''}
+        </Text>
+      </FilterSheet>
     </View>
   );
 }

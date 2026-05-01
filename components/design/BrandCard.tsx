@@ -29,6 +29,15 @@ type Props = {
   /** Price per unit — e.g. "8,90€/kg", "0,05€/Stk.". */
   unitPriceLabel?: string | null;
   onPress?: () => void;
+  /**
+   * Optionaler Marken-/Hersteller-Info-Text (z.B. aus
+   * Discounter/Hersteller `infos`-Feld). Wenn gesetzt, rendert die
+   * Card ein kleines (i)-Icon neben dem Brand-Eyebrow. Tap darauf
+   * triggert `onInfoPress` — der Caller (z.B. Stöbern) öffnet
+   * dann ein FilterSheet mit dem Text.
+   */
+  infos?: string | null;
+  onInfoPress?: () => void;
 };
 
 function formatEur(value: number): string {
@@ -57,6 +66,8 @@ function BrandCardImpl({
   sizeLabel,
   unitPriceLabel,
   onPress,
+  infos,
+  onInfoPress,
 }: Props) {
   const { theme, shadows } = useTokens();
 
@@ -178,6 +189,29 @@ function BrandCardImpl({
             >
               {brand}
             </Text>
+            {/* (i)-Info-Icon — nur wenn infos-Text + Handler vom
+                Caller geliefert wurden. Eigene Pressable damit der
+                Card-onPress NICHT mit feuert (stopPropagation via
+                event.stopPropagation()). */}
+            {infos && onInfoPress ? (
+              <Pressable
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  onInfoPress();
+                }}
+                hitSlop={8}
+                style={({ pressed }) => ({
+                  padding: 2,
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <MaterialCommunityIcons
+                  name="information-outline"
+                  size={14}
+                  color={theme.textMuted}
+                />
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
         <Text

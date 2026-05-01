@@ -18,6 +18,11 @@ type Props = {
   /** Handelsmarke name (for NoName) or brand/manufacturer name — rendered
    *  as a green uppercase eyebrow above the title. */
   brand?: string | null;
+  /** Hersteller-Name (aus dem populated `hersteller_new`-Join). Wird
+   *  unter dem Produktnamen als zweite Zeile gerendert wenn gesetzt.
+   *  Auf NoName-Karten in Stöbern-Grids hilft das dem User sofort
+   *  zu erkennen wer den NoName tatsächlich produziert. */
+  hersteller?: string | null;
   /** Tiny logo shown left of the eyebrow text. For NoName this is the
    *  discounter logo (Firestore `discounter.bild`); for brand products
    *  it's the manufacturer/brand logo (`hersteller.bild`). */
@@ -87,6 +92,7 @@ function formatPrice(price: number): string {
 function ProductCardImpl({
   title,
   brand,
+  hersteller,
   eyebrowLogoUri,
   eyebrowLoading,
   product,
@@ -300,6 +306,25 @@ function ProductCardImpl({
         >
           {title}
         </Text>
+
+        {/* Hersteller-Zeile aus dem populated `hersteller_new`-Join.
+            Nur gerendert wenn der Caller hersteller mitgibt — bei
+            Markenprodukten oder Top-Rated-Cards ohne hersteller-Daten
+            entfällt die Zeile sauber. */}
+        {hersteller ? (
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 11,
+              color: theme.textMuted,
+              marginTop: 2,
+            }}
+          >
+            {hersteller}
+          </Text>
+        ) : null}
 
         <View
           style={{
