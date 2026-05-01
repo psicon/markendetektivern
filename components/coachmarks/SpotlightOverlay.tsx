@@ -358,14 +358,26 @@ export function SpotlightOverlay({
     return { d };
   });
 
-  // Outline-Pulse — als animierter <Rect> auf dem SVG, weißer
-  // Stroke um das Hole, Opacity-Pulse via animatedProps.
+  // Outline-Pulse als sichtbares "Atmen": Ring expandiert
+  // periodisch 4 px nach außen und kontrahiert wieder. Plus
+  // Stroke-Width-Pulse 2→3 px und Opacity 0.6→1.0. Kombination
+  // wirkt wie ein lebender Hover statt eines starren Rings.
+  //
+  // Best-Practice-Pattern aus Coachmark-Tour-Libraries (Slack,
+  // Notion, etc.): subtle expansion + opacity-pulse, gemeinsam
+  // zeitlich kohärent, ohne aufdringlich zu wirken.
+  const PULSE_EXPAND = 4;
   const animatedOutlineProps = useAnimatedProps(() => {
-    const x = winX.value - TARGET_PADDING;
-    const y = winY.value - TARGET_PADDING;
-    const w = aw.value + TARGET_PADDING * 2;
-    const h = ah.value + TARGET_PADDING * 2;
-    const r = Math.min(SPOTLIGHT_BORDER_RADIUS, w / 2, h / 2);
+    const expand = pulse.value * PULSE_EXPAND;
+    const x = winX.value - TARGET_PADDING - expand;
+    const y = winY.value - TARGET_PADDING - expand;
+    const w = aw.value + TARGET_PADDING * 2 + expand * 2;
+    const h = ah.value + TARGET_PADDING * 2 + expand * 2;
+    const r = Math.min(
+      SPOTLIGHT_BORDER_RADIUS + expand,
+      w / 2,
+      h / 2,
+    );
     return {
       x,
       y,
@@ -373,7 +385,8 @@ export function SpotlightOverlay({
       height: h,
       rx: r,
       ry: r,
-      opacity: 0.45 + pulse.value * 0.55,
+      opacity: 0.6 + pulse.value * 0.4,
+      strokeWidth: 2 + pulse.value * 1,
     } as any;
   });
 
@@ -447,10 +460,13 @@ export function SpotlightOverlay({
         />
         {/* Outline-Rect direkt im selben SVG — Stroke um das
             Loch, pulst in Opacity (siehe pulse SharedValue). */}
+        {/* stroke="white" voll opak — die Sichtbarkeit wird von
+            der opacity-Animation in animatedOutlineProps gesteuert
+            (0.6 → 1.0 mit pulse). */}
         <AnimatedRect
           animatedProps={animatedOutlineProps}
           fill="transparent"
-          stroke="rgba(255,255,255,0.85)"
+          stroke="white"
           strokeWidth={2}
         />
       </Svg>
