@@ -29,6 +29,7 @@ import {
   type EnttarnteAlternative,
 } from '@/components/design/EnttarnteAlternativesList';
 import { FadingImage } from '@/components/design/FadingImage';
+import { FilterSheet } from '@/components/design/FilterSheet';
 import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
 import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
 import { ImageZoomModal, type SourceRect } from '@/components/design/ImageZoomModal';
