@@ -1945,6 +1945,37 @@ export default function ProductComparisonScreen() {
               !ratingsSheet.isMarke,
             );
             setRatings(refreshed as any);
+
+            // Optimistic local average — patcht das passende
+            // Produkt-State-Objekt damit der ⭐-ActionButton-SubLabel
+            // sofort die neue Bewertung reflektiert. Vorher zog der
+            // SubLabel aus dem Firestore-aggregierten Feld
+            // `averageRatingOverall`, das clientseitig stale blieb
+            // bis Cloud-Function-Aggregat lief + Reload. User-
+            // Regression: "die bewertungsanzeige aktualisiert sich
+            // nicht, das ging in der alten version noch".
+            const overalls = (refreshed as Rating[])
+              .map((r) => r.ratingOverall)
+              .filter((v): v is number => typeof v === 'number');
+            const avg =
+              overalls.length > 0
+                ? overalls.reduce((a, b) => a + b, 0) / overalls.length
+                : undefined;
+            if (ratingsSheet.isMarke) {
+              setMainProduct((prev) =>
+                prev
+                  ? ({ ...prev, averageRatingOverall: avg } as any)
+                  : prev,
+              );
+            } else {
+              setNonames((prev) =>
+                prev.map((n) =>
+                  n.id === ratingsSheet.productId
+                    ? ({ ...n, averageRatingOverall: avg } as any)
+                    : n,
+                ),
+              );
+            }
           } catch {
             /* non-fatal */
           }

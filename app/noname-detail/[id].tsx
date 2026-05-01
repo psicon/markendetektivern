@@ -1407,6 +1407,27 @@ export default function NoNameDetailScreen() {
               const refreshed =
                 await FirestoreService.getProductRatingsWithUserInfo(p.id, true);
               setRatings(refreshed as any);
+
+              // Optimistic local average so der ⭐-ActionButton-
+              // SubLabel sofort die neue Bewertung reflektiert.
+              // Vorher nur die `ratings`-Liste im Sheet aktualisiert
+              // — der Sublabel zog aber aus
+              // `product.averageRatingOverall`, das clientseitig
+              // stale blieb bis das Cloud-Function-Aggregat lief +
+              // das Produkt neu geladen wurde. User hat die
+              // Regression gemerkt: "die bewertungsanzeige
+              // aktualisiert sich nicht, das ging in der alten
+              // version noch".
+              const overalls = (refreshed as Rating[])
+                .map((r) => r.ratingOverall)
+                .filter((v): v is number => typeof v === 'number');
+              const avg =
+                overalls.length > 0
+                  ? overalls.reduce((a, b) => a + b, 0) / overalls.length
+                  : undefined;
+              setProduct((prev) =>
+                prev ? ({ ...prev, averageRatingOverall: avg } as any) : prev,
+              );
             } catch {
               /* non-fatal */
             }
