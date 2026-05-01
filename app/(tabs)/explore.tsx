@@ -1781,15 +1781,34 @@ export default function ExploreScreen() {
     if (markenHasMore && !markenLoading) loadMarken(false);
   }, [inSearchMode, loadMoreSearch, nonameHasMore, nonameLoading, markenHasMore, markenLoading, loadNonames, loadMarken]);
 
-  // Animated scroll handlers drive both the per-page scroll shared value
-  // (→ powers the tab-bar collapse animation on the UI thread) and the
-  // infinite-scroll trigger (JS thread).
+  // Animated scroll handlers driven both die per-page scrollYxxx
+  // (→ powert die Tab-Bar-Collapse-Animation auf dem UI-Thread) und
+  // den Infinite-Scroll-Trigger (JS-Thread via runOnJS).
+  //
+  // Wichtige Optimierung: die runOnJS-Brücke wird nur GETRIGGERED wenn
+  // der User die "Bottom-Zone" (dist < 1200) NEU betritt. Vorher
+  // feuerte sie auf JEDEM Scroll-Frame innerhalb der Zone (~60×/s)
+  // → unnötiger JS-Bridge-Druck → spürbar als "hakelige" Scroll-
+  // Performance, besonders auf Android. Die `loadingZoneXxx`-Flags
+  // sind UI-Thread-SharedValues und werden zurückgesetzt sobald der
+  // User wieder über die 1200-px-Schwelle nach oben scrollt — damit
+  // bleibt der nächste Page-Load triggerbar.
+  const loadingZoneEigen = useSharedValue(false);
+  const loadingZoneMarken = useSharedValue(false);
+  const loadingZoneAlle = useSharedValue(false);
+
   const scrollHandlerEigen = useAnimatedScrollHandler({
     onScroll: (e) => {
       scrollYEigen.value = e.contentOffset.y;
       const dist =
         e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
-      if (dist < 1200) runOnJS(checkLoadMoreEigen)();
+      const nearBottom = dist < 1200;
+      if (nearBottom && !loadingZoneEigen.value) {
+        loadingZoneEigen.value = true;
+        runOnJS(checkLoadMoreEigen)();
+      } else if (!nearBottom && loadingZoneEigen.value) {
+        loadingZoneEigen.value = false;
+      }
     },
   });
   const scrollHandlerMarken = useAnimatedScrollHandler({
@@ -1797,7 +1816,13 @@ export default function ExploreScreen() {
       scrollYMarken.value = e.contentOffset.y;
       const dist =
         e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
-      if (dist < 1200) runOnJS(checkLoadMoreMarken)();
+      const nearBottom = dist < 1200;
+      if (nearBottom && !loadingZoneMarken.value) {
+        loadingZoneMarken.value = true;
+        runOnJS(checkLoadMoreMarken)();
+      } else if (!nearBottom && loadingZoneMarken.value) {
+        loadingZoneMarken.value = false;
+      }
     },
   });
   const scrollHandlerAlle = useAnimatedScrollHandler({
@@ -1805,9 +1830,41 @@ export default function ExploreScreen() {
       scrollYAlle.value = e.contentOffset.y;
       const dist =
         e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
-      if (dist < 1200) runOnJS(checkLoadMoreAlle)();
+      const nearBottom = dist < 1200;
+      if (nearBottom && !loadingZoneAlle.value) {
+        loadingZoneAlle.value = true;
+        runOnJS(checkLoadMoreAlle)();
+      } else if (!nearBottom && loadingZoneAlle.value) {
+        loadingZoneAlle.value = false;
+      }
     },
   });
+
+  // Wenn neue Items reingeflowt sind (= contentSize wächst), reset
+  // wir die Zone-Flags damit der nächste Page-Load triggerbar ist
+  // ohne dass der User aus der Zone rausscrollen muss. Greift auch
+  // wenn nonameLoading/markenLoading von true → false flippt.
+  useEffect(() => {
+    loadingZoneEigen.value = false;
+    loadingZoneAlle.value = false;
+  }, [nonames.length, nonameLoading, loadingZoneEigen, loadingZoneAlle]);
+  useEffect(() => {
+    loadingZoneMarken.value = false;
+    loadingZoneAlle.value = false;
+  }, [markenprodukte.length, markenLoading, loadingZoneMarken, loadingZoneAlle]);
+  useEffect(() => {
+    // Such-Modus: derselbe Pattern für die zusammengeführten Hits.
+    loadingZoneEigen.value = false;
+    loadingZoneMarken.value = false;
+    loadingZoneAlle.value = false;
+  }, [
+    searchHitsEigen.length,
+    searchHitsMarken.length,
+    searchLoadingMore,
+    loadingZoneEigen,
+    loadingZoneMarken,
+    loadingZoneAlle,
+  ]);
 
   // Collapsing tab-bar style. Reads the scroll offset of the currently
   // active page (tracked via `pageIndexShared`). Clamped so the tab-bar

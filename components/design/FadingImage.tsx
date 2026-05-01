@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import { Image, ImageProps, ImageSourcePropType, View, ViewStyle } from 'react-native';
 import Animated, {
   Easing,
@@ -10,24 +10,32 @@ import Animated, {
 const AnimatedImage = Animated.createAnimatedComponent(Image);
 
 // ─── FadingImage — Image-Wrapper mit weichem Fade-In statt
-//     Snap-In, sobald die Bytes geladen sind. Adressiert das
+//     hartem Snap, sobald die Bytes geladen sind. Adressiert das
 //     "Karten erscheinen, dann ploppen die Bilder rein"-Problem
 //     auf Such-/Browse-Listen.
 //
 //     Verhalten:
-//     • Bild startet mit opacity 0 — die `placeholderColor`
-//       (default light surface-grey) füllt den Slot, sodass
-//       nie ein sichtbar leerer Container entsteht.
+//     • Bild startet mit opacity 0; der `placeholderColor`-View
+//       hinter dem Bild füllt den Slot bis zum Load.
 //     • onLoad fired → opacity ramped 0 → 1 über 220 ms (out-cubic).
-//     • Wenn `source` sich ändert (anderes Bild für dieselbe
-//       Card-Slot, z.B. bei Re-Render mit anderem Produkt), wird
-//       der Fade-State zurückgesetzt und neu gefadet.
+//     • Wenn die URI sich ändert (selber Card-Slot bekommt anderes
+//       Produkt im List-Reordering / Re-Search), wird die Opacity
+//       SOFORT auf 0 zurückgesetzt — das nächste onLoad fired den
+//       Fade neu.
 //
-//     Warum nicht Shimmer als Placeholder? Bei 6+ gleichzeitig
-//     ladenden Karten wäre das Pulsieren visuell unruhig. Eine
-//     statische Tönung ist ruhiger und reicht aus, weil das Bild
-//     selbst sehr schnell faded und der Slot dadurch nie als
-//     "kaputt" gelesen wird.
+//     Performance-Notizen (warum so minimal):
+//     • Keine React-State (kein useState/setLoadedKey), kein Re-
+//       Render der Komponente bei Image-Load. Nur ein UI-Thread-
+//       Worklet-Update via Reanimated. Wichtig im Stöbern-Grid wo
+//       20+ Cards gleichzeitig laden können — jeder unnötige Re-
+//       Render verstärkt sonst Scroll-Jank.
+//     • Der useAnimatedStyle ist memoiziert auf shared value;
+//       läuft nur wenn sich der Wert ändert (nicht pro Render).
+//     • Container ist ein einziger `<View>` mit `placeholderColor`
+//       als Background — keine zweite View-Layer für den
+//       Placeholder, das spart ein Element pro Card.
+//     • Statische Tönung statt Shimmer: bei 6+ gleichzeitig
+//       ladenden Karten wäre Shimmer visuell unruhig.
 // ───
 
 type FadingImageProps = Omit<ImageProps, 'source' | 'onLoad'> & {
@@ -47,22 +55,19 @@ export function FadingImage({
   style,
   ...rest
 }: FadingImageProps) {
-  // sourceKey lets us know when the URI changed → reset fade.
   const sourceKey =
     source && typeof source === 'object' && 'uri' in source
       ? (source.uri ?? '')
       : '';
 
-  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const opacity = useSharedValue(0);
 
-  // Reset on source change (uri swap on the same mounted component).
-  React.useEffect(() => {
-    if (loadedKey !== sourceKey) {
-      opacity.value = 0;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceKey]);
+  // URI-Wechsel im selben Slot → Fade resetten. useEffect läuft
+  // ausschließlich wenn sich sourceKey ändert (deps-Vergleich
+  // string-equality), kein Render-Overhead pro Frame.
+  useEffect(() => {
+    opacity.value = 0;
+  }, [sourceKey, opacity]);
 
   const animStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
 
@@ -78,7 +83,6 @@ export function FadingImage({
           {...rest}
           source={source}
           onLoad={() => {
-            setLoadedKey(sourceKey);
             opacity.value = withTiming(1, {
               duration: 220,
               easing: Easing.out(Easing.cubic),

@@ -233,7 +233,13 @@ function ProductCardImpl({
                   width: 16,
                   height: 16,
                   borderRadius: 3,
-                  backgroundColor: '#ffffff',
+                  // Theme-aware: in Dark Mode bekommt die Logo-Kachel
+                  // einen hellen surfaceAlt-Background (statt PURE
+                  // white), damit sie nicht als grelles Fenster aus
+                  // der Card heraussticht. Brand-Logos sind oft als
+                  // SVG/PNG für helle Hintergründe designed — der
+                  // helle Off-White-Ton funktioniert für beide Modi.
+                  backgroundColor: theme.surfaceAlt,
                   overflow: 'hidden',
                   alignItems: 'center',
                   justifyContent: 'center',

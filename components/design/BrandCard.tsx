@@ -139,7 +139,8 @@ function BrandCardImpl({
                   width: 16,
                   height: 16,
                   borderRadius: 3,
-                  backgroundColor: '#ffffff',
+                  // Theme-aware (siehe ProductCard für Reasoning).
+                  backgroundColor: theme.surfaceAlt,
                   overflow: 'hidden',
                   alignItems: 'center',
                   justifyContent: 'center',
