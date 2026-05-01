@@ -56,6 +56,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
+import { remoteConfigService } from '@/lib/services/remoteConfigService';
 import { isNonFoodCategory } from '@/lib/utils/categoryClassification';
 import {
   showFavoriteAddedToast,
@@ -419,6 +420,54 @@ export default function ProductComparisonScreen() {
   } | null>(null);
   const [ratings, setRatings] = useState<Rating[]>([]);
   const [ratingsLoading, setRatingsLoading] = useState(false);
+  // Marken-Info-Sheet: Pressable (i)-Icon im Hersteller-Chip am Hero
+  // öffnet ein FilterSheet mit zusätzlichen Hersteller/Marken-Infos.
+  // null = zu, Object = sichtbar mit den jeweiligen Daten.
+  const [infoSheet, setInfoSheet] = useState<{ title: string; body: string } | null>(null);
+
+  // ─── Stufen-Texte aus Remote Config (tier1header / tier1description
+  //     ... tier5header / tier5description). Fallback ist das hard-
+  //     coded STUFE_INFO am Modul-Top — wenn Remote Config offline ist
+  //     oder ein Key noch leer ist, lesen wir den Default. Loaded
+  //     einmal pro Mount; remoteConfigService cacht intern.
+  const [tierCopy, setTierCopy] = useState<Record<1 | 2 | 3 | 4 | 5, { label: string; line: string }> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const fetches = ([1, 2, 3, 4, 5] as const).flatMap((t) => [
+          remoteConfigService.getValue(`tier${t}header`),
+          remoteConfigService.getValue(`tier${t}description`),
+        ]);
+        const results = await Promise.all(fetches);
+        if (cancelled) return;
+        const next = {} as Record<1 | 2 | 3 | 4 | 5, { label: string; line: string }>;
+        for (let i = 0; i < 5; i++) {
+          const tier = (i + 1) as 1 | 2 | 3 | 4 | 5;
+          const headerRaw = results[i * 2];
+          const descRaw = results[i * 2 + 1];
+          const header = typeof headerRaw === 'string' && headerRaw.trim().length > 0
+            ? headerRaw.trim()
+            : STUFE_INFO[tier].label;
+          const desc = typeof descRaw === 'string' && descRaw.trim().length > 0
+            ? descRaw.trim()
+            : STUFE_INFO[tier].line;
+          next[tier] = { label: header, line: desc };
+        }
+        setTierCopy(next);
+      } catch {
+        /* keep null → fall back to STUFE_INFO */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Helper: liefert Remote-Config-Copy wenn vorhanden, sonst Fallback.
+  // Wird in JEDER Stelle aufgerufen die früher direkt STUFE_INFO[s]
+  // gelesen hat — single source of truth für Stufe-Header/Description.
+  const getStufeInfo = (s: 1 | 2 | 3 | 4 | 5) => tierCopy?.[s] ?? STUFE_INFO[s];
 
   // ─── Image zoom (Stufe 3/4/5: tap any product photo → fullscreen zoom)
   // Variant choice:
@@ -646,7 +695,9 @@ export default function ProductComparisonScreen() {
     : null;
 
   const pickedStufe = picked ? parseStufe((picked as any).stufe) : 1;
-  const pickedInfo = STUFE_INFO[pickedStufe];
+  // Stufe-Texte über getStufeInfo() — liefert Remote-Config-Copy wenn
+  // gefetched, sonst den hardcoded STUFE_INFO-Fallback.
+  const pickedInfo = getStufeInfo(pickedStufe);
 
   // ─── Handlers ─────────────────────────────────────────────────────────
   const onToggleFav = async (
@@ -1000,39 +1051,72 @@ export default function ProductComparisonScreen() {
               </View>
             ) : null}
 
-            {brandName ? (
-              <View
-                style={{
-                  position: 'absolute',
-                  left: 12,
-                  top: 12,
-                  backgroundColor: brand.primaryDark,
-                  paddingVertical: 6,
-                  paddingHorizontal: 12,
-                  borderRadius: 99,
-                  maxWidth: SCREEN_WIDTH - 64,
-                  shadowColor: '#000',
-                  shadowOpacity: 0.22,
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowRadius: 6,
-                  elevation: 3,
-                }}
-              >
-                <Text
-                  numberOfLines={2}
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.extraBold,
-                    fontSize: 13,
-                    lineHeight: 16,
-                    color: '#fff',
-                    letterSpacing: -0.1,
-                  }}
+            {brandName ? (() => {
+              // Hersteller-Infos können auf zwei Wegen reinkommen:
+              // direkt am MarkenProdukt-Doc oder am hersteller_new-Join.
+              // Wir lesen beide defensiv via `as any`, weil das Feld
+              // im TS-Typ HerstellerNew nicht explizit deklariert ist.
+              const infos =
+                (mp as any)?.hersteller?.infos ??
+                (mp as any)?.infos ??
+                null;
+              const hasInfos = typeof infos === 'string' && infos.trim().length > 0;
+              return (
+                <Pressable
+                  onPress={
+                    hasInfos
+                      ? () =>
+                          setInfoSheet({
+                            title: brandName,
+                            body: String(infos).trim(),
+                          })
+                      : undefined
+                  }
+                  disabled={!hasInfos}
+                  style={({ pressed }) => ({
+                    position: 'absolute',
+                    left: 12,
+                    top: 12,
+                    backgroundColor: brand.primaryDark,
+                    paddingVertical: 6,
+                    paddingHorizontal: 12,
+                    borderRadius: 99,
+                    maxWidth: SCREEN_WIDTH - 64,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    shadowColor: '#000',
+                    shadowOpacity: 0.22,
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowRadius: 6,
+                    elevation: 3,
+                    opacity: pressed && hasInfos ? 0.88 : 1,
+                  })}
                 >
-                  {brandName}
-                </Text>
-              </View>
-            ) : null}
+                  <Text
+                    numberOfLines={2}
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.extraBold,
+                      fontSize: 13,
+                      lineHeight: 16,
+                      color: '#fff',
+                      letterSpacing: -0.1,
+                      flexShrink: 1,
+                    }}
+                  >
+                    {brandName}
+                  </Text>
+                  {hasInfos ? (
+                    <MaterialCommunityIcons
+                      name="information-outline"
+                      size={14}
+                      color="rgba(255,255,255,0.85)"
+                    />
+                  ) : null}
+                </Pressable>
+              );
+            })() : null}
 
             {mp ? (
               <View
@@ -1491,6 +1575,25 @@ export default function ProductComparisonScreen() {
                           >
                             {(nn as any).name}
                           </Text>
+                          {/* Hersteller-Zeile direkt unter dem Produkt-
+                              namen — aus dem populated `hersteller_new`-
+                              Join. User: "schreibe bei nonames unter
+                              den produktnamen noch den hersteller". */}
+                          {(nn as any).hersteller?.name ? (
+                            <Text
+                              numberOfLines={2}
+                              style={{
+                                fontFamily,
+                                fontWeight: fontWeight.medium,
+                                fontSize: 11,
+                                lineHeight: 15,
+                                color: theme.textMuted,
+                                marginTop: 4,
+                              }}
+                            >
+                              {(nn as any).hersteller.name}
+                            </Text>
+                          ) : null}
                         </View>
                       </View>
                     </View>
@@ -1588,7 +1691,7 @@ export default function ProductComparisonScreen() {
                         weiter unten). */}
                     {STUFE_IN_CARD ? (() => {
                       const nnStufe = parseStufe((nn as any).stufe);
-                      const nnInfo = STUFE_INFO[nnStufe];
+                      const nnInfo = getStufeInfo(nnStufe);
                       return (
                         <View>
                           <View
@@ -1974,6 +2077,28 @@ export default function ProductComparisonScreen() {
 
         <View style={{ height: 24 }} />
       </Animated.ScrollView>
+
+      {/* Marken-Info-Sheet — geöffnet vom (i)-Icon im Hersteller-
+          Chip am Hero. Zeigt die `infos`-Zusatzdaten der Marke /
+          des Herstellers in einem scrollbaren Body. */}
+      <FilterSheet
+        visible={!!infoSheet}
+        title={infoSheet?.title ?? ''}
+        onClose={() => setInfoSheet(null)}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.regular,
+            fontSize: 14,
+            lineHeight: 21,
+            color: theme.text,
+            paddingBottom: 8,
+          }}
+        >
+          {infoSheet?.body ?? ''}
+        </Text>
+      </FilterSheet>
 
       {/* Ratings sheet — opened from any star ActionButton. Shared for both
           the main brand product and the currently picked NoName via the
