@@ -106,6 +106,12 @@ export type SpotlightOverlayProps = {
   // Element ist (das durch's Cutout durchschimmert).
   onPrimary?: () => void;
   primaryLabel?: string;
+  /**
+   * Pulse-Animation der Outline aus. Default: false (Pulse aktiv).
+   * Bei großen Spotlight-Targets (z.B. ganzes Hero) wirkt das
+   * Breathen unruhig statt einladend — dort lieber statisch.
+   */
+  disablePulse?: boolean;
 };
 
 export function SpotlightOverlay({
@@ -118,6 +124,7 @@ export function SpotlightOverlay({
   skipLabel = 'Überspringen',
   onPrimary,
   primaryLabel,
+  disablePulse = false,
 }: SpotlightOverlayProps) {
   const { theme, brand, shadows } = useTokens();
   const { width: SCREEN_W, height: SCREEN_H } = useWindowDimensions();
@@ -282,20 +289,28 @@ export function SpotlightOverlay({
   // nur Opacity. Reicht völlig für den Hover-Eindruck.
   const pulse = useSharedValue(0);
   useEffect(() => {
-    if (visible) {
+    if (!visible) {
       pulse.value = 0;
-      pulse.value = withRepeat(
-        withTiming(1, {
-          duration: 1600,
-          easing: Easing.inOut(Easing.ease),
-        }),
-        -1,
-        true,
-      );
-    } else {
-      pulse.value = 0;
+      return;
     }
-  }, [visible, pulse]);
+    if (disablePulse) {
+      // Statischer Mid-Wert (0.5) → Outline sieht "definitely
+      // highlighted" aus ohne zu atmen: opacity 0.8, leicht
+      // expandiert (2 px), stroke 2.5 px. Bewährter Look für
+      // große Targets wo Pulse zu unruhig wäre.
+      pulse.value = 0.5;
+      return;
+    }
+    pulse.value = 0;
+    pulse.value = withRepeat(
+      withTiming(1, {
+        duration: 1600,
+        easing: Easing.inOut(Easing.ease),
+      }),
+      -1,
+      true,
+    );
+  }, [visible, disablePulse, pulse]);
 
   // Window-Y des Anchors. Bei layout-space: layoutY - scrollY +
   // scrollViewOffsetY. Bei window-space: einfach Y.

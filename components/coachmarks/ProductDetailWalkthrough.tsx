@@ -160,6 +160,16 @@ export function ProductDetailWalkthrough({
   // Component-Tree, nur Props ändern sich. React reconciled, die
   // animated Rect-Werte im Overlay bleiben erhalten und gleiten
   // mit `withSpring` zur neuen Position (siehe SpotlightOverlay).
+  //
+  // Pulse-Animation: in den ersten beiden Phasen (hero + context)
+  // sind die Spotlight-Targets sehr groß (ganze Title-Block bzw.
+  // ganze Alternativen-Section). Auf solchen Flächen wirkt das
+  // 4-px-Atmen unruhig statt einladend → wir setzen disablePulse.
+  // Ab Phase 3 (favorite/cart/rating) sind die Targets klein
+  // (48-px-Buttons) — da bringt die Pulse den Blick auf das
+  // konkrete Element, deshalb dort an.
+  const disablePulse = phase === 'hero' || phase === 'context';
+
   return (
     <SpotlightOverlay
       visible
@@ -170,6 +180,7 @@ export function ProductDetailWalkthrough({
       skipLabel="Tour beenden"
       onPrimary={isLastStep ? onDismiss : advance}
       primaryLabel={primaryLabel}
+      disablePulse={disablePulse}
     />
   );
 }
