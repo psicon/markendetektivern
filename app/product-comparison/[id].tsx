@@ -1601,20 +1601,27 @@ export default function ProductComparisonScreen() {
                           <View
                             style={{
                               flexDirection: 'row',
-                              alignItems: 'center',
+                              alignItems: 'flex-start',
                               gap: 8,
                               paddingHorizontal: 14,
                               paddingVertical: 10,
                             }}
                           >
-                            <StufenChips stufe={nnStufe} size="sm" />
+                            <View style={{ marginTop: 2 }}>
+                              <StufenChips stufe={nnStufe} size="sm" />
+                            </View>
+                            {/* Bold-Label + graue Description in einem
+                                Text-Composite — analog zur ehemaligen
+                                globalen Detektiv-Check-Row, jetzt nur
+                                kompakter (fontSize 11 statt 13) damit
+                                die Card-Höhe nicht ausartet. */}
                             <Text
-                              numberOfLines={1}
                               style={{
                                 flex: 1,
                                 fontFamily,
                                 fontWeight: fontWeight.medium,
                                 fontSize: 11,
+                                lineHeight: 15,
                                 color: theme.textSub,
                               }}
                             >
@@ -1624,10 +1631,9 @@ export default function ProductComparisonScreen() {
                                   color: theme.text,
                                 }}
                               >
-                                Stufe {nnStufe}
-                              </Text>
-                              {' — '}
-                              {nnInfo.label}
+                                Stufe {nnStufe} — {nnInfo.label}.
+                              </Text>{' '}
+                              {nnInfo.line}
                             </Text>
                           </View>
                         </View>
