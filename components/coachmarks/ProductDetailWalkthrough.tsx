@@ -100,7 +100,7 @@ function configForPhase(
         anchorId: PRODUCT_DETAIL_ANCHOR_CART,
         title: 'Einkaufsliste',
         body:
-          'Tippe hier um das Produkt zur Einkaufsliste hinzuzufügen. Wir tracken automatisch wie viel du beim Wechsel sparst.',
+          'Tippe hier um das Produkt zur Einkaufsliste hinzuzufügen. Die interaktive Einkaufsliste ist die letzte die du brauchen wirst — du siehst sofort deine Ersparnis und sie wird automatisch aufsummiert.',
       };
     case 'rating':
       return {

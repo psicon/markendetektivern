@@ -642,6 +642,17 @@ export default function NoNameDetailScreen() {
         }}
         showsVerticalScrollIndicator={false}
       >
+        {/* Coachmark-Anchor 'product.hero' wrappt Title-Slot UND
+            Hero zusammen — Spotlight-Phase 1 hebt damit das gesamte
+            "Was wird hier gezeigt?"-Block hervor (DAS ORIGINAL /
+            DAS NoName + Produktname + Hero-Karte). User-Feedback:
+            "erweitere den Fokus auch auf den Produktnamen und 'Das
+            Original'". */}
+        <View
+          ref={heroAnchor.ref}
+          onLayout={heroAnchor.onLayout}
+          collapsable={false}
+        >
         {/* Title slot — 28 px reserves vertical space so the morph
             title (rendered absolutely above) lands at HERO_SCREEN_Y
             before the rest of the content below. */}
@@ -716,13 +727,9 @@ export default function NoNameDetailScreen() {
             </View>
           }
         >
-          {/* Coachmark-Anchor 'product.hero' wrappt den Hero —
-              Spotlight-Phase 1 hebt das ganze Hero hervor. */}
-          <View
-            ref={heroAnchor.ref}
-            onLayout={heroAnchor.onLayout}
-            collapsable={false}
-          >
+          {/* Hero-Image-Container — innerer Hero (240 px). Der
+              Coachmark-heroAnchor liegt auf dem ÄUSSEREN Wrapper
+              (Title + Hero), siehe weiter oben. */}
           <View
             ref={heroRef}
             collapsable={false}
@@ -873,8 +880,8 @@ export default function NoNameDetailScreen() {
               </View>
             ) : null}
           </View>
-          </View>{/* /heroAnchor wrapper */}
         </Crossfade>
+        </View>{/* /heroAnchor wrapper (Title + Hero) */}
 
         {/* ─── BOTTOM wave (Crossfade, delay 150 ms)
             Skeleton mirrors the bottom layout exactly: same info-

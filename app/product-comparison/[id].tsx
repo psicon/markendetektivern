@@ -860,6 +860,14 @@ export default function ProductComparisonScreen() {
         showsVerticalScrollIndicator={false}
       >
 
+        {/* Coachmark-Anchor 'product.hero' wrappt Title-Row UND
+            Hero zusammen — Spotlight-Phase 1 hebt damit den ganzen
+            "Das Original + Produktname + Hero"-Block hervor. */}
+        <View
+          ref={heroAnchor.ref}
+          onLayout={heroAnchor.onLayout}
+          collapsable={false}
+        >
         {/* Title row: "Das Original" eyebrow + 28 px slot reserved
             for the morph title (rendered absolutely above). */}
         <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
@@ -939,13 +947,9 @@ export default function ProductComparisonScreen() {
             </View>
           }
         >
-          {/* Coachmark-Anchor 'product.hero' wrappt das Markenprodukt-
-              Hero — Spotlight-Phase 1 hebt das ganze Hero hervor. */}
-          <View
-            ref={heroAnchor.ref}
-            onLayout={heroAnchor.onLayout}
-            collapsable={false}
-          >
+          {/* Hero-Image-Container — innerer Hero (240 px). Der
+              Coachmark-heroAnchor liegt auf dem ÄUSSEREN Wrapper
+              (Title-Row + Hero), siehe weiter oben. */}
           <View
             ref={(r) => mp && setProductImageRef(mp.id, r as any)}
             collapsable={false}
@@ -1098,8 +1102,8 @@ export default function ProductComparisonScreen() {
               </View>
             ) : null}
           </View>
-          </View>{/* /heroAnchor wrapper */}
         </Crossfade>
+        </View>{/* /heroAnchor wrapper (Title-Row + Hero) */}
 
         {/* ─── BOTTOM wave (Crossfade, gated on `nonamesReady`)
             Skeleton mirrors the bottom layout: section header
@@ -1212,7 +1216,15 @@ export default function ProductComparisonScreen() {
         >
           <View>
         {nonames.length > 0 ? (
-          <>
+          // Coachmark-Anchor 'product.context' wrappt die ganze
+          // Alternativen-Section: Section-Header + Carousel + Dots
+          // + Detektiv-Check-Stufe-Zeile. User-Feedback: "erweitere
+          // den fokus auch auf die stufe des produktes".
+          <View
+            ref={contextAnchor.ref}
+            onLayout={contextAnchor.onLayout}
+            collapsable={false}
+          >
             <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
               <Text
                 style={{
@@ -1228,12 +1240,7 @@ export default function ProductComparisonScreen() {
               </Text>
             </View>
 
-            <View
-              ref={contextAnchor.ref}
-              onLayout={contextAnchor.onLayout}
-              collapsable={false}
-              style={{ position: 'relative' }}
-            >
+            <View style={{ position: 'relative' }}>
             <ScrollView
               ref={carouselRef}
               horizontal
@@ -1744,7 +1751,7 @@ export default function ProductComparisonScreen() {
                 </Text>
               </View>
             ) : null}
-          </>
+          </View>
         ) : (
           <View
             style={{
