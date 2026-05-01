@@ -40,3 +40,8 @@ app-example
 
 # throwaway test artifacts (BG-removal preview etc.)
 tmp/
+
+# Google Play / Firebase service-account keys — NEVER commit these
+markendetektive-*.json
+service-account*.json
+*-service-account*.json

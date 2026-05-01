@@ -36,12 +36,12 @@
         "ascAppId": "6471081082"
       },
       "android": {
-        "serviceAccountKeyPath": "./markendetektive-895f7-58c0a81f4613.json"
+        "serviceAccountKeyPath": "./markendetektive-895f7-ee3923910ddd.json"
       }
     },
     "openTesting": {
       "android": {
-        "serviceAccountKeyPath": "./markendetektive-895f7-58c0a81f4613.json",
+        "serviceAccountKeyPath": "./markendetektive-895f7-ee3923910ddd.json",
         "track": "beta",
         "releaseStatus": "completed"
       }
