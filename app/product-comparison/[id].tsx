@@ -1047,22 +1047,38 @@ export default function ProductComparisonScreen() {
             ) : null}
 
             {brandName ? (() => {
-              // Hersteller-Infos können auf zwei Wegen reinkommen:
-              // direkt am MarkenProdukt-Doc oder am hersteller-Join
-              // (= "marken"-Collection in User-Terminologie).
-              const h = (mp as any)?.hersteller;
-              const rawInfos = h?.infos ?? (mp as any)?.infos;
+              // KORREKTES MAPPING (vom User klargestellt):
+              //   • mp.marke      → "hersteller"-Collection in der DB
+              //                    = "MARKEN" in User-Terminologie
+              //                    DAS ist wo `infos` liegt
+              //   • mp.hersteller → "hersteller_new"-Collection
+              //                    = der ECHTE Manufacturer
+              //
+              // Der Loader (getMarkenProduktWithDetails Z.1798ff)
+              // unterscheidet die beiden korrekt:
+              //   - wenn productData.hersteller-Ref auf eine Marke
+              //     zeigt (mit `herstellerref`-Field), wird die Marke
+              //     unter mp.marke abgelegt und der real Hersteller
+              //     daraus aufgelöst
+              //   - wenn productData.hersteller-Ref direkt auf einen
+              //     Hersteller zeigt, ist mp.marke null
+              //
+              // Wir lesen `infos` daher PRIMÄR vom marke-Objekt,
+              // sekundär vom Markenprodukt-Doc selbst (zukunftssicher).
+              const marke = (mp as any)?.marke;
+              const rawInfos = marke?.infos ?? (mp as any)?.infos;
               const infosText =
                 typeof rawInfos === 'string' && rawInfos.trim().length > 0
                   ? rawInfos.trim()
                   : null;
-              // Fallback-Body wenn `infos` leer: Adresse / Land
-              // damit der User bei Tap auf das Icon zumindest etwas
-              // Zusatz-Info sieht (statt "nichts da").
+              // Fallback wenn `infos` leer: NUR Marken-Adresse als
+              // Zusatz (nicht Hersteller-Adresse!). Wenn auch das
+              // fehlt → klare "keine Infos hinterlegt"-Meldung.
               const fallbackLines = [
-                h?.adresse ? String(h.adresse) : null,
-                [h?.plz, h?.stadt].filter(Boolean).join(' ') || null,
-                h?.land ? String(h.land) : null,
+                marke?.adresse ? String(marke.adresse) : null,
+                [marke?.plz, marke?.stadt].filter(Boolean).join(' ') ||
+                  null,
+                marke?.land ? String(marke.land) : null,
               ].filter(Boolean) as string[];
               const sheetBody =
                 infosText ??
@@ -1731,35 +1747,43 @@ export default function ProductComparisonScreen() {
                     })() : null}
 
                     {/* Hersteller-Pill am Card-Bottom — kompakte Chip
-                        mit `hersteller_new.name`. User: "in kleiner
-                        pill unter dem produktnamen (bottom)". */}
-                    {(nn as any).hersteller?.name ? (
-                      <View
-                        style={{
-                          alignSelf: 'flex-start',
-                          marginHorizontal: 14,
-                          marginBottom: 10,
-                          backgroundColor: theme.surfaceAlt,
-                          paddingHorizontal: 8,
-                          paddingVertical: 3,
-                          borderRadius: 6,
-                          maxWidth: '90%',
-                        }}
-                      >
-                        <Text
-                          numberOfLines={1}
+                        mit `hersteller_new.herstellername` (Fallback
+                        auf `.name`). hersteller_new-Docs haben
+                        primär `herstellername`-Feld; `name` ist eher
+                        bei marke-Docs. */}
+                    {(() => {
+                      const h = (nn as any).hersteller;
+                      const herstellerLabel =
+                        h?.herstellername ?? h?.name ?? null;
+                      if (!herstellerLabel) return null;
+                      return (
+                        <View
                           style={{
-                            fontFamily,
-                            fontWeight: fontWeight.semibold,
-                            fontSize: 10,
-                            color: theme.textSub,
-                            letterSpacing: 0.3,
+                            alignSelf: 'flex-start',
+                            marginHorizontal: 14,
+                            marginBottom: 10,
+                            backgroundColor: theme.surfaceAlt,
+                            paddingHorizontal: 8,
+                            paddingVertical: 3,
+                            borderRadius: 6,
+                            maxWidth: '90%',
                           }}
                         >
-                          {(nn as any).hersteller.name}
-                        </Text>
-                      </View>
-                    ) : null}
+                          <Text
+                            numberOfLines={1}
+                            style={{
+                              fontFamily,
+                              fontWeight: fontWeight.semibold,
+                              fontSize: 10,
+                              color: theme.textSub,
+                              letterSpacing: 0.3,
+                            }}
+                          >
+                            {herstellerLabel}
+                          </Text>
+                        </View>
+                      );
+                    })()}
                   </Pressable>
                 );
               })}

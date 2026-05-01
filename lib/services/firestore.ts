@@ -809,12 +809,30 @@ export class FirestoreService {
           ...productData
         };
 
-        // Populate hersteller reference für UI-Daten (nur wenn vorhanden)
+        // Resolve hersteller/marke (gleiche Logik wie in
+        // getMarkenProduktWithDetails Z.1755): productData.hersteller
+        // kann auf eine MARKE zeigen (Doc in `hersteller`-Collection
+        // mit `herstellerref`-Feld → das ist was der User MARKE
+        // nennt, hat das `infos`-Feld) ODER direkt auf einen
+        // HERSTELLER (Doc in `hersteller_new` mit `herstellername`).
+        // Wir teilen das in productWithDetails.marke (Marke-Doc) +
+        // .hersteller (echter Manufacturer-Doc) auf, damit Caller
+        // sauber unterscheiden können.
         if (productData.hersteller) {
-          const hersteller = await this.getDocumentByReference<any>(productData.hersteller);
-          if (hersteller) {
-            productWithDetails.hersteller = hersteller;
-            console.log(`✅ Loaded hersteller for ${productData.name}:`, hersteller.name);
+          const herstellerOrMarke = await this.getDocumentByReference<any>(productData.hersteller);
+          if (herstellerOrMarke) {
+            if (herstellerOrMarke.herstellerref) {
+              // Es ist eine MARKE (= "marken" in User-Lingo).
+              productWithDetails.marke = herstellerOrMarke;
+              const realHersteller = await this.getDocumentByReference<any>(
+                herstellerOrMarke.herstellerref,
+              ).catch(() => null);
+              if (realHersteller) productWithDetails.hersteller = realHersteller;
+            } else {
+              // Direkt ein HERSTELLER (= "hersteller_new").
+              productWithDetails.hersteller = herstellerOrMarke;
+              productWithDetails.marke = null;
+            }
           }
         }
 

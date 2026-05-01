@@ -1761,7 +1761,7 @@ export default function ExploreScreen() {
             <ProductCard
               title={p.name ?? ''}
               brand={handelsmarkeName ?? null}
-              hersteller={(p as any).hersteller?.name ?? null}
+              hersteller={(p as any).hersteller?.herstellername ?? (p as any).hersteller?.name ?? null}
               eyebrowLogoUri={disc?.bild ?? null}
               product={p}
               price={p.preis ?? 0}
@@ -1778,18 +1778,24 @@ export default function ExploreScreen() {
         // `hersteller` is populated full object — read .name + .bild directly.
         const marke = m.hersteller?.name ?? '';
         const brandLogoUri = m.hersteller?.bild ?? null;
-        // Diagnose-Log einmalig pro Session: zeigt welche Felder das
-        // populated `hersteller`-Object hat. User-Bug: "info-icon
-        // erscheint nicht" → mit dem Log lässt sich verifizieren ob
-        // `infos` der korrekte Feldname ist und mit Daten gefüllt ist.
-        if (__DEV__ && m.hersteller && !(globalThis as any).__loggedMarkeHersteller) {
+        // Diagnose-Log einmalig pro Session: zeigt welche Felder
+        // marke + hersteller jeweils haben, plus die infos-Werte.
+        // User-Bug-History: "info-icon zeigt falsche Daten" — mit
+        // dem Log lässt sich sofort sehen ob marke vs hersteller
+        // korrekt gesplittet sind und wo `infos` lebt.
+        if (__DEV__ && (m.marke || m.hersteller) && !(globalThis as any).__loggedMarkeHersteller) {
           (globalThis as any).__loggedMarkeHersteller = true;
           // eslint-disable-next-line no-console
           console.log(
-            '🔍 Markenprodukt.hersteller fields:',
-            Object.keys(m.hersteller),
-            '| infos value:',
-            JSON.stringify(m.hersteller?.infos ?? '(missing)'),
+            '🔍 Markenprodukt resolved:',
+            '\n  marke fields:',
+            m.marke ? Object.keys(m.marke) : '(null)',
+            '\n  marke.infos:',
+            JSON.stringify(m.marke?.infos ?? '(missing)'),
+            '\n  hersteller fields:',
+            m.hersteller ? Object.keys(m.hersteller) : '(null)',
+            '\n  hersteller.herstellername:',
+            JSON.stringify(m.hersteller?.herstellername ?? '(missing)'),
           );
         }
         const packTypId = m.packTyp?.id;
@@ -1807,22 +1813,22 @@ export default function ExploreScreen() {
               unitPriceLabel={unitPriceLabel}
               alternativeCount={m.relatedProdukteIDs?.length ?? 0}
               onPress={() => openBrand(m, index)}
-              infos={(m as any).hersteller?.infos ?? (m as any).infos ?? null}
+              infos={(m as any).marke?.infos ?? null}
               onInfoPress={() => {
-                const h = (m as any).hersteller;
-                const raw = h?.infos ?? (m as any).infos;
+                // `infos` liegt auf dem MARKE-Doc (= hersteller-
+                // Collection in der DB, "MARKEN" in User-Terminologie),
+                // NICHT auf dem hersteller_new-Doc.
+                const markeDoc = (m as any).marke;
+                const raw = markeDoc?.infos ?? (m as any).infos;
                 const infosText =
                   typeof raw === 'string' && raw.trim().length > 0
                     ? raw.trim()
                     : null;
-                // Wenn `infos` vorhanden → das ist der primäre Body.
-                // Sonst Fallback mit den verfügbaren Hersteller-Daten
-                // (Adresse / Land), damit der User bei einem Tap auf
-                // das Icon ZUMINDEST etwas sieht.
+                // Fallback: Marke-Adresse falls `infos` leer ist.
                 const fallbackLines = [
-                  h?.adresse ? String(h.adresse) : null,
-                  [h?.plz, h?.stadt].filter(Boolean).join(' ') || null,
-                  h?.land ? String(h.land) : null,
+                  markeDoc?.adresse ? String(markeDoc.adresse) : null,
+                  [markeDoc?.plz, markeDoc?.stadt].filter(Boolean).join(' ') || null,
+                  markeDoc?.land ? String(markeDoc.land) : null,
                 ].filter(Boolean) as string[];
                 const body =
                   infosText ??
@@ -1830,7 +1836,7 @@ export default function ExploreScreen() {
                     ? fallbackLines.join('\n')
                     : 'Zu dieser Marke sind aktuell keine Zusatz-Informationen hinterlegt.');
                 setInfoSheet({
-                  title: marke || m.name || 'Info',
+                  title: markeDoc?.name || marke || m.name || 'Info',
                   body,
                 });
               }}

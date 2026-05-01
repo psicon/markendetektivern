@@ -1354,35 +1354,40 @@ function NoNameCard({
             </Text>
           ) : null}
         </View>
-        {/* Hersteller-Pill am Bottom — `hersteller_new.name`, kompakte
-            Chip mit surfaceAlt-bg. User: "in kleiner pill unter dem
-            produktnamen (bottom)". */}
-        {p?.hersteller?.name ? (
-          <View
-            style={{
-              alignSelf: 'flex-start',
-              backgroundColor: theme.surfaceAlt,
-              paddingHorizontal: 8,
-              paddingVertical: 3,
-              borderRadius: 6,
-              marginTop: 6,
-              maxWidth: '100%',
-            }}
-          >
-            <Text
-              numberOfLines={1}
+        {/* Hersteller-Pill am Bottom — `hersteller_new.herstellername`
+            (Fallback `.name`). hersteller_new-Docs haben primär
+            `herstellername`-Feld. */}
+        {(() => {
+          const herstellerLabel =
+            p?.hersteller?.herstellername ?? p?.hersteller?.name ?? null;
+          if (!herstellerLabel) return null;
+          return (
+            <View
               style={{
-                fontFamily,
-                fontWeight: fontWeight.semibold,
-                fontSize: 10,
-                color: theme.textSub,
-                letterSpacing: 0.3,
+                alignSelf: 'flex-start',
+                backgroundColor: theme.surfaceAlt,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 6,
+                marginTop: 6,
+                maxWidth: '100%',
               }}
             >
-              {p.hersteller.name}
-            </Text>
-          </View>
-        ) : null}
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.semibold,
+                  fontSize: 10,
+                  color: theme.textSub,
+                  letterSpacing: 0.3,
+                }}
+              >
+                {herstellerLabel}
+              </Text>
+            </View>
+          );
+        })()}
       </View>
       <RowActions
         onCheck={onCheck}
@@ -1674,12 +1679,28 @@ export default function ShoppingListScreen() {
                 FirestoreService.getNoNameAlternatives(ref.id, favoriteMarketId),
               ]);
               if (!productData) return null;
+              // Markenprodukt-Hersteller-Auflösung mit Marke-vs-
+              // -Hersteller-Split (analog firestore.ts Z.1755):
+              //   • productData.hersteller-Ref → erstmal lookuppen
+              //   • Hat `herstellerref` → Marke-Doc (in DB
+              //     `hersteller`-Coll, "MARKEN" in User-Lingo, mit
+              //     `infos`-Feld). Resolve real hersteller daraus.
+              //   • Sonst: direkt Hersteller-Doc.
+              let markeData: any = null;
               let herstellerData: any = null;
               if ((productData as any).hersteller) {
                 try {
-                  herstellerData = await FirestoreService.getDocumentByReference(
+                  const herstellerOrMarke = await FirestoreService.getDocumentByReference<any>(
                     (productData as any).hersteller,
                   );
+                  if (herstellerOrMarke?.herstellerref) {
+                    markeData = herstellerOrMarke;
+                    herstellerData = await FirestoreService.getDocumentByReference<any>(
+                      herstellerOrMarke.herstellerref,
+                    ).catch(() => null);
+                  } else {
+                    herstellerData = herstellerOrMarke;
+                  }
                 } catch {
                   /* ignore */
                 }
@@ -1701,7 +1722,11 @@ export default function ShoppingListScreen() {
                   id: item.id,
                   kind: 'brand' as const,
                   markenProduktRef: ref.id,
-                  product: { ...productData, hersteller: herstellerData },
+                  product: {
+                    ...productData,
+                    hersteller: herstellerData,
+                    marke: markeData, // Für info-icon → mp.marke.infos
+                  },
                   alternatives,
                   bestAlternative,
                   potentialSavings: maxSavings,
@@ -2452,22 +2477,20 @@ export default function ShoppingListScreen() {
             loadingConvert={loadingConvert}
             favoriteMarketId={favoriteMarketId}
             allowExpand={opts.allowExpand}
-            infos={
-              (item.product as any)?.hersteller?.infos ??
-              (item.product as any)?.infos ??
-              null
-            }
+            infos={(item.product as any)?.marke?.infos ?? null}
             onInfoPress={() => {
-              const h = (item.product as any)?.hersteller;
-              const raw = h?.infos ?? (item.product as any)?.infos;
+              // `infos` liegt auf dem MARKE-Doc (= hersteller-
+              // Collection in der DB).
+              const markeDoc = (item.product as any)?.marke;
+              const raw = markeDoc?.infos ?? (item.product as any)?.infos;
               const infosText =
                 typeof raw === 'string' && raw.trim().length > 0
                   ? raw.trim()
                   : null;
               const fallbackLines = [
-                h?.adresse ? String(h.adresse) : null,
-                [h?.plz, h?.stadt].filter(Boolean).join(' ') || null,
-                h?.land ? String(h.land) : null,
+                markeDoc?.adresse ? String(markeDoc.adresse) : null,
+                [markeDoc?.plz, markeDoc?.stadt].filter(Boolean).join(' ') || null,
+                markeDoc?.land ? String(markeDoc.land) : null,
               ].filter(Boolean) as string[];
               const body =
                 infosText ??
@@ -2475,7 +2498,7 @@ export default function ShoppingListScreen() {
                   ? fallbackLines.join('\n')
                   : 'Zu dieser Marke sind aktuell keine Zusatz-Informationen hinterlegt.');
               const title =
-                h?.name ??
+                markeDoc?.name ??
                 item.name ??
                 item.product?.name ??
                 'Info';
