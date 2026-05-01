@@ -1397,10 +1397,8 @@ export default function ProductComparisonScreen() {
                           top: 0,
                           right: 0,
                           backgroundColor: brand.primary,
-                          // Padding hochgezogen damit der Pill bei
-                          // größerer Schrift proportional bleibt.
-                          paddingVertical: 8,
-                          paddingHorizontal: 14,
+                          paddingVertical: 7,
+                          paddingHorizontal: 12,
                           borderTopRightRadius: 16,
                           borderBottomLeftRadius: 14,
                           zIndex: 2,
@@ -1415,15 +1413,9 @@ export default function ProductComparisonScreen() {
                           style={{
                             fontFamily,
                             fontWeight: fontWeight.extraBold,
-                            // 11 → 22, matched die Preis-Schriftgröße.
-                            // User: "die ersparnis in der card könnte
-                            // eigentlich die schriftgröße vom preis
-                            // haben". Macht die Ersparnis zum visuellen
-                            // Anker auf der Card statt zur Mikro-Pill.
-                            fontSize: 22,
-                            lineHeight: 26,
+                            fontSize: 11,
                             color: '#fff',
-                            letterSpacing: -0.3,
+                            letterSpacing: 0.2,
                           }}
                         >
                           −{sv.pct}%
@@ -1492,12 +1484,7 @@ export default function ProductComparisonScreen() {
                         style={{
                           flex: 1,
                           minWidth: 0,
-                          // Hochgezogen von 50 → 78 weil die Savings-
-                          // Pill jetzt deutlich breiter ist (Schrift
-                          // 22 statt 11). Ohne den Padding-Right würde
-                          // der Eyebrow / Produktname unter die Pill
-                          // laufen.
-                          paddingRight: sv.pct > 0 ? 78 : 0,
+                          paddingRight: sv.pct > 0 ? 50 : 0,
                         }}
                       >
                         {/* Handelsmarke eyebrow — ALWAYS pinned to the
