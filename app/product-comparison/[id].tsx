@@ -969,7 +969,8 @@ export default function ProductComparisonScreen() {
               position: 'relative',
               borderRadius: 20,
               overflow: 'hidden',
-              backgroundColor: '#ffffff',
+              // theme.surface (siehe noname-detail).
+              backgroundColor: theme.surface,
               height: 240,
             }}
           >
@@ -980,10 +981,10 @@ export default function ProductComparisonScreen() {
                 accessibilityLabel="Bild vergrößern"
                 style={{ width: '100%', height: '100%' }}
               >
-                <Image
+                <FadingImage
                   source={{ uri: getProductImage(mp as any, 'png') ?? undefined }}
-                  style={{ width: '100%', height: '100%' }}
                   resizeMode="contain"
+                  placeholderColor={theme.surface}
                 />
               </Pressable>
             ) : mainReady ? (
@@ -1364,7 +1365,9 @@ export default function ProductComparisonScreen() {
                           height: 76,
                           borderRadius: 10,
                           overflow: 'hidden',
-                          backgroundColor: theme.surfaceAlt,
+                          // theme.surface — pure white im Light Mode,
+                          // dunkel im Dark Mode.
+                          backgroundColor: theme.surface,
                         }}
                       >
                         {getProductImage(nn as any) ? (
@@ -1383,7 +1386,7 @@ export default function ProductComparisonScreen() {
                             <FadingImage
                               source={{ uri: getProductImage(nn as any) ?? undefined }}
                               resizeMode="contain"
-                              placeholderColor={theme.surfaceAlt}
+                              placeholderColor={theme.surface}
                             />
                           </Pressable>
                         ) : (

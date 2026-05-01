@@ -80,14 +80,15 @@ function BrandCardImpl({
           <FadingImage
             source={{ uri: resolvedImageUri }}
             resizeMode="contain"
-            placeholderColor={theme.surfaceAlt}
+            // theme.surface (siehe ProductCard für Reasoning).
+            placeholderColor={theme.surface}
           />
         ) : (
           <View
             style={{
               width: '100%',
               height: '100%',
-              backgroundColor: theme.surfaceAlt,
+              backgroundColor: theme.surface,
               alignItems: 'center',
               justifyContent: 'center',
             }}
@@ -139,8 +140,9 @@ function BrandCardImpl({
                   width: 16,
                   height: 16,
                   borderRadius: 3,
-                  // Theme-aware (siehe ProductCard für Reasoning).
-                  backgroundColor: theme.surfaceAlt,
+                  // Brand-Logos in beiden Modi auf weißer Kachel
+                  // (siehe ProductCard).
+                  backgroundColor: '#ffffff',
                   overflow: 'hidden',
                   alignItems: 'center',
                   justifyContent: 'center',

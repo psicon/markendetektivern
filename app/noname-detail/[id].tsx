@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PagerView from 'react-native-pager-view';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
+import { FadingImage } from '@/components/design/FadingImage';
 import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
 import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
 import { getProductImage } from '@/lib/utils/productImage';
@@ -737,15 +738,18 @@ export default function NoNameDetailScreen() {
               position: 'relative',
               borderRadius: 20,
               overflow: 'hidden',
-              backgroundColor: '#ffffff',
+              // theme.surface = pure white im Light Mode, dunkel im
+              // Dark Mode. Damit ist der Bereich hinter dem
+              // freigestellten Produktfoto themen-konsistent.
+              backgroundColor: theme.surface,
               height: 240,
             }}
           >
             {getProductImage(p, 'png') ? (
-              <Image
+              <FadingImage
                 source={{ uri: getProductImage(p, 'png') ?? undefined }}
-                style={{ width: '100%', height: '100%' }}
                 resizeMode="contain"
+                placeholderColor={theme.surface}
               />
             ) : ready ? (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>

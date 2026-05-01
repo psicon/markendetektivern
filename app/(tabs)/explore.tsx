@@ -3,7 +3,6 @@ import { BlurView } from 'expo-blur';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Dimensions,
   Image,
   Platform,
@@ -115,6 +114,34 @@ const landToCode = (land: string | undefined): string => {
 // 2-column grid math — precomputed once. 20 = horizontal padding, 12 = gap.
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const GRID_ITEM_WIDTH = Math.floor((SCREEN_WIDTH - 20 * 2 - 12) / 2);
+
+// Load-More-Footer: zwei Skelett-Karten in derselben Grid-Form wie die
+// echten Karten oben dran. Ersetzt den vorherigen ActivityIndicator-
+// Spinner — der war ein visueller Bruch mitten in der Karten-Liste
+// ("Bilder, Bilder, Spinner, Bilder"). Skelett-Karten lesen sich als
+// "die nächste Reihe wird gerade geladen", sind also ein nahtloser
+// Übergang. Sobald die echten Karten reinkommen, ersetzt der Render
+// diese Skelette.
+function LoadMoreSkeletonRow({ itemWidth }: { itemWidth: number }) {
+  return (
+    <View
+      style={{
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        paddingBottom: 24,
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+      }}
+    >
+      {[0, 1].map((i) => (
+        <View key={i} style={{ width: itemWidth }}>
+          <ProductCardSkeleton />
+        </View>
+      ))}
+    </View>
+  );
+}
 
 // Collapsible tab-bar height (12 top + 40 SegmentedTabs + 12 bottom).
 const TAB_BAR_HEIGHT = 64;
@@ -1802,7 +1829,13 @@ export default function ExploreScreen() {
       scrollYEigen.value = e.contentOffset.y;
       const dist =
         e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
-      const nearBottom = dist < 1200;
+      // Threshold von 1200 → 2200 px hochgezogen — damit feuert der
+      // Page-Load AB ZWEI volle Bildschirmhöhen vom Boden, statt erst
+      // wenn der User ihn schon fast erreicht hat. Vorher wurde der
+      // Spinner-Footer kurz sichtbar bevor neue Items rein-faden;
+      // jetzt sind die neuen Items meist schon da bevor der User die
+      // bestehenden zu Ende scrollt.
+      const nearBottom = dist < 2200;
       if (nearBottom && !loadingZoneEigen.value) {
         loadingZoneEigen.value = true;
         runOnJS(checkLoadMoreEigen)();
@@ -1816,7 +1849,13 @@ export default function ExploreScreen() {
       scrollYMarken.value = e.contentOffset.y;
       const dist =
         e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
-      const nearBottom = dist < 1200;
+      // Threshold von 1200 → 2200 px hochgezogen — damit feuert der
+      // Page-Load AB ZWEI volle Bildschirmhöhen vom Boden, statt erst
+      // wenn der User ihn schon fast erreicht hat. Vorher wurde der
+      // Spinner-Footer kurz sichtbar bevor neue Items rein-faden;
+      // jetzt sind die neuen Items meist schon da bevor der User die
+      // bestehenden zu Ende scrollt.
+      const nearBottom = dist < 2200;
       if (nearBottom && !loadingZoneMarken.value) {
         loadingZoneMarken.value = true;
         runOnJS(checkLoadMoreMarken)();
@@ -1830,7 +1869,13 @@ export default function ExploreScreen() {
       scrollYAlle.value = e.contentOffset.y;
       const dist =
         e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
-      const nearBottom = dist < 1200;
+      // Threshold von 1200 → 2200 px hochgezogen — damit feuert der
+      // Page-Load AB ZWEI volle Bildschirmhöhen vom Boden, statt erst
+      // wenn der User ihn schon fast erreicht hat. Vorher wurde der
+      // Spinner-Footer kurz sichtbar bevor neue Items rein-faden;
+      // jetzt sind die neuen Items meist schon da bevor der User die
+      // bestehenden zu Ende scrollt.
+      const nearBottom = dist < 2200;
       if (nearBottom && !loadingZoneAlle.value) {
         loadingZoneAlle.value = true;
         runOnJS(checkLoadMoreAlle)();
@@ -2009,9 +2054,7 @@ export default function ExploreScreen() {
                 markenprodukte.length > 0 ||
                 searchHitsEigen.length > 0 ||
                 searchHitsMarken.length > 0)) ? (
-              <View style={{ paddingVertical: 24 }}>
-                <ActivityIndicator size="small" color={theme.primary} />
-              </View>
+              <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
             ) : null}
           </Animated.ScrollView>
         </View>
@@ -2055,9 +2098,7 @@ export default function ExploreScreen() {
             <View style={{ paddingTop: 12 }}>{renderGrid('eigen')}</View>
             {((nonameLoading || (searchActiveQuery && searchLoadingMore)) &&
               (nonames.length > 0 || searchHitsEigen.length > 0)) ? (
-              <View style={{ paddingVertical: 24 }}>
-                <ActivityIndicator size="small" color={theme.primary} />
-              </View>
+              <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
             ) : null}
           </Animated.ScrollView>
         </View>
@@ -2092,9 +2133,7 @@ export default function ExploreScreen() {
             <View style={{ paddingTop: 12 }}>{renderGrid('marken')}</View>
             {((markenLoading || (searchActiveQuery && searchLoadingMore)) &&
               (markenprodukte.length > 0 || searchHitsMarken.length > 0)) ? (
-              <View style={{ paddingVertical: 24 }}>
-                <ActivityIndicator size="small" color={theme.primary} />
-              </View>
+              <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
             ) : null}
           </Animated.ScrollView>
         </View>

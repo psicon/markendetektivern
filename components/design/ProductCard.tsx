@@ -133,14 +133,20 @@ function ProductCardImpl({
           <FadingImage
             source={{ uri: resolvedImageUri }}
             resizeMode="contain"
-            placeholderColor={theme.surfaceAlt}
+            // theme.surface = pure white im Light Mode (matcht den
+            // Card-Body), dunkel im Dark Mode. Damit ist der Bereich
+            // hinter dem freigestellten Produktbild im Dark Mode
+            // dunkel und im Light Mode glatt weiß — nicht das hellgraue
+            // surfaceAlt das der User als "leicht ausgegraut" empfunden
+            // hat.
+            placeholderColor={theme.surface}
           />
         ) : (
           <View
             style={{
               width: '100%',
               height: '100%',
-              backgroundColor: theme.surfaceAlt,
+              backgroundColor: theme.surface,
               alignItems: 'center',
               justifyContent: 'center',
             }}
@@ -233,13 +239,10 @@ function ProductCardImpl({
                   width: 16,
                   height: 16,
                   borderRadius: 3,
-                  // Theme-aware: in Dark Mode bekommt die Logo-Kachel
-                  // einen hellen surfaceAlt-Background (statt PURE
-                  // white), damit sie nicht als grelles Fenster aus
-                  // der Card heraussticht. Brand-Logos sind oft als
-                  // SVG/PNG für helle Hintergründe designed — der
-                  // helle Off-White-Ton funktioniert für beide Modi.
-                  backgroundColor: theme.surfaceAlt,
+                  // Brand-Logos sind als SVG/PNG für hellen Hintergrund
+                  // designed — bleibt pure white in beiden Modi (kleine
+                  // 16-px-Kachel, sticht nicht stark aus).
+                  backgroundColor: '#ffffff',
                   overflow: 'hidden',
                   alignItems: 'center',
                   justifyContent: 'center',

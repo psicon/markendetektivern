@@ -84,12 +84,17 @@ export function FadingImage({
           source={source}
           onLoad={() => {
             opacity.value = withTiming(1, {
-              duration: 220,
+              duration: 240,
               easing: Easing.out(Easing.cubic),
             });
           }}
           style={[
-            { width: '100%', height: '100%' },
+            // Initial opacity 0 als statischer Style — verhindert
+            // den 1-Frame-Flash bei dem Reanimateds animStyle erst
+            // nach dem ersten Render am UI-Thread aktiv wird. Der
+            // animStyle überschreibt das danach mit dem worklet-
+            // gesteuerten Wert.
+            { width: '100%', height: '100%', opacity: 0 },
             style as object,
             animStyle,
           ]}
