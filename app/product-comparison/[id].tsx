@@ -28,6 +28,7 @@ import {
   EnttarnteAlternativesList,
   type EnttarnteAlternative,
 } from '@/components/design/EnttarnteAlternativesList';
+import { FadingImage } from '@/components/design/FadingImage';
 import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
 import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
 import { ImageZoomModal, type SourceRect } from '@/components/design/ImageZoomModal';
@@ -1363,7 +1364,7 @@ export default function ProductComparisonScreen() {
                           height: 76,
                           borderRadius: 10,
                           overflow: 'hidden',
-                          backgroundColor: '#ffffff',
+                          backgroundColor: theme.surfaceAlt,
                         }}
                       >
                         {getProductImage(nn as any) ? (
@@ -1379,10 +1380,10 @@ export default function ProductComparisonScreen() {
                             accessibilityLabel="Bild vergrößern"
                             style={{ width: '100%', height: '100%' }}
                           >
-                            <Image
+                            <FadingImage
                               source={{ uri: getProductImage(nn as any) ?? undefined }}
-                              style={{ width: '100%', height: '100%' }}
                               resizeMode="contain"
+                              placeholderColor={theme.surfaceAlt}
                             />
                           </Pressable>
                         ) : (
@@ -1459,13 +1460,15 @@ export default function ProductComparisonScreen() {
                             {hmName ?? 'Eigenmarke'}
                           </Text>
                         </View>
-                        {/* Product name lives in a flex:1 slot under the
-                            eyebrow with `justifyContent: 'center'` — so
-                            a 1-line name sits in the middle of the
-                            remaining vertical space, and a 2- or 3-line
-                            name fills it naturally. The eyebrow's
-                            position is unaffected either way. */}
-                        <View style={{ flex: 1, justifyContent: 'center', marginTop: 4 }}>
+                        {/* Produktname sitzt direkt unter dem Eyebrow
+                            (flex-start, NICHT mehr center). Vorher ließ
+                            justifyContent:'center' einen 1-zeiligen
+                            Namen mittig in der freien Höhe schweben →
+                            unschöner Whitespace zwischen Handelsmarke
+                            und Titel. Mit flex-start dockt der Titel
+                            sauber an, mehrzeilige Namen wachsen einfach
+                            nach unten. */}
+                        <View style={{ flex: 1, justifyContent: 'flex-start', marginTop: 6 }}>
                           <Text
                             numberOfLines={3}
                             style={{

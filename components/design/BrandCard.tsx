@@ -4,6 +4,7 @@ import { Image, Platform, Pressable, Text, View } from 'react-native';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { getProductImage } from '@/lib/utils/productImage';
+import { FadingImage } from './FadingImage';
 
 type Props = {
   title: string;
@@ -74,12 +75,12 @@ function BrandCardImpl({
         ...shadows.sm,
       })}
     >
-      <View style={{ position: 'relative', width: '100%', height: 162, backgroundColor: '#ffffff' }}>
+      <View style={{ position: 'relative', width: '100%', height: 162 }}>
         {resolvedImageUri ? (
-          <Image
+          <FadingImage
             source={{ uri: resolvedImageUri }}
-            style={{ width: '100%', height: '100%' }}
             resizeMode="contain"
+            placeholderColor={theme.surfaceAlt}
           />
         ) : (
           <View

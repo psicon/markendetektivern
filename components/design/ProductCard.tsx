@@ -8,6 +8,7 @@ import {
 } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { getProductImage } from '@/lib/utils/productImage';
+import { FadingImage } from './FadingImage';
 import { Shimmer } from './Skeletons';
 import { StufenChips } from './StufenChips';
 
@@ -127,12 +128,12 @@ function ProductCardImpl({
         ...shadows.sm,
       })}
     >
-      <View style={{ position: 'relative', width: '100%', height: imageHeight, backgroundColor: '#ffffff' }}>
+      <View style={{ position: 'relative', width: '100%', height: imageHeight }}>
         {resolvedImageUri ? (
-          <Image
+          <FadingImage
             source={{ uri: resolvedImageUri }}
-            style={{ width: '100%', height: '100%' }}
             resizeMode="contain"
+            placeholderColor={theme.surfaceAlt}
           />
         ) : (
           <View
