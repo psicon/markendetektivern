@@ -7,6 +7,11 @@ import achievementService, { setProfileRefreshCallback } from '../services/achie
 import { isAppleAuthAvailable, signInWithApple, signOutApple } from '../services/auth/appleAuth';
 import { signInWithGoogle, signOutGoogle } from '../services/auth/googleAuth';
 import { createUserProfile, getUserProfile, UserProfile } from '../services/userProfile';
+import { scheduleRegionGuess } from '../services/regionGuess';
+import { FirestoreService } from '../services/firestore';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { InteractionManager } from 'react-native';
 
 interface AdditionalProfileData {
   realName?: string;
@@ -400,10 +405,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Sign out from social providers if needed
       await signOutGoogle().catch(() => {}); // Ignore errors
       await signOutApple().catch(() => {}); // Ignore errors
-      
+
+      // 🧹 Clear the AsyncStorage auth backup BEFORE signing out.
+      // This backup is meant to detect "Firebase session
+      // unexpectedly lost" on app boot — it makes the app refuse
+      // to auto-anonymous-login because we assume the user wants
+      // their registered identity back. After an EXPLICIT logout
+      // that's the wrong assumption: the user wants to be
+      // logged out, anonymous mode is fine. Without this clear,
+      // the next app boot sees the backup, refuses to auto-anon,
+      // and traps the user on a blank screen forever.
+      try {
+        await AsyncStorage.removeItem('@auth_user_id_backup');
+        await AsyncStorage.removeItem('@auth_user_email_backup');
+        await AsyncStorage.removeItem('@auth_last_login');
+      } catch (clearErr) {
+        console.warn('⚠️ Could not clear auth backup on logout:', clearErr);
+      }
+
       // Sign out from Firebase
       await signOut(auth);
       console.log('✅ Logout erfolgreich');
+
+      // 🔁 Re-establish an anonymous session immediately. Without
+      // this the tab layout sees `!user` and renders a blank
+      // screen (auto-anonymous-login only fires on first mount,
+      // not on a subsequent sign-out — see `hasInitialAuthState`
+      // gate in the onAuthStateChanged effect). Re-signing in
+      // here makes the app usable again right after logout: the
+      // user is back to anonymous mode, the listener fires and
+      // refreshes user/profile state across the tree.
+      try {
+        await signInAnonymously(auth);
+        console.log('✅ Re-signed-in as anonymous after logout');
+      } catch (anonErr) {
+        console.warn('⚠️ Anonymous re-sign-in failed after logout:', anonErr);
+        // Non-fatal: the user is still logged out, just stuck.
+        // Caller (profile.tsx) navigates to home anyway, and the
+        // tab layout's redirect-to-welcome guard kicks in.
+      }
     } catch (error) {
       // Verhindere React Error Logs in Production
       if (__DEV__) {
@@ -434,6 +474,83 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
 
+
+  // Lazy-fill of guessedCity / guessedBundesland from journey history
+  // — runs once per user when both fields are still empty. Sits as
+  // a separate effect on (uid, profile-region) so it doesn't fire
+  // until the profile load has resolved. The actual work is
+  // deferred via InteractionManager so it never blocks the main
+  // render.
+  useEffect(() => {
+    if (!user?.uid || !userProfile) return;
+    if (userProfile.city || userProfile.guessedCity) return;
+    const handle = scheduleRegionGuess(
+      user.uid,
+      { city: userProfile.city, guessedCity: userProfile.guessedCity },
+      () => refreshUserProfile(),
+    );
+    return () => {
+      try {
+        handle.cancel?.();
+      } catch {}
+    };
+  }, [user?.uid, userProfile?.city, userProfile?.guessedCity, refreshUserProfile]);
+
+  // Self-healing Backfill für `favoriteMarketName`.
+  //
+  // Bestands-User die das Onboarding VOR dem Mirror-Fix abgeschlossen
+  // haben, haben nur `favoriteMarket` (die ID) gesetzt — ohne den
+  // dazugehörigen Namen-String. Folge: ihre Profil-Stat-Card "Dein
+  // Lieblingsmarkt" rendert nichts, weil sie direkt den Namen liest
+  // (siehe profile.tsx:160).
+  //
+  // Dieser Effekt heilt das einmal pro betroffenem User: wenn die ID
+  // da ist aber der Name fehlt, lädt er den Discounter-Doc nach und
+  // schreibt das Name-Feld auf das User-Doc. Danach feuert die
+  // Bedingung nie wieder (Name ist gesetzt → early return). Cost: 1
+  // Read + 1 Write pro Bestands-User, einmalig in der Lebensdauer.
+  //
+  // Pattern parallel zum guessedCity-Backfill darüber: defer via
+  // InteractionManager damit's nicht den App-Start blockiert, alles
+  // in try/catch damit ein Fehler die Auth-Pipeline nicht stört.
+  useEffect(() => {
+    if (!user?.uid || !userProfile) return;
+    const uid = user.uid;
+    const favId = (userProfile as any).favoriteMarket as string | undefined;
+    const favName = (userProfile as any).favoriteMarketName as string | undefined;
+    // Nichts zu tun wenn keine ID oder Name schon vorhanden.
+    if (!favId) return;
+    if (favName && favName.length > 0) return;
+
+    let cancelled = false;
+    const handle = InteractionManager.runAfterInteractions(async () => {
+      try {
+        if (cancelled) return;
+        const market = await FirestoreService.getDiscounterById(favId);
+        if (cancelled) return;
+        const name = (market as any)?.name as string | undefined;
+        if (!name) return;
+        await setDoc(
+          doc(db, 'users', uid),
+          { favoriteMarketName: name },
+          { merge: true },
+        );
+        if (cancelled) return;
+        // Profile neu laden, damit das Profil-Stat-Card sofort
+        // den Lieblingsmarkt anzeigt — ohne App-Restart.
+        await refreshUserProfile();
+        console.log('✅ Lieblingsmarkt-Name nachgetragen für Bestands-User:', uid);
+      } catch (e) {
+        console.warn('⚠️ favoriteMarketName-Backfill fehlgeschlagen (non-fatal):', e);
+      }
+    });
+    return () => {
+      cancelled = true;
+      try {
+        handle.cancel?.();
+      } catch {}
+    };
+  }, [user?.uid, userProfile, refreshUserProfile]);
 
   const value = {
     user,

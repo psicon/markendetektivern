@@ -1,0 +1,24 @@
+rules_version = '2';
+// Markendetektive — Firebase Storage rules.
+//
+// Public-read everywhere (the app shows product images without auth).
+// Only the Firebase Admin SDK / Cloud Functions can write — clients
+// cannot upload directly. This protects:
+//   • markenprodukte/         — original brand-product photos
+//   • handelsmarkenprodukte/  — original NoName-product photos
+//   • productimagesclean/     — pipeline-generated WebP variants
+//   • profilePictures/        — user avatars (admin-uploaded after
+//                                processing through Cloud Functions)
+//
+// IMPORTANT: this preserves backwards compatibility with the
+// production app. The original `bild` URLs in `markenprodukte/` and
+// `handelsmarkenprodukte/` are read-only at the bucket level — the
+// image-cleanup pipeline writes only to `productimagesclean/`.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

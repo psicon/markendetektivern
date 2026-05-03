@@ -1,2843 +1,1722 @@
-import { StarRatingDisplay } from '@/components/StarRatingDisplay';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
-import { BannerAd } from '@/components/ads/BannerAd';
-import FixedAndroidModal from '@/components/ui/FixedAndroidModal';
-import { IconSymbol } from '@/components/ui/IconSymbol';
-import ImageViewer from '@/components/ui/ImageViewer';
-import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
-import { CommentSkeleton, CommentsHeaderSkeleton, ListItemSkeleton, ProductComparisonSkeleton, RatingOverviewSkeleton } from '@/components/ui/ShimmerSkeleton';
-import { getStufenColor, getStufenDescription, getStufenTitle } from '@/constants/AppTexts';
-import { Colors } from '@/constants/Colors';
-import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
-import { TOAST_MESSAGES, interpolateMessage } from '@/constants/ToastMessages';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Image,
+  InteractionManager,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
+import Animated, {
+  Easing,
+  Extrapolation,
+  interpolate,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import PagerView from 'react-native-pager-view';
+
+import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
+import { FadingImage } from '@/components/design/FadingImage';
+import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
+import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
+import { getProductImage } from '@/lib/utils/productImage';
+import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
+import {
+  EnttarnteAlternativesList,
+  type EnttarnteAlternative,
+} from '@/components/design/EnttarnteAlternativesList';
+import { SegmentedTabs } from '@/components/design/SegmentedTabs';
+import { StufenChips } from '@/components/design/StufenChips';
+import { CoachmarkScrollProvider } from '@/components/coachmarks/CoachmarkScrollContext';
+import {
+  PRODUCT_DETAIL_ANCHOR_CART,
+  PRODUCT_DETAIL_ANCHOR_CONTEXT,
+  PRODUCT_DETAIL_ANCHOR_FAVORITE,
+  PRODUCT_DETAIL_ANCHOR_HERO,
+  PRODUCT_DETAIL_ANCHOR_RATING,
+  ProductDetailWalkthrough,
+} from '@/components/coachmarks/ProductDetailWalkthrough';
+import { Crossfade, Shimmer } from '@/components/design/Skeletons';
+import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { useCoachmark } from '@/hooks/useCoachmark';
+import { useCoachmarkAnchor } from '@/hooks/useCoachmarkAnchor';
+import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
-import { db } from '@/lib/firebase';
-import { useFavoriteStatus } from '@/lib/hooks/useFavorites';
+import { useFavorites } from '@/lib/hooks/useFavorites';
 import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
-import { interstitialAdService } from '@/lib/services/interstitialAdService';
-import OpenFoodService, { OpenFoodProduct } from '@/lib/services/openfood';
-import { showAlreadyInCartToast, showCartAddedToast, showFavoriteAddedToast, showFavoriteRemovedToast, showInfoToast, showRatingToast } from '@/lib/services/ui/toast';
-import { updateUserStats } from '@/lib/services/userProfile';
-import { ProductWithDetails } from '@/lib/types/firestore';
-import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
-import { doc, onSnapshot } from 'firebase/firestore';
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
-import { ActivityIndicator, Animated, Image, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { isNonFoodCategory } from '@/lib/utils/categoryClassification';
+import {
+  showFavoriteAddedToast,
+  showFavoriteRemovedToast,
+  showInfoToast,
+} from '@/lib/services/ui/toast';
+import type { ProductWithDetails } from '@/lib/types/firestore';
 
-// ScoreImage Komponente - 1:1 wie im Produktvergleich
-const ScoreImage = ({ type, value }: { type: 'nutri' | 'eco' | 'nova'; value: string | number }) => {
-  return (
-    <View style={scoreImageStyles.container}>
-      <Image 
-        source={{
-          uri: `https://static.openfoodfacts.org/images/misc/${type}-score-${value.toString().toLowerCase()}.svg`
-        }}
-        style={scoreImageStyles.image}
-        resizeMode="contain"
-      />
-    </View>
-  );
+// ────────────────────────────────────────────────────────────────────────
+
+type Tab = 'ingredients' | 'nutrition';
+
+// Stufen-Texte für die "Detektiv-Check"-Zeile auf Stufe-1/2-
+// Detail-Seiten. Wortlaut deckungsgleich zum Stöbern-Filter
+// (`app/(tabs)/explore.tsx` STUFE_INFO) und zum
+// `SimilarityStagesModal`, damit der User in jedem Kontext denselben
+// Satz liest. Wenn der Wortlaut sich ändert, dort mitziehen.
+const STUFE_INFO: Record<1 | 2, { label: string; line: string }> = {
+  2: {
+    label: 'Markenhersteller',
+    line: 'Liefert auch Marken — aber kein vergleichbares Produkt.',
+  },
+  1: {
+    label: 'NoName-Hersteller',
+    line: 'Produziert ausschließlich Handelsmarken.',
+  },
 };
 
-const scoreImageStyles = StyleSheet.create({
-  container: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  image: {
-    width: 32,
-    height: 32,
-  },
-});
-
-// Star Rating Component - copied from product-comparison
-const StarRating = ({ 
-  rating, 
-  onRatingChange, 
-  size = 28, 
-  colors 
-}: { 
-  rating: number; 
-  onRatingChange: (rating: number) => void; 
-  size?: number; 
-  colors: any;
-}) => {
-  const isCompact = size <= 20;
-  
-  return (
-    <View style={[styles.starRating, isCompact && styles.starRatingCompact]}>
-      {[1, 2, 3, 4, 5].map((star) => (
-        <TouchableOpacity 
-          key={star} 
-          style={[styles.starButton, isCompact && styles.starButtonCompact]}
-          onPress={() => onRatingChange(star)}
-          activeOpacity={0.7}
-        >
-          <ThemedText 
-            style={[
-              styles.starIconLarge, 
-              { 
-                color: star <= rating ? colors.warning : colors.border,
-                fontSize: size,
-                lineHeight: size + 2
-              }
-            ]}
-          >
-            ★
-          </ThemedText>
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
+const parseStufe = (s: any): 1 | 2 | 3 | 4 | 5 => {
+  const n = parseInt(String(s)) || 1;
+  return Math.min(5, Math.max(1, n)) as 1 | 2 | 3 | 4 | 5;
 };
+
+const formatEur = (v?: number | null) =>
+  v == null ? '—' : `${v.toFixed(2).replace('.', ',')}€`;
+
+function formatPack(size?: number, unit?: string, price?: number): string | null {
+  if (!size || !unit) return null;
+  const u = unit.toLowerCase().replace(/\.$/, '');
+  const isStk = u === 'stk' || u === 'stück';
+  const sizeLabel = isStk ? `${size} ${unit}` : `${size}${unit}`;
+  let unitPrice: string | null = null;
+  if (price && price > 0) {
+    if (u === 'g') unitPrice = `${((price / size) * 1000).toFixed(2).replace('.', ',')}€/kg`;
+    else if (u === 'kg') unitPrice = `${(price / size).toFixed(2).replace('.', ',')}€/kg`;
+    else if (u === 'ml') unitPrice = `${((price / size) * 1000).toFixed(2).replace('.', ',')}€/L`;
+    else if (u === 'l') unitPrice = `${(price / size).toFixed(2).replace('.', ',')}€/L`;
+    else if (isStk) unitPrice = `${(price / size).toFixed(2).replace('.', ',')}€/Stk.`;
+  }
+  return unitPrice ? `${sizeLabel} · ${unitPrice}` : sizeLabel;
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Screen — Orphan NoName (no brand product linked) per prototype
+// `ProductDetailOrphan`. Stufe 1 & 2 land here because they don't have a
+// meaningful comparison target.
+// ────────────────────────────────────────────────────────────────────────
 
 export default function NoNameDetailScreen() {
-  const { id, source, sourceProduct } = useLocalSearchParams<{ id: string; source?: string; sourceProduct?: string }>();
-  const navigation = useNavigation();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { theme, brand, shadows } = useTokens();
   const { user } = useAuth();
-  const { isPremium } = useRevenueCat();
-  const analytics = useAnalytics();
-  
-  // Favorites Hook
-  const { isFavorite, loading: favoriteLoading, toggleFavorite } = useFavoriteStatus(id || '', 'noname');
-  
-  // Alle Toasts laufen jetzt über zentrale Toast-Library (konsistent mit Stufe 3+)
-  
-  const [product, setProduct] = useState<ProductWithDetails | null>(null);
-  const [isInCart, setIsInCart] = useState(false);
-  const [isAddingToCart, setIsAddingToCart] = useState(false);
-  const [openFoodData, setOpenFoodData] = useState<OpenFoodProduct | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { toggleFavorite } = useFavorites();
+
+  // ─── Coachmark Walkthrough ───────────────────────────────────
+  // Tour 'product-detail' fires beim ersten Aufruf einer Detail-
+  // Seite. Anchors sitzen unten auf den drei ActionButtons in der
+  // Hero-Bottom-Right-Cluster. ScrollView-Ref braucht's für den
+  // Scroll-Lock während Spotlights aktiv sind (siehe SpotlightOverlay).
+  const detailCoachmark = useCoachmark('product-detail');
+  const heroAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_HERO);
+  const cartAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_CART);
+  const favAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_FAVORITE);
+  const ratingAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_RATING);
+  // Auf noname-detail zeigt der Context-Anchor auf die Detektiv-
+  // Check-Zeile (Stufe + Erklärungstext) — der zeigt die Stufe
+  // visuell und bietet sich als "Hier wird's konzeptionell
+  // erklärt"-Anker an.
+  const contextAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_CONTEXT);
+  const detailScrollRef = useRef<ScrollView>(null);
+
+  // ─── Data state ──────────────────────────────────────────────────
+  // One fetch, one state slot. We deliberately wait for the FULL
+  // joined product before flipping `ready` — multiple staggered
+  // pops felt janky. The reveal is then orchestrated visually:
+  // top section crossfades in immediately, bottom section
+  // crossfades in 150 ms later via `Crossfade(delay=…)`. The
+  // DetailHeader chrome renders on the first frame regardless.
   const [error, setError] = useState<string | null>(null);
-  const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
-  const [showProductDetails, setShowProductDetails] = useState(false);
-  
-  // Button Animation States (Herz + Cart)
-  const [heartAnimation] = useState(new Animated.Value(1));
-  const [cartAnimation] = useState(new Animated.Value(1));
-  
-  // Helper: Animate button on press
-  const animateButtonPress = (animationRef: Animated.Value) => {
-    Animated.sequence([
-      Animated.timing(animationRef, {
-        toValue: 1.2,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(animationRef, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-    ]).start();
+  const [product, setProduct] = useState<ProductWithDetails | null>(null);
+  const ready = !!product;
+
+  const [tab, setTab] = useState<Tab>('ingredients');
+  // SegmentedTabs + PagerView combo for tabs (project rule).
+  const tabPagerRef = useRef<PagerView | null>(null);
+  // Hero image container ref + FlyToCart imperative handle. The
+  // hero ref is measured at "add-to-cart" time (measureInWindow),
+  // its rect feeds into FlyToCart.fly() which clones the image and
+  // animates it into the floating shopping-list button bottom-right.
+  const heroRef = useRef<View | null>(null);
+  const flyRef = useRef<FlyToCartHandle | null>(null);
+  const [tabHeights, setTabHeights] = useState<{
+    ingredients?: number;
+    nutrition?: number;
+  }>({});
+  const onTabChange = (next: Tab) => {
+    setTab(next);
+    tabPagerRef.current?.setPage(next === 'ingredients' ? 0 : 1);
   };
-
-  // Get rating circle color based on rating value
-  const getRatingCircleColor = (rating: number) => {
-    if (rating >= 4.5) return colors.primary; // Primary grün bei 4.5-5
-    if (rating >= 4) return '#4CAF50'; // Leicht grün bei 4-4.5  
-    if (rating >= 3) return '#FFC107'; // Gelb bei 3-4
-    if (rating >= 2) return '#FF9800'; // Orange bei 2-3
-    return '#F44336'; // Rot bei 1-2
+  const onTabPagerSelected = (e: { nativeEvent: { position: number } }) => {
+    const next: Tab = e.nativeEvent.position === 0 ? 'ingredients' : 'nutrition';
+    setTab((prev) => (prev === next ? prev : next));
   };
-  
-  // Handle favorite toggle
-  const handleToggleFavorite = async () => {
-    if (!user?.uid) {
-      showInfoToast(TOAST_MESSAGES.FAVORITES.authRequired, 'info');
-      return;
-    }
+  const [isFav, setIsFav] = useState(false);
+  const [inCart, setInCart] = useState(false);
+  const [ratingsOpen, setRatingsOpen] = useState(false);
+  // Connected Brands des Herstellers — separat geladen, weil das
+  // Aggregat im Cloud-Function-Job (`connected-brands-aggregator`)
+  // ein anderes Refresh-Intervall hat als das Produkt selbst.
+  const [connectedBrands, setConnectedBrands] = useState<
+    Array<{
+      id: string;
+      name: string;
+      bild: string | null;
+      source: 'direct' | 'via-markenprodukt';
+    }>
+  >([]);
+  // "Weitere enttarnte Produkte" am Seitenende — andere NoName-
+  // Produkte aus derselben Kategorie, gefiltert auf Stufe 3/4/5
+  // (= solche, die einen echten Markenprodukt-Vergleich verlinkt
+  // haben). Bei Stufe 1/2 ist das die wichtigste Discovery-Brücke,
+  // weil das aktuelle Produkt selber keinen Vergleich anbieten kann.
+  const [alternatives, setAlternatives] = useState<EnttarnteAlternative[]>([]);
+  const [ratings, setRatings] = useState<Rating[]>([]);
+  const [ratingsLoading, setRatingsLoading] = useState(false);
 
-    if (!product) return;
+  const scrollY = useSharedValue(0);
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      scrollY.value = e.contentOffset.y;
+    },
+  });
 
-    // Animate heart before action
-    animateButtonPress(heartAnimation);
+  // ─── Native "large title" morph ────────────────────────────────────
+  // Hero title sized 22 px (down from 26) and line-height 26 so the
+  // header block reads proportional to the rest of the page. Docked
+  // size stays at 17 px (iOS nav-title standard). NAV_SCREEN_Y now
+  // accounts for the scaled line-height, so the glyph centres on the
+  // nav row vertically instead of sitting a few px above centre.
+  const TITLE_FONT_SIZE = 22;
+  const TITLE_LINE_HEIGHT = 26;
+  const TITLE_NAV_SIZE = 17;
+  const TITLE_SCALE = TITLE_NAV_SIZE / TITLE_FONT_SIZE;
+  const TITLE_NAV_LINE_HEIGHT = TITLE_LINE_HEIGHT * TITLE_SCALE;
+  // paddingTop (10) + placeholder marginTop (2) = 12 of empty space
+  // above the title before it starts.
+  const HERO_TOP_IN_CONTENT = 12;
+  const HERO_SCREEN_Y = insets.top + DETAIL_HEADER_ROW_HEIGHT + HERO_TOP_IN_CONTENT;
+  const NAV_SCREEN_Y =
+    insets.top + (DETAIL_HEADER_ROW_HEIGHT - TITLE_NAV_LINE_HEIGHT) / 2;
+  const DOCK_DISTANCE = HERO_SCREEN_Y - NAV_SCREEN_Y;
+  const NAV_LEFT_OFFSET = 36;
 
-    try {
-      const wasAdded = await toggleFavorite({
-        id: product.id,
-        name: product.name,
-        preis: product.preis,
-        packSize: product.packSize,
-        bild: product.bild,
-        type: 'noname',
-        category: product.kategorie?.bezeichnung,
-        ersparnis: product.ersparnis || 0,  // Wichtig für Tracking!
-        savings: product.ersparnis || 0     // Alternative Property
-      });
+  // Reveal-fade — opacity sharedValue driven by `ready`. Combined
+  // with the dock-transform inside one worklet so the morph title
+  // fades in at the SAME 320 ms tempo as the hero Crossfade below.
+  const morphFade = useSharedValue(0);
+  useEffect(() => {
+    morphFade.value = withTiming(product ? 1 : 0, {
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [product, morphFade]);
 
-      // Konsistente Favoriten-Toasts (wie bei Stufe 3+)
-      if (wasAdded) {
-        showFavoriteAddedToast(product.name);
-      } else {
-        showFavoriteRemovedToast(product.name);
+  const morphTitleStyle = useAnimatedStyle(() => {
+    const s = scrollY.value;
+    const t = interpolate(s, [0, DOCK_DISTANCE], [0, 1], Extrapolation.CLAMP);
+    const translateY = -Math.min(s, DOCK_DISTANCE);
+    const translateX = t * NAV_LEFT_OFFSET;
+    const scale = 1 - t * (1 - TITLE_SCALE);
+    return {
+      transform: [{ translateY }, { translateX }, { scale }],
+      opacity: morphFade.value,
+    };
+  });
+
+  useEffect(() => {
+    let alive = true;
+    setError(null);
+    setProduct(null);
+    (async () => {
+      try {
+        const data = await FirestoreService.getProductWithDetails(String(id));
+        if (!alive) return;
+        if (!data) {
+          setError('Produkt nicht gefunden');
+          return;
+        }
+        setProduct(data);
+
+        // 🎯 Gamification: track `view_comparison` once the
+        // product loads. This action also triggers the
+        // `first_action_any` achievement on the user's first
+        // visit. Fire-and-forget — must not block the screen.
+        if (user?.uid) {
+          achievementService
+            .trackAction(user.uid, 'view_comparison', {
+              productId: String(id),
+              productType: 'noname',
+            })
+            .catch((err) => {
+              console.warn('view_comparison trackAction failed', err);
+            });
+        }
+      } catch (e) {
+        if (!alive) return;
+        console.warn('NoNameDetail: load failed', e);
+        setError('Fehler beim Laden');
       }
-    } catch (error) {
-      console.error('Error toggling favorite:', error);
-      showInfoToast(TOAST_MESSAGES.FAVORITES.addError, 'error');
-    }
-  };
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [id]);
 
-  // Check if product is in shopping cart
-  const checkIfInCart = async () => {
-    if (!user?.uid || !product?.id) return;
-    
+  // Initial-Load des Cart-Status. Ohne diesen useEffect startet
+  // `inCart` immer mit `false`, auch wenn das Produkt schon im
+  // Einkaufszettel liegt — der Toggle-Button zeigt dann den falschen
+  // Zustand und ein erneuter Tap würde das Produkt ein zweites Mal
+  // hinzufügen. Re-runs bei id- und uid-Wechsel.
+  useEffect(() => {
+    let alive = true;
+    if (!user?.uid || !id) {
+      setInCart(false);
+      return;
+    }
+    FirestoreService.isInShoppingCart(user.uid, String(id), false)
+      .then((res) => {
+        if (alive) setInCart(!!res);
+      })
+      .catch(() => {
+        if (alive) setInCart(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id, user?.uid]);
+
+  // Connected Brands separat laden, sobald wir die Hersteller-ID
+  // vom Produkt haben. Bewusst ENTKOPPELT vom Product-Cache, damit
+  // ein zwischenzeitlich gelaufener Aggregator-Job direkt sichtbar
+  // wird (siehe Kommentar in firestore.ts → getProductWithDetails).
+  // Service-seitig: 30 Min Cache pro Hersteller-ID, 45 s Empty-Cache
+  // → der nächste App-Tap auf dasselbe Produkt nach Aggregator-Run
+  // findet die Brands.
+  const herstellerIdForFetch = (product as any)?.herstellerId ?? null;
+  useEffect(() => {
+    let alive = true;
+    if (!herstellerIdForFetch) {
+      setConnectedBrands([]);
+      return;
+    }
+    FirestoreService.getConnectedBrandsForHersteller(herstellerIdForFetch)
+      .then((brands) => {
+        if (alive) setConnectedBrands(brands ?? []);
+      })
+      .catch(() => {
+        if (alive) setConnectedBrands([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [herstellerIdForFetch]);
+
+  // "Weitere enttarnte Produkte" — Kategorie-Pool wird gegen den
+  // Namen des aktuellen Produkts gerankt. Toastbrot zeigt zuerst
+  // andere Toastbrote, dann andere Brote, dann Rest-Kategorie.
+  // ID kommt vom expliziten `kategorieId`-Field das wir in
+  // `getProductWithDetails` an die Daten anhängen — die populierte
+  // `kategorie` enthält nur den Inhalt (bezeichnung/bild), keine ID.
+  const categoryIdForAlternatives: string | null =
+    (product as any)?.kategorieId ??
+    (product?.kategorie as any)?.id ??
+    null;
+  useEffect(() => {
+    let alive = true;
+    if (!product?.id) {
+      setAlternatives([]);
+      return;
+    }
+    // Deferred via InteractionManager — der Page-Load (Hero, Tabs,
+    // Stufen-Card) hat Vorrang. Die "Weitere enttarnte Produkte"-
+    // Section sitzt am unteren Ende und ist nicht-blockierend, also
+    // dürfen wir warten bis Animations + Gestures durch sind.
+    const handle = InteractionManager.runAfterInteractions(() => {
+      if (!alive) return;
+      FirestoreService.getEnttarnteAlternatives(
+        {
+          excludeProductId: product.id,
+          kategorieId: categoryIdForAlternatives,
+          productName: (product as any)?.name ?? null,
+          handelsmarkeName:
+            (product as any)?.handelsmarke?.bezeichnung ??
+            (product as any)?.handelsmarke?.name ??
+            null,
+        },
+        5,
+      )
+        .then((items) => {
+          if (alive) setAlternatives(items ?? []);
+        })
+        .catch(() => {
+          if (alive) setAlternatives([]);
+        });
+    });
+    return () => {
+      alive = false;
+      handle.cancel?.();
+    };
+  }, [product?.id, categoryIdForAlternatives]);
+
+  if (error) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+        <MaterialCommunityIcons name="alert-circle-outline" size={48} color={theme.textMuted} />
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 16,
+            color: theme.text,
+            marginTop: 12,
+            textAlign: 'center',
+          }}
+        >
+          {error ?? 'Produkt nicht verfügbar'}
+        </Text>
+        <Pressable
+          onPress={() => router.back()}
+          style={({ pressed }) => ({
+            marginTop: 20,
+            height: 44,
+            paddingHorizontal: 22,
+            borderRadius: radii.full,
+            backgroundColor: brand.primary,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed ? 0.9 : 1,
+          })}
+        >
+          <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: '#fff' }}>
+            Zurück
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // ─── Derived data ─────────────────────────────────────────────────────
+  // `p` is null until the full joined product lands; the page
+  // chrome and skeleton sections render meanwhile. All derived
+  // values use optional chaining so the first paint with `p === null`
+  // doesn't crash; the live values fade in via `Crossfade` once
+  // `ready` flips true.
+  const p = product as any;
+  const stufe = p ? parseStufe(p.stufe) : 1;
+  // Marken des Herstellers — kommt vom Service als zusätzliches Feld
+  // `herstellerBrands` mitgeladen (siehe getProductWithDetails).
+  // Bei Stufe 2 zeigen wir die als kleine Pills, damit der User
+  // sieht "der Hersteller dieses NoNames produziert auch X, Y, Z".
+  // Defensive: leer-Array wenn kein Hersteller / keine Marken.
+  // Connected-Brands kommen aus dem `connectedBrands`-State weiter
+  // oben (separat geladen via `useEffect` + `getConnectedBrandsFor
+  // Hersteller`). Hier nur die Stufen-Info-Vorbereitung.
+  // Only stufes 1-2 have an orphan-specific one-liner; higher stufes
+  // fall back to a generic line because they shouldn't really land here.
+  const stufeInfo =
+    stufe in STUFE_INFO
+      ? STUFE_INFO[stufe as 1 | 2]
+      : { label: 'Eigenmarke', line: 'Zu diesem Produkt ist aktuell kein Markenoriginal hinterlegt.' };
+
+  const disc = p?.discounter as
+    | { name?: string; color?: string; bild?: string; land?: string }
+    | undefined;
+  const hm = p?.handelsmarke as
+    | { bezeichnung?: string; name?: string; bild?: string }
+    | undefined;
+  const handelsmarkeName = hm?.bezeichnung ?? hm?.name ?? null;
+  const herstellerName =
+    p?.hersteller?.name ?? p?.hersteller?.herstellername ?? null;
+  const categoryName = p?.kategorie?.bezeichnung ?? p?.kategorie?.name ?? null;
+  // Non-Food (Drogerie, Haushalt, Kosmetik, Tier, …): hier sind
+  // weder Inhaltsstoffe (im Sinne von Zutaten) noch Nährwerte
+  // sinnvoll — Tabs werden komplett ausgeblendet.
+  const hideFoodTabs = isNonFoodCategory(categoryName);
+
+  const packInfo = p
+    ? formatPack(
+        p.packSize,
+        p.packTypInfo?.typKurz ?? p.packTypInfo?.typ,
+        p.preis,
+      )
+    : null;
+
+  const rating = (p?.averageRatingOverall as number | undefined)?.toFixed(1);
+
+  // ─── Handlers ─────────────────────────────────────────────────────────
+  // All handlers bail early if the basic product hasn't landed yet;
+  // the action buttons render disabled-skeleton circles in that
+  // state so this should never actually fire, but we guard anyway.
+  const onFavPress = async () => {
+    if (!p) return;
+    setIsFav((v) => !v);
     try {
-      const inCart = await FirestoreService.isInShoppingCart(
-        user.uid,
-        product.id,
-        false // NoName product
-      );
-      setIsInCart(inCart);
-    } catch (error) {
-      console.error('Error checking cart status:', error);
+      const now = await toggleFavorite(p.id, 'noname', p);
+      if (now) showFavoriteAddedToast(p.name ?? 'Produkt');
+      else showFavoriteRemovedToast(p.name ?? 'Produkt');
+    } catch {
+      setIsFav((v) => !v);
     }
   };
-  
-  // Add to shopping cart
-  const handleAddToCart = async () => {
+  const onCartPress = async () => {
+    if (!p) return;
     if (!user?.uid) {
-      showInfoToast(TOAST_MESSAGES.SHOPPING.addToCartAuthRequired, 'info');
+      showInfoToast('Bitte anmelden');
       return;
     }
-    
-    if (!product) return;
-    
-    if (isInCart) {
-      showAlreadyInCartToast(() => router.push('/shopping-list' as any));
+    if (inCart) {
+      // Optimistisches UI-Update: Button springt sofort auf
+      // "nicht im Wagen", danach Firestore-Delete im Hintergrund.
+      // Bei Fehler revert.
+      setInCart(false);
+      try {
+        await FirestoreService.removeFromShoppingCartByProductId(
+          user.uid,
+          p.id,
+          false,
+        );
+        // Leading 🗑️ overrides extractEmoji's default ✅ fallback —
+        // a green check on a "removed" toast read like confirmation
+        // that it had been ADDED, not removed.
+        showInfoToast('🗑️ Aus Einkaufsliste entfernt');
+      } catch {
+        setInCart(true);
+        showInfoToast('Fehler — bitte erneut versuchen');
+      }
       return;
     }
-    
-    // Animate cart button before action
-    animateButtonPress(cartAnimation);
-    setIsAddingToCart(true);
-    
+    setInCart(true);
+
+    // Fire the fly-to-cart animation in parallel with the Firestore
+    // call. measureInWindow gives us the hero's screen rect; FlyToCart
+    // clones it and animates the clone into the floating cart button.
+    // The clone is `pointerEvents="none"` so taps still hit the page.
+    const flyImageUri = getProductImage(p);
+    if (heroRef.current && flyImageUri) {
+      heroRef.current.measureInWindow((x, y, w, h) => {
+        flyRef.current?.fly({
+          sourceX: x,
+          sourceY: y,
+          sourceW: w,
+          sourceH: h,
+          imageUri: flyImageUri,
+        });
+      });
+    }
+
     try {
-      // 🎯 Track Add-to-Cart wird von FirestoreService automatisch gemacht
-      const productName = product.name || 'NoName Produkt';
-      
-      // Berechne Ersparnis für Stufe 1,2 Produkte
-      const ersparnis = product.ersparnis || 0;
-      const priceInfo = {
-        price: product.preis || 0,
-        savings: ersparnis,
-        comparedProducts: [] // Keine Vergleichsprodukte bei direktem Add
-      };
-      
       await FirestoreService.addToShoppingCart(
         user.uid,
-        product.id,
-        productName,
-        false, // NoName product
-        'browse', // Source (Stufe 1,2 wird meist über Stöbern gefunden)
-        { 
-          screenName: 'noname_detail',
-          productStufe: product.stufe
-        },
-        priceInfo
+        p.id,
+        p.name ?? 'Produkt',
+        false,
+        'comparison',
+        { screenName: 'noname-detail' },
+        { price: p.preis ?? 0, savings: 0 },
       );
-      setIsInCart(true);
-      const message = interpolateMessage(TOAST_MESSAGES.SHOPPING.addedToCart, { productName });
-      showCartAddedToast(message, () => router.push('/shopping-list' as any));
-    } catch (error) {
-      console.error('Error adding to cart:', error);
-      showInfoToast(TOAST_MESSAGES.SHOPPING.addToCartError, 'error');
-    } finally {
-      setIsAddingToCart(false);
+      // No toast on single-add — the FlyToCart animation + the
+      // cart-icon state flip already make the action self-evident.
+    } catch {
+      setInCart(false);
+      showInfoToast('Fehler — bitte erneut versuchen');
     }
   };
-  
-  // Load product ratings with user info
-  const loadProductRatings = async (productToLoad: any) => {
-    if (!productToLoad?.id) {
-      console.error('⚠️ loadProductRatings: No product provided!');
-      return;
-    }
-    
-
-    
-    // WICHTIG: Reset old ratings BEFORE loading new ones
-    setProductRatings([]);
-    setRatingStats(null);
-    
+  const [existingRating, setExistingRating] = useState<Rating | null>(null);
+  const onRatingsPress = async () => {
+    if (!p) return;
+    setRatingsOpen(true);
+    setRatingsLoading(true);
+    setRatings([]);
+    setExistingRating(null);
     try {
-      setRatingsLoading(true);
-      const ratings = await FirestoreService.getProductRatingsWithUserInfo(productToLoad.id, true);
-      setProductRatings(ratings);
-      
-      // Calculate rating statistics
-      const stats = FirestoreService.calculateRatingStats(ratings);
-      setRatingStats(stats);
-      
-
-    } catch (error) {
-      console.error('Error loading product ratings:', error);
+      // Parallel: alle Ratings für die Liste-View + die ggf.
+      // existierende Rating dieses Users für den Submit-Prefill.
+      const [data, mine] = await Promise.all([
+        FirestoreService.getProductRatingsWithUserInfo(p.id, true),
+        user?.uid
+          ? FirestoreService.getUserRatingForProduct(user.uid, p.id, true)
+          : Promise.resolve(null),
+      ]);
+      setRatings(data as any);
+      setExistingRating((mine ?? null) as Rating | null);
+    } catch (e) {
+      console.warn('NoNameDetail: ratings load failed', e);
     } finally {
       setRatingsLoading(false);
     }
   };
 
-  // Check for existing rating and open appropriate modal - copied from product-comparison
-  const openRatingModal = async () => {
-    if (!user?.uid) {
-      showRatingToast(TOAST_MESSAGES.RATINGS.authRequired, 'error');
-      return;
-    }
+  // ─── Render ───────────────────────────────────────────────────────────
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      {/* swapAt = DOCK_DISTANCE so the "Produktdetails" fade-out finishes
+          before the morph title docks (otherwise they overlap in the nav
+          bar for a brief window around the dock moment). */}
+      <DetailHeader
+        title="Produktdetails"
+        scrollY={scrollY}
+        swapAt={DOCK_DISTANCE}
+        onBack={() => router.back()}
+      />
 
-    if (!product?.id) return;
+      {/* Morph title — opacity is driven by morphTitleStyle's
+          `opacity` field (combined with the dock transform in the
+          same worklet) so the reveal is a smooth fade-in instead
+          of a sudden mount. Always mounted; the text reads
+          empty before data arrives but is invisible at opacity 0. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            top: HERO_SCREEN_Y,
+            left: 20,
+            right: 20,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            zIndex: 11,
+            transformOrigin: 'top left',
+          },
+          morphTitleStyle,
+        ]}
+      >
+        {(disc?.bild ?? (hm as any)?.bild) ? (
+          <View
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 6,
+              backgroundColor: '#ffffff',
+              borderWidth: 0.5,
+              borderColor: theme.border,
+              overflow: 'hidden',
+            }}
+          >
+            <Image
+              source={{ uri: disc?.bild ?? (hm as any)?.bild }}
+              style={{ width: '100%', height: '100%' }}
+              resizeMode="contain"
+            />
+          </View>
+        ) : null}
+        {/* Dynamische Title-Größe: kurze Titel rendern in voller
+            22-px-Größe, lange Titel schrumpfen automatisch bis zur
+            Mindestskala (0.65 ≈ 14 px) statt mit "..." abgeschnitten
+            zu werden. `adjustsFontSizeToFit` macht das nativ in RN.
+            Der Scale-Transform aus `morphTitleStyle` schichtet sich
+            sauber drauf — bei langen Titeln ist der gedockte Stand
+            entsprechend kleiner, aber immer lesbar. */}
+        <Text
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.65}
+          allowFontScaling={false}
+          style={{
+            flexShrink: 1,
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: TITLE_FONT_SIZE,
+            lineHeight: TITLE_LINE_HEIGHT,
+            color: theme.text,
+            letterSpacing: -0.3,
+          }}
+        >
+          {handelsmarkeName ? `${handelsmarkeName} ` : ''}
+          {p?.name ?? ''}
+        </Text>
+      </Animated.View>
 
-    try {
-      // Check if user has already rated this product
-      const existing = await FirestoreService.getUserRatingForProduct(
-        user.uid, 
-        product.id, 
-        true // isNoNameProduct
-      );
+      <Animated.ScrollView
+        ref={detailScrollRef}
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
+        contentContainerStyle={{
+          paddingTop: insets.top + DETAIL_HEADER_ROW_HEIGHT,
+          paddingBottom: 120,
+        }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Coachmark-Anchor 'product.hero' wrappt Title-Slot UND
+            Hero zusammen — Spotlight-Phase 1 hebt damit das gesamte
+            "Was wird hier gezeigt?"-Block hervor (DAS ORIGINAL /
+            DAS NoName + Produktname + Hero-Karte). User-Feedback:
+            "erweitere den Fokus auch auf den Produktnamen und 'Das
+            Original'". */}
+        <View
+          ref={heroAnchor.ref}
+          onLayout={heroAnchor.onLayout}
+          collapsable={false}
+        >
+        {/* Title slot — 28 px reserves vertical space so the morph
+            title (rendered absolutely above) lands at HERO_SCREEN_Y
+            before the rest of the content below. */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
+          <View style={{ height: 28, marginTop: 2 }} />
+        </View>
 
-      if (existing) {
-        // Load existing rating for editing
-        setExistingRating(existing);
-        setIsEditingRating(true);
-        setOverallRating(existing.ratingOverall || 0);
-        setTasteRating(existing.ratingTasteFunction || 0);
-        setPriceValueRating(existing.ratingPriceValue || 0);
-        setContentRating(existing.ratingContent || 0);
-        // Only set similarity for Stufe 3+
-        if (product.stufe && parseInt(product.stufe) >= 3) {
-          setSimilarityRating(existing.ratingSimilarity || 0);
-        }
-        setComment(existing.comment || '');
-      } else {
-        // New rating
-        setExistingRating(null);
-        setIsEditingRating(false);
-        setOverallRating(0);
-        setTasteRating(0);
-        setPriceValueRating(0);
-        setContentRating(0);
-        setSimilarityRating(0);
-        setComment('');
-      }
+        {/* ─── Hero — TOP wave (Crossfade, delay 0)
+            Skeleton SHAPES match the live hero exactly: same
+            240 px container, same Hersteller chip pill at
+            top-left, same price pill at bottom-left, same 3
+            action buttons at bottom-right. With matching shapes
+            the crossfade reads as "details fill in", not "thing
+            morphs". Duration 320 ms, single shared value
+            (skeleton 1→0 + content 0→1 sum to opacity 1 every
+            frame → constant brightness, no muddy mid-frame). */}
+        <Crossfade
+          ready={ready}
+          delay={0}
+          duration={320}
+          style={{ paddingHorizontal: 20 }}
+          skeleton={
+            <View
+              style={{
+                position: 'relative',
+                borderRadius: 20,
+                overflow: 'hidden',
+                backgroundColor: theme.surfaceAlt,
+                height: 240,
+              }}
+            >
+              {/* Image skeleton — fills the entire hero slot */}
+              <Shimmer width="100%" height={240} radius={0} />
 
-      setShowRatingModal(true);
-    } catch (error) {
-      console.error('Error checking existing rating:', error);
-      // Fallback to new rating
-      setExistingRating(null);
-      setIsEditingRating(false);
-      setOverallRating(0);
-      setTasteRating(0);
-      setPriceValueRating(0);
-      setContentRating(0);
-      setSimilarityRating(0);
-      setComment('');
-      setShowRatingModal(true);
-    }
-  };
+              {/* Hersteller chip placeholder — neutral grey pill at
+                  the SAME position + dimensions as the real chip
+                  (top-left, padded 6/12, radius 99). No brand
+                  colour during loading; just a calm grey shape so
+                  the page reads as "loading", not "promotional". */}
+              <Shimmer
+                width={140}
+                height={26}
+                radius={99}
+                style={{ position: 'absolute', left: 12, top: 12 }}
+              />
 
-  // Submit rating function - copied from product-comparison
-  const submitRating = async () => {
-    if (overallRating === 0) {
-      showRatingToast(TOAST_MESSAGES.RATINGS.ratingRequired, 'error');
-      return;
-    }
+              {/* Price pill placeholder — single Shimmer at the same
+                  outer dimensions + position as the real white
+                  price pill (rounded rect, ~96 × 56). */}
+              <Shimmer
+                width={96}
+                height={56}
+                radius={14}
+                style={{ position: 'absolute', left: 12, bottom: 12 }}
+              />
 
-    setIsSubmittingRating(true);
-
-    try {
-      if (isEditingRating && existingRating) {
-        // Update existing rating
-        const updateData = {
-          ratingOverall: overallRating,
-          ratingPriceValue: priceValueRating || null,
-          ratingTasteFunction: tasteRating || null,
-          ratingSimilarity: (product.stufe && parseInt(product.stufe) >= 3) ? (similarityRating || null) : null,
-          ratingContent: contentRating || null,
-          comment: comment || null,
-          updatedate: new Date()
-        };
-
-        await FirestoreService.updateProductRating(existingRating.id, updateData);
-        showRatingToast(TOAST_MESSAGES.RATINGS.ratingUpdated, 'success');
-      } else {
-        // Create new rating
-        const productRatingData = {
-          productID: product?.id || null,
-          brandProductID: null,
-          userID: user?.uid || 'anonymous-user-' + Date.now(),
-          ratingOverall: overallRating,
-          ratingPriceValue: priceValueRating || null,
-          ratingTasteFunction: tasteRating || null,
-          ratingSimilarity: (product.stufe && parseInt(product.stufe) >= 3) ? (similarityRating || null) : null,
-          ratingContent: contentRating || null,
-          comment: comment || null,
-          ratedate: new Date(),
-          updatedate: new Date()
-        };
-
-        await FirestoreService.addProductRating(productRatingData);
-        showRatingToast(TOAST_MESSAGES.RATINGS.ratingSaved, 'success');
-        
-        // 🎯 TRACK ACTION: submit_rating (nur bei neuer Bewertung, nicht bei Update)
-        if (user?.uid) {
-          try {
-            // Update user rating count - IMMER, nicht nur bei langem Kommentar!
-            await updateUserStats(user.uid, {
-              ratingsToAdd: 1
-            });
-            
-            // Track achievement action
-            const textLength = (comment || '').length;
-            await achievementService.trackAction(user.uid, 'submit_rating', {
-              productId: product?.id,
-              productName: product?.name,
-              productType: 'noname',
-              rating: overallRating,
-              commentLength: textLength
-            });
-            console.log('✅ Action tracked: submit_rating (NoName)');
-          } catch (error) {
-            console.error('Error tracking submit_rating action:', error);
+              {/* Action cluster placeholder — three 48×48 rounded
+                  squares matching the live ActionButtons. */}
+              <View
+                style={{
+                  position: 'absolute',
+                  right: 12,
+                  bottom: 12,
+                  flexDirection: 'row',
+                  gap: 8,
+                }}
+              >
+                {[0, 1, 2].map((i) => (
+                  <Shimmer key={i} width={48} height={48} radius={14} />
+                ))}
+              </View>
+            </View>
           }
-        }
-      }
+        >
+          {/* Hero-Image-Container — innerer Hero (240 px). Der
+              Coachmark-heroAnchor liegt auf dem ÄUSSEREN Wrapper
+              (Title + Hero), siehe weiter oben. */}
+          <View
+            ref={heroRef}
+            collapsable={false}
+            style={{
+              position: 'relative',
+              borderRadius: 20,
+              overflow: 'hidden',
+              // theme.surface = pure white im Light Mode, dunkel im
+              // Dark Mode. Damit ist der Bereich hinter dem
+              // freigestellten Produktfoto themen-konsistent.
+              backgroundColor: theme.surface,
+              height: 240,
+            }}
+          >
+            {getProductImage(p, 'png') ? (
+              <FadingImage
+                source={{ uri: getProductImage(p, 'png') ?? undefined }}
+                resizeMode="contain"
+                placeholderColor={theme.surface}
+              />
+            ) : ready ? (
+              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                <MaterialCommunityIcons name="package-variant" size={64} color={theme.textMuted} />
+              </View>
+            ) : null}
 
-      // Reset form and close modal
-      setOverallRating(0);
-      setTasteRating(0);
-      setPriceValueRating(0);
-      setContentRating(0);
-      setSimilarityRating(0);
-      setComment('');
-      setExistingRating(null);
-      setIsEditingRating(false);
-      
-      setShowRatingModal(false);
-      
-      // Delayed reload for Cloud Function (3-5 seconds backup)
-      setTimeout(async () => {
-        if (product?.id) {
-          console.log('🔄 Delayed backup reload for Cloud Function updates');
-          const updatedProduct = await FirestoreService.getProductWithDetails(product.id);
-          if (updatedProduct) {
-            setProduct(updatedProduct);
-            await loadProductRatings(updatedProduct);
+            {/* Hersteller chip — top-left */}
+            {herstellerName ? (
+              <View
+                style={{
+                  position: 'absolute',
+                  left: 12,
+                  top: 12,
+                  backgroundColor: brand.primaryDark,
+                  paddingVertical: 6,
+                  paddingHorizontal: 12,
+                  borderRadius: 99,
+                  maxWidth: '80%',
+                  shadowColor: '#000',
+                  shadowOpacity: 0.22,
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowRadius: 6,
+                  elevation: 3,
+                }}
+              >
+                <Text
+                  numberOfLines={2}
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 13,
+                    lineHeight: 16,
+                    color: '#fff',
+                    letterSpacing: -0.1,
+                  }}
+                >
+                  {herstellerName}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Price pill bottom-left */}
+            {p ? (
+              <View
+                style={{
+                  position: 'absolute',
+                  left: 12,
+                  bottom: 12,
+                  backgroundColor: 'rgba(255,255,255,0.95)',
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  borderRadius: 14,
+                  shadowColor: '#000',
+                  shadowOpacity: 0.12,
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowRadius: 8,
+                  elevation: 3,
+                }}
+              >
+                {packInfo ? (
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.medium,
+                      fontSize: 11,
+                      color: '#5c6769',
+                    }}
+                  >
+                    {packInfo}
+                  </Text>
+                ) : null}
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 22,
+                    color: '#191c1d',
+                    letterSpacing: -0.4,
+                    marginTop: packInfo ? 4 : 0,
+                  }}
+                >
+                  {formatEur(p?.preis)}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Action cluster bottom-right.
+                Jeder Button ist in ein <View> mit
+                useCoachmarkAnchor-Ref/onLayout gewickelt damit der
+                ProductDetailWalkthrough-Spotlight den jeweiligen
+                Button targeten kann. Die Wrapper-Views sind
+                visuell unsichtbar (kein Padding/Margin), nur
+                measureInWindow + onLayout machen ihren Job. */}
+            {p ? (
+              <View style={{ position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', gap: 8 }}>
+                <View
+                  ref={favAnchor.ref}
+                  onLayout={favAnchor.onLayout}
+                  collapsable={false}
+                >
+                  <ActionButton
+                    icon={isFav ? 'heart' : 'heart-outline'}
+                    iconColor={isFav ? '#e53935' : theme.text}
+                    onPress={onFavPress}
+                  />
+                </View>
+                <View
+                  ref={cartAnchor.ref}
+                  onLayout={cartAnchor.onLayout}
+                  collapsable={false}
+                >
+                  <ActionButton
+                    icon={inCart ? 'cart-check' : 'cart-plus'}
+                    iconColor={inCart ? '#fff' : theme.text}
+                    bg={inCart ? brand.primary : undefined}
+                    onPress={onCartPress}
+                  />
+                </View>
+                <View
+                  ref={ratingAnchor.ref}
+                  onLayout={ratingAnchor.onLayout}
+                  collapsable={false}
+                >
+                  <ActionButton
+                    icon="star"
+                    iconColor="#f5b301"
+                    subLabel={rating}
+                    onPress={onRatingsPress}
+                  />
+                </View>
+              </View>
+            ) : null}
+          </View>
+        </Crossfade>
+        </View>{/* /heroAnchor wrapper (Title + Hero) */}
+
+        {/* ─── BOTTOM wave (Crossfade, delay 150 ms)
+            Skeleton mirrors the bottom layout exactly: same info-
+            card surface + radius + padding + divider, same tabs
+            pill + body card, same stufe-row surfaceAlt with
+            S-letter / dots / text positions. Shape-equivalence
+            across the crossfade keeps the transition smooth. The
+            150 ms delay creates a clear "top first, then bottom"
+            cascade — small enough that the two reveals overlap
+            (so it reads as one wave, not two pops). */}
+        <Crossfade
+          ready={ready}
+          delay={150}
+          duration={320}
+          skeleton={
+            <View>
+              {/* Info card skeleton — same surface + radius + padding +
+                  shadow + divider as the live card. Shimmer occupies
+                  the value column at the same height. */}
+              <View
+                style={{
+                  marginHorizontal: 20,
+                  marginTop: 24,
+                  backgroundColor: theme.surface,
+                  borderRadius: 16,
+                  padding: 16,
+                  ...shadows.sm,
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingBottom: 12,
+                    borderBottomWidth: 1,
+                    borderBottomColor: theme.border,
+                  }}
+                >
+                  <Shimmer width={70} height={13} radius={4} />
+                  <Shimmer width={140} height={13} radius={4} />
+                </View>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingTop: 12,
+                  }}
+                >
+                  <Shimmer width={70} height={13} radius={4} />
+                  <Shimmer width={120} height={13} radius={4} />
+                </View>
+              </View>
+
+              {/* Tabs skeleton — same SegmentedTabs height (44 px,
+                  radius 999) and body card (surface, radius 14,
+                  padding 16, shadows.sm). */}
+              <View style={{ marginHorizontal: 20, marginTop: 20 }}>
+                <View
+                  style={{
+                    height: 44,
+                    borderRadius: 999,
+                    backgroundColor: theme.surfaceAlt,
+                    marginBottom: 16,
+                    flexDirection: 'row',
+                    padding: 4,
+                    gap: 4,
+                  }}
+                >
+                  {/* Two equal-width tab placeholders */}
+                  <View style={{ flex: 1, borderRadius: 999, backgroundColor: theme.surface }} />
+                  <View style={{ flex: 1, borderRadius: 999 }} />
+                </View>
+                <View
+                  style={{
+                    backgroundColor: theme.surface,
+                    borderRadius: 14,
+                    padding: 16,
+                    gap: 8,
+                    ...shadows.sm,
+                  }}
+                >
+                  <Shimmer height={12} radius={4} />
+                  <Shimmer width="92%" height={12} radius={4} />
+                  <Shimmer width="78%" height={12} radius={4} />
+                  <Shimmer width="55%" height={12} radius={4} />
+                </View>
+              </View>
+
+              {/* Stufe-row skeleton — same surfaceAlt rounded
+                  container, S-letter slot on the left, text lines
+                  on the right. */}
+              <View
+                style={{
+                  marginHorizontal: 20,
+                  marginTop: 20,
+                  padding: 14,
+                  paddingHorizontal: 16,
+                  borderRadius: 14,
+                  backgroundColor: theme.surfaceAlt,
+                  flexDirection: 'row',
+                  gap: 12,
+                  alignItems: 'flex-start',
+                }}
+              >
+                <View style={{ alignItems: 'center', gap: 4 }}>
+                  <Shimmer width={26} height={20} radius={4} />
+                  <Shimmer width={36} height={6} radius={3} />
+                </View>
+                <View style={{ flex: 1, gap: 6 }}>
+                  <Shimmer width="90%" height={12} radius={4} />
+                  <Shimmer width="75%" height={12} radius={4} />
+                  <Shimmer width="50%" height={12} radius={4} />
+                </View>
+              </View>
+            </View>
           }
-        }
-      }, 4000);
-      
-    } catch (error) {
-      console.error('Error submitting rating:', error);
-      showRatingToast(TOAST_MESSAGES.RATINGS.ratingError, 'error');
-    } finally {
-      setIsSubmittingRating(false);
-    }
-  };
+        >
+          <View>
+            {/* Info card */}
+            <View
+              style={{
+                marginHorizontal: 20,
+                marginTop: 24,
+                backgroundColor: theme.surface,
+                borderRadius: 16,
+                padding: 16,
+                ...shadows.sm,
+              }}
+            >
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  paddingBottom: 12,
+                  borderBottomWidth: 1,
+                  borderBottomColor: theme.border,
+                  gap: 12,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 13,
+                    color: theme.textMuted,
+                    paddingTop: 1,
+                  }}
+                >
+                  Hersteller
+                </Text>
+                {/* flex:1 + textAlign right + numberOfLines weg —
+                    lange Hersteller-Namen wie "Naabtaler Milchwerke
+                    GmbH & Co." dürfen umbrechen statt mit "..." aus-
+                    geblendet zu werden. */}
+                <Text
+                  style={{
+                    flex: 1,
+                    fontFamily,
+                    fontWeight: fontWeight.bold,
+                    fontSize: 13,
+                    lineHeight: 18,
+                    color: theme.text,
+                    textAlign: 'right',
+                  }}
+                >
+                  {herstellerName ?? '—'}
+                </Text>
+              </View>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingTop: 12,
+                  gap: 12,
+                  alignItems: 'flex-start',
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 13,
+                    color: theme.textMuted,
+                    paddingTop: 1,
+                  }}
+                >
+                  Kategorie
+                </Text>
+                <Text
+                  style={{
+                    flex: 1,
+                    fontFamily,
+                    fontWeight: fontWeight.bold,
+                    fontSize: 13,
+                    lineHeight: 18,
+                    color: theme.text,
+                    textAlign: 'right',
+                  }}
+                >
+                  {categoryName ?? '—'}
+                </Text>
+              </View>
+            </View>
 
-  const [showRatingsView, setShowRatingsView] = useState(false);
-  const [showRatingModal, setShowRatingModal] = useState(false);
-  const [productRatings, setProductRatings] = useState<any[]>([]);
-  const [ratingStats, setRatingStats] = useState<any>(null);
-  const [ratingsLoading, setRatingsLoading] = useState(false);
-  
-  // Rating form states - exactly like product-comparison
-  const [overallRating, setOverallRating] = useState(0);
-  const [tasteRating, setTasteRating] = useState(0);
-  const [priceValueRating, setPriceValueRating] = useState(0);
-  const [contentRating, setContentRating] = useState(0);
-  const [similarityRating, setSimilarityRating] = useState(0);
-  const [comment, setComment] = useState('');
-  const [isSubmittingRating, setIsSubmittingRating] = useState(false);
-  const [isEditingRating, setIsEditingRating] = useState(false);
-  const [existingRating, setExistingRating] = useState<any>(null);
-  const [showImageViewer, setShowImageViewer] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [showStagesInfo, setShowStagesInfo] = useState(false);
+            {/* Bekannte Marken des Herstellers — nur bei Stufe 2
+                relevant. Definition Stufe 2: "Markenhersteller ohne
+                vergleichbares Produkt" → der Hersteller produziert
+                auch für bekannte Marken, nur nicht direkt eines, das
+                sich mit diesem NoName-Produkt vergleichen lässt. Das
+                ist genau der Punkt, an dem dieser Block sichtbar
+                wird: er zeigt dem User, welche Marken sonst aus
+                derselben Produktion stammen, damit der Bezug zur
+                "Markenhersteller"-Aussage greifbar ist.
+                Stufe 1 (reiner NoName-Hersteller) hat per Definition
+                keine Marken. */}
+            {/* Verbundene Marken — gleicher Card-Stil wie die
+                Hersteller/Kategorie-Card oberhalb (theme.surface,
+                shadows.sm, 14 px Padding). Label-Stil identisch zu
+                "Hersteller"/"Kategorie": medium 13 px in textMuted,
+                regular case. Darunter wrappen die Marken-Chips. */}
+            {p && stufe === 2 && connectedBrands.length > 0 ? (
+              <View
+                style={{
+                  marginHorizontal: 20,
+                  marginTop: 12,
+                  padding: 14,
+                  paddingHorizontal: 16,
+                  borderRadius: 14,
+                  backgroundColor: theme.surface,
+                  ...shadows.sm,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 13,
+                    color: theme.textMuted,
+                    marginBottom: 10,
+                  }}
+                >
+                  Mit dem Hersteller in Verbindung stehende{' '}
+                  {connectedBrands.length === 1 ? 'Marke' : 'Marken'}
+                </Text>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                  }}
+                >
+                  {connectedBrands.map((b) => {
+                    const label = b.name || '—';
+                    const logoUri = b.bild ?? null;
+                    const initial = (label || '?').trim().charAt(0).toUpperCase();
+                    return (
+                      <View
+                        key={b.id}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 8,
+                          paddingLeft: 4,
+                          paddingRight: 12,
+                          paddingVertical: 4,
+                          borderRadius: 999,
+                          backgroundColor: theme.surfaceAlt,
+                          borderWidth: 1,
+                          borderColor: theme.border,
+                        }}
+                      >
+                        {logoUri ? (
+                          <View
+                            style={{
+                              width: 24,
+                              height: 24,
+                              borderRadius: 12,
+                              backgroundColor: '#fff',
+                              overflow: 'hidden',
+                              borderWidth: 0.5,
+                              borderColor: theme.border,
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <Image
+                              source={{ uri: logoUri }}
+                              style={{ width: '90%', height: '90%' }}
+                              resizeMode="contain"
+                            />
+                          </View>
+                        ) : (
+                          <View
+                            style={{
+                              width: 24,
+                              height: 24,
+                              borderRadius: 12,
+                              backgroundColor: brand.primary + '22',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontFamily,
+                                fontWeight: fontWeight.extraBold,
+                                fontSize: 11,
+                                color: brand.primary,
+                                includeFontPadding: false as any,
+                              }}
+                            >
+                              {initial}
+                            </Text>
+                          </View>
+                        )}
+                        <Text
+                          numberOfLines={1}
+                          style={{
+                            fontFamily,
+                            fontWeight: fontWeight.bold,
+                            fontSize: 13,
+                            color: theme.text,
+                          }}
+                        >
+                          {label}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
 
-  // Ähnliche Produkte States
-  const [similarProducts, setSimilarProducts] = useState<ProductWithDetails[]>([]);
-  const [similarProductsLoading, setSimilarProductsLoading] = useState(false);
-  
-  // Animation States für sanftes Einblenden
-  const [productAnimation] = useState(new Animated.Value(0));
-  const [similarProductAnimations, setSimilarProductAnimations] = useState<{[key: string]: Animated.Value}>({});
+            {/* Detektiv-Check-Zeile — ÜBER den Inhaltstabellen, exakt
+                wie auf der Stufe-3/4/5-Seite (product-comparison). Statt
+                der alten "S1 + Punkte"-Custom-Anzeige wird hier die
+                gleiche `StufenChips`-Komponente verwendet, die auch
+                auf den ProductCards und in Stöbern erscheint — eine
+                visuelle Sprache für Stufen app-weit.
 
-  // Animation Funktionen
-  const animateProductCard = () => {
-    Animated.timing(productAnimation, {
-      toValue: 1,
-      duration: 400,
-      useNativeDriver: true,
-    }).start();
-  };
+                Coachmark-Anchor 'product.context' liegt auf dieser
+                Zeile — die letzte Spotlight-Phase der ProductDetail-
+                Tour erklärt hier die Stufen 1-2 und referenziert
+                die höheren Stufen. */}
+            {p ? (
+              <View
+                ref={contextAnchor.ref}
+                onLayout={contextAnchor.onLayout}
+                collapsable={false}
+                style={{
+                  marginHorizontal: 20,
+                  marginTop: 20,
+                  padding: 14,
+                  paddingHorizontal: 16,
+                  borderRadius: 14,
+                  backgroundColor: theme.surfaceAlt,
+                  flexDirection: 'row',
+                  gap: 12,
+                  alignItems: 'flex-start',
+                }}
+              >
+                <View style={{ marginTop: 3 }}>
+                  <StufenChips stufe={stufe} size="md" />
+                </View>
+                <Text
+                  style={{
+                    flex: 1,
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 13,
+                    lineHeight: 18,
+                    color: theme.textSub,
+                  }}
+                >
+                  <Text style={{ fontWeight: fontWeight.bold, color: theme.text }}>
+                    Stufe {stufe} — {stufeInfo.label}.
+                  </Text>{' '}
+                  {stufeInfo.line} Kein direktes Markenprodukt zum Vergleich
+                  hinterlegt.
+                </Text>
+              </View>
+            ) : null}
 
-  const animateSimilarProduct = (productId: string, delay: number = 0) => {
-    if (!similarProductAnimations[productId]) {
-      const newOpacity = new Animated.Value(0);
-      setSimilarProductAnimations(prev => ({ ...prev, [productId]: newOpacity }));
-      
-      setTimeout(() => {
-        Animated.timing(newOpacity, {
-          toValue: 1,
-          duration: 400,
-          useNativeDriver: true,
-        }).start();
-      }, delay);
-    }
-  };
+            {/* Tabs: Inhaltsstoffe / Nährwerte. Bei Non-Food-
+                Kategorien (Drogerie, Haushalt, Kosmetik, Tier, …)
+                ergeben Zutaten + Nährwerte keinen Sinn — Tabs +
+                PagerView werden komplett ausgeblendet. */}
+            {p && !hideFoodTabs ? (
+              <>
+                <View style={{ marginHorizontal: 20, marginTop: 20 }}>
+                  <SegmentedTabs
+                    tabs={[
+                      { key: 'ingredients', label: 'Inhaltsstoffe' },
+                      { key: 'nutrition', label: 'Nährwerte' },
+                    ] as const}
+                    value={tab}
+                    onChange={onTabChange}
+                  />
+                </View>
+                <PagerView
+                  ref={tabPagerRef}
+                  style={{
+                    height: Math.max(
+                      tabHeights.ingredients ?? 0,
+                      tabHeights.nutrition ?? 0,
+                      220,
+                    ),
+                  }}
+                  initialPage={0}
+                  onPageSelected={onTabPagerSelected}
+                >
+                  <View
+                    key="ingredients"
+                    onLayout={(e) => {
+                      const h = e?.nativeEvent?.layout?.height;
+                      if (typeof h !== 'number') return;
+                      setTabHeights((prev) =>
+                        prev.ingredients === h ? prev : { ...prev, ingredients: h },
+                      );
+                    }}
+                  >
+                    <SingleInfoCard
+                      tab="ingredients"
+                      product={p}
+                      theme={theme}
+                      shadows={shadows}
+                    />
+                  </View>
+                  <View
+                    key="nutrition"
+                    onLayout={(e) => {
+                      const h = e?.nativeEvent?.layout?.height;
+                      if (typeof h !== 'number') return;
+                      setTabHeights((prev) =>
+                        prev.nutrition === h ? prev : { ...prev, nutrition: h },
+                      );
+                    }}
+                  >
+                    <SingleInfoCard
+                      tab="nutrition"
+                      product={p}
+                      theme={theme}
+                      shadows={shadows}
+                    />
+                  </View>
+                </PagerView>
+              </>
+            ) : null}
 
-  // Header konfigurieren (konsistent mit Produktvergleich - fester Titel verhindert "Poppen")
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      ...getNavigationHeaderOptions(colorScheme, 'NoName-Produkt'),
-    });
-  }, [navigation, colorScheme]);
+            {/* (Detektiv-Check-Zeile sitzt oberhalb der Tabs, siehe
+                weiter oben — sie hatte früher hier am Ende der Page
+                geklebt, wandert jetzt in den Kontext der Inhalts-
+                tabellen damit der User die Einordnung sofort sieht
+                bevor er Inhaltsstoffe/Nährwerte liest.) */}
+          </View>
+        </Crossfade>
 
-  // Check if product is in cart when product loads
-  useEffect(() => {
-    if (product) {
-      checkIfInCart();
-    }
-  }, [product, user]);
+        {/* Weitere enttarnte Produkte — vertikale Liste, Stufe 3/4/5
+            aus derselben Kategorie. Tap führt direkt zur jeweiligen
+            product-comparison-Seite (alle hier sind Stufe 3+, haben
+            also ein Markenprodukt zum Vergleich verlinkt). */}
+        <EnttarnteAlternativesList
+          items={alternatives}
+          onItemPress={(altId) => {
+            FirestoreService.prefetchComparisonData(altId, false);
+            safePush(`/product-comparison/${altId}?type=noname`);
+          }}
+        />
 
-  // Refresh cart status when screen comes back into focus
-  useFocusEffect(
-    useCallback(() => {
-      if (product) {
-        console.log('🔄 NoName Screen focused - refreshing cart status');
-        checkIfInCart();
-      }
-    }, [product?.id, user?.uid])
-  );
-  
-  // Produkt laden
-  // Real-time product updates listener for rating changes
-  const setupProductListener = (productId: string) => {
-    const productRef = doc(db, 'produkte', productId);
-    
-    const unsubscribe = onSnapshot(productRef, (doc) => {
-      if (doc.exists()) {
-        const updatedData = { id: doc.id, ...doc.data() } as ProductWithDetails;
-        
-        // Check if rating data has changed
-        if (product && (
-          updatedData.averageRatingOverall !== product.averageRatingOverall ||
-          updatedData.ratingCount !== product.ratingCount ||
-          updatedData.averageRatingSimilarity !== product.averageRatingSimilarity
-        )) {
-          console.log('🔄 Rating data updated via Cloud Function - refreshing display');
-          setProduct(updatedData);
-          
-          // Also reload detailed ratings
-          loadProductRatings(updatedData);
-        }
-      }
-    }, (error) => {
-      console.error('❌ Real-time listener error:', error);
-    });
+        <View style={{ height: 24 }} />
+      </Animated.ScrollView>
 
-    return unsubscribe;
-  };
-
-  useEffect(() => {
-    if (!id) return;
-
-    let unsubscribeListener: (() => void) | undefined;
-
-    const loadProduct = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-
-
-        
-        // Lade Produktdetails
-        const productData = await FirestoreService.getProductWithDetails(id);
-        if (!productData) {
-          setError('Produkt nicht gefunden');
-          return;
-        }
-
-        setProduct(productData);
-        
-        // Track product view for interstitial ads
-        interstitialAdService.trackProductView(isPremium);
-
-        console.log('🏷️ Product kategorie:', productData.kategorie);
-
-        // Setup real-time listener for rating updates
-        unsubscribeListener = setupProductListener(id);
-
-        // Animation starten
-        Animated.timing(productAnimation, {
-          toValue: 1,
-          duration: 400,
-          useNativeDriver: true,
-        }).start();
-
-        // Lade OpenFoodFacts Daten falls EAN vorhanden
-        if (productData.EANs?.[0] || productData.ean) {
-          const ean = productData.EANs?.[0] || productData.ean;
-
-          try {
-            const openFoodResponse = await OpenFoodService.getProductByEAN(ean);
-            if (openFoodResponse) {
-              setOpenFoodData(openFoodResponse);
-
+      {/* RatingsSheet only mounts once the basic product is in
+          state — its action button (and therefore the way to open
+          it) only mounts at the same gate, so this is consistent. */}
+      {p ? (
+        <RatingsSheet
+          visible={ratingsOpen}
+          onClose={() => setRatingsOpen(false)}
+          productName={p.name ?? 'Produkt'}
+          ratings={ratings}
+          loading={ratingsLoading}
+          showSimilarity={false}
+          existingRating={existingRating}
+          onSubmit={async (r: SubmittedRating) => {
+            if (!user?.uid) {
+              showInfoToast('Bitte anmelden');
+              throw new Error('not-authenticated');
             }
-          } catch (openFoodError) {
-            console.log('⚠️ OpenFoodFacts data not available:', openFoodError);
-          }
-        }
+            const now = new Date();
+            await FirestoreService.addProductRating({
+              userID: user.uid,
+              productID: p.id,
+              brandProductID: null,
+              ratingOverall: r.ratingOverall,
+              ratingPriceValue: r.ratingPriceValue ?? null,
+              ratingTasteFunction: r.ratingTasteFunction ?? null,
+              ratingContent: r.ratingContent ?? null,
+              ratingSimilarity: r.ratingSimilarity ?? null,
+              comment: r.comment ?? null,
+              ratedate: now,
+              updatedate: now,
+            });
 
-        // Ähnliche Produkte laden (im Hintergrund)
-        if (productData.kategorie?.bezeichnung) {
-          loadSimilarProducts(productData.kategorie.bezeichnung, productData.id);
-        }
+            // 🎯 Gamification: track `submit_rating` after the
+            // rating is persisted. Fire-and-forget.
+            achievementService
+              .trackAction(user.uid, 'submit_rating', {
+                productId: p.id,
+                productName: p.name,
+                productType: 'noname',
+                rating: r.ratingOverall,
+                commentLength: (r.comment || '').length,
+              })
+              .catch((err) => {
+                console.warn('submit_rating trackAction failed', err);
+              });
 
-      } catch (err) {
-        console.error('❌ Error loading product:', err);
-        setError('Fehler beim Laden des Produkts');
-      } finally {
-        setLoading(false);
-        // Starte Animation nach dem Laden
-        setTimeout(() => animateProductCard(), 50);
-      }
-    };
+            try {
+              const refreshed =
+                await FirestoreService.getProductRatingsWithUserInfo(p.id, true);
+              setRatings(refreshed as any);
 
-    loadProduct();
+              // Eigene Bewertung aktualisieren damit beim nächsten
+              // Sheet-Open der Submit-View mit den neuen Werten
+              // vorbefüllt wird.
+              setExistingRating({
+                id: (existingRating as any)?.id,
+                userID: user.uid,
+                ratingOverall: r.ratingOverall,
+                ratingPriceValue: r.ratingPriceValue ?? undefined,
+                ratingTasteFunction: r.ratingTasteFunction ?? undefined,
+                ratingSimilarity: r.ratingSimilarity ?? undefined,
+                ratingContent: r.ratingContent ?? undefined,
+                comment: r.comment ?? undefined,
+              } as any);
 
-    // Cleanup function
-    return () => {
-      if (unsubscribeListener) {
-        unsubscribeListener();
-        console.log('🧹 Real-time product listener cleaned up');
-      }
-    };
-  }, [id]);
+              // Optimistic local average so der ⭐-ActionButton-
+              // SubLabel sofort die neue Bewertung reflektiert.
+              // Vorher nur die `ratings`-Liste im Sheet aktualisiert
+              // — der Sublabel zog aber aus
+              // `product.averageRatingOverall`, das clientseitig
+              // stale blieb bis das Cloud-Function-Aggregat lief +
+              // das Produkt neu geladen wurde. User hat die
+              // Regression gemerkt: "die bewertungsanzeige
+              // aktualisiert sich nicht, das ging in der alten
+              // version noch".
+              const overalls = (refreshed as Rating[])
+                .map((r) => r.ratingOverall)
+                .filter((v): v is number => typeof v === 'number');
+              const avg =
+                overalls.length > 0
+                  ? overalls.reduce((a, b) => a + b, 0) / overalls.length
+                  : undefined;
+              setProduct((prev) =>
+                prev ? ({ ...prev, averageRatingOverall: avg } as any) : prev,
+              );
+            } catch {
+              /* non-fatal */
+            }
+          }}
+        />
+      ) : null}
 
-  // Helper Functions
-  const formatPrice = (price: number | string) => {
-    const numPrice = typeof price === 'string' ? parseFloat(price) : price;
-    return new Intl.NumberFormat('de-DE', {
-      style: 'currency',
-      currency: 'EUR',
-    }).format(numPrice);
-  };
+      {/* Schwebender Einkaufszettel-FAB. Detail-Seiten haben keine
+          Tab-Bar darunter, also nur safe-area-bottom + 20 px. */}
+      <FloatingShoppingListButton bottomOffset={insets.bottom + 20} />
 
-  // Ähnliche Produkte laden
-  const loadSimilarProducts = async (categoryRef: any, excludeProductId: string) => {
-    try {
-      setSimilarProductsLoading(true);
+      {/* Fly-to-cart overlay — clones the hero image and animates it
+          into the floating cart button. Mounted last so it sits on
+          top of the FAB visually. */}
+      <FlyToCart ref={flyRef} />
 
-      console.log('🔍 Excluding product ID:', excludeProductId);
-      
-      const products = await FirestoreService.getSimilarProducts(categoryRef, excludeProductId, 3);
-      setSimilarProducts(products);
+      {/* ProductDetail-Walkthrough — Welcome-Card + Spotlights.
+          CoachmarkScrollProvider gibt der SpotlightOverlay-Engine
+          den ScrollView-Ref → solange ein Spotlight sichtbar ist,
+          ist Scroll gesperrt (Anchor wandert sonst weg).
 
-      
-      // Starte Animation für ähnliche Produkte
-      products.forEach((product, index) => {
-        animateSimilarProduct(product.id, index * 40);
-      });
-    } catch (error) {
-      console.error('❌ Error loading similar products:', error);
-    } finally {
-      setSimilarProductsLoading(false);
-    }
-  };
+          scrollY ist hier nicht aktiv genutzt — wir geben einen
+          dummy SharedValue rein, weil das Provider-Schema es
+          verlangt. Die Spotlights für die Detail-Buttons brauchen
+          kein scroll-tracking weil die Buttons sowieso fixed im
+          oberen Hero sitzen und beim Spotlight-Mount eh am
+          richtigen Y stehen (Scroll ist gleich gesperrt). */}
+      <CoachmarkScrollProvider
+        scrollY={scrollY}
+        scrollViewRef={detailScrollRef}
+      >
+        <ProductDetailWalkthrough
+          visible={detailCoachmark.visible}
+          onDismiss={detailCoachmark.dismiss}
+          screenType="noname"
+        />
+      </CoachmarkScrollProvider>
+    </View>
+  );
+}
 
-  const getPackageInfo = (packSize?: string, packTypInfo?: any) => {
-    if (packSize && packTypInfo?.bezeichnung) {
-      return `${packSize} ${packTypInfo.bezeichnung}`;
-    } else if (packSize) {
-      return packSize;
-    } else if (packTypInfo?.bezeichnung) {
-      return packTypInfo.bezeichnung;
-    }
-    return 'Keine Angabe';
-  };
+// ────────────────────────────────────────────────────────────────────────
 
-  const openImageViewer = (imageUrl: string) => {
-    setSelectedImage(imageUrl);
-    setShowImageViewer(true);
-  };
+type ActionButtonProps = {
+  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+  iconColor: string;
+  bg?: string;
+  subLabel?: string;
+  onPress?: () => void;
+};
 
-  // Loading State
-  if (loading) {
+function ActionButton({ icon, iconColor, bg, subLabel, onPress }: ActionButtonProps) {
+  const { theme } = useTokens();
+  const filled = !!bg;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        width: 48,
+        height: 48,
+        borderRadius: 14,
+        backgroundColor: bg ?? theme.surface,
+        borderWidth: filled ? 0 : 1,
+        borderColor: theme.border,
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: pressed ? 0.88 : 1,
+        shadowColor: '#000',
+        shadowOpacity: 0.08,
+        shadowOffset: { width: 0, height: 2 },
+        shadowRadius: 6,
+        elevation: 2,
+      })}
+    >
+      <MaterialCommunityIcons name={icon} size={subLabel ? 14 : 22} color={iconColor} />
+      {subLabel ? (
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 11,
+            lineHeight: 13,
+            color: filled ? '#fff' : theme.text,
+            marginTop: 2,
+          }}
+        >
+          {subLabel}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+function SingleInfoCard({
+  tab,
+  product,
+  theme,
+  shadows,
+}: {
+  tab: Tab;
+  product: any;
+  theme: ReturnType<typeof useTokens>['theme'];
+  shadows: ReturnType<typeof useTokens>['shadows'];
+}) {
+  if (tab === 'ingredients') {
+    const zutaten = String(product.zutaten ?? product.moreInformation?.zutaten ?? '').trim();
     return (
-      <ThemedView style={styles.container}>
-        <ProductComparisonSkeleton />
-      </ThemedView>
+      <View style={{ marginHorizontal: 20, marginTop: 18 }}>
+        {zutaten ? (
+          <View
+            style={{
+              backgroundColor: theme.surface,
+              borderRadius: 14,
+              padding: 16,
+              ...shadows.sm,
+            }}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.regular,
+                fontSize: 13,
+                lineHeight: 19,
+                color: theme.text,
+              }}
+            >
+              {zutaten}
+            </Text>
+          </View>
+        ) : (
+          <View
+            style={{
+              backgroundColor: theme.surfaceAlt,
+              borderRadius: 14,
+              padding: 18,
+              alignItems: 'center',
+            }}
+          >
+            <MaterialCommunityIcons name="food-off-outline" size={28} color={theme.textMuted} />
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 13,
+                color: theme.textMuted,
+                marginTop: 8,
+                textAlign: 'center',
+              }}
+            >
+              Für dieses Produkt sind noch keine Zutaten hinterlegt.
+            </Text>
+          </View>
+        )}
+      </View>
     );
   }
 
-  // Error State
-  if (error || !product) {
+  // Nutrition tab
+  const n = product.naehrwerte ?? product.moreInformation ?? {};
+  const rows: Array<[string, string]> = [];
+  const pushRow = (label: string, value: any, suffix = '') => {
+    if (value == null || value === '') return;
+    rows.push([label, typeof value === 'number' ? `${value}${suffix}` : String(value)]);
+  };
+  pushRow('Energie', n.brennwertKcal ?? n.energie, ' kcal');
+  pushRow('Fett', n.fett, ' g');
+  pushRow('davon gesättigt', n.gesaettigteFettsaeuren ?? n.gesaettigt, ' g');
+  pushRow('Kohlenhydrate', n.kohlenhydrate, ' g');
+  pushRow('davon Zucker', n.zucker, ' g');
+  pushRow('Eiweiß', n.eiweiss ?? n.eiweis, ' g');
+  pushRow('Salz', n.salz, ' g');
+
+  if (rows.length === 0) {
     return (
-      <ThemedView style={styles.container}>
-        <View style={styles.errorContainer}>
-          <IconSymbol name="exclamationmark.triangle" size={48} color={colors.error} />
-          <ThemedText style={[styles.errorText, { color: colors.error }]}>
-            {error || 'Produkt nicht gefunden'}
-          </ThemedText>
-          <TouchableOpacity 
-            style={[styles.backButton, { backgroundColor: colors.primary }]}
-            onPress={() => router.back()}
+      <View style={{ marginHorizontal: 20, marginTop: 18 }}>
+        <View
+          style={{
+            backgroundColor: theme.surfaceAlt,
+            borderRadius: 14,
+            padding: 18,
+            alignItems: 'center',
+          }}
+        >
+          <MaterialCommunityIcons name="nutrition" size={28} color={theme.textMuted} />
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 13,
+              color: theme.textMuted,
+              marginTop: 8,
+              textAlign: 'center',
+            }}
           >
-            <ThemedText style={styles.backButtonText}>Zurück</ThemedText>
-          </TouchableOpacity>
+            Keine Nährwertangaben verfügbar.
+          </Text>
         </View>
-      </ThemedView>
+      </View>
     );
   }
 
   return (
-    <>
-    <ThemedView style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        
-        {/* Navigation Context Header */}
-        {source && sourceProduct && (
-          <Animated.View 
-            style={[
-              styles.navigationContext,
-              { 
-                backgroundColor: colors.cardBackground + 'F5',
-                borderBottomColor: colors.border
-              }
-            ]}
-            entering={undefined}
-          >
-            <TouchableOpacity 
-              style={styles.navigationContextContent}
-              onPress={() => router.back()}
-              activeOpacity={0.7}
-            >
-              <IconSymbol 
-                name="chevron.left" 
-                size={16} 
-                color={colors.primary} 
-              />
-              <ThemedText style={[styles.navigationContextText, { color: colors.text + 'CC' }]}>
-                Gefunden über
-              </ThemedText>
-              <ThemedText style={[styles.navigationContextProduct, { color: colors.primary }]} numberOfLines={1}>
-                {decodeURIComponent(sourceProduct as string)}
-              </ThemedText>
-            </TouchableOpacity>
-          </Animated.View>
-        )}
-        
-        {/* Main Product Card - Same style as product comparison */}
-        <Animated.View 
-          style={[
-            styles.productCard, 
-            { 
-              backgroundColor: colors.cardBackground,
-              opacity: productAnimation
-            }
-          ]}
+    <View
+      style={{
+        marginHorizontal: 20,
+        marginTop: 18,
+        backgroundColor: theme.surface,
+        borderRadius: 14,
+        paddingHorizontal: 14,
+        paddingVertical: 4,
+        ...shadows.sm,
+      }}
+    >
+      {rows.map(([label, value], i) => (
+        <View
+          key={label}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingVertical: 10,
+            borderBottomWidth: i < rows.length - 1 ? 1 : 0,
+            borderBottomColor: theme.border,
+          }}
         >
-          {/* Header with Market and Stage */}
-          <View style={styles.productCardHeader}>
-            {/* Market Chip oben links - GENAU wie bei Stufe 3,4,5 */}
-            {product.discounter && (
-              <View style={[styles.marketChip, { backgroundColor: product.discounter?.color || colors.primary }]}>
-                <IconSymbol name="house.fill" size={12} color="white" />
-                <ThemedText style={styles.chipText}>
-                  {product.discounter.name}
-                </ThemedText>
-              </View>
-            )}
-            
-            {/* Stage Chip neben Market - GENAU wie bei Stufe 3,4,5 */}
-            {product.stufe && (
-              <TouchableOpacity 
-                style={[styles.stageChip, { backgroundColor: getStufenColor(product.stufe) }]}
-                onPress={() => setShowStagesInfo(true)}
-                activeOpacity={0.8}
-              >
-                <IconSymbol name="chart.bar" size={10} color="white" />
-                <ThemedText style={styles.chipText}>
-                  {product.stufe}
-                </ThemedText>
-                <IconSymbol name="info.circle" size={12} color="white" />
-              </TouchableOpacity>
-            )}
-            
-            {/* Kategorie Chip - GENAU wie bei Markenprodukten */}
-            {product.kategorie && (
-              <View style={[styles.categoryMiniCard, { backgroundColor: colors.cardBackground }]}>
-                <ThemedText style={[styles.categoryText, { color: colors.icon }]}>
-                  {product.kategorie.bezeichnung}
-                </ThemedText>
-              </View>
-            )}
-
-            <View style={styles.spacer} />
-
-          </View>
-
-          {/* Product Row */}
-          <View style={styles.productRow}>
-            {/* Product Image */}
-            <TouchableOpacity 
-              style={styles.productImageContainer}
-              onPress={() => product.bild && openImageViewer(product.bild)}
-              disabled={!product.bild}
-            >
-              {product.bild && !failedImages.has(`product-${product.id}`) ? (
-                <ImageWithShimmer
-                  source={{ uri: product.bild }}
-                  style={styles.productImage}
-                  fallbackIcon="cube.box"
-                  fallbackIconSize={40}
-                  resizeMode="contain"
-                  onError={() => {
-                    console.log(`Failed to load image for product: ${product.name}`);
-                    setFailedImages(prev => new Set([...prev, `product-${product.id}`]));
-                  }}
-                />
-              ) : (
-                <View style={[styles.productImagePlaceholder, { backgroundColor: colors.border }]}>
-                  <IconSymbol name="photo" size={24} color={colors.icon} />
-                </View>
-              )}
-            </TouchableOpacity>
-
-            {/* Product Info */}
-            <View style={styles.productInfo}>
-              <ThemedText style={[styles.brandText, { color: colors.primary }]}>
-                {product.handelsmarke?.bezeichnung || 'NoName-Produkt'}
-              </ThemedText>
-              <ThemedText style={styles.productTitle}>
-                {product.name}
-              </ThemedText>
-
-
-            </View>
-
-            {/* Price Section */}
-            <View style={styles.priceSection}>
-              <ThemedText style={[styles.mainPrice, { color: colors.icon }]}>
-                {formatPrice(product.preis)}
-              </ThemedText>
-              <ThemedText style={[styles.mainWeight, { color: colors.icon }]}>
-                {getPackageInfo(product.packSize, product.packTypInfo)}
-              </ThemedText>
-            </View>
-          </View>
-
-          {/* Horizontal Divider */}
-          <View style={[styles.horizontalDivider, { backgroundColor: colors.border }]} />
-
-          {/* Ratings and Cart Button Row */}
-          <View style={styles.ratingsCartRowDirect}>
-            <TouchableOpacity 
-              style={styles.ratingsSection}
-              onPress={() => {
-                console.log('🎯 Opening ratings for NoName product:', product.name);
-                setShowRatingsView(true);
-                loadProductRatings(product);
-              }}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.ratingCircle, { backgroundColor: getRatingCircleColor(product.averageRatingOverall || 0) }]}>
-                <ThemedText style={styles.ratingCircleText}>
-                  {(product.averageRatingOverall || 0).toFixed(1)}
-                </ThemedText>
-              </View>
-              <View style={styles.ratingsContent}>
-                <ThemedText style={[styles.ratingsText, { color: colors.icon }]}>
-                  Bewertungen
-                </ThemedText>
-                <View style={styles.starsContainer}>
-                  <StarRatingDisplay 
-                    rating={product.averageRatingOverall || 0}
-                    colors={colors}
-                    size={16}
-                    showValue={false}
-                  />
-                  <ThemedText style={[styles.ratingsCount, { color: colors.icon }]}>
-                    ({product.ratingCount || 0})
-                  </ThemedText>
-                </View>
-              </View>
-            </TouchableOpacity>
-            
-            {/* Favorite Heart Button */}
-            <TouchableOpacity 
-              style={[styles.cartButtonGray, { backgroundColor: colors.background, marginRight: 12 }]}
-              onPress={() => {
-                animateButtonPress(heartAnimation);
-                handleToggleFavorite();
-              }}
-            >
-              <Animated.View style={{
-                transform: [{ scale: heartAnimation }]
-              }}>
-                <IconSymbol 
-                  name={isFavorite ? "heart.fill" : "heart"} 
-                  size={20} 
-                  color={isFavorite ? colors.error : colors.icon} 
-                />
-              </Animated.View>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.cartButtonGray, { 
-                backgroundColor: isInCart ? colors.success : colors.background 
-              }]}
-              onPress={handleAddToCart}
-              disabled={isAddingToCart}
-            >
-              {isAddingToCart ? (
-                <ActivityIndicator size="small" color={isInCart ? "white" : colors.icon} />
-              ) : (
-                <Animated.View style={{
-                  transform: [{ scale: cartAnimation }]
-                }}>
-                  <IconSymbol 
-                    name={isInCart ? "checkmark" : "plus"} 
-                    size={20} 
-                    color={isInCart ? "white" : colors.icon} 
-                  />
-                </Animated.View>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* Details Button */}
-          <TouchableOpacity 
-            style={[styles.detailsButtonDirect, { backgroundColor: colors.primary }]}
-            onPress={() => setShowProductDetails(true)}
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 13,
+              color: theme.text,
+            }}
           >
-            <IconSymbol name="info.circle" size={16} color="white" />
-            <ThemedText style={[styles.detailsTextDirect, { color: "white" }]}>
-              Details
-            </ThemedText>
-          </TouchableOpacity>
-          
-          {/* Lokaler Toast entfernt – zentrale Toast-Library übernimmt */}
-
-          {/* Rating Toast entfernt – zentrale Toast-Library übernimmt */}
-        </Animated.View>
-
-        {/* Banner - nur ohne Premium */}
-        {!isPremium && (
-          <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
-            <BannerAd 
-              style={{ marginHorizontal: 0 }}
-              onAdLoaded={() => console.log('✅ NoName Detail Banner loaded')}
-              onAdFailedToLoad={(error) => console.log('❌ NoName Detail Banner failed:', error)}
-            />
-          </View>
-        )}
-
-        {/* Ähnliche Produkte Sektion - immer anzeigen wenn Kategorie vorhanden */}
-        {product?.kategorie && (
-          <View style={[styles.similarProductsSection, { backgroundColor: colors.background }]}>
-            <View style={styles.similarProductsHeader}>
-              <ThemedText style={[styles.similarProductsTitle, { color: colors.text }]}>
-                Weitere enttarnte Produkte
-              </ThemedText>
-              <ThemedText style={[styles.similarProductsSubtitle, { color: colors.icon }]}>
-                Entdecke andere Produkte mit Stufe 3, 4 oder 5
-              </ThemedText>
-            </View>
-
-            {similarProductsLoading ? (
-              // Shimmer Skeleton Loading
-              <View style={styles.similarProductsList}>
-                {[...Array(3)].map((_, index) => (
-                  <ListItemSkeleton key={`similar-skeleton-${index}`} />
-                ))}
-              </View>
-            ) : similarProducts.length > 0 ? (
-              // Produkte Liste
-              <View style={styles.similarProductsList}>
-                {similarProducts.map((product, index) => (
-                  <Animated.View 
-                    key={product.id}
-                    style={{
-                      opacity: similarProductAnimations[product.id] || 0
-                    }}
-                  >
-                    <TouchableOpacity 
-                      style={[styles.similarProductItem, { backgroundColor: colors.cardBackground }]}
-                      onPress={() => {
-                        // Navigation zu Produktvergleich (Stufe 3,4,5)
-                        router.push(`/product-comparison/${product.id}?type=noname&source=noname&sourceProduct=${encodeURIComponent(product.produktName || product.name || 'NoName Produkt')}` as any);
-                      }}
-                    >
-                    {/* Produktbild */}
-                    <View style={styles.similarProductImageContainer}>
-                      {product.bild && !failedImages.has(product.bild) ? (
-                        <ImageWithShimmer
-                          source={{ uri: product.bild }}
-                          style={styles.similarProductImage}
-                          fallbackIcon="cube.box"
-                          fallbackIconSize={20}
-                          resizeMode="contain"
-                          onError={() => setFailedImages(prev => new Set([...prev, product.bild!]))}
-                        />
-                      ) : (
-                        <View style={[styles.similarProductImagePlaceholder, { backgroundColor: colors.border }]}>
-                          <IconSymbol name="photo" size={20} color={colors.icon} />
-                        </View>
-                      )}
-                    </View>
-
-                    {/* Produktinfo */}
-                    <View style={styles.similarProductContent}>
-                      <ThemedText style={[styles.similarProductTitle, { color: colors.text }]} numberOfLines={1}>
-                        {product.name}
-                      </ThemedText>
-                      <ThemedText style={[styles.similarProductSubtitle, { color: colors.icon }]} numberOfLines={1}>
-                        {product.handelsmarke?.bezeichnung || 'NoName-Produkt'}
-                      </ThemedText>
-                      
-                      {/* Markt Row */}
-                      <View style={styles.similarProductMarketRow}>
-                        {product.discounter?.bild && (
-                          <ImageWithShimmer
-                            source={{ uri: product.discounter.bild }}
-                            style={styles.similarProductMarketImage}
-                            fallbackIcon="storefront"
-                            fallbackIconSize={10}
-                            resizeMode="contain"
-                          />
-                        )}
-                        <ThemedText style={[styles.similarProductMarket, { color: colors.icon }]} numberOfLines={1}>
-                          {product.discounter?.name || 'Unbekannter Markt'}
-                        </ThemedText>
-                      </View>
-                    </View>
-
-                    {/* Rechte Seite: Stufe + Preis + Chevron */}
-                    <View style={styles.similarProductRight}>
-                      <View style={styles.similarProductInfoColumn}>
-                        {/* Stufe Badge */}
-                        <View style={[styles.similarProductStufeBadge, { backgroundColor: getStufenColor(parseInt(product.stufe) || 1) }]}>
-                          <IconSymbol name="chart.bar" size={10} color="white" />
-                          <ThemedText style={styles.similarProductStufeBadgeText}>
-                            {product.stufe}
-                          </ThemedText>
-                        </View>
-                        
-                        {/* Preis */}
-                        <ThemedText style={[styles.similarProductPrice, { color: colors.text }]}>
-                          {formatPrice(product.preis)}
-                        </ThemedText>
-                      </View>
-                      
-                      {/* Chevron */}
-                      <View style={styles.similarProductChevron}>
-                        <IconSymbol name="chevron.right" size={16} color={colors.icon} />
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-                  </Animated.View>
-                ))}
-              </View>
-            ) : (
-              // Keine Produkte gefunden
-              <View style={styles.noSimilarProductsContainer}>
-                <IconSymbol name="magnifyingglass" size={24} color={colors.icon} />
-                <ThemedText style={[styles.noSimilarProductsText, { color: colors.icon }]}>
-                  Keine ähnlichen Produkte gefunden
-                </ThemedText>
-                <ThemedText style={[styles.noSimilarProductsSubtext, { color: colors.icon }]}>
-                  In der Kategorie "{product?.kategorie?.bezeichnung}" sind momentan keine vergleichbaren Produkte verfügbar.
-                </ThemedText>
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Bottom Spacing */}
-        <View style={{ height: 100 }} />
-      </ScrollView>
-
-      {/* Product Details Bottom Sheet */}
-      <FixedAndroidModal
-        visible={showProductDetails}
-        isBottomSheet={true}
-        onRequestClose={() => setShowProductDetails(false)}
-      >
-        <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
-          {/* Bottom Sheet Header */}
-          <View style={styles.bottomSheetHeader}>
-            
-            <View style={styles.headerRow}>
-              <TouchableOpacity 
-                style={styles.closeButtonLeft}
-                onPress={() => setShowProductDetails(false)}
-              >
-                <IconSymbol name="xmark" size={24} color={colors.icon} />
-              </TouchableOpacity>
-              <View style={styles.titleSectionLeft}>
-                <ThemedText style={styles.bottomSheetTitleLeft}>
-                  {product.handelsmarke?.bezeichnung || 'NoName-Produkt'}
-                </ThemedText>
-                <ThemedText style={[styles.bottomSheetSubtitleLeft, { color: colors.primary }]}>
-                  {product.name}
-                </ThemedText>
-              </View>
-            </View>
-          </View>
-          
-          <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
-            {/* Stage Info Card */}
-            {product.stufe && (
-              <View style={[styles.similarityCard, { backgroundColor: colors.cardBackground }]}>
-                <View style={styles.similarityHeaderNew}>
-                  <View style={[styles.similarityBadgeRound, { backgroundColor: getStufenColor(product.stufe) }]}>
-                    <ThemedText style={styles.similarityNumberRound}>{product.stufe}</ThemedText>
-                  </View>
-                  <View style={styles.similarityTextContainerNew}>
-                    <ThemedText style={styles.similarityTitleNew}>
-                      {getStufenTitle(product.stufe)}
-                    </ThemedText>
-                    <ThemedText style={[styles.similarityDescriptionNew, { color: colors.icon }]}>
-                      {getStufenDescription(product.stufe)}
-                    </ThemedText>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {/* Manufacturer Info Card - 1:1 wie im Produktvergleich */}
-            <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
-              <View style={styles.sectionHeader}>
-                <IconSymbol name="building.2" size={18} color={colors.primary} />
-                <ThemedText style={styles.sectionTitleText}>Herstellerinformationen</ThemedText>
-              </View>
-              <View style={styles.infoGrid}>
-                <View style={styles.infoRow}>
-                  <ThemedText style={styles.infoLabel}>Hersteller:</ThemedText>
-                  <ThemedText style={[styles.infoValue, { color: colors.icon, flex: 1 }]}>
-                    {product.hersteller?.herstellername || 
-                     product.hersteller?.name ||
-                     'Keine Hersteller-Daten verfügbar'}
-                  </ThemedText>
-                </View>
-                <View style={styles.infoRow}>
-                  <ThemedText style={styles.infoLabel}>Markt:</ThemedText>
-                  <View style={styles.markeRow}>
-                    {product.discounter?.bild && (
-                      <ImageWithShimmer
-                        source={{ uri: product.discounter.bild }}
-                        style={styles.markeImage}
-                        fallbackIcon="storefront"
-                        fallbackIconSize={16}
-                        resizeMode="contain"
-                      />
-                    )}
-                    <ThemedText style={[styles.infoValue, { color: colors.icon, flex: 1 }]}>
-                      {product.discounter?.name || 'Keine Markt-Daten verfügbar'}
-                    </ThemedText>
-                  </View>
-                </View>
-                <View style={styles.infoRow}>
-                  <ThemedText style={styles.infoLabel}>Ort:</ThemedText>
-                  <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                    {(() => {
-                      const hersteller = product.hersteller;
-                      if (!hersteller) return 'Keine Daten verfügbar';
-                      
-                      const location = hersteller.stadt || hersteller.plz ? 
-                        `${hersteller.stadt || ''} ${hersteller.plz ? `(${hersteller.plz})` : ''}`.trim() : 
-                        hersteller.land;
-                      
-                      return location || 'Keine Daten verfügbar';
-                    })()}
-                  </ThemedText>
-                </View>
-                <View style={styles.infoRow}>
-                  <ThemedText style={styles.infoLabel}>Infos:</ThemedText>
-                  <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                    {product.hersteller?.infos || 'Keine weiteren Informationen'}
-                  </ThemedText>
-                </View>
-                {/* Alle Marken dieses Herstellers - wie im Original */}
-                <View style={styles.infoColumn}>
-                  <ThemedText style={styles.infoLabel}>Alle Marken dieses Herstellers:</ThemedText>
-                  <View style={styles.markenList}>
-                    {(() => {
-                      const brands = product.brands;
-                      if (brands && brands.length > 0) {
-                        return brands.map((brand, index) => (
-                          <View key={index} style={styles.markenItem}>
-                            {brand.bild && (
-                              <ImageWithShimmer
-                                source={{ uri: brand.bild }}
-                                style={styles.markenItemImage}
-                                fallbackIcon="tag"
-                                fallbackIconSize={16}
-                                resizeMode="contain"
-                              />
-                            )}
-                            <ThemedText style={[styles.markenItemText, { color: colors.icon }]}>
-                              {brand.name}
-                            </ThemedText>
-                          </View>
-                        ));
-                      }
-                      return (
-                        <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                          Keine weiteren Marken verfügbar
-                        </ThemedText>
-                      );
-                    })()}
-                  </View>
-                </View>
-              </View>
-            </View>
-
-            {/* Product Info Card - 1:1 wie im Produktvergleich */}
-            <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
-              <View style={styles.sectionHeader}>
-                <IconSymbol name="info.circle" size={18} color={colors.primary} />
-                <ThemedText style={styles.sectionTitleText}>Produktinformationen</ThemedText>
-              </View>
-              <View style={styles.infoGrid}>
-                <View style={styles.infoRow}>
-                  <ThemedText style={styles.infoLabel}>Kategorie:</ThemedText>
-                  <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                    {product.kategorie?.bezeichnung || 'Keine Kategorie verfügbar'}
-                  </ThemedText>
-                </View>
-                <View style={styles.infoRow}>
-                  <ThemedText style={styles.infoLabel}>Packung:</ThemedText>
-                  <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                    {(() => {
-                      const size = product.packSize || 0;
-                      const type = product.packTypInfo?.typKurz || product.packTypInfo?.typ || 'g';
-                      return `${size} ${type}`;
-                    })()}
-                  </ThemedText>
-                </View>
-                <View style={styles.infoRow}>
-                  <ThemedText style={styles.infoLabel}>Zutaten:</ThemedText>
-                  <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                    {(() => {
-                      const ean = product.EANs?.[0] || product.EAN;
-                      if (!ean) return 'Keine Daten verfügbar';
-                      // GENAU wie im Original - verwende OpenFoodService.formatIngredients
-                      const ingredients = OpenFoodService.formatIngredients(openFoodData);
-                      return ingredients || 'Keine Informationen verfügbar';
-                    })()}
-                  </ThemedText>
-                </View>
-
-                {/* Scores Row - wie im Original */}
-                {(() => {
-                  const ean = product.EANs?.[0] || product.EAN;
-                  const hasAnyScore = openFoodData?.nutriscore_grade || 
-                                     openFoodData?.ecoscore_grade || 
-                                     openFoodData?.nova_group;
-                  
-                  if (!hasAnyScore) return null;
-                  
-                  return (
-                    <View style={styles.infoRow}>
-                      <ThemedText style={styles.infoLabel}>Scores:</ThemedText>
-                      <View style={styles.scoresInlineRow}>
-                        {openFoodData?.nutriscore_grade && (
-                          <View style={styles.scoreContainer}>
-                            <ScoreImage 
-                              type="nutri" 
-                              value={openFoodData.nutriscore_grade.toUpperCase()} 
-                            />
-                          </View>
-                        )}
-                        {openFoodData?.ecoscore_grade && (
-                          <View style={styles.scoreContainer}>
-                            <ScoreImage 
-                              type="eco" 
-                              value={openFoodData.ecoscore_grade.toUpperCase()} 
-                            />
-                          </View>
-                        )}
-                        {openFoodData?.nova_group && (
-                          <View style={styles.scoreContainer}>
-                            <ScoreImage 
-                              type="nova" 
-                              value={String(openFoodData.nova_group)} 
-                            />
-                          </View>
-                        )}
-                      </View>
-                    </View>
-                  );
-                })()}
-              </View>
-            </View>
-
-            {/* Nutrition Info Card - 1:1 wie im Produktvergleich */}
-            <View style={[styles.infoCard, { backgroundColor: colors.cardBackground }]}>
-              <View style={styles.sectionHeader}>
-                <IconSymbol name="leaf" size={18} color={colors.primary} />
-                <ThemedText style={styles.sectionTitleText}>Nährwerte</ThemedText>
-              </View>
-              <View style={styles.infoGrid}>
-                {(() => {
-                  if (!product.EANs?.[0] && !product.EAN) {
-                    return (
-                      <View style={styles.infoRow}>
-                        <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                          Keine Nährwertdaten verfügbar
-                        </ThemedText>
-                      </View>
-                    );
-                  }
-                  
-                  // GENAU wie im Original - verwende OpenFoodService.formatNutrition
-                  const nutrition = OpenFoodService.formatNutrition(openFoodData?.nutriments);
-                  
-                  if (nutrition.length === 0) {
-                    return (
-                      <View style={styles.infoRow}>
-                        <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                          Keine Nährwertinformationen verfügbar
-                        </ThemedText>
-                      </View>
-                    );
-                  }
-                  
-                  return nutrition.map((item, index) => (
-                    <View key={index} style={styles.infoRow}>
-                      <ThemedText style={styles.infoLabel}>{item.label}:</ThemedText>
-                      <ThemedText style={[styles.infoValue, { color: colors.icon }]}>
-                        {item.value}
-                      </ThemedText>
-                    </View>
-                  ));
-                })()}
-              </View>
-            </View>
-
-            {/* Rating Button - wie im Original */}
-            <View style={styles.buttonSection}>
-              <TouchableOpacity 
-                style={[styles.ratingButton, { backgroundColor: colors.primary }]}
-                onPress={async () => {
-                  console.log('🎯 Opening ratings from product details for NoName product:', product?.name);
-                  setShowProductDetails(false);
-                  setShowRatingsView(true); // Modal SOFORT öffnen!
-                  loadProductRatings(product); // Parallel laden (ohne await!)
-                }}
-              >
-                <ThemedText style={styles.ratingButtonText}>Bewertungen anzeigen</ThemedText>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
+            {label}
+          </Text>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.bold,
+              fontSize: 13,
+              color: theme.text,
+            }}
+          >
+            {value}
+          </Text>
         </View>
-      </FixedAndroidModal> 
-
-      {/* Rating Bottom Sheet - GENAU wie im Produktvergleich */}
-      <FixedAndroidModal
-        visible={showRatingsView}
-        isBottomSheet={true}
-        onRequestClose={() => setShowRatingsView(false)}
-      >
-        <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
-          {/* Rating Header */}
-          <View style={styles.bottomSheetHeader}>
-            
-            <View style={styles.headerRow}>
-              <TouchableOpacity 
-                style={styles.closeButtonLeft}
-                onPress={() => setShowRatingsView(false)}
-              >
-                <IconSymbol name="xmark" size={24} color={colors.icon} />
-              </TouchableOpacity>
-              <View style={styles.titleSection}>
-                <ThemedText style={styles.bottomSheetTitle}>
-                  Bewertungen
-                </ThemedText>
-                <ThemedText style={[styles.bottomSheetSubtitle, { color: colors.primary }]}>
-                  {product?.name || 'Produkt'}
-                </ThemedText>
-              </View>
-            </View>
-          </View>
-          
-          <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
-            {/* Loading state or data */}
-            {ratingsLoading ? (
-              <>
-                <RatingOverviewSkeleton />
-                <CommentsHeaderSkeleton />
-                <CommentSkeleton />
-                <CommentSkeleton />
-                <CommentSkeleton />
-              </>
-            ) : (
-              <>
-                {/* Overall Rating Display */}
-                <View style={[styles.overallRatingCard, { backgroundColor: colors.cardBackground }]}>
-                  <View style={[styles.ratingCircleLarge, { backgroundColor: getRatingCircleColor(ratingStats?.averageOverall || 0) }]}>
-                    <ThemedText style={styles.ratingNumber}>
-                      {(ratingStats?.averageOverall || 0).toFixed(1)}
-                    </ThemedText>
-                  </View>
-                  <View style={styles.ratingInfo}>
-                    <ThemedText style={styles.ratingTitle}>Allgemeine Bewertung</ThemedText>
-                    <View style={styles.starsRow}>
-                      <StarRatingDisplay 
-                        rating={ratingStats?.averageOverall || 0}
-                        colors={colors}
-                        size={20}
-                        showValue={false}
-                      />
-                    </View>
-                    <ThemedText style={[styles.ratingCount, { color: colors.icon }]}>
-                      Basierend auf {ratingStats?.totalCount || 0} Bewertungen
-                    </ThemedText>
-                  </View>
-                </View>
-              </>
-            )}
-
-            {/* Detailed Ratings */}
-            {!ratingsLoading && ratingStats && (
-              <View style={[styles.detailedRatingsCard, { backgroundColor: colors.cardBackground }]}>
-                <ThemedText style={[styles.detailedRatingsTitle]}>
-                  Kriterien-Bewertungen
-                </ThemedText>
-                
-                <View style={styles.criterionRow}>
-                  <ThemedText style={styles.criterionLabel}>Qualität & Geschmack</ThemedText>
-                  <View style={styles.criterionRightSide}>
-                    <StarRatingDisplay 
-                      rating={ratingStats.averageTaste || 0}
-                      colors={colors}
-                      size={14}
-                      valueStyle={[styles.criterionValue, { color: colors.icon }]}
-                    />
-                  </View>
-                </View>
-                
-                <View style={styles.criterionRow}>
-                  <ThemedText style={styles.criterionLabel}>Preis-Leistung</ThemedText>
-                  <View style={styles.criterionRightSide}>
-                    <StarRatingDisplay 
-                      rating={ratingStats.averagePrice || 0}
-                      colors={colors}
-                      size={14}
-                      valueStyle={[styles.criterionValue, { color: colors.icon }]}
-                    />
-                  </View>
-                </View>
-                
-                <View style={styles.criterionRow}>
-                  <ThemedText style={styles.criterionLabel}>Inhaltsstoffe</ThemedText>
-                  <View style={styles.criterionRightSide}>
-                    <StarRatingDisplay 
-                      rating={ratingStats.averageContent || 0}
-                      colors={colors}
-                      size={14}
-                      valueStyle={[styles.criterionValue, { color: colors.icon }]}
-                    />
-                  </View>
-                </View>
-                
-                <View style={styles.criterionRow}>
-                  <ThemedText style={styles.criterionLabel}>Ähnlichkeit zu Marke</ThemedText>
-                  <View style={styles.criterionRightSide}>
-                    <StarRatingDisplay 
-                      rating={ratingStats.averageSimilarity || 0}
-                      colors={colors}
-                      size={14}
-                      valueStyle={[styles.criterionValue, { color: colors.icon }]}
-                    />
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {/* Rating Button */}
-            <View style={styles.buttonSection}>
-              <TouchableOpacity 
-                style={[styles.ratingButton, { backgroundColor: colors.primary }]}
-                onPress={async () => {
-                  setShowRatingsView(false);
-                  await openRatingModal();
-                }}
-              >
-                <ThemedText style={styles.ratingButtonText}>Bewertung abgeben</ThemedText>
-              </TouchableOpacity>
-            </View>
-
-            {/* Comments Section */}
-            <View style={[styles.commentsSection, { backgroundColor: colors.cardBackground, marginBottom: 20, marginTop: 6 }]}>
-              <View style={styles.commentsSectionHeader}>
-                <IconSymbol name="bubble.left.and.bubble.right" size={18} color={colors.primary} />
-                <ThemedText style={styles.commentsSectionTitle}>
-                  Kommentare
-                </ThemedText>
-                <View style={[styles.commentCountBadge, { backgroundColor: colors.primary + '20' }]}>
-                  <ThemedText style={[styles.commentCountText, { color: colors.primary }]}>
-                    {ratingStats?.commentsCount || 0}
-                  </ThemedText>
-                </View>
-              </View>
-              
-              {!ratingsLoading && productRatings.length > 0 ? (
-                <>
-                  {productRatings
-                    .filter(rating => rating.comment && rating.comment.trim())
-                    .slice(0, 5) // Show only first 5 comments
-                    .map((rating, index) => (
-                      <View key={rating.id || index} style={styles.commentItem}>
-                        {/* Compact User Header */}
-                        <View style={styles.commentUserHeader}>
-                          <View style={styles.userAvatarContainer}>
-                            {rating.userInfo?.avatarUrl ? (
-                              <Image 
-                                source={{ uri: rating.userInfo.avatarUrl }}
-                                style={styles.userAvatar}
-                              />
-                            ) : (
-                              <View style={[styles.userAvatarPlaceholder, { backgroundColor: colors.border }]}>
-                                <ThemedText style={styles.userAvatarText}>
-                                  {rating.userInfo?.displayName?.charAt(0)?.toUpperCase() || '?'}
-                                </ThemedText>
-                              </View>
-                            )}
-                          </View>
-                          <View style={styles.userInfoContainer}>
-                            <View style={styles.userTopRow}>
-                              <ThemedText style={[styles.userName, { color: colors.text }]}>
-                                {rating.userInfo?.displayName || 'Unbekannter User'}
-                              </ThemedText>
-                              <View style={[styles.userLevelBadge, { backgroundColor: rating.userInfo?.currentLevel?.color || '#6B7280' }]}>
-                                <ThemedText style={styles.userLevelText}>
-                                  {rating.userInfo?.currentLevel?.name || 'Neuling'}
-                                </ThemedText>
-                              </View>
-                            </View>
-                            <View style={styles.userBottomRow}>
-                              <StarRatingDisplay 
-                                rating={rating.ratingOverall || 0}
-                                colors={colors}
-                                size={14}
-                                showValue={false}
-                              />
-                              <ThemedText style={[styles.commentDate, { color: colors.icon }]}>
-                                {rating.ratedate ? new Date(rating.ratedate).toLocaleDateString('de-DE') : 'Datum unbekannt'}
-                              </ThemedText>
-                            </View>
-                          </View>
-                        </View>
-                        
-                        {/* Comment Text */}
-                        <ThemedText style={[styles.commentText, { color: colors.text }]}>
-                          {rating.comment}
-                        </ThemedText>
-                      </View>
-                    ))}
-                </>
-              ) : (
-                <View style={styles.noCommentsContainer}>
-                  <ThemedText style={[styles.noCommentsText, { color: colors.icon }]}>
-                    {ratingsLoading ? 'Lade Kommentare...' : 'Oh, hier ist noch nichts!'}
-                  </ThemedText>
-                </View>
-              )}
-            </View>
-          </ScrollView>
-        </View>
-      </FixedAndroidModal>
-
-      {/* Stages Info Bottom Sheet - GENAU wie im Produktvergleich */}
-      <FixedAndroidModal
-        visible={showStagesInfo}
-        isBottomSheet={true}
-        onRequestClose={() => setShowStagesInfo(false)}
-      >
-        <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
-          {/* Bottom Sheet Header */}
-          <View style={styles.bottomSheetHeader}>
-            
-            <View style={styles.headerRow}>
-              <TouchableOpacity 
-                style={styles.closeButtonLeft}
-                onPress={() => setShowStagesInfo(false)}
-              >
-                <IconSymbol name="xmark" size={24} color={colors.icon} />
-              </TouchableOpacity>
-              <View style={styles.titleSection}>
-                <ThemedText style={styles.bottomSheetTitle}>
-                  Ähnlichkeitsstufen
-                </ThemedText>
-                <ThemedText style={[styles.bottomSheetSubtitle, { color: colors.primary }]}>
-                  Bewertung der Produktähnlichkeit
-                </ThemedText>
-              </View>
-            </View>
-          </View>
-          
-          <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
-            {/* Stages Cards */}
-            {[0, 1, 2, 3, 4, 5].map((stage) => (
-              <View key={stage} style={[styles.stageInfoCard, { backgroundColor: colors.cardBackground }]}>
-                <View style={styles.stageInfoHeader}>
-                  <View style={[styles.stageInfoBadge, { backgroundColor: getStufenColor(stage) }]}>
-                    <ThemedText style={styles.stageInfoNumber}>{stage}</ThemedText>
-                  </View>
-                  <View style={styles.stageInfoTextContainer}>
-                    <ThemedText style={styles.stageInfoTitle}>
-                      {getStufenTitle(stage)}
-                    </ThemedText>
-                    <ThemedText style={[styles.stageInfoDescription, { color: colors.icon }]}>
-                      {getStufenDescription(stage)}
-                    </ThemedText>
-                  </View>
-                </View>
-              </View>
-            ))}
-          </ScrollView>
-        </View>
-      </FixedAndroidModal>
-
-      {/* Rating Bottom Sheet */}
-      <FixedAndroidModal
-        visible={showRatingModal}
-        isBottomSheet={true}
-        onRequestClose={() => setShowRatingModal(false)}
-      >
-        <View style={[styles.bottomSheetContainer, { backgroundColor: colors.background }]}>
-          {/* Rating Header */}
-          <View style={styles.bottomSheetHeader}>
-            
-            <View style={styles.headerRow}>
-            <TouchableOpacity 
-                style={styles.closeButtonLeft}
-              onPress={() => setShowRatingModal(false)}
-            >
-                <IconSymbol name="xmark" size={24} color={colors.icon} />
-            </TouchableOpacity>
-              <View style={styles.titleSection}>
-                <ThemedText style={styles.bottomSheetTitle}>
-                  {isEditingRating ? 'Bewertung bearbeiten' : 'Bewertung abgeben'}
-                </ThemedText>
-                <ThemedText style={[styles.bottomSheetSubtitle, { color: colors.primary }]}>
-                  {product?.name || 'Produkt'}
-                </ThemedText>
-              </View>
-            </View>
-          </View>
-          
-          <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
-            <View style={styles.ratingForm}>
-              <ThemedText style={styles.ratingFormTitle}>Deine Gesamtbewertung</ThemedText>
-              <StarRating 
-                rating={overallRating} 
-                onRatingChange={setOverallRating}
-                colors={colors}
-              />
-
-              <ThemedText style={styles.ratingFormTitle}>Detail-Bewertung nach Kriterien (optional)</ThemedText>
-
-              <View style={styles.criterionRating}>
-                <View style={styles.criterionRow}>
-                  <ThemedText style={styles.criterionLabelCompact}>Geschmack/Wirkung</ThemedText>
-                  <StarRating 
-                    rating={tasteRating} 
-                    onRatingChange={setTasteRating}
-                    size={20}
-                    colors={colors}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.criterionRating}>
-                <View style={styles.criterionRow}>
-                  <ThemedText style={styles.criterionLabelCompact}>Preis-Leistung</ThemedText>
-                  <StarRating 
-                    rating={priceValueRating} 
-                    onRatingChange={setPriceValueRating}
-                    size={20}
-                    colors={colors}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.criterionRating}>
-                <View style={styles.criterionRow}>
-                  <ThemedText style={styles.criterionLabelCompact}>Inhaltsstoffe</ThemedText>
-                  <StarRating 
-                    rating={contentRating} 
-                    onRatingChange={setContentRating}
-                    size={20}
-                    colors={colors}
-                  />
-                </View>
-              </View>
-
-              {/* Ähnlichkeit nur für NoName-Produkte Stufe 3+ */}
-              {product && product.stufe && parseInt(product.stufe) >= 3 && (
-                <View style={styles.criterionRating}>
-                  <View style={styles.criterionRow}>
-                    <ThemedText style={styles.criterionLabelCompact}>Ähnlichkeit zum Markenprodukt</ThemedText>
-                    <StarRating 
-                      rating={similarityRating} 
-                      onRatingChange={setSimilarityRating}
-                      size={20}
-                      colors={colors}
-                    />
-                  </View>
-                </View>
-              )}
-
-              <ThemedText style={styles.ratingFormTitle}>Dein Kommentar (optional)</ThemedText>
-              <TextInput
-                style={[styles.commentInput, { 
-                  borderColor: colors.border, 
-                  backgroundColor: colors.cardBackground,
-                  color: colors.text 
-                }]}
-                placeholder="Teile deine Erfahrungen mit diesem Produkt..."
-                placeholderTextColor={colors.icon}
-                value={comment}
-                onChangeText={setComment}
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-              />
-
-              <TouchableOpacity 
-                style={[
-                  styles.submitButton, 
-                  { 
-                    backgroundColor: overallRating > 0 ? colors.primary : colors.border,
-                    opacity: isSubmittingRating ? 0.7 : 1
-                  }
-                ]}
-                onPress={submitRating}
-                disabled={overallRating === 0 || isSubmittingRating}
-              >
-                {isSubmittingRating ? (
-                  <ActivityIndicator color="white" />
-                ) : (
-                  <ThemedText style={styles.submitButtonText}>
-                    {isEditingRating ? 'Bewertung aktualisieren' : 'Bewertung speichern'}
-                  </ThemedText>
-                )}
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
-      </FixedAndroidModal>
-
-      {/* Image Viewer */}
-      <ImageViewer
-        images={selectedImage ? [{ uri: selectedImage }] : []}
-        imageIndex={0}
-        visible={showImageViewer}
-        onRequestClose={() => setShowImageViewer(false)}
-      />
-      
-      {/* Shopping List FAB */}
-      <TouchableOpacity 
-        style={[styles.shoppingListFab, { backgroundColor: colors.primary }]}
-        onPress={() => router.push('/shopping-list')}
-      >
-        <IconSymbol name="cart.fill" size={20} color="white" />
-      </TouchableOpacity>
-    </ThemedView>
-    </>
+      ))}
+      <View style={{ paddingVertical: 8 }}>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 11,
+            color: theme.textMuted,
+          }}
+        >
+          Angaben pro 100 g
+        </Text>
+      </View>
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  navigationContext: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginBottom: 8,
-    borderBottomWidth: 1,
-    borderRadius: 12,
-    marginHorizontal: 16,
-    marginTop: 8,
-  },
-  navigationContextContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  navigationContextText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-  },
-  navigationContextProduct: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 16,
-    paddingHorizontal: 32,
-  },
-  errorText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_400Regular',
-    textAlign: 'center',
-  },
-  backButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  backButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-
-  // Product Card - Same as product comparison
-  productCard: {
-    marginHorizontal: 12,
-    marginTop: 12,
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  productCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-    gap: 8,
-  },
-  marketChip: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  stageChip: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  chipText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  categoryMiniCard: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.1)',
-  },
-  categoryText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  spacer: {
-    flex: 1,
-  },
-  // Top action icons - Mobile UX optimiert (konsistent mit product-comparison)
-  topActionIcons: {
-    flexDirection: 'row',
-    gap: 12,  // Mehr Abstand zwischen Buttons
-    alignItems: 'center',
-  },
-  actionIconButton: {
-    width: 44,        // Apple HIG: Minimum 44pt Touch-Target
-    height: 44,       // Quadratisch für optimale Ergonomie
-    borderRadius: 22, // Perfekt rund
-    justifyContent: 'center',
-    alignItems: 'center',
-    // backgroundColor wird dynamisch über colors.background gesetzt
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  productRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-    gap: 10,
-  },
-  productImageContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(0,0,0,0.05)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  productImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 12,
-  },
-  productImagePlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  productInfo: {
-    flex: 1,
-    paddingTop: 2,
-  },
-  brandText: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  productTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_700Bold',
-    marginBottom: 6,
-    lineHeight: 20,
-  },
-  ratingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 8,
-  },
-  ratingValue: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  starsContainer: {
-    flexDirection: 'row',
-    gap: 1,
-  },
-  starIcon: {
-    fontSize: 14,
-  },
-  reviewsText: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-  },
-
-  priceSection: {
-    alignItems: 'flex-end',
-    paddingTop: 2,
-  },
-  mainPrice: {
-    fontSize: 18,
-    fontFamily: 'Nunito_700Bold',
-    marginBottom: 2,
-  },
-  mainWeight: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-  },
-  actionButtonsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginTop: 3,
-  },
-  detailsButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,     // Erhöht von 1 auf 8 (viel höher)
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    backgroundColor: 'transparent',
-    gap: 6,
-    height: 44,             // Erhöht von 30 auf 44 (konsistent mit actionIconButton)
-  },
-  detailsText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  cartButton: {
-    width: 44,              // Breiter (35→44)
-    height: 44,             // Höher (30→44) - äquivalent zu Details
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  
-  // New Styles from product-comparison
-  horizontalDivider: {
-    height: 1,
-    marginVertical: 4,
-    borderRadius: 1,
-    opacity: 0.5,
-    marginBottom: 12,
-  },
-  ratingsCartRowDirect: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 0,
-    marginBottom: 8,
-  },
-  ratingsSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    gap: 12,
-  },
-  ratingCircle: {
-    width: 44, // Etwas größer für bessere Lesbarkeit in der Karte
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  ratingCircleText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_700Bold',
-    color: 'white',
-  },
-  ratingsContent: {
-    flex: 1,
-    gap: 0,
-  },
-  starsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: -3,
-  },
-  ratingsText: {
-    fontSize: 12,
-    fontFamily: 'Nunito_500Medium',
-  },
-  ratingsCount: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-  },
-  cartButtonGray: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  detailsButtonDirect: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    gap: 6,
-    marginTop: 4,
-    marginBottom: 8,
-  },
-  detailsTextDirect: {
-    fontSize: 13,
-    fontFamily: 'Nunito_500Medium',
-  },
-
-
-  ratingButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    gap: 8,
-  },
-  ratingButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-
-  // Bottom Sheet Styles - Same as product comparison
-  bottomSheetContainer: {
-    flex: 1,
-    paddingTop: 20,
-  },
-  bottomSheetHeader: {
-    paddingBottom: 20,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 12,
-  },
-  closeButtonLeft: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  titleSection: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  titleSectionLeft: {
-    flex: 1,
-    alignItems: 'flex-start',
-    paddingHorizontal: 20,
-  },
-  bottomSheetTitle: {
-    fontSize: 18,
-    fontFamily: 'Nunito_700Bold',
-    textAlign: 'center',
-  },
-  bottomSheetTitleLeft: {
-    fontSize: 16,
-    fontFamily: 'Nunito_700Bold',
-    textAlign: 'left',
-  },
-  bottomSheetSubtitle: {
-    fontSize: 14,
-    fontFamily: 'Nunito_500Medium',
-    textAlign: 'center',
-    marginTop: 2,
-  },
-  bottomSheetSubtitleLeft: {
-    fontSize: 12,
-    fontFamily: 'Nunito_500Medium',
-    textAlign: 'left',
-    marginTop: 2,
-  },
-  bottomSheetContent: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-
-  // Info Cards
-  similarityCard: {
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  similarityHeaderNew: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  similarityBadgeRound: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  similarityNumberRound: {
-    fontSize: 18,
-    fontFamily: 'Nunito_700Bold',
-    color: 'white',
-  },
-  similarityTextContainerNew: {
-    flex: 1,
-  },
-  similarityTitleNew: {
-    fontSize: 16,
-    fontFamily: 'Nunito_700Bold',
-    marginBottom: 2,
-  },
-  similarityDescriptionNew: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    lineHeight: 16,
-  },
-  infoCard: {
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  sectionTitleText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_700Bold',
-  },
-  infoGrid: {
-    gap: 12,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  infoLabel: {
-    fontSize: 14,
-    fontFamily: 'Nunito_500Medium',
-    width: 80,
-    flexShrink: 0,
-  },
-  infoValue: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-    flex: 1,
-  },
-  markeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flex: 1,
-  },
-  markeImage: {
-    width: 18,
-    height: 18,
-    borderRadius: 3,
-  },
-
-  // Marken List - wie im Original
-  infoColumn: {
-    marginTop: 12,
-  },
-  markenList: {
-    marginTop: 8,
-    gap: 8,
-  },
-  markenItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 4,
-  },
-  markenItemImage: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-  },
-  markenItemText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-  },
-
-  // Scores - wie im Original
-  scoresInlineRow: {
-    flexDirection: 'row',
-    gap: 8,
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  scoreContainer: {
-    alignItems: 'center',
-  },
-
-      // Button Section - wie im Original
-    buttonSection: {
-      paddingVertical: 12,
-    },
-  ratingButton: {
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ratingButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-
-  // Rating Modal Styles - GENAU wie im Produktvergleich
-  overallRatingCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 20,
-    marginBottom: 16,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-    gap: 16,
-  },
-  ratingCircleLarge: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    // backgroundColor wird dynamisch durch getRatingCircleColor() gesetzt
-  },
-  ratingNumber: {
-    fontSize: 24,
-    fontFamily: 'Nunito_700Bold',
-    color: 'white',
-    lineHeight: 30,
-  },
-  ratingInfo: {
-    flex: 1,
-  },
-  ratingTitle: {
-    fontSize: 18,
-    fontFamily: 'Nunito_700Bold',
-    marginBottom: 8,
-  },
-  starsRow: {
-    flexDirection: 'row',
-    gap: 2,
-    marginBottom: 4,
-  },
-  ratingCount: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-  },
-  detailedRatingsCard: {
-    padding: 20,
-    marginBottom: 16,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  detailedRatingsTitle: {
-    fontSize: 15,
-    fontFamily: 'Nunito_700Bold',
-    marginBottom: 16,
-    flexShrink: 0,
-  },
-  criterionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  criterionLabel: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-    flex: 1,
-    flexShrink: 0,
-  },
-  criterionRightSide: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  criterionStars: {
-    flexDirection: 'row',
-    gap: 2,
-  },
-  criterionStarIcon: {
-    fontSize: 14,
-    lineHeight: 16,
-  },
-  criterionValue: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-    minWidth: 30,
-    textAlign: 'center',
-  },
-  commentsSection: {
-    padding: 12,
-    marginBottom: 16,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  commentItem: {
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.05)',
-  },
-  commentHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  commentRating: {
-    fontSize: 14,
-    color: '#f59e0b', // Warning color for stars
-  },
-  commentDate: {
-    fontSize: 12,
-    opacity: 0.7,
-  },
-  commentText: {
-    fontSize: 14,
-    lineHeight: 20,
-    fontFamily: 'Nunito_400Regular',
-    marginTop: 8,
-  },
-  
-  // Community Comment Styles - Kompaktes Design
-  commentsSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 2,
-    gap: 1,
-  },
-  commentsSectionTitle: {
-    fontSize: 15,
-    fontFamily: 'Nunito_600SemiBold',
-    flex: 1,
-  },
-  commentCountBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 8,
-  },
-  commentCountText: {
-    fontSize: 12,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  commentUserHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  userAvatarContainer: {
-    marginRight: 10,
-  },
-  userAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#f0f0f0',
-  },
-  userAvatarPlaceholder: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  userAvatarText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'white',
-  },
-  userInfoContainer: {
-    flex: 1,
-  },
-  userTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 2,
-    gap: 6,
-  },
-  userBottomRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  userName: {
-    fontSize: 14,
-    fontWeight: '600',
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  userLevelBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 10,
-  },
-  userLevelText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: 'white',
-  },
-  commentRating: {
-    fontSize: 12,
-  },
-  noCommentsContainer: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  noCommentsText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-    textAlign: 'center',
-  },
-
-  // Stages Info Modal Styles - GENAU wie im Produktvergleich
-  stageInfoCard: {
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.09,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  stageInfoHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 16,
-  },
-  stageInfoBadge: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  stageInfoNumber: {
-    color: 'white',
-    fontSize: 16,
-    fontFamily: 'Nunito_700Bold',
-  },
-  stageInfoTextContainer: {
-    flex: 1,
-    minHeight: 50,
-  },
-  stageInfoTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 4,
-    lineHeight: 16,
-  },
-  stageInfoDescription: {
-    fontSize: 12,
-    fontWeight: '300',
-    lineHeight: 16,
-    opacity: 0.7,
-  },
-
-  // Image Viewer
-  imageViewerContainer: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  imageViewerClose: {
-    position: 'absolute',
-    top: 60,
-    right: 20,
-    zIndex: 1,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  fullScreenImage: {
-    width: '90%',
-    height: '80%',
-  },
-
-  // Ähnliche Produkte Styles
-  similarProductsSection: {
-    marginTop: 32,
-    paddingHorizontal: 16,
-  },
-  similarProductsHeader: {
-    marginBottom: 16,
-  },
-  similarProductsTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 0,
-  },
-  similarProductsSubtitle: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    lineHeight: 14,
-  },
-  similarProductsList: {
-    gap: 6,
-  },
-  similarProductItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  similarProductImageContainer: {
-    width: 50,
-    height: 50,
-    marginRight: 12,
-  },
-  similarProductImage: {
-    width: 50,
-    height: 50,
-    borderRadius: 8,
-  },
-  similarProductImagePlaceholder: {
-    width: 50,
-    height: 50,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  similarProductContent: {
-    flex: 1,
-    marginRight: 12,
-  },
-  similarProductTitle: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-    lineHeight: 18,
-    marginBottom: 2,
-  },
-  similarProductSubtitle: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    lineHeight: 16,
-    marginBottom: 4,
-  },
-  similarProductMarketRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  similarProductMarketImage: {
-    width: 16,
-    height: 16,
-    borderRadius: 2,
-  },
-  similarProductMarket: {
-    fontSize: 11,
-    fontFamily: 'Nunito_400Regular',
-    lineHeight: 14,
-    flex: 1,
-  },
-  similarProductRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  similarProductInfoColumn: {
-    alignItems: 'flex-end',
-    gap: 4,
-  },
-  similarProductStufeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    gap: 2,
-  },
-  similarProductStufeBadgeText: {
-    fontSize: 10,
-    fontFamily: 'Nunito_600SemiBold',
-    color: 'white',
-  },
-  similarProductPrice: {
-    fontSize: 12,
-    fontFamily: 'Nunito_600SemiBold',
-    textAlign: 'right',
-  },
-  similarProductChevron: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 20,
-    height: 50,
-  },
-
-  noSimilarProductsContainer: {
-    alignItems: 'center',
-    paddingVertical: 32,
-    paddingHorizontal: 20,
-  },
-  noSimilarProductsText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-    marginTop: 12,
-    textAlign: 'center',
-  },
-  noSimilarProductsSubtext: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    marginTop: 4,
-    textAlign: 'center',
-    lineHeight: 16,
-  },
-  
-  // Shopping List FAB mit mehr Schatten für bessere Sichtbarkeit
-  shoppingListFab: {
-    position: 'absolute',
-    bottom: 120,
-    right: 20,
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-  },
-
-  // Bottom Sheet Styles - copied from product-comparison
-  bottomSheetContainer: {
-    flex: 1,
-  },
-  bottomSheetHeader: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 16,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 16,
-  },
-  closeButtonLeft: {
-    padding: 8,
-    marginTop: -4,
-  },
-  titleSection: {
-    flex: 1,
-  },
-  bottomSheetTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_700Bold',
-  },
-  bottomSheetSubtitle: {
-    fontSize: 15,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  bottomSheetContent: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-
-  // Rating Form Styles - copied from product-comparison
-  ratingForm: {
-    paddingBottom: 20,
-  },
-  ratingFormTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_700Bold',
-    marginBottom: 12,
-    marginTop: 4,
-  },
-  starRating: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginBottom: 16,
-    gap: 6,
-    paddingVertical: 4,
-  },
-  starRatingCompact: {
-    justifyContent: 'flex-end', // Rechtsbündig für horizontales Layout
-    marginBottom: 0,
-    gap: 3,
-    paddingVertical: 2,
-  },
-  starButton: {
-    padding: 6,
-    minWidth: 36,
-    minHeight: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  starButtonCompact: {
-    padding: 3,
-    minWidth: 24,
-    minHeight: 24,
-  },
-  starIconLarge: {
-    fontSize: 16,
-    lineHeight: 28,
-  },
-  criterionRating: {
-    marginBottom: 12,
-  },
-  criterionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  criterionLabelCompact: {
-    fontSize: 14,
-    fontWeight: '500',
-    flex: 1,
-    marginRight: 16,
-  },
-  commentInput: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    minHeight: 80,
-    marginBottom: 16,
-    textAlignVertical: 'top',
-    fontSize: 14,
-  },
-  submitButton: {
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  submitButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  
-  // Alte Toast-Container Styles entfernt - zentrale Toast-Library übernimmt
-});

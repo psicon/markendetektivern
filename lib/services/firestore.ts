@@ -14,10 +14,12 @@ import {
     serverTimestamp,
     setDoc,
     startAfter,
+    Timestamp,
     updateDoc,
     where,
     writeBatch
 } from 'firebase/firestore';
+import { Image as RNImage } from 'react-native';
 import { db } from '../firebase';
 import {
     Discounter,
@@ -35,8 +37,258 @@ import {
 } from '../types/firestore';
 import achievementService from './achievementService';
 
+// ─── In-memory product-detail cache ────────────────────────────────
+//
+// Detail screens (`noname-detail`, `product-comparison`) re-fetch the
+// same product on every navigation, which means each back-and-forth
+// pays a full Firestore round-trip — visible as a long skeleton phase
+// then a "pop". We cache the result for 5 minutes so:
+//   1. Repeat navigations are INSTANT (no skeleton).
+//   2. Pre-fetch on tap (see `prefetchProductDetails` below) can warm
+//      the cache while the navigation animation is still running, so
+//      the destination screen often has data before its first paint.
+// The cache is module-scoped, lives only in RAM, and is bounded by
+// the natural session lifetime — no memory pressure to worry about.
+
+const PRODUCT_CACHE_TTL_MS = 5 * 60 * 1000;
+
+type CacheEntry<T> = { value: T | null; expiresAt: number };
+type InflightEntry<T> = Promise<T | null>;
+
+const productDetailsCache = new Map<string, CacheEntry<ProductWithDetails>>();
+const productDetailsInflight = new Map<
+  string,
+  InflightEntry<ProductWithDetails>
+>();
+const markenProduktDetailsCache = new Map<
+  string,
+  CacheEntry<MarkenProduktWithDetails>
+>();
+const markenProduktDetailsInflight = new Map<
+  string,
+  InflightEntry<MarkenProduktWithDetails>
+>();
+const comparisonCache = new Map<
+  string,
+  CacheEntry<{
+    mainProduct: MarkenProduktWithDetails;
+    relatedNoNameProducts: ProductWithDetails[];
+    clickedProductId: string;
+    clickedWasNoName: boolean;
+  }>
+>();
+const comparisonInflight = new Map<
+  string,
+  InflightEntry<{
+    mainProduct: MarkenProduktWithDetails;
+    relatedNoNameProducts: ProductWithDetails[];
+    clickedProductId: string;
+    clickedWasNoName: boolean;
+  }>
+>();
+
+function readCache<T>(map: Map<string, CacheEntry<T>>, key: string): T | null | undefined {
+  const hit = map.get(key);
+  if (!hit) return undefined;
+  if (Date.now() > hit.expiresAt) {
+    map.delete(key);
+    return undefined;
+  }
+  return hit.value;
+}
+
+function writeCache<T>(map: Map<string, CacheEntry<T>>, key: string, value: T | null, ttlMs: number = PRODUCT_CACHE_TTL_MS) {
+  map.set(key, { value, expiresAt: Date.now() + ttlMs });
+}
+
+// ─── Homepage caches ─────────────────────────────────────────────
+//
+// The Home tab fires several queries on mount: full discounter list,
+// 200-product pool for the random pick, and a parallel
+// `getDocumentByReference` per product to resolve the Handelsmarke
+// label. Caching these dramatically improves perceived speed on tab
+// re-entry — second visit and onward, Home renders with data
+// already in hand.
+//
+// TTLs:
+// • Discounters:  30 min   — list of grocery-store brands; basically static
+// • Handelsmarken: 30 min  — same; per-id, cached forever within the session
+// • Top-products:  3 min   — featured products rotate, but within a short
+//                            window of activity we want stability
+const TTL_LONG_MS = 30 * 60 * 1000;
+const TTL_SHORT_MS = 3 * 60 * 1000;
+
+const discounterCache = new Map<string, CacheEntry<any[]>>();
+const discounterInflight = new Map<string, Promise<any[]>>();
+
+// Marken (= Hersteller-Collection, ~968 Docs full scan) — gleiche
+// Caching-Strategie wie Discounter, weil das die teuerste Reference-
+// Query der App ist. Pro Session ein einziger Read; bis 30 Min
+// nach Cache-Write sind alle weiteren `getMarken()`-Aufrufe
+// in-memory.
+const markenCache = new Map<string, CacheEntry<any[]>>();
+const markenInflight = new Map<string, Promise<any[]>>();
+
+// Top-Products-Aggregate (Cloud Function: top-products-aggregator) —
+// 1 Read pro Session statt clientseitiger Aggregation der
+// productRatings-Collection. Wird wöchentlich befüllt, plus manuell
+// re-runnable via /aggregateTopProductsHttp.
+const topProductsAggregateCache = {
+  value: null as {
+    overall: any[];
+    monthly: any[];
+    mostViewed: any[];
+    updatedAt: Date | null;
+  } | null,
+  expiresAt: 0,
+};
+let topProductsAggregateInflight: Promise<{
+  overall: any[];
+  monthly: any[];
+  mostViewed: any[];
+  updatedAt: Date | null;
+}> | null = null;
+
+const refDocCache = new Map<string, CacheEntry<any>>();
+const refDocInflight = new Map<string, Promise<any>>();
+
+const topProductsCache = new Map<string, CacheEntry<any[]>>();
+const topProductsInflight = new Map<string, Promise<any[]>>();
+
+// Top-rated Produkte des letzten Monats — Cache + Inflight-Dedup, 10
+// Min TTL. Die Anfrage fasst alle productRatings der letzten 30 Tage
+// zusammen, aggregiert client-side per productId und holt dann die
+// Produkt-Dokumente nach. Bei vielen Bewertungen kann das teurer
+// werden (~hunderte Reads), deshalb pro Session nur 1× pro 10 Minuten.
+const topRatedCache = new Map<string, CacheEntry<any[]>>();
+const topRatedInflight = new Map<string, Promise<any[]>>();
+
+// ─── Name-Similarity Helpers (für getEnttarnteAlternatives) ─────
+//
+// Cheap Token-Score-Funktion für die "Weitere enttarnte Produkte"-
+// Liste. Ziel: bei einem Toastbrot zuerst andere Toastbrote zeigen,
+// dann andere Brote, dann Rest-Kategorie. KEIN Levenshtein, KEINE
+// externe Lib — nur Tokenisierung + exact/substring-Match.
+
+const PRODUCT_NAME_STOPWORDS = new Set([
+  // Artikel + Bindewörter (deutsch)
+  'der', 'die', 'das', 'den', 'dem', 'des',
+  'ein', 'eine', 'einer', 'einem', 'einen', 'eines',
+  'mit', 'und', 'oder', 'für', 'aus', 'auf', 'in', 'im',
+  'zu', 'zum', 'zur', 'an', 'am', 'auch',
+  'von', 'vom', 'bei', 'beim', 'als',
+  // Generische Marketing-Worte die in vielen Produktnamen
+  // auftauchen ohne tatsächliche Produktinformation. Beim Stufe-3-
+  // Vergleich helfen sie nicht und verzerren das Score.
+  'beste', 'wahl', 'gut', 'gold', 'select', 'premium',
+  'feinkost',
+]);
+
+function tokenizeProductName(
+  name: string,
+  handelsmarkeName?: string | null,
+): string[] {
+  if (!name) return [];
+  const cleaned = String(name)
+    .toLowerCase()
+    .replace(/[^a-zäöüß0-9\s-]/g, ' ')
+    .replace(/-/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // Handelsmarken-Tokens entfernen — sonst matchen z.B. zwei "REWE
+  // Beste Wahl"-Produkte sich gegenseitig nur über die Marke statt
+  // über den Inhalt.
+  const hmTokens = new Set<string>();
+  if (handelsmarkeName) {
+    String(handelsmarkeName)
+      .toLowerCase()
+      .replace(/[^a-zäöüß0-9\s-]/g, ' ')
+      .replace(/-/g, ' ')
+      .split(/\s+/)
+      .forEach((t) => {
+        if (t) hmTokens.add(t);
+      });
+  }
+  return cleaned
+    .split(' ')
+    .filter(
+      (t) =>
+        t.length >= 3 && !PRODUCT_NAME_STOPWORDS.has(t) && !hmTokens.has(t),
+    );
+}
+
+function scoreNameSimilarity(a: string[], b: string[]): number {
+  if (a.length === 0 || b.length === 0) return 0;
+  let score = 0;
+  for (const ta of a) {
+    for (const tb of b) {
+      if (ta === tb) {
+        score += 2; // exakter Token-Match (z.B. "toastbrot" == "toastbrot")
+      } else if (ta.length >= 4 && tb.length >= 4) {
+        // Substring-Stem-Match: "toast" inside "toastbrot",
+        // "brot" inside "toastbrot". Mindest-Länge 4 vermeidet
+        // dass "ml" / "kg" / "g" usw. Lärm produzieren.
+        if (ta.includes(tb) || tb.includes(ta)) score += 1;
+      }
+    }
+  }
+  return score;
+}
+
+// Per-Kategorie-Alternativen-Cache — pro Kategorie ein Eintrag mit
+// 30-Min TTL. Damit verursacht das Anschauen mehrerer Produkte
+// derselben Kategorie nur EINEN Firestore-Query. Empty-Treffer
+// werden mit kürzerem TTL (1 Min) gespeichert, damit eine eben neu
+// hochgeladene Stufe-3-Variante schnell sichtbar wird.
+const enttarnteAlternativesCache = new Map<
+  string,
+  CacheEntry<Array<{
+    id: string;
+    name: string;
+    bild: string | null;
+    preis: number | null;
+    stufe: number;
+    handelsmarkeName: string | null;
+    handelsmarkeLogo: string | null;
+    discounterName: string | null;
+    discounterLogo: string | null;
+    discounterLand: string | null;
+  }>>
+>();
+const enttarnteAlternativesInflight = new Map<
+  string,
+  Promise<any[]>
+>();
+
+// Connected-Brands map — pre-computed im Cloud-Function-Aggregator
+// (`cloud-functions/connected-brands-aggregator/`) als EIN einziger
+// Top-Level-Doc unter `aggregates/herstellerBrands_v1` mit Field
+// `byHersteller.{herstellerId} = brands[]`. Pro App-Session genau
+// ein einziger Read für ALLE Hersteller-Lookups, danach In-Memory-
+// Cache. Erbt automatisch die `aggregates/*`-Read-Permission, die
+// auch die Leaderboard-Aggregates nutzen.
+const connectedBrandsAllCache = {
+  value: null as Record<string, any[]> | null,
+  expiresAt: 0,
+};
+let connectedBrandsAllInflight: Promise<Record<string, any[]>> | null = null;
+
+// Fire-and-forget image prefetch. The hero image is the slowest
+// network resource on the detail screens — by kicking off the
+// download in parallel with the Firestore reference fetch, the
+// image is usually in the iOS/Android disk cache by the time the
+// destination screen tries to render it. Eliminates the "image
+// pops in mid-fade" feel.
+function prefetchImage(uri: string | undefined | null) {
+  if (!uri || typeof uri !== 'string' || !uri.startsWith('http')) return;
+  // RNImage.prefetch returns a promise we deliberately don't await.
+  RNImage.prefetch(uri).catch(() => {
+    /* network errors are non-fatal — the screen will load it later */
+  });
+}
+
 export class FirestoreService {
-  
+
   /**
    * Holt die letzten 10 enttarnten Produkte (NoName-Produkte sortiert nach created_at)
    */
@@ -44,24 +296,95 @@ export class FirestoreService {
     try {
       const produkteRef = collection(db, 'produkte');
       const q = query(
-        produkteRef, 
-        orderBy('created_at', 'desc'), 
+        produkteRef,
+        orderBy('created_at', 'desc'),
         limit(limitCount)
       );
-      
+
       const querySnapshot = await getDocs(q);
       const produkte: FirestoreDocument<Produkte>[] = [];
-      
+
       querySnapshot.forEach((doc) => {
         produkte.push({
           id: doc.id,
           ...doc.data() as Produkte
         });
       });
-      
+
       return produkte;
     } catch (error) {
       console.error('Error fetching latest enttarnte produkte:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Top-enttarnte-Produkte-Rotator für die Home-Sektion:
+   *   • Zieht einen Pool von `poolSize` Stufe-3/4/5-Produkten aus
+   *     `produkte`.
+   *   • Mischt den Pool Fisher-Yates.
+   *   • Gibt die ersten `pickCount` Einträge zurück.
+   *
+   * Bewusst OHNE orderBy('created_at') — Firestore würde sonst einen
+   * Composite-Index auf (stufe, created_at) verlangen, den wir nicht
+   * haben. Seit wir den Pool sowieso clientseitig shuffeln, ist die
+   * serverseitige Sortierreihenfolge egal: der User bekommt bei jedem
+   * Home-Besuch 10 aus einem größeren Pool, egal in welcher
+   * Reihenfolge Firestore die zurückliefert.
+   */
+  static async getTopEnttarnteProdukteRandomized(
+    poolSize: number = 200,
+    pickCount: number = 10,
+  ): Promise<FirestoreDocument<Produkte>[]> {
+    // Cache the POOL (not the random pick) so the user still sees
+    // a fresh shuffle each visit, but we don't pay 200 doc-reads
+    // per Home-tab open. Pool is shared across visits within the
+    // 3-minute TTL window.
+    const cacheKey = `pool:${poolSize}`;
+    const cached = readCache(topProductsCache, cacheKey) as FirestoreDocument<Produkte>[] | null | undefined;
+    let pool: FirestoreDocument<Produkte>[] | undefined =
+      cached === undefined ? undefined : (cached ?? undefined);
+
+    if (!pool) {
+      const inflight = topProductsInflight.get(cacheKey);
+      if (inflight) {
+        pool = (await inflight) as FirestoreDocument<Produkte>[];
+      } else {
+        const promise = (async () => {
+          try {
+            const produkteRef = collection(db, 'produkte');
+            const q = query(
+              produkteRef,
+              where('stufe', 'in', ['3', '4', '5']),
+              limit(poolSize),
+            );
+
+            const snap = await getDocs(q);
+            const fresh: FirestoreDocument<Produkte>[] = [];
+            snap.forEach((d) => {
+              fresh.push({ id: d.id, ...(d.data() as Produkte) });
+            });
+            writeCache(topProductsCache, cacheKey, fresh, TTL_SHORT_MS);
+            return fresh;
+          } finally {
+            topProductsInflight.delete(cacheKey);
+          }
+        })();
+        topProductsInflight.set(cacheKey, promise);
+        pool = (await promise) as FirestoreDocument<Produkte>[];
+      }
+    }
+
+    try {
+      // Shuffle a COPY so we don't mutate the cached array.
+      const shuffled = [...pool];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled.slice(0, pickCount);
+    } catch (error) {
+      console.error('Error fetching top enttarnte produkte:', error);
       throw error;
     }
   }
@@ -191,19 +514,31 @@ export class FirestoreService {
         const productWithDetails: FirestoreDocument<Produkte> & {
           discounter?: Discounter;
           handelsmarke?: Handelsmarken;
+          hersteller?: any;
         } = {
           id: docSnap.id,
           ...productData
         };
 
         // Populate references parallel für UI-Daten
-        const [discounter, handelsmarke] = await Promise.all([
+        // hersteller_new ist neu dabei — UI zeigt seinen `name` als
+        // zweite Zeile unter dem Produkttitel auf NoName-Karten
+        // (Stöbern, shopping-list, comparison alt-cards). Cost: +1
+        // ref-fetch pro Produkt — aber `getDocumentByReference` cacht
+        // 30 min sessionsweit, und viele Produkte teilen denselben
+        // Hersteller (e.g. "Andechser Molkerei" für 50 Produkte) →
+        // praktisch fast immer Cache-Hits nach dem ersten Load.
+        const [discounter, handelsmarke, hersteller] = await Promise.all([
           this.getDocumentByReference<Discounter>(productData.discounter),
-          this.getDocumentByReference<Handelsmarken>(productData.handelsmarke)
+          this.getDocumentByReference<Handelsmarken>(productData.handelsmarke),
+          (productData as any).hersteller
+            ? this.getDocumentByReference<any>((productData as any).hersteller)
+            : Promise.resolve(null),
         ]);
 
         if (discounter) productWithDetails.discounter = discounter;
         if (handelsmarke) productWithDetails.handelsmarke = handelsmarke;
+        if (hersteller) productWithDetails.hersteller = hersteller;
 
         return productWithDetails;
       });
@@ -298,40 +633,63 @@ export class FirestoreService {
   }
 
   /**
-   * Holt ein einzelnes Dokument per Referenz (unterstützt verschiedene Formate)
+   * Holt ein einzelnes Dokument per Referenz (unterstützt verschiedene Formate).
+   *
+   * Cached for 30 min by full document path — Handelsmarke /
+   * Hersteller / Kategorie / Discounter values rarely change, and
+   * this method is called dozens of times during a Home-tab open
+   * (one per featured product, etc.). Cache hit avoids the round
+   * trip entirely.
    */
   static async getDocumentByReference<T>(ref: DocumentReference | any): Promise<T | null> {
-    try {
-      // ✅ Null/undefined check first
-      if (!ref) {
-        return null;
-      }
+    if (!ref) return null;
 
-      let docRef: DocumentReference;
-      
-      // Handle different reference formats
+    let docRef: DocumentReference;
+    let cacheKey: string;
+
+    try {
       if ((ref as any).referencePath) {
-        // Firestore serialized format: {"referencePath": "collection/id", "type": "firestore/documentReference/1.0"}
         const path = (ref as any).referencePath;
         const [collection, id] = path.split('/');
         docRef = doc(db, collection, id);
+        cacheKey = path;
       } else if (ref.id && ref.path) {
-        // Standard DocumentReference
         docRef = ref;
+        cacheKey = ref.path;
       } else {
         console.error('Unsupported reference format:', ref);
         return null;
       }
-      
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        return docSnap.data() as T;
-      }
-      return null;
-    } catch (error) {
-      console.error('Error fetching document by reference:', error);
+    } catch (e) {
+      console.error('Error parsing reference:', e);
       return null;
     }
+
+    // Cache hit
+    const cached = readCache(refDocCache, cacheKey);
+    if (cached !== undefined) return cached as T | null;
+
+    // Inflight de-dup: parallel callers for the same ref share one
+    // Firestore round-trip.
+    const inflight = refDocInflight.get(cacheKey);
+    if (inflight) return (await inflight) as T | null;
+
+    const promise = (async () => {
+      try {
+        const docSnap = await getDoc(docRef);
+        const value = docSnap.exists() ? (docSnap.data() as any) : null;
+        writeCache(refDocCache, cacheKey, value, TTL_LONG_MS);
+        return value;
+      } catch (error) {
+        console.error('Error fetching document by reference:', error);
+        return null;
+      } finally {
+        refDocInflight.delete(cacheKey);
+      }
+    })();
+
+    refDocInflight.set(cacheKey, promise);
+    return (await promise) as T | null;
   }
 
   /**
@@ -451,12 +809,30 @@ export class FirestoreService {
           ...productData
         };
 
-        // Populate hersteller reference für UI-Daten (nur wenn vorhanden)
+        // Resolve hersteller/marke (gleiche Logik wie in
+        // getMarkenProduktWithDetails Z.1755): productData.hersteller
+        // kann auf eine MARKE zeigen (Doc in `hersteller`-Collection
+        // mit `herstellerref`-Feld → das ist was der User MARKE
+        // nennt, hat das `infos`-Feld) ODER direkt auf einen
+        // HERSTELLER (Doc in `hersteller_new` mit `herstellername`).
+        // Wir teilen das in productWithDetails.marke (Marke-Doc) +
+        // .hersteller (echter Manufacturer-Doc) auf, damit Caller
+        // sauber unterscheiden können.
         if (productData.hersteller) {
-          const hersteller = await this.getDocumentByReference<any>(productData.hersteller);
-          if (hersteller) {
-            productWithDetails.hersteller = hersteller;
-            console.log(`✅ Loaded hersteller for ${productData.name}:`, hersteller.name);
+          const herstellerOrMarke = await this.getDocumentByReference<any>(productData.hersteller);
+          if (herstellerOrMarke) {
+            if (herstellerOrMarke.herstellerref) {
+              // Es ist eine MARKE (= "marken" in User-Lingo).
+              productWithDetails.marke = herstellerOrMarke;
+              const realHersteller = await this.getDocumentByReference<any>(
+                herstellerOrMarke.herstellerref,
+              ).catch(() => null);
+              if (realHersteller) productWithDetails.hersteller = realHersteller;
+            } else {
+              // Direkt ein HERSTELLER (= "hersteller_new").
+              productWithDetails.hersteller = herstellerOrMarke;
+              productWithDetails.marke = null;
+            }
           }
         }
 
@@ -614,25 +990,43 @@ export class FirestoreService {
    * Holt alle Marken (hersteller_new) für Filter
    */
   static async getMarken(): Promise<FirestoreDocument<any>[]> {
-    try {
-      const markenRef = collection(db, 'hersteller');
-      const q = query(markenRef, orderBy('name', 'asc'));
-      const querySnapshot = await getDocs(q);
-      
-      const marken: FirestoreDocument<any>[] = [];
-      querySnapshot.forEach((doc) => {
-        marken.push({
-          id: doc.id,
-          ...doc.data()
+    const KEY = 'all';
+    // 30-Min In-Memory Cache + Inflight-Dedup. `getMarken()` scannt
+    // die ganze `hersteller`-Collection (~968 Docs) — das teuerste
+    // einzelne Read in der App. Pro Session ein einziger Roundtrip
+    // reicht völlig, da sich die Marken-Liste praktisch nicht
+    // innerhalb einer Session ändert.
+    const cached = readCache(markenCache, KEY);
+    if (cached !== undefined) return cached as FirestoreDocument<any>[];
+    const inflight = markenInflight.get(KEY);
+    if (inflight) return inflight;
+
+    const promise = (async () => {
+      try {
+        const markenRef = collection(db, 'hersteller');
+        const q = query(markenRef, orderBy('name', 'asc'));
+        const querySnapshot = await getDocs(q);
+
+        const marken: FirestoreDocument<any>[] = [];
+        querySnapshot.forEach((d) => {
+          marken.push({
+            id: d.id,
+            ...d.data(),
+          });
         });
-      });
-      
-      // Silent loading - kein Console.log für bessere Performance
-      return marken;
-    } catch (error) {
-      console.error('Error fetching marken:', error);
-      return [];
-    }
+
+        writeCache(markenCache, KEY, marken, TTL_LONG_MS);
+        return marken;
+      } catch (error) {
+        console.error('Error fetching marken:', error);
+        return [];
+      } finally {
+        markenInflight.delete(KEY);
+      }
+    })();
+
+    markenInflight.set(KEY, promise as Promise<any[]>);
+    return promise as Promise<FirestoreDocument<any>[]>;
   }
 
   /**
@@ -744,6 +1138,168 @@ export class FirestoreService {
    * Holt ähnliche Produkte (Stufe 3,4,5) aus der gleichen Kategorie
    * Für die "Ähnliche Produkte" Sektion auf Stufe 1+2 Detailseiten
    */
+  /**
+   * "Weitere enttarnte Produkte" — Liste ähnlicher NoNames am
+   * unteren Ende der Detail-Seiten. Sauber + günstig:
+   *
+   *   1. SAME-CATEGORY ONLY — kein globaler Fallback. Nur Produkte
+   *      aus DERSELBEN `kategorie` werden gezeigt. "Toast neben
+   *      Smoothie" tritt damit nicht mehr auf; Nischen-Kategorien
+   *      ohne Stufe-3+-Treffer rendern gar nichts.
+   *
+   *   2. SINGLE-FIELD INDEX — Query nur mit `where('kategorie',
+   *      '==', ref) limit 50`. Stufen-Filter (3,4,5) passiert
+   *      client-side. Kein composite Index nötig.
+   *
+   *   3. PER-KATEGORIE CACHE — Pool pro Kategorie 30 Min im Memory.
+   *      Zweiter Toast-Aufruf derselben Session: 0 zusätzliche Reads.
+   *      Empty-Treffer cachen nur 1 Min (frisch hochgeladene Stufe-3-
+   *      Variante schnell sichtbar).
+   *
+   *   4. NAME-NÄHE RANKING — der Pool wird client-side per Token-
+   *      Similarity gegen den Namen des AKTUELLEN Produkts gerankt.
+   *      Toastbrot-Visit zeigt zuerst andere Toastbrote, dann andere
+   *      Brote (Substring-Match), dann der Rest der Kategorie.
+   *      Random-Tiebreaker damit gleich-bewertete Treffer pro Visit
+   *      varieren.
+   */
+  static async getEnttarnteAlternatives(
+    opts: {
+      excludeProductId: string;
+      kategorieId?: string | null;
+      productName?: string | null;
+      handelsmarkeName?: string | null;
+    },
+    limitCount: number = 5,
+  ): Promise<Array<{
+    id: string;
+    name: string;
+    bild: string | null;
+    preis: number | null;
+    stufe: number;
+    handelsmarkeName: string | null;
+    handelsmarkeLogo: string | null;
+    discounterName: string | null;
+    discounterLogo: string | null;
+    discounterLand: string | null;
+  }>> {
+    if (!opts.kategorieId) return [];
+
+    const cacheKey = opts.kategorieId;
+    let pool = readCache(enttarnteAlternativesCache, cacheKey);
+
+    if (pool === undefined) {
+      // Inflight-Dedup falls zwei Detail-Pages parallel dieselbe
+      // Kategorie laden.
+      const inflight = enttarnteAlternativesInflight.get(cacheKey);
+      if (inflight) {
+        pool = await inflight;
+      } else {
+        const promise = (async () => {
+          try {
+            const produkteRef = collection(db, 'produkte');
+            const catRef = doc(db, 'kategorien', opts.kategorieId!);
+            // Single-Field-where → kein composite Index nötig.
+            const q = query(
+              produkteRef,
+              where('kategorie', '==', catRef),
+              limit(50),
+            );
+            const snap = await getDocs(q);
+
+            // Client-side Stufe-Filter (Stufe 3,4,5).
+            const filtered = snap.docs.filter((d) => {
+              const s = parseInt(String((d.data() as any).stufe ?? ''), 10);
+              return s >= 3 && s <= 5;
+            });
+
+            // Joins parallel — Discounter + Handelsmarke. Beide
+            // 30-Min-cached über `getDocumentByReference`, also
+            // beim zweiten Aufruf fast immer Cache-Hits.
+            const enriched = await Promise.all(
+              filtered.map(async (docSnap) => {
+                const p: any = { id: docSnap.id, ...(docSnap.data() as any) };
+                const [hmDoc, dcDoc] = await Promise.all([
+                  p.handelsmarke
+                    ? this.getDocumentByReference<Handelsmarken>(p.handelsmarke).catch(
+                        () => null,
+                      )
+                    : Promise.resolve(null),
+                  p.discounter
+                    ? this.getDocumentByReference<Discounter>(p.discounter).catch(
+                        () => null,
+                      )
+                    : Promise.resolve(null),
+                ]);
+                return {
+                  id: p.id,
+                  name: p.name ?? 'Produkt',
+                  bild: p.bild ?? null,
+                  bildClean: (p as any).bildClean ?? null,
+                  bildCleanPng: (p as any).bildCleanPng ?? null,
+                  bildCleanHq: (p as any).bildCleanHq ?? null,
+                  preis: typeof p.preis === 'number' ? p.preis : null,
+                  stufe: parseInt(String(p.stufe ?? '')) || 1,
+                  handelsmarkeName:
+                    (hmDoc as any)?.bezeichnung ?? (hmDoc as any)?.name ?? null,
+                  handelsmarkeLogo: (hmDoc as any)?.bild ?? null,
+                  discounterName: (dcDoc as any)?.name ?? null,
+                  discounterLogo: (dcDoc as any)?.bild ?? null,
+                  discounterLand: (dcDoc as any)?.land ?? null,
+                };
+              }),
+            );
+
+            const ttl = enriched.length === 0 ? 60_000 : 30 * 60 * 1000;
+            writeCache(enttarnteAlternativesCache, cacheKey, enriched, ttl);
+            return enriched;
+          } catch (e) {
+            console.warn('getEnttarnteAlternatives failed', e);
+            writeCache(enttarnteAlternativesCache, cacheKey, [], 60_000);
+            return [];
+          } finally {
+            enttarnteAlternativesInflight.delete(cacheKey);
+          }
+        })();
+        enttarnteAlternativesInflight.set(cacheKey, promise);
+        pool = await promise;
+      }
+    }
+
+    const raw = (pool ?? []).filter(
+      (p: any) => p.id !== opts.excludeProductId,
+    );
+
+    // Name-Similarity-Ranking. Tokenize beide Seiten, scoring nach
+    // exact match (+2) und Substring-Stem-Match (+1, wenn beide
+    // Tokens ≥ 4 Zeichen → vermeidet Lärm wie "ml" matched "milch").
+    // Für "Toastbrot": exact match auf "toastbrot" gewinnt, dann
+    // substring "toast"/"brot", dann der Rest der Kategorie ohne
+    // Token-Treffer.
+    const currentTokens = tokenizeProductName(
+      opts.productName ?? '',
+      opts.handelsmarkeName,
+    );
+    const scored = raw.map((c) => ({
+      item: c,
+      score:
+        currentTokens.length > 0
+          ? scoreNameSimilarity(
+              currentTokens,
+              tokenizeProductName(c.name, c.handelsmarkeName),
+            )
+          : 0,
+    }));
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      // Random-Tiebreaker damit gleich-bewertete Treffer pro Visit
+      // verschieden gemischt sind (Discovery-Charakter).
+      return Math.random() - 0.5;
+    });
+
+    return scored.slice(0, limitCount).map((s) => s.item);
+  }
+
   static async getSimilarProducts(
     categoryName: string, // Einfach der Kategorie-Name
     excludeProductId: string,
@@ -809,23 +1365,40 @@ export class FirestoreService {
    * Holt alle Discounter/Märkte
    */
   static async getDiscounter(): Promise<FirestoreDocument<Discounter>[]> {
-    try {
-      const discounterRef = collection(db, 'discounter');
-      const querySnapshot = await getDocs(discounterRef);
-      const discounter: FirestoreDocument<Discounter>[] = [];
-      
-      querySnapshot.forEach((doc) => {
-        discounter.push({
-          id: doc.id,
-          ...doc.data() as Discounter
+    // Cache for 30 min — the discounter list (Aldi, Lidl, …) is
+    // basically static, refetching on every Home-tab focus is
+    // wasteful. Inflight de-dup so concurrent callers share work.
+    const KEY = 'discounter:all';
+    const cached = readCache(discounterCache, KEY);
+    if (cached !== undefined) return (cached ?? []) as FirestoreDocument<Discounter>[];
+
+    const inflight = discounterInflight.get(KEY);
+    if (inflight) return (await inflight) as FirestoreDocument<Discounter>[];
+
+    const promise = (async () => {
+      try {
+        const discounterRef = collection(db, 'discounter');
+        const querySnapshot = await getDocs(discounterRef);
+        const discounter: FirestoreDocument<Discounter>[] = [];
+
+        querySnapshot.forEach((doc) => {
+          discounter.push({
+            id: doc.id,
+            ...doc.data() as Discounter
+          });
         });
-      });
-      
-      return discounter;
-    } catch (error) {
-      console.error('Error fetching discounter:', error);
-      throw error;
-    }
+        writeCache(discounterCache, KEY, discounter, TTL_LONG_MS);
+        return discounter;
+      } catch (error) {
+        console.error('Error fetching discounter:', error);
+        throw error;
+      } finally {
+        discounterInflight.delete(KEY);
+      }
+    })();
+
+    discounterInflight.set(KEY, promise as Promise<any[]>);
+    return (await promise) as FirestoreDocument<Discounter>[];
   }
 
   /**
@@ -888,48 +1461,194 @@ export class FirestoreService {
   /**
    * Holt Produkt mit allen Details (populated references)
    */
-  static async getProductWithDetails(productId: string): Promise<ProductWithDetails | null> {
-    try {
-      const productRef = doc(db, 'produkte', productId);
-      const productSnap = await getDoc(productRef);
-      
-      if (!productSnap.exists()) {
-        console.log('NoName product not found with ID:', productId);
-        return null;
+  /**
+   * Fetch a NoName product with all references populated.
+   *
+   * Optional `onBasic` callback fires after the initial doc read but
+   * BEFORE the parallel reference fetch resolves, with the product
+   * payload as it sits in Firestore (raw refs, not joined). Detail
+   * screens use this to render the hero (name/image/price/stufe) the
+   * moment the main doc lands, then swap in the joined view (info
+   * card with Hersteller + Kategorie names) once references resolve.
+   * Result: a top-then-bottom reveal instead of one big flash.
+   */
+  static async getProductWithDetails(
+    productId: string,
+    onBasic?: (basic: ProductWithDetails) => void,
+  ): Promise<ProductWithDetails | null> {
+    // Cache hit → return immediately. The detail screen sees the
+    // resolved promise on the very first paint, so there's no
+    // skeleton flash on revisits / back-navigations.
+    //
+    // Schema-Check: ältere Cache-Einträge (ohne `herstellerId` /
+    // `kategorieId`) müssen invalidiert werden, sonst sieht der
+    // Client die nötigen IDs nicht und Connected-Brands /
+    // Alternatives-Liste laden nicht. Wir prüfen NUR Felder, die
+    // bei vorhandener Original-Ref auch da sein müssen — Produkte
+    // ohne Kategorie/Hersteller brauchen die ID nicht.
+    const cached = readCache(productDetailsCache, productId);
+    const cachedAny = cached as any;
+    const cachedSchemaOk =
+      cached === null /* null-cached miss */ ||
+      cachedAny == null ||
+      ((cachedAny.hersteller == null || cachedAny.herstellerId !== undefined) &&
+        (cachedAny.kategorie == null || cachedAny.kategorieId !== undefined));
+    if (cached !== undefined && cachedSchemaOk) {
+      // Fire the basic hook synchronously for symmetry with the
+      // uncached path; it's a no-op if the caller doesn't pass one.
+      if (onBasic && cached) {
+        try {
+          onBasic(cached);
+        } catch (e) {
+          console.warn('getProductWithDetails: onBasic callback threw (cached)', e);
+        }
       }
-      
-      const productData = productSnap.data() as Produkte;
-      const productWithDetails: ProductWithDetails = {
-        id: productId,
-        ...productData
-      };
-
-      // Populate references parallel
-      console.log(`🚀 Loading references for product ${productId}...`);
-      const refStartTime = Date.now();
-      
-      const [kategorie, discounter, handelsmarke, hersteller, markenProdukt] = await Promise.all([
-        this.getDocumentByReference<Kategorien>(productData.kategorie),
-        this.getDocumentByReference<Discounter>(productData.discounter),
-        this.getDocumentByReference<Handelsmarken>(productData.handelsmarke),
-        this.getDocumentByReference<HerstellerNew>(productData.hersteller),
-        this.getDocumentByReference<MarkenProdukte>(productData.markenProdukt)
-      ]);
-      
-      const refEndTime = Date.now();
-      console.log(`✅ References loaded in ${refEndTime - refStartTime}ms`);
-
-      if (kategorie) productWithDetails.kategorie = kategorie;
-      if (discounter) productWithDetails.discounter = discounter;
-      if (handelsmarke) productWithDetails.handelsmarke = handelsmarke;
-      if (hersteller) productWithDetails.hersteller = hersteller;
-      if (markenProdukt) productWithDetails.markenProdukt = markenProdukt;
-
-      return productWithDetails;
-    } catch (error) {
-      console.log('Error fetching NoName product details (this is normal if product is in other collection):', error.message);
-      return null;
+      return cached;
     }
+    if (cached !== undefined && !cachedSchemaOk) {
+      if (__DEV__) {
+        console.log(
+          `[getProductWithDetails] dropping stale cache for ${productId} (no herstellerId)`,
+        );
+      }
+      productDetailsCache.delete(productId);
+    }
+
+    // Inflight de-dup: if two screens (or screen + prefetch) ask for
+    // the same product at once, both await the same Promise.
+    const inflight = productDetailsInflight.get(productId);
+    if (inflight) return inflight;
+
+    const promise = (async (): Promise<ProductWithDetails | null> => {
+      try {
+        const productRef = doc(db, 'produkte', productId);
+        const productSnap = await getDoc(productRef);
+
+        if (!productSnap.exists()) {
+          console.log('NoName product not found with ID:', productId);
+          writeCache(productDetailsCache, productId, null);
+          return null;
+        }
+
+        const productData = productSnap.data() as Produkte;
+        const productWithDetails: ProductWithDetails = {
+          id: productId,
+          ...productData
+        };
+
+        // Kick the hero image into the OS disk cache in parallel
+        // with the reference fetch — by the time the screen renders,
+        // the image typically loads instantly (no "image pops in
+        // mid-fade" pop).
+        prefetchImage((productData as any).bild);
+
+        // Fire the staged-load hook — caller can render the hero now.
+        // Wrapped in try/catch so a screen-side render error never
+        // breaks the data fetch itself.
+        if (onBasic) {
+          try {
+            onBasic(productWithDetails);
+          } catch (e) {
+            console.warn('getProductWithDetails: onBasic callback threw', e);
+          }
+        }
+
+        // Populate references parallel
+        console.log(`🚀 Loading references for product ${productId}...`);
+        const refStartTime = Date.now();
+
+        // Hersteller-Brands werden bewusst NICHT hier mitgeladen.
+        // Sie hängen an einem separaten Aggregate-Doc (Cloud-Function
+        // `connected-brands-aggregator`) und haben damit ein anderes
+        // Refresh-Intervall als das Produkt selbst. Wenn wir sie hier
+        // mit-cachten, würde ein zwischenzeitlicher Aggregator-Run
+        // erst nach Ablauf des 5-Min-Product-Caches sichtbar — wir
+        // wollen aber, dass neu aggregierte Brands beim nächsten
+        // Detail-Aufruf direkt erscheinen. Stattdessen ruft der
+        // Client `getConnectedBrandsForHersteller(herstellerId)`
+        // separat ab.
+        const [kategorie, discounter, handelsmarke, hersteller, markenProdukt, packTypInfo] = await Promise.all([
+          FirestoreService.getDocumentByReference<Kategorien>(productData.kategorie),
+          FirestoreService.getDocumentByReference<Discounter>(productData.discounter),
+          FirestoreService.getDocumentByReference<Handelsmarken>(productData.handelsmarke),
+          FirestoreService.getDocumentByReference<HerstellerNew>(productData.hersteller),
+          FirestoreService.getDocumentByReference<MarkenProdukte>(productData.markenProdukt),
+          // packTyp resolution was missing here — same as the marken-
+          // produkt loader at line ~1722, but for the noname path. Without
+          // it, `packTypInfo` stays undefined on stufe-1+2 docs and the
+          // detail screen's price chip silently drops the "Xg ·
+          // Y€/kg" line. Adding the parallel fetch costs zero (it
+          // joins the same Promise.all).
+          FirestoreService.getDocumentByReference<Packungstypen>(productData.packTyp),
+        ]);
+
+        const refEndTime = Date.now();
+        console.log(`✅ References loaded in ${refEndTime - refStartTime}ms`);
+
+        if (kategorie) productWithDetails.kategorie = kategorie;
+        if (discounter) productWithDetails.discounter = discounter;
+        if (handelsmarke) productWithDetails.handelsmarke = handelsmarke;
+        if (hersteller) productWithDetails.hersteller = hersteller;
+        if (markenProdukt) productWithDetails.markenProdukt = markenProdukt;
+        if (packTypInfo) (productWithDetails as any).packTypInfo = packTypInfo;
+        // Original-Refs liefern ID, populierte Daten nicht. Wir
+        // hängen die IDs explizit an, damit Caller (Connected-Brands,
+        // Alternatives-Liste, …) sie ohne weiteren Fetch haben.
+        // Defensive Extraktion über alle Ref-Shapes (Modular SDK,
+        // Legacy `referencePath`, Lite-SDK `_path.segments`, alter
+        // `path`-Getter).
+        const refToId = (ref: any): string | null => {
+          if (!ref) return null;
+          if (typeof ref === 'string') return ref;
+          if (ref.id) return ref.id;
+          if (ref.referencePath) {
+            const parts = String(ref.referencePath).split('/');
+            return parts[parts.length - 1] || null;
+          }
+          if (ref._path?.segments && Array.isArray(ref._path.segments)) {
+            const segs = ref._path.segments;
+            return segs[segs.length - 1] || null;
+          }
+          if (ref.path) {
+            const parts = String(ref.path).split('/');
+            return parts[parts.length - 1] || null;
+          }
+          return null;
+        };
+        (productWithDetails as any).herstellerId = refToId(productData.hersteller);
+        (productWithDetails as any).kategorieId = refToId(productData.kategorie);
+
+        writeCache(productDetailsCache, productId, productWithDetails);
+        return productWithDetails;
+      } catch (error: any) {
+        console.log('Error fetching NoName product details (this is normal if product is in other collection):', error?.message);
+        return null;
+      } finally {
+        productDetailsInflight.delete(productId);
+      }
+    })();
+
+    productDetailsInflight.set(productId, promise);
+    return promise;
+  }
+
+  /**
+   * Pre-warm the product-detail cache. Call this the moment the user
+   * taps a product card, BEFORE pushing the route. By the time the
+   * destination screen mounts and calls `getProductWithDetails`, the
+   * Firestore round-trip is often already complete and the screen
+   * gets a synchronous cache hit on its first render.
+   *
+   * Safe to call repeatedly — inflight de-dup means redundant calls
+   * are free.
+   */
+  static prefetchProductDetails(productId: string): void {
+    if (!productId) return;
+    if (readCache(productDetailsCache, productId) !== undefined) return;
+    if (productDetailsInflight.has(productId)) return;
+    // Fire-and-forget; the inflight map will hand the same promise
+    // back to the screen when it asks.
+    void this.getProductWithDetails(productId);
   }
 
   /**
@@ -975,20 +1694,68 @@ export class FirestoreService {
   }
 
   /**
-   * Holt Markenprodukt mit allen Details (populated references)
+   * Holt Markenprodukt mit allen Details (populated references).
+   *
+   * Optional `onBasic` callback fires after the initial doc read but
+   * BEFORE any reference fetches resolve, with the raw product
+   * payload. Detail screens use this to render the brand-product
+   * hero (name/image/price) immediately, then swap in the
+   * fully-joined view (Hersteller chip, Kategorie, Pack info, related
+   * products) once the references and joins resolve.
    */
-  static async getMarkenProduktWithDetails(productId: string, skipRelatedProducts: boolean = false, skipBrandsQuery: boolean = false): Promise<MarkenProduktWithDetails | null> {
+  static async getMarkenProduktWithDetails(
+    productId: string,
+    skipRelatedProducts: boolean = false,
+    skipBrandsQuery: boolean = false,
+    onBasic?: (basic: MarkenProduktWithDetails) => void,
+  ): Promise<MarkenProduktWithDetails | null> {
+    // Cache key includes the skip-flags because they materially
+    // change the returned shape (related products, brands list).
+    const cacheKey = `${productId}:${skipRelatedProducts ? 1 : 0}:${skipBrandsQuery ? 1 : 0}`;
+
+    const cached = readCache(markenProduktDetailsCache, cacheKey);
+    if (cached !== undefined) {
+      if (onBasic && cached) {
+        try {
+          onBasic(cached);
+        } catch (e) {
+          console.warn('getMarkenProduktWithDetails: onBasic callback threw (cached)', e);
+        }
+      }
+      return cached;
+    }
+
+    const inflight = markenProduktDetailsInflight.get(cacheKey);
+    if (inflight) return inflight;
+
+    const promise = (async (): Promise<MarkenProduktWithDetails | null> => {
     try {
       const productRef = doc(db, 'markenProdukte', productId);
       const productSnap = await getDoc(productRef);
-      
+
       if (!productSnap.exists()) {
         console.log('Brand product not found with ID:', productId);
+        writeCache(markenProduktDetailsCache, cacheKey, null);
         return null;
       }
-      
+
       const productData = productSnap.data() as MarkenProdukte;
-      
+
+      // Pre-warm the image cache — same reasoning as the noname
+      // path above (avoid hero-image-pops-in-mid-fade).
+      prefetchImage((productData as any).bild);
+      prefetchImage((productData as any).hersteller?.bild);
+
+      // Fire the staged-load hook with the raw product BEFORE any
+      // reference fetch — caller can render the hero now.
+      if (onBasic) {
+        try {
+          onBasic({ id: productId, ...productData } as MarkenProduktWithDetails);
+        } catch (e) {
+          console.warn('getMarkenProduktWithDetails: onBasic callback threw', e);
+        }
+      }
+
       // Populate references
       const [kategorie, herstellerOrMarke, packTypInfo] = await Promise.all([
         productData.kategorie ? this.getDocumentByReference<Kategorien>(productData.kategorie) : Promise.resolve(null),
@@ -1021,6 +1788,31 @@ export class FirestoreService {
         }
       }
       
+      // Original-Refs liefern ID, populierte Daten nicht — wir
+      // hängen die Kategorie-ID separat an, sonst läuft die
+      // "Weitere enttarnte Produkte"-Section auf der product-
+      // comparison-Seite leer (sie braucht `kategorieId` für die
+      // gezielte Same-Category-Query). Defensive Extraktion über
+      // alle Ref-Shapes.
+      const refToId = (ref: any): string | null => {
+        if (!ref) return null;
+        if (typeof ref === 'string') return ref;
+        if (ref.id) return ref.id;
+        if (ref.referencePath) {
+          const parts = String(ref.referencePath).split('/');
+          return parts[parts.length - 1] || null;
+        }
+        if (ref._path?.segments && Array.isArray(ref._path.segments)) {
+          const segs = ref._path.segments;
+          return segs[segs.length - 1] || null;
+        }
+        if (ref.path) {
+          const parts = String(ref.path).split('/');
+          return parts[parts.length - 1] || null;
+        }
+        return null;
+      };
+
       const productWithDetails: MarkenProduktWithDetails = {
         id: productId,
         ...productData,
@@ -1028,8 +1820,12 @@ export class FirestoreService {
         hersteller, // Echter Hersteller (hersteller_new)
         marke, // Die spezifische Marke dieses Produkts (hersteller)
         packTypInfo,
-        brands // Alle Marken dieses Herstellers
+        brands, // Alle Marken dieses Herstellers
       };
+      // ID-Felder als zusätzliche Properties — populierte Refs
+      // verlieren ihre IDs sonst, und der Client braucht z.B.
+      // `kategorieId` für die "Weitere enttarnte Produkte"-Liste.
+      (productWithDetails as any).kategorieId = refToId(productData.kategorie);
 
       // Resolve related products if available (SKIP for performance in comparison view)
       if (!skipRelatedProducts && productData.relatedProdukte && productData.relatedProdukte.length > 0) {
@@ -1067,11 +1863,18 @@ export class FirestoreService {
         productWithDetails.relatedProdukte = relatedProducts.filter(p => p !== null) as ProductWithDetails[];
       }
 
+      writeCache(markenProduktDetailsCache, cacheKey, productWithDetails);
       return productWithDetails;
-    } catch (error) {
-      console.log('Error fetching brand product details (this is normal if product is in other collection):', error.message);
+    } catch (error: any) {
+      console.log('Error fetching brand product details (this is normal if product is in other collection):', error?.message);
       return null;
+    } finally {
+      markenProduktDetailsInflight.delete(cacheKey);
     }
+    })();
+
+    markenProduktDetailsInflight.set(cacheKey, promise);
+    return promise;
   }
 
   /**
@@ -1083,39 +1886,106 @@ export class FirestoreService {
    * 
    * Always shows: Brand product on top + All related NoName products below
    */
-  static async getProductComparisonData(productId: string, isMarkenProdukt: boolean = false): Promise<{
+  static async getProductComparisonData(
+    productId: string,
+    isMarkenProdukt: boolean = false,
+    callbacks?: {
+      /** Fires after the main brand product's main doc resolves —
+       *  caller can render the hero (name/image/price) right away. */
+      onMainBasic?: (basic: MarkenProduktWithDetails) => void;
+      /** Fires once the main brand product is fully resolved with
+       *  references — caller can render Hersteller chip, pack info,
+       *  pricing-with-grundpreis. */
+      onMainResolved?: (full: MarkenProduktWithDetails) => void;
+    },
+  ): Promise<{
     mainProduct: MarkenProduktWithDetails;
     relatedNoNameProducts: ProductWithDetails[];
     clickedProductId: string;
     clickedWasNoName: boolean;
   } | null> {
-    try {
-      const totalStartTime = Date.now();
-      
-      let result;
-      if (isMarkenProdukt) {
-        // CASE 1: Brand product clicked
-        result = await this.getBrandProductComparison(productId);
-      } else {
-        // CASE 2: NoName product clicked  
-        result = await this.getNoNameProductComparison(productId);
+    const cacheKey = `${productId}:${isMarkenProdukt ? 1 : 0}`;
+
+    const cached = readCache(comparisonCache, cacheKey);
+    // Schema-Check: alte Cache-Einträge ohne `kategorieId` am
+    // mainProduct müssen invalidiert werden — sonst sieht der
+    // Client `mainProduct.kategorieId === undefined` und die
+    // Alternatives-Liste rendert nicht. Nur prüfen wenn das Doc
+    // eine kategorie-Ref hat (sonst ist die ID irrelevant).
+    const cachedSchemaOk =
+      cached === null ||
+      cached == null ||
+      !((cached as any).mainProduct?.kategorie) ||
+      (cached as any).mainProduct?.kategorieId !== undefined;
+    if (cached !== undefined && cachedSchemaOk) {
+      // Replay both staged-load callbacks synchronously so callers
+      // that rely on them keep working with the cached path.
+      if (cached) {
+        if (callbacks?.onMainBasic) {
+          try { callbacks.onMainBasic(cached.mainProduct); } catch {}
+        }
+        if (callbacks?.onMainResolved) {
+          try { callbacks.onMainResolved(cached.mainProduct); } catch {}
+        }
       }
-      
-      const totalEndTime = Date.now();
-      // Total time logged in individual cases
-      
-      return result;
-    } catch (error) {
-      console.error('Error in getProductComparisonData:', error);
-      return null;
+      return cached;
     }
+    if (cached !== undefined && !cachedSchemaOk) {
+      comparisonCache.delete(cacheKey);
+    }
+
+    const inflight = comparisonInflight.get(cacheKey);
+    if (inflight) return inflight;
+
+    const promise = (async () => {
+      try {
+        let result;
+        if (isMarkenProdukt) {
+          // CASE 1: Brand product clicked
+          result = await FirestoreService.getBrandProductComparison(productId, callbacks);
+        } else {
+          // CASE 2: NoName product clicked
+          result = await FirestoreService.getNoNameProductComparison(productId, callbacks);
+        }
+        writeCache(comparisonCache, cacheKey, result);
+        return result;
+      } catch (error) {
+        console.error('Error in getProductComparisonData:', error);
+        return null;
+      } finally {
+        comparisonInflight.delete(cacheKey);
+      }
+    })();
+
+    comparisonInflight.set(cacheKey, promise);
+    return promise;
+  }
+
+  /**
+   * Pre-warm the comparison cache. Call this when the user taps a
+   * product card that routes to the comparison screen, before the
+   * router push, so the destination screen often has data ready on
+   * its first render. See `prefetchProductDetails` for details.
+   */
+  static prefetchComparisonData(productId: string, isMarkenProdukt: boolean): void {
+    if (!productId) return;
+    const cacheKey = `${productId}:${isMarkenProdukt ? 1 : 0}`;
+    if (readCache(comparisonCache, cacheKey) !== undefined) return;
+    if (comparisonInflight.has(cacheKey)) return;
+    void this.getProductComparisonData(productId, isMarkenProdukt);
   }
 
   /**
    * CASE 1: Brand product clicked
    * → Show this brand product + find all NoName products that link to it
    */
-  private static async getBrandProductComparison(brandProductId: string): Promise<{
+  private static async getBrandProductComparison(
+    brandProductId: string,
+    callbacks?: {
+      onMainBasic?: (basic: MarkenProduktWithDetails) => void;
+      onMainResolved?: (full: MarkenProduktWithDetails) => void;
+    },
+  ): Promise<{
     mainProduct: MarkenProduktWithDetails;
     relatedNoNameProducts: ProductWithDetails[];
     clickedProductId: string;
@@ -1124,19 +1994,32 @@ export class FirestoreService {
     try {
       const stepTimes: Record<string, number> = {};
       const totalStartTime = Date.now();
-      
+
       // Get the brand product (skip related products and brands query for performance)
       let lastTime = Date.now();
-      const brandProduct = await this.getMarkenProduktWithDetails(brandProductId, true, true);
+      const brandProduct = await this.getMarkenProduktWithDetails(
+        brandProductId,
+        true,
+        true,
+        callbacks?.onMainBasic,
+      );
       stepTimes['1_getBrandProduct'] = Date.now() - lastTime;
       lastTime = Date.now();
       if (!brandProduct) {
         console.error('❌ Brand product not found:', brandProductId);
         return null;
       }
-      
-      // Found brand product
-      
+
+      // Brand product fully resolved — caller can fill in Hersteller
+      // chip, pack info, etc. before the noname carousel finishes.
+      if (callbacks?.onMainResolved) {
+        try {
+          callbacks.onMainResolved(brandProduct);
+        } catch (e) {
+          console.warn('getBrandProductComparison: onMainResolved threw', e);
+        }
+      }
+
       // Find all NoName products that link to this brand product
       const relatedNoNameProducts = await this.findNoNameProductsByBrandId(brandProductId);
       stepTimes['2_findNoNameProducts'] = Date.now() - lastTime;
@@ -1164,7 +2047,13 @@ export class FirestoreService {
    * CASE 2: NoName product clicked
    * → Get its linked brand product + find all other NoName products linking to same brand
    */
-  private static async getNoNameProductComparison(noNameProductId: string): Promise<{
+  private static async getNoNameProductComparison(
+    noNameProductId: string,
+    callbacks?: {
+      onMainBasic?: (basic: MarkenProduktWithDetails) => void;
+      onMainResolved?: (full: MarkenProduktWithDetails) => void;
+    },
+  ): Promise<{
     mainProduct: MarkenProduktWithDetails;
     relatedNoNameProducts: ProductWithDetails[];
     clickedProductId: string;
@@ -1200,11 +2089,24 @@ export class FirestoreService {
       // 🚀 PARALLEL: Load NoName product details + Brand product simultaneously
       const [noNameProduct, brandProduct] = await Promise.all([
         this.populateProductReferences(rawData, noNameProductId),
-        this.getMarkenProduktWithDetails(markenProduktId, true, true) // skip both for max performance!
+        this.getMarkenProduktWithDetails(
+          markenProduktId,
+          true,
+          true,
+          callbacks?.onMainBasic,
+        ) // skip both for max performance!
       ]);
       stepTimes['2_loadBothProducts'] = Date.now() - lastTime;
       lastTime = Date.now();
-      
+
+      if (brandProduct && callbacks?.onMainResolved) {
+        try {
+          callbacks.onMainResolved(brandProduct);
+        } catch (e) {
+          console.warn('getNoNameProductComparison: onMainResolved threw', e);
+        }
+      }
+
       if (!noNameProduct || !brandProduct) {
         console.error('❌ Failed to load product details');
         return null;
@@ -1333,27 +2235,172 @@ export class FirestoreService {
   static async getMarkenByHersteller(herstellerNewDocRef: DocumentReference): Promise<any[]> {
     try {
       // Suche Marken für Hersteller
-      
+
       // Query alle hersteller Dokumente, die auf diesen hersteller_new zeigen
       const markenQuery = query(
         collection(db, 'hersteller'),
         where('herstellerref', '==', herstellerNewDocRef)
       );
-      
+
       const markenSnapshot = await getDocs(markenQuery);
       const marken: any[] = [];
-      
+
       markenSnapshot.forEach((doc) => {
         marken.push({
           id: doc.id,
           ...doc.data()
         });
       });
-      
-      // Gefundene Marken
-      return marken;
+
+      // Dummy-/Platzhalter-Marken rausfiltern. Konvention im
+      // Datenbestand: Platzhalter werden mit "z - " (z.B. "z - NoName")
+      // benannt, damit sie alphabetisch ans Ende sortieren — die
+      // dürfen nirgends als echte Marke auftauchen. Zusätzlich
+      // exemplarische Generic-Begriffe (NoName / Dummy / Test /
+      // Platzhalter) als Defensive.
+      const isPlaceholder = (b: any): boolean => {
+        const raw = String(b?.name ?? b?.bezeichnung ?? '').trim().toLowerCase();
+        if (!raw) return true;
+        if (raw.startsWith('z - ')) return true;
+        if (raw.startsWith('z-')) return true;
+        if (raw === 'noname' || raw === 'no name') return true;
+        if (raw === 'dummy' || raw === 'test' || raw === 'platzhalter') return true;
+        return false;
+      };
+      return marken.filter((m) => !isPlaceholder(m));
     } catch (error) {
       console.error('❌ Fehler beim Laden der Marken:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Connected Marken eines Herstellers — direkt UND via NoName→
+   * Markenprodukt-Verknüpfung. Wird vom wöchentlichen Cloud-Function-
+   * Aggregator (`cloud-functions/connected-brands-aggregator/`)
+   * pre-computed und unter `aggregates/herstellerBrands_v1/items/
+   * {herstellerNewId}` abgelegt.
+   *
+   * Returnt pro Eintrag: `{ id, name, bild, source: 'direct' |
+   * 'via-markenprodukt' }`.
+   *
+   * Fallback-Logik:
+   *   • Wenn das Aggregate-Doc existiert → nutzen.
+   *   • Wenn nicht (z.B. ganz neuer Hersteller, Aggregator noch nie
+   *     gelaufen) → fallback zu `getMarkenByHersteller` (nur direkte
+   *     Marken). Damit funktioniert die UI auch ohne deployten
+   *     Aggregator weiter, eben mit reduziertem Datenstand.
+   *
+   * 30 Min Cache + Inflight-Dedup pro Hersteller-ID.
+   */
+  /**
+   * Lädt einmalig pro App-Session den kompletten Connected-Brands-
+   * Index (~540 KB, 1 Read). Pro Hersteller-ID kommt der Lookup dann
+   * aus der In-Memory-Map ohne weiteren Roundtrip.
+   */
+  private static async loadConnectedBrandsAll(): Promise<Record<string, any[]>> {
+    if (
+      connectedBrandsAllCache.value &&
+      Date.now() < connectedBrandsAllCache.expiresAt
+    ) {
+      return connectedBrandsAllCache.value;
+    }
+    if (connectedBrandsAllInflight) return connectedBrandsAllInflight;
+
+    connectedBrandsAllInflight = (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'aggregates', 'herstellerBrands_v1'));
+        if (!snap.exists()) {
+          // Aggregat noch nicht vorhanden — leeres Map cachen für 45 s,
+          // damit die App nicht jeden Detail-Aufruf erneut versucht.
+          connectedBrandsAllCache.value = {};
+          connectedBrandsAllCache.expiresAt = Date.now() + 45_000;
+          return {};
+        }
+        const data = snap.data() as any;
+        const byHersteller =
+          data && typeof data.byHersteller === 'object' && data.byHersteller !== null
+            ? (data.byHersteller as Record<string, any[]>)
+            : {};
+        // 30 Min Cache — Aggregat ändert sich wöchentlich, Sessions
+        // sind selten länger als 30 Min.
+        connectedBrandsAllCache.value = byHersteller;
+        connectedBrandsAllCache.expiresAt = Date.now() + TTL_LONG_MS;
+        return byHersteller;
+      } catch (e) {
+        console.warn('loadConnectedBrandsAll failed', e);
+        connectedBrandsAllCache.value = {};
+        connectedBrandsAllCache.expiresAt = Date.now() + 30_000;
+        return {};
+      } finally {
+        connectedBrandsAllInflight = null;
+      }
+    })();
+
+    return connectedBrandsAllInflight;
+  }
+
+  static async getConnectedBrandsForHersteller(
+    herstellerNewRefOrId: DocumentReference | string | null | undefined,
+  ): Promise<Array<{ id: string; name: string; bild: string | null; source: 'direct' | 'via-markenprodukt' }>> {
+    if (!herstellerNewRefOrId) return [];
+
+    // Defensive Extraktion über alle möglichen Ref-Shapes.
+    let herstellerId = '';
+    if (typeof herstellerNewRefOrId === 'string') {
+      herstellerId = herstellerNewRefOrId;
+    } else {
+      const r = herstellerNewRefOrId as any;
+      if (r.id) {
+        herstellerId = r.id;
+      } else if (r.referencePath) {
+        const parts = String(r.referencePath).split('/');
+        herstellerId = parts[parts.length - 1] || '';
+      } else if (r._path?.segments && Array.isArray(r._path.segments)) {
+        const segs = r._path.segments;
+        herstellerId = segs[segs.length - 1] || '';
+      } else if (r.path) {
+        const parts = String(r.path).split('/');
+        herstellerId = parts[parts.length - 1] || '';
+      }
+    }
+    if (!herstellerId) return [];
+
+    try {
+      const all = await this.loadConnectedBrandsAll();
+      const list = all[herstellerId];
+      if (Array.isArray(list)) {
+        // Defensive Normalisierung — falls jemand mal das Doc-Format
+        // hand-editiert.
+        return list
+          .filter((b: any) => b?.id && b?.name)
+          .map((b: any) => ({
+            id: String(b.id),
+            name: String(b.name),
+            bild: b.bild ?? null,
+            source:
+              b.source === 'via-markenprodukt' ? 'via-markenprodukt' : 'direct',
+          }));
+      }
+
+      // Hersteller nicht im Aggregat → Fallback auf direkte Marken-
+      // Query. Tritt nur für ganz neue Hersteller auf, die nach dem
+      // letzten Aggregator-Lauf erstellt wurden.
+      const refForFallback =
+        typeof herstellerNewRefOrId === 'string'
+          ? doc(db, 'hersteller_new', herstellerNewRefOrId)
+          : (herstellerNewRefOrId as DocumentReference);
+      const direct = await this.getMarkenByHersteller(refForFallback);
+      return (direct || [])
+        .filter((b: any) => b?.id && (b?.name || b?.bezeichnung))
+        .map((b: any) => ({
+          id: String(b.id),
+          name: String(b.name ?? b.bezeichnung),
+          bild: b.bild ?? null,
+          source: 'direct' as const,
+        }));
+    } catch (e) {
+      console.warn('getConnectedBrandsForHersteller failed', e);
       return [];
     }
   }
@@ -1676,6 +2723,326 @@ export class FirestoreService {
   /**
    * Lädt alle Bewertungen für ein Produkt aus der productRatings Collection
    */
+  /**
+   * Liefert die Top-N am besten bewerteten Produkte.
+   *
+   * `windowDays`:
+   *   - `undefined` → Overall (alle Bewertungen, keine Datums-Filter)
+   *   - `30`        → nur Bewertungen der letzten 30 Tage
+   *   - andere Zahl → entsprechendes Tagesfenster
+   *
+   * Aggregation:
+   *   1. Bewertungen aus `productRatings` lesen (mit/ohne Date-Filter).
+   *   2. Pro Produkt-Referenz (NoName ODER Marke) avgRating, count
+   *      und commentCount berechnen, plus den jüngsten Kommentar
+   *      mit Inhalt (für die Vorschau-Card auf Home).
+   *   3. Filter auf Produkte mit mindestens 1 Kommentar — sonst
+   *      reißt die Liste optisch auseinander, weil die Card eine
+   *      Kommentar-Vorschau zeigt.
+   *   4. Combined-Score sortieren: Bayesian-Avg × log10(1 + count
+   *      + 2 × commentCount). Verhindert Outlier UND zieht
+   *      diskussionsfreudige Produkte nach oben.
+   *   5. Top-N Produkte einzeln nachladen.
+   *
+   * Kosten-Profil: 1 collection-Query (mit/ohne Date-Filter) + N
+   * parallele getDoc Calls (default 10). Cached 3 Min pro Window.
+   * Overall ist auf <30 Tage Tagesbewertungen-Volumen vergleichbar,
+   * solange die App nicht extrem viele Ratings akkumuliert; ab
+   * ~5k+ Ratings gesamt sollten wir auf einen Cloud-Function-
+   * Aggregator wechseln (siehe CLAUDE.md "Cost-conscious data").
+   *
+   * Rückgabe-Shape pro Eintrag:
+   *   { id, type: 'noname' | 'marken', product (Doc-Daten),
+   *     avgRating, ratingCount, commentCount, latestComment,
+   *     latestRating }
+   */
+  /**
+   * Liest die drei Home-Top-Produkt-Listen aus dem
+   * Cloud-Function-pre-computed Aggregat-Doc:
+   *   • Top 10 overall (Bewertungen, Bayesian-gerankt)
+   *   • Top 10 letzter Monat (Bewertungen, gleiche Logik, 30-Tage-Filter)
+   *   • Top 10 meist aufgerufen (Journey-Sessions letzte 30 Tage)
+   *
+   * 1 Firestore-Read pro App-Session. 30-Min In-Memory-Cache.
+   * Aggregator-Doc wird wöchentlich vom `top-products-aggregator`
+   * Cloud-Function befüllt.
+   *
+   * Pro Eintrag wird das vollständige Render-Shape geliefert
+   * (Bild, Preis, Stufe, Brand-/Markt-/Hersteller-Joins) — keine
+   * weiteren Reads nötig.
+   */
+  static async getTopProducts(): Promise<{
+    overall: any[];
+    monthly: any[];
+    mostViewed: any[];
+    updatedAt: Date | null;
+  }> {
+    if (
+      topProductsAggregateCache.value &&
+      Date.now() < topProductsAggregateCache.expiresAt
+    ) {
+      return topProductsAggregateCache.value;
+    }
+    if (topProductsAggregateInflight) return topProductsAggregateInflight;
+
+    topProductsAggregateInflight = (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'aggregates', 'topProducts_v1'));
+        const empty = { overall: [], monthly: [], mostViewed: [], updatedAt: null };
+        if (!snap.exists()) {
+          // Aggregat noch nicht da (Erst-Deploy, neue Installation)
+          // — leer cachen für 1 Min, danach erneut probieren.
+          topProductsAggregateCache.value = empty;
+          topProductsAggregateCache.expiresAt = Date.now() + 60_000;
+          return empty;
+        }
+        const data = snap.data() as any;
+        const result = {
+          overall: Array.isArray(data?.overall) ? data.overall : [],
+          monthly: Array.isArray(data?.monthly) ? data.monthly : [],
+          mostViewed: Array.isArray(data?.mostViewed) ? data.mostViewed : [],
+          updatedAt:
+            data?.updatedAt?.toDate?.() ?? null,
+        };
+        topProductsAggregateCache.value = result;
+        topProductsAggregateCache.expiresAt = Date.now() + TTL_LONG_MS;
+        return result;
+      } catch (e) {
+        console.warn('getTopProducts failed', e);
+        const empty = { overall: [], monthly: [], mostViewed: [], updatedAt: null };
+        topProductsAggregateCache.value = empty;
+        topProductsAggregateCache.expiresAt = Date.now() + 30_000;
+        return empty;
+      } finally {
+        topProductsAggregateInflight = null;
+      }
+    })();
+
+    return topProductsAggregateInflight;
+  }
+
+  static async getTopRatedProducts(
+    limit: number = 10,
+    windowDays?: number,
+  ): Promise<Array<{
+    id: string;
+    type: 'noname' | 'marken';
+    product: any;
+    avgRating: number;
+    ratingCount: number;
+    commentCount: number;
+    latestComment: string | null;
+    latestRating: number | null;
+    brandName: string | null;
+    brandLogoUri: string | null;
+    marketName: string | null;
+    marketCountry: string | null;
+    marketLogoUri: string | null;
+    herstellerName: string | null;
+    herstellerLogoUri: string | null;
+  }>> {
+    const cacheKey = `top-rated:${limit}:${windowDays ?? 'all'}`;
+    const cached = readCache(topRatedCache, cacheKey) as any[] | null | undefined;
+    if (cached) return cached as any;
+    const inflight = topRatedInflight.get(cacheKey);
+    if (inflight) return inflight as any;
+
+    const promise = (async () => {
+      try {
+        const ratingsCollection = collection(db, 'productRatings');
+
+        // Single Query — entweder alle Bewertungen oder die der
+        // letzten N Tage. Wir sortieren NICHT serverseitig nach
+        // Rating (würde teuren composite index erfordern); die
+        // Aggregation ist client-seitig billig genug.
+        const q = windowDays
+          ? (() => {
+              const cutoff = new Date();
+              cutoff.setDate(cutoff.getDate() - windowDays);
+              return query(
+                ratingsCollection,
+                where('ratedate', '>=', Timestamp.fromDate(cutoff)),
+              );
+            })()
+          : query(ratingsCollection);
+        const snap = await getDocs(q);
+
+        // Aggregation: Map<productKey, AggData>. Key = "noname:<id>"
+        // oder "marken:<id>", damit NoName- und Markenprodukte
+        // getrennt aggregiert werden. `commentCount` zählt nur die
+        // Bewertungen MIT Text — die Karte zeigt einen Kommentar-
+        // Excerpt, also fließt das auch ins Ranking ein, damit
+        // diskussionsfreudige Produkte oben landen.
+        type Agg = {
+          id: string;
+          type: 'noname' | 'marken';
+          sum: number;
+          count: number;
+          commentCount: number;
+          latestComment: string | null;
+          latestRating: number | null;
+          latestTs: number;
+        };
+        const aggMap = new Map<string, Agg>();
+        snap.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          const productRef = data.productID || data.brandProductID;
+          if (!productRef || typeof productRef !== 'object') return;
+          const isNoName = !!data.productID;
+          const productId: string = productRef.id;
+          if (!productId) return;
+          const overall = Number(data.ratingOverall) || 0;
+          if (overall <= 0) return;
+          const key = `${isNoName ? 'noname' : 'marken'}:${productId}`;
+          const ts = data.ratedate?.toDate?.()?.getTime?.() ?? 0;
+          const comment = (data.comment ?? '').toString().trim();
+          const hasComment = comment.length > 0;
+
+          const existing = aggMap.get(key);
+          if (existing) {
+            existing.sum += overall;
+            existing.count += 1;
+            if (hasComment) existing.commentCount += 1;
+            if (hasComment && ts > existing.latestTs) {
+              existing.latestComment = comment;
+              existing.latestRating = overall;
+              existing.latestTs = ts;
+            }
+          } else {
+            aggMap.set(key, {
+              id: productId,
+              type: isNoName ? 'noname' : 'marken',
+              sum: overall,
+              count: 1,
+              commentCount: hasComment ? 1 : 0,
+              latestComment: comment || null,
+              latestRating: hasComment ? overall : null,
+              latestTs: hasComment ? ts : 0,
+            });
+          }
+        });
+
+        // Nur Produkte mit mindestens einem Kommentar — die Card zeigt
+        // einen Kommentar-Excerpt, also würden Karten ohne Kommentar
+        // visuell deutlich kürzer sein und die Liste optisch zerreißen.
+        // Außerdem ist ein Bewertungstext oft aussagekräftiger als
+        // eine reine Sterne-Wertung.
+        const itemsWithComment = Array.from(aggMap.values()).filter(
+          (a) => a.commentCount > 0,
+        );
+        if (itemsWithComment.length === 0) {
+          writeCache(topRatedCache, cacheKey, [], TTL_SHORT_MS);
+          return [];
+        }
+
+        // Combined-Score:
+        //   1. Bayesian-Avg: avg' = (C × m + R × n) / (C + n)
+        //      → dämpft Outlier mit wenigen Bewertungen.
+        //      C = 3 (Confidence-Threshold), m = globaler Durchschnitt,
+        //      n = ratingCount, R = sum.
+        //   2. Multiplier auf Basis von `count` UND `commentCount`:
+        //      score = bayesian × log10(1 + count + 2 × commentCount)
+        //      → Produkte mit mehr Bewertungen UND mehr Kommentaren
+        //        rutschen nach oben; Kommentare doppelt gewichtet
+        //        weil sie aufwendiger sind als reine Sterne-Vergaben.
+        //      Logarithmus, damit ein Produkt mit 50 Bewertungen
+        //      nicht 50× mehr "wert" ist als eines mit einer.
+        const C = 3;
+        const totalSum = itemsWithComment.reduce((s, a) => s + a.sum, 0);
+        const totalCount = itemsWithComment.reduce((s, a) => s + a.count, 0);
+        const m = totalCount > 0 ? totalSum / totalCount : 0;
+        const ranked = itemsWithComment
+          .map((a) => {
+            const rawAvg = a.sum / a.count;
+            const bayesian = (C * m + a.sum) / (C + a.count);
+            const engagement = Math.log10(1 + a.count + 2 * a.commentCount);
+            const score = bayesian * engagement;
+            return { agg: a, rawAvg, score };
+          })
+          .sort((a, b) => b.score - a.score)
+          .slice(0, limit);
+
+        // Produkt-Daten parallel nachladen — inkl. der typischen
+        // Joins (Markt/Hersteller/Handelsmarke), die die Card auf
+        // Home später anzeigen will. Alle Reference-Lookups gehen
+        // über `getDocumentByReference`, der einen 30-Min-Cache hat
+        // → die meisten Calls sind Cache-Hits.
+        const enriched = await Promise.all(
+          ranked.map(async ({ agg, rawAvg }) => {
+            try {
+              const collectionName = agg.type === 'noname' ? 'produkte' : 'markenProdukte';
+              const productSnap = await getDoc(doc(db, collectionName, agg.id));
+              if (!productSnap.exists()) return null;
+              const product = { id: productSnap.id, ...(productSnap.data() as any) };
+
+              // Joins parallel: Marke/Handelsmarke, Markt, Hersteller.
+              // Defensives optional chaining — Refs können fehlen.
+              const [brandJoin, marketJoin, herstellerJoin] = await Promise.all([
+                agg.type === 'noname' && product.handelsmarke
+                  ? this.getDocumentByReference<any>(product.handelsmarke).catch(() => null)
+                  : Promise.resolve(null),
+                agg.type === 'noname' && product.discounter
+                  ? this.getDocumentByReference<any>(product.discounter).catch(() => null)
+                  : Promise.resolve(null),
+                agg.type === 'marken' && product.hersteller
+                  ? this.getDocumentByReference<any>(product.hersteller).catch(() => null)
+                  : Promise.resolve(null),
+              ]);
+
+              return {
+                id: agg.id,
+                type: agg.type,
+                product,
+                avgRating: Math.round(rawAvg * 10) / 10,
+                ratingCount: agg.count,
+                commentCount: agg.commentCount,
+                latestComment: agg.latestComment,
+                latestRating: agg.latestRating,
+                // Join-Daten — die Card pickt sich raus was sie braucht.
+                brandName:
+                  (brandJoin as any)?.bezeichnung ?? (brandJoin as any)?.name ?? null,
+                brandLogoUri: (brandJoin as any)?.bild ?? null,
+                marketName: (marketJoin as any)?.name ?? null,
+                marketCountry: (marketJoin as any)?.land ?? null,
+                marketLogoUri: (marketJoin as any)?.bild ?? null,
+                herstellerName:
+                  (herstellerJoin as any)?.name ??
+                  (herstellerJoin as any)?.herstellername ??
+                  null,
+                herstellerLogoUri: (herstellerJoin as any)?.bild ?? null,
+              };
+            } catch (e) {
+              console.warn('getTopRatedProducts: product fetch failed', agg.id, e);
+              return null;
+            }
+          }),
+        );
+
+        const result = enriched.filter((x): x is NonNullable<typeof x> => !!x);
+        writeCache(topRatedCache, cacheKey, result, TTL_SHORT_MS);
+        return result;
+      } catch (error) {
+        console.error('Error loading top rated products:', error);
+        throw error;
+      } finally {
+        topRatedInflight.delete(cacheKey);
+      }
+    })();
+
+    topRatedInflight.set(cacheKey, promise);
+    return promise as any;
+  }
+
+  /**
+   * Convenience-Wrapper: Top-N am besten bewerteten Produkte der
+   * letzten 30 Tage. Reicht direkt an `getTopRatedProducts` durch.
+   * Bestand vor der Generalisierung — bleibt erhalten, damit
+   * existierende Aufrufer (Home) ohne Anpassung weiter laufen.
+   */
+  static async getTopRatedProductsLastMonth(limit: number = 10) {
+    return this.getTopRatedProducts(limit, 30);
+  }
+
   static async getProductRatings(productId: string, isNoNameProduct: boolean = true): Promise<any[]> {
     try {
       console.log('📊 Loading ratings for product:', productId, 'IsNoName:', isNoNameProduct);
@@ -1878,7 +3245,7 @@ export class FirestoreService {
    */
   static async addProductRating(ratingData: {
     productID: string | null;           // NoName product ID
-    brandProductID: string | null;      // Brand product ID  
+    brandProductID: string | null;      // Brand product ID
     userID: string;                     // User ID
     ratingOverall: number;              // 1-5 Gesamtbewertung (Pflicht)
     ratingPriceValue?: number | null;   // 1-5 Preis-Leistung (Optional)
@@ -1891,7 +3258,7 @@ export class FirestoreService {
   }): Promise<string> {
     try {
       console.log('💾 Saving product rating to Firestore:', ratingData);
-      
+
       // Validate required fields
       if (!ratingData.userID) {
         throw new Error('userID is required');
@@ -1901,6 +3268,51 @@ export class FirestoreService {
       }
       if (!ratingData.productID && !ratingData.brandProductID) {
         throw new Error('Either productID or brandProductID must be provided');
+      }
+
+      // 🛡️ One-rating-per-user-per-product enforcement.
+      //
+      // User-Bug-Report (alte Version vor UI-Refactor):
+      // anonyme User konnten via Submit-Spam unbegrenzt viele
+      // productRatings-Docs für dasselbe Produkt erzeugen — unter
+      // anderem weil das UI die Submit-Action nicht mit einem
+      // Has-User-Already-Rated-Check gegated hat. Vor dem Insert
+      // schauen wir jetzt nach einer bestehenden Bewertung dieses
+      // Users für dieses Produkt; wenn vorhanden, wird sie
+      // ge-updated statt eine zweite parallel anzulegen.
+      const productKeyId = ratingData.productID || ratingData.brandProductID!;
+      const isNoName = !!ratingData.productID;
+      try {
+        const existing = await this.getUserRatingForProduct(
+          ratingData.userID,
+          productKeyId,
+          isNoName,
+        );
+        if (existing?.id) {
+          console.log(
+            '↩️ addProductRating: existing rating gefunden — updating statt inserting',
+            existing.id,
+          );
+          await this.updateProductRating(existing.id, {
+            ratingOverall: ratingData.ratingOverall,
+            ratingPriceValue: ratingData.ratingPriceValue ?? null,
+            ratingTasteFunction: ratingData.ratingTasteFunction ?? null,
+            ratingSimilarity: ratingData.ratingSimilarity ?? null,
+            ratingContent: ratingData.ratingContent ?? null,
+            comment: ratingData.comment ?? null,
+            updatedate: ratingData.updatedate,
+          });
+          return existing.id;
+        }
+      } catch (err) {
+        // Wenn der Existing-Check fehlschlägt (Network-Glitch),
+        // fallen wir defensiv auf den klassischen Insert-Pfad
+        // zurück — schlechter als Update, aber besser als gar keine
+        // Bewertung.
+        console.warn(
+          'addProductRating: existing-rating check failed, fallback to insert',
+          err,
+        );
       }
 
       // Create product references if IDs are provided
@@ -1926,10 +3338,10 @@ export class FirestoreService {
 
       // Add to productRatings collection
       const docRef = await addDoc(collection(db, 'productRatings'), firestoreData);
-      
+
       console.log('✅ Product rating saved with ID:', docRef.id);
       return docRef.id;
-      
+
     } catch (error) {
       console.error('Error adding product rating:', error);
       throw error;
@@ -1974,8 +3386,11 @@ export class FirestoreService {
     customItem: {
       name: string;
       type: 'brand' | 'noname';
+      icon?: string;
       marketId?: string;
       marketName?: string;
+      marketLand?: string;
+      marketBild?: string;
     }
   ): Promise<string> {
     try {
@@ -2126,6 +3541,53 @@ export class FirestoreService {
     } catch (error) {
       console.error('Error checking shopping cart:', error);
       return false;
+    }
+  }
+
+  /**
+   * Entfernt alle (offenen) Einträge eines Produkts aus dem
+   * Einkaufszettel. Convenience-Wrapper über `removeFromShoppingCart`,
+   * sodass Aufrufer nur Produkt-ID + Typ kennen müssen, nicht die
+   * intern generierte cart-item-ID. Findet das passende Doc per
+   * Reference-Query (`markenProdukt` / `handelsmarkenProdukt`) und
+   * löscht es. Falls mehrere offene Einträge desselben Produkts
+   * existieren (sollte nicht passieren, kann aber durch
+   * Race-Conditions entstehen), werden alle entfernt.
+   */
+  static async removeFromShoppingCartByProductId(
+    userId: string,
+    productId: string,
+    isMarke: boolean,
+  ): Promise<number> {
+    try {
+      const userRef = doc(db, 'users', userId);
+      const productRef = isMarke
+        ? doc(db, 'markenProdukte', productId)
+        : doc(db, 'produkte', productId);
+      const refField = isMarke ? 'markenProdukt' : 'handelsmarkenProdukt';
+      const q = query(
+        collection(userRef, 'einkaufswagen'),
+        where(refField, '==', productRef),
+        where('gekauft', '==', false),
+      );
+      const snap = await getDocs(q);
+      if (snap.empty) return 0;
+      // Sequenziell löschen (kleine Liste, sollte fast immer 1 sein).
+      // `removeFromShoppingCart` triggered Journey-Tracking +
+      // Achievement-Logik korrekt — nutzen wir hier auch.
+      let removed = 0;
+      for (const docSnap of snap.docs) {
+        try {
+          await this.removeFromShoppingCart(userId, docSnap.id);
+          removed += 1;
+        } catch (e) {
+          console.warn('removeFromShoppingCartByProductId: single delete failed', e);
+        }
+      }
+      return removed;
+    } catch (error) {
+      console.error('Error removing by product id from cart:', error);
+      throw error;
     }
   }
 

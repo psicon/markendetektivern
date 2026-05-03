@@ -223,6 +223,15 @@ class JourneyTrackingService {
   private backgroundTimeout: NodeJS.Timeout | null = null;
   private readonly JOURNEY_SESSION_KEY = 'active_journey_id';
   private isLoadingJourney: boolean = false; // NEU: Verhindert Race Conditions
+  // Welchem User gehört die aktuell im Memory liegende Journey? Wird in
+  // startJourney + loadActiveJourney gesetzt, in completeJourney
+  // gelöscht. Wenn sich der User mitten in der Session ändert (Logout
+  // → Anon-Login, Onboarding-Abschluss mit Account-Upgrade etc.) und
+  // anschließend ein persist-Call mit einer ANDEREN userId reinkommt,
+  // erkennen wir das hier und resetten die Journey, statt einen
+  // updateDoc auf den alten firestoreDocId im neuen User-Pfad zu
+  // versuchen (würde "No document to update" werfen).
+  private currentJourneyUserId: string | null = null;
 
   static getInstance(): JourneyTrackingService {
     if (!JourneyTrackingService.instance) {
@@ -302,19 +311,38 @@ class JourneyTrackingService {
    */
   private async updateJourneyStatus(status: string, userId: string): Promise<void> {
     if (!this.currentJourney || !this.currentJourney.firestoreDocId) return;
-    
+    // Owner-Mismatch: Status-Update einer Fremd-User-Journey darf
+    // nicht in den neuen User-Pfad geschrieben werden. Stillschweigend
+    // droppen — die richtige Journey wird kurz darauf via
+    // loadActiveJourney(neueUid) aufgebaut.
+    if (
+      this.currentJourneyUserId &&
+      this.currentJourneyUserId !== userId
+    ) {
+      return;
+    }
+
     try {
       const { doc, updateDoc, serverTimestamp, collection } = await import('firebase/firestore');
       const userJourneysRef = collection(db, 'users', userId, 'journeys');
       const docRef = doc(userJourneysRef, this.currentJourney.firestoreDocId);
-      
+
       await updateDoc(docRef, {
         status: status,
         lastUpdated: serverTimestamp()
       });
-      
+
       console.log(`📝 Journey Status updated to: ${status}`);
-    } catch (error) {
+    } catch (error: any) {
+      // "not-found" kann beim Logout-Race auftreten — kein Error,
+      // der NÄCHSTE persist-Call legt das Doc neu an.
+      const code = error?.code || '';
+      const msg = String(error?.message || '');
+      const isNotFound =
+        code === 'not-found' ||
+        code === 'firestore/not-found' ||
+        msg.includes('No document to update');
+      if (isNotFound) return;
       console.error('❌ Error updating journey status:', error);
     }
   }
@@ -357,9 +385,17 @@ class JourneyTrackingService {
       console.log('⏳ Journey wird bereits geladen - überspringe');
       return;
     }
-    
+
+    // Hard guard: missing or empty userId means no journey to load.
+    // Without this, downstream Firestore calls can throw on undefined
+    // collection paths and the error bubbles up via the analytics
+    // chain into the UI's tap handlers.
+    if (!userId || typeof userId !== 'string') {
+      return;
+    }
+
     this.isLoadingJourney = true;
-    
+
     try {
       // Suche nach aktiver Journey
       const { getDocs, query, where, orderBy, limit, Timestamp } = await import('firebase/firestore');
@@ -394,6 +430,11 @@ class JourneyTrackingService {
           persistedToFirestore: true,
           firestoreDocId: journeyDoc.id
         };
+        // Journey gehört zum geladenen User — Owner registrieren, damit
+        // ein späterer persist-Call mit anderer uid (Logout-/Onboarding-
+        // Race) die stale firestoreDocId nicht in den falschen User-
+        // Pfad schreibt.
+        this.currentJourneyUserId = userId;
         
         // Stelle sicher, dass alle Arrays initialisiert sind (für ältere Journeys)
         if (!this.currentJourney.viewedProducts) this.currentJourney.viewedProducts = [];
@@ -460,6 +501,10 @@ class JourneyTrackingService {
       viewedProducts: [],
       converted: [] // NEU: Initialisiere converted Array
     };
+    // Journey gehört dem User, der startJourney aufgerufen hat. Ohne
+    // userId bleibt der Owner null — ein späterer persist-Call mit
+    // userId trägt sich dann beim ersten addDoc ein.
+    this.currentJourneyUserId = userId ?? null;
 
     // NEU: Location asynchron hinzufügen (non-blocking)
     this.addLocationToJourney(userId);
@@ -553,61 +598,105 @@ class JourneyTrackingService {
     position?: number,
     userId?: string
   ): void {
-    if (!this.currentJourney) {
-      // Keine aktive Journey - starte eine neue
-      this.startJourney('browse', 'unknown', undefined, userId);
-    }
+    // CRITICAL: Tracking is fire-and-forget — it MUST never crash the
+    // UI. The whole body is wrapped in try/catch because any thrown
+    // error here propagates up through `openProduct` → tap-handler
+    // → user sees a redbox. Hermes' source-map can also report a
+    // misaligned line/column when a deep call chain throws, so even
+    // a "shouldn't happen" code path needs to be caught here.
+    try {
+      if (!this.currentJourney) {
+        // Keine aktive Journey - starte eine neue
+        this.startJourney('browse', 'unknown', undefined, userId);
+      }
+      // Fail-safe: if startJourney didn't actually create one (e.g.
+      // because some side-effect rejected) just bail out — the UI
+      // navigation has already happened, journey-data is optional.
+      if (!this.currentJourney) return;
 
-    // IMMER neuen Eintrag erstellen - jeder View ist ein separater Eintrag
-    // Dies ermöglicht es, das gleiche Produkt mehrmals in einer Journey zu tracken
+      // Defensive: viewedProducts MUST be an array. Older Firestore
+      // journeys (pre-schema-v2) sometimes lack this field, and the
+      // restore path at `loadActiveJourney` does a `|| []` BUT a
+      // race could still leave it undefined.
+      if (!Array.isArray(this.currentJourney.viewedProducts)) {
+        this.currentJourney.viewedProducts = [];
+      }
+      const safeProductName =
+        typeof productName === 'string' && productName ? productName : 'Produkt';
+
+      // IMMER neuen Eintrag erstellen - jeder View ist ein separater Eintrag
+      // Dies ermöglicht es, das gleiche Produkt mehrmals in einer Journey zu tracken
       const newProduct: any = {
         productId,
         productType,
-        productName,
+        productName: safeProductName,
         timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
-        fromScreen: this.currentJourney!.screenName,
+        fromScreen: this.currentJourney.screenName,
         discoveryContext: {
-          method: this.currentJourney!.discoveryMethod
+          method: this.currentJourney.discoveryMethod,
         },
-        actions: [{
-          timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
-          type: 'viewed' as const,
-          // NEU: Produkt-Details direkt in der Action
-          productId: productId,
-          productName: productName,
-          productType: productType,
-          productRef: doc(db, productType === 'brand' ? 'markenProdukte' : 'produkte', productId),
-          fromScreen: this.currentJourney!.screenName,
-          fromFilters: JSON.parse(JSON.stringify(this.currentJourney!.activeFilters || {})),
-          motivation: this.calculateActionMotivation({ type: 'viewed' }, this.currentJourney!.activeFilters)
-        }],
+        actions: [
+          {
+            timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
+            type: 'viewed' as const,
+            // NEU: Produkt-Details direkt in der Action
+            productId: productId,
+            productName: safeProductName,
+            productType: productType,
+            productRef: doc(
+              db,
+              productType === 'brand' ? 'markenProdukte' : 'produkte',
+              productId,
+            ),
+            fromScreen: this.currentJourney.screenName,
+            fromFilters: JSON.parse(
+              JSON.stringify(this.currentJourney.activeFilters || {}),
+            ),
+            motivation: this.calculateActionMotivation(
+              { type: 'viewed' },
+              this.currentJourney.activeFilters,
+            ),
+          },
+        ],
         // finalStatus wird aus actions[] abgeleitet
       };
-      
+
       // Optional fields
       if (position !== undefined && position !== null) {
         newProduct.position = position;
       }
-      
+
       // Discovery context optional fields
-      if (this.currentJourney!.activeFilters?.searchQuery) {
-        newProduct.discoveryContext.searchQuery = this.currentJourney!.activeFilters.searchQuery;
+      if (this.currentJourney.activeFilters?.searchQuery) {
+        newProduct.discoveryContext.searchQuery =
+          this.currentJourney.activeFilters.searchQuery;
       }
-      if (this.currentJourney!.activeFilters && Object.keys(this.currentJourney!.activeFilters).length > 0) {
-        newProduct.discoveryContext.activeFiltersSnapshot = JSON.parse(JSON.stringify(this.currentJourney!.activeFilters));
+      if (
+        this.currentJourney.activeFilters &&
+        Object.keys(this.currentJourney.activeFilters).length > 0
+      ) {
+        newProduct.discoveryContext.activeFiltersSnapshot = JSON.parse(
+          JSON.stringify(this.currentJourney.activeFilters),
+        );
       }
-      this.currentJourney!.viewedProducts.push(newProduct);
+      this.currentJourney.viewedProducts.push(newProduct);
 
-    console.log(`👁️ Product View: ${productName.substring(0, 30)}... (Journey: ${this.currentJourney!.discoveryMethod})`);
+      console.log(
+        `👁️ Product View: ${safeProductName.substring(0, 30)}... (Journey: ${this.currentJourney.discoveryMethod})`,
+      );
 
-    // Track zu GA4 mit Journey-Context
-    analyticsService.trackProductView(productId, productType, undefined, {
-      journey_id: this.currentJourney!.journeyId,
-      discovery_method: this.currentJourney!.discoveryMethod,
-      active_filters: this.currentJourney!.activeFilters,
-      position_in_journey: this.currentJourney!.viewedProducts.length,
-      journey_duration_ms: Date.now() - this.currentJourney!.startTime
-    });
+      // Track zu GA4 mit Journey-Context
+      analyticsService.trackProductView(productId, productType, undefined, {
+        journey_id: this.currentJourney.journeyId,
+        discovery_method: this.currentJourney.discoveryMethod,
+        active_filters: this.currentJourney.activeFilters,
+        position_in_journey: this.currentJourney.viewedProducts.length,
+        journey_duration_ms: Date.now() - this.currentJourney.startTime,
+      });
+    } catch (err) {
+      // Never let analytics break navigation. Log + carry on.
+      console.warn('journeyTrackingService.trackProductView failed', err);
+    }
   }
 
   /**
@@ -1306,9 +1395,10 @@ class JourneyTrackingService {
 
     // Final Firestore Update - speichere Journey-Referenz VOR dem Cleanup
     const journeyToFinalize = this.currentJourney;
-    
+
     // Cleanup ZUERST (damit keine neuen Events mehr kommen)
     this.currentJourney = null;
+    this.currentJourneyUserId = null;
     if (this.journeyTimeout) {
       clearTimeout(this.journeyTimeout);
       this.journeyTimeout = null;
@@ -1383,12 +1473,37 @@ class JourneyTrackingService {
       console.warn('⚠️ No current journey to persist');
       return;
     }
-    
+
     if (!userId) {
       console.error('❌ No userId provided for journey persistence!');
       return;
     }
-    
+
+    // Owner-Mismatch — der User hat sich seit Journey-Start geändert
+    // (Logout-→-Anon-Login, Onboarding-Account-Upgrade, etc.). Die
+    // im Memory liegende Journey gehört zu einem ANDEREN User-Pfad.
+    // Wir würden sonst entweder updateDoc auf einen nicht existieren-
+    // den Pfad feuern (→ "No document to update") oder die alten
+    // Daten in das neue User-Doc schreiben (→ Datenintegrität kaputt).
+    // Stattdessen: Memory verwerfen und stillschweigend abbrechen —
+    // der nächste loadActiveJourney-Aufruf vom AnalyticsProvider
+    // (useEffect auf user.uid) lädt/startet eine frische Journey
+    // für den neuen User.
+    if (
+      this.currentJourneyUserId &&
+      this.currentJourneyUserId !== userId
+    ) {
+      console.log(
+        `🔁 Journey-Owner-Wechsel erkannt (${this.currentJourneyUserId} → ${userId}), resette In-Memory-Journey`,
+      );
+      this.currentJourney = null;
+      this.currentJourneyUserId = null;
+      if (this.journeyTimeout) {
+        clearTimeout(this.journeyTimeout);
+        this.journeyTimeout = null;
+      }
+      return;
+    }
 
     try {
       // Bereite Journey-Daten vor und entferne undefined Werte
@@ -1568,27 +1683,55 @@ class JourneyTrackingService {
       if (!journey.firestoreDocId) {
         // Neue Journey erstellen
         const docRef = await addDoc(userJourneysRef, cleanedJourneyData);
-        
+
         // Update currentJourney nur wenn sie noch existiert
         if (this.currentJourney && this.currentJourney.journeyId === journey.journeyId) {
           this.currentJourney.firestoreDocId = docRef.id;
           this.currentJourney.persistedToFirestore = true;
+          // Owner mit übernehmen, falls startJourney() ohne userId
+          // aufgerufen wurde und der Owner erst beim ersten persist
+          // bekannt wird.
+          if (!this.currentJourneyUserId) {
+            this.currentJourneyUserId = userId;
+          }
         }
-        
+
         console.log(`💾 Journey persisted to Firestore: ${docRef.id}`);
       } else {
         // Bestehende Journey updaten
         const docRef = doc(userJourneysRef, journey.firestoreDocId);
-        await updateDoc(docRef, cleanedJourneyData);
-        
-        console.log(`💾 Journey updated in Firestore: ${journey.firestoreDocId}`);
-      }
-      
-    } catch (error) { 
-      console.error('❌ Error persisting journey to Firestore:', error);
+        try {
+          await updateDoc(docRef, cleanedJourneyData);
+          console.log(`💾 Journey updated in Firestore: ${journey.firestoreDocId}`);
+        } catch (updateErr: any) {
+          // Self-Healing: Wenn das Ziel-Doc nicht (mehr) existiert
+          // (z. B. weil es manuell gelöscht oder durch eine ältere
+          // Version geblieben ist), legen wir es als neues Doc an
+          // statt den Fehler nach oben zu propagieren. Damit ist die
+          // Funktion idempotent und Logout-/Onboarding-Races werfen
+          // keinen sichtbaren Error mehr.
+          const code = updateErr?.code || '';
+          const msg = String(updateErr?.message || '');
+          const isNotFound =
+            code === 'not-found' ||
+            code === 'firestore/not-found' ||
+            msg.includes('No document to update');
+          if (!isNotFound) throw updateErr;
 
-    
-      
+          console.warn(
+            `🩹 Journey-Doc ${journey.firestoreDocId} fehlt im Pfad — lege neu an statt updateDoc`,
+          );
+          const newRef = await addDoc(userJourneysRef, cleanedJourneyData);
+          if (this.currentJourney && this.currentJourney.journeyId === journey.journeyId) {
+            this.currentJourney.firestoreDocId = newRef.id;
+            this.currentJourney.persistedToFirestore = true;
+          }
+          console.log(`💾 Journey neu persisted to Firestore: ${newRef.id}`);
+        }
+      }
+
+    } catch (error) {
+      console.error('❌ Error persisting journey to Firestore:', error);
       throw error;
     }
   }
@@ -1600,12 +1743,23 @@ class JourneyTrackingService {
     const journeyToFinalize = journey || this.currentJourney;
     if (!journeyToFinalize) return;
 
+    // Wenn die Journey zu einem ANDEREN User gehört (Logout-Race),
+    // diesen Finalize-Call schweigend droppen — sonst würden wir den
+    // Endzustand der alten Journey ins neue User-Profil schreiben.
+    if (
+      this.currentJourneyUserId &&
+      this.currentJourneyUserId !== userId &&
+      journeyToFinalize === this.currentJourney
+    ) {
+      return;
+    }
+
     try {
       const finalData = {
         completedAt: serverTimestamp(),
         completionReason,
         journeyDurationMs: Date.now() - journeyToFinalize.startTime,
-        finalStatus: journeyToFinalize.purchased ? 'purchased' : 
+        finalStatus: journeyToFinalize.purchased ? 'purchased' :
                     (journeyToFinalize.addedToCart && journeyToFinalize.addedToCart.length > 0) ? 'in_cart' :
                     journeyToFinalize.abandoned ? 'abandoned' : 'completed'
       };
@@ -1613,9 +1767,25 @@ class JourneyTrackingService {
       if (journeyToFinalize.firestoreDocId) {
         const docRef = doc(db, 'users', userId, 'journeys', journeyToFinalize.firestoreDocId);
         const cleanedFinalData = this.removeUndefinedValues(finalData);
-        await updateDoc(docRef, cleanedFinalData);
-        
-        console.log(`🏁 Journey finalized in Firestore: ${journeyToFinalize.firestoreDocId}`);
+        try {
+          await updateDoc(docRef, cleanedFinalData);
+          console.log(`🏁 Journey finalized in Firestore: ${journeyToFinalize.firestoreDocId}`);
+        } catch (updateErr: any) {
+          // Beim Finalisieren reicht uns "not-found" als no-op — die
+          // Journey wird ohnehin im selben Cleanup gelöscht; ein
+          // zweites addDoc würde nur ein verwaistes "completed"-Doc
+          // produzieren ohne Inhalt. Stillschweigend droppen.
+          const code = updateErr?.code || '';
+          const msg = String(updateErr?.message || '');
+          const isNotFound =
+            code === 'not-found' ||
+            code === 'firestore/not-found' ||
+            msg.includes('No document to update');
+          if (!isNotFound) throw updateErr;
+          console.warn(
+            `🩹 Journey-Doc ${journeyToFinalize.firestoreDocId} fehlt beim Finalize — überspringe`,
+          );
+        }
       }
     } catch (error) {
       console.error('❌ Error finalizing journey in Firestore:', error);

@@ -1,0 +1,14 @@
+{
+  "name": "top-products-aggregator",
+  "version": "1.0.0",
+  "description": "Weekly aggregator that pre-computes the three Home top-product lists (top-rated overall, top-rated monthly, most-viewed monthly) into a single aggregate doc.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}

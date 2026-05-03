@@ -15,6 +15,7 @@ import {
     View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Shimmer } from '@/components/design/Skeletons';
 import { IconSymbol } from './IconSymbol';
 import { ImageWithShimmer } from './ImageWithShimmer';
 
@@ -181,12 +182,36 @@ export const MarketSelector: React.FC<MarketSelectorProps> = ({
 
         {/* Content */}
         {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={safeColors.primary} />
-            <Text style={[styles.loadingText, { color: safeColors.text }]}>
-              Märkte werden geladen...
-            </Text>
-          </View>
+          // Skeleton rows mirror the marketItem layout (48 px logo +
+          // name line + country line). Replaces the centered
+          // ActivityIndicator so the modal feels like the rest of
+          // the app's loading states.
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            scrollEnabled={false}
+          >
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <View
+                key={i}
+                style={[
+                  styles.marketItem,
+                  {
+                    backgroundColor: safeColors.cardBackground,
+                    borderColor: safeColors.border,
+                    borderWidth: 1,
+                  },
+                ]}
+              >
+                <Shimmer width={48} height={48} radius={8} />
+                <View style={{ flex: 1, gap: 6 }}>
+                  <Shimmer width="60%" height={14} radius={4} />
+                  <Shimmer width="40%" height={11} radius={3} />
+                </View>
+              </View>
+            ))}
+          </ScrollView>
         ) : (
           <ScrollView 
             style={styles.scrollView}

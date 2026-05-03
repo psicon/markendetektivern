@@ -30,6 +30,19 @@ export interface Produkte {
   // 🚀 NEUE FELDER: Serverseitige Ersparnis-Berechnung
   ersparnis?: number; // Ersparnis in Euro gegenüber Markenprodukt
   ersparnisProz?: number; // Ersparnis in Prozent gegenüber Markenprodukt
+  // 🎨 Bild-Cleanup-Pipeline (cloud-functions/image-cleanup/).
+  // Drei Storage-Varianten pro Produkt. Niemals direkt vom Client
+  // gesetzt — nur Cloud Functions + Backfill schreiben hier rein.
+  // Wenn alle drei undefined sind, fällt `getProductImage()` auf
+  // das Original-`bild`-Feld zurück.
+  bildClean?: string;       // App-WebP (≤512 px, schnellladend) — Default für alle UI
+  bildCleanPng?: string;    // PNG ≤1024 px — gute Qualität für Detail-Hero
+  bildCleanHq?: string;     // PNG ≤1600 px — Gemini near-raw, höchste Qualität
+  bildCleanVersion?: number;
+  bildCleanSource?: 'gemini' | 'heuristic-skip';
+  bildCleanProcessedAt?: Timestamp;
+  bildCleanError?: string;
+  bildCleanErrorAt?: Timestamp;
 }
 
 export interface MarkenProdukte {
@@ -54,6 +67,16 @@ export interface MarkenProdukte {
   averageRatingPriceValue: number;
   averageRatingSimilarity: number;
   averageRatingTasteFunction: number;
+  // 🎨 Bild-Cleanup-Pipeline (cloud-functions/image-cleanup/).
+  // Identisch zu Produkte — siehe dort für Details.
+  bildClean?: string;
+  bildCleanPng?: string;
+  bildCleanHq?: string;
+  bildCleanVersion?: number;
+  bildCleanSource?: 'gemini' | 'heuristic-skip';
+  bildCleanProcessedAt?: Timestamp;
+  bildCleanError?: string;
+  bildCleanErrorAt?: Timestamp;
 }
 
 export interface Kategorien {
@@ -143,6 +166,7 @@ export interface Einkaufswagen {
   customItem?: {
     name: string; // "Butter", "Milch", etc.
     type: 'brand' | 'noname'; // Produkttyp
+    icon?: string; // MaterialCommunityIcons name, z.B. "bread-slice"
     marketId?: string; // Markt-ID (nur bei NoName)
     marketName?: string; // Markt-Name für Anzeige
     marketLand?: string; // Land des Marktes (für Flaggen)

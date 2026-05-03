@@ -22,13 +22,35 @@
       "autoIncrement": true
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "ios": {
+        "image": "latest"
+      }
     }
   },
   "submit": {
     "production": {
+      "ios": {
+        "appleId": "patrick@markendetektive.de",
+        "appleTeamId": "MZD2N2F887",
+        "ascAppId": "6471081082"
+      },
       "android": {
-        "serviceAccountKeyPath": "./markendetektive-895f7-58c0a81f4613.json"
+        "serviceAccountKeyPath": "./markendetektive-895f7-ee3923910ddd.json"
+      }
+    },
+    "openTesting": {
+      "android": {
+        "serviceAccountKeyPath": "./markendetektive-895f7-ee3923910ddd.json",
+        "track": "beta",
+        "releaseStatus": "completed"
+      }
+    },
+    "internalTesting": {
+      "android": {
+        "serviceAccountKeyPath": "./markendetektive-895f7-ee3923910ddd.json",
+        "track": "internal",
+        "releaseStatus": "completed"
       }
     }
   }

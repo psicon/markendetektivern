@@ -1,6 +1,7 @@
 import { ThemedText } from '@/components/ThemedText';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -23,7 +24,25 @@ export default function WelcomeScreen() {
   const [imageLoaded, setImageLoaded] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
 
-  const { signInWithGoogle, signInWithApple } = useAuth();
+  const { signInWithGoogle, signInWithApple, signInAnonymously: signInAnon } = useAuth();
+
+  // Continue as guest — covers the "registered session lost"
+  // edge case where the user lands here from the tabs-layout
+  // redirect because Firebase couldn't restore their session
+  // and we refused to silently auto-anon-login. Without this
+  // button they'd be forced to log in or register to escape.
+  const handleContinueAsGuest = async () => {
+    try {
+      await signInAnon();
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      console.error('Anonymous sign-in error:', error);
+      Alert.alert(
+        'Fehler',
+        error?.message || 'Konnte anonyme Sitzung nicht starten. Bitte versuche es erneut.',
+      );
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     try {
@@ -85,13 +104,16 @@ export default function WelcomeScreen() {
           }
         ]}
       >
-        {/* Back Button - nur wenn wir navigiert wurden */}
+        {/* Back Button — design-system arrow-left in a 40×40 round
+            translucent-white pill (auth screens have a coloured
+            background, so neutral theme.text wouldn't read). */}
         {router.canGoBack() && (
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
+            hitSlop={8}
           >
-            <IconSymbol name="chevron.left" size={24} color="white" />
+            <MaterialCommunityIcons name="arrow-left" size={22} color="white" />
           </TouchableOpacity>
         )}
 
@@ -152,9 +174,9 @@ export default function WelcomeScreen() {
             )}
 
             {/* Login Button */}
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[
-                styles.secondaryButton, 
+                styles.secondaryButton,
                 { marginTop: -1 },
                 isSmallScreen && styles.secondaryButtonSmall
               ]}
@@ -164,7 +186,24 @@ export default function WelcomeScreen() {
               <ThemedText style={styles.secondaryButtonText}>Bereits angemeldet: Login</ThemedText>
             </TouchableOpacity>
 
-
+            {/* Continue as guest — recovery path for users bounced
+                here by the tabs-layout escape-hatch (e.g. registered
+                session expired). */}
+            <TouchableOpacity
+              onPress={handleContinueAsGuest}
+              style={{ paddingVertical: 12, alignItems: 'center', marginTop: 4 }}
+            >
+              <ThemedText
+                style={{
+                  fontSize: 14,
+                  fontFamily: 'Nunito_500Medium',
+                  color: 'rgba(255,255,255,0.75)',
+                  textDecorationLine: 'underline',
+                }}
+              >
+                Ohne Anmeldung fortfahren
+              </ThemedText>
+            </TouchableOpacity>
 
             <ThemedText style={styles.termsText}>
               Ich akzeptiere: <ThemedText style={[styles.termsLink, { color: colors.primary }]}>AGB + Datenschutz</ThemedText>
@@ -199,11 +238,13 @@ const styles = StyleSheet.create({
   backButton: {
     position: 'absolute',
     top: 60,
-    left: 0,
+    left: 16,
     width: 40,
     height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.15)',
     zIndex: 10,
   },
   logoContainer: {

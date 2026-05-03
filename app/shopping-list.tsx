@@ -1,31 +1,27 @@
-import { BannerAd } from '@/components/ads/BannerAd';
-import { AddCustomItemModal } from '@/components/ui/AddCustomItemModal';
-import BatchActionLoader from '@/components/ui/BatchActionLoader';
-import FixedAndroidModal from '@/components/ui/FixedAndroidModal';
-import { IconSymbol } from '@/components/ui/IconSymbol';
-import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
-import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
-import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
-import { Colors } from '@/constants/Colors';
-import { getNavigationHeaderOptions } from '@/constants/HeaderConfig';
-import { TOAST_MESSAGES } from '@/constants/ToastMessages';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
-import { useAuth } from '@/lib/contexts/AuthContext';
-import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
-import { useTheme } from '@/lib/contexts/ThemeContext';
-import achievementService from '@/lib/services/achievementService';
-import { categoryAccessService } from '@/lib/services/categoryAccessService';
-import { FirestoreService } from '@/lib/services/firestore';
-import { showBulkConvertSuccessToast, showBulkPurchasedToast, showConvertSuccessToast, showInfoToast, showPurchasedToast } from '@/lib/services/ui/toast';
-import { updateUserStats } from '@/lib/services/userProfile';
-import {
-  Einkaufswagen,
-  FirestoreDocument,
-  MarkenProdukte,
-  ProductToConvert,
-  Produkte
-} from '@/lib/types/firestore';
+// app/shopping-list.tsx
+//
+// Einkaufszettel — neu im Design-System:
+//   • DetailHeader (Back + Title + Filter + Plus) als chrome
+//   • SegmentedTabs + PagerView für Marken / NoNames / Alle
+//   • FilterSheet statt FixedAndroidModal
+//   • Theme-Tokens via useTokens (statt Colors[colorScheme])
+//   • Swipe-Gesten auf jedem Eintrag (Pan + Reanimated 3):
+//     – Rechts wischen → als gekauft markieren
+//     – Links wischen  → löschen
+//   • "Alle Produkte"-Tab zeigt Marken + NoNames vermischt für
+//     den Einkaufsalltag (kein Tab-Wechsel mehr beim Einkauf)
+//   • Bottom-CTA passt sich pro Tab an (Umwandeln / Alle gekauft)
+//   • Crossfade-Skeleton während Initial-Load
+//
+// Funktionalität bleibt 1:1 erhalten:
+//   – getShoppingCartItems / convertToNoName / markAsPurchased(WithoutTracking)
+//   – removeFromShoppingCart, updateUserStats, updateUserTotalSavings
+//   – Achievement-Tracking (convert_product, complete_shopping)
+//   – Journey-Tracking, Analytics-Events
+//   – BatchActionLoader, AddCustomItemModal, LevelUpOverlay
+
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
@@ -33,600 +29,1967 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import {
   ActivityIndicator,
   Alert,
-  Animated,
-  Dimensions,
+  Platform,
+  Pressable,
   RefreshControl,
   ScrollView,
-  StyleSheet,
   Text,
-  TouchableOpacity,
-  View
+  View,
 } from 'react-native';
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from 'react-native-gesture-handler';
 import PagerView from 'react-native-pager-view';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, {
+  Easing,
+  Extrapolation,
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const { width } = Dimensions.get('window');
+import { BannerAd } from '@/components/ads/BannerAd';
+import { DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
+import {
+  FilterSheet,
+  OptionList,
+} from '@/components/design/FilterSheet';
+import { SegmentedTabs } from '@/components/design/SegmentedTabs';
+import { Crossfade, Shimmer } from '@/components/design/Skeletons';
+import { AddCustomItemModal } from '@/components/ui/AddCustomItemModal';
+import BatchActionLoader from '@/components/ui/BatchActionLoader';
+import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
+import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
+import { TOAST_MESSAGES } from '@/constants/ToastMessages';
+import { fontFamily, fontWeight } from '@/constants/tokens';
+import { getProductImage } from '@/lib/utils/productImage';
+import { calculateSavings } from '@/lib/utils/savings';
+import { useColorScheme } from '@/hooks/useColorScheme';
+import { useTokens } from '@/hooks/useTokens';
+import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
+import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
+import achievementService from '@/lib/services/achievementService';
+import { categoryAccessService } from '@/lib/services/categoryAccessService';
+import { FirestoreService } from '@/lib/services/firestore';
+import {
+  showBulkConvertSuccessToast,
+  showBulkPurchasedToast,
+  showConvertSuccessToast,
+  showInfoToast,
+  showPurchasedToast,
+} from '@/lib/services/ui/toast';
+import { updateUserStats } from '@/lib/services/userProfile';
+import {
+  Einkaufswagen,
+  FirestoreDocument,
+  MarkenProdukte,
+  ProductToConvert,
+  Produkte,
+} from '@/lib/types/firestore';
 
-// 🚀 HELPER: Optimierte Ersparnis-Berechnung (nutzt serverseitige Felder wenn verfügbar)
-const getSavingsData = (brandProduct: any, noNameProduct: any): { savingsEur: number; savingsPercent: number } => {
-  // 🚀 OPTIMIERUNG: Nutze serverseitige Berechnung falls vorhanden
-  if (noNameProduct.ersparnis !== undefined && noNameProduct.ersparnisProz !== undefined) {
-    if (__DEV__ && Math.random() < 0.05) { // Nur 5% der Shopping-List Aufrufe loggen
-      console.log(`💰 Einkaufszettel: Using server-calculated savings: €${noNameProduct.ersparnis}, ${noNameProduct.ersparnisProz}%`);
-    }
-    return {
-      savingsEur: parseFloat(String(noNameProduct.ersparnis || 0)),
-      savingsPercent: parseInt(String(noNameProduct.ersparnisProz || 0))
-    };
-  }
-  
-  // 🔄 FALLBACK: Client-side Berechnung (für noch nicht berechnete oder Stufe 1,2)
-  if (__DEV__ && Math.random() < 0.05) {
-    console.log('🔄 Einkaufszettel: Calculating savings client-side (Firestore fields missing)');
-  }
-  
-  if (!brandProduct.preis || !noNameProduct.preis || !brandProduct.packSize || !noNameProduct.packSize) {
-    return { savingsEur: 0, savingsPercent: 0 };
-  }
-  
-  // Preis pro Einheit (Gramm/Milliliter) - wie alte calculateSavings Logik
-  const brandPricePerUnit = brandProduct.preis / brandProduct.packSize;
-  const noNamePricePerUnit = noNameProduct.preis / noNameProduct.packSize;
-  
-  // Ersparnis in Prozent
-  const savingsPercent = ((brandPricePerUnit - noNamePricePerUnit) / brandPricePerUnit) * 100;
-  
-  // Ersparnis in Euro (basiert auf NoName packSize - konsistent mit alter Logik)
-  const savingsEur = Math.max(0, (brandPricePerUnit - noNamePricePerUnit) * noNameProduct.packSize);
-  
+// ─── Types ─────────────────────────────────────────────────────────
+type Tab = 'brand' | 'noname' | 'all';
+type SortBy = 'name' | 'price' | 'savings';
+
+type RowKind = 'brand' | 'noname' | 'custom-brand' | 'custom-noname';
+
+type EnrichedItem = {
+  id: string;
+  kind: RowKind;
+  // brand items
+  markenProduktRef?: string;
+  product?: any;
+  alternatives?: any[];
+  bestAlternative?: any;
+  potentialSavings?: number;
+  // noname items
+  savings?: number;
+  // custom items
+  isCustom?: boolean;
+  name?: string;
+  customType?: 'brand' | 'noname';
+  /** MaterialCommunityIcons name picked by the user when creating
+   *  the custom item. Falls back to a generic cart icon if missing
+   *  (legacy custom items predating the icon picker). */
+  customIcon?: string;
+  markt?: { name?: string; land?: string; bild?: string } | null;
+};
+
+// Height of the sticky SegmentedTabs row that sits below the DetailHeader.
+// Used both to size the absolute container and to pad the scrollable
+// content so the first item lands BELOW the bar.
+const SEG_BAR_HEIGHT = 64;
+
+const SORT_OPTIONS_BRAND: readonly (readonly [SortBy, string])[] = [
+  ['name', 'Name (A–Z)'],
+  ['price', 'Preis aufsteigend'],
+] as const;
+
+const SORT_OPTIONS_NONAME: readonly (readonly [SortBy, string])[] = [
+  ['name', 'Name (A–Z)'],
+  ['price', 'Preis aufsteigend'],
+  ['savings', 'Höchste Ersparnis'],
+] as const;
+
+// ─── Helpers ───────────────────────────────────────────────────────
+
+// Ersparnis-Berechnung delegiert an den shared util
+// `lib/utils/savings.ts`. Vorher hatten product-comparison und
+// shopping-list zwei verschiedene Implementierungen — der eine
+// rechnete absolute Preise, der andere per-pack-unit. Resultat:
+// dasselbe Produkt zeigte je nach Screen unterschiedliche
+// Ersparnis-Werte. Jetzt single source of truth.
+const getSavingsData = (
+  brandProduct: any,
+  noNameProduct: any,
+): { savingsEur: number; savingsPercent: number } => {
+  const r = calculateSavings(brandProduct, noNameProduct);
   return {
-    savingsEur: Math.round(savingsEur * 100) / 100,
-    savingsPercent: Math.max(0, Math.round(savingsPercent))
+    savingsEur: Math.round(r.eur * 100) / 100,
+    savingsPercent: r.pct,
   };
 };
 
-// Einfacher Shopping List Skeleton
-const ShoppingListSkeleton = () => {
-  const { theme } = useTheme();
-  const colors = Colors[theme ?? 'light'];
+const formatEur = (n: number) =>
+  `${(n || 0).toFixed(2).replace('.', ',')} €`;
 
+// ═══════════════════════════════════════════════════════════════════
+// Skeletons
+// ═══════════════════════════════════════════════════════════════════
+function ShoppingListSkeleton() {
+  const { theme } = useTokens();
   return (
- 
-      
-        <View style={styles.productContainer}>
-          <View  style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 12 }]}>
-            <ShimmerSkeleton width={60} height={60} borderRadius={8}  style={{ marginLeft: 12 , marginTop: 12, marginRight: 12, marginBottom: 12 } } />
-
-            <View style={{ alignItems: 'center', width: 80 }}>
-               
-            </View>
+    <ScrollView
+      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 140 }}
+      scrollEnabled={false}
+    >
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <View
+          key={i}
+          style={{
+            backgroundColor: theme.surface,
+            borderRadius: 14,
+            padding: 12,
+            marginBottom: 10,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+            borderWidth: 1,
+            borderColor: theme.border,
+          }}
+        >
+          <Shimmer width={62} height={62} radius={10} />
+          <View style={{ flex: 1, gap: 6 }}>
+            <Shimmer width="40%" height={10} radius={4} />
+            <Shimmer width="80%" height={14} radius={4} />
+            <Shimmer width="55%" height={12} radius={4} />
           </View>
-          <View  style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 12 }]}>
-            <ShimmerSkeleton width={60} height={60} borderRadius={8}  style={{ marginLeft: 12 , marginTop: 12, marginRight: 12, marginBottom: 12 } } />
-
-            <View style={{ alignItems: 'center', width: 80 }}>
-               
-            </View>
+          <View style={{ gap: 6 }}>
+            <Shimmer width={34} height={34} radius={17} />
+            <Shimmer width={34} height={34} radius={17} />
           </View>
-          <View  style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 12 }]}>
-            <ShimmerSkeleton width={60} height={60} borderRadius={8}  style={{ marginLeft: 12 , marginTop: 12, marginRight: 12, marginBottom: 12 } } />
-
-            <View style={{ alignItems: 'center', width: 80 }}>
-               
-            </View>
-          </View>
-          <View  style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 12 }]}>
-            <ShimmerSkeleton width={60} height={60} borderRadius={8}  style={{ marginLeft: 12 , marginTop: 12, marginRight: 12, marginBottom: 12 } } />
-
-            <View style={{ alignItems: 'center', width: 80 }}>
-               
-            </View>
-          </View>
-             <View  style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 12 }]}>
-            <ShimmerSkeleton width={60} height={60} borderRadius={8}  style={{ marginLeft: 12 , marginTop: 12, marginRight: 12, marginBottom: 12 } } />
-
-            <View style={{ alignItems: 'center', width: 80 }}>
-               
-            </View>
-          </View>
-          <View  style={[styles.productCard, { backgroundColor: colors.cardBackground, marginBottom: 12 }]}>
-            <ShimmerSkeleton width={60} height={60} borderRadius={8}  style={{ marginLeft: 12 , marginTop: 12, marginRight: 12, marginBottom: 12 } } />
-
-            <View style={{ alignItems: 'center', width: 80 }}>
-               
-            </View>
-          </View>
-          </View>
-        
-      
-
+        </View>
+      ))}
+    </ScrollView>
   );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Chrome — one absolute-positioned chrome surface that holds BOTH the
+// back/title row AND the sticky SegmentedTabs in a SINGLE BlurView.
+// Two stacked BlurViews on iOS show a visible seam (each samples its
+// own backdrop), so we inline the DetailHeader-style row here and put
+// SegmentedTabs right below it inside the same surface. Android falls
+// back to a tinted opaque View per CLAUDE.md.
+// ═══════════════════════════════════════════════════════════════════
+type ChromeProps = {
+  title: string;
+  onBack: () => void;
+  right?: React.ReactNode;
+  /** SegmentedTabs (or any sticky widget) rendered below the title row. */
+  bottom: React.ReactNode;
 };
 
+function Chrome({ title, onBack, right, bottom }: ChromeProps) {
+  const { theme } = useTokens();
+  const scheme = useColorScheme() ?? 'light';
+  const insets = useSafeAreaInsets();
+  const isIOS = Platform.OS === 'ios';
+
+  const Row = (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        height: DETAIL_HEADER_ROW_HEIGHT,
+        paddingHorizontal: 16,
+        gap: 8,
+      }}
+    >
+      <Pressable
+        onPress={onBack}
+        style={({ pressed }) => ({
+          width: 40,
+          height: 40,
+          borderRadius: 20,
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: pressed ? 0.6 : 1,
+        })}
+        hitSlop={6}
+      >
+        <MaterialCommunityIcons name="arrow-left" size={24} color={theme.text} />
+      </Pressable>
+      <View style={{ flex: 1, position: 'relative', height: 24, justifyContent: 'center' }}>
+        <Text
+          numberOfLines={1}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 20,
+            color: theme.text,
+            letterSpacing: -0.2,
+          }}
+        >
+          {title}
+        </Text>
+      </View>
+      {right ? <View style={{ marginLeft: 4 }}>{right}</View> : null}
+    </View>
+  );
+
+  const Bottom = (
+    <View
+      style={{
+        height: SEG_BAR_HEIGHT,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        paddingBottom: 12,
+        justifyContent: 'center',
+      }}
+    >
+      {bottom}
+    </View>
+  );
+
+  const containerStyle = {
+    position: 'absolute' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    paddingTop: insets.top,
+  };
+
+  if (isIOS) {
+    return (
+      <BlurView
+        tint={scheme === 'dark' ? 'dark' : 'light'}
+        intensity={80}
+        style={containerStyle}
+      >
+        {Row}
+        {Bottom}
+      </BlurView>
+    );
+  }
+
+  return (
+    <View
+      style={[
+        containerStyle,
+        {
+          backgroundColor:
+            scheme === 'dark' ? 'rgba(15,18,20,0.92)' : 'rgba(245,247,248,0.92)',
+        },
+      ]}
+    >
+      {Row}
+      {Bottom}
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SwipeRow — Pan-Gesture wraps a row.
+//   • Rechts wischen ≥ THRESH px → onSwipeBought, fling rechts raus
+//   • Links wischen  ≤ -THRESH    → onSwipeDelete, fling links raus
+//   • Backgrounds zeigen unter dem Row die Aktion
+// ═══════════════════════════════════════════════════════════════════
+const SWIPE_THRESH = 90;
+const SWIPE_FLING_OFFSCREEN = 600;
+
+type SwipeRowProps = {
+  children: React.ReactNode;
+  onSwipeBought: () => void;
+  onSwipeDelete: () => void;
+  disabled?: boolean;
+};
+
+const ROW_GAP = 10; // marginBottom between rows in normal flow
+const SWIPE_FLING_DURATION = 200;
+const COLLAPSE_DURATION = 260;
+
+function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRowProps) {
+  const { theme, brand } = useTokens();
+  const tx = useSharedValue(0);
+  // collapse: 0 = full row visible, 1 = fully collapsed (height 0, opacity 0)
+  const collapse = useSharedValue(0);
+  // Measured intrinsic height of the row content. Until measured we
+  // don't constrain height (let layout compute naturally).
+  const [measuredHeight, setMeasuredHeight] = useState<number>(0);
+  // Phase tracking — used to detect the "action failed silently" case
+  // and re-open the row so it doesn't disappear from UI on error.
+  const [phase, setPhase] = useState<'idle' | 'collapsing'>('idle');
+
+  const onLayout = useCallback(
+    (e: any) => {
+      // Re-measure auf jedem Layout-Pass während die Row IDLE ist
+      // (= nicht im Collapse). Damit reflektiert measuredHeight die
+      // tatsächliche aktuelle Höhe — z.B. wenn der User eine
+      // BrandCard ausklappt und die Inner-Content von 80 auf 280 px
+      // wächst. Während des Collapse-Übergangs ignorieren wir
+      // Layout-Updates, sonst springt die Animation mid-flight.
+      //
+      // User-Bug-Report (vorher "Capture once"): "beim einkaufszettel
+      // kann ich nicht mehr ausklappen bei marken — er toggelt aber
+      // es ist nichts zu sehen". Der Inhalt wurde gerendert, aber
+      // die SwipeRow-Wrapper-Höhe blieb auf dem initial gemessenen
+      // collapsed-Wert geklemmt → expand wurde gechlippt.
+      if (phase !== 'idle') return;
+      const h = e.nativeEvent.layout.height;
+      if (h > 0 && h !== measuredHeight) {
+        setMeasuredHeight(h);
+      }
+    },
+    [measuredHeight, phase],
+  );
+
+  const enterCollapse = () => setPhase('collapsing');
+
+  const triggerBought = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    onSwipeBought();
+  };
+  const triggerDelete = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+    onSwipeDelete();
+  };
+
+  // Safety net: if the parent doesn't unmount us within ~2.5s after
+  // collapse completes (action failed and parent didn't remove the
+  // item), re-open the row so it stays visible. The user already saw
+  // an error toast — we don't want them to also lose the row from UI.
+  useEffect(() => {
+    if (phase !== 'collapsing') return;
+    const timer = setTimeout(() => {
+      // Still mounted → parent didn't remove. Reset.
+      tx.value = withTiming(0, { duration: 240, easing: Easing.out(Easing.cubic) });
+      collapse.value = withTiming(0, { duration: 240, easing: Easing.out(Easing.cubic) });
+      setPhase('idle');
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [phase, tx, collapse]);
+
+  const pan = Gesture.Pan()
+    .activeOffsetX([-12, 12])
+    .failOffsetY([-12, 12])
+    .enabled(!disabled && phase === 'idle')
+    .onUpdate((e) => {
+      tx.value = e.translationX;
+    })
+    .onEnd((e) => {
+      const dx = e.translationX;
+      if (dx >= SWIPE_THRESH) {
+        // Fling foreground off (fast) and collapse the WHOLE row in
+        // parallel — height + margin + opacity all to 0 over ~260 ms.
+        // Action callback fires WHILE collapse is running so the API
+        // round-trip overlaps with the visual cleanup, not after it.
+        tx.value = withTiming(SWIPE_FLING_OFFSCREEN, {
+          duration: SWIPE_FLING_DURATION,
+          easing: Easing.in(Easing.cubic),
+        });
+        collapse.value = withTiming(
+          1,
+          { duration: COLLAPSE_DURATION, easing: Easing.in(Easing.cubic) },
+          (done) => {
+            if (done) runOnJS(triggerBought)();
+          },
+        );
+        runOnJS(enterCollapse)();
+      } else if (dx <= -SWIPE_THRESH) {
+        tx.value = withTiming(-SWIPE_FLING_OFFSCREEN, {
+          duration: SWIPE_FLING_DURATION,
+          easing: Easing.in(Easing.cubic),
+        });
+        collapse.value = withTiming(
+          1,
+          { duration: COLLAPSE_DURATION, easing: Easing.in(Easing.cubic) },
+          (done) => {
+            if (done) runOnJS(triggerDelete)();
+          },
+        );
+        runOnJS(enterCollapse)();
+      } else {
+        // Snap back to rest position with a calmer spring-style ease-out.
+        tx.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
+      }
+    });
+
+  const fgStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: tx.value }],
+  }));
+  const boughtBgStyle = useAnimatedStyle(() => ({
+    opacity: tx.value > 8 ? 1 : 0,
+  }));
+  const deleteBgStyle = useAnimatedStyle(() => ({
+    opacity: tx.value < -8 ? 1 : 0,
+  }));
+
+  // Wrapper animates height + marginBottom + opacity together, so the
+  // row collapses into the gap und die rows below sliden hoch.
+  //
+  // Wichtig: nur DURING dem Collapse (collapse.value > 0) klemmen wir
+  // die Höhe auf measuredHeight. Im Idle-State (collapse.value === 0)
+  // lassen wir die Höhe frei — sonst würde ein expanded BrandCard
+  // (Inner-Content wächst) auf den initial gemessenen Wert geclippt.
+  const wrapperStyle = useAnimatedStyle(() => {
+    if (measuredHeight === 0 || collapse.value === 0) {
+      // Nicht messbar oder im Idle: natürliches Layout, kein Clamp.
+      return { marginBottom: ROW_GAP, opacity: 1 };
+    }
+    return {
+      height: interpolate(
+        collapse.value,
+        [0, 1],
+        [measuredHeight, 0],
+        Extrapolation.CLAMP,
+      ),
+      marginBottom: interpolate(
+        collapse.value,
+        [0, 1],
+        [ROW_GAP, 0],
+        Extrapolation.CLAMP,
+      ),
+      opacity: interpolate(collapse.value, [0, 1], [1, 0], Extrapolation.CLAMP),
+    };
+  });
+
+  return (
+    <Animated.View
+      onLayout={onLayout}
+      style={[{ position: 'relative', overflow: 'hidden' }, wrapperStyle]}
+    >
+      {/* Action backgrounds — full-bleed, stacked. Each layer fills
+          the entire row; opacity is toggled by swipe direction so
+          only ONE colour is ever visible (no green/red side-by-side
+          cut). The icon+label sit on the side from which the
+          foreground is pulled away (left for bought / right for
+          delete) so the user "drags toward" the action. */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: 0,
+          bottom: 0,
+          borderRadius: 14,
+          overflow: 'hidden',
+        }}
+      >
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              backgroundColor: brand.primary,
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingLeft: 18,
+              gap: 10,
+            },
+            boughtBgStyle,
+          ]}
+        >
+          <MaterialCommunityIcons name="check-circle" size={26} color="#fff" />
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              color: '#fff',
+              fontSize: 14,
+            }}
+          >
+            Als gekauft markieren
+          </Text>
+        </Animated.View>
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              backgroundColor: brand.error,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              paddingRight: 18,
+              gap: 10,
+            },
+            deleteBgStyle,
+          ]}
+        >
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              color: '#fff',
+              fontSize: 14,
+            }}
+          >
+            Löschen
+          </Text>
+          <MaterialCommunityIcons name="trash-can-outline" size={26} color="#fff" />
+        </Animated.View>
+      </View>
+
+      <GestureDetector gesture={pan}>
+        <Animated.View style={fgStyle}>{children}</Animated.View>
+      </GestureDetector>
+    </Animated.View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SummaryBanner — pro Tab unterschiedlicher Gradient + Wert
+// ═══════════════════════════════════════════════════════════════════
+type BannerProps = {
+  variant: 'brand' | 'noname' | 'all';
+  potential: number;
+  earned: number;
+};
+
+function SummaryBanner({ variant, potential, earned }: BannerProps) {
+  const colors =
+    variant === 'brand'
+      ? (['#f59332', '#f57a23'] as const)
+      : variant === 'noname'
+        ? (['#0d8575', '#10a18a'] as const)
+        : (['#0d8575', '#42a968'] as const);
+  const value = variant === 'brand' ? potential : variant === 'noname' ? earned : potential + earned;
+  const title =
+    variant === 'brand'
+      ? 'Dein Sparpotenzial'
+      : variant === 'noname'
+        ? 'Einkaufszettel Ersparnis'
+        : 'Gesamt-Ersparnis';
+  const sub =
+    variant === 'brand'
+      ? 'Mit aktuell gewählten NoName-Alternativen'
+      : variant === 'noname'
+        ? 'Durch gewählte NoName-Produkte'
+        : 'Potenzial + bereits gewählt';
+
+  return (
+    <LinearGradient
+      colors={colors as unknown as [string, string]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 0 }}
+      style={{
+        marginHorizontal: 16,
+        marginTop: 10,
+        marginBottom: 6,
+        borderRadius: 14,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+      }}
+    >
+      <View style={{ flex: 1 }}>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 15,
+            color: '#fff',
+            letterSpacing: -0.1,
+          }}
+          numberOfLines={1}
+        >
+          {title}
+        </Text>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 11,
+            color: 'rgba(255,255,255,0.92)',
+            marginTop: 1,
+          }}
+          numberOfLines={1}
+        >
+          {sub}
+        </Text>
+      </View>
+      <View
+        style={{
+          backgroundColor: 'rgba(255,255,255,0.22)',
+          borderRadius: 20,
+          paddingHorizontal: 12,
+          paddingVertical: 6,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+        }}
+      >
+        <MaterialCommunityIcons name="tag-outline" size={16} color="#fff" />
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 16,
+            color: '#fff',
+          }}
+        >
+          −{formatEur(value)}
+        </Text>
+      </View>
+    </LinearGradient>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EmptyState
+// ═══════════════════════════════════════════════════════════════════
+function EmptyState({
+  variant,
+  onAdd,
+}: {
+  variant: 'brand' | 'noname' | 'all';
+  onAdd: () => void;
+}) {
+  const { theme, brand } = useTokens();
+  const text =
+    variant === 'brand'
+      ? 'Keine Markenprodukte im Einkaufszettel'
+      : variant === 'noname'
+        ? 'Keine NoName-Produkte im Einkaufszettel'
+        : 'Dein Einkaufszettel ist leer';
+  return (
+    <View
+      style={{
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 80,
+        paddingHorizontal: 32,
+      }}
+    >
+      <View
+        style={{
+          width: 64,
+          height: 64,
+          borderRadius: 32,
+          backgroundColor: theme.primaryContainer,
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: 14,
+        }}
+      >
+        <MaterialCommunityIcons name="cart-outline" size={32} color={brand.primary} />
+      </View>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 16,
+          color: theme.text,
+          textAlign: 'center',
+          letterSpacing: -0.2,
+        }}
+      >
+        {text}
+      </Text>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 13,
+          color: theme.textMuted,
+          textAlign: 'center',
+          marginTop: 6,
+          lineHeight: 18,
+        }}
+      >
+        Füge Produkte über den Scanner, die Suche oder das Plus-Symbol hinzu.
+      </Text>
+      <Pressable
+        onPress={onAdd}
+        style={({ pressed }) => ({
+          marginTop: 18,
+          backgroundColor: brand.primary,
+          paddingHorizontal: 18,
+          paddingVertical: 10,
+          borderRadius: 22,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          opacity: pressed ? 0.85 : 1,
+        })}
+      >
+        <MaterialCommunityIcons name="plus" size={18} color="#fff" />
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 14,
+            color: '#fff',
+          }}
+        >
+          Produkt hinzufügen
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Inline action buttons (Check + Trash) — used inside cards
+// ═══════════════════════════════════════════════════════════════════
+function RowActions({
+  onCheck,
+  onDelete,
+  loadingCheck,
+  loadingDelete,
+}: {
+  onCheck: () => void;
+  onDelete: () => void;
+  loadingCheck?: boolean;
+  loadingDelete?: boolean;
+}) {
+  const { brand } = useTokens();
+  return (
+    <View style={{ gap: 6, alignItems: 'center' }}>
+      <Pressable
+        onPress={onCheck}
+        disabled={loadingCheck}
+        hitSlop={4}
+        style={({ pressed }) => ({
+          width: 34,
+          height: 34,
+          borderRadius: 17,
+          backgroundColor: brand.primary,
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: pressed || loadingCheck ? 0.7 : 1,
+        })}
+      >
+        {loadingCheck ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <MaterialCommunityIcons name="check" size={18} color="#fff" />
+        )}
+      </Pressable>
+      <Pressable
+        onPress={onDelete}
+        disabled={loadingDelete}
+        hitSlop={4}
+        style={({ pressed }) => ({
+          width: 34,
+          height: 34,
+          borderRadius: 17,
+          backgroundColor: brand.error,
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: pressed || loadingDelete ? 0.7 : 1,
+        })}
+      >
+        {loadingDelete ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <MaterialCommunityIcons name="trash-can-outline" size={18} color="#fff" />
+        )}
+      </Pressable>
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BrandCard — Markenprodukt mit Expand für NoName-Alternativen
+// ═══════════════════════════════════════════════════════════════════
+type BrandCardProps = {
+  item: EnrichedItem;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onCheck: () => void;
+  onDelete: () => void;
+  selectedAltId: string | undefined;
+  onSelectAlt: (altId: string) => void;
+  /** Tap on the per-alt swap-arrow circle → convert that alt directly. */
+  onConvertAlt: (altId: string) => void;
+  loadingCheck: boolean;
+  loadingDelete: boolean;
+  loadingConvert: boolean;
+  favoriteMarketId?: string;
+  /** When false, expandable section is hidden (used in "Alle"-Tab to keep simple). */
+  allowExpand?: boolean;
+  /** Hersteller-`infos` Text — wenn vorhanden zeigt die Card ein
+   *  (i)-Icon neben dem Hersteller-Namen. Tap triggert
+   *  `onInfoPress` — Parent öffnet ein FilterSheet mit dem Text. */
+  infos?: string | null;
+  onInfoPress?: () => void;
+};
+
+function BrandCard({
+  item,
+  expanded,
+  onToggleExpand,
+  onCheck,
+  onDelete,
+  selectedAltId,
+  onSelectAlt,
+  onConvertAlt,
+  loadingCheck,
+  loadingDelete,
+  loadingConvert,
+  favoriteMarketId,
+  allowExpand = true,
+  infos,
+  onInfoPress,
+}: BrandCardProps) {
+  const { theme, brand } = useTokens();
+  const product = item.product;
+  const alts: any[] = item.alternatives || [];
+  const hasAlts = alts.length > 0;
+  const selectedAlt = alts.find((a) => a.id === selectedAltId) || alts[0];
+  const potential = item.potentialSavings || 0;
+
+  const canExpand = allowExpand && hasAlts;
+
+  return (
+    <View
+      style={{
+        backgroundColor: theme.surface,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: theme.border,
+        overflow: 'hidden',
+      }}
+    >
+      <Pressable
+        onPress={canExpand ? onToggleExpand : undefined}
+        disabled={!canExpand}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          padding: 10,
+          opacity: pressed && canExpand ? 0.7 : 1,
+        })}
+      >
+        <ImageWithShimmer
+          source={{ uri: getProductImage(product) ?? undefined }}
+          style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
+          resizeMode="contain"
+        />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          {product?.hersteller?.name ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 1 }}>
+              {product?.hersteller?.bild ? (
+                <ImageWithShimmer
+                  source={{ uri: product.hersteller.bild }}
+                  style={{ width: 12, height: 12, borderRadius: 2 }}
+                />
+              ) : null}
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.bold,
+                  fontSize: 11,
+                  color: brand.primary,
+                  letterSpacing: 0.1,
+                  flexShrink: 1,
+                }}
+              >
+                {product.hersteller.name}
+              </Text>
+              {infos && onInfoPress ? (
+                <Pressable
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    onInfoPress();
+                  }}
+                  hitSlop={8}
+                  style={({ pressed }) => ({
+                    padding: 1,
+                    opacity: pressed ? 0.6 : 1,
+                  })}
+                >
+                  <MaterialCommunityIcons
+                    name="information-outline"
+                    size={13}
+                    color={brand.primary}
+                  />
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+          <Text
+            numberOfLines={2}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 14,
+              color: theme.text,
+              lineHeight: 18,
+            }}
+          >
+            {item.name || product?.name || 'Unbekanntes Produkt'}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 13,
+                color: theme.text,
+              }}
+            >
+              {formatEur(product?.preis || 0)}
+            </Text>
+            {selectedAlt ? (
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.bold,
+                  fontSize: 11,
+                  color: brand.primary,
+                }}
+              >
+                → {formatEur(selectedAlt.preis || 0)}
+              </Text>
+            ) : null}
+          </View>
+          {potential > 0 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
+              <MaterialCommunityIcons name="tag-outline" size={11} color={brand.primary} />
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.semibold,
+                  fontSize: 10,
+                  color: brand.primary,
+                }}
+              >
+                Ersparnis möglich: {formatEur(potential)}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          {canExpand ? (
+            <View
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 14,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <MaterialCommunityIcons
+                name={expanded ? 'chevron-up' : 'chevron-down'}
+                size={20}
+                color={theme.textMuted}
+              />
+            </View>
+          ) : null}
+          <RowActions
+            onCheck={onCheck}
+            onDelete={onDelete}
+            loadingCheck={loadingCheck}
+            loadingDelete={loadingDelete}
+          />
+        </View>
+      </Pressable>
+
+      {/* Expanded NoName-Alternatives */}
+      {allowExpand && expanded && hasAlts ? (
+        <View
+          style={{
+            backgroundColor: theme.surfaceAlt,
+            paddingHorizontal: 10,
+            paddingTop: 8,
+            paddingBottom: 12,
+            borderTopWidth: 1,
+            borderTopColor: theme.border,
+          }}
+        >
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.bold,
+              fontSize: 12,
+              color: theme.text,
+              paddingVertical: 6,
+            }}
+          >
+            NoName-Alternative wählen
+            {favoriteMarketId ? (
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 10,
+                  color: theme.textMuted,
+                }}
+              >
+                {'  '}· Lieblingsmarkt wird bevorzugt
+              </Text>
+            ) : null}
+          </Text>
+          {alts.map((alt) => {
+            const isSel = selectedAltId === alt.id;
+            const isFav = favoriteMarketId && alt.discounter?.id === favoriteMarketId;
+            const sd = getSavingsData(product, alt);
+            return (
+              <Pressable
+                key={alt.id}
+                onPress={() => onSelectAlt(alt.id)}
+                style={({ pressed }) => ({
+                  backgroundColor: theme.surface,
+                  borderRadius: 10,
+                  padding: 8,
+                  marginBottom: 6,
+                  borderWidth: 2,
+                  borderColor: isSel ? brand.primary : 'transparent',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  opacity: pressed ? 0.85 : 1,
+                  position: 'relative',
+                })}
+              >
+                {isFav ? (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: -6,
+                      right: 8,
+                      backgroundColor: brand.error,
+                      paddingHorizontal: 6,
+                      paddingVertical: 2,
+                      borderRadius: 4,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 2,
+                    }}
+                  >
+                    <MaterialCommunityIcons name="heart" size={8} color="#fff" />
+                    <Text
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.extraBold,
+                        fontSize: 8,
+                        color: '#fff',
+                      }}
+                    >
+                      LIEBLINGSMARKT
+                    </Text>
+                  </View>
+                ) : null}
+                <ImageWithShimmer
+                  source={{ uri: getProductImage(alt) ?? undefined }}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 8,
+                    backgroundColor: '#ffffff',
+                  }}
+                  resizeMode="contain"
+                />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.bold,
+                      fontSize: 12,
+                      color: theme.text,
+                    }}
+                  >
+                    {alt.produktName || alt.name}
+                  </Text>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      marginTop: 2,
+                    }}
+                  >
+                    {alt.discounter?.bild ? (
+                      <ImageWithShimmer
+                        source={{ uri: alt.discounter.bild }}
+                        style={{ width: 12, height: 12, borderRadius: 2 }}
+                      />
+                    ) : null}
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.medium,
+                        fontSize: 10,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      {alt.discounter?.name || 'Unbekannt'}
+                      {alt.discounter?.land ? ` (${alt.discounter.land})` : ''}
+                    </Text>
+                  </View>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.extraBold,
+                      fontSize: 12,
+                      color: theme.text,
+                    }}
+                  >
+                    {formatEur(alt.preis || 0)}
+                  </Text>
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.bold,
+                      fontSize: 10,
+                      color: brand.primary,
+                    }}
+                  >
+                    −{formatEur(sd.savingsEur)}
+                  </Text>
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.semibold,
+                      fontSize: 9,
+                      color: theme.textMuted,
+                    }}
+                  >
+                    −{sd.savingsPercent}%
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => onConvertAlt(alt.id)}
+                  disabled={loadingConvert}
+                  hitSlop={6}
+                  style={({ pressed }) => ({
+                    width: 30,
+                    height: 30,
+                    borderRadius: 15,
+                    backgroundColor: brand.primary,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: pressed || loadingConvert ? 0.7 : 1,
+                  })}
+                >
+                  {loadingConvert && isSel ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <MaterialCommunityIcons
+                      name="swap-horizontal"
+                      size={16}
+                      color="#fff"
+                    />
+                  )}
+                </Pressable>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// NoNameCard — Handelsmarken-Produkt mit fixer Ersparnis
+// ═══════════════════════════════════════════════════════════════════
+type NoNameCardProps = {
+  item: EnrichedItem;
+  onCheck: () => void;
+  onDelete: () => void;
+  loadingCheck: boolean;
+  loadingDelete: boolean;
+  favoriteMarketId?: string;
+};
+
+function NoNameCard({
+  item,
+  onCheck,
+  onDelete,
+  loadingCheck,
+  loadingDelete,
+  favoriteMarketId,
+}: NoNameCardProps) {
+  const { theme, brand } = useTokens();
+  const p = item.product;
+  const isFav = favoriteMarketId && p?.discounter?.id === favoriteMarketId;
+  const savings = item.savings || 0;
+
+  return (
+    <View
+      style={{
+        backgroundColor: theme.surface,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: theme.border,
+        padding: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+      }}
+    >
+      <ImageWithShimmer
+        source={{ uri: getProductImage(p) ?? undefined }}
+        style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
+        resizeMode="contain"
+      />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        {p?.handelsmarke?.bezeichnung ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 1 }}>
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 11,
+                color: brand.primary,
+                letterSpacing: 0.1,
+              }}
+            >
+              {p.handelsmarke.bezeichnung}
+            </Text>
+            {isFav ? (
+              <MaterialCommunityIcons name="heart" size={10} color={brand.error} />
+            ) : null}
+          </View>
+        ) : null}
+        <Text
+          numberOfLines={2}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 14,
+            color: theme.text,
+            lineHeight: 18,
+          }}
+        >
+          {p?.name || p?.produktName || 'Unbekanntes Produkt'}
+        </Text>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 4,
+            marginTop: 3,
+          }}
+        >
+          {p?.discounter?.bild ? (
+            <ImageWithShimmer
+              source={{ uri: p.discounter.bild }}
+              style={{ width: 12, height: 12, borderRadius: 2 }}
+            />
+          ) : null}
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 10,
+              color: theme.textMuted,
+            }}
+          >
+            {p?.discounter?.name || 'Unbekannt'}
+            {p?.discounter?.land ? ` (${p.discounter.land})` : ''}
+          </Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 13,
+              color: theme.text,
+            }}
+          >
+            {formatEur(p?.preis || 0)}
+          </Text>
+          {savings > 0 ? (
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 11,
+                color: brand.primary,
+              }}
+            >
+              (−{formatEur(savings)})
+            </Text>
+          ) : null}
+        </View>
+      </View>
+      <RowActions
+        onCheck={onCheck}
+        onDelete={onDelete}
+        loadingCheck={loadingCheck}
+        loadingDelete={loadingDelete}
+      />
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CustomCard — Freitext-Eintrag (ohne DB-Bezug)
+// ═══════════════════════════════════════════════════════════════════
+type CustomCardProps = {
+  item: EnrichedItem;
+  onCheck: () => void;
+  onDelete: () => void;
+  loadingCheck: boolean;
+  loadingDelete: boolean;
+};
+
+function CustomCard({
+  item,
+  onCheck,
+  onDelete,
+  loadingCheck,
+  loadingDelete,
+}: CustomCardProps) {
+  const { theme, brand } = useTokens();
+  const isBrand = item.customType === 'brand';
+  // Picked icon takes priority. Fall back to generic glyph for legacy
+  // custom items that predate the icon picker.
+  const iconName: any = item.customIcon || (isBrand ? 'star' : 'cart-outline');
+  return (
+    <View
+      style={{
+        backgroundColor: theme.surface,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: theme.border,
+        padding: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+      }}
+    >
+      <View
+        style={{
+          width: 62,
+          height: 62,
+          borderRadius: 10,
+          backgroundColor: theme.primaryContainer,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <MaterialCommunityIcons name={iconName} size={32} color={brand.primary} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 4,
+            marginBottom: 2,
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: theme.primaryContainer,
+              paddingHorizontal: 6,
+              paddingVertical: 2,
+              borderRadius: 4,
+            }}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 9,
+                color: brand.primary,
+                letterSpacing: 0.4,
+              }}
+            >
+              {isBrand ? 'MARKE' : 'NONAME'}
+            </Text>
+          </View>
+        </View>
+        <Text
+          numberOfLines={2}
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 14,
+            color: theme.text,
+            lineHeight: 18,
+          }}
+        >
+          {item.name || 'Freitext-Eintrag'}
+        </Text>
+        {item.markt?.name ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 4,
+              marginTop: 3,
+            }}
+          >
+            {item.markt?.bild ? (
+              <ImageWithShimmer
+                source={{ uri: item.markt.bild }}
+                style={{ width: 12, height: 12, borderRadius: 2 }}
+              />
+            ) : (
+              <MaterialCommunityIcons name="storefront-outline" size={10} color={theme.textMuted} />
+            )}
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 10,
+                color: theme.textMuted,
+              }}
+            >
+              {item.markt.name}
+              {item.markt.land ? ` (${item.markt.land})` : ''}
+            </Text>
+          </View>
+        ) : (
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 10,
+              color: theme.textMuted,
+              marginTop: 3,
+            }}
+          >
+            Freitext-Eintrag
+          </Text>
+        )}
+      </View>
+      <RowActions
+        onCheck={onCheck}
+        onDelete={onDelete}
+        loadingCheck={loadingCheck}
+        loadingDelete={loadingDelete}
+      />
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MAIN
+// ═══════════════════════════════════════════════════════════════════
 export default function ShoppingListScreen() {
   const router = useRouter();
   const navigation = useNavigation();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
+  const insets = useSafeAreaInsets();
+  const { theme, brand } = useTokens();
   const { user, userProfile } = useAuth();
   const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
-  const insets = useSafeAreaInsets();
-  
-  const [activeTab, setActiveTab] = useState<'brand' | 'noname'>('brand');
-  const [loading, setLoading] = useState(true);
+
+  const favoriteMarketId: string | undefined = (userProfile as any)?.favoriteMarket;
+
+  // ─── Tab + pager ───────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<Tab>('brand');
+  const pagerRef = useRef<PagerView>(null);
+  const tabIndex = (t: Tab) => (t === 'brand' ? 0 : t === 'noname' ? 1 : 2);
+  const indexTab = (i: number): Tab => (i === 0 ? 'brand' : i === 1 ? 'noname' : 'all');
+
+  const onTabChange = (next: Tab) => {
+    if (next === activeTab) return;
+    setActiveTab(next);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    pagerRef.current?.setPage(tabIndex(next));
+  };
+  const onPageSelected = (e: { nativeEvent: { position: number } }) => {
+    const next = indexTab(e.nativeEvent.position);
+    setActiveTab((prev) => (prev === next ? prev : next));
+  };
+
+  // ─── Data ──────────────────────────────────────────────────────
+  const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [shoppingCartItems, setShoppingCartItems] = useState<FirestoreDocument<Einkaufswagen>[]>([]);
-  const [brandProducts, setBrandProducts] = useState<any[]>([]);
-  const [noNameProducts, setNoNameProducts] = useState<any[]>([]);
+  const [brandProducts, setBrandProducts] = useState<EnrichedItem[]>([]);
+  const [noNameProducts, setNoNameProducts] = useState<EnrichedItem[]>([]);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
+  // Marken-Info-Sheet — getriggered vom (i)-Icon im Hersteller-Chip
+  // einer BrandCard. null = zu, Object = sichtbar.
+  const [infoSheet, setInfoSheet] = useState<{ title: string; body: string } | null>(null);
   const [selectedConversions, setSelectedConversions] = useState<ProductToConvert[]>([]);
   const [totalPotentialSavings, setTotalPotentialSavings] = useState(0);
   const [totalActualSavings, setTotalActualSavings] = useState(0);
-  const [isConverting, setIsConverting] = useState(false);
-  const [showInfoSheet, setShowInfoSheet] = useState(false);
-  
-  // Filter States
-  const [showFilterModal, setShowFilterModal] = useState(false);
-  const [filters, setFilters] = useState({
-    markets: [] as string[],
-    categories: [] as string[],
-    sortBy: 'name' as 'name' | 'price' | 'savings'
-  });
-  const [availableMarkets, setAvailableMarkets] = useState<any[]>([]);
-  const [availableCategories, setAvailableCategories] = useState<any[]>([]);
-  
-  // Toasts laufen jetzt global über zentrale Toast-Library
-  
-  // Level-Up Overlay State (spektakuläre Animation)
-  const [showLevelUpOverlay, setShowLevelUpOverlay] = useState(false);
-  const [levelUpData, setLevelUpData] = useState<{ newLevel: number; oldLevel: number }>({ 
-    newLevel: 1, 
-    oldLevel: 1 
-  });
-  
-  // Custom Item Modal State
+
+  // ─── Filter ────────────────────────────────────────────────────
+  const [showFilter, setShowFilter] = useState(false);
   const [showCustomItemModal, setShowCustomItemModal] = useState(false);
-  
-  // Loading States für Button-Aktionen
+  const [filters, setFilters] = useState<{
+    markets: string[];
+    categories: string[];
+    sortBy: SortBy;
+  }>({ markets: [], categories: [], sortBy: 'name' });
+  const [availableMarkets, setAvailableMarkets] = useState<{ id: string; name: string }[]>([]);
+  const [availableCategories, setAvailableCategories] = useState<
+    { id: string; bezeichnung?: string; name?: string }[]
+  >([]);
+
+  // ─── Loading states ────────────────────────────────────────────
   const [loadingItems, setLoadingItems] = useState<Set<string>>(new Set());
-  
-  // Batch Action Loader States
+  const [deletingItems, setDeletingItems] = useState<Set<string>>(new Set());
+  const [convertingItems, setConvertingItems] = useState<Set<string>>(new Set());
+  const [isConverting, setIsConverting] = useState(false);
+
+  // Batch loaders
   const [purchaseLoaderState, setPurchaseLoaderState] = useState<{
     visible: boolean;
     processedItems: number;
     totalItems: number;
     currentItem: string;
-  }>({
-    visible: false,
-    processedItems: 0,
-    totalItems: 0,
-    currentItem: ''
-  });
-  
+  }>({ visible: false, processedItems: 0, totalItems: 0, currentItem: '' });
   const [convertLoaderState, setConvertLoaderState] = useState<{
     visible: boolean;
     processedItems: number;
     totalItems: number;
     currentItem: string;
-  }>({
-    visible: false,
-    processedItems: 0,
-    totalItems: 0,
-    currentItem: ''
+  }>({ visible: false, processedItems: 0, totalItems: 0, currentItem: '' });
+
+  // Level-up overlay (currently driven via gamification provider, but we
+  // keep the legacy hook here for safety).
+  const [showLevelUpOverlay, setShowLevelUpOverlay] = useState(false);
+  const [levelUpData] = useState<{ newLevel: number; oldLevel: number }>({
+    newLevel: 1,
+    oldLevel: 1,
   });
-  const [deletingItems, setDeletingItems] = useState<Set<string>>(new Set());
-  const [convertingItems, setConvertingItems] = useState<Set<string>>(new Set());
-  
-  const tabIndicatorPosition = useState(new Animated.Value(0))[0];
-  const pagerRef = useRef<PagerView>(null);
 
-  // Gamified toast helper
-  const showGameToast = (message: string, type: 'success' | 'error' | 'info' = 'success', enableAudio = true) => {
-    showInfoToast(message, type);
-  };
-
-  // Helper ganz oben in der Datei
-const safeCall = (fn?: (...a: any[]) => any, ...args: any[]) => {
-  try { fn?.(...args); } catch (e) { if (__DEV__) console.warn('non-critical error', e); }
-};
-const safeAsync = async (p: Promise<any>) => {
-  try { await p; } catch (e) { if (__DEV__) console.warn('non-critical async error', e); }
-};
-
-  // Header konfigurieren
+  // ─── Hide native stack header (we render DetailHeader) ─────────
   useLayoutEffect(() => {
-    navigation.setOptions({
-      ...getNavigationHeaderOptions(colorScheme, 'Einkaufszettel'),
-      headerRight: () => (
-        <TouchableOpacity
-          onPress={() => setShowCustomItemModal(true)}
-          style={{ paddingRight: 16 }}
-        >
-          <IconSymbol name="plus" size={20} color="white" />
-        </TouchableOpacity>
-      ),
-    });
-  }, [colorScheme, navigation]);
-  
-  // 🚫 KEIN lokaler Achievement-Handler mehr!
-  // Achievements werden jetzt ZENTRAL über GamificationProvider mit großen Lottie-Overlays angezeigt!
-  
-  // Load shopping cart data
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
+
+  // ─── Load shopping cart ────────────────────────────────────────
   const loadShoppingCart = useCallback(async () => {
     if (!user?.uid) return;
-    
-
-    
     try {
-      setLoading(true);
-      
-      // Reset selectedConversions to prevent accumulation on reload
       setSelectedConversions([]);
-      
-      // Load shopping cart items
       const items = await FirestoreService.getShoppingCartItems(user.uid);
-      setShoppingCartItems(items);
-      
-      // 🚀 PERFORMANCE FIX: Parallele Verarbeitung aller Items!
-      if (__DEV__ && typeof console.time === 'function') console.time('⚡ Parallele Einkaufszettel-Verarbeitung');
-      
-      // Separiere Custom Items (keine DB-Calls nötig)
-      const customBrandItems = [];
-      const customNoNameItems = [];
-      const dbItems = [];
-      
+
+      const customBrandItems: EnrichedItem[] = [];
+      const customNoNameItems: EnrichedItem[] = [];
+      const dbItems: FirestoreDocument<Einkaufswagen>[] = [];
+
       for (const item of items) {
         if (item.customItem) {
-          const customItemData = {
+          const enriched: EnrichedItem = {
             id: item.id,
-            name: item.customItem.name,
+            kind: item.customItem.type === 'brand' ? 'custom-brand' : 'custom-noname',
             isCustom: true,
+            name: item.customItem.name,
             customType: item.customItem.type,
-            marketName: item.customItem.marketName,
-            marketLand: item.customItem.marketLand,
-            marketBild: item.customItem.marketBild,
-            gekauft: item.gekauft,
-            einkaufswagenRef: item.id,
-            // Markt für NoName Items
-            ...(item.customItem.type === 'noname' && {
-              markt: {
-                name: item.customItem.marketName,
-                land: item.customItem.marketLand,
-                bild: item.customItem.marketBild
-              }
-            })
+            customIcon: (item.customItem as any).icon,
+            markt:
+              item.customItem.type === 'noname'
+                ? {
+                    name: item.customItem.marketName,
+                    land: item.customItem.marketLand,
+                    bild: item.customItem.marketBild,
+                  }
+                : null,
           };
-          
-          if (item.customItem.type === 'brand') {
-            customBrandItems.push(customItemData);
-          } else {
-            customNoNameItems.push(customItemData);
-          }
+          if (item.customItem.type === 'brand') customBrandItems.push(enriched);
+          else customNoNameItems.push(enriched);
         } else {
           dbItems.push(item);
         }
       }
-      
-      // 🚀 PARALLELE VERARBEITUNG: Alle DB-Items parallel laden
-      const processedItems = await Promise.all(dbItems.map(async (item) => {
-        try {
-          if (item.markenProdukt) {
-            // Brand Product Parallel Loading
-            const [productData, alternatives] = await Promise.all([
-              FirestoreService.getDocumentByReference<MarkenProdukte>(item.markenProdukt),
-              FirestoreService.getNoNameAlternatives(item.markenProdukt.id, userProfile?.favoriteMarket)
-            ]);
-            
-            if (productData) {
-              // Load hersteller parallel zu alternatives (schon geladen)
-              let herstellerData = null;
-              if (productData.hersteller) {
+
+      const processedItems = await Promise.all(
+        dbItems.map(async (item) => {
+          try {
+            if ((item as any).markenProdukt) {
+              const ref = (item as any).markenProdukt;
+              const [productData, alternatives] = await Promise.all([
+                FirestoreService.getDocumentByReference<MarkenProdukte>(ref),
+                FirestoreService.getNoNameAlternatives(ref.id, favoriteMarketId),
+              ]);
+              if (!productData) return null;
+              // Markenprodukt-Hersteller-Auflösung mit Marke-vs-
+              // -Hersteller-Split (analog firestore.ts Z.1755):
+              //   • productData.hersteller-Ref → erstmal lookuppen
+              //   • Hat `herstellerref` → Marke-Doc (in DB
+              //     `hersteller`-Coll, "MARKEN" in User-Lingo, mit
+              //     `infos`-Feld). Resolve real hersteller daraus.
+              //   • Sonst: direkt Hersteller-Doc.
+              let markeData: any = null;
+              let herstellerData: any = null;
+              if ((productData as any).hersteller) {
                 try {
-                  herstellerData = await FirestoreService.getDocumentByReference(productData.hersteller);
-                } catch (error) {
-                  console.error('Error loading hersteller for brand product:', error);
+                  const herstellerOrMarke = await FirestoreService.getDocumentByReference<any>(
+                    (productData as any).hersteller,
+                  );
+                  if (herstellerOrMarke?.herstellerref) {
+                    markeData = herstellerOrMarke;
+                    herstellerData = await FirestoreService.getDocumentByReference<any>(
+                      herstellerOrMarke.herstellerref,
+                    ).catch(() => null);
+                  } else {
+                    herstellerData = herstellerOrMarke;
+                  }
+                } catch {
+                  /* ignore */
                 }
               }
-              
-              // Calculate potential savings with best alternative
-              let bestAlternative = null;
+
+              let bestAlternative: any = null;
               let maxSavings = 0;
-              
               for (const alt of alternatives) {
-                // 🚀 OPTIMIERUNG: Nutze serverseitige Ersparnis falls verfügbar
-                const savingsData = getSavingsData(productData, alt);
-                if (savingsData.savingsEur > maxSavings) {
-                  maxSavings = savingsData.savingsEur;
+                const sd = getSavingsData(productData, alt);
+                if (sd.savingsEur > maxSavings) {
+                  maxSavings = sd.savingsEur;
                   bestAlternative = alt;
                 }
               }
-              
+
               return {
-                type: 'brand',
-                data: {
-                  ...item,
+                kind: 'brand' as const,
+                enriched: {
+                  id: item.id,
+                  kind: 'brand' as const,
+                  markenProduktRef: ref.id,
                   product: {
                     ...productData,
-                    hersteller: herstellerData
+                    hersteller: herstellerData,
+                    marke: markeData, // Für info-icon → mp.marke.infos
                   },
                   alternatives,
                   bestAlternative,
-                  potentialSavings: maxSavings
-                },
+                  potentialSavings: maxSavings,
+                } satisfies EnrichedItem,
                 potentialSavings: maxSavings,
-                actualSavings: 0,
-                bestAlternative
+                bestAlternative,
               };
-            }
-          } else if (item.handelsmarkenProdukt) {
-            // NoName Product Parallel Loading
-            const productData = await FirestoreService.getDocumentByReference<Produkte>(item.handelsmarkenProdukt);
-            if (productData) {
-              // Alle NoName References parallel laden
-              const [handelsmarkeData, discounterData, markenProdukt] = await Promise.all([
-                productData.handelsmarke ? 
-                  FirestoreService.getDocumentByReference(productData.handelsmarke).catch(() => null) : 
-                  Promise.resolve(null),
-                productData.discounter ? 
-                  FirestoreService.getDocumentByReference(productData.discounter).catch(() => null) : 
-                  Promise.resolve(null),
-                productData.markenProdukt ? 
-                  FirestoreService.getDocumentByReference<MarkenProdukte>(productData.markenProdukt).catch(() => null) : 
-                  Promise.resolve(null)
+            } else if ((item as any).handelsmarkenProdukt) {
+              const ref = (item as any).handelsmarkenProdukt;
+              const productData = await FirestoreService.getDocumentByReference<Produkte>(ref);
+              if (!productData) return null;
+              const [handelsmarkeData, discounterData, markenProdukt, herstellerData] = await Promise.all([
+                (productData as any).handelsmarke
+                  ? FirestoreService.getDocumentByReference(
+                      (productData as any).handelsmarke,
+                    ).catch(() => null)
+                  : Promise.resolve(null),
+                (productData as any).discounter
+                  ? FirestoreService.getDocumentByReference(
+                      (productData as any).discounter,
+                    ).catch(() => null)
+                  : Promise.resolve(null),
+                (productData as any).markenProdukt
+                  ? FirestoreService.getDocumentByReference<MarkenProdukte>(
+                      (productData as any).markenProdukt,
+                    ).catch(() => null)
+                  : Promise.resolve(null),
+                // hersteller_new für die "tatsächlicher Hersteller"-
+                // Zeile unter dem Produktnamen — siehe NoNameCard.
+                (productData as any).hersteller
+                  ? FirestoreService.getDocumentByReference(
+                      (productData as any).hersteller,
+                    ).catch(() => null)
+                  : Promise.resolve(null),
               ]);
-              
-              // Fix discounter ID preservation
-              let finalDiscounterData = discounterData;
-              if (discounterData && productData.discounter) {
-                finalDiscounterData = {
-                  ...discounterData,
-                  id: productData.discounter.id
+
+              let finalDiscounter: any = discounterData;
+              if (discounterData && (productData as any).discounter) {
+                finalDiscounter = {
+                  ...(discounterData as any),
+                  id: (productData as any).discounter.id,
                 };
               }
-              
-              // Calculate actual savings
               let savings = 0;
               if (markenProdukt) {
-                const savingsData = getSavingsData(markenProdukt, productData);
-                savings = savingsData.savingsEur;
+                const sd = getSavingsData(markenProdukt, productData);
+                savings = sd.savingsEur;
               }
-              
               return {
-                type: 'noname',
-                data: {
-                  ...item,
+                kind: 'noname' as const,
+                enriched: {
+                  id: item.id,
+                  kind: 'noname' as const,
                   product: {
                     ...productData,
                     handelsmarke: handelsmarkeData,
-                    discounter: finalDiscounterData
+                    discounter: finalDiscounter,
+                    hersteller: herstellerData,
                   },
-                  savings
-                },
-                potentialSavings: 0,
-                actualSavings: savings
+                  savings,
+                  // preserve journey info for bulk purchase
+                  ...(item as any),
+                } satisfies EnrichedItem,
+                savings,
               };
             }
+            return null;
+          } catch (error) {
+            console.error('Error processing shopping cart item:', error);
+            return null;
           }
-          return null;
-        } catch (error) {
-          console.error('Error processing item:', error);
-          return null;
-        }
-      }));
-      
-      // Ergebnisse sammeln und State setzen
-      const brandItems = [...customBrandItems];
-      const noNameItems = [...customNoNameItems];
-      let potentialSavings = 0;
-      let actualSavings = 0;
-      const newSelectedConversions = [];
-      
+        }),
+      );
+
+      const brandItems: EnrichedItem[] = [...customBrandItems];
+      const noNameItems: EnrichedItem[] = [...customNoNameItems];
+      let potential = 0;
+      let actual = 0;
+      const newSelected: ProductToConvert[] = [];
+
       for (const result of processedItems) {
-        if (result) {
-          if (result.type === 'brand') {
-            brandItems.push(result.data as any); // Type assertion for mixed array
-            potentialSavings += result.potentialSavings;
-            
-            // Auto-select best alternative for conversion
-            if (result.bestAlternative && result.data.markenProdukt) {
-              newSelectedConversions.push({
-                einkaufswagenRef: result.data.id,
-                markenProduktRef: result.data.markenProdukt.id,
-                produktRef: result.bestAlternative.id
-              });
-            }
-          } else if (result.type === 'noname') {
-            noNameItems.push(result.data as any); // Type assertion for mixed array
-            actualSavings += result.actualSavings;
+        if (!result) continue;
+        if (result.kind === 'brand') {
+          brandItems.push(result.enriched);
+          potential += result.potentialSavings;
+          if (
+            result.bestAlternative &&
+            result.enriched.markenProduktRef
+          ) {
+            newSelected.push({
+              einkaufswagenRef: result.enriched.id,
+              markenProduktRef: result.enriched.markenProduktRef,
+              produktRef: result.bestAlternative.id,
+            });
           }
+        } else {
+          noNameItems.push(result.enriched);
+          actual += result.savings;
         }
       }
-      
-      // Batch State Updates
-      setSelectedConversions(newSelectedConversions);
-      if (__DEV__ && typeof console.timeEnd === 'function') console.timeEnd('⚡ Parallele Einkaufszettel-Verarbeitung');
-      
+
+      setSelectedConversions(newSelected);
       setBrandProducts(brandItems);
       setNoNameProducts(noNameItems);
-      setTotalPotentialSavings(potentialSavings);
-      setTotalActualSavings(actualSavings);
-      
-
-      console.log(`💰 Potential savings: €${potentialSavings.toFixed(2)}, Actual savings: €${actualSavings.toFixed(2)}`);
-      
+      setTotalPotentialSavings(potential);
+      setTotalActualSavings(actual);
     } catch (error: any) {
       console.error('Error loading shopping cart:', error);
       showInfoToast(
-        TOAST_MESSAGES.SHOPPING.loadError + " " + (error?.message ? error.message.toString() : String(error)),
-        'error'
+        TOAST_MESSAGES.SHOPPING.loadError +
+          ' ' +
+          (error?.message ? String(error.message) : String(error)),
+        'error',
       );
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
       setRefreshing(false);
     }
-  }, [user, userProfile]);
-  
+  }, [user?.uid, favoriteMarketId]);
+
   useEffect(() => {
-    if (user?.uid) {
-      loadShoppingCart();
+    if (user?.uid) loadShoppingCart();
+  }, [user?.uid, loadShoppingCart]);
+
+  // ─── Filter options ────────────────────────────────────────────
+  const loadFilterOptions = useCallback(async () => {
+    try {
+      const marketsMap = new Map<string, { id: string; name: string }>();
+      const categoriesMap = new Map<string, { id: string; bezeichnung?: string; name?: string }>();
+      const all = [...brandProducts, ...noNameProducts];
+      all.forEach((item) => {
+        const p = item.product;
+        if (p?.discounter?.id && p?.discounter?.name) {
+          marketsMap.set(p.discounter.id, { id: p.discounter.id, name: p.discounter.name });
+        }
+        if (p?.kategorie?.id && (p?.kategorie?.bezeichnung || p?.kategorie?.name)) {
+          categoriesMap.set(p.kategorie.id, {
+            id: p.kategorie.id,
+            bezeichnung: p.kategorie.bezeichnung,
+            name: p.kategorie.name,
+          });
+        }
+      });
+      const marketsArray = Array.from(marketsMap.values());
+      const categoriesArray = Array.from(categoriesMap.values());
+
+      const userLevel =
+        (userProfile as any)?.stats?.currentLevel || (userProfile as any)?.level || 1;
+
+      if (categoriesArray.length === 0) {
+        try {
+          const cwa = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
+          setAvailableCategories(cwa.filter((c: any) => !c.isLocked));
+        } catch {
+          setAvailableCategories([]);
+        }
+      } else {
+        const filtered: typeof categoriesArray = [];
+        for (const cat of categoriesArray) {
+          const ok = await categoryAccessService.isCategoryAvailable(cat.id, userLevel, isPremium);
+          if (ok) filtered.push(cat);
+        }
+        setAvailableCategories(filtered);
+      }
+      setAvailableMarkets(marketsArray);
+    } catch (error) {
+      console.error('Error loading filter options:', error);
     }
-  }, [user?.uid]); // Only reload when user changes, not on userProfile changes
-  
+  }, [brandProducts, noNameProducts, userProfile, isPremium]);
+
   useEffect(() => {
     if (brandProducts.length > 0 || noNameProducts.length > 0) {
       loadFilterOptions();
     }
-  }, [brandProducts.length, noNameProducts.length, activeTab]); // 🎯 Nur bei Längen-Änderung oder Tab-Wechsel
-  
-  const handleTabChange = (tab: 'brand' | 'noname') => {
-    const pageIndex = tab === 'brand' ? 0 : 1;
-    setActiveTab(tab);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    
-    // Animate tab indicator
-    Animated.timing(tabIndicatorPosition, {
-      toValue: tab === 'brand' ? 0 : width / 2,
-      duration: 200,
-      useNativeDriver: true
-    }).start();
-    
-    // Switch PagerView page
-    pagerRef.current?.setPage(pageIndex);
-  };
+  }, [brandProducts.length, noNameProducts.length, loadFilterOptions]);
 
-  const handlePageSelected = (e: any) => {
-    const position = e.nativeEvent.position;
-    const newTab = position === 0 ? 'brand' : 'noname';
-    
-    if (newTab !== activeTab) {
-      setActiveTab(newTab);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      
-      // Animate tab indicator
-      Animated.timing(tabIndicatorPosition, {
-        toValue: position === 0 ? 0 : width / 2,
-        duration: 200,
-        useNativeDriver: true
-      }).start();
-    }
-  };
-  
-  // Toggle expand/collapse for brand products
+  // ─── Apply filters + sort ──────────────────────────────────────
+  const applyFiltersAndSorting = useCallback(
+    (products: EnrichedItem[]) => {
+      let filtered = [...products];
+      // Markets only matter on noname-style entries with discounter
+      if (filters.markets.length > 0) {
+        filtered = filtered.filter((item) => {
+          const did = item.product?.discounter?.id;
+          // Items without discounter (brand items, custom items) → bypass market filter
+          return !did || filters.markets.includes(did);
+        });
+      }
+      if (filters.categories.length > 0) {
+        filtered = filtered.filter((item) => {
+          const cid = item.product?.kategorie?.id;
+          return !cid || filters.categories.includes(cid);
+        });
+      }
+      filtered.sort((a, b) => {
+        switch (filters.sortBy) {
+          case 'name': {
+            const na = a.name || a.product?.produktName || a.product?.name || '';
+            const nb = b.name || b.product?.produktName || b.product?.name || '';
+            return na.localeCompare(nb);
+          }
+          case 'price':
+            return (a.product?.preis || 0) - (b.product?.preis || 0);
+          case 'savings':
+            return (b.savings || 0) - (a.savings || 0);
+          default:
+            return 0;
+        }
+      });
+      return filtered;
+    },
+    [filters],
+  );
+
+  const filteredBrand = applyFiltersAndSorting(brandProducts);
+  const filteredNoName = applyFiltersAndSorting(noNameProducts);
+  const filteredAll = applyFiltersAndSorting([...brandProducts, ...noNameProducts]);
+
+  const activeFilterCount =
+    filters.markets.length + filters.categories.length + (filters.sortBy !== 'name' ? 1 : 0);
+
+  const clearAllFilters = () =>
+    setFilters({ markets: [], categories: [], sortBy: 'name' });
+
+  // ─── Action handlers ───────────────────────────────────────────
+
   const toggleExpanded = (itemId: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setExpandedItems(prev =>
-      prev.includes(itemId)
-        ? prev.filter(id => id !== itemId)
-        : [...prev, itemId]
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setExpandedItems((prev) =>
+      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId],
     );
   };
-  
-  // Select alternative for conversion
+
   const handleSelectAlternative = (
     einkaufswagenRef: string,
     markenProduktRef: string,
-    produktRef: string
+    produktRef: string,
   ) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedConversions(prev => {
-      const existingIndex = prev.findIndex(
-        conv => conv.einkaufswagenRef === einkaufswagenRef
-      );
-      
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setSelectedConversions((prev) => {
+      const existingIndex = prev.findIndex((c) => c.einkaufswagenRef === einkaufswagenRef);
       if (existingIndex !== -1) {
-        const newConversions = [...prev];
-        if (newConversions[existingIndex].produktRef === produktRef) {
-          // Deselect if same product
-          newConversions.splice(existingIndex, 1);
+        const next = [...prev];
+        if (next[existingIndex].produktRef === produktRef) {
+          next.splice(existingIndex, 1);
         } else {
-          // Update selection
-          newConversions[existingIndex] = {
-            einkaufswagenRef,
-            markenProduktRef,
-            produktRef
-          };
+          next[existingIndex] = { einkaufswagenRef, markenProduktRef, produktRef };
         }
-        return newConversions;
-      } else {
-        // Add new selection
-        return [
-          ...prev,
-          { einkaufswagenRef, markenProduktRef, produktRef }
-        ];
+        return next;
       }
+      return [...prev, { einkaufswagenRef, markenProduktRef, produktRef }];
     });
   };
-  
-  // Convert single product
+
   const handleConvertSingle = async (
     einkaufswagenRef: string,
     markenProduktRef: string,
-    produktRef: string
+    produktRef: string,
   ) => {
     if (!user) return;
-    
-    // Loading State setzen
-    setConvertingItems(prev => new Set(prev).add(einkaufswagenRef));
-    
+    setConvertingItems((prev) => new Set(prev).add(einkaufswagenRef));
     try {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      
-      // Convert this single product
-      const conversions = [{
-        einkaufswagenRef,
-        markenProduktRef,
-        produktRef
-      }];
-      
-      const result = await FirestoreService.convertToNoName(user.uid, conversions);
-      
-      // Calculate savings for toast before reloading
-      const brandItem = brandProducts.find(item => item.id === einkaufswagenRef);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      const conversions = [{ einkaufswagenRef, markenProduktRef, produktRef }];
+      await FirestoreService.convertToNoName(user.uid, conversions);
+      const brandItem = brandProducts.find((i) => i.id === einkaufswagenRef);
       const savingsAmount = brandItem?.potentialSavings || 0;
-      
-      // 🚀 FIX: Erst Daten laden, dann Tab wechseln (verhindert Tab-Sprung-zurück)
       await loadShoppingCart();
-      
-      // ✅ FIX: Tab-Wechsel nach Daten-Laden (mit kleiner Verzögerung für Stabilität)
-      setTimeout(() => {
-        handleTabChange('noname');
-      }, 100);
-      
-      // Success toast with savings amount
+      setTimeout(() => onTabChange('noname'), 100);
       showConvertSuccessToast(savingsAmount);
-      
-      // 🚀 PERFORMANCE: Achievement Non-Blocking
-      achievementService.trackAction(user.uid, 'convert_product').catch(error => {
-        console.error('❌ Convert Achievement Tracking Fehler:', error);
+      achievementService.trackAction(user.uid, 'convert_product').catch((e) => {
+        console.error('Achievement convert_product error', e);
       });
-      
     } catch (error) {
       console.error('Error converting single product:', error);
       showInfoToast(TOAST_MESSAGES.SHOPPING.convertError, 'error');
     } finally {
-      // Loading State entfernen
-      setConvertingItems(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(einkaufswagenRef);
-        return newSet;
+      setConvertingItems((prev) => {
+        const n = new Set(prev);
+        n.delete(einkaufswagenRef);
+        return n;
       });
     }
   };
-  
-  // Convert selected brand products to NoName
+
   const handleConvertSelected = async () => {
     if (!user?.uid) return;
     if (selectedConversions.length === 0) {
       showInfoToast(TOAST_MESSAGES.SHOPPING.selectFirstPrompt, 'info');
       return;
     }
-  
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     Alert.alert(
       'In NoNames umwandeln?',
-      `${selectedConversions.length} Produkt${selectedConversions.length > 1 ? 'e' : ''} umwandeln und €${totalPotentialSavings.toFixed(2)} sparen?`,
+      `${selectedConversions.length} Produkt${
+        selectedConversions.length > 1 ? 'e' : ''
+      } umwandeln und ${formatEur(totalPotentialSavings)} sparen?`,
       [
         { text: 'Abbrechen', style: 'cancel' },
         {
@@ -637,595 +2000,167 @@ const safeAsync = async (p: Promise<any>) => {
               visible: true,
               processedItems: 0,
               totalItems: selectedConversions.length,
-              currentItem: ''
+              currentItem: '',
             });
-  
             try {
-              // UI-Progress (nur Anzeige)
               for (let i = 0; i < selectedConversions.length; i++) {
                 const c = selectedConversions[i];
-                const bp = brandProducts.find(p => p.id === c.einkaufswagenRef); // <-- FIX
+                const bp = brandProducts.find((p) => p.id === c.einkaufswagenRef);
                 const name = bp?.product?.name || bp?.name || 'Produkt';
-                setConvertLoaderState(prev => ({
-                  ...prev,
-                  currentItem: name,
-                  processedItems: i
-                }));
-                await new Promise(res => setTimeout(res, 40));
+                setConvertLoaderState((prev) => ({ ...prev, currentItem: name, processedItems: i }));
+                await new Promise((res) => setTimeout(res, 40));
               }
-  
-              // eigentliche Umwandlung
-              setConvertLoaderState(prev => ({
+              setConvertLoaderState((prev) => ({
                 ...prev,
                 currentItem: 'Umwandlung wird verarbeitet...',
-                processedItems: selectedConversions.length
+                processedItems: selectedConversions.length,
               }));
-  
               await FirestoreService.convertToNoName(user.uid, selectedConversions);
               await FirestoreService.updateUserTotalSavings(user.uid, totalPotentialSavings);
-  
-              // Side-Effects: dürfen NIE den Erfolg kippen
+
               const sideEffects: Promise<any>[] = [];
               for (const c of selectedConversions) {
-                const bp = brandProducts.find(p => p.id === c.einkaufswagenRef); // <-- FIX
+                const bp = brandProducts.find((p) => p.id === c.einkaufswagenRef);
                 if (bp) {
-                  const { savingsEur, savingsPercent } = getSavingsData(
-                    bp.product,
-                    { preis: bp.product?.preis ?? 0, packSize: bp.product?.packSize ?? 1 }
+                  const { savingsEur, savingsPercent } = getSavingsData(bp.product, {
+                    preis: bp.product?.preis ?? 0,
+                    packSize: bp.product?.packSize ?? 1,
+                  });
+                  sideEffects.push(
+                    Promise.resolve(
+                      analytics?.trackProductConversion?.(
+                        c.markenProduktRef,
+                        c.produktRef,
+                        savingsEur,
+                        savingsPercent,
+                      ),
+                    ),
                   );
-                  sideEffects.push(Promise.resolve(
-                    analytics?.trackProductConversion?.(
-                      c.markenProduktRef,
-                      c.produktRef,
-                      savingsEur,
-                      savingsPercent
-                    )
-                  ));
                 }
-                sideEffects.push(Promise.resolve(
-                  achievementService?.trackAction?.(user.uid, 'convert_product')
-                ));
+                sideEffects.push(
+                  Promise.resolve(achievementService?.trackAction?.(user.uid, 'convert_product')),
+                );
               }
-              await Promise.allSettled(sideEffects); // <-- wirft nicht
-  
-              // Abschluss & UI
-              setConvertLoaderState(prev => ({
+              await Promise.allSettled(sideEffects);
+
+              setConvertLoaderState((prev) => ({
                 ...prev,
                 currentItem: 'Abgeschlossen!',
-                processedItems: selectedConversions.length
+                processedItems: selectedConversions.length,
               }));
-              await new Promise(res => setTimeout(res, 80));
-  
+              await new Promise((res) => setTimeout(res, 80));
               setConvertLoaderState({ visible: false, processedItems: 0, totalItems: 0, currentItem: '' });
-  
+
               await loadShoppingCart();
-              setTimeout(() => handleTabChange('noname'), 100);
-  
+              setTimeout(() => onTabChange('noname'), 100);
               showBulkConvertSuccessToast(totalPotentialSavings);
             } catch (error) {
               console.error('[convert] bulk error', error);
               showInfoToast(TOAST_MESSAGES.SHOPPING.bulkConvertError, 'error');
             } finally {
-              // falls irgendwo ein früher return passiert ist
               setConvertLoaderState({ visible: false, processedItems: 0, totalItems: 0, currentItem: '' });
               setIsConverting(false);
             }
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   };
-  
-  
-  // Filter Functions
-  const getActiveFiltersCount = () => {
-    return filters.markets.length + filters.categories.length;
-  };
-  
-  const getSortingOptions = () => {
-    const baseSorting = [
-      { value: 'name', label: 'Name', icon: 'textformat.abc' },
-      { value: 'price', label: 'Preis', icon: 'eurosign' }
-    ];
-    
-    if (activeTab === 'noname') {
-      baseSorting.push({ value: 'savings', label: 'Ersparnis', icon: 'leaf.fill' });
-    }
-    
-    return baseSorting;
-  };
-  
-  const updateSorting = (sortBy: 'name' | 'price' | 'savings') => {
-    setFilters(prev => ({ ...prev, sortBy }));
-  };
-  
-  const toggleMarketFilter = (marketId: string) => {
-    setFilters(prev => ({
-      ...prev,
-      markets: prev.markets.includes(marketId)
-        ? prev.markets.filter(id => id !== marketId)
-        : [...prev.markets, marketId]
-    }));
-  };
-  
-  const toggleCategoryFilter = (categoryId: string) => {
-    setFilters(prev => ({
-      ...prev,
-      categories: prev.categories.includes(categoryId)
-        ? prev.categories.filter(id => id !== categoryId)
-        : [...prev.categories, categoryId]
-    }));
-  };
-  
-  const clearAllFilters = () => {
-    setFilters({
-      markets: [],
-      categories: [],
-      sortBy: 'name'
-    });
-  };
-  
-  // Load available markets and categories for filtering
-  const loadFilterOptions = useCallback(async () => {
+
+  const handleMarkAsPurchased = async (itemId: string, savings?: number) => {
+    if (!user?.uid) return;
+    setLoadingItems((prev) => new Set(prev).add(itemId));
     try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      const isCustomItem = [...brandProducts, ...noNameProducts].some(
+        (item) => item.id === itemId && item.isCustom,
+      );
 
-      
-      // Load available markets from current products
-      const marketsMap = new Map();
-      const categoriesMap = new Map();
-      
-      // Check both brand and noname products
-      const allProducts = [...brandProducts, ...noNameProducts];
-      console.log(`📊 Checking ${allProducts.length} products for filter options`);
-      
-      allProducts.forEach(item => {
-        // Market from discounter
-        if (item.product?.discounter?.id && item.product?.discounter?.name) {
-          marketsMap.set(item.product.discounter.id, {
-            id: item.product.discounter.id,
-            name: item.product.discounter.name
-          });
-        }
-        
-        // Category from kategorie
-        if (item.product?.kategorie?.id && item.product?.kategorie?.bezeichnung) {
-          categoriesMap.set(item.product.kategorie.id, {
-            id: item.product.kategorie.id,
-            bezeichnung: item.product.kategorie.bezeichnung
-          });
-        }
-      });
-      
-      const marketsArray = Array.from(marketsMap.values());
-      const categoriesArray = Array.from(categoriesMap.values());
-      
-      console.log(`✅ Found ${marketsArray.length} markets and ${categoriesArray.length} categories`);
-      console.log('📍 Markets:', marketsArray.map(m => m.name));
-      console.log('📂 Categories:', categoriesArray.map(c => c.bezeichnung));
-      
-      // Fallback: Lade alle Kategorien aus Firestore wenn keine in Produkten gefunden
-      if (categoriesArray.length === 0) {
-        try {
-          // User Level für Kategorie-Zugriff
-          const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
-          const categoriesWithAccess = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
-          
-          // Zeige nur verfügbare Kategorien
-          const availableCategories = categoriesWithAccess.filter(cat => !cat.isLocked);
-          setAvailableCategories(availableCategories);
-        } catch (error) {
-          console.error('Error loading categories from Firestore:', error);
-          setAvailableCategories([]);
-        }
-      } else {
-        // Filtere gefundene Kategorien basierend auf User-Level
-        const userLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
-        const filteredCategories = [];
-        
-        for (const cat of categoriesArray) {
-          const isAvailable = await categoryAccessService.isCategoryAvailable(cat.id, userLevel, isPremium);
-          if (isAvailable) {
-            filteredCategories.push(cat);
-          }
-        }
-        
-        setAvailableCategories(filteredCategories);
-      }
-      
-      setAvailableMarkets(marketsArray);
-    } catch (error) {
-      console.error('Error loading filter options:', error);
-    }
-  }, [brandProducts, noNameProducts, userProfile]);
-  
-  // Apply filters and sorting
-  const applyFiltersAndSorting = useCallback((products: any[]) => {
-    let filtered = [...products];
-    
-    // Apply market filter (only for noname)
-    if (activeTab === 'noname' && filters.markets.length > 0) {
-      filtered = filtered.filter(item => 
-        item.product?.discounter?.id && filters.markets.includes(item.product.discounter.id)
-      );
-    }
-    
-    // Apply category filter
-    if (filters.categories.length > 0) {
-      filtered = filtered.filter(item =>
-        item.product?.kategorie?.id && filters.categories.includes(item.product.kategorie.id)
-      );
-    }
-    
-    // Apply sorting
-    filtered.sort((a, b) => {
-      switch (filters.sortBy) {
-        case 'name':
-          const nameA = a.name || a.product?.produktName || a.product?.name || '';
-          const nameB = b.name || b.product?.produktName || b.product?.name || '';
-          return nameA.localeCompare(nameB);
-        case 'price':
-          const priceA = a.product?.preis || 0;
-          const priceB = b.product?.preis || 0;
-          return priceA - priceB;
-        case 'savings':
-          if (activeTab === 'noname') {
-            const savingsA = a.savings || 0;
-            const savingsB = b.savings || 0;
-            return savingsB - savingsA; // Höchste Ersparnis zuerst
-          }
-          return 0;
-        default:
-          return 0;
-      }
-    });
-    
-    return filtered;
-  }, [activeTab, filters]);
-  
-  // Mark all as purchased
-    const handleMarkAllAsPurchased = async () => {
-      if (!user || noNameProducts.length === 0) return;
-      
-      // Separate DB products and custom items
-      const dbNoNameProducts = noNameProducts.filter(item => !item.isCustom);
-      const customItems = noNameProducts.filter(item => item.isCustom);
-      const dbProductCount = dbNoNameProducts.length;
-      const customItemCount = customItems.length;
-      const totalSavings = dbNoNameProducts.reduce((sum, item) => sum + (item.savings || 0), 0);
-      
-      // Total count for user display
-      const totalCount = dbProductCount + customItemCount;
-      
-      // Check if there are any items to process
-      if (totalCount === 0) return;
-      
-      // Create appropriate message based on what we have
-      let message = '';
-      if (dbProductCount > 0 && customItemCount > 0) {
-        message = `Möchtest du alle ${totalCount} Produkte als erledigt markieren? (${dbProductCount} NoName-Produkte für €${totalSavings.toFixed(2)} Ersparnis + ${customItemCount} Freitext-Einträge)`;
-      } else if (dbProductCount > 0) {
-        message = `Möchtest du alle ${dbProductCount} NoName-Produkte als gekauft markieren und €${totalSavings.toFixed(2)} zu deiner Ersparnis hinzufügen?`;
-      } else {
-        message = `Möchtest du alle ${customItemCount} Freitext-Einträge als erledigt markieren?`;
-      }
-      
-      // Confirmation dialog before bulk action
-      Alert.alert(
-        'Alle als erledigt markieren?',
-        message,
-        [
-          {
-            text: 'Abbrechen',
-            style: 'cancel',
-            onPress: () => console.log('Bulk purchase cancelled by user')
-          },
-          {
-            text: 'Alle markieren',
-            style: 'default',
-            onPress: () => executeMarkAllAsPurchased(dbProductCount, customItemCount, totalSavings)
-          }
-        ]
-      );
-    };
-
-    const executeMarkAllAsPurchased = async (dbProductCount: number, customItemCount: number, totalSavings: number) => {
-      // Process DB products and custom items separately - MUSS VOR dem try-Block sein!
-      const dbNoNameProducts = noNameProducts.filter(item => !item.isCustom);
-      const customItems = noNameProducts.filter(item => item.isCustom);
-      
-      // Show batch loader
-      setPurchaseLoaderState({
-        visible: true,
-        processedItems: 0,
-        totalItems: dbProductCount + customItemCount,
-        currentItem: 'Wird verarbeitet...'
-      });
-      
-      try {
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        
-        const totalCount = dbProductCount + customItemCount;
-        console.log(`📊 Bulk update: ${dbProductCount} DB products, ${customItemCount} custom items, €${totalSavings.toFixed(2)} savings`);
-        
-        const promises = [];
-        
-        // WICHTIG: productsForJourneyTracking UND productsWithIndices AUSSERHALB des if-Blocks definieren
-        let productsForJourneyTracking: any[] = [];
-        let productsWithIndices: any[] = [];
-        
-        // Journey Tracking Service AUCH außerhalb importieren!
-        const journeyTrackingService = await import('@/lib/services/journeyTrackingService').then(m => m.default);
-        
-        // Mark DB products as purchased (creates purchase history)
-        if (dbNoNameProducts.length > 0) {
-          // Sammle alle Produkt-Infos für EINE Bulk-Journey-Update
-          productsForJourneyTracking = dbNoNameProducts.map(item => {
-            // Debug: Log das Item um zu sehen, was wir haben
-            console.log('🔍 Debug Item für Bulk Purchase:', {
-              itemId: item.id,
-              hasProduct: !!item.product,
-              productId: item.product?.id,
-              handelsmarkenProdukt: item.handelsmarkenProdukt,
-              productName: item.product?.name || item.product?.produktName || item.name
-            });
-            
-            return {
-              productId: item.product?.id || (item.handelsmarkenProdukt && typeof item.handelsmarkenProdukt === 'object' && 'id' in item.handelsmarkenProdukt ? item.handelsmarkenProdukt.id : '') || '',
-              productName: item.product?.name || item.product?.produktName || item.name || 'Unbekannt',
-              productType: (item.isMarkenProdukt ? 'brand' : 'noname') as 'brand' | 'noname',
-              finalPrice: item.product?.preis || 0,
-              finalSavings: item.savings || 0,
-              journeyId: item.journeyId, // Falls vorhanden
-              viewedProductIndex: item.viewedProductIndex // NEU: Index für eindeutige Zuordnung
-            };
-          });
-          
-          // Tracke alle Purchases in EINER Operation
-          if (productsForJourneyTracking.length > 0 && productsForJourneyTracking[0].journeyId) {
-            // NEU: Hole Indices für alle Produkte
-            productsWithIndices = productsForJourneyTracking.map(product => ({
-              ...product,
-              viewedProductIndex: journeyTrackingService.getViewedProductIndexAfterAction(product.productId)
-            }));
-            
-            console.log('🔍 DEBUG Bulk Purchase - Products with Indices:', productsWithIndices.map(p => ({
-              name: p.productName,
-              id: p.productId,
-              index: p.viewedProductIndex
-            })));
-            
-            // Journey-Tracking wird später mit Achievement kombiniert
-          }
-          
-          // Dann die einzelnen Firestore-Updates (ohne Journey-Tracking)
-          promises.push(
-            ...dbNoNameProducts.map(item => 
-              FirestoreService.markAsPurchasedWithoutTracking(user.uid, item.id)
-            )
-          );
-        }
-        
-        // Remove custom items from cart (no purchase history)
-        if (customItems.length > 0) {
-          promises.push(
-            ...customItems.map(item => 
-              FirestoreService.removeFromShoppingCart(user.uid, item.id)
-            )
-          );
-        }
-        
-        // Show processing message
-        setPurchaseLoaderState(prev => ({
-          ...prev,
-          currentItem: 'Alle Produkte werden verarbeitet...',
-          processedItems: Math.floor(totalCount * 0.3)
-        }));
-        
-        // Execute all operations in parallel
-        await Promise.all(promises);
-        
-        // Update progress
-        setPurchaseLoaderState(prev => ({
-          ...prev,
-          currentItem: 'Ersparnis wird gespeichert...',
-          processedItems: Math.floor(totalCount * 0.7)
-        }));
-        
-        // Update user's total savings and product count (only for DB products)
-        if (totalSavings > 0 || dbProductCount > 0) {
-          await updateUserStats(user.uid, {
-            savingsToAdd: totalSavings,
-            productsToAdd: dbProductCount
-          });
-        }
-        
-        // Clear all NoName products locally (both DB and custom)
-        setNoNameProducts([]);
-        setTotalActualSavings(0);
-        
-        // Track Achievement: complete_shopping (only for DB products)
-        if (dbProductCount > 0) {
-          setPurchaseLoaderState(prev => ({
-            ...prev,
-            currentItem: 'Achievement wird getrackt...',
-            processedItems: totalCount
-          }));
-          
-          // 🚀 PERFORMANCE: Journey + Achievement Sequential Non-Blocking
-          if (productsForJourneyTracking.length > 0 && productsForJourneyTracking[0].journeyId && productsWithIndices) {
-            // Journey-Update DANN Achievement - Sequential aber Non-Blocking
-            journeyTrackingService.trackBulkPurchaseInSpecificJourney(
-              productsForJourneyTracking[0].journeyId,
-              productsWithIndices,
-              totalSavings,
-              user.uid
-            ).then(() => {
-              // Achievement NACH Journey-Update (vermeidet Race Conditions)
-              return achievementService.trackAction(user.uid, 'complete_shopping', {
-                productCount: dbProductCount,
-                totalSavings
-              });
-            }).catch(error => {
-              console.error('❌ Sequential Tracking Fehler:', error);
-            });
-          } else {
-            // Nur Achievement wenn keine Journey
-            achievementService.trackAction(user.uid, 'complete_shopping', {
-              productCount: dbProductCount,
-              totalSavings
-            }).catch(error => {
-              console.error('❌ Achievement Tracking Fehler:', error);
-            });
-          }
-          
-          // UI ist sofort frei, Tracking läuft im Hintergrund
-        }
-        
-        // Final completion
-        setPurchaseLoaderState(prev => ({
-          ...prev,
-          currentItem: 'Abgeschlossen!',
-          processedItems: totalCount
-        }));
-        
-        // 🚀 PERFORMANCE: Künstliches Delay entfernt
-        
-        // 📊 Track Purchase Completed Event
-        if (dbProductCount > 0) {
-          // Sammle Source-Informationen aus den gekauften Produkten
-          const sourceMix = dbNoNameProducts
-            .map(item => item.source || 'unknown')
-            .filter((source, index, arr) => arr.indexOf(source) === index); // Unique sources
-          
-          // 🎯 Track Purchase (korrekte Parameter)
-          // Purchase-with-Journey wird durch Legacy Purchase Event abgedeckt
-          
-          // Legacy Purchase Event
-          analytics.trackPurchaseCompleted(
-            totalCount,
-            totalSavings,
-            dbProductCount,
-            0, // Keine Brand-Produkte im NoName-Tab
-            sourceMix
-          );
-        }
-        
-        // ENTFERNT: Doppeltes Tracking! 
-        // Das Journey-Tracking passiert bereits in FirestoreService.markAsPurchased
-        // für jedes einzelne Produkt mit der korrekten Original-Journey
-        
-        // Verwende Bulk-Purchased-Toast mit intelligenter Message-Auswahl
-        showBulkPurchasedToast(dbProductCount, customItemCount, totalSavings);
-        
-      } catch (error) {
-        console.error('Error marking all as purchased:', error);
-        showInfoToast(TOAST_MESSAGES.SHOPPING.bulkPurchaseError, 'error');
-      } finally {
-        setPurchaseLoaderState({
-          visible: false,
-          processedItems: 0,
-          totalItems: 0,
-          currentItem: ''
-        });
-      }
-    };
-
-    const handleMarkAsPurchased = async (itemId: string, savings?: number) => {
-      if (!user?.uid) return;
-    
-    // Loading State setzen
-    setLoadingItems(prev => new Set(prev).add(itemId));
-    
-    try {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      
-      // Check if this is a custom item (freitext)
-      const isCustomItem = [...brandProducts, ...noNameProducts].some(item => 
-        item.id === itemId && item.isCustom
-      );
-      
       if (isCustomItem) {
-        // For custom items: only remove from cart, no purchase history
         await FirestoreService.removeFromShoppingCart(user.uid, itemId);
-        console.log('✅ Custom item removed from cart (no purchase history):', itemId);
       } else {
-        // For DB items: normal purchase with history
         await FirestoreService.markAsPurchased(user.uid, itemId);
       }
-      
-      // Update user savings and product count (only for DB items)
+
       if (!isCustomItem) {
-        console.log(`📊 Single update: 1 product, €${(savings || 0).toFixed(2)} savings`);
         await updateUserStats(user.uid, {
           savingsToAdd: savings || 0,
-          productsToAdd: 1
+          productsToAdd: 1,
         });
-        
-        // Profile wird automatisch über Achievement-Callback aktualisiert
-        
-        // Track Achievement: complete_shopping for single item
-        console.log('🎯 Tracking complete_shopping action with:', {
-          productCount: 1,
-          totalSavings: savings || 0,
-          currentLevel: (userProfile as any)?.stats?.currentLevel || userProfile?.level || 'unknown'
-        });
-        
-        // 🚀 PERFORMANCE: Achievement Non-Blocking
-        achievementService.trackAction(user.uid, 'complete_shopping', {
-          productCount: 1,
-          totalSavings: savings || 0
-        }).catch(error => {
-          console.error('❌ Achievement Tracking Fehler:', error);
-        });
-        
-        // Motivational message based on savings
+        achievementService
+          .trackAction(user.uid, 'complete_shopping', {
+            productCount: 1,
+            totalSavings: savings || 0,
+          })
+          .catch((error) => console.error('Achievement complete_shopping error:', error));
         if (savings && savings > 0) {
-          showPurchasedToast(`Gekauft! Du hast €${savings.toFixed(2)} gespart - super gemacht!`);
+          showPurchasedToast(`Gekauft! Du hast ${formatEur(savings)} gespart - super gemacht!`);
         } else {
           showPurchasedToast(TOAST_MESSAGES.SHOPPING.purchasedSimple);
         }
       } else {
-        // Custom items: simple confirmation message
         showInfoToast(TOAST_MESSAGES.SHOPPING.customItemPurchased, 'success');
       }
-      
-      // Optimized: Remove item from local state instead of reloading
-      if (isCustomItem) {
-        // Custom items: Check which list they belong to
-        const customItem = [...brandProducts, ...noNameProducts].find(item => 
-          item.id === itemId && item.isCustom
-        );
-        
-        if (customItem?.customType === 'noname') {
-          setNoNameProducts(prev => prev.filter(item => item.id !== itemId));
+
+      // Optimistic local removal
+      const customItem = [...brandProducts, ...noNameProducts].find(
+        (item) => item.id === itemId && item.isCustom,
+      );
+      if (customItem) {
+        if (customItem.customType === 'noname') {
+          setNoNameProducts((prev) => prev.filter((i) => i.id !== itemId));
         } else {
-          setBrandProducts(prev => prev.filter(item => item.id !== itemId));
+          setBrandProducts((prev) => prev.filter((i) => i.id !== itemId));
         }
       } else if (savings && savings > 0) {
-        // Regular NoName product - remove from noname list and update savings
-        setNoNameProducts(prev => prev.filter(item => item.id !== itemId));
-        setTotalActualSavings(prev => Math.max(0, prev - savings));
+        setNoNameProducts((prev) => prev.filter((i) => i.id !== itemId));
+        setTotalActualSavings((prev) => Math.max(0, prev - savings));
       } else {
-        // Regular Brand product - remove from brand list
-        setBrandProducts(prev => prev.filter(item => item.id !== itemId));
+        setBrandProducts((prev) => prev.filter((i) => i.id !== itemId));
       }
     } catch (error) {
       console.error('Error marking as purchased:', error);
       showInfoToast(TOAST_MESSAGES.SHOPPING.purchaseError, 'error');
     } finally {
-      // Loading State entfernen
-      setLoadingItems(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(itemId);
-        return newSet;
+      setLoadingItems((prev) => {
+        const n = new Set(prev);
+        n.delete(itemId);
+        return n;
       });
     }
   };
-  
-  // Remove from cart
+
   const handleRemoveFromCart = async (itemId: string) => {
     if (!user?.uid) return;
-    
+    setDeletingItems((prev) => new Set(prev).add(itemId));
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      await FirestoreService.removeFromShoppingCart(user.uid, itemId);
+      showInfoToast(TOAST_MESSAGES.SHOPPING.removedFromCart, 'info');
+      // Optimistic update
+      setBrandProducts((prev) => prev.filter((i) => i.id !== itemId));
+      setNoNameProducts((prev) => {
+        const removed = prev.find((i) => i.id === itemId);
+        if (removed) {
+          setTotalActualSavings((s) => Math.max(0, s - (removed.savings || 0)));
+        }
+        return prev.filter((i) => i.id !== itemId);
+      });
+      setSelectedConversions((prev) => prev.filter((c) => c.einkaufswagenRef !== itemId));
+    } catch (error) {
+      console.error('Error removing from cart:', error);
+      showInfoToast(TOAST_MESSAGES.SHOPPING.removeError, 'error');
+    } finally {
+      setDeletingItems((prev) => {
+        const n = new Set(prev);
+        n.delete(itemId);
+        return n;
+      });
+    }
+  };
+
+  // Confirm-wrapped delete (used on the inline trash button)
+  const handleRemoveFromCartConfirm = (itemId: string) => {
     Alert.alert(
       'Produkt entfernen?',
       'Möchtest du dieses Produkt vom Einkaufszettel entfernen?',
@@ -1234,1457 +2169,933 @@ const safeAsync = async (p: Promise<any>) => {
         {
           text: 'Entfernen',
           style: 'destructive',
-          onPress: async () => {
-            // Loading State setzen
-            setDeletingItems(prev => new Set(prev).add(itemId));
-            
-            try {
-              await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              await FirestoreService.removeFromShoppingCart(user.uid, itemId);
-              showInfoToast(TOAST_MESSAGES.SHOPPING.removedFromCart, 'info');
-              
-              // Optimized: Remove from local state instead of reloading
-              setBrandProducts(prev => prev.filter(item => item.id !== itemId));
-              setNoNameProducts(prev => {
-                const removedItem = prev.find(item => item.id === itemId);
-                if (removedItem) {
-                  // Update total actual savings if removing a NoName product
-                  setTotalActualSavings(prevSavings => Math.max(0, prevSavings - (removedItem.savings || 0)));
-                }
-                return prev.filter(item => item.id !== itemId);
-              });
-            } catch (error) {
-              console.error('Error removing from cart:', error);
-              showInfoToast(TOAST_MESSAGES.SHOPPING.removeError, 'error');
-            } finally {
-              // Loading State entfernen
-              setDeletingItems(prev => {
-                const newSet = new Set(prev);
-                newSet.delete(itemId);
-                return newSet;
-              });
-            }
-          }
-        }
-      ]
+          onPress: () => handleRemoveFromCart(itemId),
+        },
+      ],
     );
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-        {/* Simple Header */}
-        <View style={{ backgroundColor: colors.warning }}>
-          <View style={styles.headerContent}>
-            <ShimmerSkeleton width={150} height={44} borderRadius={0}  />
-        </View>
-        </View>
-        
-        {/* Simple Summary */}
-     
- <ShoppingListSkeleton /> 
-       </SafeAreaView>
+  // ─── "Alle als gekauft markieren" — works for any list of items ──
+  const executeMarkAllAsPurchased = async (
+    targets: EnrichedItem[],
+    sourceLabel: string,
+  ) => {
+    if (!user || targets.length === 0) return;
+
+    const dbProducts = targets.filter(
+      (item) => !item.isCustom && item.kind === 'noname',
     );
-  }
+    const customItems = targets.filter((item) => item.isCustom);
+    const dbBrandItems = targets.filter((item) => !item.isCustom && item.kind === 'brand');
 
-  return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    const totalSavings = dbProducts.reduce((s, item) => s + (item.savings || 0), 0);
+    const totalCount = dbProducts.length + customItems.length + dbBrandItems.length;
 
-      
-      {/* Tabs with integrated Summary */}
-      <View style={[styles.tabContainer, { backgroundColor: colors.cardBackground }]}>
-        <View style={styles.tabButtons}>
-          <TouchableOpacity style={styles.tab} onPress={() => handleTabChange('brand')}>
-            <Text style={[styles.tabText, { color: activeTab === 'brand' ? colors.primary : colors.icon }]}>
-              Marken ({brandProducts.length})
-            </Text>
-        </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.tab} onPress={() => handleTabChange('noname')}>
-            <Text style={[styles.tabText, { color: activeTab === 'noname' ? colors.primary : colors.icon }]}>
-              NoNames ({noNameProducts.length})
-            </Text>
-          </TouchableOpacity>
-          
-          <Animated.View
-            style={[styles.tabIndicator, {
-              backgroundColor: colors.primary,
-              transform: [{ translateX: tabIndicatorPosition }]
-            }]}
+    setPurchaseLoaderState({
+      visible: true,
+      processedItems: 0,
+      totalItems: totalCount,
+      currentItem: 'Wird verarbeitet...',
+    });
+
+    try {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+
+      const journeyTrackingService = await import(
+        '@/lib/services/journeyTrackingService'
+      ).then((m) => m.default);
+
+      let productsForJourneyTracking: any[] = [];
+      let productsWithIndices: any[] = [];
+
+      if (dbProducts.length > 0) {
+        productsForJourneyTracking = dbProducts.map((item) => ({
+          productId: item.product?.id || '',
+          productName:
+            item.product?.name || item.product?.produktName || item.name || 'Unbekannt',
+          productType: 'noname' as 'brand' | 'noname',
+          finalPrice: item.product?.preis || 0,
+          finalSavings: item.savings || 0,
+          journeyId: (item as any).journeyId,
+          viewedProductIndex: (item as any).viewedProductIndex,
+        }));
+        if (
+          productsForJourneyTracking.length > 0 &&
+          productsForJourneyTracking[0].journeyId
+        ) {
+          productsWithIndices = productsForJourneyTracking.map((p) => ({
+            ...p,
+            viewedProductIndex: journeyTrackingService.getViewedProductIndexAfterAction(
+              p.productId,
+            ),
+          }));
+        }
+      }
+
+      const promises: Promise<any>[] = [];
+      // DB noname: mark as purchased (without journey tracking — we batch it)
+      if (dbProducts.length > 0) {
+        promises.push(
+          ...dbProducts.map((item) =>
+            FirestoreService.markAsPurchasedWithoutTracking(user.uid, item.id),
+          ),
+        );
+      }
+      // DB brand on this list: mark as purchased too (kept for "Alle"-Tab semantics)
+      if (dbBrandItems.length > 0) {
+        promises.push(
+          ...dbBrandItems.map((item) => FirestoreService.markAsPurchased(user.uid, item.id)),
+        );
+      }
+      // Custom items: simple removal
+      if (customItems.length > 0) {
+        promises.push(
+          ...customItems.map((item) => FirestoreService.removeFromShoppingCart(user.uid, item.id)),
+        );
+      }
+
+      setPurchaseLoaderState((prev) => ({
+        ...prev,
+        currentItem: 'Alle Produkte werden verarbeitet...',
+        processedItems: Math.floor(totalCount * 0.3),
+      }));
+      await Promise.all(promises);
+
+      setPurchaseLoaderState((prev) => ({
+        ...prev,
+        currentItem: 'Ersparnis wird gespeichert...',
+        processedItems: Math.floor(totalCount * 0.7),
+      }));
+
+      const productsToAdd = dbProducts.length;
+      if (totalSavings > 0 || productsToAdd > 0) {
+        await updateUserStats(user.uid, {
+          savingsToAdd: totalSavings,
+          productsToAdd,
+        });
+      }
+
+      // Local state
+      const removedIds = new Set(targets.map((t) => t.id));
+      setNoNameProducts((prev) => prev.filter((i) => !removedIds.has(i.id)));
+      setBrandProducts((prev) => prev.filter((i) => !removedIds.has(i.id)));
+      setTotalActualSavings((prev) => Math.max(0, prev - totalSavings));
+
+      if (productsToAdd > 0) {
+        setPurchaseLoaderState((prev) => ({
+          ...prev,
+          currentItem: 'Achievement wird getrackt...',
+          processedItems: totalCount,
+        }));
+        if (
+          productsForJourneyTracking.length > 0 &&
+          productsForJourneyTracking[0].journeyId &&
+          productsWithIndices
+        ) {
+          journeyTrackingService
+            .trackBulkPurchaseInSpecificJourney(
+              productsForJourneyTracking[0].journeyId,
+              productsWithIndices,
+              totalSavings,
+              user.uid,
+            )
+            .then(() =>
+              achievementService.trackAction(user.uid, 'complete_shopping', {
+                productCount: productsToAdd,
+                totalSavings,
+              }),
+            )
+            .catch((error) => console.error('Sequential tracking error', error));
+        } else {
+          achievementService
+            .trackAction(user.uid, 'complete_shopping', {
+              productCount: productsToAdd,
+              totalSavings,
+            })
+            .catch((error) => console.error('Achievement tracking error', error));
+        }
+      }
+
+      setPurchaseLoaderState((prev) => ({
+        ...prev,
+        currentItem: 'Abgeschlossen!',
+        processedItems: totalCount,
+      }));
+
+      // Analytics legacy
+      if (productsToAdd > 0) {
+        const sourceMix = dbProducts
+          .map((item) => (item as any).source || 'unknown')
+          .filter((s, i, arr) => arr.indexOf(s) === i);
+        analytics.trackPurchaseCompleted?.(
+          totalCount,
+          totalSavings,
+          productsToAdd,
+          dbBrandItems.length,
+          sourceMix,
+        );
+      }
+
+      showBulkPurchasedToast(productsToAdd, customItems.length, totalSavings);
+    } catch (error) {
+      console.error(`Error marking all (${sourceLabel}) as purchased:`, error);
+      showInfoToast(TOAST_MESSAGES.SHOPPING.bulkPurchaseError, 'error');
+    } finally {
+      setPurchaseLoaderState({
+        visible: false,
+        processedItems: 0,
+        totalItems: 0,
+        currentItem: '',
+      });
+    }
+  };
+
+  const handleMarkAllAsPurchased = (variant: Tab) => {
+    const targets =
+      variant === 'noname'
+        ? noNameProducts
+        : variant === 'all'
+          ? [...brandProducts, ...noNameProducts]
+          : brandProducts;
+
+    if (targets.length === 0) return;
+    const dbCount = targets.filter((t) => !t.isCustom && t.kind === 'noname').length;
+    const customCount = targets.filter((t) => t.isCustom).length;
+    const brandCount = targets.filter((t) => !t.isCustom && t.kind === 'brand').length;
+    const totalSavings = targets.reduce((s, t) => s + (t.savings || 0), 0);
+
+    let message = '';
+    if (dbCount > 0 && customCount > 0 && brandCount > 0) {
+      message = `Möchtest du alle ${targets.length} Produkte (${brandCount} Marken, ${dbCount} NoNames, ${customCount} Freitext) als erledigt markieren? Du sparst dabei ${formatEur(totalSavings)}.`;
+    } else if (dbCount > 0 && customCount > 0) {
+      message = `Möchtest du alle ${targets.length} Produkte als erledigt markieren? (${dbCount} NoNames für ${formatEur(totalSavings)} Ersparnis + ${customCount} Freitext-Einträge)`;
+    } else if (dbCount > 0) {
+      message = `Möchtest du alle ${dbCount} NoName-Produkte als gekauft markieren und ${formatEur(totalSavings)} zu deiner Ersparnis hinzufügen?`;
+    } else if (brandCount > 0 && customCount > 0) {
+      message = `Möchtest du alle ${targets.length} Einträge (${brandCount} Marken + ${customCount} Freitext) als erledigt markieren?`;
+    } else if (brandCount > 0) {
+      message = `Möchtest du alle ${brandCount} Markenprodukte als gekauft markieren?`;
+    } else {
+      message = `Möchtest du alle ${customCount} Freitext-Einträge als erledigt markieren?`;
+    }
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    Alert.alert('Alle als erledigt markieren?', message, [
+      { text: 'Abbrechen', style: 'cancel' },
+      {
+        text: 'Alle markieren',
+        onPress: () => executeMarkAllAsPurchased(targets, variant),
+      },
+    ]);
+  };
+
+  // ─── Render helpers ────────────────────────────────────────────
+  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
+
+  const renderItem = (item: EnrichedItem, opts: { allowExpand: boolean }) => {
+    const loadingCheck = loadingItems.has(item.id);
+    const loadingDelete = deletingItems.has(item.id);
+    const loadingConvert = convertingItems.has(item.id);
+
+    if (item.isCustom) {
+      return (
+        <SwipeRow
+          key={item.id}
+          onSwipeBought={() => handleMarkAsPurchased(item.id)}
+          onSwipeDelete={() => handleRemoveFromCart(item.id)}
+          disabled={loadingCheck || loadingDelete}
+        >
+          <CustomCard
+            item={item}
+            onCheck={() => handleMarkAsPurchased(item.id)}
+            onDelete={() => handleRemoveFromCartConfirm(item.id)}
+            loadingCheck={loadingCheck}
+            loadingDelete={loadingDelete}
           />
-        </View>
-
-        {/* Sticky Summary Bar */}
-        {(activeTab === 'brand' ? brandProducts.length > 0 : noNameProducts.length > 0) && (
-          <LinearGradient
-            colors={activeTab === 'brand' 
-              ? ['#FF9500', '#FF6B35']  // Orange gradient for brand
-              : [colors.primary, colors.secondary]  // Primary to secondary for noname
+        </SwipeRow>
+      );
+    }
+    if (item.kind === 'brand') {
+      const sel = selectedConversions.find((c) => c.einkaufswagenRef === item.id);
+      const expanded = expandedItems.includes(item.id);
+      return (
+        <SwipeRow
+          key={item.id}
+          onSwipeBought={() => handleMarkAsPurchased(item.id)}
+          onSwipeDelete={() => handleRemoveFromCart(item.id)}
+          disabled={loadingCheck || loadingDelete}
+        >
+          <BrandCard
+            item={item}
+            expanded={expanded}
+            onToggleExpand={() => toggleExpanded(item.id)}
+            onCheck={() => handleMarkAsPurchased(item.id)}
+            onDelete={() => handleRemoveFromCartConfirm(item.id)}
+            selectedAltId={sel?.produktRef}
+            onSelectAlt={(altId) =>
+              handleSelectAlternative(item.id, item.markenProduktRef!, altId)
             }
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.stickySummaryGradient}
-          >
-                        <View style={styles.summaryContent}>
-              <TouchableOpacity 
-                style={styles.summaryLeft}
-                onPress={() => setShowInfoSheet(true)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.summaryTitleRow}>
-                  <Text style={styles.summaryTitle}>
-                    {activeTab === 'brand' 
-                      ? 'Dein Sparpotenzial'
-                      : 'Einkaufszettel Ersparnis'}
-                  </Text>
-                  <View style={styles.infoIcon}>
-                    <IconSymbol name="info.circle" size={16} color="rgba(255,255,255,0.8)" />
-                  </View>
-                </View>
-                {activeTab === 'brand' && (
-                  <Text style={styles.summarySubtitle}>
-                    Mit NoName-Alternativen
-                  </Text>
-                )}{activeTab === 'noname' && (
-                  <Text style={styles.summarySubtitle}>
-                    Durch gewählte NoName-Produkte
-                  </Text>
-          )}
-        </TouchableOpacity>
-              <View style={styles.summaryRight}>
-                <View style={styles.savingsContainer}>
-                  <IconSymbol name="tag.fill" size={16} color="white" style={styles.savingsIcon} />
-                  <Text style={styles.summaryAmount}>
-                    -€{activeTab === 'brand' ? totalPotentialSavings.toFixed(2) : totalActualSavings.toFixed(2)}
-                  </Text>
-                </View>
-              </View>
-            </View>
-          </LinearGradient>
-      )}
-      </View>
+            onConvertAlt={(altId) =>
+              handleConvertSingle(item.id, item.markenProduktRef!, altId)
+            }
+            loadingCheck={loadingCheck}
+            loadingDelete={loadingDelete}
+            loadingConvert={loadingConvert}
+            favoriteMarketId={favoriteMarketId}
+            allowExpand={opts.allowExpand}
+            infos={(item.product as any)?.marke?.infos ?? null}
+            onInfoPress={() => {
+              // `infos` liegt auf dem MARKE-Doc (= hersteller-
+              // Collection in der DB).
+              const markeDoc = (item.product as any)?.marke;
+              const raw = markeDoc?.infos ?? (item.product as any)?.infos;
+              const infosText =
+                typeof raw === 'string' && raw.trim().length > 0
+                  ? raw.trim()
+                  : null;
+              const fallbackLines = [
+                markeDoc?.adresse ? String(markeDoc.adresse) : null,
+                [markeDoc?.plz, markeDoc?.stadt].filter(Boolean).join(' ') || null,
+                markeDoc?.land ? String(markeDoc.land) : null,
+              ].filter(Boolean) as string[];
+              const body =
+                infosText ??
+                (fallbackLines.length > 0
+                  ? fallbackLines.join('\n')
+                  : 'Zu dieser Marke sind aktuell keine Zusatz-Informationen hinterlegt.');
+              const title =
+                markeDoc?.name ??
+                item.name ??
+                item.product?.name ??
+                'Info';
+              setInfoSheet({ title, body });
+            }}
+          />
+        </SwipeRow>
+      );
+    }
+    return (
+      <SwipeRow
+        key={item.id}
+        onSwipeBought={() => handleMarkAsPurchased(item.id, item.savings)}
+        onSwipeDelete={() => handleRemoveFromCart(item.id)}
+        disabled={loadingCheck || loadingDelete}
+      >
+        <NoNameCard
+          item={item}
+          onCheck={() => handleMarkAsPurchased(item.id, item.savings)}
+          onDelete={() => handleRemoveFromCartConfirm(item.id)}
+          loadingCheck={loadingCheck}
+          loadingDelete={loadingDelete}
+          favoriteMarketId={favoriteMarketId}
+        />
+      </SwipeRow>
+    );
+  };
 
-        <PagerView 
-          ref={pagerRef}
-          style={styles.pagerView}
-          initialPage={0}
-          onPageSelected={handlePageSelected}
-        >
-          {/* Page 1: Brand Products */}
-          <View key="brand" style={styles.pageContainer}>
-            <ScrollView 
-              style={styles.productList}
-              refreshControl={
-                <RefreshControl
-                  refreshing={refreshing}
-                  onRefresh={() => {
-                    setRefreshing(true);
-                    loadShoppingCart();
-                  }}
-                  tintColor={colors.primary}
-                />
-              }
-            >
-              {/* Banner - nur ohne Premium */}
-              {!isPremium && (
-                <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
-                  <BannerAd 
-                    style={{ marginHorizontal: 0 }}
-                    onAdLoaded={() => console.log('✅ Shopping List Brand Banner loaded')}
-                    onAdFailedToLoad={(error) => console.log('❌ Shopping List Brand Banner failed:', error)}
-                  />
-                </View>
-              )}
-              
-              {
-              applyFiltersAndSorting(brandProducts).length === 0 ? (
-              <View style={styles.emptyState}>
-                <IconSymbol name="cart" size={48} color={colors.icon} />
-                <Text style={[styles.emptyText, { color: colors.text }]}>
-                  Keine Markenprodukte im Einkaufszettel
-                </Text>
-                <Text style={[styles.emptySubtext, { color: colors.icon }]}>
-                  Füge Produkte über den Barcode-Scanner oder die Produktsuche hinzu
-                </Text>
-    </View>
-            ) : (
-              <View style={styles.productContainer}>
-                {applyFiltersAndSorting(brandProducts).map((item) => {
-                  const isExpanded = expandedItems.includes(item.id);
-                  const selectedConversion = selectedConversions.find(c => c.einkaufswagenRef === item.id);
-
-  return (
-                    <View key={item.id} style={[styles.productCard, { backgroundColor: colors.cardBackground }]}>
-                      <TouchableOpacity 
-                        style={styles.productContent}
-                        onPress={() => {
-                          if (item.isCustom) {
-                            // Custom items are not expandable
-                            return;
-                          }
-                          if (item.alternatives?.length > 0) {
-                            toggleExpanded(item.id);
-                          }
-                        }}
-                        disabled={item.isCustom}
-                      >
-                        {/* Custom Items vs DB Items Rendering */}
-                        {item.isCustom ? (
-                          <>
-                            {/* Custom Item Placeholder Image */}
-                            <View style={[styles.productImage, { backgroundColor: colors.border, justifyContent: 'center', alignItems: 'center' }]}>
-                              <IconSymbol 
-                                name="star.fill"
-                                size={24} 
-                                color={colors.icon} 
-                              />
-                            </View>
-                            <View style={styles.productInfo}>
-                              {/* Custom Badge */}
-                              <View style={[styles.customBadge, { backgroundColor: colors.primary }]}>
-                                <Text style={styles.customBadgeText}>
-                                  MARKE
-                                </Text>
-                              </View>
-                              
-                              <Text style={[styles.productName, { color: colors.text }]} numberOfLines={2}>
-                                {item.name}
-                              </Text>
-                              
-                              {/* Freitext Hinweis */}
-                              <Text style={[styles.customItemHint, { color: colors.icon }]}>
-                                Freitext-Eintrag
-                              </Text>
-                            </View>
-                          </>
-                        ) : (
-                          <>
-                            {/* Regular DB Item Rendering */}
-                            <ImageWithShimmer
-                              source={{ uri: item.product.bild }}
-                              style={styles.productImage}
-                            />
-                            <View style={styles.productInfo}>
-                          {/* Marke mit Logo zuerst */}
-                          {item.product.hersteller?.name && (
-                            <View style={styles.brandRow}>
-                              {item.product.hersteller?.bild && (
-                                <ImageWithShimmer
-                                  source={{ uri: item.product.hersteller.bild }}
-                                  style={styles.brandLogo}
-                                />
-                              )}
-                              <Text style={[styles.brandName, { color: colors.primary }]} numberOfLines={1}>
-                                {item.product.hersteller.name}
-                              </Text>
-      </View>
-                          )}
-                          
-                          <Text style={[styles.productName, { color: colors.text }]} numberOfLines={2}>
-                            {item.name || item.product.name || 'Unbekanntes Produkt'}
-                          </Text>
-                          
-                          <Text style={[styles.productPrice, { color: colors.primary }]}>
-                            €{item.product.preis?.toFixed(2) || '0.00'}
-                          </Text>
-                          {item.potentialSavings > 0 && (
-                            <Text style={[styles.savingsHint, { color: colors.success }]}>
-                              Ersparnis möglich: €{item.potentialSavings.toFixed(2)}
-                            </Text>
-                          )}
-                            </View>
-                          </>
-                        )}
-                        <View style={styles.productActions}>
-                          {!item.isCustom && item.alternatives?.length > 0 && (
-        <TouchableOpacity
-                              style={styles.expandButton}
-                              onPress={() => toggleExpanded(item.id)}
-                            >
-                              <IconSymbol 
-                                name={isExpanded ? "chevron.up" : "chevron.down"} 
-                                size={20} 
-                                color={colors.icon} 
-                              />
-        </TouchableOpacity>
-      )}
-        <TouchableOpacity
-          style={[
-                              styles.actionButton, 
-                              { backgroundColor: colors.primary, opacity: loadingItems.has(item.id) ? 0.7 : 1 }
-                            ]}
-                            onPress={() => handleMarkAsPurchased(item.id)}
-                            disabled={loadingItems.has(item.id)}
-                          >
-                            {loadingItems.has(item.id) ? (
-                              <ActivityIndicator size="small" color="white" />
-                            ) : (
-                              <IconSymbol name="checkmark" size={20} color="white" />
-                            )}
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-                              styles.actionButton, 
-                              { backgroundColor: colors.error, opacity: deletingItems.has(item.id) ? 0.7 : 1 }
-                            ]}
-                            onPress={() => handleRemoveFromCart(item.id)}
-                            disabled={deletingItems.has(item.id)}
-                          >
-                            {deletingItems.has(item.id) ? (
-                              <ActivityIndicator size="small" color="white" />
-                            ) : (
-                              <IconSymbol name="trash" size={20} color="white" />
-                            )}
-        </TouchableOpacity>
-      </View>
-                      </TouchableOpacity>
-                      
-                      {/* NoName Alternatives */}
-                      {!item.isCustom && isExpanded && item.alternatives?.length > 0 && (
-                        <View style={styles.alternativesContainer}>
-                          <Text style={[styles.alternativesTitle, { color: colors.text }]}>
-                            NoName Alternativen:
-                          </Text>
-                          {item.alternatives.map((alt: any) => {
-                            const isSelected = selectedConversion?.produktRef === alt.id;
-                            // 🚀 OPTIMIERUNG: Nutze serverseitige Ersparnis falls verfügbar
-                            const savingsData = getSavingsData(item.product, alt);
-                            const savings = { 
-                              amount: savingsData.savingsEur, 
-                              percent: savingsData.savingsPercent 
-                            };
-
-  return (
-        <TouchableOpacity
-                                key={alt.id}
-          style={[
-                                  styles.alternativeItem,
-                                  { 
-                                    backgroundColor: isSelected ? colors.primary + '20' : 'transparent',
-                                    borderColor: isSelected ? colors.primary : colors.border
-                                  }
-                                ]}
-                                onPress={() => handleSelectAlternative(item.id, item.markenProdukt.id, alt.id)}
-                              >
-                                <ImageWithShimmer
-                                  source={{ uri: alt.bild }}
-                                  style={styles.alternativeImage}
-                                />
-                                <View style={styles.alternativeInfo}>
-                                  <Text style={[styles.alternativeName, { color: colors.text }]} numberOfLines={1}>
-                                    {alt.produktName || alt.name}
-                                  </Text>
-                                  <View style={styles.alternativeMeta}>
-                                    <View style={styles.marketInfo}>
-                                      {alt.discounter?.bild ? (
-                                        <ImageWithShimmer 
-                                          source={{ uri: alt.discounter.bild }} 
-                                          style={styles.marketLogo} 
-                                        />
-                                      ) : (
-                                        <View style={[styles.marketLogo, styles.marketLogoFallback, { backgroundColor: colors.border }]}>
-                                          <IconSymbol name="storefront" size={8} color={colors.icon} />
-          </View>
-                                      )}
-                                      {userProfile?.favoriteMarket === alt.discounter?.id && (
-                                        <IconSymbol name="heart.fill" size={10} color={colors.primary} style={styles.favoriteMarketIconLeft} />
-                                      )}
-                                      <Text style={[styles.marketName, { color: colors.icon }]} numberOfLines={1}>
-                                        {alt.discounter?.name || 'Unbekannt'}
-                                        {alt.discounter?.land && ` (${alt.discounter.land})`}
-                                      </Text>
-          </View>
-                                    <Text style={[styles.alternativePrice, { color: colors.primary }]}>
-                                      €{alt.preis?.toFixed(2)}
-                                    </Text>
-        </View>
-          </View>
-                                <View style={styles.alternativeSavings}>
-                                  <Text style={[styles.savingsAmount, { color: colors.primary }]}>
-                                    -€{savings.amount.toFixed(2)}
-                                  </Text>
-                                  <Text style={[styles.savingsPercent, { color: colors.primary }]}>
-                                    -{savings.percent}%
-                                  </Text>
-          </View>
-                                {isSelected ? (
-        <TouchableOpacity
-          style={[
-                                      styles.convertSingleButton, 
-                                      { 
-                                        backgroundColor: colors.primary, 
-                                        opacity: convertingItems.has(item.id) ? 0.7 : 1 
-                                      }
-                                    ]}
-                                    onPress={() => handleConvertSingle(item.id, item.markenProdukt.id, alt.id)}
-                                    disabled={convertingItems.has(item.id)}
-                                  >
-                                    {convertingItems.has(item.id) ? (
-                                      <ActivityIndicator size="small" color="white" />
-                                    ) : (
-                                      <IconSymbol name="arrow.triangle.2.circlepath" size={14} color="white" />
-                                    )}
-        </TouchableOpacity>
-                                ) : (
-                                  <View style={styles.selectIndicator}>
-                                    <IconSymbol name="circle" size={24} color={colors.border} />
-        </View>
-      )}
-                              </TouchableOpacity>
-                            );
-                          })}
-          </View>
-      )}
-          </View>
-                  );
-                })}
-        </View>
-            )
+  const renderPage = (variant: Tab) => {
+    const items =
+      variant === 'brand' ? filteredBrand : variant === 'noname' ? filteredNoName : filteredAll;
+    const isEmpty = items.length === 0;
+    return (
+      <View key={variant} style={{ flex: 1 }}>
+        <ScrollView
+          contentContainerStyle={{
+            paddingTop: chromeHeight + SEG_BAR_HEIGHT,
+            paddingBottom: 140,
+          }}
+          contentInsetAdjustmentBehavior="never"
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                loadShoppingCart();
+              }}
+              progressViewOffset={chromeHeight + SEG_BAR_HEIGHT}
+              tintColor={brand.primary}
+            />
           }
-            </ScrollView>
-      </View>
-
-          {/* Page 2: NoName Products */}
-          <View key="noname" style={styles.pageContainer}>
-            <ScrollView 
-              style={styles.productList}
-              refreshControl={
-                <RefreshControl
-                  refreshing={refreshing}
-                  onRefresh={() => {
-                    setRefreshing(true);
-                    loadShoppingCart();
-                  }}
-                  tintColor={colors.primary}
-                />
-              }
-            >
-              {/* Banner - nur ohne Premium */}
-              {!isPremium && (
-                <View style={{ marginBottom: 16, marginHorizontal: -16 }}>
-                  <BannerAd 
-                    style={{ marginHorizontal: 0 }}
-                    onAdLoaded={() => console.log('✅ Shopping List NoName Banner loaded')}
-                    onAdFailedToLoad={(error) => console.log('❌ Shopping List NoName Banner failed:', error)}
-                  />
-                </View>
-              )}
-              
-              {
-            applyFiltersAndSorting(noNameProducts).length === 0 ? (
-              <View style={styles.emptyState}>
-                <IconSymbol name="cart" size={48} color={colors.icon} />
-                <Text style={[styles.emptyText, { color: colors.text }]}>
-                  Keine NoName-Produkte im Einkaufszettel
-                </Text>
-                <Text style={[styles.emptySubtext, { color: colors.icon }]}>
-                  Füge Produkte über den Barcode-Scanner oder die Produktsuche hinzu
-                </Text>
-          </View>
-        ) : (
-              <View style={styles.productContainer}>
-                {applyFiltersAndSorting(noNameProducts).map((item) => (
-                  <View key={item.id} style={[styles.productCard, { backgroundColor: colors.cardBackground }]}>
-                    <View style={styles.productContent}>
-                      {/* Custom Items vs DB Items Rendering */}
-                      {item.isCustom ? (
-                        <>
-                          {/* Custom Item Placeholder Image */}
-                          <View style={[styles.productImage, { backgroundColor: colors.border, justifyContent: 'center', alignItems: 'center' }]}>
-                            <IconSymbol 
-                              name={item.customType === 'brand' ? "star.fill" : "storefront"} 
-                              size={24} 
-                              color={colors.icon} 
-                            />
-          </View>
-                          <View style={styles.productInfo}>
-                            {/* Custom Badge */}
-                            <View style={[styles.customBadge, { backgroundColor: colors.primary }]}>
-                              <Text style={styles.customBadgeText}>
-                                {item.customType === 'brand' ? 'MARKE' : 'NONAME'}
-                              </Text>
-                            </View>
-                            
-                            <Text style={[styles.productName, { color: colors.text }]} numberOfLines={2}>
-                              {item.name}
-                            </Text>
-                            
-                                                        {/* Market Info for Custom NoName */}
-                            {item.customType === 'noname' && item.markt && (
-                              <View style={styles.marketInfo}>
-                                {item.markt.bild ? (
-                                  <ImageWithShimmer
-                                    source={{ uri: item.markt.bild }}
-                                    style={styles.marketLogo}
-                                    fallbackIcon="storefront"
-                                    fallbackIconSize={8}
-                                  />
-                                ) : (
-                                  <View style={[styles.marketLogo, styles.marketLogoFallback, { backgroundColor: colors.border }]}>
-                                    <IconSymbol name="storefront" size={8} color={colors.icon} />
-          </View>
-        )}
-                                <Text style={[styles.marketName, { color: colors.icon }]} numberOfLines={1}>
-                                  {item.markt.name} {item.markt.land === 'Deutschland' ? '🇩🇪' : item.markt.land === 'Schweiz' ? '🇨🇭' : item.markt.land === 'Österreich' ? '🇦🇹' : ''}
-                                </Text>
-        </View>
-      )}
-
-                            {/* Freitext Hinweis */}
-                            <Text style={[styles.customItemHint, { color: colors.icon }]}>
-                              Freitext-Eintrag
-                            </Text>
-          </View>
-                        </>
-                      ) : (
-                        <>
-                          {/* Regular DB Item Rendering */}
-                          <ImageWithShimmer
-                            source={{ uri: item.product.bild }}
-                            style={styles.productImage}
-                          />
-                          <View style={styles.productInfo}>
-                            {/* Handelsmarke zuerst */}
-                            {item.product.handelsmarke?.bezeichnung && (
-                              <Text style={[styles.brandName, { color: colors.primary }]} numberOfLines={1}>
-                                {item.product.handelsmarke.bezeichnung}
-                              </Text>
-                            )}
-                            
-                            <Text style={[styles.productName, { color: colors.text }]} numberOfLines={2}>
-                              {item.product.name || item.product.produktName || 'Unbekanntes Produkt'}
-                            </Text>
-                            
-                            {/* Discounter Info */}
-                            <View style={styles.marketInfo}>
-                              {item.product.discounter?.bild ? (
-                                <ImageWithShimmer 
-                                  source={{ uri: item.product.discounter.bild }} 
-                                  style={styles.marketLogo} 
-                                />
-                              ) : (
-                                <View style={[styles.marketLogo, styles.marketLogoFallback, { backgroundColor: colors.border }]}>
-                                  <IconSymbol name="storefront" size={8} color={colors.icon} />
-          </View>
-        )}
-                              {userProfile?.favoriteMarket === item.product.discounter?.id && (
-                                <IconSymbol name="heart.fill" size={10} color={colors.primary} style={styles.favoriteMarketIconLeft} />
-                              )}
-                              <Text style={[styles.marketName, { color: colors.icon }]} numberOfLines={1}>
-                                {item.product.discounter?.name || 'Unbekannt'}
-                                {item.product.discounter?.land && ` (${item.product.discounter.land})`}
-                              </Text>
-                            </View>
-
-                            {/* Preis mit Ersparnis in Klammern */}
-                            <Text style={[styles.productPrice, { color: colors.primary }]}>
-                              €{item.product.preis?.toFixed(2) || '0.00'}
-                              {item.savings > 0 && (
-                                <Text style={[styles.savingsInline, { color: colors.primary }]}>
-                                  {' '}(- €{item.savings.toFixed(2)})
-                                </Text>
-                              )}
-                            </Text>
-                          </View>
-                        </>
-                      )}
-                      <View style={styles.productActions}>
-                        <TouchableOpacity 
-                          style={[
-                            styles.actionButton, 
-                            { backgroundColor: colors.primary, opacity: loadingItems.has(item.id) ? 0.7 : 1 }
-                          ]}
-                          onPress={() => handleMarkAsPurchased(item.id, item.savings)}
-                          disabled={loadingItems.has(item.id)}
-                        >
-                          {loadingItems.has(item.id) ? (
-                            <ActivityIndicator size="small" color="white" />
-                          ) : (
-                            <IconSymbol name="checkmark" size={20} color="white" />
-                          )}
-                        </TouchableOpacity>
-                        <TouchableOpacity 
-                          style={[
-                            styles.actionButton, 
-                            { backgroundColor: colors.error, opacity: deletingItems.has(item.id) ? 0.7 : 1 }
-                          ]}
-                          onPress={() => handleRemoveFromCart(item.id)}
-                          disabled={deletingItems.has(item.id)}
-                        >
-                          {deletingItems.has(item.id) ? (
-                            <ActivityIndicator size="small" color="white" />
-                          ) : (
-                            <IconSymbol name="trash" size={20} color="white" />
-                          )}
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )
-              }
-      </ScrollView>
-          </View>
-        </PagerView>
-
-        {/* Bottom Buttons */}
-        {activeTab === 'brand' && brandProducts.length > 0 && selectedConversions.length > 0 && (
-          <View style={[
-            styles.bottomButtonContainer,
-            { paddingBottom: Math.max(insets.bottom, 16) }
-          ]}>
-        <TouchableOpacity 
-              style={[styles.bottomButton, { backgroundColor: colors.primary }]}
-              onPress={handleConvertSelected}
-              disabled={isConverting}
-            >
-              {isConverting ? (
-                <ActivityIndicator size="small" color="white" />
-              ) : (
-                <>
-                  <IconSymbol name="arrow.triangle.2.circlepath" size={20} color="white" />
-                  <Text style={styles.bottomButtonText}>
-            Produkte umwandeln
-                  </Text>
-                </>
-              )}
-        </TouchableOpacity>
-          </View>
-      )}
-
-        {activeTab === 'noname' && noNameProducts.length > 0 && (
-          <View style={[
-            styles.bottomButtonContainer,
-            { paddingBottom: Math.max(insets.bottom, 16) }
-          ]}>
-        <TouchableOpacity 
-              style={[styles.bottomButton, { backgroundColor: colors.primary }]}
-              onPress={() => handleMarkAllAsPurchased()}
+          showsVerticalScrollIndicator={false}
+          scrollIndicatorInsets={{ top: chromeHeight + SEG_BAR_HEIGHT }}
+          // Nur die aktive PagerView-Page claimt iOS-Status-Bar-Tap-
+          // Scroll-to-Top — sonst deaktiviert iOS das Feature weil
+          // mehrere ScrollViews auf scrollsToTop=true (Default) wären.
+          scrollsToTop={activeTab === variant}
         >
-              <IconSymbol name="checkmark.circle.fill" size={20} color="white" />
-              <Text style={styles.bottomButtonText}>
-            Alle als gekauft markieren
-              </Text>
-        </TouchableOpacity>
-          </View>
-        )}
-        
-        {/* Floating Filter Button */}
-        <TouchableOpacity 
-          style={[styles.filterFab, { backgroundColor: colors.primary }]}
-          onPress={() => setShowFilterModal(true)}
-        >
-          <IconSymbol name="line.3.horizontal.decrease" size={20} color="white" />
-          {getActiveFiltersCount() > 0 && (
-            <View style={[styles.filterBadge, { backgroundColor: colors.error }]}>
-              <Text style={styles.filterBadgeText}>
-                {getActiveFiltersCount()}
+          {!isPremium ? (
+            <View style={{ marginHorizontal: 16, marginTop: 6, marginBottom: 4 }}>
+              <BannerAd style={{ marginHorizontal: 0 }} />
+            </View>
+          ) : null}
+
+          {!isEmpty ? (
+            <SummaryBanner
+              variant={variant}
+              potential={totalPotentialSavings}
+              earned={totalActualSavings}
+            />
+          ) : null}
+
+          {isEmpty ? (
+            <EmptyState variant={variant} onAdd={() => setShowCustomItemModal(true)} />
+          ) : (
+            <View style={{ paddingHorizontal: 16, paddingTop: 4 }}>
+              {items.map((item) => renderItem(item, { allowExpand: variant === 'brand' }))}
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 11,
+                  color: theme.textMuted,
+                  textAlign: 'center',
+                  paddingVertical: 12,
+                }}
+              >
+                Tipp: Nach rechts wischen = gekauft · Nach links wischen = löschen
               </Text>
             </View>
           )}
-        </TouchableOpacity>
-        
-        {/* Filter Modal */}
-      <FixedAndroidModal
-          visible={showFilterModal}
-          onRequestClose={() => setShowFilterModal(false)}
-          isBottomSheet={true}
-        >
-          <View style={[styles.filterModalContainer, { backgroundColor: colors.background }]}>
-            {/* Header */}
-            <View style={styles.filterModalHeader}>
-              
-              <View style={styles.headerRow}>
-              <TouchableOpacity 
-                  style={styles.closeButtonLeft}
-                  onPress={() => setShowFilterModal(false)}
-              >
-                  <IconSymbol name="xmark" size={24} color={colors.icon} />
-              </TouchableOpacity>
-                <View style={styles.titleSection}>
-                  <Text style={[styles.filterModalTitle, { color: colors.text }]}>
-                    Filter & Sortierung
-                  </Text>
-                </View>
-              <TouchableOpacity 
-                  style={styles.clearAllButton}
-                  onPress={clearAllFilters}
-              >
-                  <Text style={[styles.clearAllText, { color: colors.primary }]}>
-                    Zurücksetzen
-                  </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-            
-            <ScrollView style={styles.filterOptions}>
-              {/* Sortierung */}
-              <View style={styles.filterSection}>
-                <Text style={[styles.filterSectionTitle, { color: colors.text }]}>
-                  Sortierung
-                </Text>
-                <View style={styles.sortingOptions}>
-                  {getSortingOptions().map((option) => (
-                    <TouchableOpacity
-                      key={option.value}
-                      style={[
-                        styles.sortingOption,
-                        {
-                          backgroundColor: filters.sortBy === option.value ? colors.primary : colors.cardBackground,
-                          borderColor: colors.border
-                        }
-                      ]}
-                      onPress={() => updateSorting(option.value)}
-                    >
-                      <IconSymbol 
-                        name={option.icon} 
-                        size={16} 
-                        color={filters.sortBy === option.value ? 'white' : colors.primary}
-                      />
-                      <Text style={[
-                        styles.sortingOptionText,
-                        { color: filters.sortBy === option.value ? 'white' : colors.text }
-                      ]}>
-                        {option.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-        </View>
-              </View>
-              
-              {/* Märkte Filter (nur bei NoName Tab) - DEBUG */}
-              {activeTab === 'noname' && (
-                <View style={styles.filterSection}>
-                  <Text style={[styles.filterSectionTitle, { color: colors.text }]}>
-                    Märkte ({availableMarkets.length})
-                  </Text>
-                  {availableMarkets.length === 0 ? (
-                    <Text style={[styles.debugText, { color: colors.error }]}>
-                      Debug: Keine Märkte gefunden in {noNameProducts.length} NoName-Produkten
-                    </Text>
-                  ) : (
-                    <View style={styles.chipsContainer}>
-                      {availableMarkets.map((market) => (
-                        <TouchableOpacity 
-                          key={market.id}
-                          style={[
-                            styles.filterChip,
-                            { 
-                              backgroundColor: filters.markets.includes(market.id) 
-                                ? colors.primary 
-                                : colors.cardBackground,
-                              borderColor: colors.border
-                            }
-                          ]}
-                          onPress={() => toggleMarketFilter(market.id)}
-                        >
-                          <Text style={[
-                            styles.chipText, 
-                            { 
-                              color: filters.markets.includes(market.id) 
-                                ? 'white' 
-                                : colors.text 
-                            }
-                          ]}>
-                            {market.name}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-            </View>
-                  )}
-                </View>
-              )}
-              
-              {/* Kategorien Filter - DEBUG */}
-              <View style={styles.filterSection}>
-                <Text style={[styles.filterSectionTitle, { color: colors.text }]}>
-                  Kategorien ({availableCategories.length})
-                </Text>
-                {availableCategories.length === 0 ? (
-                  <Text style={[styles.debugText, { color: colors.error }]}>
-                    Debug: Keine Kategorien gefunden in {brandProducts.length + noNameProducts.length} Produkten
-                  </Text>
-                ) : (
-                  <View style={styles.chipsContainer}>
-                    {availableCategories.map((category) => (
-            <TouchableOpacity 
-                        key={category.id}
-                        style={[
-                          styles.filterChip,
-                          { 
-                            backgroundColor: filters.categories.includes(category.id) 
-                              ? colors.primary 
-                              : colors.cardBackground,
-                            borderColor: colors.border
-                          }
-                        ]}
-                        onPress={() => toggleCategoryFilter(category.id)}
-                      >
-                        <Text style={[
-                          styles.chipText, 
-                          { 
-                            color: filters.categories.includes(category.id) 
-                              ? 'white' 
-                              : colors.text 
-                          }
-                        ]}>
-                          {category.bezeichnung || category.name}
-                        </Text>
-            </TouchableOpacity>
-                    ))}
-          </View>
-                )}
-        </View>
-            </ScrollView>
-        </View>
-        </FixedAndroidModal>
+        </ScrollView>
+      </View>
+    );
+  };
 
-        {/* Info Bottom Sheet */}
-      <FixedAndroidModal
-          visible={showInfoSheet}
-          onRequestClose={() => setShowInfoSheet(false)}
-          isBottomSheet={true}
+  // Bottom CTA
+  const renderBottomCta = () => {
+    if (activeTab === 'brand') {
+      const selCount = selectedConversions.length;
+      if (brandProducts.length === 0) return null;
+      const disabled = selCount === 0 || isConverting;
+      return (
+        <Pressable
+          onPress={handleConvertSelected}
+          disabled={disabled}
+          style={({ pressed }) => ({
+            backgroundColor: disabled ? theme.borderStrong : brand.primary,
+            height: 50,
+            borderRadius: 14,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            opacity: pressed && !disabled ? 0.85 : 1,
+          })}
+        >
+          {isConverting ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <>
+              <MaterialCommunityIcons name="swap-horizontal" size={18} color="#fff" />
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 15,
+                  color: '#fff',
+                }}
               >
-          <View style={[styles.pageSheetContainer, { backgroundColor: colors.background }]}>
-            {/* Page Sheet Header */}
-            <View style={styles.pageSheetHeader}>
-              
-              <View style={styles.headerRow}>
-            <TouchableOpacity 
-                  style={styles.closeButtonLeft}
-                  onPress={() => setShowInfoSheet(false)}
+                {selCount === 0
+                  ? 'Alternative wählen zum Umwandeln'
+                  : `${selCount} Produkt${selCount > 1 ? 'e' : ''} umwandeln`}
+              </Text>
+            </>
+          )}
+        </Pressable>
+      );
+    }
+    if (activeTab === 'noname') {
+      if (noNameProducts.length === 0) return null;
+      return (
+        <Pressable
+          onPress={() => handleMarkAllAsPurchased('noname')}
+          style={({ pressed }) => ({
+            backgroundColor: brand.primary,
+            height: 50,
+            borderRadius: 14,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            opacity: pressed ? 0.85 : 1,
+          })}
+        >
+          <MaterialCommunityIcons name="check-circle" size={18} color="#fff" />
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 15,
+              color: '#fff',
+            }}
+          >
+            Alle als gekauft markieren
+          </Text>
+        </Pressable>
+      );
+    }
+    // 'all' tab
+    if (brandProducts.length + noNameProducts.length === 0) return null;
+    return (
+      <Pressable
+        onPress={() => handleMarkAllAsPurchased('all')}
+        style={({ pressed }) => ({
+          backgroundColor: brand.primary,
+          height: 50,
+          borderRadius: 14,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          opacity: pressed ? 0.85 : 1,
+        })}
+      >
+        <MaterialCommunityIcons name="check-all" size={18} color="#fff" />
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 15,
+            color: '#fff',
+          }}
+        >
+          Alle als gekauft markieren
+        </Text>
+      </Pressable>
+    );
+  };
+
+  // ─── Render ────────────────────────────────────────────────────
+  return (
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.bg }}>
+      {/* Body fills the entire screen so scroll content can extend UP
+          behind the chrome (DetailHeader + sticky SegmentedTabs row).
+          The ScrollViews inside add `paddingTop: chromeHeight +
+          SEG_BAR_HEIGHT` so the first item lands BELOW the chrome
+          stack — but as the user scrolls, content slides under both
+          and the BlurView shows the blur effect. */}
+      <Crossfade
+        ready={!initialLoading}
+        duration={320}
+        fillParent
+        style={{ flex: 1 }}
+        skeleton={<ShoppingListSkeleton />}
+      >
+        <PagerView
+          ref={pagerRef}
+          style={{ flex: 1 }}
+          initialPage={0}
+          onPageSelected={onPageSelected}
+        >
+          {renderPage('brand')}
+          {renderPage('noname')}
+          {renderPage('all')}
+        </PagerView>
+      </Crossfade>
+
+      {/* Unified chrome — back/title row + SegmentedTabs in ONE
+          BlurView so there's no visible seam between header and
+          tab bar. zIndex 10, absolute over the scrollable body. */}
+      <Chrome
+        title="Einkaufszettel"
+        onBack={() => router.back()}
+        right={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Pressable
+              onPress={() => setShowFilter(true)}
+              hitSlop={6}
+              style={({ pressed }) => ({
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                backgroundColor: theme.surfaceAlt,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.7 : 1,
+              })}
             >
-                  <IconSymbol name="xmark" size={24} color={colors.icon} />
-            </TouchableOpacity>
-                <View style={styles.titleSection}>
-                  <Text style={[styles.pageSheetTitle, { color: colors.text }]}>
-                    {activeTab === 'brand' ? 'Sparpotenzial' : 'Ersparnis'} Erklärung
+              <MaterialCommunityIcons
+                name="tune-vertical"
+                size={18}
+                color={theme.textMuted}
+              />
+              {activeFilterCount > 0 ? (
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: -2,
+                    right: -2,
+                    minWidth: 16,
+                    height: 16,
+                    borderRadius: 8,
+                    paddingHorizontal: 4,
+                    backgroundColor: brand.primary,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.extraBold,
+                      fontSize: 10,
+                      color: '#fff',
+                      lineHeight: 14,
+                    }}
+                  >
+                    {activeFilterCount}
                   </Text>
+                </View>
+              ) : null}
+            </Pressable>
+            <Pressable
+              onPress={() => setShowCustomItemModal(true)}
+              hitSlop={6}
+              style={({ pressed }) => ({
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                backgroundColor: brand.primary,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <MaterialCommunityIcons name="plus" size={20} color="#fff" />
+            </Pressable>
           </View>
-                <View style={styles.spacer} />
-          </View>
-        </View>
-              
-                            <ScrollView style={styles.sheetContent} showsVerticalScrollIndicator={false}>
-                {activeTab === 'brand' ? (
-                  <View>
-                    <Text style={[styles.sheetText, { color: colors.text }]}>
-                      🎯 <Text style={styles.boldText}>Dein Sparpotenzial</Text> zeigt dir, wie viel Geld du bei deiner nächsten Einkaufsmission sparen könntest! Verwandle teure Markenprodukte in günstigere NoName-Schätze und sammle dabei echte Euros.
-                    </Text>
-                    
-                    <View style={styles.gamificationBox}>
-                      <Text style={[styles.sheetText, { color: colors.text, marginTop: 12 }]}>
-                        🔄 <Text style={styles.boldText}>Smart Umwandeln:</Text> Wähle deine Lieblingsalternativen aus und verwandle deine komplette Einkaufsliste mit einem Fingertipp!
-                      </Text>
-                      
-                      <Text style={[styles.sheetText, { color: colors.text, marginTop: 12 }]}>
-                        🏆 <Text style={styles.boldText}>Achievement Bonus:</Text> Je mehr du umwandelst, desto höher steigt dein Spar-Level und deine Gesamtersparnis!
-                      </Text>
-                      
-                      <Text style={[styles.sheetText, { color: colors.text, marginTop: 12 }]}>
-                        ❤️ <Text style={styles.boldText}>Lieblingsmarkt Power-Up:</Text> Produkte aus deinem Lieblingsmarkt werden prioritär angezeigt - für maximale Bequemlichkeit!
-                      </Text>
-            </View>
-                    
-                    <Text style={[styles.gameTip, { color: colors.primary, marginTop: 16 }]}>
-                      💡 Pro-Tipp: Sammle Punkte durch jede erfolgreiche Umwandlung!
-                    </Text>
-          </View>
-                ) : (
-                  <View>
-                    <Text style={[styles.sheetText, { color: colors.text }]}>
-                      🏅 <Text style={styles.boldText}>Deine Ersparnis-Erfolge!</Text> Hier siehst du deine bereits erreichten Spar-Achievements mit NoName-Helden im Vergleich zu teuren Marken-Bossen.
-                    </Text>
-                    
-                    <View style={styles.gamificationBox}>
-                      <Text style={[styles.sheetText, { color: colors.text, marginTop: 12 }]}>
-                        ✅ <Text style={styles.boldText}>Mission Complete:</Text> Markiere gekaufte Produkte als erledigt und übertrage deine verdienten Spar-Punkte in dein Profil!
-                      </Text>
-                      
-                      <Text style={[styles.sheetText, { color: colors.text, marginTop: 12 }]}>
-                        📈 <Text style={styles.boldText}>Level Up System:</Text> Jeder gesparte Euro bringt dich näher zum nächsten Spar-Champion Level!
-                      </Text>
-                      
-                      <Text style={[styles.sheetText, { color: colors.text, marginTop: 12 }]}>
-                        🌱 <Text style={styles.boldText}>Öko-Bonus:</Text> NoName-Helden können nachhaltiger sein durch weniger Verpackung - zusätzliche Karma-Punkte für die Umwelt!
-                      </Text>
-                    </View>
-                    
-                    <Text style={[styles.gameTip, { color: colors.primary, marginTop: 16 }]}>
-                      🎮 Challenge: Schaffe es auf Platz 1 der Spar-Bestenliste!
-                    </Text>
-                  </View>
-                )}
-              </ScrollView>
-        </View>
-        </FixedAndroidModal>
-      
-      {/* LEVEL-UP OVERLAY - Spektakuläre Animation mit Confetti */}
-      <LevelUpOverlay
-        visible={showLevelUpOverlay}
-        newLevel={levelUpData.newLevel}
-        oldLevel={levelUpData.oldLevel}
-        onClose={() => setShowLevelUpOverlay(false)}
+        }
+        bottom={
+          <SegmentedTabs
+            tabs={[
+              { key: 'brand', label: `Marken (${brandProducts.length})` },
+              { key: 'noname', label: `NoNames (${noNameProducts.length})` },
+              { key: 'all', label: `Alle (${brandProducts.length + noNameProducts.length})` },
+            ] as const}
+            value={activeTab}
+            onChange={onTabChange}
+          />
+        }
       />
-      
-      {/* Batch Action Loaders */}
+
+      {/* Bottom CTA — sticky, solid bg backplate. Scroll content
+          simply clips at the top of this strip; no gradient fade
+          (caused a visible "shadow" against white product cards). */}
+      <View
+        pointerEvents="box-none"
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          paddingHorizontal: 16,
+          paddingTop: 12,
+          paddingBottom: Math.max(insets.bottom + 8, 16),
+          backgroundColor: theme.bg,
+        }}
+      >
+        {renderBottomCta()}
+      </View>
+
+      {/* Filter sheet */}
+      <FilterSheet
+        visible={showFilter}
+        title="Filter & Sortierung"
+        onClose={() => setShowFilter(false)}
+      >
+        <FilterSheetBody
+          activeTab={activeTab}
+          filters={filters}
+          setFilters={setFilters}
+          availableMarkets={availableMarkets}
+          availableCategories={availableCategories}
+          onClearAll={clearAllFilters}
+          brandCount={brandProducts.length}
+          noNameCount={noNameProducts.length}
+        />
+      </FilterSheet>
+
+      {/* Marken-Info-Sheet — getriggert vom (i)-Icon im
+          Hersteller-Chip einer BrandCard. */}
+      <FilterSheet
+        visible={!!infoSheet}
+        title={infoSheet?.title ?? ''}
+        onClose={() => setInfoSheet(null)}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.regular,
+            fontSize: 14,
+            lineHeight: 21,
+            color: theme.text,
+            paddingBottom: 8,
+          }}
+        >
+          {infoSheet?.body ?? ''}
+        </Text>
+      </FilterSheet>
+
+      {/* Batch loaders */}
       <BatchActionLoader
         visible={convertLoaderState.visible}
         title="Produkte umwandeln"
         subtitle="Markenprodukte werden zu NoNames"
         icon="arrow.triangle.2.circlepath"
         gradient={['#FF9800', '#F57C00']}
-        progress={convertLoaderState.totalItems > 0 ? convertLoaderState.processedItems / convertLoaderState.totalItems : 0}
+        progress={
+          convertLoaderState.totalItems > 0
+            ? convertLoaderState.processedItems / convertLoaderState.totalItems
+            : 0
+        }
         currentItem={convertLoaderState.currentItem}
         totalItems={convertLoaderState.totalItems}
         processedItems={convertLoaderState.processedItems}
       />
-      
       <BatchActionLoader
         visible={purchaseLoaderState.visible}
         title="Als gekauft markieren"
-        subtitle="NoName-Produkte werden abgehakt"
+        subtitle="Produkte werden abgehakt"
         icon="checkmark.circle.fill"
         gradient={['#4CAF50', '#2E7D32']}
-        progress={purchaseLoaderState.totalItems > 0 ? purchaseLoaderState.processedItems / purchaseLoaderState.totalItems : 0}
+        progress={
+          purchaseLoaderState.totalItems > 0
+            ? purchaseLoaderState.processedItems / purchaseLoaderState.totalItems
+            : 0
+        }
         currentItem={purchaseLoaderState.currentItem}
         totalItems={purchaseLoaderState.totalItems}
         processedItems={purchaseLoaderState.processedItems}
       />
 
-      {/* Lokale CartToast-Instanz entfernt – zentrale Toast-Library übernimmt */}
+      {/* Level-up overlay */}
+      <LevelUpOverlay
+        visible={showLevelUpOverlay}
+        newLevel={levelUpData.newLevel}
+        oldLevel={levelUpData.oldLevel}
+        onClose={() => setShowLevelUpOverlay(false)}
+      />
 
-        {/* Custom Item Modal */}
-        <AddCustomItemModal
-          visible={showCustomItemModal}
-          onClose={() => setShowCustomItemModal(false)}
-          userId={user?.uid || ''}
-          onSuccess={(message) => {
-            showInfoToast(message, 'success');
-            loadShoppingCart(); // Reload nach Hinzufügung
-          }}
-          onError={(message) => {
-            showInfoToast(message, 'error');
-          }}
-        />
-        </View>
+      {/* Custom item modal */}
+      <AddCustomItemModal
+        visible={showCustomItemModal}
+        onClose={() => setShowCustomItemModal(false)}
+        userId={user?.uid || ''}
+        onSuccess={(message) => {
+          showInfoToast(message, 'success');
+          loadShoppingCart();
+        }}
+        onError={(message) => showInfoToast(message, 'error')}
+      />
+    </GestureHandlerRootView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { marginTop: 16, fontSize: 16, fontFamily: 'Nunito_600SemiBold' },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  
-  // Summary Bar
-  summaryBar: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.1)',
-  },
+// ═══════════════════════════════════════════════════════════════════
+// FilterSheetBody
+// ═══════════════════════════════════════════════════════════════════
+type FilterSheetBodyProps = {
+  activeTab: Tab;
+  filters: { markets: string[]; categories: string[]; sortBy: SortBy };
+  setFilters: React.Dispatch<
+    React.SetStateAction<{ markets: string[]; categories: string[]; sortBy: SortBy }>
+  >;
+  availableMarkets: { id: string; name: string }[];
+  availableCategories: { id: string; bezeichnung?: string; name?: string }[];
+  onClearAll: () => void;
+  brandCount: number;
+  noNameCount: number;
+};
 
-  summaryContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  summaryLeft: {
-    flex: 1,
-  },
-  summaryTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 2,
-  },
-  summaryTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    color: 'white',
-  },
-  summarySubtitle: {
-    fontSize: 13,
-    fontFamily: 'Nunito_400Regular',
-    color: 'rgba(255,255,255,0.8)',
-  },
-  summaryRight: {
-    alignItems: 'flex-end',
-  },
-  savingsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  savingsIcon: {
-    marginRight: 6,
-  },
-  infoIcon: {
-    marginLeft: 8,
-    padding: 4,
-  },
-  summaryLabel: {
-    fontSize: 14,
-    fontFamily: 'Nunito_400Regular',
-  },
-  summaryValues: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  summaryAmount: {
-    fontSize: 18,
-    fontFamily: 'Nunito_700Bold',
-    color: 'white',
-  },
-  summaryPercent: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  convertAllButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    marginTop: 8,
-    alignSelf: 'flex-end',
-  },
-  convertAllText: {
-    color: 'white',
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  
-  // Tabs
-  tabContainer: { 
-    backgroundColor: 'white',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 3,
-  },
-  tabButtons: {
-    flexDirection: 'row', 
-    height: 48, 
-    position: 'relative',
-  },
-  stickySummaryGradient: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  tab: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  tabText: { fontSize: 16, fontFamily: 'Nunito_600SemiBold' },
-  tabIndicator: { position: 'absolute', bottom: 0, height: 3, width: width / 2 },
-  
-  // Product List
-  pagerView: { flex: 1 },
-  pageContainer: { flex: 1 },
-  productList: { flex: 1 },
-  emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 80 },
-  emptyText: { fontSize: 16, fontFamily: 'Nunito_600SemiBold', marginTop: 16, textAlign: 'center' },
-  emptySubtext: { fontSize: 14, fontFamily: 'Nunito_400Regular', marginTop: 8, textAlign: 'center', paddingHorizontal: 32 },
-  
-  // Product Cards
-  productContainer: { padding: 16 },
-  productCard: {
-    marginBottom: 12,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  productContent: {
-    flexDirection: 'row',
-    padding: 12,
-    alignItems: 'center',
-  },
-  productImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-  },
-  productInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  productMeta: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 2,
-  },
-  productName: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 2,
-  },
-  productPrice: {
-    fontSize: 16,
-    fontFamily: 'Nunito_700Bold',
-    marginBottom: 2,
-  },
-  savingsHint: {
-    fontSize: 12,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  savingsInline: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    fontWeight: '400',
-  },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 2,
-    marginTop: 2,
-    gap: 6,
-  },
-  brandLogo: {
-    width: 16,
-    height: 16,
-    borderRadius: 2,
-  },
-  brandName: {
-    fontSize: 13,
-    fontFamily: 'Nunito_500Medium',
-    flex: 1,
-  },
-  productActions: {
-    flexDirection: 'row',
-    gap: 8,
-    alignItems: 'center',
-  },
-  expandButton: {
-    padding: 4,
-  },
-  actionButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  
-  // Alternatives
-  alternativesContainer: {
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-  },
-  alternativesTitle: {
-    fontSize: 13,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 8,
-  },
-  alternativeItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 8,
-    borderRadius: 8,
-    marginBottom: 6,
-    borderWidth: 1,
-  },
-  alternativeImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 6,
-  },
-  alternativeInfo: {
-    flex: 1,
-    marginLeft: 8,
-  },
-  alternativeName: {
-    fontSize: 13,
-    fontFamily: 'Nunito_500Medium',
-    marginBottom: 2,
-  },
-  alternativeMeta: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  marketInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    marginRight: 8,
-  },
-  marketLogo: {
-    width: 14,
-    height: 14,
-    borderRadius: 0,
-    resizeMode: 'contain',
-    marginRight: 4,
-  },
-  marketLogoFallback: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  marketName: {
-    fontSize: 11,
-    fontFamily: 'Nunito_400Regular',
-    flex: 1,
-  },
-  favoriteMarketIcon: {
-    marginLeft: 2,
-  },
-  favoriteMarketIconLeft: {
-    marginRight: 4,
-  },
-  alternativePrice: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  alternativeSavings: {
-    alignItems: 'flex-end',
-    marginRight: 8,
-  },
-  savingsAmount: {
-    fontSize: 14,
-    fontFamily: 'Nunito_700Bold',
-  },
-  savingsPercent: {
-    fontSize: 12,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  convertSingleButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 8,
-  },
-  selectIndicator: {
-    width: 30,
-    height: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 8,
-  },
-  
-  // Bottom Buttons (5% höher)
-  bottomButtonContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    paddingBottom: 16,
-    marginBottom: 8,
-  },
-  bottomButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-  },
-  bottomButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    marginLeft: 8,
-  },
-  
-  // Page Sheet (wie in Produktdetails)
-  pageSheetContainer: {
-    flex: 1,
-    paddingTop: 20,
-  },
-  pageSheetHeader: {
-    paddingBottom: 20,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 12,
-  },
-  closeButtonLeft: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  titleSection: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  spacer: {
-    width: 40,
-  },
-  pageSheetTitle: {
-    fontSize: 18,
-    fontFamily: 'Nunito_700Bold',
-    textAlign: 'center',
-  },
-  sheetContent: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  sheetText: {
-    fontSize: 14,
-    lineHeight: 20,
-    fontFamily: 'Nunito_400Regular',
-  },
-  boldText: {
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  
-  // Floating Filter Button (wie in explore.tsx)
-  filterFab: {
-    position: 'absolute',
-    bottom: 120,
-    right: 20,
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-  },
-  filterBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-  },
-  filterBadgeText: {
-    fontSize: 10,
-    fontFamily: 'Nunito_600SemiBold',
-    color: 'white',
-    lineHeight: 12,
-  },
-  
-  // Filter Modal
-  filterModalContainer: {
-    flex: 1,
-    paddingTop: 20,
-  },
-  filterModalHeader: {
-    paddingBottom: 20,
-  },
-  filterModalTitle: {
-    fontSize: 18,
-    fontFamily: 'Nunito_700Bold',
-    textAlign: 'center',
-  },
-  filterOptions: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  filterSection: {
-    marginBottom: 24,
-  },
-  filterSectionTitle: {
-    fontSize: 18,
-    fontFamily: 'Nunito_600SemiBold',
-    marginBottom: 12,
-  },
-  sortingOptions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  sortingOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    gap: 6,
-  },
-  sortingOptionText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_500Medium',
-  },
-  chipsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    gap: 6,
-  },
-  chipText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_500Medium',
-  },
-  clearAllButton: {
-    alignItems: 'center',
-  },
-  clearAllText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  debugText: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    fontStyle: 'italic',
-  },
-  gamificationBox: {
-    backgroundColor: 'rgba(66, 169, 104, 0.1)',
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#42a968',
-  },
-  gameTip: {
-    fontSize: 13,
-    fontFamily: 'Nunito_600SemiBold',
-    fontStyle: 'italic',
-    textAlign: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(13, 133, 117, 0.1)',
-    borderRadius: 8,
-  },
-  
-  // Alte Toast-Container Styles entfernt - zentrale Toast-Library übernimmt
-  
-  // Custom Item Styles
-  customBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginBottom: 4,
-  },
-  customBadgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontFamily: 'Nunito_600SemiBold',
-  },
-  customItemHint: {
-    fontSize: 12,
-    fontFamily: 'Nunito_400Regular',
-    fontStyle: 'italic',
-    marginTop: 4,
-  },
-});
+function FilterSheetBody({
+  activeTab,
+  filters,
+  setFilters,
+  availableMarkets,
+  availableCategories,
+  onClearAll,
+  brandCount,
+  noNameCount,
+}: FilterSheetBodyProps) {
+  const { theme, brand } = useTokens();
+  const sortOptions =
+    activeTab === 'brand' ? SORT_OPTIONS_BRAND : SORT_OPTIONS_NONAME;
+
+  const showMarkets = activeTab !== 'brand' && availableMarkets.length > 0;
+  const activeCount =
+    filters.markets.length + filters.categories.length + (filters.sortBy !== 'name' ? 1 : 0);
+
+  const toggleMarket = (id: string) =>
+    setFilters((prev) => ({
+      ...prev,
+      markets: prev.markets.includes(id)
+        ? prev.markets.filter((m) => m !== id)
+        : [...prev.markets, id],
+    }));
+  const toggleCategory = (id: string) =>
+    setFilters((prev) => ({
+      ...prev,
+      categories: prev.categories.includes(id)
+        ? prev.categories.filter((c) => c !== id)
+        : [...prev.categories, id],
+    }));
+
+  return (
+    <View style={{ paddingTop: 4 }}>
+      {/* Sort */}
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 14,
+          color: theme.text,
+          marginBottom: 6,
+        }}
+      >
+        Sortierung
+      </Text>
+      <OptionList
+        value={filters.sortBy}
+        options={sortOptions}
+        onChange={(v) => setFilters((prev) => ({ ...prev, sortBy: v }))}
+      />
+
+      {/* Markets */}
+      {showMarkets ? (
+        <>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 14,
+              color: theme.text,
+              marginTop: 16,
+              marginBottom: 8,
+            }}
+          >
+            Märkte
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {availableMarkets.map((m) => {
+              const on = filters.markets.includes(m.id);
+              return (
+                <Pressable
+                  key={m.id}
+                  onPress={() => toggleMarket(m.id)}
+                  style={({ pressed }) => ({
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 18,
+                    backgroundColor: on ? brand.primary : theme.surfaceAlt,
+                    opacity: pressed ? 0.85 : 1,
+                  })}
+                >
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.bold,
+                      fontSize: 12,
+                      color: on ? '#fff' : theme.text,
+                    }}
+                  >
+                    {m.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </>
+      ) : null}
+
+      {/* Categories */}
+      {availableCategories.length > 0 ? (
+        <>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 14,
+              color: theme.text,
+              marginTop: 16,
+              marginBottom: 8,
+            }}
+          >
+            Kategorien
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {availableCategories.map((c) => {
+              const on = filters.categories.includes(c.id);
+              return (
+                <Pressable
+                  key={c.id}
+                  onPress={() => toggleCategory(c.id)}
+                  style={({ pressed }) => ({
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 18,
+                    backgroundColor: on ? brand.primary : theme.surfaceAlt,
+                    opacity: pressed ? 0.85 : 1,
+                  })}
+                >
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.bold,
+                      fontSize: 12,
+                      color: on ? '#fff' : theme.text,
+                    }}
+                  >
+                    {c.bezeichnung || c.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </>
+      ) : null}
+
+      {/* Footer: clear-all + counter */}
+      <View
+        style={{
+          marginTop: 22,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 11,
+            color: theme.textMuted,
+          }}
+        >
+          {brandCount + noNameCount} Produkte gesamt
+        </Text>
+        <Pressable
+          onPress={onClearAll}
+          disabled={activeCount === 0}
+          style={({ pressed }) => ({
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            borderRadius: 18,
+            backgroundColor: activeCount === 0 ? theme.surfaceAlt : theme.primaryContainer,
+            opacity: pressed ? 0.85 : 1,
+          })}
+        >
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 12,
+              color: activeCount === 0 ? theme.textMuted : brand.primary,
+            }}
+          >
+            Zurücksetzen
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}

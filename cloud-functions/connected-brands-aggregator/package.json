@@ -1,0 +1,14 @@
+{
+  "name": "connected-brands-aggregator",
+  "version": "1.0.0",
+  "description": "Weekly aggregator that pre-computes the connected-brands list per Hersteller (direct + via NoName→Markenprodukt link) into aggregates/herstellerBrands_v1/{herstellerId}.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}
