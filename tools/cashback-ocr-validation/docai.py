@@ -54,10 +54,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 DOCAI_PRICING = {
-    "expense":  {"per_page_usd": 0.10},  # Expense Parser, specialized
-    "form":     {"per_page_usd": 0.03},  # Form Parser
-    "ocr":      {"per_page_usd": 0.0015},  # Plain OCR
-    "custom":   {"per_page_usd": 0.03},  # Custom Extractor
+    # Updated 2025: Google reduced specialized-processor prices.
+    # Source: https://cloud.google.com/document-ai/pricing
+    "expense":  {"per_page_usd": 0.05},   # Expense Parser (was $0.10 in 2023)
+    "form":     {"per_page_usd": 0.03},   # Form Parser
+    "ocr":      {"per_page_usd": 0.0015}, # Layout Parser / OCR
+    "custom":   {"per_page_usd": 0.03},   # Custom Extractor
 }
 
 

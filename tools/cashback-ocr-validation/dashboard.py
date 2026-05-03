@@ -36,12 +36,13 @@ from PIL import Image, ImageDraw, ImageFont
 from prompts import VERSION as PROMPT_VERSION
 from validate import PRICING as GEMINI_PRICING, estimate_cents, extract_one
 from docai import DOCAI_PRICING, extract_docai, estimate_docai_cents
+from cv_hybrid import CV_PRICING, extract_cv_hybrid, estimate_cv_hybrid_cents, CV_HYBRID_VERSION
 from image_prep import preprocess as preprocess_image
 
 # Cache-busting key. Bump this whenever extraction logic, prompts,
 # preprocessing, or merchant fallback changes — invalidates all cached
 # extractions in one shot so users don't see stale results from old code.
-_CACHE_VERSION = "v6-2026-05-03-position-aware"
+_CACHE_VERSION = "v7-2026-05-03-clahe-hybrid-escalate"
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -101,8 +102,9 @@ st.markdown(
 # ---------------------------------------------------------------------------
 
 ENGINES = {
-    "gemini": "🤖 Gemini (LLM-based, schnell, non-deterministisch)",
-    "docai":  "📄 Document AI Expense Parser (spezialisiert, deterministisch)",
+    "gemini":    "🤖 Gemini direct (LLM auf Bild, schnell, non-deterministisch)",
+    "docai":     "📄 Document AI Expense Parser (spezialisiert, $0,05/page)",
+    "cv-hybrid": "🔀 Cloud Vision + Gemini Flash Parser (Hybrid, ~$0,003/page)",
 }
 
 
@@ -117,7 +119,7 @@ with st.sidebar:
         label="OCR Engine",
         options=list(ENGINES.keys()),
         format_func=lambda k: ENGINES[k],
-        index=list(ENGINES.keys()).index("docai"),  # Default = DocAI (deterministisch)
+        index=list(ENGINES.keys()).index("cv-hybrid"),  # Default = Hybrid (best $/quality)
         label_visibility="collapsed",
     )
 
@@ -133,7 +135,7 @@ with st.sidebar:
             f"in ${GEMINI_PRICING[model]['in']} / out ${GEMINI_PRICING[model]['out']}"
         )
         st.caption(f"Prompt version: `{PROMPT_VERSION}`, temperature=0, seed=42")
-    else:  # docai
+    elif engine == "docai":
         model = "docai/expense"
         proc_id = os.environ.get("DOCUMENTAI_PROCESSOR_ID", "")
         proc_loc = os.environ.get("DOCUMENTAI_LOCATION", "eu")
@@ -141,13 +143,41 @@ with st.sidebar:
         if proc_id and proc_proj:
             st.caption(f"Processor: `{proc_id}` in `{proc_loc}`")
             st.caption(f"Project: `{proc_proj}`")
-            st.caption("Pricing: $0,10 / page (Expense Parser)")
+            st.caption("Pricing: $0,05 / page (Expense Parser, 2025-Preise)")
         else:
             st.error(
                 "DocAI nicht konfiguriert. Setze in `.env`:\n\n"
                 "`GOOGLE_CLOUD_PROJECT`, `DOCUMENTAI_LOCATION`, `DOCUMENTAI_PROCESSOR_ID`\n\n"
                 "Siehe README §Document AI."
             )
+    else:  # cv-hybrid
+        model = "cv-hybrid/flash"
+        st.caption(
+            "Cloud Vision OCR (deterministisch) → Gemini 2.5 Flash strukturiert."
+        )
+        st.caption(
+            f"Pricing: ${CV_PRICING['vision_per_page_usd']}/page Vision + Gemini-Flash text"
+        )
+        st.caption(f"Version: `{CV_HYBRID_VERSION}`, temperature=0, seed=42")
+        if not os.environ.get("GEMINI_API_KEY"):
+            st.error("`GEMINI_API_KEY` muss in `.env` gesetzt sein.")
+        if not os.environ.get("GOOGLE_CLOUD_PROJECT"):
+            st.warning(
+                "`GOOGLE_CLOUD_PROJECT` nicht gesetzt — Vision auth nutzt ADC. "
+                "Falls Auth fehlschlägt: `gcloud auth application-default login`"
+            )
+
+    # Auto-escalate toggle: only meaningful for non-DocAI engines
+    if engine != "docai":
+        escalate = st.checkbox(
+            "🚨 Auto-Escalate to DocAI on Δ ≠ 0",
+            value=True,
+            help="Wenn die primäre Engine Σ items ≠ Total liefert (Reconciliation "
+                 "fehlschlägt), automatisch DocAI Expense Parser als Backup aufrufen. "
+                 "Cost-Aufschlag nur bei den Bons die's brauchen.",
+        )
+    else:
+        escalate = False  # DocAI is already the most accurate, no escalation needed
 
     st.markdown("---")
     st.markdown("### 🖼 Image Preprocessing")
@@ -163,6 +193,27 @@ with st.sidebar:
         value=True,
         help="Zeichnet farbige Boxen auf das Bild — eine pro erkanntem "
              "Item / Total / Merchant / Date. Nur DocAI liefert Boxen.",
+    )
+
+    st.markdown("**Quality Enhancements** (alle $0, alle einzeln aktivierbar)")
+    enable_clahe = st.checkbox(
+        "CLAHE — Kontrast-Boost",
+        value=False,
+        help="Adaptives Histogramm-Equalization. Big Win für verblasste "
+             "Thermal-Bons (Penny/Aldi nach Wallet-Aufenthalt).",
+    )
+    enable_denoise = st.checkbox(
+        "Denoise — JPEG-Artefakte raus",
+        value=False,
+        help="Non-Local Means Denoising. Glättet Bildrauschen, behält Kanten. "
+             "Langsamer (~1-2 s/Bon zusätzlich).",
+    )
+    enable_threshold = st.checkbox(
+        "B&W Adaptive Threshold",
+        value=False,
+        help="Konvertiert auf reines Schwarz-Weiß mit lokalem Threshold. "
+             "Killt Hintergrund-Schatten, hilft enorm bei Tisch-Photos. "
+             "VORSICHT: Verliert Farbinfo, manchmal hilft es OCR, manchmal nicht — ausprobieren.",
     )
 
     st.markdown("---")
@@ -240,22 +291,33 @@ def process(
     engine: str,
     model: str,
     preprocess_enabled: bool,
+    enable_clahe: bool = False,
+    enable_denoise: bool = False,
+    enable_threshold: bool = False,
+    escalate: bool = False,
     code_version: str = _CACHE_VERSION,
 ) -> dict:
     """Wrap engine extraction with bytes-cached invocation.
 
     Returns a uniform result dict regardless of engine.
-    Cache key includes preprocess flag AND code_version — toggling either
-    triggers fresh API calls.
+    Cache key includes ALL flags + code_version — toggling any triggers
+    fresh API calls.
     """
     bytes_hash = hashlib.sha256(file_bytes).hexdigest()[:16]
     _ = code_version  # only used for cache-key invalidation
 
-    # Run image preprocessing if enabled
+    # Run image preprocessing if enabled.
+    # The 3 quality enhancements (CLAHE/Denoise/Threshold) only fire if
+    # the geometric preprocess is also enabled — they share the same pipeline.
     prep_info: dict = {"applied": False}
-    if preprocess_enabled:
+    if preprocess_enabled or enable_clahe or enable_denoise or enable_threshold:
         try:
-            prep = preprocess_image(file_bytes)
+            prep = preprocess_image(
+                file_bytes,
+                enable_clahe=enable_clahe,
+                enable_denoise=enable_denoise,
+                enable_threshold=enable_threshold,
+            )
             send_bytes = prep.output_bytes
             prep_info = {
                 "applied": True,
@@ -267,6 +329,11 @@ def process(
                 "detected_corners": prep.detected_corners,
                 "notes": prep.notes,
                 "preprocessed_bytes": prep.output_bytes,
+                "enhancements": {
+                    "clahe": enable_clahe,
+                    "denoise": enable_denoise,
+                    "threshold": enable_threshold,
+                },
             }
         except Exception as e:  # noqa: BLE001
             send_bytes = file_bytes
@@ -277,11 +344,23 @@ def process(
     tmp = Path("/tmp") / f"streamlit_bon_{bytes_hash}_{file_name}"
     tmp.write_bytes(send_bytes)
 
+    def _check_reconciliation(receipt_dict: Optional[dict]) -> tuple[bool, float]:
+        """Returns (passes_gate, delta_eur). Gate: |Σ items - Total| ≤ 0.05€."""
+        if not receipt_dict:
+            return (False, float("inf"))
+        sum_items = sum((it["priceCents"] or 0) for it in receipt_dict.get("items", []))
+        total = receipt_dict.get("totalCents") or 0
+        if not total:
+            return (False, float("inf"))
+        delta = abs(total - sum_items) / 100.0
+        return (delta <= 0.05, delta)
+
     try:
+        # ----- Primary engine extraction -----
         if engine == "gemini":
             r = extract_one(get_gemini_client(), model, tmp)
-            cost = estimate_cents(r.model, r.inputTokens, r.outputTokens)
-            return {
+            primary_cost = estimate_cents(r.model, r.inputTokens, r.outputTokens)
+            primary_result = {
                 "engine": "gemini",
                 "ok": r.ok,
                 "error": r.error,
@@ -290,7 +369,7 @@ def process(
                 "promptVersion": r.promptVersion,
                 "receipt": r.receipt.model_dump() if r.receipt else None,
                 "rawText": r.rawText if not r.ok else None,
-                "estCostCents": cost,
+                "estCostCents": primary_cost,
                 "inputTokens": r.inputTokens,
                 "outputTokens": r.outputTokens,
                 "pages": None,
@@ -299,10 +378,37 @@ def process(
                 "boundingBoxes": [],
                 "prep": prep_info,
             }
+        elif engine == "cv-hybrid":
+            r = extract_cv_hybrid(tmp, gemini_model="gemini-2.5-flash")
+            primary_cost = estimate_cv_hybrid_cents(r.pages or 1, r.inputTokens, r.outputTokens)
+            primary_result = {
+                "engine": "cv-hybrid",
+                "ok": r.ok,
+                "error": r.error,
+                "latencyMs": r.latencyMs,
+                "model": r.engine,
+                "promptVersion": r.promptVersion,
+                "receipt": r.receipt.model_dump() if r.receipt else None,
+                "rawText": r.rawText if not r.ok else None,
+                "estCostCents": primary_cost,
+                "inputTokens": r.inputTokens,
+                "outputTokens": r.outputTokens,
+                "pages": r.pages,
+                "docConfidence": None,
+                "bytesHash": bytes_hash,
+                "boundingBoxes": [
+                    {"label": b.label, "text": b.text, "confidence": b.confidence,
+                     "x": b.x, "y": b.y, "w": b.w, "h": b.h}
+                    for b in r.boundingBoxes
+                ],
+                "prep": prep_info,
+                "cvLatencyMs": r.cv_latency_ms,
+                "geminiLatencyMs": r.gemini_latency_ms,
+            }
         else:  # docai
             r = extract_docai(tmp)
-            cost = estimate_docai_cents(r.pages or 1, "expense")
-            return {
+            primary_cost = estimate_docai_cents(r.pages or 1, "expense")
+            primary_result = {
                 "engine": "docai",
                 "ok": r.ok,
                 "error": r.error,
@@ -311,7 +417,7 @@ def process(
                 "promptVersion": r.promptVersion,
                 "receipt": r.receipt.model_dump() if r.receipt else None,
                 "rawText": r.rawText if not r.ok else None,
-                "estCostCents": cost,
+                "estCostCents": primary_cost,
                 "inputTokens": None,
                 "outputTokens": None,
                 "pages": r.pages,
@@ -324,6 +430,43 @@ def process(
                 ],
                 "prep": prep_info,
             }
+
+        # ----- Auto-escalation: if primary failed reconciliation, retry with DocAI -----
+        primary_passes, primary_delta = _check_reconciliation(primary_result["receipt"])
+        if escalate and primary_result["ok"] and not primary_passes and engine != "docai":
+            # Run DocAI as backup
+            docai_r = extract_docai(tmp)
+            docai_passes, docai_delta = _check_reconciliation(
+                docai_r.receipt.model_dump() if docai_r.receipt else None
+            )
+            docai_cost = estimate_docai_cents(docai_r.pages or 1, "expense")
+            primary_result["escalation"] = {
+                "fired": True,
+                "primary_delta_eur": primary_delta if primary_delta != float("inf") else None,
+                "docai_passes": docai_passes,
+                "docai_delta_eur": docai_delta if docai_delta != float("inf") else None,
+                "docai_cost_cents": docai_cost,
+                "docai_latency_ms": docai_r.latencyMs,
+            }
+            # If DocAI did better, swap in its result for display
+            if docai_passes and docai_r.receipt:
+                primary_result["receipt"] = docai_r.receipt.model_dump()
+                primary_result["estCostCents"] = (primary_cost or 0) + (docai_cost or 0)
+                primary_result["model"] = f"{primary_result['model']} → escalated to docai/expense"
+                # Replace bounding boxes too — DocAI's are correct for the escalated result
+                primary_result["boundingBoxes"] = [
+                    {"label": b.label, "text": b.text, "confidence": b.confidence,
+                     "x": b.x, "y": b.y, "w": b.w, "h": b.h}
+                    for b in docai_r.boundingBoxes
+                ]
+            else:
+                # DocAI didn't help either — keep primary but log
+                primary_result["estCostCents"] = (primary_cost or 0) + (docai_cost or 0)
+                primary_result["model"] = f"{primary_result['model']} (escalation tried, DocAI also Δ={docai_delta:.2f})"
+        else:
+            primary_result["escalation"] = {"fired": False}
+
+        return primary_result
     finally:
         try:
             tmp.unlink()
@@ -370,24 +513,45 @@ if not uploaded:
 # Process all bons
 # ---------------------------------------------------------------------------
 
-if engine == "docai" and not (
+_docai_configured = bool(
     os.environ.get("DOCUMENTAI_PROCESSOR_ID")
     and os.environ.get("GOOGLE_CLOUD_PROJECT")
-):
+)
+if engine == "docai" and not _docai_configured:
     st.error(
         "Document AI ist gewählt, aber `DOCUMENTAI_PROCESSOR_ID` und/oder "
         "`GOOGLE_CLOUD_PROJECT` fehlen in der `.env`. "
         "Setup-Anleitung: README §Document AI."
     )
     st.stop()
+if escalate and not _docai_configured:
+    st.warning(
+        "🚨 Auto-Escalate aktiviert, aber DocAI nicht konfiguriert. "
+        "Escalation wird übersprungen — siehe README §Document AI."
+    )
 
 results: list[tuple[str, bytes, dict]] = []
-prep_label = "preprocessed" if preprocess_enabled else "raw"
+enh_parts = []
+if enable_clahe:
+    enh_parts.append("CLAHE")
+if enable_denoise:
+    enh_parts.append("Denoise")
+if enable_threshold:
+    enh_parts.append("Threshold")
+prep_label = ("preprocessed" if preprocess_enabled else "raw") + (
+    f" + {'+'.join(enh_parts)}" if enh_parts else ""
+)
 progress = st.progress(0.0, text=f"Processing {len(uploaded)} bons via {model} ({prep_label}) …")
 for idx, f in enumerate(uploaded):
     raw = f.read()
     started = time.monotonic()
-    res = process(raw, f.name, engine, model, preprocess_enabled)
+    res = process(
+        raw, f.name, engine, model, preprocess_enabled,
+        enable_clahe=enable_clahe,
+        enable_denoise=enable_denoise,
+        enable_threshold=enable_threshold,
+        escalate=escalate,
+    )
     elapsed = time.monotonic() - started
     results.append((f.name, raw, res))
     progress.progress(
@@ -562,6 +726,18 @@ elif gate_ok == "fail" or gate_delta == "fail" or gate_det == "fail":
     st.error("Hartes Problem: " + "; ".join(msg))
 else:
     st.warning("Borderline. Schau dir die Per-Bon-Cards unten an.")
+
+# Escalation summary (aggregate across all bons)
+escalations_fired = [r for _, _, r in results if r.get("escalation", {}).get("fired")]
+escalations_helped = [r for r in escalations_fired if r["escalation"].get("docai_passes")]
+if escalations_fired:
+    st.info(
+        f"🚨 **Auto-Escalation:** fired on {len(escalations_fired)}/{len(results)} bons "
+        f"({len(escalations_fired)*100//max(1,len(results))}%). "
+        f"DocAI fixed {len(escalations_helped)} of them. "
+        f"Extra cost-aufschlag: ~"
+        f"{sum(r['escalation'].get('docai_cost_cents', 0) or 0 for r in escalations_fired):.4f} ¢ total."
+    )
 
 # Run details
 st.markdown("### Run-Details")
@@ -953,12 +1129,38 @@ for idx, (name, raw, r) in enumerate(results):
                     f"{r.get('inputTokens', '?')} in + {r.get('outputTokens', '?')} out tok · "
                     f"~{cost or 0:.4f} ¢ · bytes-hash `{r.get('bytesHash', '?')}`"
                 )
+            elif r["engine"] == "cv-hybrid":
+                st.caption(
+                    f"⚙ {r['model']} · "
+                    f"{r['latencyMs']} ms (CV {r.get('cvLatencyMs', '?')} + Gemini {r.get('geminiLatencyMs', '?')}) · "
+                    f"{r.get('inputTokens', '?')} in + {r.get('outputTokens', '?')} out tok · "
+                    f"~{cost or 0:.4f} ¢ · bytes-hash `{r.get('bytesHash', '?')}`"
+                )
             else:
                 st.caption(
                     f"⚙ {r['model']} · {r['latencyMs']} ms · "
                     f"{r.get('pages', 1)} page(s) · "
                     f"~{cost or 0:.4f} ¢ · bytes-hash `{r.get('bytesHash', '?')}`"
                 )
+
+            # Escalation badge if fired
+            esc = r.get("escalation", {})
+            if esc.get("fired"):
+                if esc.get("docai_passes"):
+                    st.success(
+                        f"🚨 **Escalated to DocAI** — primary delta was "
+                        f"{esc.get('primary_delta_eur', 0):.2f} €. DocAI fixed it "
+                        f"(Δ={esc.get('docai_delta_eur', 0):.2f} €). "
+                        f"Extra cost: ~{esc.get('docai_cost_cents', 0):.4f} ¢, "
+                        f"+{esc.get('docai_latency_ms', 0)} ms latency."
+                    )
+                else:
+                    st.warning(
+                        f"🚨 **Escalation tried, didn't help** — primary Δ="
+                        f"{esc.get('primary_delta_eur', 0):.2f} €, "
+                        f"DocAI Δ={esc.get('docai_delta_eur', 0):.2f} €. "
+                        f"Extra cost: ~{esc.get('docai_cost_cents', 0):.4f} ¢ wasted."
+                    )
 
             # Confidence
             conf = rcpt.get("ocrConfidence")

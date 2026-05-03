@@ -168,30 +168,92 @@ def _sharpness(img_cv: np.ndarray) -> float:
 
 
 # ---------------------------------------------------------------------------
+# 4. Image-quality enhancements (toggleable — all $0, all client-side)
+# ---------------------------------------------------------------------------
+
+
+def _apply_clahe(img_cv: np.ndarray) -> np.ndarray:
+    """CLAHE — Contrast Limited Adaptive Histogram Equalization.
+
+    Boosts local contrast while preventing over-amplification of noise.
+    Big win for faded thermal-receipts (Penny/Aldi/Lidl after a year in
+    a wallet) — text becomes readable again.
+
+    Operates in LAB color space (only on L channel) to preserve color.
+    """
+    lab = cv2.cvtColor(img_cv, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l_eq = clahe.apply(l)
+    lab_eq = cv2.merge((l_eq, a, b))
+    return cv2.cvtColor(lab_eq, cv2.COLOR_LAB2BGR)
+
+
+def _apply_denoise(img_cv: np.ndarray) -> np.ndarray:
+    """Non-Local Means Denoise.
+
+    Removes JPEG compression artifacts and sensor noise while preserving
+    edges. Slow on large images so we work at the current resolution.
+    """
+    return cv2.fastNlMeansDenoisingColored(
+        img_cv,
+        None,
+        h=10,           # luminance filter strength
+        hColor=10,      # color filter strength
+        templateWindowSize=7,
+        searchWindowSize=21,
+    )
+
+
+def _apply_adaptive_threshold(img_cv: np.ndarray) -> np.ndarray:
+    """Adaptive thresholding → high-contrast B&W.
+
+    Especially useful for thermal receipts on dark/textured backgrounds
+    (wood tables) — the Gaussian local-mean threshold cleanly separates
+    receipt text from background. OCR engines love this.
+
+    Returns 3-channel BGR image (single-channel B&W replicated to BGR)
+    so the rest of the pipeline doesn't choke.
+    """
+    gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+    # Block size 25 + C 10 works well for typical phone-camera receipts;
+    # tweak if results are too noisy or too washed out.
+    binary = cv2.adaptiveThreshold(
+        gray, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        25,    # block size (odd)
+        10,    # constant subtracted from mean
+    )
+    return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
 
-def preprocess(image_bytes: bytes, max_dim: int = 3500) -> PreprocessResult:
+def preprocess(
+    image_bytes: bytes,
+    max_dim: int = 3500,
+    enable_clahe: bool = False,
+    enable_denoise: bool = False,
+    enable_threshold: bool = False,
+) -> PreprocessResult:
     """Run the full pipeline.
 
-    DESIGN PRINCIPLE — non-destructive when possible:
-      - If no transformation is needed (no rotation, no perspective fix,
-        already <max_dim) → return ORIGINAL BYTES UNCHANGED. No re-encode,
-        no quality loss. This avoids degrading OCR input when preprocessing
-        has nothing useful to do.
-      - If only EXIF rotation is needed → re-encode at quality 95 (light).
-      - If perspective correction was applied → image already changed,
-        re-encode at quality 95.
-      - Resize cap is 3500px (was 2000) so item-text resolution survives.
-        Thermal-receipt item lines are ~30-40px tall on phone photos;
-        downsizing to 1500px halves that to 15-20px which DocAI/Gemini
-        struggle with.
+    DESIGN PRINCIPLE — non-destructive when possible (geometric only):
+      - If no transformation is needed AND no enhancement is enabled
+        (no rotation, no perspective fix, no CLAHE/denoise/threshold,
+        already <max_dim) → return ORIGINAL BYTES UNCHANGED.
+      - Any enabled enhancement triggers re-encode at quality 95.
 
     Args:
       image_bytes: raw JPEG/PNG/HEIC bytes
-      max_dim: cap the longer edge AFTER preprocessing (3500 default — only
-               resize if image is larger).
+      max_dim: cap the longer edge AFTER preprocessing (3500 default).
+      enable_clahe: apply CLAHE contrast equalization (free, helps faded bons)
+      enable_denoise: apply Non-Local Means Denoise (free, slow ~1-2s/bon)
+      enable_threshold: apply adaptive B&W threshold (free, drops color)
 
     Returns PreprocessResult with output bytes (possibly identical to input).
     """
@@ -261,16 +323,32 @@ def preprocess(image_bytes: bytes, max_dim: int = 3500) -> PreprocessResult:
     if sharpness < 100:
         notes.append(f"⚠ Low sharpness {sharpness:.0f} — may impact OCR")
 
+    # -----------------------------------------------------------
+    # Quality enhancements — apply only if user toggled them on
+    # -----------------------------------------------------------
+    if enable_clahe:
+        img_cv = _apply_clahe(img_cv)
+        notes.append("CLAHE contrast equalization applied")
+    if enable_denoise:
+        img_cv = _apply_denoise(img_cv)
+        notes.append("Non-Local Means denoise applied")
+    if enable_threshold:
+        img_cv = _apply_adaptive_threshold(img_cv)
+        notes.append("Adaptive B&W threshold applied (color information lost)")
+
     # ---------------------------------------------------------------
     # Decide whether to return original bytes or re-encode.
-    # If we made NO destructive changes, return original. This preserves
-    # the source quality entirely.
+    # If we made NO destructive changes AND no enhancement enabled,
+    # return original. This preserves the source quality entirely.
     # ---------------------------------------------------------------
     no_changes = (
         deg == 0
         and not perspective_corrected
         and not needs_resize
         and not rotated_to_portrait
+        and not enable_clahe
+        and not enable_denoise
+        and not enable_threshold
     )
     if no_changes:
         notes.append("No transformation needed — original bytes preserved")
