@@ -112,7 +112,7 @@ with st.sidebar:
         label="OCR Engine",
         options=list(ENGINES.keys()),
         format_func=lambda k: ENGINES[k],
-        index=0,
+        index=list(ENGINES.keys()).index("docai"),  # Default = DocAI (deterministisch)
         label_visibility="collapsed",
     )
 

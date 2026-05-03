@@ -172,14 +172,28 @@ def _sharpness(img_cv: np.ndarray) -> float:
 # ---------------------------------------------------------------------------
 
 
-def preprocess(image_bytes: bytes, max_dim: int = 2000) -> PreprocessResult:
+def preprocess(image_bytes: bytes, max_dim: int = 3500) -> PreprocessResult:
     """Run the full pipeline.
+
+    DESIGN PRINCIPLE — non-destructive when possible:
+      - If no transformation is needed (no rotation, no perspective fix,
+        already <max_dim) → return ORIGINAL BYTES UNCHANGED. No re-encode,
+        no quality loss. This avoids degrading OCR input when preprocessing
+        has nothing useful to do.
+      - If only EXIF rotation is needed → re-encode at quality 95 (light).
+      - If perspective correction was applied → image already changed,
+        re-encode at quality 95.
+      - Resize cap is 3500px (was 2000) so item-text resolution survives.
+        Thermal-receipt item lines are ~30-40px tall on phone photos;
+        downsizing to 1500px halves that to 15-20px which DocAI/Gemini
+        struggle with.
 
     Args:
       image_bytes: raw JPEG/PNG/HEIC bytes
-      max_dim: cap the longer edge after preprocessing (smaller = cheaper OCR)
+      max_dim: cap the longer edge AFTER preprocessing (3500 default — only
+               resize if image is larger).
 
-    Returns PreprocessResult with new JPEG bytes + debug info.
+    Returns PreprocessResult with output bytes (possibly identical to input).
     """
     notes: list[str] = []
 
@@ -197,35 +211,73 @@ def preprocess(image_bytes: bytes, max_dim: int = 2000) -> PreprocessResult:
     corners = _detect_receipt_corners(img_cv)
     perspective_corrected = False
     if corners is not None:
-        notes.append("Receipt corners detected — perspective-correcting")
         try:
             warped = _perspective_correct(img_cv, corners)
-            if warped.shape[0] >= 100 and warped.shape[1] >= 100:
+            # Only accept the warp if it preserves at least 60% of the image
+            # area — guards against mis-detecting a small inner rectangle
+            # (e.g. the Summe-box) as the receipt boundary.
+            warped_area = warped.shape[0] * warped.shape[1]
+            orig_area = img_cv.shape[0] * img_cv.shape[1]
+            if (warped.shape[0] >= 100 and warped.shape[1] >= 100
+                    and warped_area >= 0.6 * orig_area):
                 img_cv = warped
                 perspective_corrected = True
+                notes.append("Receipt corners detected — perspective-corrected")
+            else:
+                notes.append(
+                    f"Detected corners cover only {warped_area/orig_area:.0%} "
+                    "of image — likely a sub-region, skipping correction"
+                )
+                corners = None  # don't store potentially-bad corners
         except Exception as e:  # noqa: BLE001
             notes.append(f"Perspective correction failed: {e}")
+            corners = None
     else:
         notes.append("No receipt corners detected — using full image as-is")
 
     # Cap dimensions (smaller image = fewer OCR tokens / faster)
     h, w = img_cv.shape[:2]
-    if max(h, w) > max_dim:
+    needs_resize = max(h, w) > max_dim
+    if needs_resize:
         scale = max_dim / float(max(h, w))
         img_cv = cv2.resize(img_cv, (int(w * scale), int(h * scale)),
                             interpolation=cv2.INTER_AREA)
         notes.append(f"Resized to fit max_dim={max_dim}")
 
-    # Sharpness check (informational)
+    # Sharpness check (informational, does not modify image)
     sharpness = _sharpness(img_cv)
     if sharpness < 100:
         notes.append(f"⚠ Low sharpness {sharpness:.0f} — may impact OCR")
 
-    # Encode back to JPEG
+    # ---------------------------------------------------------------
+    # Decide whether to return original bytes or re-encode.
+    # If we made NO destructive changes, return original. This preserves
+    # the source quality entirely.
+    # ---------------------------------------------------------------
+    no_changes = (
+        deg == 0
+        and not perspective_corrected
+        and not needs_resize
+    )
+    if no_changes:
+        notes.append("No transformation needed — original bytes preserved")
+        return PreprocessResult(
+            output_bytes=image_bytes,
+            output_w=original_w,
+            output_h=original_h,
+            original_w=original_w,
+            original_h=original_h,
+            detected_corners=None,
+            perspective_corrected=False,
+            rotation_applied=0,
+            sharpness_score=sharpness,
+            notes=notes,
+        )
+
+    # Re-encode the modified image. Quality 95 to minimize artifacts.
     out_h, out_w = img_cv.shape[:2]
-    ok, buf = cv2.imencode(".jpg", img_cv, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    ok, buf = cv2.imencode(".jpg", img_cv, [cv2.IMWRITE_JPEG_QUALITY, 95])
     if not ok:
-        # Fallback: re-encode original
         return PreprocessResult(
             output_bytes=image_bytes,
             output_w=original_w,
