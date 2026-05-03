@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 import os
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -187,6 +188,94 @@ def _entity_text(entity: documentai.Document.Entity) -> str:
             else entity.mention_text or "")
 
 
+# ---------------------------------------------------------------------------
+# DACH retailer recognition — fallback when DocAI's supplier_name is wrong
+# (which happens often when receipts contain TSE-Signatur base64 strings or
+# barcode artifacts that DocAI mistakes for the merchant header).
+# Order matters: check more specific names first (ALDI SÜD before ALDI).
+# ---------------------------------------------------------------------------
+
+DACH_RETAILERS = [
+    # Format: (canonical name, list of header substrings to match, lowercase)
+    ("ALDI SÜD",        ["aldi süd", "aldi sued"]),
+    ("ALDI Nord",       ["aldi nord"]),
+    ("ALDI",            ["aldi"]),
+    ("LIDL",            ["lidl"]),
+    ("Kaufland",        ["kaufland"]),
+    ("REWE",            ["rewe"]),
+    ("EDEKA",           ["edeka", "e-center", "e center"]),
+    ("Penny",           ["penny-markt", "penny markt", "penny"]),
+    ("Netto",           ["netto marken-discount", "netto-markendiscount", "netto"]),
+    ("Norma",           ["norma"]),
+    ("real",            ["real,-", "real-"]),
+    ("Globus",          ["globus"]),
+    ("tegut",           ["tegut"]),
+    ("HIT",             ["hit-markt", "hit markt"]),
+    ("Müller",          ["müller drogerie", "mueller drogerie", "müller "]),
+    ("dm",              ["dm-drogerie markt", "dm drogerie markt"]),
+    ("Rossmann",        ["rossmann"]),
+    ("Budni",           ["budni"]),
+    ("Famila",          ["famila"]),
+    ("Combi",           ["combi"]),
+    ("Marktkauf",       ["marktkauf"]),
+    ("Wasgau",          ["wasgau"]),
+    ("Spar",            ["spar markt", "spar express", "spar  "]),  # AT
+    ("Billa",           ["billa"]),  # AT
+    ("Hofer",           ["hofer"]),  # AT
+    ("Migros",          ["migros"]),  # CH
+    ("Coop",            ["coop "]),  # CH
+    ("Denner",          ["denner"]),  # CH
+]
+
+
+_BAD_MERCHANT_PATTERN = re.compile(r"^[A-Za-z0-9+/=]{20,}$")  # base64-ish
+
+
+def _looks_like_bad_merchant(name: Optional[str]) -> bool:
+    """Heuristic: does this look like a TSE signature / barcode artifact?
+
+    Triggers:
+      - Empty or 1-char
+      - Pure base64-ish (long alphanumeric+/= no spaces)
+      - >50% digits
+      - Contains 'TSE-Sig', 'TRANS', 'KASSE-', 'B-NR' (typical receipt-internals
+        DocAI sometimes picks up)
+    """
+    if not name:
+        return True
+    s = name.strip()
+    if len(s) < 2:
+        return True
+    if _BAD_MERCHANT_PATTERN.match(s):
+        return True
+    digits = sum(1 for c in s if c.isdigit())
+    if len(s) >= 4 and digits / len(s) > 0.5:
+        return True
+    s_lower = s.lower()
+    bad_substrings = ("tse-sig", "tse sig", "tse-signatur", "trans-tion",
+                      "kasse-", "kasse:", "bon-nr", "bon nr", "trace-",
+                      "uid nr", "ust-id-nr", "serial", "seriennummer")
+    for bad in bad_substrings:
+        if bad in s_lower:
+            return True
+    return False
+
+
+def _detect_dach_retailer(doc_text: str) -> Optional[str]:
+    """Scan the first ~1500 chars of OCR text for a known DACH retailer.
+
+    Returns canonical merchant name or None.
+    """
+    if not doc_text:
+        return None
+    head = doc_text[:1500].lower()
+    for canonical, patterns in DACH_RETAILERS:
+        for pat in patterns:
+            if pat in head:
+                return canonical
+    return None
+
+
 def _build_line_item(entity: documentai.Document.Entity) -> Optional[ReceiptItem]:
     """Build a ReceiptItem from a `line_item` entity (which has nested properties)."""
     name = None
@@ -335,6 +424,24 @@ def _doc_to_receipt(doc: documentai.Document) -> tuple[Receipt, float, list[Boun
                     boxes.append(box)
 
     avg_conf = (sum(confidences) / len(confidences)) if confidences else None
+
+    # ---------------------------------------------------------------
+    # Merchant fallback: DocAI's supplier_name is unreliable on DACH
+    # bons (often picks TSE-Signatur base64 strings or barcode
+    # artifacts). If the extracted name looks suspicious, scan the
+    # full OCR text for a known DACH retailer instead.
+    # ---------------------------------------------------------------
+    if _looks_like_bad_merchant(merchant):
+        bad_value = merchant
+        fallback = _detect_dach_retailer(doc.text or "")
+        if fallback:
+            merchant = fallback
+            # Preserve what DocAI originally said as a debug hint
+            if bad_value:
+                if merchant_subtitle:
+                    merchant_subtitle = f"{merchant_subtitle}  (DocAI raw: {bad_value[:40]})"
+                else:
+                    merchant_subtitle = f"DocAI raw merchant: {bad_value[:40]}"
 
     return (
         Receipt(

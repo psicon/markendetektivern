@@ -244,6 +244,18 @@ def preprocess(image_bytes: bytes, max_dim: int = 3500) -> PreprocessResult:
                             interpolation=cv2.INTER_AREA)
         notes.append(f"Resized to fit max_dim={max_dim}")
 
+    # Auto-rotate to portrait orientation.
+    # Phone landscape photos of vertical receipts produce wide images where
+    # the receipt text runs left-to-right. Cash-register receipts are
+    # predominantly portrait (taller than wide), so if width > height we
+    # rotate 90° CW to put the text upright.
+    h, w = img_cv.shape[:2]
+    rotated_to_portrait = False
+    if w > h * 1.2:  # 1.2 threshold avoids nearly-square edge cases
+        img_cv = cv2.rotate(img_cv, cv2.ROTATE_90_CLOCKWISE)
+        rotated_to_portrait = True
+        notes.append("Auto-rotated 90° CW to portrait orientation")
+
     # Sharpness check (informational, does not modify image)
     sharpness = _sharpness(img_cv)
     if sharpness < 100:
@@ -258,6 +270,7 @@ def preprocess(image_bytes: bytes, max_dim: int = 3500) -> PreprocessResult:
         deg == 0
         and not perspective_corrected
         and not needs_resize
+        and not rotated_to_portrait
     )
     if no_changes:
         notes.append("No transformation needed — original bytes preserved")
