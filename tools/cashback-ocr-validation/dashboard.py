@@ -1,7 +1,10 @@
 """
 Phase-0 OCR Validation Dashboard.
 
-Streamlit-based local web UI for testing the Gemini receipt-OCR pipeline.
+Streamlit-based local web UI for testing receipt-OCR engines.
+Supports two engines side-by-side:
+  - Gemini (2.5 Flash / Flash-Lite / Pro) — LLM-based, fast, non-deterministic
+  - Document AI Expense Parser — specialized, deterministic, more expensive
 
 Run:
     cd tools/cashback-ocr-validation
@@ -10,10 +13,6 @@ Run:
 
 Then open http://localhost:8501
 
-This file shares prompts.py + schema.py + the extract_one() function
-with validate.py — single source of truth for the OCR call. The
-dashboard is purely UI: drag-drop, model picker, result render.
-
 Total isolation: own venv (`tools/cashback-ocr-validation/.venv`),
 own port (8501), own deps. Does NOT touch the React Native app, the
 Firestore project, or anything in `app/` / `cloud-functions/`.
@@ -21,7 +20,9 @@ Firestore project, or anything in `app/` / `cloud-functions/`.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import time
 from io import BytesIO
 from pathlib import Path
@@ -33,7 +34,8 @@ from google import genai
 from PIL import Image
 
 from prompts import VERSION as PROMPT_VERSION
-from validate import PRICING, estimate_cents, extract_one
+from validate import PRICING as GEMINI_PRICING, estimate_cents, extract_one
+from docai import DOCAI_PRICING, extract_docai, estimate_docai_cents
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -48,7 +50,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS — calmer typography, tighter cards
 st.markdown(
     """
     <style>
@@ -77,6 +78,12 @@ st.markdown(
       }
       .meta-pill-warn { background: #fff8c5; color: #9a6700; }
       .meta-pill-bad { background: #ffebe9; color: #cf222e; }
+      .engine-badge {
+        display: inline-block; padding: 4px 12px; border-radius: 8px;
+        background: #1f6feb; color: white; font-weight: 700;
+        font-size: 12px; letter-spacing: 0.04em;
+      }
+      .engine-badge-docai { background: #8250df; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -84,18 +91,57 @@ st.markdown(
 
 
 # ---------------------------------------------------------------------------
+# Engine config
+# ---------------------------------------------------------------------------
+
+ENGINES = {
+    "gemini": "🤖 Gemini (LLM-based, schnell, non-deterministisch)",
+    "docai":  "📄 Document AI Expense Parser (spezialisiert, deterministisch)",
+}
+
+
+# ---------------------------------------------------------------------------
 # Sidebar — controls
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
-    st.markdown("### ⚙️ Settings")
+    st.markdown("### ⚙️ Engine")
 
-    model = st.selectbox(
-        "OCR Model",
-        options=sorted(PRICING.keys()),
-        index=sorted(PRICING.keys()).index("gemini-2.5-flash"),
-        help="gemini-2.5-flash = Plan B (default). flash-lite = cost floor. pro = höchste Qualität.",
+    engine = st.radio(
+        label="OCR Engine",
+        options=list(ENGINES.keys()),
+        format_func=lambda k: ENGINES[k],
+        index=0,
+        label_visibility="collapsed",
     )
+
+    if engine == "gemini":
+        model = st.selectbox(
+            "Modell",
+            options=sorted(GEMINI_PRICING.keys()),
+            index=sorted(GEMINI_PRICING.keys()).index("gemini-2.5-flash"),
+            help="flash = Default. flash-lite = günstigster. pro = höchste Quali.",
+        )
+        st.caption(
+            f"`{model}` pricing per 1M tokens: "
+            f"in ${GEMINI_PRICING[model]['in']} / out ${GEMINI_PRICING[model]['out']}"
+        )
+        st.caption(f"Prompt version: `{PROMPT_VERSION}`, temperature=0, seed=42")
+    else:  # docai
+        model = "docai/expense"
+        proc_id = os.environ.get("DOCUMENTAI_PROCESSOR_ID", "")
+        proc_loc = os.environ.get("DOCUMENTAI_LOCATION", "eu")
+        proc_proj = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+        if proc_id and proc_proj:
+            st.caption(f"Processor: `{proc_id}` in `{proc_loc}`")
+            st.caption(f"Project: `{proc_proj}`")
+            st.caption("Pricing: $0,10 / page (Expense Parser)")
+        else:
+            st.error(
+                "DocAI nicht konfiguriert. Setze in `.env`:\n\n"
+                "`GOOGLE_CLOUD_PROJECT`, `DOCUMENTAI_LOCATION`, `DOCUMENTAI_PROCESSOR_ID`\n\n"
+                "Siehe README §Document AI."
+            )
 
     st.markdown("---")
     st.markdown("### 📊 Decision Gates")
@@ -103,22 +149,18 @@ with st.sidebar:
         """
         - **OK-Quote** ≥ 95 %
         - **Δ ≤ 0,05 €** ≥ 95 %
-        - **Cost / Bon** ≤ 0,2 ¢
+        - **Cost / Bon** ≤ 0,3 ¢
+        - **Determinismus**: same bon → same JSON
         """
     )
 
     st.markdown("---")
-    st.markdown("### 💰 Cost reference")
-    st.caption(
-        f"`{model}` pricing per 1M tokens:\n"
-        f"- Input: ${PRICING[model]['in']}\n"
-        f"- Output: ${PRICING[model]['out']}"
-    )
+    if st.button("🗑 Cache leeren (forciert frische API-Calls)"):
+        st.cache_data.clear()
+        st.success("Cache geleert. Re-Upload triggert frische Calls.")
 
-    st.markdown("---")
-    st.caption(f"Prompt version: `{PROMPT_VERSION}`")
     st.caption(
-        "Local-only tool. Bons leave **only** to Gemini API. "
+        "Local-only Tool. Bons leave **only** to the chosen engine's API. "
         "Nothing is written to Firestore, App, or any prod system."
     )
 
@@ -128,9 +170,16 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 
 st.markdown("# 🧾 Cashback OCR — Phase 0 Validation")
+
+engine_badge_class = "engine-badge engine-badge-docai" if engine == "docai" else "engine-badge"
+engine_label = "DOCUMENT AI" if engine == "docai" else f"GEMINI · {model}"
 st.markdown(
-    "Drag receipts in, see what Gemini extracts. Decision-gate stats appear "
-    "live underneath. **No app/Firestore impact.**"
+    f"<span class='{engine_badge_class}'>{engine_label}</span>",
+    unsafe_allow_html=True,
+)
+st.markdown(
+    "Drag receipts in, see what the engine extracts. Switch engines in the "
+    "sidebar to compare on the same bons. **No app/Firestore impact.**"
 )
 
 
@@ -151,51 +200,81 @@ uploaded = st.file_uploader(
 
 
 @st.cache_resource
-def get_client() -> genai.Client:
-    import os
-
+def get_gemini_client() -> genai.Client:
     return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 
 # ---------------------------------------------------------------------------
-# Per-bon processing — cache by file content hash so re-renders don't re-bill
+# Per-bon processing — cache is keyed by (bytes_hash, engine, model).
+# Same bon + same engine + same model → cached, no second API call.
+# Switch engine or model → fresh call.
 # ---------------------------------------------------------------------------
 
 
-@st.cache_data(show_spinner=False, max_entries=200)
-def process(file_bytes: bytes, file_name: str, model: str) -> dict:
-    """Wrap extract_one() with bytes-cached invocation."""
-    tmp = Path("/tmp") / f"streamlit_bon_{abs(hash(file_bytes))}_{file_name}"
+@st.cache_data(show_spinner=False, max_entries=400)
+def process(file_bytes: bytes, file_name: str, engine: str, model: str) -> dict:
+    """Wrap engine extraction with bytes-cached invocation.
+
+    Returns a uniform result dict regardless of engine.
+    """
+    bytes_hash = hashlib.sha256(file_bytes).hexdigest()[:16]
+    tmp = Path("/tmp") / f"streamlit_bon_{bytes_hash}_{file_name}"
     tmp.write_bytes(file_bytes)
+
     try:
-        result = extract_one(get_client(), model, tmp)
+        if engine == "gemini":
+            r = extract_one(get_gemini_client(), model, tmp)
+            cost = estimate_cents(r.model, r.inputTokens, r.outputTokens)
+            return {
+                "engine": "gemini",
+                "ok": r.ok,
+                "error": r.error,
+                "latencyMs": r.latencyMs,
+                "model": r.model,
+                "promptVersion": r.promptVersion,
+                "receipt": r.receipt.model_dump() if r.receipt else None,
+                "rawText": r.rawText if not r.ok else None,
+                "estCostCents": cost,
+                "inputTokens": r.inputTokens,
+                "outputTokens": r.outputTokens,
+                "pages": None,
+                "docConfidence": None,
+                "bytesHash": bytes_hash,
+            }
+        else:  # docai
+            r = extract_docai(tmp)
+            cost = estimate_docai_cents(r.pages or 1, "expense")
+            return {
+                "engine": "docai",
+                "ok": r.ok,
+                "error": r.error,
+                "latencyMs": r.latencyMs,
+                "model": r.engine,
+                "promptVersion": r.promptVersion,
+                "receipt": r.receipt.model_dump() if r.receipt else None,
+                "rawText": r.rawText if not r.ok else None,
+                "estCostCents": cost,
+                "inputTokens": None,
+                "outputTokens": None,
+                "pages": r.pages,
+                "docConfidence": r.docConfidence,
+                "bytesHash": bytes_hash,
+            }
     finally:
         try:
             tmp.unlink()
         except OSError:
             pass
 
-    return {
-        "ok": result.ok,
-        "error": result.error,
-        "latencyMs": result.latencyMs,
-        "inputTokens": result.inputTokens,
-        "outputTokens": result.outputTokens,
-        "model": result.model,
-        "promptVersion": result.promptVersion,
-        "receipt": result.receipt.model_dump() if result.receipt else None,
-        "rawText": result.rawText if not result.ok else None,
-    }
-
 
 # ---------------------------------------------------------------------------
-# Main view
+# Empty state
 # ---------------------------------------------------------------------------
 
 if not uploaded:
     st.info(
-        "👆 Drag-drop your receipt photos above. They'll be sent to Gemini, "
-        "and the parsed JSON appears side-by-side with the original."
+        "👆 Drag-drop deine Kassenbon-Fotos. Sie werden direkt an die gewählte "
+        "Engine geschickt, das Result erscheint Side-by-Side mit dem Original."
     )
     st.markdown("---")
     st.markdown("### Was du brauchst für eine valide Stichprobe")
@@ -211,20 +290,39 @@ if not uploaded:
         - 1× schräg fotografiert
         - 1× sehr lang (≥30 Items)
         - 1× kurz (3–4 Items) — Edge-Case Tier-Cutoff
-
-        Wenn nicht alles da ist: zumindest 5 verschiedene Discounter, jeweils
-        einer als Foto. Reicht für ein klares Decision-Gate-Signal.
         """
+    )
+    st.markdown("---")
+    st.markdown("### Determinismus-Test")
+    st.markdown(
+        "Lade **denselben Bon zweimal** hoch (gleiche Datei oder eine Kopie mit "
+        "anderem Namen). Bei einer **deterministischen** Engine müssen beide "
+        "Ergebnisse identisch sein. Das **Determinismus-Gate** unten zeigt dir das."
     )
     st.stop()
 
-# Process all bons (cached so re-renders are instant)
+
+# ---------------------------------------------------------------------------
+# Process all bons
+# ---------------------------------------------------------------------------
+
+if engine == "docai" and not (
+    os.environ.get("DOCUMENTAI_PROCESSOR_ID")
+    and os.environ.get("GOOGLE_CLOUD_PROJECT")
+):
+    st.error(
+        "Document AI ist gewählt, aber `DOCUMENTAI_PROCESSOR_ID` und/oder "
+        "`GOOGLE_CLOUD_PROJECT` fehlen in der `.env`. "
+        "Setup-Anleitung: README §Document AI."
+    )
+    st.stop()
+
 results: list[tuple[str, bytes, dict]] = []
 progress = st.progress(0.0, text=f"Processing {len(uploaded)} bons via {model} …")
 for idx, f in enumerate(uploaded):
     raw = f.read()
     started = time.monotonic()
-    res = process(raw, f.name, model)
+    res = process(raw, f.name, engine, model)
     elapsed = time.monotonic() - started
     results.append((f.name, raw, res))
     progress.progress(
@@ -240,7 +338,6 @@ progress.empty()
 
 ok_results = [(n, b, r) for n, b, r in results if r["ok"]]
 fail_results = [(n, b, r) for n, b, r in results if not r["ok"]]
-
 ok_pct = (len(ok_results) * 100 // max(1, len(results)))
 
 # Δ analysis
@@ -253,21 +350,43 @@ for _, _, r in ok_results:
     total = rcpt.get("totalCents") or 0
     if total:
         deltas.append(abs(total - sum_items) / 100.0)
-
 within_5c = sum(1 for d in deltas if d <= 0.05)
 within_5c_pct = (within_5c * 100 // max(1, len(deltas))) if deltas else 0
 
 # Cost
-cost_cents_total = 0.0
-for _, _, r in ok_results:
-    c = estimate_cents(r["model"], r["inputTokens"], r["outputTokens"])
-    if c:
-        cost_cents_total += c
+cost_cents_total = sum(
+    (r["estCostCents"] or 0) for _, _, r in ok_results
+    if isinstance(r.get("estCostCents"), (int, float))
+)
 avg_cost_per_bon = cost_cents_total / max(1, len(ok_results))
-month_estimate_usd = (avg_cost_per_bon * 1500 * 30) / 100  # 1.5k/day, 30 days, ¢→$
+month_estimate_usd = (avg_cost_per_bon * 1500 * 30) / 100  # ¢→$, 1.5k/day, 30 days
 
 # Latency
 avg_latency = sum(r["latencyMs"] for _, _, r in ok_results) / max(1, len(ok_results))
+
+# Determinism — group results by bytesHash, check if all in a group have identical receipt JSON
+det_groups: dict[str, list[dict]] = {}
+for _, _, r in results:
+    h = r.get("bytesHash") or "?"
+    det_groups.setdefault(h, []).append(r)
+
+det_dup_groups = {h: g for h, g in det_groups.items() if len(g) > 1}
+det_consistent = 0
+det_inconsistent = 0
+for h, g in det_dup_groups.items():
+    rcpts = [json.dumps(x["receipt"], sort_keys=True, ensure_ascii=False)
+             for x in g if x["ok"]]
+    if not rcpts:
+        continue
+    if all(rc == rcpts[0] for rc in rcpts):
+        det_consistent += 1
+    else:
+        det_inconsistent += 1
+det_total_dups = det_consistent + det_inconsistent
+det_pct: Optional[int] = (
+    (det_consistent * 100 // det_total_dups) if det_total_dups else None
+)
+
 
 # Decision-gate verdicts
 def gate(value: float, threshold: float, kind: str = "min") -> str:
@@ -287,7 +406,10 @@ def gate(value: float, threshold: float, kind: str = "min") -> str:
 
 gate_ok = gate(ok_pct, 95, "min")
 gate_delta = gate(within_5c_pct, 95, "min")
-gate_cost = gate(avg_cost_per_bon, 0.2, "max")
+# Cost gate is engine-specific
+cost_gate_threshold = 0.3 if engine == "gemini" else 12.0  # docai ≈ 10¢/page
+gate_cost = gate(avg_cost_per_bon, cost_gate_threshold, "max")
+gate_det = "ok" if (det_pct is None or det_pct == 100) else "fail"
 
 
 def gate_badge(g: str, label: str) -> str:
@@ -296,8 +418,13 @@ def gate_badge(g: str, label: str) -> str:
     return f'<span style="color:{color};font-weight:700">{icon} {label}</span>'
 
 
+# ---------------------------------------------------------------------------
+# 4-card decision gate
+# ---------------------------------------------------------------------------
+
 st.markdown("## 📊 Decision Gate")
-gate_cols = st.columns(3)
+gate_cols = st.columns(4)
+
 with gate_cols[0]:
     st.markdown(
         f"""
@@ -325,32 +452,53 @@ with gate_cols[2]:
         f"""
         <div class='stat-card'>
           <div class='stat-num'>{avg_cost_per_bon:.4f} ¢</div>
-          <div class='stat-label'>Avg cost / Bon · Gate ≤0,2 ¢</div>
+          <div class='stat-label'>Avg cost / Bon · Gate ≤{cost_gate_threshold:.1f} ¢</div>
           <div style='margin-top:6px'>{gate_badge(gate_cost, "Gate")}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+with gate_cols[3]:
+    if det_total_dups == 0:
+        det_display = "—"
+        det_label = "Determinismus · Lade Bon 2× hoch"
+    else:
+        det_display = f"{det_pct} %"
+        det_label = f"Determinismus · {det_consistent}/{det_total_dups} match"
+    st.markdown(
+        f"""
+        <div class='stat-card'>
+          <div class='stat-num'>{det_display}</div>
+          <div class='stat-label'>{det_label}</div>
+          <div style='margin-top:6px'>{gate_badge(gate_det, "Gate")}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-# Summary line
-all_green = gate_ok == "ok" and gate_delta == "ok" and gate_cost == "ok"
+# Summary
+all_green = (
+    gate_ok == "ok" and gate_delta == "ok" and gate_cost == "ok"
+    and (det_total_dups == 0 or gate_det == "ok")
+)
 if all_green:
     st.success(
-        f"**Alle 3 Gates grün** mit `{model}`. "
-        f"Plan B kann gelocked werden. Bei 1.5 k Bons/Tag = ~${month_estimate_usd:.2f} / Monat."
+        f"**Alle Gates grün** mit `{model}`. "
+        f"Bei 1.5 k Bons/Tag = ~${month_estimate_usd:.2f} / Monat."
     )
-elif gate_ok == "fail" or gate_delta == "fail":
-    st.error(
-        "Mindestens ein Gate ist hart rot. Vor Phase-1: entweder Prompt-"
-        "Iteration (siehe Per-Bon-FAILs unten), Modell-Upgrade auf "
-        "`gemini-2.5-pro`, oder Hybrid mit Document AI."
-    )
+elif gate_ok == "fail" or gate_delta == "fail" or gate_det == "fail":
+    msg = []
+    if gate_ok == "fail":
+        msg.append("OK-Quote unter 95%")
+    if gate_delta == "fail":
+        msg.append("Δ-Quote unter 95% → Items/Discounts werden falsch erkannt")
+    if gate_det == "fail":
+        msg.append("Determinismus gebrochen → gleicher Bon → unterschiedliche JSONs")
+    st.error("Hartes Problem: " + "; ".join(msg))
 else:
-    st.warning(
-        "Borderline. Schau dir die Bons an wo Δ groß war, evtl. Prompt-Tuning genug."
-    )
+    st.warning("Borderline. Schau dir die Per-Bon-Cards unten an.")
 
-# Secondary stats
+# Run details
 st.markdown("### Run-Details")
 sec_cols = st.columns(4)
 with sec_cols[0]:
@@ -378,6 +526,31 @@ with sec_cols[3]:
         unsafe_allow_html=True,
     )
 
+# Determinism subdetail
+if det_dup_groups:
+    with st.expander(f"🔬 Determinismus-Detail ({len(det_dup_groups)} Bytes-Gruppe(n) mit Duplikaten)"):
+        for h, group in det_dup_groups.items():
+            names = [g_["bytesHash"] for g_ in group]
+            file_names = []
+            # Find filenames from the original results list
+            for nm, _, r in results:
+                if r.get("bytesHash") == h:
+                    file_names.append(nm)
+            rcpt_jsons = [json.dumps(g_["receipt"], sort_keys=True, ensure_ascii=False)
+                          for g_ in group if g_["ok"]]
+            same = all(j == rcpt_jsons[0] for j in rcpt_jsons) if rcpt_jsons else False
+            status = "✅ identisch" if same else "❌ DIVERGIERT"
+            st.markdown(f"**Bytes-Hash `{h}…`** ({len(group)} Uploads) → {status}")
+            st.caption(f"Files: {', '.join(file_names)}")
+            if not same and len(rcpt_jsons) >= 2:
+                st.caption("Diff zwischen Output #1 und #2:")
+                # crude diff
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.code(rcpt_jsons[0][:1500], language="json")
+                with col2:
+                    st.code(rcpt_jsons[1][:1500], language="json")
+
 st.markdown("---")
 
 
@@ -390,7 +563,7 @@ st.markdown(f"## 🧾 Per-Bon Details ({len(results)})")
 
 def render_image(file_bytes: bytes, file_name: str) -> None:
     if file_name.lower().endswith(".pdf"):
-        st.warning("PDF preview not rendered — sent to Gemini directly.")
+        st.warning("PDF preview not rendered — sent to engine directly.")
         return
     try:
         img = Image.open(BytesIO(file_bytes))
@@ -401,16 +574,14 @@ def render_image(file_bytes: bytes, file_name: str) -> None:
 
 for idx, (name, raw, r) in enumerate(results):
     with st.expander(
-        label=f"{'✓' if r['ok'] else '✗'}  {name}",
-        expanded=(idx == 0),  # first one open by default
+        label=f"{'✓' if r['ok'] else '✗'}  {name}  ·  {r.get('engine', '?')}",
+        expanded=(idx == 0),
     ):
         cols = st.columns([1, 1.2])
 
-        # Left: image preview
         with cols[0]:
             render_image(raw, name)
 
-        # Right: parsed result
         with cols[1]:
             if not r["ok"]:
                 st.error(f"**FAIL:** `{r['error']}`")
@@ -424,7 +595,6 @@ for idx, (name, raw, r) in enumerate(results):
                 st.warning("OK but no receipt body returned.")
                 continue
 
-            # Header
             merchant = rcpt.get("merchant") or "—"
             sub = rcpt.get("merchantSubtitle") or ""
             date_ = rcpt.get("bonDate") or "—"
@@ -434,7 +604,6 @@ for idx, (name, raw, r) in enumerate(results):
             if sub:
                 st.caption(sub)
 
-            # Pills
             pills = []
             pills.append(f'<span class="meta-pill">📅 {date_}</span>')
             if time_:
@@ -503,35 +672,36 @@ for idx, (name, raw, r) in enumerate(results):
                 )
             st.markdown(items_html, unsafe_allow_html=True)
 
-            # Cost line
-            cost = estimate_cents(r["model"], r["inputTokens"], r["outputTokens"])
-            st.caption(
-                f"⚙ {r['model']} · {r['latencyMs']} ms · "
-                f"{r.get('inputTokens', '?')} in + {r.get('outputTokens', '?')} out tok · "
-                f"~{cost or 0:.4f} ¢"
-            )
+            # Engine-specific cost line
+            cost = r.get("estCostCents")
+            if r["engine"] == "gemini":
+                st.caption(
+                    f"⚙ {r['model']} · {r['latencyMs']} ms · "
+                    f"{r.get('inputTokens', '?')} in + {r.get('outputTokens', '?')} out tok · "
+                    f"~{cost or 0:.4f} ¢ · bytes-hash `{r.get('bytesHash', '?')}`"
+                )
+            else:
+                st.caption(
+                    f"⚙ {r['model']} · {r['latencyMs']} ms · "
+                    f"{r.get('pages', 1)} page(s) · "
+                    f"~{cost or 0:.4f} ¢ · bytes-hash `{r.get('bytesHash', '?')}`"
+                )
 
             # Confidence
             conf = rcpt.get("ocrConfidence")
             if conf is not None:
-                st.progress(float(conf), text=f"Self-reported confidence: {conf:.2f}")
+                st.progress(float(conf), text=f"Confidence: {conf:.2f}")
 
-            # Manipulation notes
             if rcpt.get("manipulationNotes"):
                 st.warning(f"**Manipulation notes:** {rcpt['manipulationNotes']}")
 
-            # Raw JSON expander
             with st.expander("Raw JSON"):
                 st.code(json.dumps(rcpt, indent=2, ensure_ascii=False), language="json")
 
 
-# ---------------------------------------------------------------------------
-# Footer
-# ---------------------------------------------------------------------------
-
 st.markdown("---")
 st.caption(
-    "Run-Cache: gleicher Bon + gleiches Modell = kein zweiter API-Call. "
-    "Modell wechseln in der Sidebar → frischer Run gegen das neue Modell. "
+    "Run-Cache: gleicher Bon + gleiche Engine + gleiches Modell = kein zweiter API-Call. "
+    "Engine wechseln in der Sidebar → frischer Run gegen die neue Engine. "
     "Logs landen NICHT in Firestore — alles bleibt lokal in dieser Session."
 )

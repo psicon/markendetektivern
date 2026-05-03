@@ -11,9 +11,9 @@ Differenz ≤ 0,05 €.
 
 ---
 
-## 1. Setup (einmalig, ~5 Minuten)
+## 1. Setup (einmalig, ~5–15 Minuten je nach Engines)
 
-### 1a. Gemini API Key holen
+### 1a. Gemini API Key holen (Engine 1)
 
 1. https://aistudio.google.com/apikey öffnen
 2. Mit dem Google-Account einloggen, der zu `markendetektive-895f7`
@@ -22,7 +22,43 @@ Differenz ≤ 0,05 €.
    (`markendetektive-895f7` ist fein) oder neu.
 4. Key kopieren (`AIzaSy…`).
 
-### 1b. Repo-Setup
+### 1b. Document AI Processor erstellen (Engine 2)
+
+Document AI ist deterministisch — gleicher Bon → gleiches JSON garantiert.
+Im Gegensatz zu Gemini, das auch bei `temperature=0` leicht variiert.
+
+1. **API aktivieren:**
+   ```bash
+   gcloud services enable documentai.googleapis.com --project=markendetektive-895f7
+   ```
+   Oder im Browser: https://console.cloud.google.com/apis/library/documentai.googleapis.com?project=markendetektive-895f7
+
+2. **Processor anlegen:**
+   https://console.cloud.google.com/ai/document-ai/processors?project=markendetektive-895f7
+   → **"Create Processor"** → Filter "Expense Parser" → Name beliebig
+   (z. B. `cashback-receipts-eu`) → Region: **`eu`** (EU data residency,
+   passt zu unseren `europe-west3` Cloud Functions später).
+
+3. **Processor ID kopieren** — sieht aus wie `abc123def456789`.
+
+4. **Authenticate** (eine der beiden Optionen):
+
+   **Option a (empfohlen, 1× pro Maschine):**
+   ```bash
+   gcloud auth application-default login
+   ```
+
+   **Option b (Service Account):** der existierende EAS-SA
+   (`flutterflowcodemagic@markendetektive-895f7.iam.gserviceaccount.com`)
+   braucht zusätzlich die IAM-Rolle **"Document AI API User"**:
+   ```bash
+   gcloud projects add-iam-policy-binding markendetektive-895f7 \
+     --member="serviceAccount:flutterflowcodemagic@markendetektive-895f7.iam.gserviceaccount.com" \
+     --role="roles/documentai.apiUser"
+   ```
+   Dann `GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa.json` in `.env` setzen.
+
+### 1c. Repo-Setup
 
 ```bash
 cd tools/cashback-ocr-validation
@@ -31,19 +67,23 @@ cd tools/cashback-ocr-validation
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Deps
+# Deps (inkl. google-cloud-documentai + streamlit)
 pip install -r requirements.txt
 
-# Key in .env packen
+# Keys in .env packen
 cp .env.example .env
-# .env editieren, GEMINI_API_KEY eintragen
+# .env editieren:
+#   GEMINI_API_KEY=AIzaSy...
+#   DOCUMENTAI_PROCESSOR_ID=<die-id-von-oben>
 ```
 
 Quick-Check dass alles installiert ist:
 
 ```bash
 python -c "from google import genai; print('genai ok')"
+python -c "from google.cloud import documentai_v1; print('docai ok')"
 python -c "from pydantic import BaseModel; print('pydantic ok')"
+python -c "import streamlit; print('streamlit ok')"
 ```
 
 ---

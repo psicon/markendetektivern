@@ -92,7 +92,11 @@ def extract_one(client: genai.Client, model: str, image_path: Path) -> ExtractRe
             ],
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
-                temperature=0.1,
+                # Determinism push: temperature=0 + fixed seed.
+                # NB: vision models still have float-precision wobble even
+                # at temp=0; this minimizes but does not eliminate it.
+                temperature=0.0,
+                seed=42,
                 response_mime_type="application/json",
                 response_schema=Receipt,
             ),
