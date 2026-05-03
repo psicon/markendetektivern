@@ -189,91 +189,109 @@ def _entity_text(entity: documentai.Document.Entity) -> str:
 
 
 # ---------------------------------------------------------------------------
-# DACH retailer recognition — fallback when DocAI's supplier_name is wrong
-# (which happens often when receipts contain TSE-Signatur base64 strings or
-# barcode artifacts that DocAI mistakes for the merchant header).
-# Order matters: check more specific names first (ALDI SÜD before ALDI).
+# DACH retailer recognition.
+#
+# We DON'T rely on DocAI's supplier_name field — it's wrong on ~30% of DACH
+# bons because the model is global-trained and gets confused by:
+#   - TSE-Signatur base64 strings (DACH-specific)
+#   - Barcode artifacts above the receipt header
+#   - Receipts where the first line is an item, not the merchant
+#
+# Strategy: scan the OCR text for known retailer signatures. Two layers:
+#   1) Header/address mentions ("LIDL", "REWE", "Kaufland", ...)
+#   2) Receipt-internal codes ("LDL-" for LIDL TSE, "KFL-" for Kaufland, ...)
+#   3) Private-label product names that only appear at one retailer
+#      ("MILBONA" → LIDL, "JA!" → REWE, "K-CLASSIC" → Kaufland, ...)
+#
+# Order matters: more-specific patterns first (ALDI SÜD before ALDI).
 # ---------------------------------------------------------------------------
 
 DACH_RETAILERS = [
-    # Format: (canonical name, list of header substrings to match, lowercase)
-    ("ALDI SÜD",        ["aldi süd", "aldi sued"]),
-    ("ALDI Nord",       ["aldi nord"]),
-    ("ALDI",            ["aldi"]),
-    ("LIDL",            ["lidl"]),
-    ("Kaufland",        ["kaufland"]),
-    ("REWE",            ["rewe"]),
-    ("EDEKA",           ["edeka", "e-center", "e center"]),
-    ("Penny",           ["penny-markt", "penny markt", "penny"]),
-    ("Netto",           ["netto marken-discount", "netto-markendiscount", "netto"]),
-    ("Norma",           ["norma"]),
-    ("real",            ["real,-", "real-"]),
-    ("Globus",          ["globus"]),
-    ("tegut",           ["tegut"]),
-    ("HIT",             ["hit-markt", "hit markt"]),
-    ("Müller",          ["müller drogerie", "mueller drogerie", "müller "]),
-    ("dm",              ["dm-drogerie markt", "dm drogerie markt"]),
-    ("Rossmann",        ["rossmann"]),
-    ("Budni",           ["budni"]),
-    ("Famila",          ["famila"]),
-    ("Combi",           ["combi"]),
-    ("Marktkauf",       ["marktkauf"]),
-    ("Wasgau",          ["wasgau"]),
-    ("Spar",            ["spar markt", "spar express", "spar  "]),  # AT
-    ("Billa",           ["billa"]),  # AT
-    ("Hofer",           ["hofer"]),  # AT
-    ("Migros",          ["migros"]),  # CH
-    ("Coop",            ["coop "]),  # CH
-    ("Denner",          ["denner"]),  # CH
+    # (canonical, header_patterns, receipt_code_prefixes, private_label_brands)
+    # All patterns matched case-insensitively.
+    ("ALDI SÜD",  ["aldi süd", "aldi sued"], ["asd-", "ald-sd"],  []),
+    ("ALDI Nord", ["aldi nord"],              ["asn-", "ald-nd"],  []),
+    ("ALDI",      ["aldi"],                   ["aldi-"],            ["milsani", "tandil", "alpensahne"]),
+    ("LIDL",      ["lidl"],                   ["ldl-"],             ["milbona", "freeway", "chef select",
+                                                                     "italiamo", "vitafit", "deluxe",
+                                                                     "snack day", "favorina", "lupilu"]),
+    ("Kaufland",  ["kaufland"],               ["kfl-"],             ["k-classic", "k classic", "k-bio",
+                                                                     "k-purland", "k-favourites", "k-take it",
+                                                                     "klc.", "klc "]),
+    ("REWE",      ["rewe"],                   ["rew-"],             ["ja!", "rewe bio", "rewe beste wahl",
+                                                                     "rewe regional", "smoothie rewe",
+                                                                     "rewe feine welt"]),
+    ("EDEKA",     ["edeka", "e-center", "e center"], ["edk-"],     ["gut&günstig", "gut & günstig",
+                                                                     "edeka bio", "edeka mein land",
+                                                                     "g&g ", "g & g", "elkos"]),
+    ("Penny",     ["penny-markt", "penny markt", "penny"], ["pny-", "penny-"], ["san fabio", "rispando",
+                                                                                "ich liebe es"]),
+    ("Netto",     ["netto marken-discount", "netto-markendiscount", "netto-marken", "netto"],
+                                              ["ntm-", "ntt-"],     ["bio sonne", "ja-", "viva vital"]),
+    ("Norma",     ["norma"],                  ["nrm-"],             ["selection", "san fabio"]),
+    ("real",      ["real,-", "real-"],        ["rl-"],              ["tip", "real quality"]),
+    ("Globus",    ["globus"],                 ["glb-"],             ["natur pur"]),
+    ("tegut",     ["tegut"],                  ["tgt-"],             ["tegut bio"]),
+    ("HIT",       ["hit-markt", "hit markt"], ["hit-"],             []),
+    ("Müller",    ["müller drogerie", "mueller drogerie", "müller "], ["mdm-"], []),
+    ("dm",        ["dm-drogerie markt", "dm drogerie markt"], ["dmm-"], ["alverde", "balea", "dmbio"]),
+    ("Rossmann",  ["rossmann"],               ["rsm-"],             ["alterra", "ener bio", "isana"]),
+    ("Budni",     ["budni"],                  ["bdn-"],             []),
+    ("Famila",    ["famila"],                 ["fam-"],             []),
+    ("Combi",     ["combi"],                  ["cmb-"],             []),
+    ("Marktkauf", ["marktkauf"],              ["mkk-"],             []),
+    ("Wasgau",    ["wasgau"],                 ["wsg-"],             []),
+    ("Spar",      ["spar markt", "spar express", "spar  "],  ["spr-"], []),  # AT
+    ("Billa",     ["billa"],                  ["bil-"],             ["clever"]),  # AT
+    ("Hofer",     ["hofer"],                  ["hof-"],             []),  # AT
+    ("Migros",    ["migros"],                 ["mgr-"],             ["m-classic", "m-budget"]),  # CH
+    ("Coop",      ["coop "],                  ["cop-"],             ["prix garantie", "qualité&prix"]),  # CH
+    ("Denner",    ["denner"],                 ["dnr-"],             []),  # CH
 ]
 
 
-_BAD_MERCHANT_PATTERN = re.compile(r"^[A-Za-z0-9+/=]{20,}$")  # base64-ish
+def _detect_dach_retailer(doc_text: str) -> Optional[tuple[str, str]]:
+    """Scan OCR text for a known DACH retailer using 3 signal layers.
 
-
-def _looks_like_bad_merchant(name: Optional[str]) -> bool:
-    """Heuristic: does this look like a TSE signature / barcode artifact?
-
-    Triggers:
-      - Empty or 1-char
-      - Pure base64-ish (long alphanumeric+/= no spaces)
-      - >50% digits
-      - Contains 'TSE-Sig', 'TRANS', 'KASSE-', 'B-NR' (typical receipt-internals
-        DocAI sometimes picks up)
+    Returns (canonical_name, signal_used) or None.
+    signal_used is "header" | "code" | "brand" — useful for debugging.
     """
+    if not doc_text:
+        return None
+    head = doc_text[:1500].lower()
+    full = doc_text.lower()
+
+    # Layer 1: header/address mention — strongest signal
+    for canonical, headers, _codes, _brands in DACH_RETAILERS:
+        for pat in headers:
+            if pat in head:
+                return (canonical, "header")
+
+    # Layer 2: receipt-internal codes (TSE serial prefixes etc.)
+    for canonical, _headers, codes, _brands in DACH_RETAILERS:
+        for code in codes:
+            if code in full:
+                return (canonical, "code")
+
+    # Layer 3: private-label product brands
+    for canonical, _headers, _codes, brands in DACH_RETAILERS:
+        for brand in brands:
+            if brand in full:
+                return (canonical, "brand")
+
+    return None
+
+
+# Kept for backward compat / introspection. Always returns False now —
+# we no longer trust DocAI's supplier_name; we always prefer DACH retailer
+# detection if it returns anything.
+def _looks_like_bad_merchant(name: Optional[str]) -> bool:
     if not name:
         return True
     s = name.strip()
     if len(s) < 2:
         return True
-    if _BAD_MERCHANT_PATTERN.match(s):
-        return True
-    digits = sum(1 for c in s if c.isdigit())
-    if len(s) >= 4 and digits / len(s) > 0.5:
-        return True
-    s_lower = s.lower()
-    bad_substrings = ("tse-sig", "tse sig", "tse-signatur", "trans-tion",
-                      "kasse-", "kasse:", "bon-nr", "bon nr", "trace-",
-                      "uid nr", "ust-id-nr", "serial", "seriennummer")
-    for bad in bad_substrings:
-        if bad in s_lower:
-            return True
     return False
-
-
-def _detect_dach_retailer(doc_text: str) -> Optional[str]:
-    """Scan the first ~1500 chars of OCR text for a known DACH retailer.
-
-    Returns canonical merchant name or None.
-    """
-    if not doc_text:
-        return None
-    head = doc_text[:1500].lower()
-    for canonical, patterns in DACH_RETAILERS:
-        for pat in patterns:
-            if pat in head:
-                return canonical
-    return None
 
 
 def _build_line_item(entity: documentai.Document.Entity) -> Optional[ReceiptItem]:
@@ -426,22 +444,36 @@ def _doc_to_receipt(doc: documentai.Document) -> tuple[Receipt, float, list[Boun
     avg_conf = (sum(confidences) / len(confidences)) if confidences else None
 
     # ---------------------------------------------------------------
-    # Merchant fallback: DocAI's supplier_name is unreliable on DACH
-    # bons (often picks TSE-Signatur base64 strings or barcode
-    # artifacts). If the extracted name looks suspicious, scan the
-    # full OCR text for a known DACH retailer instead.
+    # Merchant resolution — ALWAYS run DACH retailer detection first.
+    # DocAI's supplier_name is unreliable (~30% wrong on DACH bons:
+    # TSE-base64 artifacts, barcode noise, first-item misclassification).
+    # Use DACH detection if it finds anything, fall back to DocAI's
+    # supplier_name only when DACH detection comes up empty.
     # ---------------------------------------------------------------
-    if _looks_like_bad_merchant(merchant):
-        bad_value = merchant
-        fallback = _detect_dach_retailer(doc.text or "")
-        if fallback:
-            merchant = fallback
-            # Preserve what DocAI originally said as a debug hint
-            if bad_value:
-                if merchant_subtitle:
-                    merchant_subtitle = f"{merchant_subtitle}  (DocAI raw: {bad_value[:40]})"
-                else:
-                    merchant_subtitle = f"DocAI raw merchant: {bad_value[:40]}"
+    docai_raw_merchant = (merchant or "").strip().replace("\n", " ")[:80]
+    dach_match = _detect_dach_retailer(doc.text or "")
+    if dach_match:
+        canonical, signal = dach_match
+        merchant = canonical
+        # Tag the source so we can see in the UI which signal triggered
+        debug_tag = f"DACH:{signal}"
+        if docai_raw_merchant and docai_raw_merchant.lower() != canonical.lower():
+            debug_tag += f" · DocAI raw: «{docai_raw_merchant}»"
+        if merchant_subtitle:
+            merchant_subtitle = f"{merchant_subtitle}  ({debug_tag})"
+        else:
+            merchant_subtitle = debug_tag
+    elif _looks_like_bad_merchant(merchant):
+        # DACH unrecognized AND DocAI supplier_name looks empty/garbage
+        merchant = "Unknown merchant"
+        if docai_raw_merchant:
+            merchant_subtitle = (
+                f"{merchant_subtitle}  (DocAI raw: «{docai_raw_merchant}» — not in DACH list)"
+                if merchant_subtitle
+                else f"DocAI raw: «{docai_raw_merchant}» — not in DACH list"
+            )
+    # else: keep DocAI's supplier_name as-is (it looked plausible and
+    # we don't have a DACH match to override it).
 
     return (
         Receipt(

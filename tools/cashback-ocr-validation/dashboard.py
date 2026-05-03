@@ -41,7 +41,7 @@ from image_prep import preprocess as preprocess_image
 # Cache-busting key. Bump this whenever extraction logic, prompts,
 # preprocessing, or merchant fallback changes — invalidates all cached
 # extractions in one shot so users don't see stale results from old code.
-_CACHE_VERSION = "v4-2026-05-03-orient"
+_CACHE_VERSION = "v5-2026-05-03-merchant-retry"
 
 # ---------------------------------------------------------------------------
 # Page config
