@@ -1,0 +1,10 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+output/*.json
+output/*.csv
+bons/*
+!bons/.gitkeep
+!output/.gitkeep
