@@ -9,3 +9,7 @@ google-cloud-documentai>=2.30.0
 # Web dashboard (dashboard.py only — CLI usage doesn't need these)
 streamlit>=1.50
 pillow>=10.0
+
+# Image preprocessing (auto-deskew, perspective correction, EXIF rotate)
+opencv-python-headless>=4.10
+numpy>=1.26

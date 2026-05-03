@@ -66,6 +66,19 @@ DOCAI_PRICING = {
 
 
 @dataclass
+class BoundingBox:
+    """Pixel-coordinate bounding box (normalized 0-1) of an entity in the page."""
+    label: str          # 'item', 'total', 'merchant', 'date', 'subtotal', 'discount'
+    text: str           # what was read at this location (truncated)
+    confidence: float
+    # Normalized (0-1) coordinates — convert with image w/h on the client side
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+@dataclass
 class DocAIResult:
     bon: str
     ok: bool
@@ -77,6 +90,7 @@ class DocAIResult:
     error: Optional[str]
     rawText: Optional[str]  # On error: dump raw doc.text for debugging
     docConfidence: Optional[float]  # Average entity confidence
+    boundingBoxes: list[BoundingBox]   # for visual overlay in the dashboard
 
 
 # ---------------------------------------------------------------------------
@@ -213,10 +227,54 @@ def _build_line_item(entity: documentai.Document.Entity) -> Optional[ReceiptItem
     )
 
 
-def _doc_to_receipt(doc: documentai.Document) -> tuple[Receipt, float]:
-    """Map a parsed Document AI Document into our Receipt schema.
+def _entity_bbox(entity: documentai.Document.Entity, doc: documentai.Document) -> Optional[tuple[float, float, float, float]]:
+    """Pull normalized (x, y, w, h) for an entity by walking its page anchors.
 
-    Returns (Receipt, avg_confidence).
+    Returns None if entity has no anchor.
+    """
+    if not entity.page_anchor or not entity.page_anchor.page_refs:
+        return None
+    page_ref = entity.page_anchor.page_refs[0]
+    poly = page_ref.bounding_poly
+    if not poly:
+        return None
+
+    if poly.normalized_vertices:
+        verts = [(v.x, v.y) for v in poly.normalized_vertices]
+    elif poly.vertices and len(doc.pages) > 0:
+        page = doc.pages[int(page_ref.page) if page_ref.page else 0]
+        page_w = page.dimension.width if page.dimension else 1
+        page_h = page.dimension.height if page.dimension else 1
+        verts = [(v.x / page_w, v.y / page_h) for v in poly.vertices]
+    else:
+        return None
+
+    if not verts:
+        return None
+    xs = [v[0] for v in verts]
+    ys = [v[1] for v in verts]
+    x0, y0 = min(xs), min(ys)
+    x1, y1 = max(xs), max(ys)
+    return (x0, y0, x1 - x0, y1 - y0)
+
+
+def _bbox_from_entity(entity: documentai.Document.Entity, doc: documentai.Document, label: str) -> Optional[BoundingBox]:
+    pos = _entity_bbox(entity, doc)
+    if not pos:
+        return None
+    text = _entity_text(entity)
+    return BoundingBox(
+        label=label,
+        text=text[:60],
+        confidence=float(entity.confidence) if entity.confidence else 0.0,
+        x=pos[0], y=pos[1], w=pos[2], h=pos[3],
+    )
+
+
+def _doc_to_receipt(doc: documentai.Document) -> tuple[Receipt, float, list[BoundingBox]]:
+    """Map a parsed Document AI Document into our Receipt schema + bbox list.
+
+    Returns (Receipt, avg_confidence, bounding_boxes).
     """
     merchant: Optional[str] = None
     merchant_subtitle: Optional[str] = None
@@ -228,6 +286,7 @@ def _doc_to_receipt(doc: documentai.Document) -> tuple[Receipt, float]:
     items: list[ReceiptItem] = []
 
     confidences: list[float] = []
+    boxes: list[BoundingBox] = []
 
     for entity in doc.entities:
         etype = entity.type_
@@ -237,35 +296,49 @@ def _doc_to_receipt(doc: documentai.Document) -> tuple[Receipt, float]:
 
         if etype == "supplier_name":
             merchant = etext.strip() or merchant
+            box = _bbox_from_entity(entity, doc, "merchant")
+            if box:
+                boxes.append(box)
         elif etype == "supplier_address":
             merchant_subtitle = etext.strip() or merchant_subtitle
         elif etype == "supplier_phone":
-            # Concatenate to subtitle if not already present
             if etext and (not merchant_subtitle or etext not in merchant_subtitle):
                 merchant_subtitle = (merchant_subtitle + " · " + etext.strip()
                                      if merchant_subtitle else etext.strip())
         elif etype == "receipt_date" or etype == "purchase_date":
             bon_date = _to_iso_date(etext)
+            box = _bbox_from_entity(entity, doc, "date")
+            if box:
+                boxes.append(box)
         elif etype == "purchase_time":
             bon_time = _to_hh_mm(etext)
         elif etype == "total_amount":
             total_cents = _to_cents(etext)
+            box = _bbox_from_entity(entity, doc, "total")
+            if box:
+                boxes.append(box)
         elif etype == "net_amount" or etype == "total_tax_amount":
-            pass  # Available if we want VAT-aware logic later
+            pass
         elif etype == "subtotal_amount":
             subtotal_cents = _to_cents(etext)
+            box = _bbox_from_entity(entity, doc, "subtotal")
+            if box:
+                boxes.append(box)
         elif etype == "payment_type":
             payment_method = etext.strip()
         elif etype == "line_item":
             li = _build_line_item(entity)
             if li:
                 items.append(li)
+                box = _bbox_from_entity(entity, doc, "item")
+                if box:
+                    boxes.append(box)
 
     avg_conf = (sum(confidences) / len(confidences)) if confidences else None
 
     return (
         Receipt(
-            isReceipt=True,  # If DocAI accepted it, it's a receipt
+            isReceipt=True,
             notReceiptReason=None,
             merchant=merchant,
             merchantSubtitle=merchant_subtitle,
@@ -275,11 +348,12 @@ def _doc_to_receipt(doc: documentai.Document) -> tuple[Receipt, float]:
             subtotalCents=subtotal_cents,
             totalCents=total_cents,
             paymentMethod=payment_method,
-            suspiciousManipulation=False,  # DocAI doesn't flag this — keep false
+            suspiciousManipulation=False,
             manipulationNotes=None,
             ocrConfidence=avg_conf,
         ),
         avg_conf or 0.0,
+        boxes,
     )
 
 
@@ -319,6 +393,7 @@ def extract_docai(image_path: Path) -> DocAIResult:
             ),
             rawText=None,
             docConfidence=None,
+            boundingBoxes=[],
         )
 
     try:
@@ -338,7 +413,7 @@ def extract_docai(image_path: Path) -> DocAIResult:
         response = client.process_document(request=request)
         doc = response.document
 
-        receipt, avg_conf = _doc_to_receipt(doc)
+        receipt, avg_conf, boxes = _doc_to_receipt(doc)
         latency_ms = int((time.monotonic() - started) * 1000)
 
         return DocAIResult(
@@ -352,6 +427,7 @@ def extract_docai(image_path: Path) -> DocAIResult:
             error=None,
             rawText=None,
             docConfidence=avg_conf,
+            boundingBoxes=boxes,
         )
     except Exception as e:  # noqa: BLE001 — capture per-bon errors cleanly
         latency_ms = int((time.monotonic() - started) * 1000)
@@ -367,6 +443,7 @@ def extract_docai(image_path: Path) -> DocAIResult:
             error=f"{type(e).__name__}: {e}",
             rawText=None,
             docConfidence=None,
+            boundingBoxes=[],
         )
 
 

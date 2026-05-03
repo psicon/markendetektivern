@@ -31,11 +31,12 @@ from typing import Optional
 import streamlit as st
 from dotenv import load_dotenv
 from google import genai
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from prompts import VERSION as PROMPT_VERSION
 from validate import PRICING as GEMINI_PRICING, estimate_cents, extract_one
 from docai import DOCAI_PRICING, extract_docai, estimate_docai_cents
+from image_prep import preprocess as preprocess_image
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -144,6 +145,22 @@ with st.sidebar:
             )
 
     st.markdown("---")
+    st.markdown("### 🖼 Image Preprocessing")
+    preprocess_enabled = st.checkbox(
+        "Auto-deskew + crop bon (vor OCR-Send)",
+        value=True,
+        help="Erkennt die 4 Ecken des Bons, korrigiert die Perspektive, "
+             "schneidet den Hintergrund weg. Schickt das saubere Bild an OCR. "
+             "Cache invalidiert wenn umgeschaltet.",
+    )
+    show_overlay = st.checkbox(
+        "OCR-Overlay anzeigen (Bounding Boxes)",
+        value=True,
+        help="Zeichnet farbige Boxen auf das Bild — eine pro erkanntem "
+             "Item / Total / Merchant / Date. Nur DocAI liefert Boxen.",
+    )
+
+    st.markdown("---")
     st.markdown("### 📊 Decision Gates")
     st.markdown(
         """
@@ -212,14 +229,45 @@ def get_gemini_client() -> genai.Client:
 
 
 @st.cache_data(show_spinner=False, max_entries=400)
-def process(file_bytes: bytes, file_name: str, engine: str, model: str) -> dict:
+def process(
+    file_bytes: bytes,
+    file_name: str,
+    engine: str,
+    model: str,
+    preprocess_enabled: bool,
+) -> dict:
     """Wrap engine extraction with bytes-cached invocation.
 
     Returns a uniform result dict regardless of engine.
+    Cache key includes preprocess flag — toggling it triggers fresh API calls.
     """
     bytes_hash = hashlib.sha256(file_bytes).hexdigest()[:16]
+
+    # Run image preprocessing if enabled
+    prep_info: dict = {"applied": False}
+    if preprocess_enabled:
+        try:
+            prep = preprocess_image(file_bytes)
+            send_bytes = prep.output_bytes
+            prep_info = {
+                "applied": True,
+                "perspective_corrected": prep.perspective_corrected,
+                "rotation_applied": prep.rotation_applied,
+                "sharpness": prep.sharpness_score,
+                "original_dim": (prep.original_w, prep.original_h),
+                "output_dim": (prep.output_w, prep.output_h),
+                "detected_corners": prep.detected_corners,
+                "notes": prep.notes,
+                "preprocessed_bytes": prep.output_bytes,
+            }
+        except Exception as e:  # noqa: BLE001
+            send_bytes = file_bytes
+            prep_info = {"applied": True, "failed": str(e)}
+    else:
+        send_bytes = file_bytes
+
     tmp = Path("/tmp") / f"streamlit_bon_{bytes_hash}_{file_name}"
-    tmp.write_bytes(file_bytes)
+    tmp.write_bytes(send_bytes)
 
     try:
         if engine == "gemini":
@@ -240,6 +288,8 @@ def process(file_bytes: bytes, file_name: str, engine: str, model: str) -> dict:
                 "pages": None,
                 "docConfidence": None,
                 "bytesHash": bytes_hash,
+                "boundingBoxes": [],
+                "prep": prep_info,
             }
         else:  # docai
             r = extract_docai(tmp)
@@ -259,6 +309,12 @@ def process(file_bytes: bytes, file_name: str, engine: str, model: str) -> dict:
                 "pages": r.pages,
                 "docConfidence": r.docConfidence,
                 "bytesHash": bytes_hash,
+                "boundingBoxes": [
+                    {"label": b.label, "text": b.text, "confidence": b.confidence,
+                     "x": b.x, "y": b.y, "w": b.w, "h": b.h}
+                    for b in r.boundingBoxes
+                ],
+                "prep": prep_info,
             }
     finally:
         try:
@@ -318,11 +374,12 @@ if engine == "docai" and not (
     st.stop()
 
 results: list[tuple[str, bytes, dict]] = []
-progress = st.progress(0.0, text=f"Processing {len(uploaded)} bons via {model} …")
+prep_label = "preprocessed" if preprocess_enabled else "raw"
+progress = st.progress(0.0, text=f"Processing {len(uploaded)} bons via {model} ({prep_label}) …")
 for idx, f in enumerate(uploaded):
     raw = f.read()
     started = time.monotonic()
-    res = process(raw, f.name, engine, model)
+    res = process(raw, f.name, engine, model, preprocess_enabled)
     elapsed = time.monotonic() - started
     results.append((f.name, raw, res))
     progress.progress(
@@ -561,15 +618,107 @@ st.markdown("---")
 st.markdown(f"## 🧾 Per-Bon Details ({len(results)})")
 
 
-def render_image(file_bytes: bytes, file_name: str) -> None:
+BBOX_COLORS = {
+    "merchant": (255, 100, 100, 200),  # red
+    "date":     (100, 200, 255, 200),  # blue
+    "total":    (50, 200, 80, 220),    # green
+    "subtotal": (180, 180, 100, 200),  # olive
+    "item":     (255, 180, 60, 200),   # orange
+    "discount": (200, 100, 255, 200),  # purple
+}
+
+
+def _draw_overlay(pil_img: Image.Image, bboxes: list[dict]) -> Image.Image:
+    """Overlay colored bounding boxes + labels on the receipt image."""
+    if not bboxes:
+        return pil_img
+
+    img = pil_img.convert("RGBA")
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    w, h = img.size
+
+    # Try to load a small font; fall back to default
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 14)
+        font_small = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 11)
+    except OSError:
+        font = ImageFont.load_default()
+        font_small = font
+
+    # Draw rectangles + labels
+    for b in bboxes:
+        color = BBOX_COLORS.get(b["label"], (255, 255, 255, 200))
+        x = int(b["x"] * w)
+        y = int(b["y"] * h)
+        bw = int(b["w"] * w)
+        bh = int(b["h"] * h)
+
+        # Outline
+        draw.rectangle([x, y, x + bw, y + bh], outline=color, width=3)
+
+        # Label tag at top-left of box
+        label = b["label"].upper()
+        tag_w = draw.textlength(label, font=font_small) + 8
+        tag_h = 16
+        tag_y = max(0, y - tag_h)
+        draw.rectangle([x, tag_y, x + tag_w, tag_y + tag_h], fill=color)
+        draw.text((x + 4, tag_y + 1), label, fill=(255, 255, 255), font=font_small)
+
+    return Image.alpha_composite(img, overlay).convert("RGB")
+
+
+def render_image(file_bytes: bytes, file_name: str, prep: dict, bboxes: list[dict], show_overlay_flag: bool) -> None:
     if file_name.lower().endswith(".pdf"):
         st.warning("PDF preview not rendered — sent to engine directly.")
         return
     try:
-        img = Image.open(BytesIO(file_bytes))
-        st.image(img, use_container_width=True)
-    except Exception:
-        st.warning(f"Could not render preview for {file_name}")
+        # Show the *preprocessed* image if available (so overlay coordinates match what OCR saw)
+        if prep.get("applied") and prep.get("preprocessed_bytes"):
+            img = Image.open(BytesIO(prep["preprocessed_bytes"]))
+            cap = "preprocessed (auto-cropped, perspective-corrected)"
+        else:
+            img = Image.open(BytesIO(file_bytes))
+            cap = "original"
+
+        if show_overlay_flag and bboxes:
+            img = _draw_overlay(img, bboxes)
+            cap += f" + overlay ({len(bboxes)} boxes)"
+
+        st.image(img, use_container_width=True, caption=cap)
+
+        # Tiny legend if we have boxes
+        if show_overlay_flag and bboxes:
+            legend_html = " ".join(
+                f'<span style="background:rgba({c[0]},{c[1]},{c[2]},0.6);color:white;'
+                f'padding:1px 8px;border-radius:4px;font-size:10px;'
+                f'font-weight:700;margin-right:4px">{lbl.upper()}</span>'
+                for lbl, c in BBOX_COLORS.items()
+                if any(b["label"] == lbl for b in bboxes)
+            )
+            st.markdown(legend_html, unsafe_allow_html=True)
+
+        # Preprocessing info collapsible
+        if prep.get("applied") and not prep.get("failed"):
+            with st.expander("🖼 Preprocessing-Details"):
+                if prep.get("rotation_applied"):
+                    st.caption(f"EXIF-Rotation: {prep['rotation_applied']}°")
+                if prep.get("perspective_corrected"):
+                    st.caption("✓ Perspektive korrigiert + auf Bon-Rand gecropped")
+                else:
+                    st.caption("⚠ Keine 4 Ecken gefunden — Original verwendet")
+                st.caption(f"Original: {prep['original_dim'][0]}×{prep['original_dim'][1]}px")
+                st.caption(f"Output:   {prep['output_dim'][0]}×{prep['output_dim'][1]}px")
+                if prep.get("sharpness") is not None:
+                    sharp = prep["sharpness"]
+                    sharp_emoji = "🟢" if sharp > 200 else "🟡" if sharp > 80 else "🔴"
+                    st.caption(f"Schärfe: {sharp_emoji} {sharp:.0f} (>200 = scharf, <80 = blurry)")
+                for note in prep.get("notes", []):
+                    st.caption(f"  · {note}")
+        elif prep.get("failed"):
+            st.caption(f"⚠ Preprocessing failed: {prep['failed']}")
+    except Exception as e:  # noqa: BLE001
+        st.warning(f"Could not render preview for {file_name}: {e}")
 
 
 for idx, (name, raw, r) in enumerate(results):
@@ -580,7 +729,13 @@ for idx, (name, raw, r) in enumerate(results):
         cols = st.columns([1, 1.2])
 
         with cols[0]:
-            render_image(raw, name)
+            render_image(
+                raw,
+                name,
+                r.get("prep", {}),
+                r.get("boundingBoxes", []),
+                show_overlay,
+            )
 
         with cols[1]:
             if not r["ok"]:
