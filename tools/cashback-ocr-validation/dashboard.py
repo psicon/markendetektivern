@@ -38,6 +38,11 @@ from validate import PRICING as GEMINI_PRICING, estimate_cents, extract_one
 from docai import DOCAI_PRICING, extract_docai, estimate_docai_cents
 from image_prep import preprocess as preprocess_image
 
+# Cache-busting key. Bump this whenever extraction logic, prompts,
+# preprocessing, or merchant fallback changes — invalidates all cached
+# extractions in one shot so users don't see stale results from old code.
+_CACHE_VERSION = "v4-2026-05-03-orient"
+
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
@@ -235,13 +240,16 @@ def process(
     engine: str,
     model: str,
     preprocess_enabled: bool,
+    code_version: str = _CACHE_VERSION,
 ) -> dict:
     """Wrap engine extraction with bytes-cached invocation.
 
     Returns a uniform result dict regardless of engine.
-    Cache key includes preprocess flag — toggling it triggers fresh API calls.
+    Cache key includes preprocess flag AND code_version — toggling either
+    triggers fresh API calls.
     """
     bytes_hash = hashlib.sha256(file_bytes).hexdigest()[:16]
+    _ = code_version  # only used for cache-key invalidation
 
     # Run image preprocessing if enabled
     prep_info: dict = {"applied": False}
@@ -628,6 +636,70 @@ BBOX_COLORS = {
 }
 
 
+def _detect_text_orientation(bboxes: list[dict]) -> int:
+    """Detect required display rotation based on bounding box layout.
+
+    Receipts read TOP-TO-BOTTOM, so item boxes should be wider than tall
+    (text lines run horizontal). And the merchant box should be near the
+    TOP of the image.
+
+    Returns degrees of rotation needed for upright display: 0, 90, 180, or 270.
+    Convention: positive = rotate CW.
+    """
+    if not bboxes:
+        return 0
+
+    # Gather valid item-like boxes
+    item_boxes = [b for b in bboxes if b["label"] == "item" and b["h"] > 0.001 and b["w"] > 0.001]
+    if len(item_boxes) < 3:
+        return 0  # not enough data to judge
+
+    # Median aspect ratio of item boxes (w/h)
+    ratios = sorted(b["w"] / b["h"] for b in item_boxes)
+    median_ar = ratios[len(ratios) // 2]
+
+    # If items are tall+narrow (ar < 0.7), text is rotated 90° relative to image
+    if median_ar >= 0.7:
+        # Items already wider than tall → text reads horizontally → could
+        # still be upside-down (180°). Check merchant position.
+        merchant_box = next((b for b in bboxes if b["label"] == "merchant"), None)
+        if merchant_box and merchant_box["y"] > 0.6:
+            # Merchant is in bottom 40% → image is upside down
+            return 180
+        return 0  # upright
+
+    # Items are tall+narrow → text rotated 90°. Determine CW vs CCW from merchant position.
+    merchant_box = next((b for b in bboxes if b["label"] == "merchant"), None)
+    if merchant_box:
+        # If merchant is on the LEFT of the image, text reads bottom-to-top
+        # → need to rotate 90° CW so merchant ends up at the top.
+        # If merchant is on the RIGHT, text reads top-to-bottom → rotate 90° CCW.
+        if merchant_box["x"] < 0.4:
+            return 90  # CW
+        else:
+            return 270  # CCW
+    # No merchant box detected — default CW (more common phone-landscape orientation)
+    return 90
+
+
+def _rotate_bbox(b: dict, deg: int) -> dict:
+    """Rotate a normalized bbox by `deg` (0/90/180/270, CW positive)."""
+    x, y, w, h = b["x"], b["y"], b["w"], b["h"]
+    if deg == 0:
+        nx, ny, nw, nh = x, y, w, h
+    elif deg == 90:
+        # CW: (x, y, w, h) → (1 - y - h, x, h, w)
+        nx, ny, nw, nh = 1.0 - y - h, x, h, w
+    elif deg == 180:
+        nx, ny, nw, nh = 1.0 - x - w, 1.0 - y - h, w, h
+    elif deg == 270:
+        # CCW: (x, y, w, h) → (y, 1 - x - w, h, w)
+        nx, ny, nw, nh = y, 1.0 - x - w, h, w
+    else:
+        nx, ny, nw, nh = x, y, w, h
+    return {**b, "x": nx, "y": ny, "w": nw, "h": nh}
+
+
 def _draw_overlay(pil_img: Image.Image, bboxes: list[dict]) -> Image.Image:
     """Overlay colored bounding boxes + labels on the receipt image."""
     if not bboxes:
@@ -668,7 +740,7 @@ def _draw_overlay(pil_img: Image.Image, bboxes: list[dict]) -> Image.Image:
     return Image.alpha_composite(img, overlay).convert("RGB")
 
 
-def render_image(file_bytes: bytes, file_name: str, prep: dict, bboxes: list[dict], show_overlay_flag: bool) -> None:
+def render_image(file_bytes: bytes, file_name: str, prep: dict, bboxes: list[dict], show_overlay_flag: bool, manual_rot: int = 0) -> None:
     if file_name.lower().endswith(".pdf"):
         st.warning("PDF preview not rendered — sent to engine directly.")
         return
@@ -676,14 +748,25 @@ def render_image(file_bytes: bytes, file_name: str, prep: dict, bboxes: list[dic
         # Show the *preprocessed* image if available (so overlay coordinates match what OCR saw)
         if prep.get("applied") and prep.get("preprocessed_bytes"):
             img = Image.open(BytesIO(prep["preprocessed_bytes"]))
-            cap = "preprocessed (auto-cropped, perspective-corrected)"
+            cap = "preprocessed"
         else:
             img = Image.open(BytesIO(file_bytes))
             cap = "original"
 
-        if show_overlay_flag and bboxes:
-            img = _draw_overlay(img, bboxes)
-            cap += f" + overlay ({len(bboxes)} boxes)"
+        # Auto-detect display orientation from box layout, plus manual override
+        auto_rot = _detect_text_orientation(bboxes)
+        total_rot = (auto_rot + manual_rot) % 360
+        if total_rot:
+            # PIL rotate is CCW-positive; we want CW-positive convention
+            img = img.rotate(-total_rot, expand=True)
+            bboxes_for_display = [_rotate_bbox(b, total_rot) for b in bboxes]
+            cap += f" · rotated {total_rot}° for display"
+        else:
+            bboxes_for_display = bboxes
+
+        if show_overlay_flag and bboxes_for_display:
+            img = _draw_overlay(img, bboxes_for_display)
+            cap += f" + overlay ({len(bboxes_for_display)} boxes)"
 
         st.image(img, use_container_width=True, caption=cap)
 
@@ -729,13 +812,25 @@ for idx, (name, raw, r) in enumerate(results):
         cols = st.columns([1, 1.2])
 
         with cols[0]:
+            # Per-bon manual rotation override (applied on top of auto-detect)
+            rot_key = f"manual_rot_{name}_{r.get('bytesHash', '?')}"
+            if rot_key not in st.session_state:
+                st.session_state[rot_key] = 0
             render_image(
                 raw,
                 name,
                 r.get("prep", {}),
                 r.get("boundingBoxes", []),
                 show_overlay,
+                manual_rot=st.session_state[rot_key],
             )
+            rot_cols = st.columns(4)
+            for i, deg in enumerate([0, 90, 180, 270]):
+                with rot_cols[i]:
+                    label = f"{deg}°" if deg else "Auto"
+                    if st.button(label, key=f"{rot_key}_btn_{deg}", use_container_width=True):
+                        st.session_state[rot_key] = deg
+                        st.rerun()
 
         with cols[1]:
             if not r["ok"]:
