@@ -1,3 +1,8 @@
+# Core OCR pipeline (used by validate.py CLI + dashboard.py UI)
 google-genai>=0.3.0
 pydantic>=2.6
 python-dotenv>=1.0
+
+# Web dashboard (dashboard.py only — CLI usage doesn't need these)
+streamlit>=1.50
+pillow>=10.0

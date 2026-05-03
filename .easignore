@@ -1,0 +1,35 @@
+# EAS Build / Submit — explicit excludes
+#
+# By default EAS uses .gitignore. This file ADDS to that with stuff
+# that's tracked in git but should NEVER be uploaded into the
+# iOS/Android build context.
+#
+# Format = same as .gitignore.
+
+# Local-only Phase-0 OCR validation tool (Python).
+# Has nothing to do with the React Native app — must never ship to
+# Apple/Google build pipelines.
+tools/
+
+# Documentation that doesn't need to be in the build context.
+# (Source-of-truth lives in git, not in the build artifact.)
+CASHBACK_ARCHITECTURE.md
+KNOWHOW.md
+DESIGN_SYSTEM.md
+CONSENT_REVIEW_CHECKLIST.md
+CRASHLYTICS_SETUP.md
+DEPLOYMENT_INSTRUCTIONS.md
+LEADERBOARD_FIRESTORE_RULES.md
+PAYWALL_SETUP.md
+RELEASE_README.md
+REVENUECAT_TESTING.md
+
+# Worktree scratch space
+.claude/
+
+# Stray Firebase / Firestore rule snippets that aren't picked up by
+# the build (firebase deploy reads firestore.rules + firebase.json,
+# not these txt drafts).
+firebase-*.txt
+firebase-*.json
+firestore-*.txt

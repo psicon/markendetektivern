@@ -73,7 +73,22 @@ Tool-Output benutzt einfach den Dateinamen als ID.
 
 ---
 
-## 3. Ausführen
+## 3. Ausführen — zwei Modi
+
+### 3a. Web-Dashboard (empfohlen, drag-drop, sieht hübsch aus)
+
+```bash
+streamlit run dashboard.py
+# Öffnet sich automatisch auf http://localhost:8501
+# Sidebar: Modell-Switch (Flash / Flash-Lite / Pro)
+# Drag-drop deine Bons → Decision-Gate-Karten + Per-Bon-Cards
+# Cache: gleicher Bon + gleiches Modell = kein zweiter API-Call
+```
+
+Stop mit `Ctrl-C` im Terminal. Logs landen NICHT in Firestore, alles
+bleibt lokal in der Session.
+
+### 3b. CLI-Modus (für Batch-Runs / Scripting / CI)
 
 ```bash
 # Default: gemini-2.5-flash, alle Bons in bons/
