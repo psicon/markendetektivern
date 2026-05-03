@@ -255,29 +255,60 @@ def _detect_dach_retailer(doc_text: str) -> Optional[tuple[str, str]]:
 
     Returns (canonical_name, signal_used) or None.
     signal_used is "header" | "code" | "brand" — useful for debugging.
+
+    Penny→REWE bug: Penny is a REWE-Group subsidiary. Penny receipts contain
+    "REWE" in the TSE serial line ("Seriennummer Kasse: REWE:b4..."). If we
+    pick first-list-match, REWE wins over Penny. Fix: pick the retailer
+    whose match occurs EARLIEST in doc_text — actual receipt headers are at
+    the very top, TSE blocks are way further down.
     """
     if not doc_text:
         return None
     head = doc_text[:1500].lower()
     full = doc_text.lower()
 
-    # Layer 1: header/address mention — strongest signal
+    # Layer 1: header/address mention — strongest signal.
+    # Find ALL header matches with their positions, return earliest.
+    header_hits: list[tuple[int, str]] = []
     for canonical, headers, _codes, _brands in DACH_RETAILERS:
+        best_pos = None
         for pat in headers:
-            if pat in head:
-                return (canonical, "header")
+            pos = head.find(pat)
+            if pos >= 0 and (best_pos is None or pos < best_pos):
+                best_pos = pos
+        if best_pos is not None:
+            header_hits.append((best_pos, canonical))
+    if header_hits:
+        header_hits.sort()  # by position
+        return (header_hits[0][1], "header")
 
-    # Layer 2: receipt-internal codes (TSE serial prefixes etc.)
+    # Layer 2: receipt-internal codes (TSE serial prefixes etc.) — earliest wins.
+    code_hits: list[tuple[int, str]] = []
     for canonical, _headers, codes, _brands in DACH_RETAILERS:
+        best_pos = None
         for code in codes:
-            if code in full:
-                return (canonical, "code")
+            pos = full.find(code)
+            if pos >= 0 and (best_pos is None or pos < best_pos):
+                best_pos = pos
+        if best_pos is not None:
+            code_hits.append((best_pos, canonical))
+    if code_hits:
+        code_hits.sort()
+        return (code_hits[0][1], "code")
 
-    # Layer 3: private-label product brands
+    # Layer 3: private-label product brands — earliest wins.
+    brand_hits: list[tuple[int, str]] = []
     for canonical, _headers, _codes, brands in DACH_RETAILERS:
+        best_pos = None
         for brand in brands:
-            if brand in full:
-                return (canonical, "brand")
+            pos = full.find(brand)
+            if pos >= 0 and (best_pos is None or pos < best_pos):
+                best_pos = pos
+        if best_pos is not None:
+            brand_hits.append((best_pos, canonical))
+    if brand_hits:
+        brand_hits.sort()
+        return (brand_hits[0][1], "brand")
 
     return None
 

@@ -41,7 +41,7 @@ from image_prep import preprocess as preprocess_image
 # Cache-busting key. Bump this whenever extraction logic, prompts,
 # preprocessing, or merchant fallback changes — invalidates all cached
 # extractions in one shot so users don't see stale results from old code.
-_CACHE_VERSION = "v5-2026-05-03-merchant-retry"
+_CACHE_VERSION = "v6-2026-05-03-position-aware"
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -637,49 +637,72 @@ BBOX_COLORS = {
 
 
 def _detect_text_orientation(bboxes: list[dict]) -> int:
-    """Detect required display rotation based on bounding box layout.
+    """Detect required display rotation by scoring all 4 possible rotations.
 
-    Receipts read TOP-TO-BOTTOM, so item boxes should be wider than tall
-    (text lines run horizontal). And the merchant box should be near the
-    TOP of the image.
+    A correctly-oriented receipt layout has:
+      - Merchant box near the TOP of the image (small y)
+      - Total box near the BOTTOM (large y)
+      - Items between them, with text reading horizontally (w > h)
+      - Items column has consistent x position (small horizontal spread)
 
-    Returns degrees of rotation needed for upright display: 0, 90, 180, or 270.
-    Convention: positive = rotate CW.
+    For each candidate rotation (0/90/180/270), apply the rotation to the
+    boxes, compute a layout score, return the rotation with the best score.
+
+    This is more robust than my earlier "merchant on left → 90°" heuristic
+    because it uses the FULL receipt layout (merchant + total + items),
+    not just one anchor.
+
+    Returns degrees: 0, 90, 180, or 270 (CW positive).
     """
     if not bboxes:
         return 0
 
-    # Gather valid item-like boxes
     item_boxes = [b for b in bboxes if b["label"] == "item" and b["h"] > 0.001 and b["w"] > 0.001]
-    if len(item_boxes) < 3:
-        return 0  # not enough data to judge
+    if len(item_boxes) < 2:
+        return 0  # not enough layout signal
 
-    # Median aspect ratio of item boxes (w/h)
-    ratios = sorted(b["w"] / b["h"] for b in item_boxes)
-    median_ar = ratios[len(ratios) // 2]
+    def score(rot: int) -> float:
+        rotated = [_rotate_bbox(b, rot) for b in bboxes]
+        merchants = [b for b in rotated if b["label"] == "merchant"]
+        items = [b for b in rotated if b["label"] == "item"]
+        totals = [b for b in rotated if b["label"] == "total"]
+        dates = [b for b in rotated if b["label"] == "date"]
 
-    # If items are tall+narrow (ar < 0.7), text is rotated 90° relative to image
-    if median_ar >= 0.7:
-        # Items already wider than tall → text reads horizontally → could
-        # still be upside-down (180°). Check merchant position.
-        merchant_box = next((b for b in bboxes if b["label"] == "merchant"), None)
-        if merchant_box and merchant_box["y"] > 0.6:
-            # Merchant is in bottom 40% → image is upside down
-            return 180
-        return 0  # upright
+        s = 0.0
 
-    # Items are tall+narrow → text rotated 90°. Determine CW vs CCW from merchant position.
-    merchant_box = next((b for b in bboxes if b["label"] == "merchant"), None)
-    if merchant_box:
-        # If merchant is on the LEFT of the image, text reads bottom-to-top
-        # → need to rotate 90° CW so merchant ends up at the top.
-        # If merchant is on the RIGHT, text reads top-to-bottom → rotate 90° CCW.
-        if merchant_box["x"] < 0.4:
-            return 90  # CW
-        else:
-            return 270  # CCW
-    # No merchant box detected — default CW (more common phone-landscape orientation)
-    return 90
+        # Merchant near top: bonus for small y
+        if merchants:
+            avg_y = sum(b["y"] + b["h"] / 2 for b in merchants) / len(merchants)
+            s += (1.0 - avg_y) * 30
+
+        # Total near bottom: bonus for large y
+        if totals:
+            avg_y = sum(b["y"] + b["h"] / 2 for b in totals) / len(totals)
+            s += avg_y * 30
+
+        # Date near top: bonus for small y (smaller weight than merchant)
+        if dates:
+            avg_y = sum(b["y"] + b["h"] / 2 for b in dates) / len(dates)
+            s += (1.0 - avg_y) * 10
+
+        # Items: text reads horizontally → boxes wider than tall
+        wider = sum(1 for b in items if b["w"] > b["h"])
+        s += (wider / max(1, len(items))) * 30
+
+        # Items column consistency: x-coordinate variance (low variance = good)
+        if items:
+            xs = [b["x"] for b in items]
+            mean_x = sum(xs) / len(xs)
+            var_x = sum((x - mean_x) ** 2 for x in xs) / len(xs)
+            # Penalty: high variance means items aren't in a column → wrong orientation
+            s -= var_x * 50
+
+        return s
+
+    # Score each candidate, pick best
+    candidates = [0, 90, 180, 270]
+    best = max(candidates, key=score)
+    return best
 
 
 def _rotate_bbox(b: dict, deg: int) -> dict:
