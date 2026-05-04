@@ -157,6 +157,7 @@ export interface CashbackStatusEntry {
   eligibleItemCount?: number;
   merchantId?: string | null;
   merchantName?: string | null;
+  merchantDisplayName?: string | null;
   merchantLogoUrl?: string | null;
   merchantRaw?: string | null;
   // Legacy:

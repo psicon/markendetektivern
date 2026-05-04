@@ -11,7 +11,7 @@
 
 'use strict';
 
-const VERSION = 'v1.1';
+const VERSION = 'v1.2';
 
 const SYSTEM_PROMPT = `\
 Du bist ein OCR-Spezialist für deutsche Kassenbons (DACH-Raum: DE, AT,
@@ -36,7 +36,14 @@ extrahieren.
 9. Wenn das Bild kein Kassenbon ist, setze isReceipt=false und gib
    einen Grund in notReceiptReason.
 10. Bei Manipulationsverdacht setze suspiciousManipulation=true und
-    beschreibe in manipulationNotes.`;
+    beschreibe in manipulationNotes.
+11. **bonCountry**: setze 'DE' / 'AT' / 'CH' wenn das Land erkennbar
+    ist. Starke Signale (in dieser Priorität):
+    - UID-Nr / Steuer-ID Präfix: 'DE...' = DE, 'ATU...' = AT, 'CHE-...' = CH
+    - Postleitzahl: 5-stellig (DE), 4-stellig (AT/CH)
+    - Adresse mit Bundesland-Hinweis
+    - Währung CHF = CH (sonst EUR)
+    Wenn unklar: null lassen.`;
 
 const USER_PROMPT =
   'Extrahiere alle strukturierten Daten aus diesem Kassenbon-Foto gemäß dem JSON-Schema. Antworte ausschließlich mit dem JSON-Objekt.';
@@ -73,6 +80,7 @@ const RESPONSE_SCHEMA = {
     suspiciousManipulation: { type: 'boolean' },
     manipulationNotes: { type: 'string', nullable: true },
     ocrConfidence: { type: 'number', nullable: true },
+    bonCountry: { type: 'string', nullable: true },
   },
   required: ['isReceipt', 'items'],
 };

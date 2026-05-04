@@ -58,9 +58,12 @@ interface MirrorDoc {
   // New canonical fields (set by the merchant matcher in the CF):
   merchantId?: string | null;
   merchantName?: string | null;
+  merchantDisplayName?: string | null; // 'LiDL (DE)'
   merchantLogoUrl?: string | null;
   merchantLand?: string | null;
   merchantRaw?: string | null;
+  bonCountry?: string | null;
+  bonAgeDays?: number | null;
   // Legacy fallback (older mirror docs may still have `merchant`):
   merchant?: string | null;
   bonDate?: string | null;
@@ -207,7 +210,9 @@ export default function CashbackPendingScreen() {
           : reason === 'reconciliation_delta'
           ? 'Endbetrag und Einzelartikel passen nicht ganz zusammen. Wir konnten den Bon nicht verifizieren.'
           : reason === 'unknown_merchant'
-          ? `Diesen Markt unterstützen wir aktuell noch nicht für Cashback. ${doc?.merchantRaw ? `Erkannt als: „${doc.merchantRaw}".` : ''}`
+          ? `Diesen Markt unterstützen wir aktuell noch nicht für Cashback.${doc?.merchantRaw ? ` Erkannt als: „${doc.merchantRaw}".` : ''}`
+          : reason === 'bon_too_old'
+          ? `Dieser Bon ist zu alt — wir nehmen nur Bons der letzten 5 Tage an.${typeof doc?.bonAgeDays === 'number' ? ` Dieser Bon ist ${doc.bonAgeDays} Tage alt.` : ''}`
           : reason === 'not_a_receipt'
           ? 'Das Foto sieht nicht nach einem Kassenbon aus. Bitte versuche es nochmal mit einem klar lesbaren Bon.'
           : reason === 'process_error'
@@ -373,7 +378,7 @@ export default function CashbackPendingScreen() {
                   letterSpacing: -0.3,
                 }}
               >
-                {doc?.merchantName || doc?.merchant}
+                {doc?.merchantDisplayName || doc?.merchantName || doc?.merchant}
               </Text>
               {bonDate ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
