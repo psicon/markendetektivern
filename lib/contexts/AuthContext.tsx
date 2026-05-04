@@ -496,6 +496,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [user?.uid, userProfile?.city, userProfile?.guessedCity, refreshUserProfile]);
 
+  // FCM token registration for cashback push notifications.
+  // Lazy-imports the messaging module so the dev-client doesn't crash
+  // when the native module hasn't been linked yet.
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid) return;
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { registerFcmTokenForUser } = await import('@/lib/services/fcmTokenService');
+        const teardown = await registerFcmTokenForUser(uid);
+        if (cancelled) {
+          teardown();
+        } else {
+          unsub = teardown;
+        }
+      } catch (e: any) {
+        // Non-fatal — push is a nice-to-have, app works without.
+        console.log('[fcm] register skipped:', e?.message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      try {
+        unsub?.();
+      } catch {}
+    };
+  }, [user?.uid]);
+
   // Self-healing Backfill für `favoriteMarketName`.
   //
   // Bestands-User die das Onboarding VOR dem Mirror-Fix abgeschlossen

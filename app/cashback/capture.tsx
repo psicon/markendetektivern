@@ -1,18 +1,20 @@
 /**
- * Bon Capture Screen — Phase 1.5 (expo-camera based).
+ * Bon Capture Screen — Phase 1.5.2 (Document Scanner).
  *
- * Pragmatic capture flow that ships now without a dev-client rebuild.
- * Phase 1.5.1 will swap the camera for ML-Kit Document Scanner and
- * keep the same screen shell.
+ * Primary flow uses react-native-document-scanner-plugin which wraps:
+ *   - iOS: Apple VisionKit (VNDocumentCameraViewController) — auto
+ *     edge-detection, auto-perspective-correction, auto-rotation
+ *     (same engine Apple Notes uses)
+ *   - Android: Google ML-Kit Document Scanner — same auto-magic
  *
- * Flow:
- *   - Permission gate (handled by useCameraPermissions)
- *   - Full-screen camera preview
- *   - Overlay frame guide (4-corner brackets) so user aligns the bon
- *   - Helper text: "Bon flach hinlegen, alle 4 Ecken im Rahmen"
- *   - Capture button → expo-camera takePictureAsync → buildCapturedBon
- *   - On capture → router.push('/cashback/review?...') with the URI
- *   - Manual override: "Aus Galerie wählen" via expo-image-picker
+ * The user gets a NATIVE camera UI with green outline that locks onto
+ * the bon, snaps automatically when stable, returns a perspective-
+ * corrected JPEG. No more crooked bons, no manual cropping.
+ *
+ * Fallback: when the native module isn't available (dev-client not
+ * rebuilt yet), we drop back to a plain expo-camera + gallery picker.
+ *
+ * After capture: navigate to /cashback/review with the cropped URI.
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -27,7 +29,6 @@ import {
   Dimensions,
   InteractionManager,
   Linking,
-  Platform,
   Pressable,
   StatusBar,
   StyleSheet,
@@ -37,31 +38,63 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fontFamily, fontWeight } from '@/constants/tokens';
+import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import {
-  hasValidCashbackConsent,
-} from '@/lib/services/cashbackService';
+import { hasValidCashbackConsent } from '@/lib/services/cashbackService';
 import { buildCapturedBon } from '@/lib/utils/cashbackImage';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
-// Bon-frame proportions: typical thermal bons are 80mm wide × 200-400mm
-// long. We use a 0.55-aspect frame (taller than barcode-scanner's 0.45)
-// to encourage users to capture more vertical content.
 const FRAME_WIDTH = SCREEN_W * 0.82;
 const FRAME_HEIGHT = SCREEN_H * 0.55;
 const CORNER_LEN = 28;
 const CORNER_THICK = 3;
 
+/**
+ * Try the native Document Scanner first. Returns null if the plugin
+ * isn't linked yet (dev-client missing the native module) so the
+ * caller can fall back to the expo-camera path.
+ */
+async function tryDocumentScanner(): Promise<string | null | 'cancel' | 'unavailable'> {
+  try {
+    // Lazy-load so the screen still mounts when the native module is
+    // missing.
+    const mod: any = await import('react-native-document-scanner-plugin');
+    const Scanner = mod?.default ?? mod;
+    if (!Scanner?.scanDocument) return 'unavailable';
+
+    const result = await Scanner.scanDocument({
+      croppedImageQuality: 90,
+      maxNumDocuments: 1,
+      responseType: 'imageFilePath',
+    });
+
+    if (result?.status === 'cancel') return 'cancel';
+    const uri = result?.scannedImages?.[0];
+    return uri ? String(uri) : null;
+  } catch (e: any) {
+    const msg = String(e?.message || e?.code || '');
+    if (/not.*registered|nativemodule|TurboModule|requireNativeModule/i.test(msg)) {
+      return 'unavailable';
+    }
+    console.warn('⚠️ Document Scanner failed:', msg);
+    return null;
+  }
+}
+
 export default function CashbackCaptureScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { user } = useAuth();
+  const { theme } = useTokens();
 
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraReady, setCameraReady] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  // 'unknown' = haven't tried scanner yet. 'available' = use native.
+  // 'unavailable' = drop to expo-camera fallback UI.
+  const [scannerState, setScannerState] = useState<'unknown' | 'available' | 'unavailable'>('unknown');
   const cameraRef = useRef<CameraView>(null);
 
   useLayoutEffect(() => {
@@ -91,6 +124,81 @@ export default function CashbackCaptureScreen() {
     };
   }, [user?.uid]);
 
+  const goReview = useCallback(
+    async (uri: string, source: 'live_camera' | 'upload') => {
+      // We don't get pixel dimensions back from the doc scanner —
+      // buildCapturedBon will pull file size + hash, dimensions stay 0
+      // and the review/crop screens compute aspect ratio from the
+      // image itself.
+      const bon = await buildCapturedBon(uri, 0, 0);
+      router.replace({
+        pathname: '/cashback/review',
+        params: {
+          uri: bon.uri,
+          width: String(bon.width),
+          height: String(bon.height),
+          hash: bon.bytesHash,
+          brightness: String(bon.approxBrightness),
+          size: String(bon.sizeBytes),
+          source,
+        },
+      });
+    },
+    [],
+  );
+
+  // On mount: try the native scanner FIRST. If available, the user
+  // immediately sees the iOS/Android system scanner — no extra tap
+  // needed. If unavailable, drop to the expo-camera fallback.
+  useEffect(() => {
+    if (scannerState !== 'unknown') return;
+    let cancelled = false;
+    (async () => {
+      const result = await tryDocumentScanner();
+      if (cancelled) return;
+      if (result === 'unavailable') {
+        setScannerState('unavailable');
+        return;
+      }
+      setScannerState('available');
+      if (result === 'cancel') {
+        // User backed out of the scanner — return to consent / rewards.
+        router.back();
+        return;
+      }
+      if (typeof result === 'string') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        await goReview(result, 'live_camera');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scannerState, goReview]);
+
+  const launchScannerAgain = useCallback(async () => {
+    if (capturing) return;
+    setCapturing(true);
+    try {
+      const result = await tryDocumentScanner();
+      if (result === 'unavailable') {
+        setScannerState('unavailable');
+        return;
+      }
+      if (result === 'cancel') {
+        router.back();
+        return;
+      }
+      if (typeof result === 'string') {
+        await goReview(result, 'live_camera');
+      }
+    } finally {
+      setCapturing(false);
+    }
+  }, [capturing, goReview]);
+
+  // ─── Fallback flow (expo-camera) ─────────────────────────────────
+
   const ensurePermission = useCallback(async (): Promise<boolean> => {
     const current = await Camera.getCameraPermissionsAsync();
     if (current.status === 'granted') return true;
@@ -109,7 +217,7 @@ export default function CashbackCaptureScreen() {
     return false;
   }, [requestPermission]);
 
-  const handleCapture = useCallback(async () => {
+  const handleCaptureFallback = useCallback(async () => {
     if (capturing || !cameraRef.current) return;
     setCapturing(true);
     try {
@@ -119,32 +227,15 @@ export default function CashbackCaptureScreen() {
         skipProcessing: false,
         exif: false,
       });
-      if (!photo?.uri) {
-        throw new Error('takePictureAsync returned no URI');
-      }
-      const bon = await buildCapturedBon(photo.uri, photo.width ?? 0, photo.height ?? 0);
-      // Use REPLACE not push: keeps the cashback stack flat at [tabs, review]
-      // so the user's back gesture goes straight to rewards, not back
-      // through the camera.
-      router.replace({
-        pathname: '/cashback/review',
-        params: {
-          uri: bon.uri,
-          width: String(bon.width),
-          height: String(bon.height),
-          hash: bon.bytesHash,
-          brightness: String(bon.approxBrightness),
-          size: String(bon.sizeBytes),
-          source: 'live_camera',
-        },
-      });
+      if (!photo?.uri) throw new Error('takePictureAsync returned no URI');
+      await goReview(photo.uri, 'live_camera');
     } catch (error: any) {
       console.warn('⚠️ Bon capture failed:', error);
       Alert.alert('Aufnahme fehlgeschlagen', 'Bitte versuch es noch einmal.');
     } finally {
       setCapturing(false);
     }
-  }, [capturing]);
+  }, [capturing, goReview]);
 
   const handlePickFromGallery = useCallback(async () => {
     try {
@@ -164,29 +255,66 @@ export default function CashbackCaptureScreen() {
       });
       if (result.canceled || !result.assets?.[0]) return;
       const a = result.assets[0];
-      const bon = await buildCapturedBon(a.uri, a.width ?? 0, a.height ?? 0);
-      router.replace({
-        pathname: '/cashback/review',
-        params: {
-          uri: bon.uri,
-          width: String(bon.width),
-          height: String(bon.height),
-          hash: bon.bytesHash,
-          brightness: String(bon.approxBrightness),
-          size: String(bon.sizeBytes),
-          source: 'upload',
-        },
-      });
+      await goReview(a.uri, 'upload');
     } catch (error: any) {
       console.warn('⚠️ Gallery pick failed:', error);
     }
-  }, []);
+  }, [goReview]);
 
   const handleBack = useCallback(() => {
     router.back();
   }, []);
 
-  // Permission states
+  // ─── Render: primary state is a thin "opening scanner" splash ─────
+
+  if (scannerState === 'unknown') {
+    return (
+      <View style={[styles.permGate, { backgroundColor: '#0a0a0a' }]}>
+        <StatusBar barStyle="light-content" />
+        <View style={styles.permCenter}>
+          <ActivityIndicator color="#fff" size="large" />
+          <Text style={[styles.permBody, { marginTop: 14 }]}>Bon-Scanner wird geöffnet …</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (scannerState === 'available') {
+    // Scanner is taking the foreground. Render an idle view that
+    // re-launches if the user navigates back without scanning.
+    return (
+      <View style={[styles.permGate, { backgroundColor: '#0a0a0a' }]}>
+        <StatusBar barStyle="light-content" />
+        <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+          <Pressable onPress={handleBack} style={styles.iconButton} hitSlop={10}>
+            <MaterialCommunityIcons name="close" size={26} color="#fff" />
+          </Pressable>
+        </View>
+        <View style={styles.permCenter}>
+          <MaterialCommunityIcons name="line-scan" size={56} color="#fff" />
+          <Text style={styles.permTitle}>Scanner geöffnet</Text>
+          <Text style={styles.permBody}>
+            Halte den Bon flach in das Sichtfeld — der Scanner erkennt die Ränder automatisch
+            und zieht das Bild gerade. Falls der Scanner geschlossen wurde, tippe unten zum
+            erneuten Öffnen.
+          </Text>
+          <Pressable onPress={launchScannerAgain} style={styles.primaryButton} disabled={capturing}>
+            {capturing ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.primaryButtonText}>Scanner öffnen</Text>
+            )}
+          </Pressable>
+          <Pressable onPress={handlePickFromGallery} style={styles.secondaryButton}>
+            <Text style={styles.secondaryButtonText}>Aus Galerie wählen</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // ─── Fallback: classic expo-camera (no native scanner installed) ───
+
   if (!permission) {
     return (
       <View style={styles.permLoading}>
@@ -232,7 +360,6 @@ export default function CashbackCaptureScreen() {
         <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
       )}
 
-      {/* Top bar */}
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <Pressable onPress={handleBack} style={styles.iconButton} hitSlop={10}>
           <MaterialCommunityIcons name="close" size={26} color="#fff" />
@@ -241,23 +368,13 @@ export default function CashbackCaptureScreen() {
           <Text style={styles.title}>Bon scannen</Text>
           <Text style={styles.subtitle}>Halte den Bon flach im Rahmen</Text>
         </View>
-        <Pressable
-          onPress={() => setFlashOn((v) => !v)}
-          style={styles.iconButton}
-          hitSlop={10}
-        >
-          <MaterialCommunityIcons
-            name={flashOn ? 'flash' : 'flash-off'}
-            size={24}
-            color={flashOn ? '#ffd44b' : '#fff'}
-          />
+        <Pressable onPress={() => setFlashOn((v) => !v)} style={styles.iconButton} hitSlop={10}>
+          <MaterialCommunityIcons name={flashOn ? 'flash' : 'flash-off'} size={24} color={flashOn ? '#ffd44b' : '#fff'} />
         </Pressable>
       </View>
 
-      {/* Frame overlay — 4 corner brackets defining the bon area */}
       <View pointerEvents="none" style={styles.frameWrap}>
         <View style={styles.frame}>
-          {/* corners */}
           <View style={[styles.corner, styles.cornerTL]} />
           <View style={[styles.corner, styles.cornerTR]} />
           <View style={[styles.corner, styles.cornerBL]} />
@@ -265,7 +382,6 @@ export default function CashbackCaptureScreen() {
         </View>
       </View>
 
-      {/* Helper text */}
       <View style={styles.helperWrap} pointerEvents="none">
         <View style={styles.helperBubble}>
           <MaterialCommunityIcons name="information-outline" size={14} color="#fff" />
@@ -275,17 +391,12 @@ export default function CashbackCaptureScreen() {
         </View>
       </View>
 
-      {/* Bottom bar */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
-        <Pressable
-          onPress={handlePickFromGallery}
-          style={styles.iconButton}
-          hitSlop={12}
-        >
+        <Pressable onPress={handlePickFromGallery} style={styles.iconButton} hitSlop={12}>
           <MaterialCommunityIcons name="image-outline" size={26} color="#fff" />
         </Pressable>
         <Pressable
-          onPress={handleCapture}
+          onPress={handleCaptureFallback}
           disabled={capturing || !cameraReady}
           style={({ pressed }) => [
             styles.shutter,
@@ -310,53 +421,16 @@ export default function CashbackCaptureScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  permLoading: {
-    flex: 1,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  permGate: {
-    flex: 1,
-    backgroundColor: '#0a0a0a',
-  },
-  permCenter: {
-    flex: 1,
-    paddingHorizontal: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-  },
-  permTitle: {
-    color: '#fff',
-    fontFamily: fontFamily.heading,
-    fontWeight: fontWeight.bold as any,
-    fontSize: 20,
-    marginTop: 8,
-  },
-  permBody: {
-    color: 'rgba(255,255,255,0.78)',
-    fontFamily: fontFamily.body,
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
-  },
-  primaryButton: {
-    marginTop: 20,
-    backgroundColor: '#0d8575',
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 999,
-  },
-  primaryButtonText: {
-    color: '#fff',
-    fontFamily: fontFamily.body,
-    fontWeight: fontWeight.bold as any,
-  },
+  root: { flex: 1, backgroundColor: '#000' },
+  permLoading: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
+  permGate: { flex: 1, backgroundColor: '#0a0a0a' },
+  permCenter: { flex: 1, paddingHorizontal: 32, alignItems: 'center', justifyContent: 'center', gap: 14 },
+  permTitle: { color: '#fff', fontFamily: fontFamily.heading, fontWeight: fontWeight.bold as any, fontSize: 20, marginTop: 8 },
+  permBody: { color: 'rgba(255,255,255,0.78)', fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  primaryButton: { marginTop: 20, backgroundColor: '#0d8575', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14 },
+  primaryButtonText: { color: '#fff', fontFamily: fontFamily.body, fontWeight: fontWeight.bold as any },
+  secondaryButton: { marginTop: 6, paddingHorizontal: 24, paddingVertical: 12 },
+  secondaryButtonText: { color: 'rgba(255,255,255,0.78)', fontFamily: fontFamily.body, fontSize: 14 },
   topBar: {
     position: 'absolute',
     top: 0,
@@ -368,55 +442,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
-  iconButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  iconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   titleBlock: { flex: 1, alignItems: 'center' },
-  title: {
-    color: '#fff',
-    fontFamily: fontFamily.heading,
-    fontWeight: fontWeight.bold as any,
-    fontSize: 16,
-  },
-  subtitle: {
-    color: 'rgba(255,255,255,0.78)',
-    fontFamily: fontFamily.body,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  frameWrap: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  frame: {
-    width: FRAME_WIDTH,
-    height: FRAME_HEIGHT,
-  },
-  corner: {
-    position: 'absolute',
-    width: CORNER_LEN,
-    height: CORNER_LEN,
-    borderColor: '#ffd44b',
-  },
+  title: { color: '#fff', fontFamily: fontFamily.heading, fontWeight: fontWeight.bold as any, fontSize: 16 },
+  subtitle: { color: 'rgba(255,255,255,0.78)', fontFamily: fontFamily.body, fontSize: 12, marginTop: 2 },
+  frameWrap: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
+  frame: { width: FRAME_WIDTH, height: FRAME_HEIGHT },
+  corner: { position: 'absolute', width: CORNER_LEN, height: CORNER_LEN, borderColor: '#ffd44b' },
   cornerTL: { top: 0, left: 0, borderTopWidth: CORNER_THICK, borderLeftWidth: CORNER_THICK },
   cornerTR: { top: 0, right: 0, borderTopWidth: CORNER_THICK, borderRightWidth: CORNER_THICK },
   cornerBL: { bottom: 0, left: 0, borderBottomWidth: CORNER_THICK, borderLeftWidth: CORNER_THICK },
   cornerBR: { bottom: 0, right: 0, borderBottomWidth: CORNER_THICK, borderRightWidth: CORNER_THICK },
-  helperWrap: {
-    position: 'absolute',
-    top: '12%',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-  },
+  helperWrap: { position: 'absolute', top: '12%', left: 0, right: 0, alignItems: 'center' },
   helperBubble: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -426,11 +463,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 999,
   },
-  helperText: {
-    color: '#fff',
-    fontFamily: fontFamily.body,
-    fontSize: 12,
-  },
+  helperText: { color: '#fff', fontFamily: fontFamily.body, fontSize: 12 },
   bottomBar: {
     position: 'absolute',
     bottom: 0,
