@@ -306,7 +306,15 @@ exports.enqueueCashback = onRequest(
     const uid = decoded.uid;
 
     const body = req.body || {};
-    const { storagePath, bytesHash, capturedAt, perceptualHash, source, journey } = body;
+    const {
+      storagePath,
+      bytesHash,
+      capturedAt,
+      perceptualHash,
+      source,
+      journey,
+      clientUploadId, // optional: client's pre-allocated id for the receipt doc
+    } = body;
     if (!storagePath || !bytesHash) {
       res.status(400).json({ code: 'invalid_image', message: 'storagePath + bytesHash required' });
       return;
@@ -345,6 +353,22 @@ exports.enqueueCashback = onRequest(
       .get();
     if (!dedupQuery.empty) {
       const existing = dedupQuery.docs[0];
+      // If the client wrote a placeholder mirror doc with a different
+      // id, mark it as superseded so it disappears from the user's
+      // history (the canonical existing receipt is the source of truth).
+      if (clientUploadId && clientUploadId !== existing.id) {
+        await db
+          .doc(`users/${uid}/cashback_status/${clientUploadId}`)
+          .set(
+            {
+              status: 'superseded',
+              supersededBy: existing.id,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          )
+          .catch(() => {});
+      }
       res.status(200).json({
         cashbackId: existing.id,
         status: existing.get('status'),
@@ -353,7 +377,12 @@ exports.enqueueCashback = onRequest(
       return;
     }
 
-    const docRef = db.collection('receipts').doc();
+    // Use the client-provided id (so the placeholder mirror doc and
+    // the receipt doc share the id, and the live snapshot keeps working
+    // through the entire lifecycle without identity changes).
+    const docRef = clientUploadId
+      ? db.collection('receipts').doc(clientUploadId)
+      : db.collection('receipts').doc();
     const cashbackId = docRef.id;
     const now = admin.firestore.FieldValue.serverTimestamp();
     const estimatedReadyBy = Date.now() + 30_000;
@@ -418,14 +447,19 @@ exports.enqueueCashback = onRequest(
       updatedAt: now,
     });
 
-    // Mirror a slim status doc into the user's sub-collection so the
-    // app can subscribe without needing top-level /receipts/* rules.
-    await db.doc(`users/${uid}/cashback_status/${cashbackId}`).set({
-      status: 'ocr_pending',
-      receiptId: cashbackId,
-      cashbackCents: 0,
-      updatedAt: now,
-    });
+    // Update the user-side mirror to ocr_pending. If the client wrote
+    // a placeholder mirror earlier ('uploading'), this merges into it;
+    // if not, it creates the doc fresh.
+    await db.doc(`users/${uid}/cashback_status/${cashbackId}`).set(
+      {
+        status: 'ocr_pending',
+        receiptId: cashbackId,
+        cashbackCents: 0,
+        isClientPlaceholder: false,
+        updatedAt: now,
+      },
+      { merge: true },
+    );
 
     // Publish PubSub
     try {

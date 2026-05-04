@@ -15,6 +15,8 @@ import {
   collection,
   doc,
   onSnapshot,
+  serverTimestamp,
+  setDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { ref as storageRef, uploadBytesResumable } from 'firebase/storage';
@@ -99,7 +101,55 @@ function randomId(): string {
 
 // ─── Enqueue HTTPS call ─────────────────────────────────────────────
 
+/**
+ * Write a thin placeholder mirror doc the moment the user taps
+ * "Einreichen" — before upload even starts. This makes the bon
+ * visible in /cashback/history immediately + survives app close
+ * + lets the pending screen subscribe like any other bon.
+ *
+ * Status starts as 'uploading'. The Cloud Function later updates
+ * the same doc (we pass `localId` as `clientUploadId` to the
+ * function so it uses our id as the receipt doc id).
+ */
+export async function createPendingMirror(
+  uid: string,
+  localId: string,
+  initial?: { merchantName?: string | null },
+): Promise<void> {
+  await setDoc(
+    doc(db, `users/${uid}/cashback_status/${localId}`),
+    {
+      status: 'uploading',
+      receiptId: localId,
+      cashbackCents: 0,
+      eligibleItemCount: 0,
+      merchantName: initial?.merchantName ?? null,
+      isClientPlaceholder: true,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+export async function deletePendingMirror(uid: string, localId: string): Promise<void> {
+  // Soft-delete: just mark as superseded. Avoids race with CF write.
+  try {
+    await setDoc(
+      doc(db, `users/${uid}/cashback_status/${localId}`),
+      { status: 'superseded', updatedAt: serverTimestamp() },
+      { merge: true },
+    );
+  } catch (e) {
+    console.warn('⚠️ deletePendingMirror failed:', e);
+  }
+}
+
 export interface EnqueueArgs {
+  /** Client-generated id used for both the placeholder mirror AND the
+   *  Cloud Function's receipt doc. Lets the same UI subscription work
+   *  through the entire lifecycle. */
+  clientUploadId: string;
   storagePath: string;
   bytesHash: string;
   capturedAt: number;

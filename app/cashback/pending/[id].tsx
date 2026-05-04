@@ -37,6 +37,7 @@ import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { storage } from '@/lib/firebase';
 import {
+  deletePendingMirror,
   enqueueCashback,
   subscribeReceipt,
   uploadBonImage,
@@ -47,7 +48,7 @@ import journeyTrackingService from '@/lib/services/journeyTrackingService';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-type ViewState = 'unknown' | 'pending' | 'review' | 'approved' | 'rejected' | 'not_found';
+type ViewState = 'unknown' | 'uploading' | 'pending' | 'review' | 'approved' | 'rejected' | 'not_found';
 
 interface MirrorItem {
   name: string;
@@ -85,6 +86,8 @@ interface MirrorDoc {
 
 function viewStateFor(status?: string | null): ViewState {
   switch (status) {
+    case 'uploading':
+      return 'uploading';
     case 'ocr_pending':
     case 'ocr_done':
     case 'matched':
@@ -96,6 +99,8 @@ function viewStateFor(status?: string | null): ViewState {
       return 'approved';
     case 'rejected':
       return 'rejected';
+    case 'superseded':
+      return 'not_found';
     default:
       return 'unknown';
   }
@@ -138,11 +143,10 @@ export default function CashbackPendingScreen() {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
-  // Optimistic upload + enqueue path: when we arrive with a local-XYZ
-  // id and an uploadUri, run upload+enqueue here, then router.replace
-  // to the real cashbackId so the snapshot subscription kicks in.
-  const isLocal = String(params.id ?? '').startsWith('local-');
-  const hasUploadHandoff = isLocal && !!params.uploadUri && uploadStep === 'idle';
+  // Upload+enqueue handoff: triggered when we arrive with uploadUri
+  // params (the placeholder mirror is already in Firestore from the
+  // review screen, so the user already sees this bon in /history).
+  const hasUploadHandoff = !!params.uploadUri && uploadStep === 'idle';
 
   useEffect(() => {
     if (!hasUploadHandoff) return;
@@ -153,6 +157,8 @@ export default function CashbackPendingScreen() {
     }
 
     let cancelled = false;
+    const localId = String(params.id ?? '');
+
     (async () => {
       try {
         setUploadStep('uploading');
@@ -168,8 +174,7 @@ export default function CashbackPendingScreen() {
         setUploadStep('enqueueing');
 
         // Snapshot the active journey so the receipt has shopping
-        // context (geohash, motivation, viewedProducts at the moment
-        // of upload). Best-effort — swallow failures.
+        // context (geohash, motivation, viewedProducts at upload).
         let journey: any = null;
         try {
           const j = journeyTrackingService.getCurrentJourney?.();
@@ -187,6 +192,7 @@ export default function CashbackPendingScreen() {
         } catch {}
 
         const result = await enqueueCashback({
+          clientUploadId: localId,
           storagePath: upload.storagePath,
           bytesHash: String(params.uploadHash ?? ''),
           capturedAt: Number(params.uploadCapturedAt ?? Date.now()),
@@ -196,13 +202,17 @@ export default function CashbackPendingScreen() {
         if (cancelled) return;
 
         setUploadStep('done');
-        // Forward to the real cashbackId so the live mirror listener
-        // subscribes properly. Carry the duplicate flag so the user
-        // sees the friendly banner.
-        router.replace({
-          pathname: '/cashback/pending/[id]' as any,
-          params: { id: result.cashbackId, dup: result.duplicate ? '1' : undefined } as any,
-        });
+        if (result.duplicate && result.cashbackId !== localId) {
+          // Server detected duplicate. Mark our placeholder as
+          // superseded + navigate to the canonical bon.
+          await deletePendingMirror(user.uid, localId).catch(() => {});
+          router.replace({
+            pathname: '/cashback/pending/[id]' as any,
+            params: { id: result.cashbackId, dup: '1' } as any,
+          });
+        }
+        // Otherwise: same id, CF will update OUR mirror doc and the
+        // existing snapshot listener picks up the new state. Stay put.
       } catch (e: any) {
         if (cancelled) return;
         const code = e?.code as string | undefined;
@@ -229,10 +239,12 @@ export default function CashbackPendingScreen() {
     };
   }, [hasUploadHandoff, user?.uid]);
 
-  // Live snapshot for the real cashbackId.
+  // Live snapshot — the placeholder mirror exists from the moment the
+  // user tapped "Einreichen", so subscribing immediately works for
+  // both the placeholder ('uploading') AND the final state.
   useEffect(() => {
     const id = String(params.id ?? '');
-    if (!id || id.startsWith('local-')) {
+    if (!id) {
       setHasResponded(true);
       return;
     }
@@ -268,15 +280,23 @@ export default function CashbackPendingScreen() {
   }, [doc?.storagePath]);
 
   const state: ViewState = useMemo(() => {
-    if (uploadStep === 'uploading' || uploadStep === 'enqueueing') return 'pending';
     if (uploadStep === 'error') return 'rejected';
+    // Visual state is driven by the mirror doc's status. Upload-step is
+    // only used to override copy / show the "Einreichen fehlgeschlagen"
+    // banner — actual state comes from Firestore so the user gets the
+    // truth even after closing the app.
     if (!hasResponded) return 'unknown';
     if (!doc) {
-      const id = String(params.id ?? '');
-      return id.startsWith('local-') ? 'pending' : 'not_found';
+      // Placeholder might have been deleted (superseded after dedup) —
+      // most likely the user is now on a different doc. If we're still
+      // mid-upload, show 'uploading' (the mirror writes are eventually
+      // consistent and may not have hit yet).
+      return uploadStep === 'uploading' || uploadStep === 'enqueueing'
+        ? 'uploading'
+        : 'not_found';
     }
     return viewStateFor(doc.status);
-  }, [doc, hasResponded, params.id, uploadStep]);
+  }, [doc, hasResponded, uploadStep]);
 
   const primary = theme.primary ?? '#0d8575';
   const warn = '#d6603a';
@@ -287,25 +307,23 @@ export default function CashbackPendingScreen() {
 
   const banner = useMemo(() => {
     if (state === 'unknown') return null;
-    if (state === 'pending') {
-      const titleByStep =
-        uploadStep === 'uploading'
-          ? 'Bon wird hochgeladen'
-          : uploadStep === 'enqueueing'
-          ? 'Wird in die Prüfung gegeben'
-          : 'Bon wird geprüft';
-      const bodyByStep =
-        uploadStep === 'uploading'
-          ? 'Wir laden dein Foto hoch — meistens nur ein paar Sekunden.'
-          : uploadStep === 'enqueueing'
-          ? 'Foto ist da, wir starten gerade die Prüfung.'
-          : 'Das kann einen Moment dauern. Du kannst die App ruhig schließen — den Status findest du jederzeit unter „Meine Bons".';
+    if (state === 'uploading') {
       return {
         icon: <ActivityIndicator size="large" color={primary} />,
         bg: primary + '18',
-        title: titleByStep,
-        body: bodyByStep,
+        title: 'Bon wird hochgeladen',
+        body: 'Wir laden dein Foto hoch — meistens nur ein paar Sekunden. Du kannst die App ruhig schließen.',
         cashback: null as string | null,
+      };
+    }
+    if (state === 'pending') {
+      return {
+        icon: <ActivityIndicator size="large" color={primary} />,
+        bg: primary + '18',
+        title: 'Bon wird geprüft',
+        body:
+          'Das kann einen Moment dauern. Du kannst die App ruhig schließen — den Status findest du jederzeit unter „Meine Bons".',
+        cashback: null,
       };
     }
     if (state === 'rejected' && uploadStep === 'error') {

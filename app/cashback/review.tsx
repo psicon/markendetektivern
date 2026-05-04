@@ -31,7 +31,21 @@ const { height: SCREEN_H } = Dimensions.get('window');
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { createPendingMirror } from '@/lib/services/cashbackUpload';
 import { verdictFor, type CapturedBon } from '@/lib/utils/cashbackImage';
+
+function newClientUploadId(): string {
+  // Compact UUID-ish (no dashes) — safe as a Firestore doc id.
+  const buf = new Uint8Array(16);
+  if (typeof globalThis.crypto?.getRandomValues === 'function') {
+    globalThis.crypto.getRandomValues(buf);
+  } else {
+    for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 256);
+  }
+  buf[6] = (buf[6] & 0x0f) | 0x40;
+  buf[8] = (buf[8] & 0x3f) | 0x80;
+  return [...buf].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 const CHECK_ITEMS: { key: 'corners' | 'date' | 'items'; label: string; sub: string }[] = [
   {
@@ -122,19 +136,31 @@ export default function CashbackReviewScreen() {
     });
   }, [bon.uri, bon.width, bon.height, params.source]);
 
-  // Optimistic submit: navigate IMMEDIATELY to pending with a local
-  // placeholder ID + the bon metadata in route params. The pending
-  // screen runs the upload + enqueue in the background and updates
-  // its own state with progress ("Bild wird hochgeladen…" → "Wird
-  // geprüft…" → live status). User never stares at a frozen review
-  // screen with a spinner.
-  const handleSubmit = useCallback(() => {
+  // Optimistic submit (best-practice): create a placeholder mirror doc
+  // in Firestore RIGHT NOW so the bon is immediately visible everywhere
+  // (Bons-Verlauf, snapshot listeners, even if the user closes the app
+  // mid-upload). Then navigate to the pending screen which subscribes
+  // to that same doc + runs the upload+enqueue in the background. The
+  // Cloud Function uses our clientUploadId as the receipt doc id so
+  // the mirror smoothly transitions through `uploading` → `ocr_pending`
+  // → final state without identity changes.
+  const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
     if (!user?.uid) {
       setSubmitError('Bitte melde dich an, um Bons einzureichen.');
       return;
     }
-    const localId = `local-${Date.now()}`;
+    const localId = newClientUploadId();
+    setSubmitting(true);
+    try {
+      await createPendingMirror(user.uid, localId, {
+        merchantName: 'Wird hochgeladen …',
+      });
+    } catch (e) {
+      console.warn('⚠️ createPendingMirror failed', e);
+      // Non-fatal — pending screen will still upload, just won't have
+      // the placeholder shown in history during the brief window.
+    }
     router.replace({
       pathname: '/cashback/pending/[id]' as any,
       params: {

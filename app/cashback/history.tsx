@@ -69,6 +69,20 @@ function statusVisual(s: string | undefined, primary: string): StatusVisual {
         bg: 'rgba(241,196,15,0.18)',
         icon: 'account-search-outline',
       };
+    case 'uploading':
+      return {
+        label: 'Wird hochgeladen',
+        color: primary,
+        bg: primary + '15',
+        icon: 'cloud-upload-outline',
+      };
+    case 'superseded':
+      return {
+        label: 'Doppelt — siehe Original',
+        color: '#5c6769',
+        bg: 'rgba(92,103,105,0.12)',
+        icon: 'content-copy',
+      };
     case 'ocr_pending':
     case 'ocr_done':
     case 'matched':
@@ -126,7 +140,12 @@ export default function CashbackHistoryScreen() {
       setEntries([]);
       return;
     }
-    const unsub = subscribeUserCashbackHistory((rows) => setEntries(rows));
+    const unsub = subscribeUserCashbackHistory((rows) =>
+      // 'superseded' entries are duplicate-detected placeholders that
+      // the user is automatically redirected to the canonical bon —
+      // hiding them keeps the list tidy.
+      setEntries(rows.filter((r) => r.status !== 'superseded')),
+    );
     return unsub;
   }, [user?.uid]);
 
