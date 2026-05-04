@@ -129,6 +129,50 @@ function bonAgeDays(iso) {
 }
 
 /**
+ * Per-user purchased-products trail (architecture §3.2). One doc per
+ * (receiptId × item-name-slug) so reprocesses are idempotent (same
+ * input → same doc-id → set with merge, no dupes).
+ */
+function slugify(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-zäöüß0-9]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+}
+
+async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo) {
+  if (!parsed || !Array.isArray(parsed.items)) return;
+  const col = db.collection(`users/${uid}/purchased_products`);
+  const writes = [];
+  for (const it of parsed.items) {
+    if (!it || !Number.isFinite(it.priceCents) || it.priceCents <= 0) continue;
+    const slug = slugify(it.name);
+    if (!slug) continue;
+    const id = `${cashbackId}_${slug}`;
+    writes.push(
+      col.doc(id).set(
+        {
+          itemName: String(it.name || ''),
+          priceCents: it.priceCents,
+          qty: Number.isFinite(it.qty) ? it.qty : 1,
+          receiptId: cashbackId,
+          bonDate: parsed.bonDate || null,
+          merchantId: merchantInfo?.id || null,
+          merchantName: merchantInfo?.name || null,
+          merchantLand: merchantInfo?.land || null,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      ),
+    );
+  }
+  await Promise.all(writes).catch((e) =>
+    logger.warn('purchased-products-write-failed', { cashbackId, err: e.message }),
+  );
+}
+
+/**
  * Idempotent ledger sync: enforce that a receiptId has AT MOST one
  * active 'earn' entry, and that the earn matches the current status.
  *
@@ -262,7 +306,7 @@ exports.enqueueCashback = onRequest(
     const uid = decoded.uid;
 
     const body = req.body || {};
-    const { storagePath, bytesHash, capturedAt, perceptualHash, source } = body;
+    const { storagePath, bytesHash, capturedAt, perceptualHash, source, journey } = body;
     if (!storagePath || !bytesHash) {
       res.status(400).json({ code: 'invalid_image', message: 'storagePath + bytesHash required' });
       return;
@@ -314,6 +358,44 @@ exports.enqueueCashback = onRequest(
     const now = admin.firestore.FieldValue.serverTimestamp();
     const estimatedReadyBy = Date.now() + 30_000;
 
+    // Sanitize journey snapshot — strip anything that isn't a primitive
+    // or plain object (DocumentReferences from the client would explode
+    // here). We only persist what's safe for analytics + audit.
+    const safeJourney =
+      journey && typeof journey === 'object'
+        ? {
+            journeyId: journey.journeyId ? String(journey.journeyId) : null,
+            discoveryMethod: journey.discoveryMethod ? String(journey.discoveryMethod) : null,
+            startedAt: Number.isFinite(journey.startedAt) ? Number(journey.startedAt) : null,
+            location:
+              journey.location && typeof journey.location === 'object'
+                ? {
+                    lat: Number(journey.location.lat) || null,
+                    lon: Number(journey.location.lon) || null,
+                    city: journey.location.city ? String(journey.location.city) : null,
+                    geohash5: journey.location.geohash5 ? String(journey.location.geohash5) : null,
+                    source: journey.location.source ? String(journey.location.source) : null,
+                  }
+                : null,
+            motivationSignals:
+              journey.motivationSignals && typeof journey.motivationSignals === 'object'
+                ? {
+                    priceSignals: Number(journey.motivationSignals.priceSignals) || 0,
+                    brandSignals: Number(journey.motivationSignals.brandSignals) || 0,
+                    contentSignals: Number(journey.motivationSignals.contentSignals) || 0,
+                    marketSignals: Number(journey.motivationSignals.marketSignals) || 0,
+                    searchTerms: Array.isArray(journey.motivationSignals.searchTerms)
+                      ? journey.motivationSignals.searchTerms.slice(0, 20).map(String)
+                      : [],
+                  }
+                : null,
+            filterMetricsMotivation: journey.filterMetricsMotivation
+              ? String(journey.filterMetricsMotivation)
+              : null,
+            viewedProductsCount: Number(journey.viewedProductsCount) || 0,
+          }
+        : null;
+
     await docRef.set({
       userId: uid,
       status: 'ocr_pending',
@@ -331,6 +413,7 @@ exports.enqueueCashback = onRequest(
         contentType: 'image/jpeg',
         sizeBytes: 0, // process step fills the real number
       },
+      journey: safeJourney,
       createdAt: now,
       updatedAt: now,
     });
@@ -559,7 +642,13 @@ exports.processCashback = onMessagePublished(
       // If reprocess flips approved→rejected, we reverse the earlier earn.
       const userRef = db.doc(`users/${uid}`);
       await syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, ocr.parsed.bonDate);
+
       if (status === 'approved' && cashbackCents > 0) {
+        // 7a) Per-user purchased products audit (architecture §3.2).
+        // One doc per item-name × bon — gives an at-a-glance "what did
+        // I buy here" trail under the user. We use a deterministic
+        // doc id so reprocessing doesn't multiply entries.
+        await writePurchasedProducts(uid, cashbackId, ocr.parsed, merchantInfo);
 
         // 8) Push (currently stub-logs)
         await sendCashbackReady(uid, {

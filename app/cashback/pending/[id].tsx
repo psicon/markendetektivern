@@ -34,9 +34,16 @@ import {
 } from '@/components/design/DetailHeader';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { useAuth } from '@/lib/contexts/AuthContext';
 import { storage } from '@/lib/firebase';
-import { subscribeReceipt } from '@/lib/services/cashbackUpload';
+import {
+  enqueueCashback,
+  subscribeReceipt,
+  uploadBonImage,
+} from '@/lib/services/cashbackUpload';
 import { formatCents } from '@/lib/types/cashback';
+import { prepareForUpload } from '@/lib/utils/cashbackImage';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -102,19 +109,127 @@ function formatDate(iso?: string | null) {
 }
 
 export default function CashbackPendingScreen() {
-  const params = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{
+    id: string;
+    dup?: string;
+    // Optimistic-submit handoff from review screen:
+    uploadUri?: string;
+    uploadHash?: string;
+    uploadWidth?: string;
+    uploadHeight?: string;
+    uploadCapturedAt?: string;
+    uploadSource?: string;
+  }>();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { theme, shadows } = useTokens();
+  const { user } = useAuth();
 
   const [doc, setDoc] = useState<MirrorDoc | null>(null);
   const [hasResponded, setHasResponded] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [uploadStep, setUploadStep] = useState<
+    'idle' | 'uploading' | 'enqueueing' | 'done' | 'error'
+  >('idle');
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [showDuplicate, setShowDuplicate] = useState<boolean>(params.dup === '1');
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
+  // Optimistic upload + enqueue path: when we arrive with a local-XYZ
+  // id and an uploadUri, run upload+enqueue here, then router.replace
+  // to the real cashbackId so the snapshot subscription kicks in.
+  const isLocal = String(params.id ?? '').startsWith('local-');
+  const hasUploadHandoff = isLocal && !!params.uploadUri && uploadStep === 'idle';
+
+  useEffect(() => {
+    if (!hasUploadHandoff) return;
+    if (!user?.uid) {
+      setUploadError('Bitte melde dich an, um Bons einzureichen.');
+      setUploadStep('error');
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        setUploadStep('uploading');
+        const prepared = await prepareForUpload(
+          String(params.uploadUri),
+          2000,
+          Number(params.uploadWidth ?? 0),
+          Number(params.uploadHeight ?? 0),
+        );
+        const upload = await uploadBonImage(prepared.uri, user.uid);
+        if (cancelled) return;
+
+        setUploadStep('enqueueing');
+
+        // Snapshot the active journey so the receipt has shopping
+        // context (geohash, motivation, viewedProducts at the moment
+        // of upload). Best-effort — swallow failures.
+        let journey: any = null;
+        try {
+          const j = journeyTrackingService.getCurrentJourney?.();
+          if (j) {
+            journey = {
+              journeyId: j.journeyId,
+              discoveryMethod: j.discoveryMethod,
+              startedAt: j.startTime,
+              location: j.location ?? null,
+              motivationSignals: j.motivationSignals ?? null,
+              filterMetricsMotivation: j.filterMetrics?.motivation ?? null,
+              viewedProductsCount: j.viewedProducts?.length ?? 0,
+            };
+          }
+        } catch {}
+
+        const result = await enqueueCashback({
+          storagePath: upload.storagePath,
+          bytesHash: String(params.uploadHash ?? ''),
+          capturedAt: Number(params.uploadCapturedAt ?? Date.now()),
+          source: (params.uploadSource as any) || 'live_camera',
+          journey,
+        });
+        if (cancelled) return;
+
+        setUploadStep('done');
+        // Forward to the real cashbackId so the live mirror listener
+        // subscribes properly. Carry the duplicate flag so the user
+        // sees the friendly banner.
+        router.replace({
+          pathname: '/cashback/pending/[id]' as any,
+          params: { id: result.cashbackId, dup: result.duplicate ? '1' : undefined } as any,
+        });
+      } catch (e: any) {
+        if (cancelled) return;
+        const code = e?.code as string | undefined;
+        const message = e?.message as string | undefined;
+        const human =
+          code === 'rate_limited'
+            ? 'Du hast heute schon einen Bon eingereicht. Morgen geht es weiter.'
+            : code === 'consent_missing'
+            ? 'Bitte bestätige zuerst die Cashback-Einwilligung.'
+            : code === 'unauthenticated' || code === 'not_authenticated'
+            ? 'Bitte melde dich an, um Bons einzureichen.'
+            : code?.startsWith('storage/')
+            ? `Storage-Fehler: ${code}${message ? ' — ' + message : ''}`
+            : code?.startsWith('http_')
+            ? `Backend antwortet nicht (${code}). Nochmal versuchen?`
+            : `Einreichen fehlgeschlagen: ${code || message || 'unbekannter Fehler'}`;
+        setUploadError(human);
+        setUploadStep('error');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasUploadHandoff, user?.uid]);
+
+  // Live snapshot for the real cashbackId.
   useEffect(() => {
     const id = String(params.id ?? '');
     if (!id || id.startsWith('local-')) {
@@ -153,13 +268,15 @@ export default function CashbackPendingScreen() {
   }, [doc?.storagePath]);
 
   const state: ViewState = useMemo(() => {
+    if (uploadStep === 'uploading' || uploadStep === 'enqueueing') return 'pending';
+    if (uploadStep === 'error') return 'rejected';
     if (!hasResponded) return 'unknown';
     if (!doc) {
       const id = String(params.id ?? '');
       return id.startsWith('local-') ? 'pending' : 'not_found';
     }
     return viewStateFor(doc.status);
-  }, [doc, hasResponded, params.id]);
+  }, [doc, hasResponded, params.id, uploadStep]);
 
   const primary = theme.primary ?? '#0d8575';
   const warn = '#d6603a';
@@ -171,13 +288,33 @@ export default function CashbackPendingScreen() {
   const banner = useMemo(() => {
     if (state === 'unknown') return null;
     if (state === 'pending') {
+      const titleByStep =
+        uploadStep === 'uploading'
+          ? 'Bon wird hochgeladen'
+          : uploadStep === 'enqueueing'
+          ? 'Wird in die Prüfung gegeben'
+          : 'Bon wird geprüft';
+      const bodyByStep =
+        uploadStep === 'uploading'
+          ? 'Wir laden dein Foto hoch — meistens nur ein paar Sekunden.'
+          : uploadStep === 'enqueueing'
+          ? 'Foto ist da, wir starten gerade die Prüfung.'
+          : 'Das kann einen Moment dauern. Du kannst die App ruhig schließen — den Status findest du jederzeit unter „Meine Bons".';
       return {
         icon: <ActivityIndicator size="large" color={primary} />,
         bg: primary + '18',
-        title: 'Bon wird geprüft',
-        body:
-          'Das kann einen Moment dauern. Du kannst die App ruhig schließen — den Status findest du jederzeit unter „Meine Bons".',
+        title: titleByStep,
+        body: bodyByStep,
         cashback: null as string | null,
+      };
+    }
+    if (state === 'rejected' && uploadStep === 'error') {
+      return {
+        icon: <MaterialCommunityIcons name="alert-circle-outline" size={42} color={warn} />,
+        bg: warn + '22',
+        title: 'Einreichen fehlgeschlagen',
+        body: uploadError ?? 'Bitte versuche es noch einmal.',
+        cashback: null,
       };
     }
     if (state === 'review') {
@@ -245,6 +382,37 @@ export default function CashbackPendingScreen() {
         contentContainerStyle={{ paddingTop: headerOffset + 8, paddingBottom: insets.bottom + 100 }}
         showsVerticalScrollIndicator={false}
       >
+        {/* ─── Duplicate-friendly banner ─── */}
+        {showDuplicate ? (
+          <View
+            style={{
+              marginHorizontal: 16,
+              marginBottom: 8,
+              padding: 12,
+              borderRadius: radii.md ?? 12,
+              backgroundColor: '#f1c40f22',
+              borderWidth: 1,
+              borderColor: '#f1c40f55',
+              flexDirection: 'row',
+              alignItems: 'flex-start',
+              gap: 10,
+            }}
+          >
+            <MaterialCommunityIcons name="information-outline" size={18} color="#b08800" />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: theme.text, fontFamily: fontFamily.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
+                Diesen Bon hattest du schon eingereicht
+              </Text>
+              <Text style={{ color: theme.textSub, fontFamily: fontFamily.body, fontSize: 13, marginTop: 2, lineHeight: 18 }}>
+                Wir zeigen dir den ursprünglichen Eintrag — du wirst nicht doppelt belohnt, aber auch nicht doppelt belastet.
+              </Text>
+            </View>
+            <Pressable onPress={() => setShowDuplicate(false)} hitSlop={8}>
+              <MaterialCommunityIcons name="close" size={16} color={theme.textSub} />
+            </Pressable>
+          </View>
+        ) : null}
+
         {/* ─── Status banner ─── */}
         {banner ? (
           <View

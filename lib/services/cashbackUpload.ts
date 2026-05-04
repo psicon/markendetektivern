@@ -105,6 +105,18 @@ export interface EnqueueArgs {
   capturedAt: number;
   perceptualHash?: string;
   source: 'live_camera' | 'upload';
+  /** Best-effort journey snapshot at upload time — gets stored on the
+   *  receipt doc so the admin audit + future B2B analytics see what
+   *  the user was doing in-app right before submitting. */
+  journey?: {
+    journeyId?: string;
+    discoveryMethod?: string;
+    startedAt?: number;
+    location?: any | null;
+    motivationSignals?: any | null;
+    filterMetricsMotivation?: any | null;
+    viewedProductsCount?: number;
+  } | null;
 }
 
 export interface EnqueueResult {

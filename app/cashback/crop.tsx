@@ -236,8 +236,8 @@ export default function CashbackCropScreen() {
     } catch (e: any) {
       console.warn('⚠️ crop failed', e?.message);
       const msg = String(e?.message || e?.code || '');
-      const friendly = /not.*registered|native|nativemodule/i.test(msg)
-        ? 'Crop braucht ein App-Update: im Terminal "npx expo run:ios --device" laufen lassen, dann ist das Native-Modul drin.'
+      const friendly = /not.*registered|native|nativemodule|manipulator_not_available/i.test(msg)
+        ? 'Zuschneiden ist im aktuellen Build noch nicht verfügbar. Du kannst den Bon trotzdem ohne Zuschnitt einreichen — die OCR ist robust gegen Rand-Padding. Zum Aktivieren: Dev-Client neu bauen mit „npx expo run:ios --device".'
         : `Zuschneiden fehlgeschlagen: ${msg || 'unbekannter Fehler'}`;
       setError(friendly);
       setCropping(false);

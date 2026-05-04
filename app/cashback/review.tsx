@@ -31,15 +31,7 @@ const { height: SCREEN_H } = Dimensions.get('window');
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import {
-  enqueueCashback,
-  uploadBonImage,
-} from '@/lib/services/cashbackUpload';
-import {
-  prepareForUpload,
-  verdictFor,
-  type CapturedBon,
-} from '@/lib/utils/cashbackImage';
+import { verdictFor, type CapturedBon } from '@/lib/utils/cashbackImage';
 
 const CHECK_ITEMS: { key: 'corners' | 'date' | 'items'; label: string; sub: string }[] = [
   {
@@ -130,55 +122,31 @@ export default function CashbackReviewScreen() {
     });
   }, [bon.uri, bon.width, bon.height, params.source]);
 
-  const handleSubmit = useCallback(async () => {
+  // Optimistic submit: navigate IMMEDIATELY to pending with a local
+  // placeholder ID + the bon metadata in route params. The pending
+  // screen runs the upload + enqueue in the background and updates
+  // its own state with progress ("Bild wird hochgeladen…" → "Wird
+  // geprüft…" → live status). User never stares at a frozen review
+  // screen with a spinner.
+  const handleSubmit = useCallback(() => {
     if (!canSubmit) return;
-    setSubmitError(null);
-    setSubmitting(true);
-    try {
-      if (!user?.uid) {
-        throw new Error('not_authenticated');
-      }
-      const prepared = await prepareForUpload(bon.uri, 2000, bon.width, bon.height);
-      const upload = await uploadBonImage(prepared.uri, user.uid);
-      const result = await enqueueCashback({
-        storagePath: upload.storagePath,
-        bytesHash: bon.bytesHash,
-        capturedAt: bon.capturedAt,
-        source: (params.source as 'live_camera' | 'upload') || 'live_camera',
-      });
-      router.replace({
-        pathname: '/cashback/pending/[id]' as any,
-        params: { id: result.cashbackId },
-      });
-    } catch (error: any) {
-      console.warn('⚠️ submit failed:', JSON.stringify({
-        code: error?.code,
-        message: error?.message,
-        name: error?.name,
-        stack: error?.stack?.split('\n')?.slice(0, 4),
-      }, null, 2));
-      const code = error?.code as string | undefined;
-      const message = error?.message as string | undefined;
-      const msg =
-        code === 'rate_limited'
-          ? 'Du hast heute schon einen Bon eingereicht. Morgen geht es weiter.'
-          : code === 'consent_missing'
-          ? 'Bitte bestätige zuerst die Cashback-Einwilligung.'
-          : code === 'unauthenticated' || code === 'not_authenticated'
-          ? 'Bitte melde dich an, um Bons einzureichen.'
-          : code?.startsWith('http_')
-          ? `Backend-Fehler ${code}. (Network? Cloud Function nicht deployed?)`
-          : code === 'storage/unauthorized'
-          ? 'Storage lehnt den Upload ab — Storage-Rules müssen aktualisiert werden (storage.rules deploy).'
-          : code?.startsWith('storage/')
-          ? `Storage-Fehler: ${code}${message ? ' — ' + message : ''}`
-          : code === 'local_read_failed'
-          ? 'Bon-Bild konnte nicht gelesen werden.'
-          : `Einreichen fehlgeschlagen: ${code || message || 'unbekannter Fehler'}`;
-      setSubmitError(msg);
-    } finally {
-      setSubmitting(false);
+    if (!user?.uid) {
+      setSubmitError('Bitte melde dich an, um Bons einzureichen.');
+      return;
     }
+    const localId = `local-${Date.now()}`;
+    router.replace({
+      pathname: '/cashback/pending/[id]' as any,
+      params: {
+        id: localId,
+        uploadUri: bon.uri,
+        uploadHash: bon.bytesHash,
+        uploadWidth: String(bon.width),
+        uploadHeight: String(bon.height),
+        uploadCapturedAt: String(bon.capturedAt),
+        uploadSource: (params.source as string) || 'live_camera',
+      },
+    });
   }, [bon, canSubmit, user?.uid, params.source]);
 
   const verdictColor = (ok: boolean) => (ok ? theme.primary ?? '#0d8575' : '#d6603a');
