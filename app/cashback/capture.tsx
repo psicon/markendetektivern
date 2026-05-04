@@ -255,9 +255,25 @@ export default function CashbackCaptureScreen() {
       });
       if (result.canceled || !result.assets?.[0]) return;
       const a = result.assets[0];
-      // Gallery photos aren't auto-cropped (the native document
-      // scanner only works on live camera). Route through the crop
-      // screen so the user can adjust the bon area before submit.
+
+      // Try iOS auto edge-detection + perspective correction first
+      // (Apple VisionKit). On success we skip the manual crop screen
+      // and go straight to review with a clean, flat bon image.
+      // On Android (where the native module is a stub) and on iOS
+      // when no clear quad is found, the JS layer falls back to
+      // the manual crop screen.
+      try {
+        const { detectAndCropDocument } = await import('bon-edge-detector');
+        const auto = await detectAndCropDocument(a.uri);
+        if (auto) {
+          await goReview(auto.uri, 'upload');
+          return;
+        }
+      } catch (e: any) {
+        console.warn('⚠️ auto-crop unavailable:', e?.message);
+      }
+
+      // Fallback: manual crop screen.
       router.replace({
         pathname: '/cashback/crop',
         params: {
@@ -270,7 +286,7 @@ export default function CashbackCaptureScreen() {
     } catch (error: any) {
       console.warn('⚠️ Gallery pick failed:', error);
     }
-  }, []);
+  }, [goReview]);
 
   const handleBack = useCallback(() => {
     router.back();

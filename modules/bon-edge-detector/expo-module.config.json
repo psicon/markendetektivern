@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["BonEdgeDetectorModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.bonedgedetector.BonEdgeDetectorModule"]
+  }
+}

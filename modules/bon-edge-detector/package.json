@@ -1,0 +1,15 @@
+{
+  "name": "bon-edge-detector",
+  "version": "0.1.0",
+  "description": "Native document-edge detection + perspective correction for static images. iOS uses Apple VisionKit (VNDetectRectanglesRequest + CIPerspectiveCorrection); Android is a stub that returns null so the JS layer falls back to manual crop.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "private": true,
+  "license": "PRIVATE",
+  "files": [
+    "src",
+    "ios",
+    "android",
+    "expo-module.config.json"
+  ]
+}

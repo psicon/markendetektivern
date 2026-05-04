@@ -12,6 +12,7 @@
     "lint": "expo lint"
   },
   "dependencies": {
+    "bon-edge-detector": "file:./modules/bon-edge-detector",
     "@backpackapp-io/react-native-toast": "^0.14.0",
     "@expo-google-fonts/lato": "^0.4.0",
     "@expo-google-fonts/nunito": "^0.4.1",
