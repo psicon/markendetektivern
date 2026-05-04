@@ -184,8 +184,10 @@ export default function CashbackCaptureScreen() {
       }
       setScannerState('available');
       if (result === 'cancel') {
-        // User backed out of the scanner — return to consent / rewards.
-        router.back();
+        // User dismissed the scanner without scanning. We DO NOT
+        // navigate back — instead we stay here and show the picker
+        // (Scanner / Galerie) so the user can pick another option
+        // without bouncing through Rewards.
         return;
       }
       if (typeof result === 'string') {
@@ -207,10 +209,8 @@ export default function CashbackCaptureScreen() {
         setScannerState('unavailable');
         return;
       }
-      if (result === 'cancel') {
-        router.back();
-        return;
-      }
+      // On cancel: just stay on the picker UI — user can try again
+      // or pick from gallery instead.
       if (typeof result === 'string') {
         await goReview(result, 'live_camera');
       }
@@ -291,44 +291,114 @@ export default function CashbackCaptureScreen() {
 
   if (scannerState === 'unknown') {
     return (
-      <View style={[styles.permGate, { backgroundColor: '#0a0a0a' }]}>
-        <StatusBar barStyle="light-content" />
+      <View style={[styles.permGate, { backgroundColor: theme.bg ?? '#fff' }]}>
+        <StatusBar barStyle="dark-content" />
         <View style={styles.permCenter}>
-          <ActivityIndicator color="#fff" size="large" />
-          <Text style={[styles.permBody, { marginTop: 14 }]}>Bon-Scanner wird geöffnet …</Text>
+          <ActivityIndicator color={theme.primary ?? '#0d8575'} size="large" />
+          <Text style={[styles.permBody, { marginTop: 14, color: theme.textSub ?? '#5c6769' }]}>
+            Bon-Scanner wird geöffnet …
+          </Text>
         </View>
       </View>
     );
   }
 
   if (scannerState === 'available') {
-    // Scanner is taking the foreground. Render an idle view that
-    // re-launches if the user navigates back without scanning.
+    // Picker UI — shown either before the user opens the scanner for
+    // the first time (rare; scanner auto-launches on mount) or AFTER
+    // they cancel out of the native scanner. Two clear options: scan
+    // a new bon, or pick a photo from the gallery.
     return (
-      <View style={[styles.permGate, { backgroundColor: '#0a0a0a' }]}>
-        <StatusBar barStyle="light-content" />
-        <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+      <View style={[styles.permGate, { backgroundColor: theme.bg ?? '#fff' }]}>
+        <StatusBar barStyle="dark-content" />
+        <View
+          style={[
+            styles.topBar,
+            { paddingTop: insets.top + 8, backgroundColor: 'transparent' },
+          ]}
+        >
           <Pressable onPress={handleBack} style={styles.iconButton} hitSlop={10}>
-            <MaterialCommunityIcons name="close" size={26} color="#fff" />
+            <MaterialCommunityIcons name="close" size={26} color={theme.text ?? '#191c1d'} />
           </Pressable>
         </View>
         <View style={styles.permCenter}>
-          <MaterialCommunityIcons name="line-scan" size={56} color="#fff" />
-          <Text style={styles.permTitle}>Scanner geöffnet</Text>
-          <Text style={styles.permBody}>
-            Halte den Bon flach in das Sichtfeld — der Scanner erkennt die Ränder automatisch
-            und zieht das Bild gerade. Falls der Scanner geschlossen wurde, tippe unten zum
-            erneuten Öffnen.
+          <View
+            style={{
+              width: 88,
+              height: 88,
+              borderRadius: 44,
+              backgroundColor: (theme.primary ?? '#0d8575') + '18',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 4,
+            }}
+          >
+            <MaterialCommunityIcons
+              name="line-scan"
+              size={42}
+              color={theme.primary ?? '#0d8575'}
+            />
+          </View>
+          <Text style={[styles.permTitle, { color: theme.text ?? '#191c1d' }]}>
+            Bon einreichen
           </Text>
-          <Pressable onPress={launchScannerAgain} style={styles.primaryButton} disabled={capturing}>
+          <Text
+            style={[
+              styles.permBody,
+              { color: theme.textSub ?? '#5c6769', maxWidth: 320 },
+            ]}
+          >
+            Wähle, wie du deinen Bon übermitteln möchtest. Der Scanner erkennt Ränder
+            automatisch und richtet das Bild gerade aus.
+          </Text>
+          <Pressable
+            onPress={launchScannerAgain}
+            style={[
+              styles.primaryButton,
+              { backgroundColor: theme.primary ?? '#0d8575', width: '80%', marginTop: 24, flexDirection: 'row', gap: 8, justifyContent: 'center' },
+            ]}
+            disabled={capturing}
+          >
             {capturing ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.primaryButtonText}>Scanner öffnen</Text>
+              <>
+                <MaterialCommunityIcons name="line-scan" size={18} color="#fff" />
+                <Text style={styles.primaryButtonText}>Bon scannen</Text>
+              </>
             )}
           </Pressable>
-          <Pressable onPress={handlePickFromGallery} style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>Aus Galerie wählen</Text>
+          <Pressable
+            onPress={handlePickFromGallery}
+            style={{
+              marginTop: 10,
+              width: '80%',
+              paddingVertical: 14,
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: theme.border ?? 'rgba(0,0,0,0.1)',
+              alignItems: 'center',
+              flexDirection: 'row',
+              gap: 8,
+              justifyContent: 'center',
+              backgroundColor: 'transparent',
+            }}
+          >
+            <MaterialCommunityIcons
+              name="image-outline"
+              size={18}
+              color={theme.text ?? '#191c1d'}
+            />
+            <Text
+              style={{
+                color: theme.text ?? '#191c1d',
+                fontFamily: fontFamily.body,
+                fontWeight: fontWeight.bold as any,
+                fontSize: 15,
+              }}
+            >
+              Aus Galerie wählen
+            </Text>
           </Pressable>
         </View>
       </View>

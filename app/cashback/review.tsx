@@ -124,17 +124,11 @@ export default function CashbackReviewScreen() {
     router.navigate('/(tabs)/rewards');
   }, []);
 
-  const handleCropTap = useCallback(() => {
-    router.push({
-      pathname: '/cashback/crop',
-      params: {
-        uri: bon.uri,
-        width: String(bon.width),
-        height: String(bon.height),
-        source: (params.source as any) || 'live_camera',
-      },
-    });
-  }, [bon.uri, bon.width, bon.height, params.source]);
+  // Manual crop is no longer surfaced from the review screen — the
+  // native scanner (VisionKit / ML-Kit) already auto-crops + auto-
+  // rotates at capture time. If the user wants a different crop,
+  // "Nochmal" re-launches the scanner. The /cashback/crop route is
+  // kept for power-users / debugging only.
 
   // Optimistic submit (best-practice): create a placeholder mirror doc
   // in Firestore RIGHT NOW so the bon is immediately visible everywhere
@@ -207,26 +201,6 @@ export default function CashbackReviewScreen() {
         imageBlock: {
           height: SCREEN_H * 0.36,
           backgroundColor: '#0a0a0a',
-        },
-        cropPill: {
-          position: 'absolute',
-          bottom: 12,
-          alignSelf: 'center',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 6,
-          paddingHorizontal: 14,
-          paddingVertical: 8,
-          borderRadius: 999,
-          backgroundColor: 'rgba(0,0,0,0.6)',
-          borderWidth: 1,
-          borderColor: 'rgba(255,255,255,0.18)',
-        },
-        cropPillText: {
-          color: '#fff',
-          fontFamily: fontFamily.body,
-          fontWeight: fontWeight.medium as any,
-          fontSize: 12,
         },
         sheet: {
           flex: 1,
@@ -342,10 +316,6 @@ export default function CashbackReviewScreen() {
             <ActivityIndicator color="#fff" />
           </View>
         )}
-        <Pressable onPress={handleCropTap} style={styles.cropPill} hitSlop={6}>
-          <MaterialCommunityIcons name="crop" size={14} color="#fff" />
-          <Text style={styles.cropPillText}>Zuschneiden</Text>
-        </Pressable>
       </View>
 
       {/* Bottom: theme-aware sheet — flex:1 so labels are clearly visible */}
