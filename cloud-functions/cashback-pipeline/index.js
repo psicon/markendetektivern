@@ -316,6 +316,29 @@ exports.processCashback = onMessagePublished(
 
       // 6a) Mirror the status into the user sub-collection (so the
       // app's pending screen can listen without top-level rules).
+      // We also include the items list + a signed URL of the bon
+      // image (24h TTL) so the detail screen can show "what we
+      // saw" without giving the client direct Storage access.
+      let imageUrl = null;
+      try {
+        const [signedUrl] = await file.getSignedUrl({
+          action: 'read',
+          expires: Date.now() + 24 * 60 * 60 * 1000,
+        });
+        imageUrl = signedUrl;
+      } catch (e) {
+        logger.warn('signed-url-failed', { cashbackId, err: e.message });
+      }
+
+      const slimItems = Array.isArray(ocr.parsed.items)
+        ? ocr.parsed.items.map((it) => ({
+            name: String(it.name ?? ''),
+            qty: Number.isFinite(it.qty) ? it.qty : 1,
+            priceCents: Number.isFinite(it.priceCents) ? it.priceCents : 0,
+            eligible: Number.isFinite(it.priceCents) && it.priceCents > 0,
+          }))
+        : [];
+
       await db
         .doc(`users/${uid}/cashback_status/${cashbackId}`)
         .set(
@@ -328,6 +351,10 @@ exports.processCashback = onMessagePublished(
             merchant: ocr.parsed.merchant ?? null,
             bonDate: ocr.parsed.bonDate || null,
             bonTotalCents: ocr.parsed.totalCents ?? null,
+            paymentMethod: ocr.parsed.paymentMethod ?? null,
+            items: slimItems,
+            imageUrl,
+            imageUrlExpiresAt: Date.now() + 24 * 60 * 60 * 1000,
             rejectReason,
             updatedAt: now,
           },
