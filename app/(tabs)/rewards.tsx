@@ -67,66 +67,60 @@ const RECEIPT_LIMIT = { perWeek: 6, eurEach: 0.08, usedThisWeek: 2 };
 const PHOTO_LIMIT = { perWeek: 20, eurEach: 0.1, usedThisWeek: 14 };
 const SURVEY_AVAILABLE = false;
 
+// Single source of truth for the three earn-action cards. The same
+// data feeds the Schnellzugriff tile + (formerly) the "Taler verdienen"
+// list. List was removed because it duplicated everything the tiles
+// already conveyed; the tiles now show the per-week status inline.
 type EarnAction = {
-  k: 'survey' | 'receipt' | 'photo';
-  i: keyof typeof MaterialCommunityIcons.glyphMap;
-  l: string;
-  sub: string;
-  reward: string;
+  k: 'receipt' | 'photo' | 'survey';
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string; // tile label, "\n" splits the two lines
+  bg: string;
+  dark: boolean;
+  reward: string; // pill copy: "0,08 €", "0,10 €", "wenn verfügb."
   available: boolean;
-  limitLabel: string;
-  limitProgress?: number;
+  statusLabel: string; // "2/6 diese Woche" / "Aktuell keine Umfrage" / "Limit erreicht"
+  progress?: number; // 0..1 — undefined for survey (no weekly counter)
 };
-const CASHBACK_EARN: EarnAction[] = [
-  {
-    k: 'survey',
-    i: 'poll',
-    l: 'Umfrage beantworten',
-    sub: 'Nur wenn verfügbar · 2-5 Min',
-    reward: '0,20 - 2,00 €',
-    available: SURVEY_AVAILABLE,
-    limitLabel: SURVEY_AVAILABLE ? 'Verfügbar' : 'Aktuell keine Umfrage',
-  },
+const EARN_ACTIONS: EarnAction[] = [
   {
     k: 'receipt',
-    i: 'receipt',
-    l: 'Kassenbon hochladen',
-    sub: `${RECEIPT_LIMIT.eurEach.toFixed(2).replace('.', ',')} € pro Bon · max. ${RECEIPT_LIMIT.perWeek}/Woche`,
+    icon: 'receipt',
+    label: 'Kassenbon\nscannen',
+    bg: '#95cfc4',
+    dark: true,
     reward: `${RECEIPT_LIMIT.eurEach.toFixed(2).replace('.', ',')} €`,
     available: RECEIPT_LIMIT.usedThisWeek < RECEIPT_LIMIT.perWeek,
-    limitLabel:
+    statusLabel:
       RECEIPT_LIMIT.usedThisWeek < RECEIPT_LIMIT.perWeek
-        ? `Noch verfügbar · ${RECEIPT_LIMIT.usedThisWeek}/${RECEIPT_LIMIT.perWeek} diese Woche`
-        : `Limit erreicht · ${RECEIPT_LIMIT.perWeek}/${RECEIPT_LIMIT.perWeek} diese Woche`,
-    limitProgress: RECEIPT_LIMIT.usedThisWeek / RECEIPT_LIMIT.perWeek,
+        ? `${RECEIPT_LIMIT.usedThisWeek}/${RECEIPT_LIMIT.perWeek} Woche`
+        : 'Limit erreicht',
+    progress: RECEIPT_LIMIT.usedThisWeek / RECEIPT_LIMIT.perWeek,
   },
   {
     k: 'photo',
-    i: 'camera-outline',
-    l: 'Produktbilder einreichen',
-    sub: 'Wizard: 7 Fotos – Front, Rückseite, Barcode, Zutaten, Nährwerte, Hersteller, Preis',
+    icon: 'camera-plus-outline',
+    label: 'Produkte\neinreichen',
+    bg: '#a89cdf',
+    dark: true,
     reward: `${PHOTO_LIMIT.eurEach.toFixed(2).replace('.', ',')} €`,
     available: PHOTO_LIMIT.usedThisWeek < PHOTO_LIMIT.perWeek,
-    limitLabel:
+    statusLabel:
       PHOTO_LIMIT.usedThisWeek < PHOTO_LIMIT.perWeek
-        ? `Noch verfügbar · ${PHOTO_LIMIT.usedThisWeek}/${PHOTO_LIMIT.perWeek} diese Woche`
-        : `Limit erreicht · ${PHOTO_LIMIT.perWeek}/${PHOTO_LIMIT.perWeek} diese Woche`,
-    limitProgress: PHOTO_LIMIT.usedThisWeek / PHOTO_LIMIT.perWeek,
+        ? `${PHOTO_LIMIT.usedThisWeek}/${PHOTO_LIMIT.perWeek} Woche`
+        : 'Limit erreicht',
+    progress: PHOTO_LIMIT.usedThisWeek / PHOTO_LIMIT.perWeek,
   },
-];
-
-type QuickAction = {
-  k: 'receipt' | 'photo' | 'survey';
-  i: keyof typeof MaterialCommunityIcons.glyphMap;
-  l: string;
-  bg: string;
-  dark: boolean;
-  reward: string;
-};
-const QUICK_ACTIONS: QuickAction[] = [
-  { k: 'receipt', i: 'receipt', l: 'Kassenbon\nscannen', bg: '#95cfc4', dark: true, reward: '0,08 €' },
-  { k: 'photo', i: 'camera-plus-outline', l: 'Produkte\neinreichen', bg: '#a89cdf', dark: true, reward: '0,10 €' },
-  { k: 'survey', i: 'poll', l: 'Umfragen', bg: '#dde2e4', dark: false, reward: 'wenn verfügb.' },
+  {
+    k: 'survey',
+    icon: 'poll',
+    label: 'Umfragen',
+    bg: '#dde2e4',
+    dark: false,
+    reward: SURVEY_AVAILABLE ? 'wenn verfügb.' : 'wenn verfügb.',
+    available: SURVEY_AVAILABLE,
+    statusLabel: SURVEY_AVAILABLE ? 'Verfügbar' : 'Aktuell keine',
+  },
 ];
 
 // ─── Sub-tab plumbing ──────────────────────────────────────────────────
@@ -671,7 +665,7 @@ function RedeemTab() {
             }}
           >
             <MaterialCommunityIcons
-              name="receipt-text-outline"
+              name="clipboard-list-outline"
               size={20}
               color={theme.primary ?? '#0d8575'}
             />
@@ -723,38 +717,11 @@ function RedeemTab() {
           Schnellzugriff · Mehr Taler & Punkte sammeln
         </Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          {QUICK_ACTIONS.map((a) => (
+          {EARN_ACTIONS.map((a) => (
             <QuickActionTile
               key={a.k}
               action={a}
               onCashbackTap={a.k === 'receipt' ? onScanBon : undefined}
-            />
-          ))}
-        </View>
-      </View>
-
-      {/* ── Earn list ── */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
-        <SectionHeader
-          title="Taler verdienen"
-          sub="Nur diese Aktionen geben Cashback"
-        />
-        <View
-          style={{
-            backgroundColor: theme.surface,
-            borderRadius: 14,
-            borderWidth: 1,
-            borderColor: theme.border,
-            overflow: 'hidden',
-            marginTop: 10,
-          }}
-        >
-          {CASHBACK_EARN.map((e, i) => (
-            <EarnRow
-              key={e.k}
-              action={e}
-              isFirst={i === 0}
-              onCashbackTap={e.k === 'receipt' ? onScanBon : undefined}
             />
           ))}
         </View>
@@ -1106,8 +1073,18 @@ function SectionHeader({ title, sub }: { title: string; sub?: string }) {
   );
 }
 
-function QuickActionTile({ action, onCashbackTap }: { action: QuickAction; onCashbackTap?: () => void }) {
+function QuickActionTile({
+  action,
+  onCashbackTap,
+}: {
+  action: EarnAction;
+  onCashbackTap?: () => void;
+}) {
   const fg = action.dark ? '#fff' : '#191c1d';
+  // Bar fill colour: white-overlay on dark tiles, theme primary on light.
+  const barTrack = action.dark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.08)';
+  const barFill = action.dark ? '#fff' : '#0d8575';
+  const showProgress = typeof action.progress === 'number';
   return (
     <Pressable
       onPress={() => {
@@ -1121,7 +1098,7 @@ function QuickActionTile({ action, onCashbackTap }: { action: QuickAction; onCas
       }}
       style={({ pressed }) => ({
         flex: 1,
-        minHeight: 112,
+        minHeight: 138,
         backgroundColor: action.bg,
         borderRadius: 14,
         padding: 12,
@@ -1140,11 +1117,12 @@ function QuickActionTile({ action, onCashbackTap }: { action: QuickAction; onCas
         }}
       >
         <MaterialCommunityIcons
-          name={action.i}
+          name={action.icon}
           size={17}
           color={action.dark ? '#fff' : '#0d8575'}
         />
       </View>
+
       <View>
         <Text
           style={{
@@ -1155,8 +1133,12 @@ function QuickActionTile({ action, onCashbackTap }: { action: QuickAction; onCas
             color: fg,
           }}
         >
-          {action.l}
+          {action.label}
         </Text>
+
+        {/* Reward + status: stacked. Reward stays prominent (pill),
+            status reads compact — for receipt/photo with a weekly
+            quota a thin progress bar follows underneath. */}
         <View
           style={{
             alignSelf: 'flex-start',
@@ -1181,163 +1163,39 @@ function QuickActionTile({ action, onCashbackTap }: { action: QuickAction; onCas
             {action.reward}
           </Text>
         </View>
-      </View>
-    </Pressable>
-  );
-}
 
-function EarnRow({
-  action,
-  isFirst,
-  onCashbackTap,
-}: {
-  action: EarnAction;
-  isFirst: boolean;
-  onCashbackTap?: () => void;
-}) {
-  const { theme } = useTokens();
-  return (
-    <Pressable
-      onPress={() => {
-        // 'receipt' = Bon-Scan via Cashback-Flow (Consent → Capture →
-        // Review → Pending). NOT the barcode scanner.
-        if (action.k === 'receipt') {
-          onCashbackTap?.();
-        }
-        // photo + survey wire up later
-      }}
-      style={({ pressed }) => ({
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: 12,
-        padding: 12,
-        paddingHorizontal: 14,
-        borderTopWidth: isFirst ? 0 : 1,
-        borderTopColor: theme.border,
-        opacity: pressed ? 0.7 : 1,
-      })}
-    >
-      <View
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: 10,
-          backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginTop: 2,
-        }}
-      >
-        <MaterialCommunityIcons
-          name={action.i}
-          size={20}
-          color={theme.primary}
-        />
-      </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'baseline',
-            gap: 8,
-          }}
-        >
-          <Text
-            style={{
-              flex: 1,
-              fontFamily,
-              fontWeight: fontWeight.bold,
-              fontSize: 14,
-              color: theme.text,
-            }}
-            numberOfLines={1}
-          >
-            {action.l}
-          </Text>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 12,
-              color: theme.primary,
-            }}
-          >
-            {action.reward}
-          </Text>
-        </View>
         <Text
+          numberOfLines={1}
           style={{
             fontFamily,
             fontWeight: fontWeight.medium,
-            fontSize: 11,
-            lineHeight: 15,
-            color: theme.textMuted,
-            marginTop: 2,
+            fontSize: 10,
+            color: action.dark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.55)',
+            marginTop: 6,
           }}
         >
-          {action.sub}
+          {action.statusLabel}
         </Text>
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-            marginTop: 7,
-          }}
-        >
+
+        {showProgress ? (
           <View
             style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 4,
-              paddingHorizontal: 7,
-              paddingVertical: 2,
-              borderRadius: 4,
-              backgroundColor: action.available
-                ? theme.primaryContainer ?? theme.surfaceAlt
-                : 'rgba(220,38,38,0.1)',
+              height: 3,
+              borderRadius: 2,
+              backgroundColor: barTrack,
+              marginTop: 4,
+              overflow: 'hidden',
             }}
           >
             <View
               style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: action.available ? '#16a34a' : '#dc2626',
+                width: `${Math.min(100, Math.round((action.progress ?? 0) * 100))}%`,
+                height: '100%',
+                backgroundColor: barFill,
               }}
             />
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold,
-                fontSize: 10,
-                letterSpacing: 0.3,
-                color: action.available ? theme.primary : '#dc2626',
-              }}
-            >
-              {action.limitLabel}
-            </Text>
           </View>
-          {typeof action.limitProgress === 'number' ? (
-            <View
-              style={{
-                flex: 1,
-                height: 4,
-                backgroundColor: theme.border,
-                borderRadius: 2,
-                overflow: 'hidden',
-              }}
-            >
-              <View
-                style={{
-                  width: `${Math.min(100, Math.round(action.limitProgress * 100))}%`,
-                  height: '100%',
-                  backgroundColor: action.available ? theme.primary : '#dc2626',
-                }}
-              />
-            </View>
-          ) : null}
-        </View>
+        ) : null}
       </View>
     </Pressable>
   );

@@ -1089,6 +1089,13 @@ export default function ProfileScreen() {
               onPress={() => router.push('/purchase-history' as any)}
             />
             <MenuRow
+              icon="clipboard-list-outline"
+              color="#0d8575"
+              label="Meine Bons"
+              sub="Verlauf, Status & abgelehnte Bons"
+              onPress={() => router.push('/cashback/history' as any)}
+            />
+            <MenuRow
               icon="magnify"
               color="#0ea5e9"
               label="Such- & Scanverlauf"
