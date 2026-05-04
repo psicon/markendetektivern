@@ -16,15 +16,16 @@ rules_version = '2';
 // image-cleanup pipeline writes only to `productimagesclean/`.
 service firebase.storage {
   match /b/{bucket}/o {
-    // Cashback bon uploads — user can write their own under their uid.
-    // No client read; the Cloud Function uses the Admin SDK internally.
-    // See CASHBACK_ARCHITECTURE.md §11 #6.
+    // Cashback bon uploads — user can write + read their own bons.
+    // Read access is needed so the detail screen can render the bon
+    // image via getDownloadURL() — Cloud Functions still write
+    // structured data via Admin SDK.
     match /cashback-uploads/{userId}/{file=**} {
       allow write: if request.auth != null
                     && request.auth.uid == userId
                     && request.resource.size < 8 * 1024 * 1024
                     && request.resource.contentType.matches('image/.*|application/pdf');
-      allow read: if false;
+      allow read: if request.auth != null && request.auth.uid == userId;
     }
 
     // Default fallback — public-read, no client write (preserves

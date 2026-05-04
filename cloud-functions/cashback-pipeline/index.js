@@ -316,20 +316,11 @@ exports.processCashback = onMessagePublished(
 
       // 6a) Mirror the status into the user sub-collection (so the
       // app's pending screen can listen without top-level rules).
-      // We also include the items list + a signed URL of the bon
-      // image (24h TTL) so the detail screen can show "what we
-      // saw" without giving the client direct Storage access.
-      let imageUrl = null;
-      try {
-        const [signedUrl] = await file.getSignedUrl({
-          action: 'read',
-          expires: Date.now() + 24 * 60 * 60 * 1000,
-        });
-        imageUrl = signedUrl;
-      } catch (e) {
-        logger.warn('signed-url-failed', { cashbackId, err: e.message });
-      }
-
+      // Includes items + the bucket+path of the bon image so the
+      // client can resolve a download URL via Firebase Storage SDK
+      // (storage rules permit the owner to read their own bons —
+      // simpler + more reliable than admin-side signed URLs which
+      // need iam.serviceAccountTokenCreator on the runtime SA).
       const slimItems = Array.isArray(ocr.parsed.items)
         ? ocr.parsed.items.map((it) => ({
             name: String(it.name ?? ''),
@@ -353,8 +344,8 @@ exports.processCashback = onMessagePublished(
             bonTotalCents: ocr.parsed.totalCents ?? null,
             paymentMethod: ocr.parsed.paymentMethod ?? null,
             items: slimItems,
-            imageUrl,
-            imageUrlExpiresAt: Date.now() + 24 * 60 * 60 * 1000,
+            storageBucket: receipt.storage?.bucket ?? null,
+            storagePath: receipt.storage?.path ?? null,
             rejectReason,
             updatedAt: now,
           },

@@ -15,6 +15,7 @@
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image as ExpoImage } from 'expo-image';
+import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
@@ -33,6 +34,7 @@ import {
 } from '@/components/design/DetailHeader';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { storage } from '@/lib/firebase';
 import { subscribeReceipt } from '@/lib/services/cashbackUpload';
 import { formatCents } from '@/lib/types/cashback';
 
@@ -58,7 +60,8 @@ interface MirrorDoc {
   bonTotalCents?: number | null;
   paymentMethod?: string | null;
   items?: MirrorItem[];
-  imageUrl?: string | null;
+  storageBucket?: string | null;
+  storagePath?: string | null;
   rejectReason?: string | null;
   updatedAt?: any;
 }
@@ -96,6 +99,7 @@ export default function CashbackPendingScreen() {
 
   const [doc, setDoc] = useState<MirrorDoc | null>(null);
   const [hasResponded, setHasResponded] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -113,6 +117,30 @@ export default function CashbackPendingScreen() {
     });
     return unsub;
   }, [params.id]);
+
+  // Resolve a download URL for the bon image whenever the storagePath
+  // changes. Storage rules permit the owner to read; getDownloadURL
+  // returns a long-lived token URL.
+  useEffect(() => {
+    let alive = true;
+    const path = doc?.storagePath;
+    if (!path) {
+      setImageUrl(null);
+      return;
+    }
+    (async () => {
+      try {
+        const url = await getDownloadURL(storageRef(storage, path));
+        if (alive) setImageUrl(url);
+      } catch (e: any) {
+        console.warn('⚠️ getDownloadURL failed:', e?.message);
+        if (alive) setImageUrl(null);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [doc?.storagePath]);
 
   const state: ViewState = useMemo(() => {
     if (!hasResponded) return 'unknown';
@@ -273,7 +301,7 @@ export default function CashbackPendingScreen() {
         ) : null}
 
         {/* ─── Bon image ─── */}
-        {doc?.imageUrl ? (
+        {imageUrl ? (
           <View
             style={{
               marginHorizontal: 16,
@@ -286,7 +314,7 @@ export default function CashbackPendingScreen() {
             }}
           >
             <ExpoImage
-              source={{ uri: doc.imageUrl }}
+              source={{ uri: imageUrl }}
               style={{ width: '100%', aspectRatio: 0.75 }}
               contentFit="contain"
             />
