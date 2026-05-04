@@ -129,6 +129,10 @@ function ThemedApp() {
                   options={{ headerShown: false, animation: 'slide_from_bottom', gestureEnabled: true }}
                 />
                 <Stack.Screen
+                  name="cashback/history"
+                  options={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: true }}
+                />
+                <Stack.Screen
                   name="cashback/pending/[id]"
                   options={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: true }}
                 />

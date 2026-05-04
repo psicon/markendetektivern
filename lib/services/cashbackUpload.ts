@@ -12,6 +12,7 @@
 
 import { auth, storage } from '@/lib/firebase';
 import {
+  collection,
   doc,
   onSnapshot,
   type Unsubscribe,
@@ -147,6 +148,53 @@ export async function enqueueCashback(args: EnqueueArgs): Promise<EnqueueResult>
 // The Cloud Function mirrors a slim status into
 // /users/{uid}/cashback_status/{cashbackId} that the existing user-doc
 // rules cover automatically — no top-level /receipts/* rule needed.
+
+export interface CashbackStatusEntry {
+  id: string;
+  status?: string;
+  cashbackCents?: number;
+  tierApplied?: number;
+  eligibleItemCount?: number;
+  merchant?: string | null;
+  bonDate?: string | null;
+  bonTotalCents?: number | null;
+  rejectReason?: string | null;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+/**
+ * Live list of the current user's bons (status mirrors). Sorted by
+ * updatedAt desc on the client side.
+ */
+export function subscribeUserCashbackHistory(
+  onChange: (entries: CashbackStatusEntry[]) => void,
+): Unsubscribe {
+  const uid = auth.currentUser?.uid;
+  if (!uid) {
+    onChange([]);
+    return () => {};
+  }
+  return onSnapshot(
+    collection(db, `users/${uid}/cashback_status`),
+    (qs) => {
+      const rows: CashbackStatusEntry[] = qs.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as any),
+      }));
+      rows.sort((a, b) => {
+        const aT = a.updatedAt?.toMillis?.() ?? 0;
+        const bT = b.updatedAt?.toMillis?.() ?? 0;
+        return bT - aT;
+      });
+      onChange(rows);
+    },
+    (error) => {
+      console.warn('⚠️ subscribeUserCashbackHistory error:', error);
+      onChange([]);
+    },
+  );
+}
 
 export function subscribeReceipt(
   cashbackId: string,

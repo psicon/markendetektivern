@@ -636,6 +636,72 @@ function RedeemTab() {
         </LinearGradient>
       </View>
 
+      {/* ── Bons-Verlauf row ── */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 18 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Bons-Verlauf öffnen"
+          onPress={() => router.push('/cashback/history')}
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: theme.surface,
+            borderRadius: 14,
+            borderWidth: 1,
+            borderColor: theme.border,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            gap: 12,
+            opacity: pressed ? 0.9 : 1,
+          })}
+        >
+          <View
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 19,
+              backgroundColor: (theme.primary ?? '#0d8575') + '18',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <MaterialCommunityIcons
+              name="receipt-text-outline"
+              size={20}
+              color={theme.primary ?? '#0d8575'}
+            />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 14,
+                color: theme.text,
+              }}
+            >
+              Meine Bons
+            </Text>
+            <Text
+              style={{
+                fontFamily,
+                fontSize: 12,
+                color: theme.textSub,
+                marginTop: 2,
+              }}
+              numberOfLines={1}
+            >
+              Verlauf, Status & abgelehnte Bons ansehen
+            </Text>
+          </View>
+          <MaterialCommunityIcons
+            name="chevron-right"
+            size={20}
+            color={theme.textMuted}
+          />
+        </Pressable>
+      </View>
+
       {/* ── Quick actions row ── */}
       <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
         <Text
