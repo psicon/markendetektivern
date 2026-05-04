@@ -2,14 +2,16 @@
  * Gemini system prompt for DACH receipt OCR.
  * Ported 1:1 from tools/cashback-ocr-validation/prompts.py (v1.0).
  *
- * When iterating: bump VERSION + write a changelog line. The prompt
- * version lands on the receipt doc so we can re-process bons with
- * later prompts and compare.
+ * VERSION HISTORY
+ * v1.0 (2026-05-03) — initial.
+ * v1.1 (2026-05-04) — Gemini schema fix: nullability via `nullable: true`
+ *   instead of `type: [..., 'null']` which Gemini's schema validator
+ *   rejected (Proto field is not repeating).
  */
 
 'use strict';
 
-const VERSION = 'v1.0';
+const VERSION = 'v1.1';
 
 const SYSTEM_PROMPT = `\
 Du bist ein OCR-Spezialist für deutsche Kassenbons (DACH-Raum: DE, AT,
@@ -39,15 +41,18 @@ extrahieren.
 const USER_PROMPT =
   'Extrahiere alle strukturierten Daten aus diesem Kassenbon-Foto gemäß dem JSON-Schema. Antworte ausschließlich mit dem JSON-Objekt.';
 
+// Gemini structured-output schema. Note: Gemini does NOT accept
+// `type: ['string', 'null']` (JSON-Schema syntax). Optional fields
+// must use `nullable: true` and a single concrete type.
 const RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
     isReceipt: { type: 'boolean' },
-    notReceiptReason: { type: ['string', 'null'] },
-    merchant: { type: ['string', 'null'] },
-    merchantSubtitle: { type: ['string', 'null'] },
-    bonDate: { type: ['string', 'null'] },
-    bonTime: { type: ['string', 'null'] },
+    notReceiptReason: { type: 'string', nullable: true },
+    merchant: { type: 'string', nullable: true },
+    merchantSubtitle: { type: 'string', nullable: true },
+    bonDate: { type: 'string', nullable: true },
+    bonTime: { type: 'string', nullable: true },
     items: {
       type: 'array',
       items: {
@@ -56,18 +61,18 @@ const RESPONSE_SCHEMA = {
           name: { type: 'string' },
           qty: { type: 'number' },
           priceCents: { type: 'integer' },
-          unitPriceCents: { type: ['integer', 'null'] },
-          category: { type: ['string', 'null'] },
+          unitPriceCents: { type: 'integer', nullable: true },
+          category: { type: 'string', nullable: true },
         },
         required: ['name', 'priceCents'],
       },
     },
-    subtotalCents: { type: ['integer', 'null'] },
-    totalCents: { type: ['integer', 'null'] },
-    paymentMethod: { type: ['string', 'null'] },
+    subtotalCents: { type: 'integer', nullable: true },
+    totalCents: { type: 'integer', nullable: true },
+    paymentMethod: { type: 'string', nullable: true },
     suspiciousManipulation: { type: 'boolean' },
-    manipulationNotes: { type: ['string', 'null'] },
-    ocrConfidence: { type: ['number', 'null'] },
+    manipulationNotes: { type: 'string', nullable: true },
+    ocrConfidence: { type: 'number', nullable: true },
   },
   required: ['isReceipt', 'items'],
 };

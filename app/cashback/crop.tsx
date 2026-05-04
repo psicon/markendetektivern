@@ -14,8 +14,6 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Image as ExpoImage } from 'expo-image';
-import * as ImageManipulator from 'expo-image-manipulator';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -189,6 +187,14 @@ export default function CashbackCropScreen() {
     if (!imgUri || !naturalW || !naturalH || cropping) return;
     setCropping(true);
     try {
+      // Lazy-import to avoid the requireNativeModule call at module
+      // load when the dev-client hasn't been rebuilt yet — that crash
+      // would prevent the whole screen from mounting (you'd see "Oops").
+      // With dynamic import the screen mounts fine, only the manipulate
+      // call throws if the native module is missing — which we catch
+      // and surface as a friendly rebuild message.
+      const ImageManipulator = await import('expo-image-manipulator');
+
       // Convert screen rect → image rect (factor by display↔natural ratio).
       const scaleX = naturalW / fittedSize.w;
       const scaleY = naturalH / fittedSize.h;

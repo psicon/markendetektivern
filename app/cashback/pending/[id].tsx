@@ -206,8 +206,8 @@ export default function CashbackPendingScreen() {
               </View>
               <Text style={styles.title}>Bon wird geprüft</Text>
               <Text style={styles.body}>
-                Wir lesen gerade deinen Bon aus. Das dauert in der Regel 5 bis 15 Sekunden — du
-                bekommst eine Benachrichtigung sobald wir fertig sind.
+                Das kann einen Moment dauern. Du kannst die App ruhig schließen — den Status
+                findest du jederzeit unter „Meine Bons".
               </Text>
             </>
           ) : null}
@@ -217,10 +217,11 @@ export default function CashbackPendingScreen() {
               <View style={[styles.iconBubble, { backgroundColor: '#f1c40f30' }]}>
                 <MaterialCommunityIcons name="account-search-outline" size={42} color="#b08800" />
               </View>
-              <Text style={styles.title}>Manuelle Prüfung</Text>
+              <Text style={styles.title}>In Prüfung</Text>
               <Text style={styles.body}>
-                Wir konnten den Bon nicht eindeutig auswerten. Unser Team schaut innerhalb der
-                nächsten 24 Stunden nach.
+                Wir konnten den Bon nicht eindeutig auswerten und schauen genauer hin. Sobald
+                geklärt — meistens innerhalb eines Tages — siehst du das Ergebnis unter
+                „Meine Bons".
               </Text>
             </>
           ) : null}

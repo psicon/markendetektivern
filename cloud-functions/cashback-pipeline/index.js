@@ -419,6 +419,20 @@ exports.processCashback = onMessagePublished(
           updatedAt: now,
         })
         .catch(() => {});
+      // Also update the user-side mirror so the app's pending screen
+      // and history page reflect the failure (otherwise it stays
+      // stuck on "wird geprüft" forever).
+      await db
+        .doc(`users/${uid}/cashback_status/${cashbackId}`)
+        .set(
+          {
+            status: 'rejected',
+            rejectReason: err.code || 'process_error',
+            updatedAt: now,
+          },
+          { merge: true },
+        )
+        .catch(() => {});
       throw err; // let PubSub retry policy take over
     }
   },
