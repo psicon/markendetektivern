@@ -150,7 +150,7 @@ export default function CashbackPendingScreen() {
         idText: { fontFamily: fontFamily.body, fontSize: 12, color: theme.textSub },
         cta: {
           height: 52,
-          borderRadius: radii.pill,
+          borderRadius: 14,
           alignItems: 'center',
           justifyContent: 'center',
           flexDirection: 'row',
@@ -165,7 +165,7 @@ export default function CashbackPendingScreen() {
         },
         ctaSecondary: {
           height: 50,
-          borderRadius: radii.pill,
+          borderRadius: 14,
           alignItems: 'center',
           justifyContent: 'center',
           borderWidth: 1,

@@ -107,6 +107,19 @@ export default function CashbackReviewScreen() {
     router.replace('/cashback/capture');
   }, []);
 
+  // Top-bar X dismisses the entire cashback flow back to the rewards
+  // tab in a single tap. "Nochmal" inside the sheet is the explicit
+  // "I want a different photo" path.
+  const handleDismiss = useCallback(() => {
+    router.replace('/(tabs)/rewards');
+  }, []);
+
+  const handleCropTap = useCallback(() => {
+    setSubmitError(
+      'Zuschneiden ist gerade noch nicht aktiviert (kommt in Phase 1.5.2 mit ML-Kit Document Scanner — braucht einen App-Update via "expo run:ios"). Tipp: Foto so ablichten dass der Bon den Rahmen füllt.',
+    );
+  }, []);
+
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
     setSubmitError(null);
@@ -153,21 +166,15 @@ export default function CashbackReviewScreen() {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        imageBlock: {
-          height: SCREEN_H * 0.42,
-          backgroundColor: '#0a0a0a',
-        },
+        // Top bar sits OUTSIDE the image block (own row), so the receipt
+        // photo never gets clipped behind the status bar / title.
         topBar: {
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
+          paddingTop: insets.top + 6,
           paddingBottom: 10,
           paddingHorizontal: 12,
           flexDirection: 'row',
           alignItems: 'center',
-          backgroundColor: 'rgba(0,0,0,0.55)',
-          zIndex: 10,
+          backgroundColor: '#0a0a0a',
         },
         topBarTitle: {
           flex: 1,
@@ -183,6 +190,30 @@ export default function CashbackReviewScreen() {
           alignItems: 'center',
           justifyContent: 'center',
         },
+        imageBlock: {
+          height: SCREEN_H * 0.36,
+          backgroundColor: '#0a0a0a',
+        },
+        cropPill: {
+          position: 'absolute',
+          bottom: 12,
+          alignSelf: 'center',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          paddingHorizontal: 14,
+          paddingVertical: 8,
+          borderRadius: 999,
+          backgroundColor: 'rgba(0,0,0,0.6)',
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.18)',
+        },
+        cropPillText: {
+          color: '#fff',
+          fontFamily: fontFamily.body,
+          fontWeight: fontWeight.medium as any,
+          fontSize: 12,
+        },
         sheet: {
           flex: 1,
           backgroundColor: theme.bg,
@@ -191,7 +222,7 @@ export default function CashbackReviewScreen() {
           paddingHorizontal: 18,
           paddingTop: 6,
           marginTop: -16,
-          ...(shadows.card ?? {}),
+          ...(shadows.md ?? {}),
         },
         sectionTitle: {
           color: theme.text,
@@ -242,8 +273,8 @@ export default function CashbackReviewScreen() {
         },
         cta: {
           flex: 1,
-          height: 50,
-          borderRadius: radii.pill,
+          height: 52,
+          borderRadius: 14,
           alignItems: 'center',
           justifyContent: 'center',
           flexDirection: 'row',
@@ -275,7 +306,16 @@ export default function CashbackReviewScreen() {
       <StatusBar barStyle="light-content" />
 
       {/* Image fills the top half, sheet sits on top. */}
-      {/* Top: image preview block on dark backdrop */}
+      {/* Standalone top bar — sits ABOVE the image so nothing gets clipped. */}
+      <View style={styles.topBar}>
+        <Pressable onPress={handleDismiss} style={styles.iconButton} hitSlop={10}>
+          <MaterialCommunityIcons name="close" size={24} color="#fff" />
+        </Pressable>
+        <Text style={styles.topBarTitle}>Foto kontrollieren</Text>
+        <View style={styles.iconButton} />
+      </View>
+
+      {/* Image preview — fixed height, never overlapped by chrome. */}
       <View style={styles.imageBlock}>
         {bon.uri ? (
           <Image
@@ -288,13 +328,10 @@ export default function CashbackReviewScreen() {
             <ActivityIndicator color="#fff" />
           </View>
         )}
-        <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-          <Pressable onPress={handleRetake} style={styles.iconButton} hitSlop={10}>
-            <MaterialCommunityIcons name="arrow-left" size={24} color="#fff" />
-          </Pressable>
-          <Text style={styles.topBarTitle}>Foto kontrollieren</Text>
-          <View style={styles.iconButton} />
-        </View>
+        <Pressable onPress={handleCropTap} style={styles.cropPill} hitSlop={6}>
+          <MaterialCommunityIcons name="crop" size={14} color="#fff" />
+          <Text style={styles.cropPillText}>Zuschneiden</Text>
+        </Pressable>
       </View>
 
       {/* Bottom: theme-aware sheet — flex:1 so labels are clearly visible */}

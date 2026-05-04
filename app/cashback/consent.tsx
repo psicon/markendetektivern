@@ -168,9 +168,9 @@ export default function CashbackConsentScreen() {
       heroGradient: {
         marginHorizontal: 16,
         marginTop: 12,
-        borderRadius: radii.card,
+        borderRadius: radii.lg,
         padding: 20,
-        ...(shadows.card ?? {}),
+        ...(shadows.md ?? {}),
       },
       heroTitle: {
         color: '#fff',
@@ -201,11 +201,11 @@ export default function CashbackConsentScreen() {
         marginHorizontal: 16,
         marginVertical: 6,
         backgroundColor: cardBg,
-        borderRadius: radii.card,
+        borderRadius: radii.lg,
         padding: 16,
         flexDirection: 'row' as const,
         gap: 14,
-        ...(shadows.card ?? {}),
+        ...(shadows.md ?? {}),
       },
       bulletIconBox: {
         width: 40,
@@ -256,7 +256,7 @@ export default function CashbackConsentScreen() {
       },
       acceptButton: {
         backgroundColor: theme.primary ?? headerBgEnd,
-        borderRadius: radii.pill,
+        borderRadius: 14,
         paddingVertical: 14,
         alignItems: 'center' as const,
         justifyContent: 'center' as const,
@@ -283,7 +283,7 @@ export default function CashbackConsentScreen() {
         alignSelf: 'flex-start' as const,
         paddingHorizontal: 8,
         paddingVertical: 3,
-        borderRadius: radii.pill,
+        borderRadius: 14,
         backgroundColor: 'rgba(255,255,255,0.18)',
       },
       versionBadgeText: {
