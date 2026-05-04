@@ -29,10 +29,12 @@ import {
   Dimensions,
   InteractionManager,
   Linking,
+  NativeModules,
   Pressable,
   StatusBar,
   StyleSheet,
   Text,
+  TurboModuleRegistry,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -51,14 +53,34 @@ const CORNER_LEN = 28;
 const CORNER_THICK = 3;
 
 /**
- * Try the native Document Scanner first. Returns null if the plugin
- * isn't linked yet (dev-client missing the native module) so the
- * caller can fall back to the expo-camera path.
+ * Probe whether the DocumentScanner native module is registered with
+ * React Native's bridge. We do this BEFORE attempting to import the JS
+ * package because the package's index.ts uses `TurboModuleRegistry
+ * .getEnforcing()` at module-eval time — if the native side is
+ * missing, that throws and Metro's dev-mode LogBox shows a red
+ * full-screen error even if downstream catches it. Probing first lets
+ * us skip the import entirely on dev-clients that haven't been rebuilt
+ * with the native module linked.
+ */
+function isDocumentScannerLinked(): boolean {
+  try {
+    if ((NativeModules as any)?.DocumentScanner) return true;
+    const tm: any = TurboModuleRegistry as any;
+    if (typeof tm?.get === 'function' && tm.get('DocumentScanner')) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Try the native Document Scanner. Returns 'unavailable' if the
+ * package isn't linked into the dev-client (caller falls back to
+ * expo-camera + manual capture).
  */
 async function tryDocumentScanner(): Promise<string | null | 'cancel' | 'unavailable'> {
+  if (!isDocumentScannerLinked()) return 'unavailable';
   try {
-    // Lazy-load so the screen still mounts when the native module is
-    // missing.
     const mod: any = await import('react-native-document-scanner-plugin');
     const Scanner = mod?.default ?? mod;
     if (!Scanner?.scanDocument) return 'unavailable';

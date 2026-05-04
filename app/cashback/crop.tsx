@@ -20,13 +20,27 @@ import {
   ActivityIndicator,
   Dimensions,
   Image,
+  NativeModules,
   PanResponder,
   Pressable,
   StatusBar,
   StyleSheet,
   Text,
+  TurboModuleRegistry,
   View,
 } from 'react-native';
+
+function isImageManipulatorLinked(): boolean {
+  try {
+    const nm: any = NativeModules as any;
+    if (nm?.ExpoImageManipulator) return true;
+    const tm: any = TurboModuleRegistry as any;
+    if (typeof tm?.get === 'function' && tm.get('ExpoImageManipulator')) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fontFamily, fontWeight } from '@/constants/tokens';
@@ -187,18 +201,16 @@ export default function CashbackCropScreen() {
     if (!imgUri || !naturalW || !naturalH || cropping) return;
     setCropping(true);
     try {
-      // Lazy-import to avoid the requireNativeModule call at module
-      // load when the dev-client hasn't been rebuilt yet — that crash
-      // would prevent the whole screen from mounting (you'd see "Oops").
-      // With dynamic import the screen mounts fine, only the manipulate
-      // call throws if the native module is missing — which we catch
-      // and surface as a friendly rebuild message.
+      // Probe the native bridge first — the package's index.ts uses
+      // `requireNativeModule(...)` at module-eval time, which throws
+      // (and Metro's LogBox shows a red banner) if the module isn't
+      // linked. Probing avoids ever hitting the import in that case.
+      if (!isImageManipulatorLinked()) {
+        throw new Error('manipulator_not_available');
+      }
       const mod: any = await import('expo-image-manipulator');
       const IM = mod?.default ?? mod;
       const manipulateAsync = IM?.manipulateAsync ?? mod?.manipulateAsync;
-      // SaveFormat enum values are 'jpeg'/'png'/'webp' under the hood;
-      // hard-fall to the literal so the screen still works if the
-      // bundler strips the enum object.
       const formatJpeg = IM?.SaveFormat?.JPEG ?? mod?.SaveFormat?.JPEG ?? 'jpeg';
       if (typeof manipulateAsync !== 'function') {
         throw new Error('manipulator_not_available');

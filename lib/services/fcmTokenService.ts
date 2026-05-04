@@ -18,23 +18,46 @@
  * dev-client yet (rebuild via `npx expo run:ios --device`).
  */
 
-import { Platform } from 'react-native';
+import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 let _registered = false;
 
+/**
+ * Probe whether the Firebase Messaging native module is linked into
+ * the dev-client. Avoids the import-time crash + LogBox red banner
+ * when the dev-client hasn't been rebuilt with @react-native-firebase
+ * /messaging yet.
+ */
+function isMessagingLinked(): boolean {
+  try {
+    // RNFB modules register under the `RNFBMessagingModule` name on
+    // the bridge (different across versions; we probe both).
+    const nm: any = NativeModules as any;
+    if (nm?.RNFBMessagingModule) return true;
+    if (nm?.RNFBMessaging) return true;
+    const tm: any = TurboModuleRegistry as any;
+    if (typeof tm?.get === 'function') {
+      if (tm.get('RNFBMessagingModule')) return true;
+      if (tm.get('RNFBMessaging')) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 async function getMessagingModule(): Promise<any | null> {
+  if (!isMessagingLinked()) {
+    console.log('[fcm] native module not linked — skipping push registration');
+    return null;
+  }
   try {
     const mod: any = await import('@react-native-firebase/messaging');
     return mod?.default ?? mod;
   } catch (e: any) {
-    const msg = String(e?.message || '');
-    if (/not.*registered|nativemodule|TurboModule|requireNativeModule/i.test(msg)) {
-      console.log('[fcm] native module not yet linked — skipping push registration');
-    } else {
-      console.warn('[fcm] messaging import failed:', msg);
-    }
+    console.warn('[fcm] messaging import failed:', e?.message);
     return null;
   }
 }
