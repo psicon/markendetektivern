@@ -1,0 +1,75 @@
+# EAS-Build ignore list. EAS uses this when present, otherwise falls
+# back to .gitignore. We keep .gitignore tight (Pods/build/etc.
+# already excluded), and use this file to additionally strip stuff
+# that's tracked in git but irrelevant to the iOS / Android binary.
+#
+# Goal: keep the upload tarball under ~50 MB (full repo with Pods is
+# ~700 MB; without unrelated trees it's ~30 MB).
+
+# ─── Native build artifacts (also in .gitignore but listing for clarity)
+node_modules/
+ios/Pods/
+ios/build/
+ios/DerivedData/
+android/.gradle/
+android/build/
+android/app/build/
+**/*.xcworkspace/xcuserdata/
+**/*.xcodeproj/xcuserdata/
+**/*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# ─── Tracked-but-not-needed-for-mobile-build content
+# Cloud Functions deploy via firebase, not part of the iOS/Android binary.
+cloud-functions/
+
+# Old design prototype (HTML/CSS scratch dir, never imported by the app).
+markendetektive_newdesign/
+
+# OCR validation tool (Python) lives in the repo for reference,
+# never bundled into the mobile app.
+tools/
+
+# Documentation / planning files
+docs/
+*.md
+!README.md
+firestore-*.txt
+firebase-*.txt
+firebase-*.json
+LEADERBOARD_*.md
+CASHBACK_*.md
+CONSENT_*.md
+CRASHLYTICS_*.md
+DEPLOYMENT_*.md
+PAYWALL_*.md
+RELEASE_*.md
+REVENUECAT_*.md
+
+# Service account JSONs — should never go into a build
+markendetektive-895f7-*.json
+GoogleService-Info.plist.bak
+
+# Build cache + dev tooling
+.expo/
+.expo-shared/
+.metro-health-check*
+.cursor/
+.vscode/
+.claude/
+
+# CI / git artifacts
+.github/
+
+# Bundle output (rebuilt fresh in cloud)
+dist/
+web-build/
+
+# Local-only test scripts
+test-*.js
+get-crash-log.sh
+bundletool.jar
+
+# Temp / OS junk
+.DS_Store
+*.log
+Thumbs.db
