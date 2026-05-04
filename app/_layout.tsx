@@ -112,6 +112,14 @@ function ThemedApp() {
                     gestureEnabled: true
                   }}
                 />
+                <Stack.Screen
+                  name="cashback/consent"
+                  options={{ headerShown: false, animation: 'slide_from_bottom', gestureEnabled: true }}
+                />
+                {/* cashback/capture, cashback/review, cashback/pending/[id]
+                    werden in Phase 1.5 + Phase 2 registriert wenn die
+                    Screens existieren — sonst feuert expo-router warnings
+                    für leere Dateien. */}
                 <Stack.Screen name="+not-found" />
               </Stack>
               <StatusBar 

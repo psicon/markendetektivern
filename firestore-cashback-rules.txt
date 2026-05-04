@@ -1,0 +1,133 @@
+// Cashback / Kassenbon System — Firestore Rules to ADD
+// =====================================================
+//
+// Copy each block below into the existing Firestore rules in the
+// Firebase Console (markendetektive-895f7).
+//
+// Key principle (CASHBACK_ARCHITECTURE.md §11 #3):
+//   ALL writes that affect cashback balance happen via Cloud Functions
+//   using Admin SDK. Clients can READ their own data but never WRITE
+//   to receipts / payouts / ledger / config. The only client write is
+//   the consent block on their own user doc.
+//
+// Project: markendetektive-895f7
+// Pre-req: Phase 1 deploy — these rules can be added the moment the
+//          collections are first referenced; they're additive.
+
+// ─── ADD on top-level (outside users) ────────────────────────────────
+
+// Cashback config — public read (so the app knows the tiers + cap),
+// admin-only write.
+match /cashback_config/{configId} {
+  allow read: if true;
+  allow write: if false;
+}
+
+// Receipts — user can read their own, no client writes.
+match /receipts/{receiptId} {
+  allow read: if request.auth != null
+              && resource.data.userId == request.auth.uid;
+  allow write: if false;
+}
+
+// Cashback payouts — user can read their own, no client writes.
+match /cashback_payouts/{payoutId} {
+  allow read: if request.auth != null
+              && resource.data.userId == request.auth.uid;
+  allow write: if false;
+}
+
+// Review queue — never readable to clients.
+match /cashback_review_queue/{queueId} {
+  allow read: if false;
+  allow write: if false;
+}
+
+// Merchants — public read (logo + canonical name), admin-only write.
+match /merchants/{merchantId} {
+  allow read: if true;
+  allow write: if false;
+}
+
+// Monthly consumption aggregate — never readable to clients.
+match /cashback_consumption/{month} {
+  allow read: if false;
+  allow write: if false;
+}
+
+// Learning labels (Sprint 0+) — never readable to clients.
+match /learning/{document=**} {
+  allow read: if false;
+  allow write: if false;
+}
+
+// ─── ADD inside users/{userId} match block ───────────────────────────
+// (paste these inside your existing `match /users/{userId} { ... }`)
+
+// Cashback ledger — user can read own, no client writes (admin SDK only).
+match /cashback_ledger/{ledgerId} {
+  allow read: if request.auth != null && request.auth.uid == userId;
+  allow write: if false;
+}
+
+// Purchased products — user can read own, no client writes.
+match /purchased_products/{productId} {
+  allow read: if request.auth != null && request.auth.uid == userId;
+  allow write: if false;
+}
+
+// ─── User-doc field-level constraints ────────────────────────────────
+//
+// The user already owns /users/{uid} for write. We add a guard against
+// the user spoofing their own cashback fields. Replace your existing
+// user-doc write rule with this stricter version:
+//
+//   match /users/{userId} {
+//     allow read: if request.auth != null && request.auth.uid == userId;
+//     allow create: if request.auth != null && request.auth.uid == userId;
+//     allow update: if request.auth != null
+//                    && request.auth.uid == userId
+//                    && (
+//                      // No cashback-related field can be touched from client...
+//                      !request.resource.data.diff(resource.data).affectedKeys()
+//                        .hasAny([
+//                          'cashback_balance_cents',
+//                          'cashback_lifetime_cents',
+//                          'cashback_pending_cents',
+//                          'cashback_monthly',
+//                          'cashback_last_bon_date',
+//                          'trust_score',
+//                          'trust_score_components',
+//                          'kyc',
+//                        ])
+//                      // ...EXCEPT the consent block (user owns their consent).
+//                      || request.resource.data.diff(resource.data).affectedKeys()
+//                          .hasOnly(['cashback_consent'])
+//                    );
+//   }
+//
+// Adjust to match your existing user-doc rule structure if it's already
+// more nuanced. The guard above is the *minimum* you need.
+
+// ─── FCM token subcollection (Phase 2) ───────────────────────────────
+//
+// User stores their FCM tokens for push delivery. Inside users/{userId}:
+//
+//   match /fcmTokens/{tokenId} {
+//     allow read, write: if request.auth != null && request.auth.uid == userId;
+//   }
+
+// ─── Storage rules (separate file, storage.rules) ────────────────────
+//
+// In storage.rules, ADD:
+//
+//   match /b/{bucket}/o {
+//     match /cashback-uploads/{userId}/{file=**} {
+//       allow write: if request.auth != null
+//                    && request.auth.uid == userId
+//                    && request.resource.size < 8 * 1024 * 1024
+//                    && request.resource.contentType.matches('image/.*|application/pdf');
+//       // No client read — Cloud Functions use admin SDK with signed URLs.
+//       allow read: if false;
+//     }
+//   }

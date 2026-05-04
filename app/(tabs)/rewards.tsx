@@ -27,6 +27,7 @@ import { useGamificationEnabled } from '@/hooks/useGamificationEnabled';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { db } from '@/lib/firebase';
+import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import {
   getAggregateUpdatedAt,
   getBundeslandRanks,
@@ -42,12 +43,12 @@ import { useAchievements } from '@/lib/hooks/useAchievements';
 import { achievementService } from '@/lib/services/achievementService';
 import type { Level } from '@/lib/types/achievements';
 
-// ─── Demo data ─────────────────────────────────────────────────────────
-// Lifted directly from `markendetektive_newdesign/project/Rewards.jsx`
-// so the screen renders something realistic in Phase 2. Wire-up to
-// real services / Firestore comes when the backend exposes the
-// Cashback-Taler model — until then this is hard-coded.
-const CASHBACK_EUR = 12.4;
+// ─── Cashback fallback ─────────────────────────────────────────────────
+// Wenn kein User eingeloggt ist (oder das Cashback-Backend offline)
+// rendert die UI mit einem 0,00 € Fallback. Live-Werte kommen aus
+// `useCashbackUserState()` via Firestore-Snapshot — siehe
+// CASHBACK_ARCHITECTURE.md §3.3 (User-Felder).
+const CASHBACK_FALLBACK_EUR = 0.0;
 const PAYOUT_THRESHOLD = 15.0;
 
 // Shared height for both hero cards (Cashback in Einlösen +
@@ -449,14 +450,33 @@ export default function RewardsScreen() {
 
 function RedeemTab() {
   const { theme } = useTokens();
+  // Live cashback state from Firestore. Falls back to 0,00 € when
+  // the user isn't signed in or the backend hasn't seeded the field
+  // yet (Phase 1 deploys the fields lazy via the Cloud Function).
+  const cashback = useCashbackUserState();
+  const cashbackEur = cashback.uid
+    ? cashback.balanceCents / 100
+    : CASHBACK_FALLBACK_EUR;
   const pct = Math.min(
     100,
-    Math.round((CASHBACK_EUR / PAYOUT_THRESHOLD) * 100),
+    Math.round((cashbackEur / PAYOUT_THRESHOLD) * 100),
   );
-  const canRedeem = CASHBACK_EUR >= PAYOUT_THRESHOLD;
-  const gapEur = (PAYOUT_THRESHOLD - CASHBACK_EUR)
+  const canRedeem = cashbackEur >= PAYOUT_THRESHOLD;
+  const gapEur = (PAYOUT_THRESHOLD - cashbackEur)
     .toFixed(2)
     .replace('.', ',');
+
+  // Tap target for "Bon scannen" — routes through consent gate first.
+  // Phase 1.5 swaps the post-consent branch for `/cashback/capture`.
+  // For now we always land on the consent screen which shows the
+  // already-accepted state when consent is valid.
+  const onScanBon = useCallback(() => {
+    if (!cashback.uid) {
+      router.push('/auth/login');
+      return;
+    }
+    router.push('/cashback/consent');
+  }, [cashback.uid]);
 
   return (
     <>
@@ -577,7 +597,7 @@ function RedeemTab() {
                     color: '#fff',
                   }}
                 >
-                  {CASHBACK_EUR.toFixed(2).replace('.', ',')}
+                  {cashbackEur.toFixed(2).replace('.', ',')}
                 </Text>
                 <Text
                   style={{
@@ -605,7 +625,7 @@ function RedeemTab() {
             label={
               canRedeem ? 'Bereit zur Auszahlung' : 'Auszahlungs-Schwelle'
             }
-            current={`${CASHBACK_EUR.toFixed(2).replace('.', ',')} €`}
+            current={`${cashbackEur.toFixed(2).replace('.', ',')} €`}
             required={`${PAYOUT_THRESHOLD.toFixed(2).replace('.', ',')} €`}
             pct={pct}
           />
@@ -630,7 +650,11 @@ function RedeemTab() {
         </Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           {QUICK_ACTIONS.map((a) => (
-            <QuickActionTile key={a.k} action={a} />
+            <QuickActionTile
+              key={a.k}
+              action={a}
+              onCashbackTap={a.k === 'receipt' ? onScanBon : undefined}
+            />
           ))}
         </View>
       </View>
@@ -1003,12 +1027,18 @@ function SectionHeader({ title, sub }: { title: string; sub?: string }) {
   );
 }
 
-function QuickActionTile({ action }: { action: QuickAction }) {
+function QuickActionTile({ action, onCashbackTap }: { action: QuickAction; onCashbackTap?: () => void }) {
   const fg = action.dark ? '#fff' : '#191c1d';
   return (
     <Pressable
       onPress={() => {
-        if (action.k === 'receipt') safePush('/barcode-scanner' as any);
+        if (action.k === 'receipt') {
+          if (onCashbackTap) {
+            onCashbackTap();
+          } else {
+            safePush('/barcode-scanner' as any);
+          }
+        }
         // photo + survey wire up later
       }}
       style={({ pressed }) => ({
