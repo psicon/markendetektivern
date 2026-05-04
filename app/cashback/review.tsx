@@ -108,17 +108,24 @@ export default function CashbackReviewScreen() {
   }, []);
 
   // Top-bar X dismisses the entire cashback flow back to the rewards
-  // tab in a single tap. "Nochmal" inside the sheet is the explicit
-  // "I want a different photo" path.
+  // tab. We navigate to rewards explicitly because router.back() on a
+  // freshly-mounted stack with replace-style entry can land on the
+  // hidden index splash; navigate is robust either way.
   const handleDismiss = useCallback(() => {
-    router.replace('/(tabs)/rewards');
+    router.navigate('/(tabs)/rewards');
   }, []);
 
   const handleCropTap = useCallback(() => {
-    setSubmitError(
-      'Zuschneiden ist gerade noch nicht aktiviert (kommt in Phase 1.5.2 mit ML-Kit Document Scanner — braucht einen App-Update via "expo run:ios"). Tipp: Foto so ablichten dass der Bon den Rahmen füllt.',
-    );
-  }, []);
+    router.push({
+      pathname: '/cashback/crop',
+      params: {
+        uri: bon.uri,
+        width: String(bon.width),
+        height: String(bon.height),
+        source: (params.source as any) || 'live_camera',
+      },
+    });
+  }, [bon.uri, bon.width, bon.height, params.source]);
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
@@ -141,8 +148,14 @@ export default function CashbackReviewScreen() {
         params: { id: result.cashbackId },
       });
     } catch (error: any) {
-      console.warn('⚠️ submit failed:', error);
+      console.warn('⚠️ submit failed:', JSON.stringify({
+        code: error?.code,
+        message: error?.message,
+        name: error?.name,
+        stack: error?.stack?.split('\n')?.slice(0, 4),
+      }, null, 2));
       const code = error?.code as string | undefined;
+      const message = error?.message as string | undefined;
       const msg =
         code === 'rate_limited'
           ? 'Du hast heute schon einen Bon eingereicht. Morgen geht es weiter.'
@@ -150,11 +163,15 @@ export default function CashbackReviewScreen() {
           ? 'Bitte bestätige zuerst die Cashback-Einwilligung.'
           : code === 'unauthenticated' || code === 'not_authenticated'
           ? 'Bitte melde dich an, um Bons einzureichen.'
-          : code === 'http_404' || code?.startsWith('http_')
-          ? 'Backend antwortet nicht (Cloud Function noch nicht deployed). Vor dem Test bitte im Terminal: firebase deploy --only functions:cashback-pipeline'
+          : code?.startsWith('http_')
+          ? `Backend-Fehler ${code}. (Network? Cloud Function nicht deployed?)`
           : code === 'storage/unauthorized'
-          ? 'Storage lehnt den Upload ab — die Storage-Rules aus firestore-cashback-rules.txt müssen noch in der Firebase-Konsole eingetragen werden.'
-          : `Einreichen fehlgeschlagen (${code || 'unbekannter Fehler'}). Konsolen-Log prüfen.`;
+          ? 'Storage lehnt den Upload ab — Storage-Rules müssen aktualisiert werden (storage.rules deploy).'
+          : code?.startsWith('storage/')
+          ? `Storage-Fehler: ${code}${message ? ' — ' + message : ''}`
+          : code === 'local_read_failed'
+          ? 'Bon-Bild konnte nicht gelesen werden.'
+          : `Einreichen fehlgeschlagen: ${code || message || 'unbekannter Fehler'}`;
       setSubmitError(msg);
     } finally {
       setSubmitting(false);

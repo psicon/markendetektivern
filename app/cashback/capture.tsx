@@ -123,7 +123,10 @@ export default function CashbackCaptureScreen() {
         throw new Error('takePictureAsync returned no URI');
       }
       const bon = await buildCapturedBon(photo.uri, photo.width ?? 0, photo.height ?? 0);
-      router.push({
+      // Use REPLACE not push: keeps the cashback stack flat at [tabs, review]
+      // so the user's back gesture goes straight to rewards, not back
+      // through the camera.
+      router.replace({
         pathname: '/cashback/review',
         params: {
           uri: bon.uri,
@@ -162,7 +165,7 @@ export default function CashbackCaptureScreen() {
       if (result.canceled || !result.assets?.[0]) return;
       const a = result.assets[0];
       const bon = await buildCapturedBon(a.uri, a.width ?? 0, a.height ?? 0);
-      router.push({
+      router.replace({
         pathname: '/cashback/review',
         params: {
           uri: bon.uri,

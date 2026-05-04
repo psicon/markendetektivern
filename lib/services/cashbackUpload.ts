@@ -13,12 +13,10 @@
 import { auth, storage } from '@/lib/firebase';
 import {
   doc,
-  getFirestore,
   onSnapshot,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { ref as storageRef, uploadBytes } from 'firebase/storage';
-import * as FileSystem from 'expo-file-system';
+import { ref as storageRef, uploadBytesResumable } from 'firebase/storage';
 
 import { db } from '@/lib/firebase';
 import type { ReceiptDoc } from '@/lib/types/cashback';
@@ -39,46 +37,50 @@ export interface UploadResult {
 
 /**
  * Upload a JPEG to gs://.../cashback-uploads/{uid}/{filename}.
- * The filename is a v4-uuid-ish random string; the server validates
- * the prefix matches the authenticated uid.
+ *
+ * In React Native, the most reliable upload path is `fetch(localUri) →
+ * .blob() → uploadBytesResumable(blob)`. The Web SDK's plain
+ * `uploadBytes(Uint8Array)` is flaky on RN (network task adapter does
+ * not always forward the body). Resumable also works on slow / flaky
+ * mobile connections.
  */
 export async function uploadBonImage(
   localUri: string,
   uid: string,
 ): Promise<UploadResult> {
+  if (!auth.currentUser) {
+    const e: any = new Error('not_authenticated');
+    e.code = 'not_authenticated';
+    throw e;
+  }
   const filename = `${randomId()}.jpg`;
   const storagePath = `cashback-uploads/${uid}/${filename}`;
 
-  // expo-file-system → ArrayBuffer
-  const base64 = await FileSystem.readAsStringAsync(localUri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  const bytes = base64ToUint8Array(base64);
+  const response = await fetch(localUri);
+  if (!response.ok) {
+    const e: any = new Error(`local_read_failed_${response.status}`);
+    e.code = 'local_read_failed';
+    throw e;
+  }
+  const blob = await response.blob();
+  const sizeBytes = (blob as any).size ?? 0;
 
   const ref = storageRef(storage, storagePath);
-  await uploadBytes(ref, bytes, { contentType: 'image/jpeg' });
+  await new Promise<void>((resolve, reject) => {
+    const task = uploadBytesResumable(ref, blob, { contentType: 'image/jpeg' });
+    task.on(
+      'state_changed',
+      undefined,
+      (err) => reject(err),
+      () => resolve(),
+    );
+  });
 
   return {
     storagePath,
     contentType: 'image/jpeg',
-    sizeBytes: bytes.byteLength,
+    sizeBytes,
   };
-}
-
-function base64ToUint8Array(b64: string): Uint8Array {
-  // RN doesn't ship Buffer by default. Implement a small decoder.
-  const cleaned = b64.replace(/[^A-Za-z0-9+/=]/g, '');
-  const padded = cleaned + '==='.slice((cleaned.length + 3) % 4);
-  const bin =
-    typeof atob === 'function'
-      ? atob(padded)
-      : globalThis.Buffer
-      ? globalThis.Buffer.from(padded, 'base64').toString('binary')
-      : '';
-  const len = bin.length;
-  const out = new Uint8Array(len);
-  for (let i = 0; i < len; i++) out[i] = bin.charCodeAt(i);
-  return out;
 }
 
 function randomId(): string {
