@@ -51,6 +51,7 @@ import { useTokens } from '@/hooks/useTokens';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
+import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { achievementService } from '@/lib/services/achievementService';
 import { AlgoliaService } from '@/lib/services/algolia';
 import { FirestoreService } from '@/lib/services/firestore';
@@ -71,6 +72,22 @@ export default function HomeScreen() {
   const { user, userProfile } = useAuth();
   const { isPremium, refreshPremiumStatus } = useRevenueCat();
   const analytics = useAnalytics();
+  const cashback = useCashbackUserState();
+
+  // Tap target for "Kassenbon scannen" — same flow as Belohnungen tab.
+  // Routes through the consent gate first; if consent is already
+  // accepted we skip straight to capture.
+  const onScanBon = useCallback(() => {
+    if (!cashback.uid) {
+      router.push('/auth/login');
+      return;
+    }
+    if (cashback.hasConsent) {
+      router.push('/cashback/capture');
+    } else {
+      router.push('/cashback/consent');
+    }
+  }, [cashback.uid, cashback.hasConsent]);
 
   // Coachmark — per-Screen-Erklär-Overlay, fires nur beim ersten
   // Mount eines Users (siehe useCoachmark für die Hard-Block-Logik
@@ -585,7 +602,7 @@ export default function HomeScreen() {
   // change; otherwise we'd re-render five cards on every scroll
   // tick.
   const schnellzugriff = useMemo(() => [
-    { icon: 'receipt' as const, label: 'Kassenbon\nscannen', background: '#95cfc4', dark: true as const,  onPress: () => safePush('/achievements' as any) },
+    { icon: 'receipt' as const, label: 'Kassenbon\nscannen', background: '#95cfc4', dark: true as const,  onPress: onScanBon },
     { icon: 'camera-plus-outline'  as const, label: 'Produkte\neinreichen', background: '#a89cdf', dark: true as const,  onPress: () => safePush('/achievements' as any) },
     { icon: 'heart-outline'        as const, label: 'Deine\nFavoriten',    background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/favorites' as any) },
     { icon: 'poll'                 as const, label: 'Umfragen',            background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/achievements' as any) },
@@ -593,7 +610,7 @@ export default function HomeScreen() {
     // Homepage und matcht den schwebenden Einkaufszettel-FAB rechts
     // unten, sodass Schnellzugriff + FAB visuell verbunden sind.
     { icon: 'cart'                 as const, label: 'Einkaufs-\nliste',    background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/shopping-list' as any) },
-  ], [theme.surfaceAlt]);
+  ], [theme.surfaceAlt, onScanBon]);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
