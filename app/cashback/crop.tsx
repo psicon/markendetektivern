@@ -20,27 +20,13 @@ import {
   ActivityIndicator,
   Dimensions,
   Image,
-  NativeModules,
   PanResponder,
   Pressable,
   StatusBar,
   StyleSheet,
   Text,
-  TurboModuleRegistry,
   View,
 } from 'react-native';
-
-function isImageManipulatorLinked(): boolean {
-  try {
-    const nm: any = NativeModules as any;
-    if (nm?.ExpoImageManipulator) return true;
-    const tm: any = TurboModuleRegistry as any;
-    if (typeof tm?.get === 'function' && tm.get('ExpoImageManipulator')) return true;
-    return false;
-  } catch {
-    return false;
-  }
-}
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fontFamily, fontWeight } from '@/constants/tokens';
@@ -205,13 +191,11 @@ export default function CashbackCropScreen() {
     if (!imgUri || !naturalW || !naturalH || cropping) return;
     setCropping(true);
     try {
-      // Probe the native bridge first — the package's index.ts uses
-      // `requireNativeModule(...)` at module-eval time, which throws
-      // (and Metro's LogBox shows a red banner) if the module isn't
-      // linked. Probing avoids ever hitting the import in that case.
-      if (!isImageManipulatorLinked()) {
-        throw new Error('manipulator_not_available');
-      }
+      // expo-image-manipulator registers on the Expo modules bridge
+      // (NOT React Native's NativeModules), so probing the latter
+      // gives false negatives. We just try the import + call —
+      // catch handles the failure case and surfaces a friendly
+      // rebuild message.
       const mod: any = await import('expo-image-manipulator');
       const IM = mod?.default ?? mod;
       const manipulateAsync = IM?.manipulateAsync ?? mod?.manipulateAsync;
