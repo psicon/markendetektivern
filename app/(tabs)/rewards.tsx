@@ -340,32 +340,37 @@ export default function RewardsScreen() {
           </ScrollView>
         </View>
 
-        {gamificationEnabled ? (
+        {/* PagerView's internals call React.cloneElement on each child,
+            which throws "Cannot read property 'props' of null" if any
+            child is `null`. So when Gamification is off we still render
+            a placeholder View (just a no-op page that's never reachable
+            because scrollEnabled is false and the tab pill is hidden). */}
         <View key="ranks" style={{ flex: 1 }}>
-          <ScrollView
-            scrollsToTop={tab === 'ranks'}
-            contentContainerStyle={{
-              paddingTop: chromeHeight,
-              // Extra room at the bottom: the floating
-              // PositionStickyBar sits ~95 px above the safe-area
-              // (tab bar + raised Stöbern button), and is itself
-              // ~50 px tall. 220 keeps the last list row visible
-              // above the bar.
-              paddingBottom: 220,
-            }}
-            showsVerticalScrollIndicator={false}
-          >
-            <RanksTab
-              outerScope={outerScope}
-              setOuterScope={setOuterScope}
-              geo={geo}
-              setGeo={setGeo}
-              userStats={userStats}
-              levels={levels}
-            />
-          </ScrollView>
+          {gamificationEnabled ? (
+            <ScrollView
+              scrollsToTop={tab === 'ranks'}
+              contentContainerStyle={{
+                paddingTop: chromeHeight,
+                // Extra room at the bottom: the floating
+                // PositionStickyBar sits ~95 px above the safe-area
+                // (tab bar + raised Stöbern button), and is itself
+                // ~50 px tall. 220 keeps the last list row visible
+                // above the bar.
+                paddingBottom: 220,
+              }}
+              showsVerticalScrollIndicator={false}
+            >
+              <RanksTab
+                outerScope={outerScope}
+                setOuterScope={setOuterScope}
+                geo={geo}
+                setGeo={setGeo}
+                userStats={userStats}
+                levels={levels}
+              />
+            </ScrollView>
+          ) : null}
         </View>
-        ) : null}
       </PagerView>
 
       {/* Floating "Deine Position" — only on the Bestenliste tab.
