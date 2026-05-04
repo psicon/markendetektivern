@@ -523,5 +523,57 @@ Existing relevant code/projects (NOT in this repo):
 
 ---
 
+## 13. Implementation Status (live tracker)
+
+### 13.1 Branch strategy
+
+- `feat/cashback-foundation` — architecture doc + Phase 0 OCR validation tools (Python). Reference branch.
+- `feat/cashback-impl` — **active implementation branch**, branched from `feat/design-implementation-home`. Carries Phase 1 + 1.5 + 2 work.
+- `feat/design-implementation-home` — App-Track main line (139 commits ahead of `main`). Cashback-impl rebases onto this.
+- `main` — clean integration target, untouched until everything is reviewed.
+
+### 13.2 Phase status
+
+| Phase | Status | Commit | Notes |
+|-------|--------|--------|-------|
+| 0 — OCR validation tool | ✅ Done | feat/cashback-foundation | Python tool ready, 50-bon decision-gate not run yet |
+| 1 — Foundation | ✅ Done | `5c05679` | types, service, consent screen, live wiring in rewards.tsx |
+| 1.5 — Capture | ✅ Done | `0ba133b` | expo-camera based, frame overlay, review checklist, pending stub. **ML-Kit upgrade = Phase 1.5.1** |
+| 2 — Async backend + push | ✅ Done (v1) | this commit | enqueueCashback + processCashback Cloud Functions, OCR JS port, Storage upload, live pending listener. **Real FCM = Phase 2.1** |
+| 2.1 — Real FCM | ⏭️ Pending | — | Needs `@react-native-firebase/messaging` + dev-client rebuild |
+| 3 — Catalog match | ⏭️ Pending | — | productId/brandId mapping per OCR'd item |
+| 4 — Per-user product index | ⏭️ Pending | — | journeys + purchased_products writes |
+| 4.5 — Trust + behavioural | ⏭️ Pending | — | trust_score model, device graph, IP rep |
+| 5 — AI Review (LLM-as-judge) | ⏭️ Pending | — | Gemini 2.5 Pro reviewer Cloud Function |
+| 6 — Tremendous payouts | ⏭️ Pending | — | needs Tremendous API key |
+| 7 — RevealyIQ dashboard | ⏭️ Pending | — | post-MVP integration into existing project |
+
+### 13.3 What you need to do BEFORE Phase 2 deploys
+
+1. **Set Gemini API secret on the Cloud Function:**
+   ```bash
+   firebase use markendetektive-895f7
+   firebase functions:secrets:set GEMINI_API_KEY
+   ```
+2. **Add the Firestore + Storage rules** from `firestore-cashback-rules.txt` via Firebase Console.
+3. **Pre-create the PubSub topic** (or let it lazy-create on first publish):
+   ```bash
+   gcloud pubsub topics create cashback-ocr-jobs --project=markendetektive-895f7
+   ```
+4. **Deploy the function:**
+   ```bash
+   firebase deploy --only functions:cashback-pipeline
+   ```
+5. **Test end-to-end:** open the app → Rewards tab → "Bon scannen" → consent → capture → review → submit. Watch the receipt doc in Firestore (`/receipts/{id}`) flip from `ocr_pending` → `approved` (or `review`/`rejected`).
+
+### 13.4 What's deferred to Phase 2.1 (next dev-client rebuild)
+
+- `@react-native-firebase/messaging` install → real FCM push in `cloud-functions/cashback-pipeline/lib/push.js`
+- ML-Kit Document Scanner replacing the expo-camera capture for live edge detection
+- App Check + Device Attestation enforcement in the Cloud Function
+- DocAI Expense Parser fallback when reconciliation fails
+
+---
+
 *End of CASHBACK_ARCHITECTURE.md. Update this file in the same commit
 as any decision change.*

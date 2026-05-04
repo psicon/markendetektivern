@@ -1,0 +1,21 @@
+{
+  "name": "cashback-pipeline",
+  "version": "1.0.0",
+  "description": "Async OCR pipeline for the Cashback / Kassenbon flow. enqueueCashback HTTPS + processCashback PubSub.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "lint": "echo no-lint",
+    "deploy": "firebase deploy --only functions:cashback-pipeline"
+  },
+  "dependencies": {
+    "@google-cloud/pubsub": "^4.5.0",
+    "@google-cloud/storage": "^7.13.0",
+    "@google/genai": "^0.3.0",
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}

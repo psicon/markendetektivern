@@ -27,6 +27,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { useAuth } from '@/lib/contexts/AuthContext';
+import {
+  enqueueCashback,
+  uploadBonImage,
+} from '@/lib/services/cashbackUpload';
 import {
   prepareForUpload,
   verdictFor,
@@ -64,6 +69,7 @@ export default function CashbackReviewScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { theme, shadows } = useTokens();
+  const { user } = useAuth();
 
   const [checks, setChecks] = useState<Record<'corners' | 'date' | 'items', boolean>>({
     corners: false,
@@ -71,6 +77,7 @@ export default function CashbackReviewScreen() {
     items: false,
   });
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -99,24 +106,39 @@ export default function CashbackReviewScreen() {
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
+    setSubmitError(null);
     setSubmitting(true);
     try {
-      // Phase 1.5 stub: prepare the image for upload locally so the
-      // resize/compress path is exercised end-to-end. Phase 2 hands
-      // this off to `enqueueCashback`.
+      if (!user?.uid) {
+        throw new Error('not_authenticated');
+      }
       const prepared = await prepareForUpload(bon.uri, 2000, bon.width, bon.height);
-      console.log('[cashback] prepared for upload', prepared);
-
-      // Stub navigation — Phase 2 replaces with real ID from the
-      // enqueue Cloud Function response.
-      const stubId = `local-${Date.now()}`;
-      router.replace({ pathname: '/cashback/pending/[id]' as any, params: { id: stubId } });
-    } catch (error) {
+      const upload = await uploadBonImage(prepared.uri, user.uid);
+      const result = await enqueueCashback({
+        storagePath: upload.storagePath,
+        bytesHash: bon.bytesHash,
+        capturedAt: bon.capturedAt,
+        source: (params.source as 'live_camera' | 'upload') || 'live_camera',
+      });
+      router.replace({
+        pathname: '/cashback/pending/[id]' as any,
+        params: { id: result.cashbackId },
+      });
+    } catch (error: any) {
       console.warn('⚠️ submit failed:', error);
+      const msg =
+        error?.code === 'rate_limited'
+          ? 'Du hast heute schon einen Bon eingereicht. Morgen geht es weiter.'
+          : error?.code === 'consent_missing'
+          ? 'Bitte bestätige zuerst die Cashback-Einwilligung.'
+          : error?.code === 'unauthenticated'
+          ? 'Bitte melde dich an, um Bons einzureichen.'
+          : 'Einreichen fehlgeschlagen. Bitte später erneut versuchen.';
+      setSubmitError(msg);
     } finally {
       setSubmitting(false);
     }
-  }, [bon, canSubmit]);
+  }, [bon, canSubmit, user?.uid, params.source]);
 
   const verdictColor = (ok: boolean) => (ok ? theme.brandPrimary ?? '#0d8575' : '#d6603a');
 
@@ -321,6 +343,25 @@ export default function CashbackReviewScreen() {
             </Pressable>
           );
         })}
+
+        {submitError ? (
+          <View
+            style={{
+              marginTop: 8,
+              backgroundColor: 'rgba(214,96,58,0.12)',
+              borderRadius: 8,
+              padding: 10,
+              flexDirection: 'row',
+              alignItems: 'flex-start',
+              gap: 8,
+            }}
+          >
+            <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#d6603a" />
+            <Text style={{ color: '#d6603a', fontFamily: fontFamily.body, fontSize: 12, flex: 1, lineHeight: 18 }}>
+              {submitError}
+            </Text>
+          </View>
+        ) : null}
 
         <View style={styles.ctaRow}>
           <Pressable onPress={handleRetake} style={[styles.cta, styles.ctaSecondary]}>
