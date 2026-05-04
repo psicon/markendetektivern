@@ -257,32 +257,20 @@ export default function CashbackCaptureScreen() {
       const a = result.assets[0];
 
       // Try iOS auto edge-detection + perspective correction first
-      // (Apple VisionKit). On success we skip the manual crop screen
-      // and go straight to review with a clean, flat bon image.
-      // On Android (where the native module is a stub) and on iOS
-      // when no clear quad is found, the JS layer falls back to
-      // the manual crop screen.
+      // (Apple VisionKit). On success we ship a clean, flat bon to
+      // Review. On null (Android stub, or no clear quad found on iOS),
+      // we send the RAW image straight to Review — Gemini OCR is
+      // robust enough to extract items from photos with backgrounds.
+      // We never bounce the user through a manual crop step.
+      let outUri = a.uri;
       try {
         const { detectAndCropDocument } = await import('bon-edge-detector');
         const auto = await detectAndCropDocument(a.uri);
-        if (auto) {
-          await goReview(auto.uri, 'upload');
-          return;
-        }
+        if (auto) outUri = auto.uri;
       } catch (e: any) {
-        console.warn('⚠️ auto-crop unavailable:', e?.message);
+        console.warn('⚠️ auto-crop unavailable, sending raw image:', e?.message);
       }
-
-      // Fallback: manual crop screen.
-      router.replace({
-        pathname: '/cashback/crop',
-        params: {
-          uri: a.uri,
-          width: String(a.width ?? 0),
-          height: String(a.height ?? 0),
-          source: 'upload',
-        },
-      });
+      await goReview(outUri, 'upload');
     } catch (error: any) {
       console.warn('⚠️ Gallery pick failed:', error);
     }

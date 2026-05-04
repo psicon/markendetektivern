@@ -124,11 +124,10 @@ export default function CashbackReviewScreen() {
     router.navigate('/(tabs)/rewards');
   }, []);
 
-  // Manual crop is no longer surfaced from the review screen — the
-  // native scanner (VisionKit / ML-Kit) already auto-crops + auto-
-  // rotates at capture time. If the user wants a different crop,
-  // "Nochmal" re-launches the scanner. The /cashback/crop route is
-  // kept for power-users / debugging only.
+  // No manual crop step in the flow anymore. iOS auto-crops via
+  // VisionKit (native scanner) or via bon-edge-detector (gallery).
+  // Android sends the raw image to OCR — Gemini handles wide-angle
+  // bons reliably. "Nochmal" re-launches the capture flow.
 
   // Optimistic submit (best-practice): create a placeholder mirror doc
   // in Firestore RIGHT NOW so the bon is immediately visible everywhere
