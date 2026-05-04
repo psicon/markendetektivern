@@ -750,7 +750,12 @@ function RedeemTab() {
           }}
         >
           {CASHBACK_EARN.map((e, i) => (
-            <EarnRow key={e.k} action={e} isFirst={i === 0} />
+            <EarnRow
+              key={e.k}
+              action={e}
+              isFirst={i === 0}
+              onCashbackTap={e.k === 'receipt' ? onScanBon : undefined}
+            />
           ))}
         </View>
       </View>
@@ -1106,12 +1111,11 @@ function QuickActionTile({ action, onCashbackTap }: { action: QuickAction; onCas
   return (
     <Pressable
       onPress={() => {
+        // 'receipt' = Bon-Scan via Cashback-Flow (Consent → Capture →
+        // Review → Pending). NOT the barcode scanner — that's a
+        // completely separate Stöbern-flow for product lookup.
         if (action.k === 'receipt') {
-          if (onCashbackTap) {
-            onCashbackTap();
-          } else {
-            safePush('/barcode-scanner' as any);
-          }
+          onCashbackTap?.();
         }
         // photo + survey wire up later
       }}
@@ -1185,15 +1189,22 @@ function QuickActionTile({ action, onCashbackTap }: { action: QuickAction; onCas
 function EarnRow({
   action,
   isFirst,
+  onCashbackTap,
 }: {
   action: EarnAction;
   isFirst: boolean;
+  onCashbackTap?: () => void;
 }) {
   const { theme } = useTokens();
   return (
     <Pressable
       onPress={() => {
-        if (action.k === 'receipt') safePush('/barcode-scanner' as any);
+        // 'receipt' = Bon-Scan via Cashback-Flow (Consent → Capture →
+        // Review → Pending). NOT the barcode scanner.
+        if (action.k === 'receipt') {
+          onCashbackTap?.();
+        }
+        // photo + survey wire up later
       }}
       style={({ pressed }) => ({
         flexDirection: 'row',
