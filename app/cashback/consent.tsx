@@ -31,7 +31,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { DetailHeader } from '@/components/design/DetailHeader';
+import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -67,7 +67,7 @@ const BULLETS: { icon: string; title: string; body: string }[] = [
     icon: 'cash-multiple',
     title: 'Auszahlung über Tremendous',
     body:
-      'Ab 5 € Cashback-Guthaben kannst du dir das Geld via PayPal, SEPA oder Gutschein auszahlen lassen. Steuerliche Pflichten liegen bei dir.',
+      'Ab 15 € Cashback-Guthaben kannst du dir das Geld via PayPal, SEPA oder Gutschein auszahlen lassen. Steuerliche Pflichten liegen bei dir.',
   },
   {
     icon: 'account-cancel-outline',
@@ -160,8 +160,8 @@ export default function CashbackConsentScreen() {
     router.back();
   }, []);
 
-  const cardBg = theme.surface ?? theme.background;
-  const headerBgEnd = theme.brandPrimary ?? '#0d8575';
+  const cardBg = theme.surface ?? theme.bg;
+  const headerBgEnd = theme.primary ?? '#0d8575';
 
   const styles = useMemo(
     () => ({
@@ -187,7 +187,7 @@ export default function CashbackConsentScreen() {
         marginTop: 8,
       },
       sectionTitle: {
-        color: theme.textPrimary,
+        color: theme.text,
         fontSize: 13,
         fontFamily: fontFamily.body,
         fontWeight: fontWeight.bold as any,
@@ -213,18 +213,18 @@ export default function CashbackConsentScreen() {
         borderRadius: 20,
         alignItems: 'center' as const,
         justifyContent: 'center' as const,
-        backgroundColor: theme.brandPrimary
-          ? `${theme.brandPrimary}15`
+        backgroundColor: theme.primary
+          ? `${theme.primary}15`
           : 'rgba(13,133,117,0.1)',
       },
       bulletTitle: {
-        color: theme.textPrimary,
+        color: theme.text,
         fontSize: 15,
         fontFamily: fontFamily.body,
         fontWeight: fontWeight.bold as any,
       },
       bulletBody: {
-        color: theme.textSecondary,
+        color: theme.textSub,
         fontSize: 14,
         lineHeight: 20,
         marginTop: 4,
@@ -236,13 +236,13 @@ export default function CashbackConsentScreen() {
         marginBottom: 12,
       },
       legalText: {
-        color: theme.textSecondary,
+        color: theme.textSub,
         fontSize: 12,
         lineHeight: 18,
         fontFamily: fontFamily.body,
       },
       legalLink: {
-        color: theme.brandPrimary ?? headerBgEnd,
+        color: theme.primary ?? headerBgEnd,
         textDecorationLine: 'underline' as const,
       },
       footer: {
@@ -252,10 +252,10 @@ export default function CashbackConsentScreen() {
         gap: 10,
         borderTopWidth: 1,
         borderTopColor: theme.border ?? 'rgba(0,0,0,0.06)',
-        backgroundColor: theme.background,
+        backgroundColor: theme.bg,
       },
       acceptButton: {
-        backgroundColor: theme.brandPrimary ?? headerBgEnd,
+        backgroundColor: theme.primary ?? headerBgEnd,
         borderRadius: radii.pill,
         paddingVertical: 14,
         alignItems: 'center' as const,
@@ -275,7 +275,7 @@ export default function CashbackConsentScreen() {
         alignItems: 'center' as const,
       },
       cancelButtonText: {
-        color: theme.textSecondary,
+        color: theme.textSub,
         fontFamily: fontFamily.body,
         fontSize: 14,
       },
@@ -296,12 +296,14 @@ export default function CashbackConsentScreen() {
     [theme, shadows, cardBg, insets.bottom, isSubmitting, headerBgEnd],
   );
 
+  const headerOffset = insets.top + DETAIL_HEADER_ROW_HEIGHT;
+
   return (
-    <View style={{ flex: 1, backgroundColor: theme.background }}>
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <DetailHeader title="Cashback" onBack={handleCancel} />
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 32 }}
+        contentContainerStyle={{ paddingTop: headerOffset + 8, paddingBottom: 32 }}
         showsVerticalScrollIndicator={false}
       >
         <LinearGradient
@@ -318,7 +320,7 @@ export default function CashbackConsentScreen() {
           <Text style={styles.heroBody}>
             Lade nach dem Einkauf deinen Kassenbon hoch. Wir prüfen die enthaltenen
             Produkte automatisch und schreiben dir Cashback in Euro gut. Auszahlung
-            ab 5 € — wahlweise als PayPal, SEPA-Überweisung oder Gutschein.
+            ab 15 € — wahlweise als PayPal, SEPA-Überweisung oder Gutschein.
           </Text>
         </LinearGradient>
 
@@ -330,7 +332,7 @@ export default function CashbackConsentScreen() {
               <MaterialCommunityIcons
                 name={bullet.icon as any}
                 size={22}
-                color={theme.brandPrimary ?? headerBgEnd}
+                color={theme.primary ?? headerBgEnd}
               />
             </View>
             <View style={{ flex: 1 }}>

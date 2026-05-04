@@ -140,14 +140,23 @@ export async function enqueueCashback(args: EnqueueArgs): Promise<EnqueueResult>
   return payload as EnqueueResult;
 }
 
-// ─── Snapshot subscription on the receipt doc ───────────────────────
+// ─── Snapshot subscription on the user-sub-collection mirror ────────
+//
+// The Cloud Function mirrors a slim status into
+// /users/{uid}/cashback_status/{cashbackId} that the existing user-doc
+// rules cover automatically — no top-level /receipts/* rule needed.
 
 export function subscribeReceipt(
   cashbackId: string,
   onChange: (data: (Partial<ReceiptDoc> & { id: string }) | null) => void,
 ): Unsubscribe {
+  const uid = auth.currentUser?.uid;
+  if (!uid) {
+    onChange(null);
+    return () => {};
+  }
   return onSnapshot(
-    doc(db, 'receipts', cashbackId),
+    doc(db, `users/${uid}/cashback_status/${cashbackId}`),
     (snap) => {
       if (!snap.exists()) {
         onChange(null);

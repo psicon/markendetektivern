@@ -16,6 +16,7 @@ import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   Pressable,
   ScrollView,
   StatusBar,
@@ -24,6 +25,8 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const { height: SCREEN_H } = Dimensions.get('window');
 
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
@@ -126,36 +129,44 @@ export default function CashbackReviewScreen() {
       });
     } catch (error: any) {
       console.warn('⚠️ submit failed:', error);
+      const code = error?.code as string | undefined;
       const msg =
-        error?.code === 'rate_limited'
+        code === 'rate_limited'
           ? 'Du hast heute schon einen Bon eingereicht. Morgen geht es weiter.'
-          : error?.code === 'consent_missing'
+          : code === 'consent_missing'
           ? 'Bitte bestätige zuerst die Cashback-Einwilligung.'
-          : error?.code === 'unauthenticated'
+          : code === 'unauthenticated' || code === 'not_authenticated'
           ? 'Bitte melde dich an, um Bons einzureichen.'
-          : 'Einreichen fehlgeschlagen. Bitte später erneut versuchen.';
+          : code === 'http_404' || code?.startsWith('http_')
+          ? 'Backend antwortet nicht (Cloud Function noch nicht deployed). Vor dem Test bitte im Terminal: firebase deploy --only functions:cashback-pipeline'
+          : code === 'storage/unauthorized'
+          ? 'Storage lehnt den Upload ab — die Storage-Rules aus firestore-cashback-rules.txt müssen noch in der Firebase-Konsole eingetragen werden.'
+          : `Einreichen fehlgeschlagen (${code || 'unbekannter Fehler'}). Konsolen-Log prüfen.`;
       setSubmitError(msg);
     } finally {
       setSubmitting(false);
     }
   }, [bon, canSubmit, user?.uid, params.source]);
 
-  const verdictColor = (ok: boolean) => (ok ? theme.brandPrimary ?? '#0d8575' : '#d6603a');
+  const verdictColor = (ok: boolean) => (ok ? theme.primary ?? '#0d8575' : '#d6603a');
 
   const styles = useMemo(
     () =>
       StyleSheet.create({
+        imageBlock: {
+          height: SCREEN_H * 0.42,
+          backgroundColor: '#0a0a0a',
+        },
         topBar: {
           position: 'absolute',
           top: 0,
           left: 0,
           right: 0,
-          paddingTop: insets.top + 8,
-          paddingBottom: 12,
+          paddingBottom: 10,
           paddingHorizontal: 12,
           flexDirection: 'row',
           alignItems: 'center',
-          backgroundColor: 'rgba(0,0,0,0.45)',
+          backgroundColor: 'rgba(0,0,0,0.55)',
           zIndex: 10,
         },
         topBarTitle: {
@@ -172,34 +183,18 @@ export default function CashbackReviewScreen() {
           alignItems: 'center',
           justifyContent: 'center',
         },
-        verdictRow: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          paddingHorizontal: 12,
-          paddingVertical: 8,
-          borderRadius: 999,
-          backgroundColor: theme.surfaceAlt ?? 'rgba(0,0,0,0.05)',
-          alignSelf: 'flex-start',
-          marginBottom: 8,
-        },
-        verdictText: {
-          color: theme.textPrimary,
-          fontFamily: fontFamily.body,
-          fontSize: 12,
-          fontWeight: fontWeight.medium as any,
-        },
         sheet: {
-          backgroundColor: theme.background,
-          borderTopLeftRadius: 20,
-          borderTopRightRadius: 20,
-          paddingHorizontal: 16,
-          paddingTop: 16,
-          paddingBottom: insets.bottom + 12,
+          flex: 1,
+          backgroundColor: theme.bg,
+          borderTopLeftRadius: 22,
+          borderTopRightRadius: 22,
+          paddingHorizontal: 18,
+          paddingTop: 6,
+          marginTop: -16,
           ...(shadows.card ?? {}),
         },
         sectionTitle: {
-          color: theme.textPrimary,
+          color: theme.text,
           fontFamily: fontFamily.body,
           fontWeight: fontWeight.bold as any,
           fontSize: 14,
@@ -218,21 +213,21 @@ export default function CashbackReviewScreen() {
           height: 24,
           borderRadius: 6,
           borderWidth: 1.5,
-          borderColor: theme.brandPrimary ?? '#0d8575',
+          borderColor: theme.primary ?? '#0d8575',
           alignItems: 'center',
           justifyContent: 'center',
         },
         checkBoxOn: {
-          backgroundColor: theme.brandPrimary ?? '#0d8575',
+          backgroundColor: theme.primary ?? '#0d8575',
         },
         checkLabel: {
-          color: theme.textPrimary,
+          color: theme.text,
           fontFamily: fontFamily.body,
           fontWeight: fontWeight.bold as any,
           fontSize: 14,
         },
         checkSub: {
-          color: theme.textSecondary,
+          color: theme.textSub,
           fontFamily: fontFamily.body,
           fontSize: 12,
           marginTop: 2,
@@ -240,7 +235,10 @@ export default function CashbackReviewScreen() {
         ctaRow: {
           flexDirection: 'row',
           gap: 10,
-          marginTop: 14,
+          paddingTop: 12,
+          paddingBottom: insets.bottom + 12,
+          borderTopWidth: 1,
+          borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
         },
         cta: {
           flex: 1,
@@ -252,7 +250,7 @@ export default function CashbackReviewScreen() {
           gap: 8,
         },
         ctaPrimary: {
-          backgroundColor: canSubmit ? theme.brandPrimary ?? '#0d8575' : theme.surfaceAlt ?? '#ddd',
+          backgroundColor: canSubmit ? theme.primary ?? '#0d8575' : theme.surfaceAlt ?? '#ddd',
         },
         ctaPrimaryText: {
           color: canSubmit ? '#fff' : theme.textMuted ?? '#888',
@@ -261,10 +259,10 @@ export default function CashbackReviewScreen() {
         },
         ctaSecondary: {
           borderWidth: 1,
-          borderColor: theme.brandPrimary ?? '#0d8575',
+          borderColor: theme.primary ?? '#0d8575',
         },
         ctaSecondaryText: {
-          color: theme.brandPrimary ?? '#0d8575',
+          color: theme.primary ?? '#0d8575',
           fontFamily: fontFamily.body,
           fontWeight: fontWeight.bold as any,
         },
@@ -277,11 +275,12 @@ export default function CashbackReviewScreen() {
       <StatusBar barStyle="light-content" />
 
       {/* Image fills the top half, sheet sits on top. */}
-      <View style={{ flex: 1 }}>
+      {/* Top: image preview block on dark backdrop */}
+      <View style={styles.imageBlock}>
         {bon.uri ? (
           <Image
             source={{ uri: bon.uri }}
-            style={{ flex: 1, width: '100%' }}
+            style={StyleSheet.absoluteFillObject}
             contentFit="contain"
           />
         ) : (
@@ -289,89 +288,73 @@ export default function CashbackReviewScreen() {
             <ActivityIndicator color="#fff" />
           </View>
         )}
+        <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+          <Pressable onPress={handleRetake} style={styles.iconButton} hitSlop={10}>
+            <MaterialCommunityIcons name="arrow-left" size={24} color="#fff" />
+          </Pressable>
+          <Text style={styles.topBarTitle}>Foto kontrollieren</Text>
+          <View style={styles.iconButton} />
+        </View>
       </View>
 
-      <View style={styles.topBar}>
-        <Pressable onPress={handleRetake} style={styles.iconButton} hitSlop={10}>
-          <MaterialCommunityIcons name="arrow-left" size={24} color="#fff" />
-        </Pressable>
-        <Text style={styles.topBarTitle}>Bon prüfen</Text>
-        <View style={styles.iconButton} />
-      </View>
+      {/* Bottom: theme-aware sheet — flex:1 so labels are clearly visible */}
+      <View style={styles.sheet}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingTop: 12, paddingBottom: 16 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.sectionTitle}>Bevor du absendest, bestätige:</Text>
 
-      <ScrollView
-        style={styles.sheet}
-        contentContainerStyle={{ paddingBottom: 16 }}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.verdictRow}>
-          <MaterialCommunityIcons
-            name={verdict.brightnessOk ? 'brightness-6' : 'alert-circle-outline'}
-            size={14}
-            color={verdictColor(verdict.brightnessOk)}
-          />
-          <Text style={styles.verdictText}>{verdict.brightnessLabel}</Text>
-        </View>
-        <View style={styles.verdictRow}>
-          <MaterialCommunityIcons
-            name={verdict.sizeOk ? 'check-circle-outline' : 'alert-circle-outline'}
-            size={14}
-            color={verdictColor(verdict.sizeOk)}
-          />
-          <Text style={styles.verdictText}>{verdict.sizeLabel}</Text>
-        </View>
+          {CHECK_ITEMS.map((item, idx) => {
+            const on = checks[item.key];
+            return (
+              <Pressable
+                key={item.key}
+                onPress={() => setChecks((s) => ({ ...s, [item.key]: !s[item.key] }))}
+                style={[styles.checkRow, idx === 0 && { borderTopWidth: 0 }]}
+              >
+                <View style={[styles.checkBox, on && styles.checkBoxOn]}>
+                  {on ? <MaterialCommunityIcons name="check" size={16} color="#fff" /> : null}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.checkLabel}>{item.label}</Text>
+                  <Text style={styles.checkSub}>{item.sub}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
 
-        <Text style={[styles.sectionTitle, { marginTop: 14 }]}>
-          Bestätige bitte:
-        </Text>
-
-        {CHECK_ITEMS.map((item) => {
-          const on = checks[item.key];
-          return (
-            <Pressable
-              key={item.key}
-              onPress={() => setChecks((s) => ({ ...s, [item.key]: !s[item.key] }))}
-              style={styles.checkRow}
+          {submitError ? (
+            <View
+              style={{
+                marginTop: 12,
+                backgroundColor: 'rgba(214,96,58,0.12)',
+                borderRadius: 10,
+                padding: 12,
+                flexDirection: 'row',
+                alignItems: 'flex-start',
+                gap: 8,
+              }}
             >
-              <View style={[styles.checkBox, on && styles.checkBoxOn]}>
-                {on ? <MaterialCommunityIcons name="check" size={16} color="#fff" /> : null}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.checkLabel}>{item.label}</Text>
-                <Text style={styles.checkSub}>{item.sub}</Text>
-              </View>
-            </Pressable>
-          );
-        })}
+              <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#d6603a" />
+              <Text style={{ color: '#d6603a', fontFamily: fontFamily.body, fontSize: 13, flex: 1, lineHeight: 18 }}>
+                {submitError}
+              </Text>
+            </View>
+          ) : null}
+        </ScrollView>
 
-        {submitError ? (
-          <View
-            style={{
-              marginTop: 8,
-              backgroundColor: 'rgba(214,96,58,0.12)',
-              borderRadius: 8,
-              padding: 10,
-              flexDirection: 'row',
-              alignItems: 'flex-start',
-              gap: 8,
-            }}
-          >
-            <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#d6603a" />
-            <Text style={{ color: '#d6603a', fontFamily: fontFamily.body, fontSize: 12, flex: 1, lineHeight: 18 }}>
-              {submitError}
-            </Text>
-          </View>
-        ) : null}
-
+        {/* Sticky CTA row */}
         <View style={styles.ctaRow}>
           <Pressable onPress={handleRetake} style={[styles.cta, styles.ctaSecondary]}>
-            <MaterialCommunityIcons name="camera-retake-outline" size={18} color={theme.brandPrimary ?? '#0d8575'} />
+            <MaterialCommunityIcons name="camera-retake-outline" size={18} color={theme.primary ?? '#0d8575'} />
             <Text style={styles.ctaSecondaryText}>Nochmal</Text>
           </Pressable>
           <Pressable
             disabled={!canSubmit}
             onPress={handleSubmit}
-            style={[styles.cta, styles.ctaPrimary]}
+            style={[styles.cta, styles.ctaPrimary, { flex: 1.4 }]}
           >
             {submitting ? (
               <ActivityIndicator color="#fff" />
@@ -385,7 +368,7 @@ export default function CashbackReviewScreen() {
             )}
           </Pressable>
         </View>
-      </ScrollView>
+      </View>
     </View>
   );
 }

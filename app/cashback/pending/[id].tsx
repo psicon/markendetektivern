@@ -99,7 +99,7 @@ export default function CashbackPendingScreen() {
       StyleSheet.create({
         root: {
           flex: 1,
-          backgroundColor: theme.background,
+          backgroundColor: theme.bg,
           paddingTop: insets.top + 24,
           paddingBottom: insets.bottom + 24,
           paddingHorizontal: 24,
@@ -115,14 +115,14 @@ export default function CashbackPendingScreen() {
           marginBottom: 8,
         },
         title: {
-          color: theme.textPrimary,
+          color: theme.text,
           fontFamily: fontFamily.heading,
           fontWeight: fontWeight.bold as any,
           fontSize: 22,
           textAlign: 'center',
         },
         body: {
-          color: theme.textSecondary,
+          color: theme.textSub,
           fontFamily: fontFamily.body,
           fontSize: 14,
           lineHeight: 20,
@@ -130,7 +130,7 @@ export default function CashbackPendingScreen() {
           maxWidth: 320,
         },
         amount: {
-          color: theme.brandPrimary ?? '#0d8575',
+          color: theme.primary ?? '#0d8575',
           fontFamily: fontFamily.heading,
           fontWeight: fontWeight.extraBold as any,
           fontSize: 38,
@@ -147,7 +147,7 @@ export default function CashbackPendingScreen() {
           marginTop: 6,
           backgroundColor: theme.surfaceAlt ?? 'rgba(0,0,0,0.05)',
         },
-        idText: { fontFamily: fontFamily.body, fontSize: 12, color: theme.textSecondary },
+        idText: { fontFamily: fontFamily.body, fontSize: 12, color: theme.textSub },
         cta: {
           height: 52,
           borderRadius: radii.pill,
@@ -155,7 +155,7 @@ export default function CashbackPendingScreen() {
           justifyContent: 'center',
           flexDirection: 'row',
           gap: 8,
-          backgroundColor: theme.brandPrimary ?? '#0d8575',
+          backgroundColor: theme.primary ?? '#0d8575',
         },
         ctaText: {
           color: '#fff',
@@ -169,11 +169,11 @@ export default function CashbackPendingScreen() {
           alignItems: 'center',
           justifyContent: 'center',
           borderWidth: 1,
-          borderColor: theme.brandPrimary ?? '#0d8575',
+          borderColor: theme.primary ?? '#0d8575',
           marginTop: 10,
         },
         ctaSecondaryText: {
-          color: theme.brandPrimary ?? '#0d8575',
+          color: theme.primary ?? '#0d8575',
           fontFamily: fontFamily.body,
           fontWeight: fontWeight.bold as any,
           fontSize: 14,
@@ -182,7 +182,7 @@ export default function CashbackPendingScreen() {
     [theme, insets.top, insets.bottom],
   );
 
-  const colorOk = theme.brandPrimary ?? '#0d8575';
+  const colorOk = theme.primary ?? '#0d8575';
   const colorWarn = '#d6603a';
 
   return (
@@ -268,7 +268,7 @@ export default function CashbackPendingScreen() {
           ) : null}
 
           <View style={styles.idPill}>
-            <MaterialCommunityIcons name="identifier" size={14} color={theme.textSecondary} />
+            <MaterialCommunityIcons name="identifier" size={14} color={theme.textSub} />
             <Text style={styles.idText}>{params.id ?? '—'}</Text>
           </View>
         </View>

@@ -44,9 +44,12 @@
 const admin = require('firebase-admin');
 const functions = require('firebase-functions');
 const { logger } = require('firebase-functions');
+const { defineSecret } = require('firebase-functions/params');
 const { onRequest } = require('firebase-functions/v2/https');
 const { onMessagePublished } = require('firebase-functions/v2/pubsub');
 const { PubSub } = require('@google-cloud/pubsub');
+
+const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 
 const { extractReceipt, reconcile, countEligibleItems, tierFor, DEFAULT_MODEL } = require('./lib/ocr');
 const { sendCashbackReady } = require('./lib/push');
@@ -111,7 +114,7 @@ async function verifyAuthFromRequest(req) {
 // ─── enqueueCashback (HTTPS) ────────────────────────────────────────
 
 exports.enqueueCashback = onRequest(
-  { region: REGION, timeoutSeconds: 30, memory: '256MiB', cors: true },
+  { region: REGION, timeoutSeconds: 30, memory: '256MiB', cors: true, invoker: 'public' },
   async (req, res) => {
     if (req.method !== 'POST') {
       res.status(405).json({ code: 'method_not_allowed' });
@@ -199,6 +202,15 @@ exports.enqueueCashback = onRequest(
       updatedAt: now,
     });
 
+    // Mirror a slim status doc into the user's sub-collection so the
+    // app can subscribe without needing top-level /receipts/* rules.
+    await db.doc(`users/${uid}/cashback_status/${cashbackId}`).set({
+      status: 'ocr_pending',
+      receiptId: cashbackId,
+      cashbackCents: 0,
+      updatedAt: now,
+    });
+
     // Publish PubSub
     try {
       const topic = pubsub.topic(PUBSUB_TOPIC);
@@ -237,7 +249,13 @@ exports.enqueueCashback = onRequest(
 // ─── processCashback (PubSub) ───────────────────────────────────────
 
 exports.processCashback = onMessagePublished(
-  { region: REGION, topic: PUBSUB_TOPIC, timeoutSeconds: 120, memory: '1GiB' },
+  {
+    region: REGION,
+    topic: PUBSUB_TOPIC,
+    timeoutSeconds: 120,
+    memory: '1GiB',
+    secrets: [GEMINI_API_KEY],
+  },
   async (event) => {
     const data = event.data.message.json || {};
     const { cashbackId, uid } = data;
@@ -296,7 +314,27 @@ exports.processCashback = onMessagePublished(
         status = 'approved';
       }
 
-      // 6) Write doc
+      // 6a) Mirror the status into the user sub-collection (so the
+      // app's pending screen can listen without top-level rules).
+      await db
+        .doc(`users/${uid}/cashback_status/${cashbackId}`)
+        .set(
+          {
+            status,
+            receiptId: cashbackId,
+            cashbackCents,
+            tierApplied: cashbackCents,
+            eligibleItemCount,
+            merchant: ocr.parsed.merchant ?? null,
+            bonDate: ocr.parsed.bonDate || null,
+            bonTotalCents: ocr.parsed.totalCents ?? null,
+            rejectReason,
+            updatedAt: now,
+          },
+          { merge: true },
+        );
+
+      // 6) Write authoritative doc to top-level /receipts/*
       await docRef.update({
         status,
         rejectReason,
