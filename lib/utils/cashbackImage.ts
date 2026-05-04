@@ -1,21 +1,25 @@
 /**
  * Image-helpers for the Cashback capture/review flow.
  *
- * Phase 1.5 ships a pragmatic, dependency-light implementation:
+ * Phase 1.5 ships a dependency-light implementation:
  *  - SHA-256 hash of the image bytes (for server-side de-dup)
- *  - Brightness sample via expo-image-manipulator + a downscaled PNG
- *    base64 (we average the luminance of a small sample).
- *  - Sharpness is NOT computed here — too expensive without a native
- *    image-pixels module. Phase 1.5.1 (ML-Kit upgrade) brings real
- *    Laplacian-variance via the ported Python helper from
- *    tools/cashback-ocr-validation/image_prep.py.
+ *  - File size lookup
+ *
+ * Brightness + sharpness gates are NOT computed here in v1 — they
+ * would need expo-image-manipulator (native module → dev-client
+ * rebuild). The user-self-check in review.tsx covers the same UX
+ * goal until Phase 1.5.1 brings ML-Kit Document Scanner with real
+ * pixel access.
+ *
+ * Resize-before-upload is also deferred — expo-camera already
+ * compresses to JPEG q0.9 which is small enough for current upload
+ * (most receipt photos land around 1-3 MB).
  *
  * All metadata stays client-side; the server re-computes hashes
  * authoritatively on upload (don't trust the client).
  */
 
 import * as Crypto from 'expo-crypto';
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
 
 export interface CapturedBon {
@@ -23,12 +27,10 @@ export interface CapturedBon {
   width: number;
   height: number;
   bytesHash: string;
-  approxBrightness: number; // 0..255 mean luminance
+  approxBrightness: number; // 0..255 — currently always 128 (neutral)
   sizeBytes: number;
   capturedAt: number;
 }
-
-const SAMPLE_SIZE = 48; // 48×48 sample for the brightness estimate
 
 /**
  * Compute a SHA-256 hex digest of the file at `uri`.
@@ -64,98 +66,48 @@ export async function getFileSize(uri: string): Promise<number> {
 }
 
 /**
- * Crude brightness estimate: scale to 48×48 PNG, average the luminance
- * of the base64-decoded pixel bytes.
- *
- * NOTE: We don't decode PNG bytes properly here — we just average byte
- * values in the base64 stream as a heuristic. It's good enough to flag
- * obviously dark or obviously over-exposed shots in the review screen.
- * Replace with real pixel access when ML-Kit lands.
+ * Brightness estimate stub — Phase 1.5.1 with ML-Kit will compute a
+ * real luminance histogram. For now we return 128 (neutral) so the
+ * verdict helper neither warns nor congratulates.
  */
-export async function estimateBrightness(uri: string): Promise<number> {
-  try {
-    const result = await ImageManipulator.manipulateAsync(
-      uri,
-      [{ resize: { width: SAMPLE_SIZE, height: SAMPLE_SIZE } }],
-      {
-        compress: 0.9,
-        format: ImageManipulator.SaveFormat.JPEG,
-        base64: true,
-      },
-    );
-    const b64 = result.base64 ?? '';
-    if (!b64) return 128;
-
-    // Heuristic: byte-average of a JPEG byte-stream is dominated by
-    // entropy and image content. Not a true luminance — but: very dark
-    // images compress to mostly low bytes, very bright shots produce
-    // higher average bytes. Map to 0..255 via the actual byte average
-    // of a decoded chunk.
-    let sum = 0;
-    let count = 0;
-    // Sample every 7th char to keep this fast even on large strings.
-    for (let i = 0; i < b64.length; i += 7) {
-      sum += b64.charCodeAt(i);
-      count++;
-    }
-    if (!count) return 128;
-    const avg = sum / count;
-    // Map base64 char codes (~43..122) into 0..255.
-    return Math.max(0, Math.min(255, Math.round(((avg - 43) / (122 - 43)) * 255)));
-  } catch (error) {
-    console.warn('⚠️ estimateBrightness failed:', error);
-    return 128;
-  }
+export async function estimateBrightness(_uri: string): Promise<number> {
+  return 128;
 }
 
 /**
- * Resize + JPEG-compress before upload. Receipts max ~2000px on the
- * long edge keeps OCR quality while cutting upload size massively.
+ * Pass-through "prepare for upload" — Phase 1.5 doesn't resize because
+ * we don't have expo-image-manipulator installed. expo-camera quality
+ * 0.9 produces JPEGs around 1-3 MB which is comfortable for the 8 MB
+ * upload limit in the storage rules.
+ *
+ * Phase 1.5.1 brings native resize via ML-Kit's pipeline; until then
+ * Cloud Functions can downscale server-side if size becomes an issue.
  */
 export async function prepareForUpload(
   uri: string,
-  maxLongEdge = 2000,
+  _maxLongEdge = 2000,
   width?: number,
   height?: number,
 ): Promise<{ uri: string; width: number; height: number; sizeBytes: number }> {
-  try {
-    const resizeOpt =
-      width && height
-        ? width > height
-          ? { width: Math.min(width, maxLongEdge) }
-          : { height: Math.min(height, maxLongEdge) }
-        : { width: maxLongEdge };
-
-    const result = await ImageManipulator.manipulateAsync(
-      uri,
-      [{ resize: resizeOpt }],
-      { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG },
-    );
-    const sizeBytes = await getFileSize(result.uri);
-    return {
-      uri: result.uri,
-      width: result.width,
-      height: result.height,
-      sizeBytes,
-    };
-  } catch (error) {
-    console.warn('⚠️ prepareForUpload failed:', error);
-    return { uri, width: width ?? 0, height: height ?? 0, sizeBytes: await getFileSize(uri) };
-  }
+  const sizeBytes = await getFileSize(uri);
+  return {
+    uri,
+    width: width ?? 0,
+    height: height ?? 0,
+    sizeBytes,
+  };
 }
 
 /**
  * Build a CapturedBon from a freshly-captured image URI.
- * Runs hash + brightness + size in parallel.
  */
 export async function buildCapturedBon(
   uri: string,
   width: number,
   height: number,
 ): Promise<CapturedBon> {
-  const [bytesHash, approxBrightness, sizeBytes] = await Promise.all([
+  const [bytesHash, sizeBytes] = await Promise.all([
     hashImageFile(uri),
-    estimateBrightness(uri),
     getFileSize(uri),
   ]);
 
@@ -164,15 +116,16 @@ export async function buildCapturedBon(
     width,
     height,
     bytesHash,
-    approxBrightness,
+    approxBrightness: 128,
     sizeBytes,
     capturedAt: Date.now(),
   };
 }
 
 /**
- * Quality verdict — used by the review screen to decide whether to
- * show warnings to the user.
+ * Quality verdict — used by the review screen to surface basic
+ * file-level warnings. Brightness verdict is always "ok" until
+ * Phase 1.5.1.
  */
 export interface QualityVerdict {
   brightnessOk: boolean;
@@ -183,18 +136,12 @@ export interface QualityVerdict {
 }
 
 export function verdictFor(bon: CapturedBon): QualityVerdict {
-  const tooDark = bon.approxBrightness < 60;
-  const tooBright = bon.approxBrightness > 220;
   const tooSmall = bon.sizeBytes > 0 && bon.sizeBytes < 30 * 1024;
   const tooLarge = bon.sizeBytes > 8 * 1024 * 1024;
 
   return {
-    brightnessOk: !tooDark && !tooBright,
-    brightnessLabel: tooDark
-      ? 'Bon wirkt zu dunkel — mehr Licht oder Bild näher'
-      : tooBright
-      ? 'Bon wirkt überstrahlt — Reflexion oder Blitz vermeiden'
-      : 'Helligkeit sieht gut aus',
+    brightnessOk: true,
+    brightnessLabel: 'Bild aufgenommen',
     sizeOk: !tooSmall && !tooLarge,
     sizeLabel: tooSmall
       ? 'Bild sehr klein — bitte nochmal fokussieren'
