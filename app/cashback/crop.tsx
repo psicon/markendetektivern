@@ -104,14 +104,23 @@ export default function CashbackCropScreen() {
     };
   }, [naturalW, naturalH, canvasW, canvasH, canvasTop]);
 
-  // Initial crop = full image (so user just shrinks). Inset 8 so handles
-  // are visible.
-  const [rect, setRect] = useState<Rect>(() => ({
-    x: fittedSize.x + 8,
-    y: fittedSize.y + 8,
-    w: Math.max(MIN_RECT, fittedSize.w - 16),
-    h: Math.max(MIN_RECT, fittedSize.h - 16),
-  }));
+  // Initial crop = ~70% width × 90% height, centered. Bons photographed
+  // in casual lighting usually have ~30% background on each side and a
+  // small top/bottom margin — these defaults give the user a useful
+  // starting point so they only have to nudge corners, not pinch the
+  // whole frame inward from the edges.
+  const initialRect = (fs: typeof fittedSize): Rect => {
+    const w = Math.max(MIN_RECT, fs.w * 0.7);
+    const h = Math.max(MIN_RECT, fs.h * 0.9);
+    return {
+      x: fs.x + (fs.w - w) / 2,
+      y: fs.y + (fs.h - h) / 2,
+      w,
+      h,
+    };
+  };
+
+  const [rect, setRect] = useState<Rect>(() => initialRect(fittedSize));
   const rectRef = useRef(rect);
   useEffect(() => {
     rectRef.current = rect;
@@ -119,12 +128,7 @@ export default function CashbackCropScreen() {
 
   // Reset rect when image fits change (orientation, etc.)
   useEffect(() => {
-    setRect({
-      x: fittedSize.x + 8,
-      y: fittedSize.y + 8,
-      w: Math.max(MIN_RECT, fittedSize.w - 16),
-      h: Math.max(MIN_RECT, fittedSize.h - 16),
-    });
+    setRect(initialRect(fittedSize));
   }, [fittedSize.x, fittedSize.y, fittedSize.w, fittedSize.h]);
 
   const [cropping, setCropping] = useState(false);

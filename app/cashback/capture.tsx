@@ -169,36 +169,14 @@ export default function CashbackCaptureScreen() {
     [],
   );
 
-  // On mount: try the native scanner FIRST. If available, the user
-  // immediately sees the iOS/Android system scanner — no extra tap
-  // needed. If unavailable, drop to the expo-camera fallback.
+  // On mount: just probe for the native scanner so we know which UI
+  // to render. We do NOT auto-launch — that bites the navigation
+  // animation (capture page slides in from rewards while the native
+  // modal opens, leading to a confusing reveal on cancel).
   useEffect(() => {
     if (scannerState !== 'unknown') return;
-    let cancelled = false;
-    (async () => {
-      const result = await tryDocumentScanner();
-      if (cancelled) return;
-      if (result === 'unavailable') {
-        setScannerState('unavailable');
-        return;
-      }
-      setScannerState('available');
-      if (result === 'cancel') {
-        // User dismissed the scanner without scanning. We DO NOT
-        // navigate back — instead we stay here and show the picker
-        // (Scanner / Galerie) so the user can pick another option
-        // without bouncing through Rewards.
-        return;
-      }
-      if (typeof result === 'string') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-        await goReview(result, 'live_camera');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [scannerState, goReview]);
+    setScannerState(isDocumentScannerLinked() ? 'available' : 'unavailable');
+  }, [scannerState]);
 
   const launchScannerAgain = useCallback(async () => {
     if (capturing) return;
@@ -277,11 +255,22 @@ export default function CashbackCaptureScreen() {
       });
       if (result.canceled || !result.assets?.[0]) return;
       const a = result.assets[0];
-      await goReview(a.uri, 'upload');
+      // Gallery photos aren't auto-cropped (the native document
+      // scanner only works on live camera). Route through the crop
+      // screen so the user can adjust the bon area before submit.
+      router.replace({
+        pathname: '/cashback/crop',
+        params: {
+          uri: a.uri,
+          width: String(a.width ?? 0),
+          height: String(a.height ?? 0),
+          source: 'upload',
+        },
+      });
     } catch (error: any) {
       console.warn('⚠️ Gallery pick failed:', error);
     }
-  }, [goReview]);
+  }, []);
 
   const handleBack = useCallback(() => {
     router.back();
