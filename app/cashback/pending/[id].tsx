@@ -17,7 +17,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image as ExpoImage } from 'expo-image';
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -39,6 +39,8 @@ import { storage } from '@/lib/firebase';
 import {
   deletePendingMirror,
   enqueueCashback,
+  setPendingMirrorError,
+  setPendingMirrorProgress,
   subscribeReceipt,
   uploadBonImage,
 } from '@/lib/services/cashbackUpload';
@@ -48,7 +50,7 @@ import journeyTrackingService from '@/lib/services/journeyTrackingService';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-type ViewState = 'unknown' | 'uploading' | 'pending' | 'review' | 'approved' | 'rejected' | 'not_found';
+type ViewState = 'unknown' | 'uploading' | 'upload_failed' | 'pending' | 'review' | 'approved' | 'rejected' | 'not_found';
 
 interface MirrorItem {
   name: string;
@@ -63,7 +65,7 @@ interface MirrorDoc {
   cashbackCents?: number;
   tierApplied?: number;
   eligibleItemCount?: number;
-  // New canonical fields (set by the merchant matcher in the CF):
+  // Set by the merchant matcher in the CF:
   merchantId?: string | null;
   merchantName?: string | null;
   merchantDisplayName?: string | null; // 'LiDL (DE)'
@@ -81,6 +83,10 @@ interface MirrorDoc {
   storagePath?: string | null;
   reconciliationDeltaCents?: number | null;
   rejectReason?: string | null;
+  // Client-side placeholder fields:
+  isClientPlaceholder?: boolean;
+  uploadProgress?: number; // 0–100
+  uploadError?: string | null;
   updatedAt?: any;
 }
 
@@ -88,6 +94,8 @@ function viewStateFor(status?: string | null): ViewState {
   switch (status) {
     case 'uploading':
       return 'uploading';
+    case 'upload_failed':
+      return 'upload_failed';
     case 'ocr_pending':
     case 'ocr_done':
     case 'matched':
@@ -143,11 +151,108 @@ export default function CashbackPendingScreen() {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
-  // Upload+enqueue handoff: triggered when we arrive with uploadUri
-  // params (the placeholder mirror is already in Firestore from the
-  // review screen, so the user already sees this bon in /history).
-  const hasUploadHandoff = !!params.uploadUri && uploadStep === 'idle';
+  // Upload+enqueue runner — extracted so the retry button can call it.
+  const runUpload = useCallback(async () => {
+    const localId = String(params.id ?? '');
+    if (!user?.uid || !params.uploadUri) return;
 
+    setUploadStep('uploading');
+    setUploadError(null);
+
+    try {
+      const prepared = await prepareForUpload(
+        String(params.uploadUri),
+        2000,
+        Number(params.uploadWidth ?? 0),
+        Number(params.uploadHeight ?? 0),
+      );
+
+      // Throttle progress writes to mirror — every 5% only.
+      let lastWrittenPct = 0;
+      const upload = await uploadBonImage(prepared.uri, user.uid, {
+        onProgress: (pct) => {
+          if (pct - lastWrittenPct >= 5 || pct === 100) {
+            lastWrittenPct = pct;
+            setPendingMirrorProgress(user.uid!, localId, pct).catch(() => {});
+          }
+        },
+        timeoutMs: 60_000,
+      });
+
+      setUploadStep('enqueueing');
+
+      // Journey snapshot (geohash, motivation, viewedProducts) for audit.
+      let journey: any = null;
+      try {
+        const j = journeyTrackingService.getCurrentJourney?.();
+        if (j) {
+          journey = {
+            journeyId: j.journeyId,
+            discoveryMethod: j.discoveryMethod,
+            startedAt: j.startTime,
+            location: j.location ?? null,
+            motivationSignals: j.motivationSignals ?? null,
+            filterMetricsMotivation: j.filterMetrics?.motivation ?? null,
+            viewedProductsCount: j.viewedProducts?.length ?? 0,
+          };
+        }
+      } catch {}
+
+      const result = await enqueueCashback({
+        clientUploadId: localId,
+        storagePath: upload.storagePath,
+        bytesHash: String(params.uploadHash ?? ''),
+        capturedAt: Number(params.uploadCapturedAt ?? Date.now()),
+        source: (params.uploadSource as any) || 'live_camera',
+        journey,
+      });
+
+      setUploadStep('done');
+      if (result.duplicate && result.cashbackId !== localId) {
+        await deletePendingMirror(user.uid!, localId).catch(() => {});
+        router.replace({
+          pathname: '/cashback/pending/[id]' as any,
+          params: { id: result.cashbackId, dup: '1' } as any,
+        });
+      }
+      // Otherwise: same id, CF updates the same mirror doc.
+    } catch (e: any) {
+      const code = e?.code as string | undefined;
+      const message = e?.message as string | undefined;
+      const human =
+        code === 'upload_timeout'
+          ? 'Der Upload braucht zu lange. Prüfe deine Verbindung und versuch es erneut.'
+          : code === 'rate_limited'
+          ? 'Du hast heute schon einen Bon eingereicht. Morgen geht es weiter.'
+          : code === 'consent_missing'
+          ? 'Bitte bestätige zuerst die Cashback-Einwilligung.'
+          : code === 'unauthenticated' || code === 'not_authenticated'
+          ? 'Bitte melde dich an, um Bons einzureichen.'
+          : code?.startsWith('storage/')
+          ? `Upload abgelehnt: ${code}${message ? ' — ' + message : ''}`
+          : code?.startsWith('http_')
+          ? `Backend antwortet nicht (${code}). Verbindung okay?`
+          : `Einreichen fehlgeschlagen: ${code || message || 'unbekannter Fehler'}`;
+
+      setUploadError(human);
+      setUploadStep('error');
+      // Persist failure to the mirror so the user sees it everywhere
+      // (history, etc.) — and it doesn't show as "uploading forever".
+      await setPendingMirrorError(user.uid!, localId, human).catch(() => {});
+    }
+  }, [
+    params.id,
+    params.uploadUri,
+    params.uploadHash,
+    params.uploadWidth,
+    params.uploadHeight,
+    params.uploadCapturedAt,
+    params.uploadSource,
+    user?.uid,
+  ]);
+
+  // Run the upload exactly once when we arrive with handoff params.
+  const hasUploadHandoff = !!params.uploadUri && uploadStep === 'idle';
   useEffect(() => {
     if (!hasUploadHandoff) return;
     if (!user?.uid) {
@@ -155,89 +260,8 @@ export default function CashbackPendingScreen() {
       setUploadStep('error');
       return;
     }
-
-    let cancelled = false;
-    const localId = String(params.id ?? '');
-
-    (async () => {
-      try {
-        setUploadStep('uploading');
-        const prepared = await prepareForUpload(
-          String(params.uploadUri),
-          2000,
-          Number(params.uploadWidth ?? 0),
-          Number(params.uploadHeight ?? 0),
-        );
-        const upload = await uploadBonImage(prepared.uri, user.uid);
-        if (cancelled) return;
-
-        setUploadStep('enqueueing');
-
-        // Snapshot the active journey so the receipt has shopping
-        // context (geohash, motivation, viewedProducts at upload).
-        let journey: any = null;
-        try {
-          const j = journeyTrackingService.getCurrentJourney?.();
-          if (j) {
-            journey = {
-              journeyId: j.journeyId,
-              discoveryMethod: j.discoveryMethod,
-              startedAt: j.startTime,
-              location: j.location ?? null,
-              motivationSignals: j.motivationSignals ?? null,
-              filterMetricsMotivation: j.filterMetrics?.motivation ?? null,
-              viewedProductsCount: j.viewedProducts?.length ?? 0,
-            };
-          }
-        } catch {}
-
-        const result = await enqueueCashback({
-          clientUploadId: localId,
-          storagePath: upload.storagePath,
-          bytesHash: String(params.uploadHash ?? ''),
-          capturedAt: Number(params.uploadCapturedAt ?? Date.now()),
-          source: (params.uploadSource as any) || 'live_camera',
-          journey,
-        });
-        if (cancelled) return;
-
-        setUploadStep('done');
-        if (result.duplicate && result.cashbackId !== localId) {
-          // Server detected duplicate. Mark our placeholder as
-          // superseded + navigate to the canonical bon.
-          await deletePendingMirror(user.uid, localId).catch(() => {});
-          router.replace({
-            pathname: '/cashback/pending/[id]' as any,
-            params: { id: result.cashbackId, dup: '1' } as any,
-          });
-        }
-        // Otherwise: same id, CF will update OUR mirror doc and the
-        // existing snapshot listener picks up the new state. Stay put.
-      } catch (e: any) {
-        if (cancelled) return;
-        const code = e?.code as string | undefined;
-        const message = e?.message as string | undefined;
-        const human =
-          code === 'rate_limited'
-            ? 'Du hast heute schon einen Bon eingereicht. Morgen geht es weiter.'
-            : code === 'consent_missing'
-            ? 'Bitte bestätige zuerst die Cashback-Einwilligung.'
-            : code === 'unauthenticated' || code === 'not_authenticated'
-            ? 'Bitte melde dich an, um Bons einzureichen.'
-            : code?.startsWith('storage/')
-            ? `Storage-Fehler: ${code}${message ? ' — ' + message : ''}`
-            : code?.startsWith('http_')
-            ? `Backend antwortet nicht (${code}). Nochmal versuchen?`
-            : `Einreichen fehlgeschlagen: ${code || message || 'unbekannter Fehler'}`;
-        setUploadError(human);
-        setUploadStep('error');
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [hasUploadHandoff, user?.uid]);
+    runUpload();
+  }, [hasUploadHandoff, user?.uid, runUpload]);
 
   // Live snapshot — the placeholder mirror exists from the moment the
   // user tapped "Einreichen", so subscribing immediately works for
@@ -308,11 +332,16 @@ export default function CashbackPendingScreen() {
   const banner = useMemo(() => {
     if (state === 'unknown') return null;
     if (state === 'uploading') {
+      const pct =
+        typeof doc?.uploadProgress === 'number' ? doc.uploadProgress : null;
       return {
         icon: <ActivityIndicator size="large" color={primary} />,
         bg: primary + '18',
         title: 'Bon wird hochgeladen',
-        body: 'Wir laden dein Foto hoch — meistens nur ein paar Sekunden. Du kannst die App ruhig schließen.',
+        body:
+          pct != null
+            ? `Wir laden dein Foto hoch — ${pct} %.`
+            : 'Wir laden dein Foto hoch — bleib einen Moment dran.',
         cashback: null as string | null,
       };
     }
@@ -322,16 +351,16 @@ export default function CashbackPendingScreen() {
         bg: primary + '18',
         title: 'Bon wird geprüft',
         body:
-          'Das kann einen Moment dauern. Du kannst die App ruhig schließen — den Status findest du jederzeit unter „Meine Bons".',
+          'Das dauert nur einen Moment. Du siehst das Ergebnis hier oder unter „Meine Bons", sobald wir fertig sind.',
         cashback: null,
       };
     }
-    if (state === 'rejected' && uploadStep === 'error') {
+    if (state === 'upload_failed') {
       return {
-        icon: <MaterialCommunityIcons name="alert-circle-outline" size={42} color={warn} />,
+        icon: <MaterialCommunityIcons name="cloud-alert-outline" size={42} color={warn} />,
         bg: warn + '22',
-        title: 'Einreichen fehlgeschlagen',
-        body: uploadError ?? 'Bitte versuche es noch einmal.',
+        title: 'Upload fehlgeschlagen',
+        body: doc?.uploadError || uploadError || 'Verbindung abgebrochen. Tippe auf „Erneut versuchen", um den Upload neu zu starten.',
         cashback: null,
       };
     }
@@ -495,6 +524,59 @@ export default function CashbackPendingScreen() {
             >
               {banner.body}
             </Text>
+
+            {/* Progress bar — only shown during 'uploading' */}
+            {state === 'uploading' ? (
+              <View
+                style={{
+                  width: '100%',
+                  maxWidth: 280,
+                  marginTop: 12,
+                  height: 6,
+                  borderRadius: 3,
+                  backgroundColor: primary + '22',
+                  overflow: 'hidden',
+                }}
+              >
+                <View
+                  style={{
+                    width: `${typeof doc?.uploadProgress === 'number' ? Math.max(2, doc.uploadProgress) : 8}%`,
+                    height: '100%',
+                    backgroundColor: primary,
+                  }}
+                />
+              </View>
+            ) : null}
+
+            {/* Retry button — only shown on upload_failed */}
+            {state === 'upload_failed' ? (
+              <Pressable
+                onPress={runUpload}
+                style={({ pressed }) => ({
+                  marginTop: 14,
+                  paddingHorizontal: 20,
+                  paddingVertical: 12,
+                  borderRadius: 14,
+                  backgroundColor: primary,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  opacity: pressed ? 0.85 : 1,
+                })}
+              >
+                <MaterialCommunityIcons name="refresh" size={16} color="#fff" />
+                <Text
+                  style={{
+                    color: '#fff',
+                    fontFamily: fontFamily.body,
+                    fontWeight: fontWeight.bold as any,
+                    fontSize: 14,
+                  }}
+                >
+                  Erneut versuchen
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : state === 'unknown' ? (
           <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 60 }}>
@@ -503,7 +585,7 @@ export default function CashbackPendingScreen() {
         ) : null}
 
         {/* ─── Merchant hero — large logo + bold name + date below ─── */}
-        {(doc?.merchantName || doc?.merchant) && state !== 'pending' && state !== 'unknown' ? (
+        {(doc?.merchantName || doc?.merchant) && (state === 'approved' || state === 'rejected' || state === 'review') ? (
           <View
             style={{
               marginHorizontal: 16,
@@ -579,7 +661,7 @@ export default function CashbackPendingScreen() {
         ) : null}
 
         {/* ─── Items list ─── */}
-        {items.length > 0 && state !== 'pending' && state !== 'unknown' ? (
+        {items.length > 0 && (state === 'approved' || state === 'rejected' || state === 'review') ? (
           <View style={{ marginHorizontal: 16, marginTop: 18 }}>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
               <Text style={{ color: theme.textSub, fontFamily: fontFamily.body, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6 }}>
@@ -712,7 +794,7 @@ export default function CashbackPendingScreen() {
         ) : null}
 
         {/* ─── Bon image (below the parsed details) ─── */}
-        {imageUrl && state !== 'pending' && state !== 'unknown' ? (
+        {imageUrl && (state === 'approved' || state === 'rejected' || state === 'review') ? (
           <View style={{ marginHorizontal: 16, marginTop: 18 }}>
             <Text
               style={{

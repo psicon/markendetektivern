@@ -41,15 +41,17 @@ export interface UploadResult {
 /**
  * Upload a JPEG to gs://.../cashback-uploads/{uid}/{filename}.
  *
- * In React Native, the most reliable upload path is `fetch(localUri) →
- * .blob() → uploadBytesResumable(blob)`. The Web SDK's plain
- * `uploadBytes(Uint8Array)` is flaky on RN (network task adapter does
- * not always forward the body). Resumable also works on slow / flaky
- * mobile connections.
+ * Uses uploadBytesResumable with explicit progress + 60s no-progress
+ * timeout. Reports per-state-change ticks via onProgress so the UI
+ * can mirror them into Firestore (and other surfaces).
  */
 export async function uploadBonImage(
   localUri: string,
   uid: string,
+  opts?: {
+    onProgress?: (pct: number, transferred: number, total: number) => void;
+    timeoutMs?: number;
+  },
 ): Promise<UploadResult> {
   if (!auth.currentUser) {
     const e: any = new Error('not_authenticated');
@@ -69,13 +71,41 @@ export async function uploadBonImage(
   const sizeBytes = (blob as any).size ?? 0;
 
   const ref = storageRef(storage, storagePath);
+  const timeoutMs = opts?.timeoutMs ?? 60_000;
+
   await new Promise<void>((resolve, reject) => {
     const task = uploadBytesResumable(ref, blob, { contentType: 'image/jpeg' });
+
+    let lastTick = Date.now();
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastTick > timeoutMs) {
+        clearInterval(watchdog);
+        try {
+          task.cancel();
+        } catch {}
+        const err: any = new Error('upload_timeout');
+        err.code = 'upload_timeout';
+        reject(err);
+      }
+    }, 5_000);
+
     task.on(
       'state_changed',
-      undefined,
-      (err) => reject(err),
-      () => resolve(),
+      (snap) => {
+        lastTick = Date.now();
+        const total = snap.totalBytes || sizeBytes || 1;
+        const pct = Math.round((snap.bytesTransferred / total) * 100);
+        opts?.onProgress?.(pct, snap.bytesTransferred, total);
+      },
+      (err) => {
+        clearInterval(watchdog);
+        reject(err);
+      },
+      () => {
+        clearInterval(watchdog);
+        opts?.onProgress?.(100, sizeBytes, sizeBytes);
+        resolve();
+      },
     );
   });
 
@@ -142,6 +172,51 @@ export async function deletePendingMirror(uid: string, localId: string): Promise
     );
   } catch (e) {
     console.warn('⚠️ deletePendingMirror failed:', e);
+  }
+}
+
+/**
+ * Update the placeholder mirror with upload progress so the UI shows
+ * a real progress bar. Called from the pending screen during upload.
+ */
+export async function setPendingMirrorProgress(
+  uid: string,
+  localId: string,
+  progress: number,
+): Promise<void> {
+  try {
+    await setDoc(
+      doc(db, `users/${uid}/cashback_status/${localId}`),
+      { uploadProgress: Math.max(0, Math.min(100, Math.round(progress))), updatedAt: serverTimestamp() },
+      { merge: true },
+    );
+  } catch (e) {
+    // Non-fatal — progress is purely cosmetic
+  }
+}
+
+/**
+ * Mark a placeholder as failed so the pending screen can render a
+ * "Erneut versuchen" CTA. Avoids the user being stuck with a forever-
+ * loading placeholder.
+ */
+export async function setPendingMirrorError(
+  uid: string,
+  localId: string,
+  error: string,
+): Promise<void> {
+  try {
+    await setDoc(
+      doc(db, `users/${uid}/cashback_status/${localId}`),
+      {
+        status: 'upload_failed',
+        uploadError: String(error || 'unknown_error'),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (e) {
+    // Non-fatal — caller already knows about the error
   }
 }
 
