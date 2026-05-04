@@ -101,7 +101,10 @@ export default function CashbackReviewScreen() {
 
   const verdict = useMemo(() => verdictFor(bon), [bon]);
   const allChecked = checks.corners && checks.date && checks.items;
-  const canSubmit = allChecked && verdict.hashOk && verdict.sizeOk && !submitting;
+  // "Looks ready" drives the visual state (color stays green while
+  // submitting). canSubmit gates the actual press handler.
+  const looksReady = allChecked && verdict.hashOk && verdict.sizeOk;
+  const canSubmit = looksReady && !submitting;
 
   const handleRetake = useCallback(() => {
     router.replace('/cashback/capture');
@@ -298,10 +301,10 @@ export default function CashbackReviewScreen() {
           gap: 8,
         },
         ctaPrimary: {
-          backgroundColor: canSubmit ? theme.primary ?? '#0d8575' : theme.surfaceAlt ?? '#ddd',
+          backgroundColor: looksReady ? theme.primary ?? '#0d8575' : theme.surfaceAlt ?? '#ddd',
         },
         ctaPrimaryText: {
-          color: canSubmit ? '#fff' : theme.textMuted ?? '#888',
+          color: looksReady ? '#fff' : theme.textMuted ?? '#888',
           fontFamily: fontFamily.body,
           fontWeight: fontWeight.bold as any,
         },
@@ -414,7 +417,7 @@ export default function CashbackReviewScreen() {
               <ActivityIndicator color="#fff" />
             ) : (
               <>
-                <MaterialCommunityIcons name="cloud-upload-outline" size={18} color={canSubmit ? '#fff' : theme.textMuted ?? '#888'} />
+                <MaterialCommunityIcons name="cloud-upload-outline" size={18} color={looksReady ? '#fff' : theme.textMuted ?? '#888'} />
                 <Text style={styles.ctaPrimaryText}>
                   {allChecked ? 'Einreichen' : `Noch ${3 - Object.values(checks).filter(Boolean).length} bestätigen`}
                 </Text>

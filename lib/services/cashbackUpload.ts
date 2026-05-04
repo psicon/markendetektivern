@@ -155,6 +155,11 @@ export interface CashbackStatusEntry {
   cashbackCents?: number;
   tierApplied?: number;
   eligibleItemCount?: number;
+  merchantId?: string | null;
+  merchantName?: string | null;
+  merchantLogoUrl?: string | null;
+  merchantRaw?: string | null;
+  // Legacy:
   merchant?: string | null;
   bonDate?: string | null;
   bonTotalCents?: number | null;

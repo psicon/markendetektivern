@@ -52,6 +52,7 @@ const { PubSub } = require('@google-cloud/pubsub');
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 
 const { extractReceipt, reconcile, countEligibleItems, tierFor, DEFAULT_MODEL } = require('./lib/ocr');
+const { resolveMerchant } = require('./lib/merchant');
 const { sendCashbackReady } = require('./lib/push');
 
 if (!admin.apps.length) admin.initializeApp();
@@ -291,19 +292,28 @@ exports.processCashback = onMessagePublished(
       // 2) Gemini OCR
       const ocr = await extractReceipt(bytes, mimeType, { model: config.ocrModel });
 
-      // 3) Reconciliation
+      // 3) Reconciliation (Pfand-tolerant, 2 € window — see ocr.js)
       const recon = reconcile(ocr.parsed);
 
-      // 4) Eligibility + tier
-      const eligibleItemCount = countEligibleItems(ocr.parsed);
-      const cashbackCents = recon.ok ? tierFor(eligibleItemCount, config.tiers) : 0;
+      // 4) Merchant resolution against the existing /discounter list.
+      // If we don't know the store, the bon isn't useful for cashback —
+      // we can't categorise it, can't show a logo, and can't trust it.
+      const merchantInfo = await resolveMerchant(ocr.parsed.merchant);
 
-      // 5) Decide status
+      // 5) Eligibility + tier
+      const eligibleItemCount = countEligibleItems(ocr.parsed);
+      const cashbackCents =
+        merchantInfo && recon.ok ? tierFor(eligibleItemCount, config.tiers) : 0;
+
+      // 6) Decide status (priority: not-a-receipt > unknown-merchant > recon > below-min)
       let status = 'matched';
       let rejectReason = null;
       if (!ocr.parsed.isReceipt) {
         status = 'rejected';
         rejectReason = ocr.parsed.notReceiptReason || 'not_a_receipt';
+      } else if (!merchantInfo) {
+        status = 'rejected';
+        rejectReason = 'unknown_merchant';
       } else if (!recon.ok) {
         status = 'review';
         rejectReason = 'reconciliation_delta';
@@ -339,20 +349,24 @@ exports.processCashback = onMessagePublished(
             cashbackCents,
             tierApplied: cashbackCents,
             eligibleItemCount,
-            merchant: ocr.parsed.merchant ?? null,
+            merchantRaw: ocr.parsed.merchant ?? null,
+            merchantId: merchantInfo?.id ?? null,
+            merchantName: merchantInfo?.name ?? null,
+            merchantLogoUrl: merchantInfo?.logoUrl ?? null,
+            merchantLand: merchantInfo?.land ?? null,
             bonDate: ocr.parsed.bonDate || null,
             bonTotalCents: ocr.parsed.totalCents ?? null,
-            paymentMethod: ocr.parsed.paymentMethod ?? null,
             items: slimItems,
             storageBucket: receipt.storage?.bucket ?? null,
             storagePath: receipt.storage?.path ?? null,
+            reconciliationDeltaCents: recon.deltaCents ?? null,
             rejectReason,
             updatedAt: now,
           },
           { merge: true },
         );
 
-      // 6) Write authoritative doc to top-level /receipts/*
+      // 7) Write authoritative doc to top-level /receipts/*
       await docRef.update({
         status,
         rejectReason,
@@ -363,8 +377,10 @@ exports.processCashback = onMessagePublished(
           parsed: ocr.parsed,
           confidence: ocr.parsed.ocrConfidence ?? null,
         },
-        merchant: ocr.parsed.merchant
-          ? { id: String(ocr.parsed.merchant).toLowerCase(), matchedScore: 1 }
+        merchant: merchantInfo
+          ? { id: merchantInfo.id, name: merchantInfo.name, raw: ocr.parsed.merchant ?? null, matchedScore: 1 }
+          : ocr.parsed.merchant
+          ? { id: 'unknown', raw: ocr.parsed.merchant, matchedScore: 0 }
           : null,
         bonDate: ocr.parsed.bonDate || null,
         bonTime: ocr.parsed.bonTime || null,

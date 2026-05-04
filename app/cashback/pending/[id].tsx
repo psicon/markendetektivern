@@ -55,13 +55,20 @@ interface MirrorDoc {
   cashbackCents?: number;
   tierApplied?: number;
   eligibleItemCount?: number;
+  // New canonical fields (set by the merchant matcher in the CF):
+  merchantId?: string | null;
+  merchantName?: string | null;
+  merchantLogoUrl?: string | null;
+  merchantLand?: string | null;
+  merchantRaw?: string | null;
+  // Legacy fallback (older mirror docs may still have `merchant`):
   merchant?: string | null;
   bonDate?: string | null;
   bonTotalCents?: number | null;
-  paymentMethod?: string | null;
   items?: MirrorItem[];
   storageBucket?: string | null;
   storagePath?: string | null;
+  reconciliationDeltaCents?: number | null;
   rejectReason?: string | null;
   updatedAt?: any;
 }
@@ -199,8 +206,12 @@ export default function CashbackPendingScreen() {
           ? 'Auf dem Bon konnten wir weniger als 4 Artikel erkennen — für Cashback brauchen wir mindestens 4.'
           : reason === 'reconciliation_delta'
           ? 'Endbetrag und Einzelartikel passen nicht ganz zusammen. Wir konnten den Bon nicht verifizieren.'
+          : reason === 'unknown_merchant'
+          ? `Diesen Markt unterstützen wir aktuell noch nicht für Cashback. ${doc?.merchantRaw ? `Erkannt als: „${doc.merchantRaw}".` : ''}`
+          : reason === 'not_a_receipt'
+          ? 'Das Foto sieht nicht nach einem Kassenbon aus. Bitte versuche es nochmal mit einem klar lesbaren Bon.'
           : reason === 'process_error'
-          ? 'Bei der Auswertung ist etwas schiefgegangen. Wir versuchen es neu — sonst nochmal aufnehmen mit besserem Licht.'
+          ? 'Bei der Auswertung ist etwas schiefgegangen. Versuche es nochmal mit einem schärferen Foto.'
           : 'Bon konnte nicht verbucht werden.';
       return {
         icon: <MaterialCommunityIcons name="close-circle-outline" size={42} color={warn} />,
@@ -300,51 +311,74 @@ export default function CashbackPendingScreen() {
           </View>
         ) : null}
 
-        {/* ─── Bon meta (merchant + date) ─── */}
-        {(doc?.merchant || bonDate) && state !== 'pending' && state !== 'unknown' ? (
-          <View style={{ marginHorizontal: 16, marginTop: 16 }}>
-            <Text style={{ color: theme.textSub, fontFamily: fontFamily.body, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 }}>
-              Bon-Info
-            </Text>
-            <View
-              style={{
-                flexDirection: 'row',
-                gap: 8,
-                flexWrap: 'wrap',
-              }}
-            >
-              {doc?.merchant ? (
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 6,
-                    paddingHorizontal: 10,
-                    paddingVertical: 6,
-                    borderRadius: 999,
-                    backgroundColor: theme.surfaceAlt ?? 'rgba(0,0,0,0.05)',
-                  }}
-                >
-                  <MaterialCommunityIcons name="storefront-outline" size={14} color={theme.textSub} />
-                  <Text style={{ color: theme.text, fontFamily: fontFamily.body, fontSize: 12, fontWeight: fontWeight.medium as any }}>
-                    {doc.merchant}
-                  </Text>
-                </View>
-              ) : null}
+        {/* ─── Merchant hero — large logo + bold name + date below ─── */}
+        {(doc?.merchantName || doc?.merchant) && state !== 'pending' && state !== 'unknown' ? (
+          <View
+            style={{
+              marginHorizontal: 16,
+              marginTop: 16,
+              padding: 16,
+              borderRadius: radii.lg,
+              backgroundColor: theme.surface,
+              borderWidth: 1,
+              borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 14,
+              ...(shadows.md ?? {}),
+            }}
+          >
+            {doc?.merchantLogoUrl ? (
+              <View
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 14,
+                  backgroundColor: '#fff',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: 1,
+                  borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
+                  overflow: 'hidden',
+                }}
+              >
+                <ExpoImage
+                  source={{ uri: doc.merchantLogoUrl }}
+                  style={{ width: 56, height: 56 }}
+                  contentFit="contain"
+                />
+              </View>
+            ) : (
+              <View
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 14,
+                  backgroundColor: theme.surfaceAlt ?? 'rgba(0,0,0,0.06)',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <MaterialCommunityIcons name="storefront-outline" size={32} color={theme.textSub} />
+              </View>
+            )}
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text
+                numberOfLines={2}
+                style={{
+                  color: theme.text,
+                  fontFamily: fontFamily.heading,
+                  fontWeight: fontWeight.extraBold as any,
+                  fontSize: 22,
+                  letterSpacing: -0.3,
+                }}
+              >
+                {doc?.merchantName || doc?.merchant}
+              </Text>
               {bonDate ? (
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 6,
-                    paddingHorizontal: 10,
-                    paddingVertical: 6,
-                    borderRadius: 999,
-                    backgroundColor: theme.surfaceAlt ?? 'rgba(0,0,0,0.05)',
-                  }}
-                >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
                   <MaterialCommunityIcons name="calendar-outline" size={14} color={theme.textSub} />
-                  <Text style={{ color: theme.text, fontFamily: fontFamily.body, fontSize: 12, fontWeight: fontWeight.medium as any }}>
+                  <Text style={{ color: theme.textSub, fontFamily: fontFamily.body, fontSize: 13 }}>
                     {bonDate}
                   </Text>
                 </View>

@@ -143,7 +143,7 @@ export default function CashbackHistoryScreen() {
   const renderItem = ({ item }: { item: CashbackStatusEntry }) => {
     const v = statusVisual(item.status, primary);
     const bonDateStr = formatBonDate(item.bonDate);
-    const merchant = item.merchant ?? 'Unbekannte Filiale';
+    const merchant = item.merchantName || item.merchant || item.merchantRaw || 'Unbekannte Filiale';
     const cashback = item.cashbackCents ? formatCents(item.cashbackCents) : null;
 
     return (

@@ -104,9 +104,24 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
 }
 
 /**
- * Reconciliation: |Σ items - total| ≤ 0.05€.
+ * Reconciliation: |Σ items - total| ≤ tolerance.
+ *
+ * The OCR prompt explicitly excludes Pfand / Rabatt lines from the
+ * items array (they're meta, not items). That means real bons routinely
+ * have Σ items < total by ~0.25–3 € per receipt because:
+ *   • bottle deposits (Pfand) — typically 0.08–0.25 € per item
+ *   • bag fees, ID-checked age verification fee
+ *   • category-level discounts (Rabattaktionen)
+ *   • rounding / cash-truncation
+ *
+ * 5 cents was way too tight (rejected legitimate bons as 'review'
+ * even when the OCR was perfect). 200 cents = 2 € catches obvious
+ * fraud (missing items by half) while letting normal Pfand pass.
+ *
  * Returns { ok, sumItemsCents, deltaCents }.
  */
+const RECON_TOLERANCE_CENTS = 200;
+
 function reconcile(parsed) {
   if (!parsed || !Array.isArray(parsed.items)) {
     return { ok: false, sumItemsCents: 0, deltaCents: null };
@@ -120,7 +135,7 @@ function reconcile(parsed) {
     return { ok: false, sumItemsCents, deltaCents: null };
   }
   const deltaCents = Math.abs(total - sumItemsCents);
-  return { ok: deltaCents <= 5, sumItemsCents, deltaCents };
+  return { ok: deltaCents <= RECON_TOLERANCE_CENTS, sumItemsCents, deltaCents };
 }
 
 /**

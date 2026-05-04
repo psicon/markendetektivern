@@ -193,7 +193,16 @@ export default function CashbackCropScreen() {
       // With dynamic import the screen mounts fine, only the manipulate
       // call throws if the native module is missing — which we catch
       // and surface as a friendly rebuild message.
-      const ImageManipulator = await import('expo-image-manipulator');
+      const mod: any = await import('expo-image-manipulator');
+      const IM = mod?.default ?? mod;
+      const manipulateAsync = IM?.manipulateAsync ?? mod?.manipulateAsync;
+      // SaveFormat enum values are 'jpeg'/'png'/'webp' under the hood;
+      // hard-fall to the literal so the screen still works if the
+      // bundler strips the enum object.
+      const formatJpeg = IM?.SaveFormat?.JPEG ?? mod?.SaveFormat?.JPEG ?? 'jpeg';
+      if (typeof manipulateAsync !== 'function') {
+        throw new Error('manipulator_not_available');
+      }
 
       // Convert screen rect → image rect (factor by display↔natural ratio).
       const scaleX = naturalW / fittedSize.w;
@@ -205,10 +214,10 @@ export default function CashbackCropScreen() {
         height: Math.round(rect.h * scaleY),
       };
 
-      const result = await ImageManipulator.manipulateAsync(
+      const result = await manipulateAsync(
         imgUri,
         [{ crop: cropParams }],
-        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+        { compress: 0.9, format: formatJpeg },
       );
       const bon = await buildCapturedBon(result.uri, result.width, result.height);
 
