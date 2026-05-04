@@ -102,10 +102,8 @@ export default function CashbackConsentScreen() {
       if (user?.uid) {
         const valid = await hasValidCashbackConsent(user.uid);
         if (alive && valid) {
-          // Already consented for this version — Phase 1.5 will replace this
-          // with `router.replace('/cashback/capture')`. For now mark as
-          // accepted so the CTA shows the post-consent state.
-          setHasAccepted(true);
+          // Already consented — go straight to capture.
+          router.replace('/cashback/capture');
         }
       }
     })();
@@ -143,12 +141,10 @@ export default function CashbackConsentScreen() {
     try {
       await acceptCashbackConsent(user.uid);
       setHasAccepted(true);
-      // Phase 1.5 swaps this for `router.replace('/cashback/capture')`.
-      // For Phase 1 we route back to /rewards — the user sees the
-      // updated CTA on the rewards tab.
+      // Forward to the capture screen now that consent landed.
       setTimeout(() => {
-        router.back();
-      }, 600);
+        router.replace('/cashback/capture');
+      }, 350);
     } catch (error: any) {
       console.warn('⚠️ acceptCashbackConsent failed:', error);
       Alert.alert(

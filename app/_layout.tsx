@@ -116,10 +116,18 @@ function ThemedApp() {
                   name="cashback/consent"
                   options={{ headerShown: false, animation: 'slide_from_bottom', gestureEnabled: true }}
                 />
-                {/* cashback/capture, cashback/review, cashback/pending/[id]
-                    werden in Phase 1.5 + Phase 2 registriert wenn die
-                    Screens existieren — sonst feuert expo-router warnings
-                    für leere Dateien. */}
+                <Stack.Screen
+                  name="cashback/capture"
+                  options={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: true }}
+                />
+                <Stack.Screen
+                  name="cashback/review"
+                  options={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: true }}
+                />
+                <Stack.Screen
+                  name="cashback/pending/[id]"
+                  options={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: true }}
+                />
                 <Stack.Screen name="+not-found" />
               </Stack>
               <StatusBar 

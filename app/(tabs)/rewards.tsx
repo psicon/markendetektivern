@@ -467,16 +467,19 @@ function RedeemTab() {
     .replace('.', ',');
 
   // Tap target for "Bon scannen" — routes through consent gate first.
-  // Phase 1.5 swaps the post-consent branch for `/cashback/capture`.
-  // For now we always land on the consent screen which shows the
-  // already-accepted state when consent is valid.
+  // If the user already accepted the current consent version we skip
+  // straight to the capture screen.
   const onScanBon = useCallback(() => {
     if (!cashback.uid) {
       router.push('/auth/login');
       return;
     }
-    router.push('/cashback/consent');
-  }, [cashback.uid]);
+    if (cashback.hasConsent) {
+      router.push('/cashback/capture');
+    } else {
+      router.push('/cashback/consent');
+    }
+  }, [cashback.uid, cashback.hasConsent]);
 
   return (
     <>
