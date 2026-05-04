@@ -300,27 +300,6 @@ export default function CashbackPendingScreen() {
           </View>
         ) : null}
 
-        {/* ─── Bon image ─── */}
-        {imageUrl ? (
-          <View
-            style={{
-              marginHorizontal: 16,
-              marginTop: 16,
-              borderRadius: radii.lg,
-              overflow: 'hidden',
-              backgroundColor: '#0a0a0a',
-              borderWidth: 1,
-              borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
-            }}
-          >
-            <ExpoImage
-              source={{ uri: imageUrl }}
-              style={{ width: '100%', aspectRatio: 0.75 }}
-              contentFit="contain"
-            />
-          </View>
-        ) : null}
-
         {/* ─── Bon meta (merchant + date) ─── */}
         {(doc?.merchant || bonDate) && state !== 'pending' && state !== 'unknown' ? (
           <View style={{ marginHorizontal: 16, marginTop: 16 }}>
@@ -367,24 +346,6 @@ export default function CashbackPendingScreen() {
                   <MaterialCommunityIcons name="calendar-outline" size={14} color={theme.textSub} />
                   <Text style={{ color: theme.text, fontFamily: fontFamily.body, fontSize: 12, fontWeight: fontWeight.medium as any }}>
                     {bonDate}
-                  </Text>
-                </View>
-              ) : null}
-              {doc?.paymentMethod ? (
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 6,
-                    paddingHorizontal: 10,
-                    paddingVertical: 6,
-                    borderRadius: 999,
-                    backgroundColor: theme.surfaceAlt ?? 'rgba(0,0,0,0.05)',
-                  }}
-                >
-                  <MaterialCommunityIcons name="credit-card-outline" size={14} color={theme.textSub} />
-                  <Text style={{ color: theme.text, fontFamily: fontFamily.body, fontSize: 12, fontWeight: fontWeight.medium as any }}>
-                    {doc.paymentMethod}
                   </Text>
                 </View>
               ) : null}
@@ -521,6 +482,39 @@ export default function CashbackPendingScreen() {
                   </Text>
                 </View>
               ) : null}
+            </View>
+          </View>
+        ) : null}
+
+        {/* ─── Bon image (below the parsed details) ─── */}
+        {imageUrl && state !== 'pending' && state !== 'unknown' ? (
+          <View style={{ marginHorizontal: 16, marginTop: 18 }}>
+            <Text
+              style={{
+                color: theme.textSub,
+                fontFamily: fontFamily.body,
+                fontSize: 12,
+                textTransform: 'uppercase',
+                letterSpacing: 0.6,
+                marginBottom: 8,
+              }}
+            >
+              Bon-Foto
+            </Text>
+            <View
+              style={{
+                borderRadius: radii.lg,
+                overflow: 'hidden',
+                backgroundColor: '#0a0a0a',
+                borderWidth: 1,
+                borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
+              }}
+            >
+              <ExpoImage
+                source={{ uri: imageUrl }}
+                style={{ width: '100%', aspectRatio: 0.7 }}
+                contentFit="contain"
+              />
             </View>
           </View>
         ) : null}

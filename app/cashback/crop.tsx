@@ -260,14 +260,17 @@ export default function CashbackCropScreen() {
         <View style={styles.iconButton} />
       </View>
 
-      {/* Image canvas */}
+      {/* Image canvas — image is rendered at fittedSize.y - canvasTop
+          (same offset the constraint logic uses) so the dim overlay,
+          crop rect, and corner handles are pixel-aligned with what the
+          user actually sees. */}
       <View style={[styles.canvas, { top: canvasTop, height: canvasH }]}>
         <Image
           source={{ uri: imgUri }}
           style={{
             position: 'absolute',
             left: fittedSize.x,
-            top: 0, // canvas already starts at canvasTop
+            top: fittedSize.y - canvasTop,
             width: fittedSize.w,
             height: fittedSize.h,
           }}
@@ -290,7 +293,7 @@ export default function CashbackCropScreen() {
             width: rect.w,
             height: rect.h,
             borderWidth: 2,
-            borderColor: '#ffd44b',
+            borderColor: theme.primary ?? '#0d8575',
           }}
         >
           {/* Grid lines (rule of thirds) */}
@@ -316,9 +319,9 @@ export default function CashbackCropScreen() {
                 width: HANDLE_SIZE,
                 height: HANDLE_SIZE,
                 borderRadius: HANDLE_HALF,
-                backgroundColor: '#ffd44b',
+                backgroundColor: theme.primary ?? '#0d8575',
                 borderWidth: 2,
-                borderColor: '#000',
+                borderColor: '#fff',
               }}
             />
           );
@@ -347,10 +350,10 @@ export default function CashbackCropScreen() {
         </Pressable>
         <Pressable onPress={handleApply} disabled={cropping} style={[styles.bottomBtn, styles.bottomBtnPrimary]}>
           {cropping ? (
-            <ActivityIndicator color="#000" />
+            <ActivityIndicator color="#fff" />
           ) : (
             <>
-              <MaterialCommunityIcons name="crop" size={18} color="#000" />
+              <MaterialCommunityIcons name="crop" size={18} color="#fff" />
               <Text style={styles.bottomBtnPrimaryText}>Zuschneiden</Text>
             </>
           )}
@@ -393,7 +396,7 @@ const styles = StyleSheet.create({
   },
   grid: {
     position: 'absolute',
-    backgroundColor: 'rgba(255,212,75,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.4)',
   },
   bottomBar: {
     position: 'absolute',
@@ -415,9 +418,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
-  bottomBtnPrimary: { backgroundColor: '#ffd44b' },
+  bottomBtnPrimary: { backgroundColor: '#0d8575' },
   bottomBtnPrimaryText: {
-    color: '#000',
+    color: '#fff',
     fontFamily: fontFamily.body,
     fontWeight: fontWeight.bold as any,
     fontSize: 15,
