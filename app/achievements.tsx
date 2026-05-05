@@ -270,10 +270,10 @@ export default function AchievementsScreen() {
     useState<'overall' | 'region'>('overall');
   const [geo, setGeo] = useState<'bundesland' | 'stadt'>('bundesland');
 
-  // Chrome height — DetailHeader row + tabs strip.
-  const TABS_ROW_HEIGHT = 50;
-  const chromeBaseHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
-  const chromeHeight = chromeBaseHeight + TABS_ROW_HEIGHT;
+  // Chrome height — DetailHeader row only. Tabs scroll WITH the
+  // content (rendered as the first item in each page's ScrollView)
+  // so there's no hard cut between sticky-strip and scroll content.
+  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
 
   // Loading state: render the chrome + a skeleton body instead of a
   // centered ActivityIndicator. Two reasons:
@@ -283,6 +283,28 @@ export default function AchievementsScreen() {
   //   2. The skeleton mirrors the page layout (hero card + 2 card
   //      rows) so the eventual data swap doesn't shift content.
   const isLoading = levelsLoading || achievementsLoading;
+
+  // Tabs row rendered inline at the top of each page's ScrollView so
+  // it scrolls naturally with content — no hard sticky-strip cut
+  // under DetailHeader. Same JSX in both pages, shared state.
+  const tabsRow = (
+    <View
+      style={{
+        paddingHorizontal: 20,
+        paddingTop: 8,
+        paddingBottom: 12,
+      }}
+    >
+      <SegmentedTabs
+        tabs={[
+          { key: 'errungen', label: 'Errungenschaften' },
+          { key: 'bestenliste', label: 'Bestenliste' },
+        ] as const}
+        value={tab}
+        onChange={onTabChange}
+      />
+    </View>
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -302,6 +324,7 @@ export default function AchievementsScreen() {
         showsVerticalScrollIndicator={false}
         scrollEnabled={!isLoading}
       >
+        {tabsRow}
         {isLoading ? (
           <AchievementsSkeleton />
         ) : (
@@ -419,6 +442,7 @@ export default function AchievementsScreen() {
             }}
             showsVerticalScrollIndicator={false}
           >
+            {tabsRow}
             <BestenlisteTab
               outerScope={outerScope}
               setOuterScope={setOuterScope}
@@ -472,36 +496,6 @@ export default function AchievementsScreen() {
           </Pressable>
         }
       />
-
-      {/* SegmentedTabs strip — sits absolute right under the
-          DetailHeader chrome. Solid theme.bg backdrop so list
-          content scrolling underneath stays clean (no blur stack
-          fighting with DetailHeader's blur). */}
-      <View
-        style={{
-          position: 'absolute',
-          top: chromeBaseHeight,
-          left: 0,
-          right: 0,
-          height: TABS_ROW_HEIGHT,
-          zIndex: 9,
-          backgroundColor: theme.bg,
-          paddingHorizontal: 20,
-          paddingTop: 7,
-          paddingBottom: 7,
-          borderBottomWidth: 1,
-          borderBottomColor: theme.border,
-        }}
-      >
-        <SegmentedTabs
-          tabs={[
-            { key: 'errungen', label: 'Errungenschaften' },
-            { key: 'bestenliste', label: 'Bestenliste' },
-          ] as const}
-          value={tab}
-          onChange={onTabChange}
-        />
-      </View>
 
       {/* Info bottom-sheet — same `FilterSheet` component used
           for the Region-Setup on the Belohnungen tab so all sheets
