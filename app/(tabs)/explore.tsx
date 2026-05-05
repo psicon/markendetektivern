@@ -1742,7 +1742,7 @@ export default function ExploreScreen() {
         const unit = packTypId ? packungstypenMap[packTypId] : undefined;
         const { sizeLabel, unitPriceLabel } = formatPack(p.packSize, unit, p.preis);
         return (
-          <View style={{ paddingHorizontal: 6, paddingBottom: 12, minHeight: 268 }}>
+          <View style={{ paddingHorizontal: 6, paddingBottom: 12 }}>
             <ProductCard
               title={p.name ?? ''}
               brand={handelsmarkeName ?? null}
@@ -1766,7 +1766,7 @@ export default function ExploreScreen() {
       const unit = packTypId ? packungstypenMap[packTypId] : undefined;
       const { sizeLabel, unitPriceLabel } = formatPack(m.packSize, unit, m.preis);
       return (
-        <View style={{ paddingHorizontal: 6, paddingBottom: 12, minHeight: 268 }}>
+        <View style={{ paddingHorizontal: 6, paddingBottom: 12 }}>
           <BrandCard
             title={m.name ?? ''}
             brand={marke}
@@ -1777,6 +1777,29 @@ export default function ExploreScreen() {
             unitPriceLabel={unitPriceLabel}
             alternativeCount={m.relatedProdukteIDs?.length ?? 0}
             onPress={() => openBrand(m, index)}
+            infos={(m as any).marke?.infos ?? null}
+            onInfoPress={() => {
+              const markeDoc = (m as any).marke;
+              const raw = markeDoc?.infos ?? (m as any).infos;
+              const infosText =
+                typeof raw === 'string' && raw.trim().length > 0
+                  ? raw.trim()
+                  : null;
+              const fallbackLines = [
+                markeDoc?.adresse ? String(markeDoc.adresse) : null,
+                [markeDoc?.plz, markeDoc?.stadt].filter(Boolean).join(' ') || null,
+                markeDoc?.land ? String(markeDoc.land) : null,
+              ].filter(Boolean) as string[];
+              const body =
+                infosText ??
+                (fallbackLines.length > 0
+                  ? fallbackLines.join('\n')
+                  : 'Zu dieser Marke sind aktuell keine Zusatz-Informationen hinterlegt.');
+              setInfoSheet({
+                title: markeDoc?.name || marke || m.name || 'Info',
+                body,
+              });
+            }}
           />
         </View>
       );
@@ -2304,13 +2327,17 @@ export default function ExploreScreen() {
             Visual leftmost tab; PagerView page index 0 so swiping
             from Eigenmarken (page 1) to the LEFT lands here, matching
             the SegmentedTabs visual order. */}
-        <View
-          key="alle"
-          style={{ flex: 1, paddingTop: chromeTotalHeight + 12 }}
-        >
+        <View key="alle" style={{ flex: 1 }}>
           {itemsForTab('alle').length === 0 ? (
+            // Empty / skeleton path lives in a plain ScrollView so the
+            // chrome-paddingTop is honoured (LegendList v2's
+            // ListEmptyComponent renders without that padding,
+            // pushing skeleton rows behind the chrome).
             <ScrollView
-              contentContainerStyle={{ paddingBottom: 120 }}
+              contentContainerStyle={{
+                paddingTop: chromeTotalHeight + 12,
+                paddingBottom: 120,
+              }}
               showsVerticalScrollIndicator={false}
             >
               {renderGrid('alle')}
@@ -2336,6 +2363,7 @@ export default function ExploreScreen() {
               onEndReached={checkLoadMoreAlle}
               onEndReachedThreshold={0.5}
               contentContainerStyle={{
+                paddingTop: chromeTotalHeight + 12,
                 paddingBottom: 120,
                 paddingHorizontal: 14,
               }}
@@ -2377,13 +2405,13 @@ export default function ExploreScreen() {
             mounted ScrollViews claim it, iOS silently disables the
             status-bar-tap scroll-to-top for all of them (documented
             UIScrollView behaviour when multiple responders exist). */}
-        <View
-          key="eigen"
-          style={{ flex: 1, paddingTop: chromeTotalHeight + 12 }}
-        >
+        <View key="eigen" style={{ flex: 1 }}>
           {itemsForTab('eigen').length === 0 ? (
             <ScrollView
-              contentContainerStyle={{ paddingBottom: 120 }}
+              contentContainerStyle={{
+                paddingTop: chromeTotalHeight + 12,
+                paddingBottom: 120,
+              }}
               showsVerticalScrollIndicator={false}
             >
               {renderGrid('eigen')}
@@ -2409,6 +2437,7 @@ export default function ExploreScreen() {
               onEndReached={checkLoadMoreEigen}
               onEndReachedThreshold={0.5}
               contentContainerStyle={{
+                paddingTop: chromeTotalHeight + 12,
                 paddingBottom: 120,
                 paddingHorizontal: 14,
               }}
@@ -2443,13 +2472,13 @@ export default function ExploreScreen() {
         </View>
 
         {/* ─── Page 2 — Marken ──────────────────────────────────────── */}
-        <View
-          key="marken"
-          style={{ flex: 1, paddingTop: chromeTotalHeight + 12 }}
-        >
+        <View key="marken" style={{ flex: 1 }}>
           {itemsForTab('marken').length === 0 ? (
             <ScrollView
-              contentContainerStyle={{ paddingBottom: 120 }}
+              contentContainerStyle={{
+                paddingTop: chromeTotalHeight + 12,
+                paddingBottom: 120,
+              }}
               showsVerticalScrollIndicator={false}
             >
               {renderGrid('marken')}
@@ -2475,6 +2504,7 @@ export default function ExploreScreen() {
               onEndReached={checkLoadMoreMarken}
               onEndReachedThreshold={0.5}
               contentContainerStyle={{
+                paddingTop: chromeTotalHeight + 12,
                 paddingBottom: 120,
                 paddingHorizontal: 14,
               }}
