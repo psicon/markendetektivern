@@ -755,10 +755,10 @@ export default function ProductComparisonScreen() {
           productId,
           productType === 'markenprodukt',
         );
-        // Leading 🗑️ overrides extractEmoji's default ✅ fallback —
-        // a green check on a "removed" toast read as confirmation that
-        // it had been ADDED, not removed.
-        showInfoToast('🗑️ Aus Einkaufsliste entfernt');
+        // ERROR category → soft-red pill, signals the destructive
+        // (but successful) action. Leading 🗑️ wins over extractEmoji's
+        // default ✅ so the icon matches the action.
+        showInfoToast('🗑️ Aus Einkaufsliste entfernt', 'ERROR');
       } else {
         await FirestoreService.addToShoppingCart(
           user.uid,

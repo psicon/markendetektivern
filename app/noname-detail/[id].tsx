@@ -492,10 +492,10 @@ export default function NoNameDetailScreen() {
           p.id,
           false,
         );
-        // Leading 🗑️ overrides extractEmoji's default ✅ fallback —
-        // a green check on a "removed" toast read like confirmation
-        // that it had been ADDED, not removed.
-        showInfoToast('🗑️ Aus Einkaufsliste entfernt');
+        // ERROR category → soft-red pill, signals the destructive
+        // (but successful) action. Leading 🗑️ wins over extractEmoji's
+        // default ✅ so the icon matches the action.
+        showInfoToast('🗑️ Aus Einkaufsliste entfernt', 'ERROR');
       } catch {
         setInCart(true);
         showInfoToast('Fehler — bitte erneut versuchen');
