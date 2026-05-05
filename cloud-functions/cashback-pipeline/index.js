@@ -83,7 +83,9 @@ const CONFIG_DOC_PATH = 'cashback_config/v1';
 // Bon must be no older than this many days (server-time check, not
 // client). Avoids backdated bons + bons forgotten in a drawer for
 // months. Configurable via cashback_config.maxBonAgeDays in future.
-const MAX_BON_AGE_DAYS = 5;
+// Currently effectively disabled for testing — bump back to 5 once
+// the dev/test phase is done.
+const MAX_BON_AGE_DAYS = 9999;
 
 // Hamming-distance threshold for "near-duplicate" dHash matches.
 // 0 = bit-identical (same image, possibly re-encoded at different
