@@ -540,8 +540,9 @@ Existing relevant code/projects (NOT in this repo):
 | 0 — OCR validation tool | ✅ Done | feat/cashback-foundation | Python tool ready, 50-bon decision-gate not run yet |
 | 1 — Foundation | ✅ Done | `5c05679` | types, service, consent screen, live wiring in rewards.tsx |
 | 1.5 — Capture | ✅ Done | `0ba133b` | expo-camera based, frame overlay, review checklist, pending stub. **ML-Kit upgrade = Phase 1.5.1** |
-| 2 — Async backend + push | ✅ Done (v1) | this commit | enqueueCashback + processCashback Cloud Functions, OCR JS port, Storage upload, live pending listener. **Real FCM = Phase 2.1** |
+| 2 — Async backend + push | ✅ Done (v1) | `888ce3f` | enqueueCashback + processCashback Cloud Functions, OCR JS port, Storage upload, live pending listener. **Real FCM = Phase 2.1** |
 | 2.1 — Real FCM | ⏭️ Pending | — | Needs `@react-native-firebase/messaging` + dev-client rebuild |
+| 2.2 — CV-Hybrid OCR + DocAI escalation + asymmetric reconciliation | ✅ Done | this commit | Cloud Vision OCR → Gemini Flash text-parser as primary engine (lib/ocr_cvhybrid.js, lib/prompt_text.js). Replaces Gemini-direct image OCR. DocAI Expense Parser as escalation fallback when reconciliation fails (lib/ocr_docai.js, auto-skip when env vars unset). Reconciliation tolerance now asymmetric: ±200¢ undershoot (Pfand normal) / ±50¢ overshoot (suspicious) |
 | 3 — Catalog match | ⏭️ Pending | — | productId/brandId mapping per OCR'd item |
 | 4 — Per-user product index | ⏭️ Pending | — | journeys + purchased_products writes |
 | 4.5a — L1 image forensics | ✅ Done | this commit | server-trusted dHash + EXIF cross-check + near-duplicate scan in `enqueueCashback`. Library in `lib/forensics.js`, deps `sharp` + `exifr` |

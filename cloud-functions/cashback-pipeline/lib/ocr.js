@@ -104,27 +104,43 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
 }
 
 /**
- * Reconciliation: |Σ items - total| ≤ tolerance.
+ * Reconciliation: Σ items vs total, asymmetric tolerance.
  *
  * The OCR prompt explicitly excludes Pfand / Rabatt lines from the
  * items array (they're meta, not items). That means real bons routinely
- * have Σ items < total by ~0.25–3 € per receipt because:
+ * have Σ items < total by ~0.25–3 € because of:
  *   • bottle deposits (Pfand) — typically 0.08–0.25 € per item
  *   • bag fees, ID-checked age verification fee
  *   • category-level discounts (Rabattaktionen)
  *   • rounding / cash-truncation
  *
- * 5 cents was way too tight (rejected legitimate bons as 'review'
- * even when the OCR was perfect). 200 cents = 2 € catches obvious
- * fraud (missing items by half) while letting normal Pfand pass.
+ * Asymmetric thresholds (the key insight):
+ *   - Σ < total (positive delta): up to RECON_TOLERANCE_UNDERSHOOT_CENTS
+ *     allowed. This is the *normal* Pfand case.
+ *   - Σ > total (negative delta): only RECON_TOLERANCE_OVERSHOOT_CENTS
+ *     allowed. This is *suspicious* — usually means a Rabatt-Zeile was
+ *     missed or an item got double-extracted by the LLM. Triggers
+ *     escalation to DocAI.
  *
- * Returns { ok, sumItemsCents, deltaCents }.
+ * Returns:
+ *   { ok, sumItemsCents, deltaCents, signedDeltaCents, direction }
+ *
+ *   - deltaCents: absolute |Σ - total|
+ *   - signedDeltaCents: total - Σ (positive = items missing/Pfand, negative = items duplicated)
+ *   - direction: 'undershoot' | 'overshoot' | 'match' | 'unknown'
  */
-const RECON_TOLERANCE_CENTS = 200;
+const RECON_TOLERANCE_UNDERSHOOT_CENTS = 200; // Σ < total: Pfand-tolerant
+const RECON_TOLERANCE_OVERSHOOT_CENTS = 50;   // Σ > total: tight, missed-discount territory
 
 function reconcile(parsed) {
   if (!parsed || !Array.isArray(parsed.items)) {
-    return { ok: false, sumItemsCents: 0, deltaCents: null };
+    return {
+      ok: false,
+      sumItemsCents: 0,
+      deltaCents: null,
+      signedDeltaCents: null,
+      direction: 'unknown',
+    };
   }
   const sumItemsCents = parsed.items.reduce(
     (acc, it) => acc + (Number.isFinite(it.priceCents) ? it.priceCents : 0),
@@ -132,10 +148,29 @@ function reconcile(parsed) {
   );
   const total = Number.isFinite(parsed.totalCents) ? parsed.totalCents : null;
   if (total == null) {
-    return { ok: false, sumItemsCents, deltaCents: null };
+    return {
+      ok: false,
+      sumItemsCents,
+      deltaCents: null,
+      signedDeltaCents: null,
+      direction: 'unknown',
+    };
   }
-  const deltaCents = Math.abs(total - sumItemsCents);
-  return { ok: deltaCents <= RECON_TOLERANCE_CENTS, sumItemsCents, deltaCents };
+  const signedDeltaCents = total - sumItemsCents;
+  const deltaCents = Math.abs(signedDeltaCents);
+  let direction;
+  let ok;
+  if (signedDeltaCents > 0) {
+    direction = 'undershoot'; // Σ < total — normal Pfand case
+    ok = deltaCents <= RECON_TOLERANCE_UNDERSHOOT_CENTS;
+  } else if (signedDeltaCents < 0) {
+    direction = 'overshoot'; // Σ > total — suspicious
+    ok = deltaCents <= RECON_TOLERANCE_OVERSHOOT_CENTS;
+  } else {
+    direction = 'match';
+    ok = true;
+  }
+  return { ok, sumItemsCents, deltaCents, signedDeltaCents, direction };
 }
 
 /**

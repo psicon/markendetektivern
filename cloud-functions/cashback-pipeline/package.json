@@ -11,8 +11,10 @@
     "deploy": "firebase deploy --only functions:cashback-pipeline"
   },
   "dependencies": {
+    "@google-cloud/documentai": "^9.0.0",
     "@google-cloud/pubsub": "^4.5.0",
     "@google-cloud/storage": "^7.13.0",
+    "@google-cloud/vision": "^4.3.0",
     "@google/genai": "^0.3.0",
     "exifr": "^7.1.3",
     "firebase-admin": "^12.6.0",

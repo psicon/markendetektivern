@@ -52,6 +52,8 @@ const { PubSub } = require('@google-cloud/pubsub');
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 
 const { extractReceipt, reconcile, countEligibleItems, tierFor, DEFAULT_MODEL } = require('./lib/ocr');
+const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
+const { extractReceiptDocAI, isConfigured: isDocAIConfigured } = require('./lib/ocr_docai');
 const { resolveMerchant } = require('./lib/merchant');
 const { sendCashbackReady } = require('./lib/push');
 const {
@@ -60,6 +62,16 @@ const {
   readExifMeta,
   deriveForensicFlags,
 } = require('./lib/forensics');
+
+// OCR engine selection. Default = cv-hybrid (Cloud Vision + Gemini Flash
+// text-parser, validated as the winner in Phase 0). Override per-deploy
+// via env var if you want to A/B-test the original Gemini-direct path.
+const OCR_ENGINE = (process.env.CASHBACK_OCR_ENGINE || 'cv-hybrid').toLowerCase();
+
+// When the primary OCR fails reconciliation (asymmetric tolerance),
+// re-run via DocAI Expense Parser as a fallback. Cost: $0.05/page only
+// on the bons that need it. Auto-no-op if DocAI env vars unset.
+const ESCALATE_ON_RECON_FAIL = process.env.CASHBACK_ESCALATE_DOCAI !== 'false';
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -693,11 +705,67 @@ exports.processCashback = onMessagePublished(
       const sizeBytes = Number(metadata.size) || bytes.length;
       const mimeType = metadata.contentType || 'image/jpeg';
 
-      // 2) Gemini OCR
-      const ocr = await extractReceipt(bytes, mimeType, { model: config.ocrModel });
+      // 2) Primary OCR — engine selected via CASHBACK_OCR_ENGINE env var
+      //    (default: cv-hybrid, the Phase-0 validated winner).
+      let ocr;
+      if (OCR_ENGINE === 'cv-hybrid') {
+        ocr = await extractReceiptCVHybrid(bytes, mimeType, { model: config.ocrModel });
+      } else {
+        // Legacy path — direct Gemini-on-image. Less stable, kept for rollback.
+        ocr = await extractReceipt(bytes, mimeType, { model: config.ocrModel });
+        ocr.engine = ocr.engine || 'gemini-direct';
+        ocr.cvLatencyMs = 0;
+        ocr.geminiLatencyMs = ocr.latencyMs;
+        ocr.ocrText = '';
+      }
 
-      // 3) Reconciliation (Pfand-tolerant, 2 € window — see ocr.js)
-      const recon = reconcile(ocr.parsed);
+      // 3) Reconciliation — asymmetric tolerance (Σ < total: ±200¢ for
+      //    Pfand; Σ > total: only ±50¢ — that's the suspicious direction).
+      let recon = reconcile(ocr.parsed);
+
+      // 3a) Escalation: if primary failed recon AND DocAI is configured,
+      //     re-run the bon through DocAI Expense Parser. Take whichever
+      //     result has the smaller |signedDelta| (or DocAI if it passes
+      //     and primary doesn't).
+      let escalation = { fired: false };
+      if (
+        !recon.ok
+        && ESCALATE_ON_RECON_FAIL
+        && isDocAIConfigured()
+        && ocr.parsed?.isReceipt !== false
+      ) {
+        try {
+          const docai = await extractReceiptDocAI(bytes, mimeType);
+          if (docai && docai.parsed) {
+            const docaiRecon = reconcile(docai.parsed);
+            const primaryAbsDelta = recon.deltaCents == null ? Infinity : recon.deltaCents;
+            const docaiAbsDelta = docaiRecon.deltaCents == null ? Infinity : docaiRecon.deltaCents;
+            const swap =
+              docaiRecon.ok && !recon.ok
+                ? true
+                : docaiAbsDelta < primaryAbsDelta;
+            escalation = {
+              fired: true,
+              swapped: swap,
+              primaryEngine: ocr.engine,
+              primaryDeltaCents: recon.deltaCents,
+              primaryDirection: recon.direction,
+              docaiDeltaCents: docaiRecon.deltaCents,
+              docaiDirection: docaiRecon.direction,
+              docaiLatencyMs: docai.latencyMs,
+            };
+            if (swap) {
+              ocr = docai;
+              recon = docaiRecon;
+            }
+          } else {
+            escalation = { fired: true, swapped: false, reason: 'docai_no_result' };
+          }
+        } catch (e) {
+          logger.warn('escalation-failed', { cashbackId, err: e.message });
+          escalation = { fired: true, swapped: false, reason: e.message };
+        }
+      }
 
       // 4) Bon-Datum freshness check (server-side, Berlin-anchored).
       // Bons older than MAX_BON_AGE_DAYS are rejected — protects
@@ -785,6 +853,9 @@ exports.processCashback = onMessagePublished(
             storageBucket: receipt.storage?.bucket ?? null,
             storagePath: receipt.storage?.path ?? null,
             reconciliationDeltaCents: recon.deltaCents ?? null,
+            reconciliationDirection: recon.direction ?? null,
+            ocrEngine: ocr.engine ?? null,
+            escalation: escalation?.fired ? escalation : null,
             rejectReason,
             updatedAt: now,
           },
@@ -797,10 +868,22 @@ exports.processCashback = onMessagePublished(
         rejectReason,
         ocr: {
           model: ocr.model,
+          engine: ocr.engine ?? null,
           promptVersion: ocr.promptVersion,
           latencyMs: ocr.latencyMs,
+          cvLatencyMs: ocr.cvLatencyMs ?? null,
+          geminiLatencyMs: ocr.geminiLatencyMs ?? null,
           parsed: ocr.parsed,
           confidence: ocr.parsed.ocrConfidence ?? null,
+          escalation: escalation?.fired ? escalation : null,
+          reconciliation: {
+            ok: recon.ok,
+            sumItemsCents: recon.sumItemsCents,
+            totalCents: ocr.parsed.totalCents ?? null,
+            deltaCents: recon.deltaCents,
+            signedDeltaCents: recon.signedDeltaCents,
+            direction: recon.direction,
+          },
         },
         merchant: merchantInfo
           ? { id: merchantInfo.id, name: merchantInfo.name, raw: ocr.parsed.merchant ?? null, matchedScore: 1 }
@@ -850,10 +933,16 @@ exports.processCashback = onMessagePublished(
       logger.info('process-done', {
         cashbackId,
         status,
+        engine: ocr.engine,
         latencyMs: ocr.latencyMs,
+        cvLatencyMs: ocr.cvLatencyMs ?? null,
+        geminiLatencyMs: ocr.geminiLatencyMs ?? null,
         cashbackCents,
         eligibleItemCount,
         deltaCents: recon.deltaCents,
+        signedDeltaCents: recon.signedDeltaCents,
+        direction: recon.direction,
+        escalated: escalation?.fired ? escalation.swapped : false,
       });
     } catch (err) {
       logger.error('process-failed', { cashbackId, err: err.message, stack: err.stack });
