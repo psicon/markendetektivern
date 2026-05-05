@@ -526,6 +526,28 @@ export default function AchievementsScreen() {
         </View>
       )}
 
+      {/* Soft fade below the chrome — kills the hard rectangle line
+          when colored content (StatusHero gradient, level cards)
+          scrolls under the BlurView. 14 px gradient zone going from
+          ~80% bg-tint at the top to fully transparent at the bottom,
+          so the chrome dissolves into the content instead of cutting. */}
+      <LinearGradient
+        pointerEvents="none"
+        colors={
+          scheme === 'dark'
+            ? ['rgba(15,18,20,0.85)', 'rgba(15,18,20,0)']
+            : ['rgba(245,247,248,0.85)', 'rgba(245,247,248,0)']
+        }
+        style={{
+          position: 'absolute',
+          top: chromeBaseHeight + TABS_ROW_HEIGHT,
+          left: 0,
+          right: 0,
+          height: 14,
+          zIndex: 9,
+        }}
+      />
+
       {/* Info bottom-sheet — same `FilterSheet` component used
           for the Region-Setup on the Belohnungen tab so all sheets
           share the slide-up animation, drag handle, backdrop fade
