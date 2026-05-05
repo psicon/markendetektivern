@@ -30,6 +30,7 @@ from io import BytesIO
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -282,7 +283,13 @@ def estimate_cost(r: dict) -> float:
 
 total_cost_cents = sum(estimate_cost(r) for r in receipts)
 avg_cost = total_cost_cents / max(1, total)
-projected_monthly_usd = (avg_cost * 1500 * 30) / 100  # ¢→$, 1.5k Bons/Tag, 30 Tage
+
+# Forecast volume = "Annahme" für die Hochrechnung. 1.5k Bons/Tag ist die
+# Architektur-Annahme aus CASHBACK_ARCHITECTURE.md §2.3.
+FORECAST_BONS_PER_DAY = 1500
+projected_daily_usd   = (avg_cost * FORECAST_BONS_PER_DAY) / 100
+projected_monthly_usd = projected_daily_usd * 30
+projected_yearly_usd  = projected_daily_usd * 365
 
 # Reconciliation
 recon_dirs: dict[str, int] = {}
@@ -378,27 +385,138 @@ c5.markdown(
 
 # Cost + Escalation row
 st.markdown("## 💰 Cost & Escalation")
-c1, c2, c3, c4 = st.columns(4)
+st.caption(
+    f"Hochrechnungen unten basieren auf der Annahme **{FORECAST_BONS_PER_DAY:,} Bons/Tag** "
+    f"(aus CASHBACK_ARCHITECTURE.md §2.3) und dem aktuellen avg Cost/Bon. "
+    f"Tatsächliche Bon-Volumes siehst du im Trend-Chart weiter unten."
+)
+c1, c2, c3, c4, c5 = st.columns(5)
 c1.markdown(
     f"<div class='stat-card'><div class='stat-num'>{avg_cost:.3f} ¢</div>"
-    f"<div class='stat-label'>Avg Cost / Bon (geschätzt)</div></div>",
+    f"<div class='stat-label'>Avg / Bon (geschätzt)</div></div>",
     unsafe_allow_html=True,
 )
 c2.markdown(
-    f"<div class='stat-card'><div class='stat-num'>${projected_monthly_usd:.2f}</div>"
-    f"<div class='stat-label'>Hochrechnung @ 1.5k Bons/Tag</div></div>",
+    f"<div class='stat-card'><div class='stat-num'>${projected_daily_usd:.2f}</div>"
+    f"<div class='stat-label'>Forecast / Tag (@ 1.5k Bons)</div></div>",
     unsafe_allow_html=True,
 )
 c3.markdown(
-    f"<div class='stat-card'><div class='stat-num'>{escalation_fired}/{total}</div>"
-    f"<div class='stat-label'>Escalations fired · {pct(escalation_fired, total)}%</div></div>",
+    f"<div class='stat-card'><div class='stat-num'>${projected_monthly_usd:.2f}</div>"
+    f"<div class='stat-label'>Forecast / Monat (30 Tage)</div></div>",
     unsafe_allow_html=True,
 )
 c4.markdown(
-    f"<div class='stat-card'><div class='stat-num'>{escalation_swapped}/{max(1,escalation_fired)}</div>"
-    f"<div class='stat-label'>DocAI swapped (won)</div></div>",
+    f"<div class='stat-card'><div class='stat-num'>${projected_yearly_usd:,.0f}</div>"
+    f"<div class='stat-label'>Forecast / Jahr (365 Tage)</div></div>",
     unsafe_allow_html=True,
 )
+with c5:
+    st.markdown(
+        f"<div class='stat-card'><div class='stat-num'>{escalation_fired}/{total}</div>"
+        f"<div class='stat-label'>Escalations · {pct(escalation_fired, total)}%</div>"
+        f"<div style='margin-top:6px;font-size:11px;color:#57606a'>"
+        f"DocAI won {escalation_swapped} of {max(1,escalation_fired)}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+# ─── Time-series + Forecast chart ─────────────────────────────────────
+st.markdown("### 📈 Trend (actual + forecast)")
+
+# Build daily aggregation: bons per Berlin-day + total cost per day
+daily_records: list[dict] = []
+for r in receipts:
+    created = r.get("createdAt")
+    if hasattr(created, "to_datetime"):
+        d = created.to_datetime()
+    elif isinstance(created, datetime):
+        d = created
+    else:
+        continue
+    day = d.astimezone(BERLIN).date()
+    daily_records.append({"day": day, "cost_cents": estimate_cost(r)})
+
+if daily_records:
+    df_daily = pd.DataFrame(daily_records)
+    daily = (
+        df_daily.groupby("day")
+        .agg(bons=("cost_cents", "count"), cost_eur=("cost_cents", lambda s: s.sum() / 100))
+        .reset_index()
+    )
+
+    # Fill missing days in range with 0 so the chart isn't sparse
+    all_days = pd.date_range(
+        start=since.astimezone(BERLIN).date(),
+        end=datetime.now(BERLIN).date(),
+        freq="D",
+    ).date
+    daily = daily.set_index("day").reindex(all_days, fill_value=0).reset_index().rename(columns={"index": "day"})
+
+    # Forecast: extend 14 days into the future using the last-7-day average
+    last_n = 7
+    recent = daily.tail(last_n) if len(daily) >= last_n else daily
+    avg_bons_per_day = recent["bons"].mean() if len(recent) else 0
+    avg_cost_per_day = recent["cost_eur"].mean() if len(recent) else 0
+
+    forecast_days = pd.date_range(
+        start=daily["day"].iloc[-1] + pd.Timedelta(days=1),
+        periods=14,
+        freq="D",
+    ).date
+    forecast_df = pd.DataFrame({
+        "day": forecast_days,
+        "bons": avg_bons_per_day,
+        "cost_eur": avg_cost_per_day,
+    })
+
+    # Combine for charting with a 'series' label so altair can color by it
+    actual = daily.assign(series="actual")
+    forecast = forecast_df.assign(series="forecast")
+    combined = pd.concat([actual, forecast], ignore_index=True)
+    combined["day"] = pd.to_datetime(combined["day"])
+
+    chart_col1, chart_col2 = st.columns(2)
+    with chart_col1:
+        st.markdown("**Bons / Tag** — solid = actual, dashed = forecast (avg of last 7 days)")
+        line = (
+            alt.Chart(combined)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X("day:T", title=None),
+                y=alt.Y("bons:Q", title="Bons / Tag"),
+                color=alt.Color("series:N", legend=alt.Legend(title=None),
+                                scale=alt.Scale(domain=["actual", "forecast"], range=["#0d8575", "#9a6700"])),
+                strokeDash=alt.StrokeDash("series:N", legend=None,
+                                          scale=alt.Scale(domain=["actual", "forecast"], range=[[1, 0], [4, 4]])),
+                tooltip=["day:T", "bons:Q", "series:N"],
+            )
+            .properties(height=240)
+        )
+        st.altair_chart(line, use_container_width=True)
+    with chart_col2:
+        st.markdown("**Cost € / Tag** — solid = actual, dashed = forecast")
+        line2 = (
+            alt.Chart(combined)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X("day:T", title=None),
+                y=alt.Y("cost_eur:Q", title="EUR / Tag"),
+                color=alt.Color("series:N", legend=alt.Legend(title=None),
+                                scale=alt.Scale(domain=["actual", "forecast"], range=["#0969da", "#9a6700"])),
+                strokeDash=alt.StrokeDash("series:N", legend=None,
+                                          scale=alt.Scale(domain=["actual", "forecast"], range=[[1, 0], [4, 4]])),
+                tooltip=["day:T", "cost_eur:Q", "series:N"],
+            )
+            .properties(height=240)
+        )
+        st.altair_chart(line2, use_container_width=True)
+    st.caption(
+        f"Forecast = Durchschnitt der letzten {min(last_n, len(daily))} Tage, "
+        f"projiziert 14 Tage voraus. Aktualisiert sich mit jedem neuen Bon."
+    )
+else:
+    st.caption("Keine zeitliche Daten zum Plotten.")
 
 
 # Latency row
@@ -476,17 +594,64 @@ def to_row(r: dict) -> dict:
     }
 
 
-df = pd.DataFrame([to_row(r) for r in receipts])
+# Pagination — show 20 per page, surface controls only when needed
+PAGE_SIZE = 20
+total_rows = len(receipts)
+if total_rows > PAGE_SIZE:
+    total_pages = (total_rows + PAGE_SIZE - 1) // PAGE_SIZE
+    pcol1, pcol2 = st.columns([1, 5])
+    with pcol1:
+        page = st.number_input(
+            "Seite",
+            min_value=1,
+            max_value=total_pages,
+            value=1,
+            step=1,
+            key="bon_page",
+        )
+    with pcol2:
+        st.caption(
+            f"Seite {page} von {total_pages}  ·  {total_rows} Bons gesamt  ·  "
+            f"{PAGE_SIZE} pro Seite"
+        )
+    page_start = (int(page) - 1) * PAGE_SIZE
+    page_end = page_start + PAGE_SIZE
+    page_receipts = receipts[page_start:page_end]
+else:
+    page_receipts = receipts
+
+df = pd.DataFrame([to_row(r) for r in page_receipts])
 display_df = df.drop(columns=["_id_full"])
-st.dataframe(
+
+# Click-to-select: st.dataframe with selection_mode='single-row' returns
+# the selected indexes in the event object on rerun. Streamlit ≥1.35.
+selection_event = st.dataframe(
     display_df,
     use_container_width=True,
     hide_index=True,
+    height=min(60 + 35 * len(page_receipts), 720),
     column_config={
-        "Δ_eur": st.column_config.NumberColumn("Δ €", format="%.2f"),
-        "total_eur": st.column_config.NumberColumn("Total €", format="%.2f"),
+        "id": st.column_config.TextColumn("ID", width="small"),
+        "created": st.column_config.TextColumn("Created", width="small"),
+        "status": st.column_config.TextColumn("Status", width="small"),
+        "merchant": st.column_config.TextColumn("Merchant", width="medium"),
+        "items": st.column_config.NumberColumn("Items", width="small"),
+        "total_eur": st.column_config.NumberColumn("Total €", format="%.2f", width="small"),
+        "cashback_¢": st.column_config.NumberColumn("Cashback ¢", width="small"),
+        "engine": st.column_config.TextColumn("Engine", width="small"),
+        "recon": st.column_config.TextColumn("Recon", width="small"),
+        "Δ_eur": st.column_config.NumberColumn("Δ €", format="%.2f", width="small"),
+        "esc_fired": st.column_config.TextColumn("Esc?", width="small"),
+        "esc_won": st.column_config.TextColumn("Won?", width="small"),
+        "lat_ms": st.column_config.NumberColumn("Lat ms", width="small"),
+        "reject": st.column_config.TextColumn("Reject reason", width="large"),
     },
+    selection_mode="single-row",
+    on_select="rerun",
+    key="bon_table",
 )
+
+st.caption("👆 Klick auf eine Zeile, um die Bon-Details unten anzuzeigen.")
 
 
 # ---------------------------------------------------------------------------
@@ -496,16 +661,38 @@ st.dataframe(
 st.markdown("---")
 st.markdown("## 🔍 Bon-Detail")
 
-selected_id = st.selectbox(
-    "Bon-ID",
+# Resolve selected bon: row-click first, fall back to manual selectbox
+selected_id: Optional[str] = None
+try:
+    sel_rows = (selection_event or {}).get("selection", {}).get("rows") or []
+    if sel_rows:
+        selected_id = page_receipts[sel_rows[0]]["_id"]
+except Exception:  # noqa: BLE001
+    selected_id = None
+
+# Always show a selectbox too (drives detail when nothing is row-selected,
+# OR lets you pick from outside the current page).
+default_index = 0
+if selected_id is not None:
+    try:
+        default_index = [r["_id"] for r in receipts].index(selected_id)
+    except ValueError:
+        default_index = 0
+
+picked = st.selectbox(
+    "…oder per ID auswählen (auch von anderen Seiten)",
     options=[r["_id"] for r in receipts],
     format_func=lambda i: (
         f"{i[:10]}  ·  "
         f"{next(((r.get('merchant') or {}).get('name') or '?' for r in receipts if r['_id'] == i), '?')}"
         f"  ·  {next((r.get('status') for r in receipts if r['_id'] == i), '?')}"
     ),
-    index=0,
+    index=default_index,
+    key="bon_picker",
 )
+# Selectbox wins if the user explicitly picked something different
+if picked and picked != selected_id:
+    selected_id = picked
 
 selected = next((r for r in receipts if r["_id"] == selected_id), None)
 
