@@ -1,6 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text } from 'react-native';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 
@@ -26,11 +26,6 @@ type Props = {
 function QuickAccessCardImpl({ icon, label, background, dark, onPress }: Props) {
   const { theme } = useTokens();
   const fg = dark ? '#ffffff' : theme.text;
-  // Icon-circle colours match the Belohnungen Schnellzugriff tile:
-  //   • dark tile → translucent white square + white icon
-  //   • light tile → solid white square + brand-teal icon
-  const iconBoxBg = dark ? 'rgba(255,255,255,0.22)' : '#ffffff';
-  const iconColor = dark ? '#ffffff' : '#0d8575';
 
   return (
     <Pressable
@@ -46,18 +41,7 @@ function QuickAccessCardImpl({ icon, label, background, dark, onPress }: Props) 
         opacity: pressed ? 0.88 : 1,
       })}
     >
-      <View
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: 8,
-          backgroundColor: iconBoxBg,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <MaterialCommunityIcons name={icon} size={17} color={iconColor} />
-      </View>
+      <MaterialCommunityIcons name={icon} size={22} color={fg} />
       <Text
         numberOfLines={2}
         style={{
