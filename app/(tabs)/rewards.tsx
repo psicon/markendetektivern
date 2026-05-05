@@ -87,7 +87,7 @@ const EARN_ACTIONS: EarnAction[] = [
     k: 'receipt',
     icon: 'receipt',
     label: 'Kassenbon\nscannen',
-    bg: '#95cfc4',
+    bg: '#0a6f62',
     dark: true,
     reward: `${RECEIPT_LIMIT.eurEach.toFixed(2).replace('.', ',')} €`,
     available: RECEIPT_LIMIT.usedThisWeek < RECEIPT_LIMIT.perWeek,
@@ -101,7 +101,7 @@ const EARN_ACTIONS: EarnAction[] = [
     k: 'photo',
     icon: 'camera-plus-outline',
     label: 'Produkte\neinreichen',
-    bg: '#a89cdf',
+    bg: '#5b4f9c',
     dark: true,
     reward: `${PHOTO_LIMIT.eurEach.toFixed(2).replace('.', ',')} €`,
     available: PHOTO_LIMIT.usedThisWeek < PHOTO_LIMIT.perWeek,
@@ -117,7 +117,7 @@ const EARN_ACTIONS: EarnAction[] = [
     label: 'Umfragen',
     bg: '#dde2e4',
     dark: false,
-    reward: SURVEY_AVAILABLE ? 'wenn verfügb.' : 'wenn verfügb.',
+    reward: 'wenn verfügb.',
     available: SURVEY_AVAILABLE,
     statusLabel: SURVEY_AVAILABLE ? 'Verfügbar' : 'Aktuell keine',
   },
@@ -740,47 +740,59 @@ function RedeemTab() {
           style={{
             backgroundColor: theme.surface,
             borderRadius: 18,
-            padding: 22,
+            padding: 18,
             borderWidth: 1,
             borderColor: theme.border,
           }}
         >
+          {/* Icon + title in one row — kills the dead whitespace
+              that the stacked 56-px-block-above-title layout caused.
+              Description stays on its own row underneath so it can
+              wrap to 2-3 lines without colliding with the icon. */}
           <View
             style={{
-              width: 56,
-              height: 56,
-              borderRadius: 16,
-              backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
+              flexDirection: 'row',
               alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: 14,
+              gap: 12,
             }}
           >
-            <MaterialCommunityIcons
-              name="gift-outline"
-              size={28}
-              color={theme.primary}
-            />
+            <View
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <MaterialCommunityIcons
+                name="gift-outline"
+                size={22}
+                color={theme.primary}
+              />
+            </View>
+            <Text
+              style={{
+                flex: 1,
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 20,
+                color: theme.text,
+                letterSpacing: -0.3,
+              }}
+            >
+              Cashback einlösen
+            </Text>
           </View>
           <Text
             style={{
               fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 22,
-              color: theme.text,
-              letterSpacing: -0.3,
-            }}
-          >
-            Cashback einlösen
-          </Text>
-          <Text
-            style={{
-              fontFamily,
               fontWeight: fontWeight.medium,
-              fontSize: 14,
-              lineHeight: 20,
+              fontSize: 13,
+              lineHeight: 19,
               color: theme.textSub,
-              marginTop: 6,
+              marginTop: 10,
             }}
           >
             {canRedeem
@@ -1081,7 +1093,7 @@ function QuickActionTile({
   onCashbackTap?: () => void;
 }) {
   const fg = action.dark ? '#fff' : '#191c1d';
-  // Bar fill colour: white-overlay on dark tiles, theme primary on light.
+  // Bar fill colour: white-overlay on dark tiles, brand teal on light.
   const barTrack = action.dark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.08)';
   const barFill = action.dark ? '#fff' : '#0d8575';
   const showProgress = typeof action.progress === 'number';
@@ -1200,8 +1212,6 @@ function QuickActionTile({
     </Pressable>
   );
 }
-
-
 
 // ════════════════════════════════════════════════════════════════════════
 // BESTENLISTE (Rewards Tab "Bestenliste")
