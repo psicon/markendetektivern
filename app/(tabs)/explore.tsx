@@ -37,7 +37,7 @@ import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
 import { ProductCard } from '@/components/design/ProductCard';
 import { SearchableOptionList } from '@/components/design/SearchableOptionList';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
-import { Crossfade, ProductCardSkeleton, Shimmer } from '@/components/design/Skeletons';
+import { Crossfade, ProductCardSkeleton } from '@/components/design/Skeletons';
 import { getStufeCopy, loadStufeCopy } from '@/lib/utils/stufeCopy';
 import { StufenChips } from '@/components/design/StufenChips';
 import { collection, getDocs } from 'firebase/firestore';
@@ -1820,6 +1820,14 @@ export default function ExploreScreen() {
     ],
   );
 
+  // Stable per-tab data refs — LegendList re-evaluates layout when
+  // `data` prop changes by reference, which on tab-switch caused the
+  // visible jump. useMemo keeps the reference stable across renders
+  // until the underlying source array actually changes.
+  const dataAlle = useMemo(() => itemsForTab('alle'), [itemsForTab]);
+  const dataEigen = useMemo(() => itemsForTab('eigen'), [itemsForTab]);
+  const dataMarken = useMemo(() => itemsForTab('marken'), [itemsForTab]);
+
   const renderGrid = (forTab: Tab) => {
     // Search mode overlays browse mode: when a search is active, the
     // grid sources its items from the Algolia hits instead of the
@@ -2314,7 +2322,7 @@ export default function ExploreScreen() {
         <View key="alle" style={{ flex: 1 }}>
           <AnimatedLegendList
             ref={alleScrollRef}
-            data={itemsForTab('alle')}
+            data={dataAlle}
             keyExtractor={(item: any, index: number) =>
               String(item?.id ?? item?.objectID ?? index)
             }
@@ -2323,7 +2331,6 @@ export default function ExploreScreen() {
             }
             numColumns={2}
             estimatedItemSize={290}
-            initialScrollIndex={0}
             onScroll={scrollHandlerAlle}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
@@ -2350,11 +2357,7 @@ export default function ExploreScreen() {
                 >
                   {mountBanner('alle') ? (
                     <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                  ) : (
-                    <View style={{ width: '92%', height: 50 }}>
-                      <Shimmer width="100%" height={50} radius={8} />
-                    </View>
-                  )}
+                  ) : null}
                 </View>
               ) : null
             }
@@ -2385,7 +2388,7 @@ export default function ExploreScreen() {
         <View key="eigen" style={{ flex: 1 }}>
           <AnimatedLegendList
             ref={eigenScrollRef}
-            data={itemsForTab('eigen')}
+            data={dataEigen}
             keyExtractor={(item: any, index: number) =>
               String(item?.id ?? item?.objectID ?? index)
             }
@@ -2394,7 +2397,6 @@ export default function ExploreScreen() {
             }
             numColumns={2}
             estimatedItemSize={290}
-            initialScrollIndex={0}
             onScroll={scrollHandlerEigen}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
@@ -2421,11 +2423,7 @@ export default function ExploreScreen() {
                 >
                   {mountBanner('eigen') ? (
                     <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                  ) : (
-                    <View style={{ width: '92%', height: 50 }}>
-                      <Shimmer width="100%" height={50} radius={8} />
-                    </View>
-                  )}
+                  ) : null}
                 </View>
               ) : null
             }
@@ -2449,7 +2447,7 @@ export default function ExploreScreen() {
         <View key="marken" style={{ flex: 1 }}>
           <AnimatedLegendList
             ref={markenScrollRef}
-            data={itemsForTab('marken')}
+            data={dataMarken}
             keyExtractor={(item: any, index: number) =>
               String(item?.id ?? item?.objectID ?? index)
             }
@@ -2458,7 +2456,6 @@ export default function ExploreScreen() {
             }
             numColumns={2}
             estimatedItemSize={290}
-            initialScrollIndex={0}
             onScroll={scrollHandlerMarken}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
@@ -2485,11 +2482,7 @@ export default function ExploreScreen() {
                 >
                   {mountBanner('marken') ? (
                     <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                  ) : (
-                    <View style={{ width: '92%', height: 50 }}>
-                      <Shimmer width="100%" height={50} radius={8} />
-                    </View>
-                  )}
+                  ) : null}
                 </View>
               ) : null
             }
