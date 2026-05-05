@@ -17,9 +17,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useNavigation } from 'expo-router';
 import LottieView from 'lottie-react-native';
 import React, {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -28,13 +30,19 @@ import {
   Text,
   View,
 } from 'react-native';
+import PagerView from 'react-native-pager-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import {
+  BestenlisteTab,
+  PositionStickyBar,
+} from '@/components/rewards/Bestenliste';
 import {
   DETAIL_HEADER_ROW_HEIGHT,
   DetailHeader,
 } from '@/components/design/DetailHeader';
 import { FilterSheet } from '@/components/design/FilterSheet';
+import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { AchievementsSkeleton } from '@/components/design/Skeletons';
 import AchievementUnlockOverlay from '@/components/ui/AchievementUnlockOverlay';
 import { IconSymbol } from '@/components/ui/IconSymbol';
@@ -238,10 +246,34 @@ export default function AchievementsScreen() {
 
   const completedCount = processed.filter((p) => p.isCompleted).length;
 
-  // Chrome height — same row metric as the rest of the app's
-  // detail screens (DetailHeader uses DETAIL_HEADER_ROW_HEIGHT
-  // below the safe-area inset).
-  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
+  // Tab plumbing — Bestenliste lives under this screen now (moved
+  // from the Belohnungen tab) so a 2nd page joins via PagerView.
+  type AchTab = 'errungen' | 'bestenliste';
+  const [tab, setTab] = useState<AchTab>('errungen');
+  const pagerRef = useRef<PagerView | null>(null);
+  const onTabChange = useCallback((next: AchTab) => {
+    setTab(next);
+    pagerRef.current?.setPage(next === 'errungen' ? 0 : 1);
+  }, []);
+  const onPageSelected = useCallback(
+    (e: { nativeEvent: { position: number } }) => {
+      const next: AchTab = e.nativeEvent.position === 0 ? 'errungen' : 'bestenliste';
+      setTab((prev) => (prev === next ? prev : next));
+    },
+    [],
+  );
+
+  // Bestenliste-state lifted up so the floating PositionStickyBar
+  // (sibling of PagerView, screen-fixed overlay) reads the right
+  // slice without re-querying.
+  const [outerScope, setOuterScope] =
+    useState<'overall' | 'region'>('overall');
+  const [geo, setGeo] = useState<'bundesland' | 'stadt'>('bundesland');
+
+  // Chrome height — DetailHeader row + tabs strip.
+  const TABS_ROW_HEIGHT = 50;
+  const chromeBaseHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
+  const chromeHeight = chromeBaseHeight + TABS_ROW_HEIGHT;
 
   // Loading state: render the chrome + a skeleton body instead of a
   // centered ActivityIndicator. Two reasons:
@@ -254,6 +286,14 @@ export default function AchievementsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      <PagerView
+        ref={pagerRef}
+        style={{ flex: 1 }}
+        initialPage={0}
+        onPageSelected={onPageSelected}
+        scrollEnabled={!isLoading}
+      >
+        <View key="errungen" style={{ flex: 1 }}>
       <ScrollView
         contentContainerStyle={{
           paddingTop: chromeHeight,
@@ -365,6 +405,44 @@ export default function AchievementsScreen() {
         </>
         )}
       </ScrollView>
+        </View>
+
+        {/* ── BESTENLISTE TAB ── */}
+        <View key="bestenliste" style={{ flex: 1 }}>
+          <ScrollView
+            contentContainerStyle={{
+              paddingTop: chromeHeight,
+              // Extra room at bottom so the floating PositionStickyBar
+              // (~50 px tall, sits ~95 px above safe-area) doesn't hide
+              // the last list row.
+              paddingBottom: 220,
+            }}
+            showsVerticalScrollIndicator={false}
+          >
+            <BestenlisteTab
+              outerScope={outerScope}
+              setOuterScope={setOuterScope}
+              geo={geo}
+              setGeo={setGeo}
+              userStats={userStats}
+              levels={levels}
+            />
+          </ScrollView>
+        </View>
+      </PagerView>
+
+      {/* Floating "Deine Position" — only visible on the Bestenliste
+          tab, sibling of PagerView so it stays screen-fixed against
+          the scroll content. */}
+      {tab === 'bestenliste' && userProfile ? (
+        <PositionStickyBar
+          userProfile={userProfile}
+          outerScope={outerScope}
+          geo={geo}
+          userStats={userStats}
+          levels={levels}
+        />
+      ) : null}
 
       {/* Chrome — shared `DetailHeader` (BlurView on iOS, tinted
           View on Android, arrow-left back button, optional right
@@ -394,6 +472,36 @@ export default function AchievementsScreen() {
           </Pressable>
         }
       />
+
+      {/* SegmentedTabs strip — sits absolute right under the
+          DetailHeader chrome. Solid theme.bg backdrop so list
+          content scrolling underneath stays clean (no blur stack
+          fighting with DetailHeader's blur). */}
+      <View
+        style={{
+          position: 'absolute',
+          top: chromeBaseHeight,
+          left: 0,
+          right: 0,
+          height: TABS_ROW_HEIGHT,
+          zIndex: 9,
+          backgroundColor: theme.bg,
+          paddingHorizontal: 20,
+          paddingTop: 7,
+          paddingBottom: 7,
+          borderBottomWidth: 1,
+          borderBottomColor: theme.border,
+        }}
+      >
+        <SegmentedTabs
+          tabs={[
+            { key: 'errungen', label: 'Errungenschaften' },
+            { key: 'bestenliste', label: 'Bestenliste' },
+          ] as const}
+          value={tab}
+          onChange={onTabChange}
+        />
+      </View>
 
       {/* Info bottom-sheet — same `FilterSheet` component used
           for the Region-Setup on the Belohnungen tab so all sheets
