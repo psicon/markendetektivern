@@ -16,3 +16,11 @@ pillow>=10.0
 # Image preprocessing (auto-deskew, perspective correction, EXIF rotate)
 opencv-python-headless>=4.10
 numpy>=1.26
+
+# Production Monitor (pages/01_Production_Monitor.py only):
+# reads receipts collection live from Firestore + bon images from Storage
+# + reprocesses via PubSub. Uses Application Default Credentials —
+# run `gcloud auth application-default login` once.
+firebase-admin>=6.5
+google-cloud-pubsub>=2.21
+pandas>=2.2

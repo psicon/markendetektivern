@@ -128,6 +128,26 @@ streamlit run dashboard.py
 Stop mit `Ctrl-C` im Terminal. Logs landen NICHT in Firestore, alles
 bleibt lokal in der Session.
 
+### 3a-2. Production Monitor (live Firestore — was die deployed Pipeline gerade tut)
+
+```bash
+streamlit run dashboard.py
+# Sidebar links: "Production Monitor" anklicken
+```
+
+Liest live aus dem `markendetektive-895f7` Firestore (`receipts/*`),
+zeigt:
+- KPIs (approved/review/rejected/pending Counts + Quoten)
+- Avg Cost/Bon + Hochrechnung @ 1.5k Bons/Tag
+- Escalation rate + DocAI swap rate
+- P50/P95 Latenz (gesamt + CV + Gemini getrennt)
+- Engine + Reconciliation-Direction Distributions
+- Bon Browser mit Tabelle + Detail-View (Bild, Items, Recon, Escalation, Forensik)
+- **Reprocess-Button**: re-publisht PubSub für einen Bon — debugged ohne den User zum Re-Upload zu zwingen
+
+Auth: braucht einmalig `gcloud auth application-default login`. Liest
+read-only, schreibt nur indirekt via PubSub-Reprocess.
+
 ### 3b. CLI-Modus (für Batch-Runs / Scripting / CI)
 
 ```bash
