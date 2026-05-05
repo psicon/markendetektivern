@@ -1,14 +1,14 @@
 /**
  * Cashback consent — gate before any Bon upload.
  *
- * Kept short on purpose: a long DSGVO essay drives users away. The
- * regulator wants the user to know (a) what data is processed, (b)
- * the legal basis, (c) where to read more — three bullets + a link
- * to the full Datenschutzerklärung covers that.
+ * Design intent: pitch the value first ("hier kommt Geld zurück"),
+ * walk through the 3-step flow visually, THEN cover the legal
+ * minimums in a compact bullet list. Keeps users from bouncing on
+ * a wall of DSGVO text.
  *
- * If the user already accepted (valid version + timestamp), we skip
- * straight to /cashback/capture in the mount effect — they don't see
- * this screen on second-and-onwards taps.
+ * If consent is already valid (current version + recorded), the
+ * mount effect routes straight to /cashback/capture so this screen
+ * shows up exactly once.
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -48,23 +48,44 @@ import {
 const PRIVACY_URL = 'https://markendetektive.de/datenschutz';
 const TERMS_URL = 'https://markendetektive.de/agb';
 
-// Three plain-language bullets — the legal minimum, not marketing.
-// Order: WHAT we do → WHAT we keep → HOW you opt out.
-const BULLETS: { icon: string; title: string; body: string }[] = [
+// Three-step "so einfach" flow — numbered circles + crisp labels.
+// Concrete (not "wie magisch"), but the magic of the auto-OCR is the
+// hero, so middle step is a tiny aha-moment.
+const STEPS: { icon: string; title: string; sub: string }[] = [
   {
     icon: 'camera-outline',
-    title: 'Bon-Foto wird ausgelesen',
-    body: 'Filiale, Datum und Artikel werden aus deinem Foto extrahiert.',
+    title: 'Bon abfotografieren',
+    sub: 'Direkt nach dem Einkauf',
   },
   {
+    icon: 'auto-fix',
+    title: 'Wir lesen ihn aus',
+    sub: 'Markt, Datum, Artikel — automatisch',
+  },
+  {
+    icon: 'cash-multiple',
+    title: 'Cashback sammeln',
+    sub: 'Ab 15 € auszahlen lassen',
+  },
+];
+
+// Compact privacy/data block. Three rows = the legal minimum users
+// need to see up-front (was an essay before, now one line each).
+const PRIVACY: { icon: string; title: string; body: string }[] = [
+  {
     icon: 'database-check-outline',
-    title: 'Bild wird nach 30 Tagen gelöscht',
-    body: 'Die strukturierten Daten bleiben gespeichert, das Foto nicht.',
+    title: 'Daten in der EU verarbeitet',
+    body: 'Foto wird nach 30 Tagen gelöscht. Strukturierte Daten bleiben.',
+  },
+  {
+    icon: 'shield-check-outline',
+    title: 'DSGVO-konform',
+    body: 'Auszahlung über unseren Partner Tremendous (PayPal, SEPA, Gutscheine).',
   },
   {
     icon: 'account-cancel-outline',
     title: 'Jederzeit widerrufbar',
-    body: 'Bereits gesammeltes Cashback bleibt auszahlbar.',
+    body: 'Bereits gesammeltes Guthaben bleibt auszahlbar.',
   },
 ];
 
@@ -82,7 +103,6 @@ export default function CashbackConsentScreen() {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
-  // Skip the screen entirely if consent is already valid + current.
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -148,29 +168,41 @@ export default function CashbackConsentScreen() {
 
   const styles = useMemo(
     () => ({
+      // Hero — brand-teal gradient (same vector as the Cashback
+      // hero on Belohnungen so this screen reads as part of that
+      // family). Big "Bis zu …€" headline + 3 stat pills.
       hero: {
         marginHorizontal: 20,
         marginTop: 6,
         borderRadius: 18,
         paddingHorizontal: 18,
-        paddingVertical: 22,
+        paddingVertical: 18,
         overflow: 'hidden' as const,
       },
       heroIcon: {
-        width: 44,
-        height: 44,
-        borderRadius: 12,
+        width: 48,
+        height: 48,
+        borderRadius: 14,
         backgroundColor: 'rgba(255,255,255,0.22)',
         alignItems: 'center' as const,
         justifyContent: 'center' as const,
       },
+      heroEyebrow: {
+        color: 'rgba(255,255,255,0.85)',
+        fontSize: 11,
+        fontFamily,
+        fontWeight: fontWeight.bold as any,
+        letterSpacing: 0.8,
+        textTransform: 'uppercase' as const,
+        marginTop: 14,
+      },
       heroTitle: {
         color: '#fff',
-        fontSize: 20,
+        fontSize: 24,
         fontFamily,
         fontWeight: fontWeight.extraBold as any,
-        letterSpacing: -0.3,
-        marginTop: 14,
+        letterSpacing: -0.4,
+        marginTop: 4,
       },
       heroBody: {
         color: 'rgba(255,255,255,0.92)',
@@ -179,8 +211,91 @@ export default function CashbackConsentScreen() {
         fontFamily,
         marginTop: 6,
       },
-      bulletList: {
-        marginTop: 18,
+      pillRow: {
+        flexDirection: 'row' as const,
+        flexWrap: 'wrap' as const,
+        gap: 6,
+        marginTop: 14,
+      },
+      pill: {
+        flexDirection: 'row' as const,
+        alignItems: 'center' as const,
+        gap: 5,
+        paddingHorizontal: 9,
+        paddingVertical: 5,
+        borderRadius: 999,
+        backgroundColor: 'rgba(255,255,255,0.22)',
+      },
+      pillText: {
+        color: '#fff',
+        fontSize: 11,
+        fontFamily,
+        fontWeight: fontWeight.bold as any,
+        letterSpacing: 0.2,
+      },
+
+      sectionLabel: {
+        color: theme.textMuted,
+        fontSize: 11,
+        fontFamily,
+        fontWeight: fontWeight.bold as any,
+        letterSpacing: 0.7,
+        textTransform: 'uppercase' as const,
+        marginHorizontal: 20,
+        marginTop: 22,
+        marginBottom: 10,
+      },
+
+      // Step row — circle with the step number + title + sub. Three
+      // of these stacked, no card chrome — keeps the page airy.
+      stepRow: {
+        flexDirection: 'row' as const,
+        alignItems: 'center' as const,
+        gap: 12,
+        paddingHorizontal: 20,
+        paddingVertical: 8,
+      },
+      stepCircle: {
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        backgroundColor: accent + '18',
+        alignItems: 'center' as const,
+        justifyContent: 'center' as const,
+        position: 'relative' as const,
+      },
+      stepNumber: {
+        position: 'absolute' as const,
+        top: -4,
+        right: -4,
+        width: 18,
+        height: 18,
+        borderRadius: 9,
+        backgroundColor: accent,
+        alignItems: 'center' as const,
+        justifyContent: 'center' as const,
+      },
+      stepNumberText: {
+        color: '#fff',
+        fontSize: 10,
+        fontFamily,
+        fontWeight: fontWeight.extraBold as any,
+      },
+      stepTitle: {
+        color: theme.text,
+        fontSize: 14,
+        fontFamily,
+        fontWeight: fontWeight.bold as any,
+      },
+      stepSub: {
+        color: theme.textSub,
+        fontSize: 12,
+        fontFamily,
+        marginTop: 2,
+      },
+
+      // Privacy block — same one-card-with-rows pattern as Profile.
+      privacyCard: {
         marginHorizontal: 20,
         backgroundColor: theme.surface,
         borderRadius: 14,
@@ -188,42 +303,43 @@ export default function CashbackConsentScreen() {
         borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
         overflow: 'hidden' as const,
       },
-      bulletRow: {
+      privacyRow: {
         flexDirection: 'row' as const,
         alignItems: 'flex-start' as const,
         gap: 12,
         paddingHorizontal: 14,
         paddingVertical: 12,
       },
-      bulletDivider: {
+      privacyDivider: {
         height: 1,
         backgroundColor: theme.border ?? 'rgba(0,0,0,0.06)',
-        marginLeft: 14 + 32 + 12, // align under text, after icon column
+        marginLeft: 14 + 30 + 12,
       },
-      bulletIconBox: {
-        width: 32,
-        height: 32,
+      privacyIconBox: {
+        width: 30,
+        height: 30,
         borderRadius: 8,
-        backgroundColor: accent + '18',
+        backgroundColor: accent + '14',
         alignItems: 'center' as const,
         justifyContent: 'center' as const,
         marginTop: 1,
       },
-      bulletTitle: {
+      privacyTitle: {
         color: theme.text,
-        fontSize: 14,
+        fontSize: 13,
         fontFamily,
         fontWeight: fontWeight.bold as any,
       },
-      bulletBody: {
+      privacyBody: {
         color: theme.textSub,
-        fontSize: 12,
-        lineHeight: 17,
+        fontSize: 11,
+        lineHeight: 16,
         fontFamily,
         marginTop: 2,
       },
+
       legalText: {
-        marginTop: 16,
+        marginTop: 14,
         marginHorizontal: 20,
         color: theme.textMuted,
         fontSize: 11,
@@ -234,11 +350,12 @@ export default function CashbackConsentScreen() {
         color: accent,
         textDecorationLine: 'underline' as const,
       },
+
       footer: {
         paddingHorizontal: 16,
         paddingTop: 12,
         paddingBottom: insets.bottom + 12,
-        gap: 8,
+        gap: 6,
         borderTopWidth: 1,
         borderTopColor: theme.border ?? 'rgba(0,0,0,0.06)',
         backgroundColor: theme.bg,
@@ -282,6 +399,7 @@ export default function CashbackConsentScreen() {
         }}
         showsVerticalScrollIndicator={false}
       >
+        {/* Hero — value pitch + stat pills */}
         <LinearGradient
           colors={['#0a6f62', '#0d8575', '#10a18a']}
           start={{ x: -1, y: 0.34 }}
@@ -291,31 +409,81 @@ export default function CashbackConsentScreen() {
           <View style={styles.heroIcon}>
             <MaterialCommunityIcons
               name="cash-multiple"
-              size={22}
+              size={24}
               color="#fff"
             />
           </View>
-          <Text style={styles.heroTitle}>Cashback freischalten</Text>
+          <Text style={styles.heroEyebrow}>Echtes Cashback in €</Text>
+          <Text style={styles.heroTitle}>Hol dir Geld für deine Bons</Text>
           <Text style={styles.heroBody}>
-            Bon hochladen, automatisch auswerten lassen, ab 15 € auszahlen.
+            Bis zu 6 Bons pro Woche → bis zu rund 25 € im Jahr, nur fürs
+            Hochladen. Plus extra für Produktbilder & Umfragen.
           </Text>
+
+          <View style={styles.pillRow}>
+            <View style={styles.pill}>
+              <MaterialCommunityIcons name="receipt" size={11} color="#fff" />
+              <Text style={styles.pillText}>0,08 € pro Bon</Text>
+            </View>
+            <View style={styles.pill}>
+              <MaterialCommunityIcons
+                name="calendar-week"
+                size={11}
+                color="#fff"
+              />
+              <Text style={styles.pillText}>6 Bons/Woche</Text>
+            </View>
+            <View style={styles.pill}>
+              <MaterialCommunityIcons
+                name="bank-transfer-out"
+                size={11}
+                color="#fff"
+              />
+              <Text style={styles.pillText}>Ab 15 € auszahlen</Text>
+            </View>
+          </View>
         </LinearGradient>
 
-        <View style={styles.bulletList}>
-          {BULLETS.map((bullet, idx) => (
-            <View key={bullet.title}>
-              {idx > 0 ? <View style={styles.bulletDivider} /> : null}
-              <View style={styles.bulletRow}>
-                <View style={styles.bulletIconBox}>
+        {/* So einfach geht's */}
+        <Text style={styles.sectionLabel}>So einfach geht's</Text>
+        <View>
+          {STEPS.map((step, idx) => (
+            <View key={step.title} style={styles.stepRow}>
+              <View style={styles.stepCircle}>
+                <MaterialCommunityIcons
+                  name={step.icon as any}
+                  size={18}
+                  color={accent}
+                />
+                <View style={styles.stepNumber}>
+                  <Text style={styles.stepNumberText}>{idx + 1}</Text>
+                </View>
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.stepTitle}>{step.title}</Text>
+                <Text style={styles.stepSub}>{step.sub}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+
+        {/* Privacy / Data — same card-with-rows pattern as Profile */}
+        <Text style={styles.sectionLabel}>Daten & Auszahlung</Text>
+        <View style={styles.privacyCard}>
+          {PRIVACY.map((row, idx) => (
+            <View key={row.title}>
+              {idx > 0 ? <View style={styles.privacyDivider} /> : null}
+              <View style={styles.privacyRow}>
+                <View style={styles.privacyIconBox}>
                   <MaterialCommunityIcons
-                    name={bullet.icon as any}
-                    size={17}
+                    name={row.icon as any}
+                    size={16}
                     color={accent}
                   />
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={styles.bulletTitle}>{bullet.title}</Text>
-                  <Text style={styles.bulletBody}>{bullet.body}</Text>
+                  <Text style={styles.privacyTitle}>{row.title}</Text>
+                  <Text style={styles.privacyBody}>{row.body}</Text>
                 </View>
               </View>
             </View>
@@ -337,7 +505,7 @@ export default function CashbackConsentScreen() {
           >
             Datenschutzerklärung
           </Text>
-          {' '}zu. Verarbeitung in der EU. Auszahlung über Tremendous.
+          {' '}zu.
         </Text>
       </ScrollView>
 
@@ -358,7 +526,7 @@ export default function CashbackConsentScreen() {
                 color="#fff"
               />
               <Text style={styles.acceptText}>
-                {hasAccepted ? 'Gespeichert' : 'Akzeptieren & weiter'}
+                {hasAccepted ? 'Gespeichert' : 'Akzeptieren & Bon scannen'}
               </Text>
             </>
           )}
