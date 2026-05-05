@@ -222,7 +222,7 @@ export const TOAST_MESSAGES = {
     bulkPurchaseError: '❌ Oops! Markierung fehlgeschlagen. Versuch es nochmal!',
     
     // Entfernen
-    removedFromCart: '🛒 Produkt vom Einkaufszettel entfernt',
+    removedFromCart: '🗑️ Aus Einkaufsliste entfernt',
     removeError: '❌ Entfernen fehlgeschlagen. Versuch es nochmal!',
     
     // Loading

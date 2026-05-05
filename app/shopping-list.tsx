@@ -2136,7 +2136,7 @@ export default function ShoppingListScreen() {
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
       await FirestoreService.removeFromShoppingCart(user.uid, itemId);
-      showInfoToast(TOAST_MESSAGES.SHOPPING.removedFromCart, 'info');
+      showInfoToast(TOAST_MESSAGES.SHOPPING.removedFromCart, 'ERROR');
       // Optimistic update
       setBrandProducts((prev) => prev.filter((i) => i.id !== itemId));
       setNoNameProducts((prev) => {
