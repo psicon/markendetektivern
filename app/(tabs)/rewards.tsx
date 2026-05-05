@@ -87,7 +87,7 @@ const EARN_ACTIONS: EarnAction[] = [
     k: 'receipt',
     icon: 'receipt',
     label: 'Kassenbon\nscannen',
-    bg: '#0a6f62',
+    bg: '#0d8575',
     dark: true,
     reward: `${RECEIPT_LIMIT.eurEach.toFixed(2).replace('.', ',')} €`,
     available: RECEIPT_LIMIT.usedThisWeek < RECEIPT_LIMIT.perWeek,
@@ -883,13 +883,13 @@ function RewardsHelpContent() {
       />
       <HelpBlock
         icon="receipt"
-        iconColor="#95cfc4"
+        iconColor="#0d8575"
         title="Kassenbon hochladen"
         body="0,08 € pro Bon, max. 6 Bons pro Woche. Wir erkennen automatisch den Markt und die gekauften Produkte für unsere Markt-Insights."
       />
       <HelpBlock
         icon="camera-outline"
-        iconColor="#a89cdf"
+        iconColor="#5b4f9c"
         title="Produktbilder einreichen"
         body="0,10 € pro Produkt-Set (7 Fotos: Front, Rückseite, Barcode, Zutaten, Nährwerte, Hersteller, Preis). Hilft uns, die Datenbank vollständig zu halten."
       />

@@ -602,7 +602,7 @@ export default function HomeScreen() {
   // change; otherwise we'd re-render five cards on every scroll
   // tick.
   const schnellzugriff = useMemo(() => [
-    { icon: 'receipt' as const, label: 'Kassenbon\nscannen', background: '#0a6f62', dark: true as const,  onPress: onScanBon },
+    { icon: 'receipt' as const, label: 'Kassenbon\nscannen', background: '#0d8575', dark: true as const,  onPress: onScanBon },
     { icon: 'camera-plus-outline'  as const, label: 'Produkte\neinreichen', background: '#5b4f9c', dark: true as const,  onPress: () => safePush('/achievements' as any) },
     { icon: 'heart-outline'        as const, label: 'Deine\nFavoriten',    background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/favorites' as any) },
     { icon: 'poll'                 as const, label: 'Umfragen',            background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/achievements' as any) },
