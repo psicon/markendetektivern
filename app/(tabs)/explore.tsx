@@ -925,6 +925,13 @@ export default function ExploreScreen() {
     }
   }, [tab, pageIndexShared]);
 
+  // (See `dataAlle/Eigen/Marken` first-load scroll-to-top effects
+  // BELOW these state declarations — they need the memoised data
+  // arrays to exist first. Refs declared up here so the effects
+  // can read prev-length on each render.)
+  const prevAlleLen = useRef(0);
+  const prevEigenLen = useRef(0);
+  const prevMarkenLen = useRef(0);
 
   const resetAll = useCallback(() => {
     // 📊 Analytics — fire BEFORE state resets, so the change-detection
@@ -1848,6 +1855,31 @@ export default function ExploreScreen() {
   const dataAlle = useMemo(() => itemsForTab('alle'), [itemsForTab]);
   const dataEigen = useMemo(() => itemsForTab('eigen'), [itemsForTab]);
   const dataMarken = useMemo(() => itemsForTab('marken'), [itemsForTab]);
+
+  // First-load scroll-to-top per tab: when data goes from empty to
+  // populated (e.g. user opened Stöbern + switched tabs BEFORE the
+  // Firestore fetch landed), snap that tab's list to 0. Without
+  // this, the prior scrollToOffset(0) ran while ListEmptyComponent
+  // was on screen — once real cards mount the layout shifts and
+  // the list ends up mid-row. We only act on the 0 → >0 transition.
+  useEffect(() => {
+    if (prevAlleLen.current === 0 && dataAlle.length > 0) {
+      alleScrollRef.current?.scrollToOffset?.({ offset: 0, animated: false });
+    }
+    prevAlleLen.current = dataAlle.length;
+  }, [dataAlle.length]);
+  useEffect(() => {
+    if (prevEigenLen.current === 0 && dataEigen.length > 0) {
+      eigenScrollRef.current?.scrollToOffset?.({ offset: 0, animated: false });
+    }
+    prevEigenLen.current = dataEigen.length;
+  }, [dataEigen.length]);
+  useEffect(() => {
+    if (prevMarkenLen.current === 0 && dataMarken.length > 0) {
+      markenScrollRef.current?.scrollToOffset?.({ offset: 0, animated: false });
+    }
+    prevMarkenLen.current = dataMarken.length;
+  }, [dataMarken.length]);
 
   const renderGrid = (forTab: Tab) => {
     // Search mode overlays browse mode: when a search is active, the
