@@ -905,6 +905,25 @@ export default function ExploreScreen() {
     if (k !== tab) setTab(k);
   }, [tab, pageIndexShared]);
 
+  // When the user switches tab (pill tap OR pager swipe), scroll the
+  // destination list back to its top. Without this, PagerView keeps
+  // each page's scroll position — which means jumping back to a tab
+  // shows you wherever you left it last, not the top.
+  useEffect(() => {
+    const ref =
+      tab === 'alle'
+        ? alleScrollRef
+        : tab === 'eigen'
+          ? eigenScrollRef
+          : markenScrollRef;
+    // Slight delay so the PagerView has finished its swap before we
+    // try to drive the new ref's scroll position.
+    const t = setTimeout(() => {
+      ref.current?.scrollToOffset?.({ offset: 0, animated: false });
+    }, 50);
+    return () => clearTimeout(t);
+  }, [tab]);
+
   const resetAll = useCallback(() => {
     // 📊 Analytics — fire BEFORE state resets, so the change-detection
     // useEffect below doesn't double-track each cleared filter.
@@ -2370,7 +2389,12 @@ export default function ExploreScreen() {
               ) : null
             }
             ListEmptyComponent={
-              <View style={{ marginHorizontal: -14 }}>
+              <View
+                style={{
+                  paddingTop: chromeTotalHeight + 12,
+                  marginHorizontal: -14,
+                }}
+              >
                 {renderGrid('alle')}
               </View>
             }
@@ -2430,7 +2454,12 @@ export default function ExploreScreen() {
               ) : null
             }
             ListEmptyComponent={
-              <View style={{ marginHorizontal: -14 }}>
+              <View
+                style={{
+                  paddingTop: chromeTotalHeight + 12,
+                  marginHorizontal: -14,
+                }}
+              >
                 {renderGrid('eigen')}
               </View>
             }
@@ -2486,7 +2515,12 @@ export default function ExploreScreen() {
               ) : null
             }
             ListEmptyComponent={
-              <View style={{ marginHorizontal: -14 }}>
+              <View
+                style={{
+                  paddingTop: chromeTotalHeight + 12,
+                  marginHorizontal: -14,
+                }}
+              >
                 {renderGrid('marken')}
               </View>
             }
