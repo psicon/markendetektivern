@@ -98,7 +98,7 @@ const EARN_ACTIONS: EarnAction[] = [
     label: 'Umfragen',
     bg: '#dde2e4',
     dark: false,
-    reward: 'wenn verfügb.',
+    reward: '0,20-2,50 €',
     available: SURVEY_AVAILABLE,
     statusLabel: SURVEY_AVAILABLE ? 'Verfügbar' : 'Aktuell keine',
   },
@@ -959,34 +959,17 @@ function QuickActionTile({
         opacity: pressed ? 0.85 : 1,
       })}
     >
-      {/* Icon rendered directly, matching the Home Schnellzugriff
-          card style. White on dark tiles, theme.text on light. */}
-      <MaterialCommunityIcons
-        name={action.icon}
-        size={22}
-        color={fg}
-      />
-
-      <View>
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.bold,
-            fontSize: 12,
-            lineHeight: 14,
-            color: fg,
-          }}
-        >
-          {action.label}
-        </Text>
-
-        {/* Reward + status: stacked. Reward stays prominent (pill),
-            status reads compact — for receipt/photo with a weekly
-            quota a thin progress bar follows underneath. */}
+      {/* Top row — icon left, reward chip top-right corner. */}
+      <View
+        style={{
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+        }}
+      >
+        <MaterialCommunityIcons name={action.icon} size={22} color={fg} />
         <View
           style={{
-            alignSelf: 'flex-start',
-            marginTop: 6,
             paddingHorizontal: 6,
             paddingVertical: 2,
             borderRadius: 4,
@@ -1007,6 +990,20 @@ function QuickActionTile({
             {action.reward}
           </Text>
         </View>
+      </View>
+
+      <View>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 12,
+            lineHeight: 14,
+            color: fg,
+          }}
+        >
+          {action.label}
+        </Text>
 
         <Text
           numberOfLines={1}
