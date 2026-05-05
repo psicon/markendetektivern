@@ -1,5 +1,6 @@
+import { Image as ExpoImage } from 'expo-image';
 import React, { useState } from 'react';
-import { Image, Platform, Pressable, Text, View } from 'react-native';
+import { Platform, Pressable, Text, View } from 'react-native';
 import {
   fontFamily,
   fontWeight,
@@ -158,20 +159,16 @@ function ProductCardImpl({
       >
         {resolvedImageUri ? (
           <>
-            {/* Plain RN-Image (KEIN Reanimated-Wrapper hier!) — wir
-                hatten kurzzeitig ein FadingImage mit useSharedValue +
-                useAnimatedStyle pro Karte. Bei 20-40 mounted Karten
-                in 3 PagerView-Pages = 60-120 Worklets, kombiniert
-                mit Scroll-Handler-Worklets + Chrome-Collapse-Anims
-                + Shadows = spürbares Scroll-Stocking. RNs
-                `fadeDuration`-Prop macht den Soft-Fade auf Android
-                nativ; iOS dekodiert Bilder so schnell dass kein
-                expliziter Fade nötig ist. */}
-            <Image
+            {/* expo-image — memory + disk cache, native fast decode.
+                `transition` runs on the native side (no Reanimated
+                worklet per card, so the scroll-stocking we hit with
+                the old FadingImage approach stays away). */}
+            <ExpoImage
               source={{ uri: resolvedImageUri }}
               style={{ width: '100%', height: '100%' }}
-              resizeMode="contain"
-              fadeDuration={200}
+              contentFit="contain"
+              transition={150}
+              cachePolicy="memory-disk"
               onLoad={() => setImageLoaded(true)}
               onError={() => setImageLoaded(true)}
             />
@@ -303,10 +300,11 @@ function ProductCardImpl({
                   borderColor: theme.border,
                 }}
               >
-                <Image
+                <ExpoImage
                   source={{ uri: eyebrowLogoUri }}
                   style={{ width: '100%', height: '100%' }}
-                  resizeMode="contain"
+                  contentFit="contain"
+                  cachePolicy="memory-disk"
                 />
               </View>
             ) : null}

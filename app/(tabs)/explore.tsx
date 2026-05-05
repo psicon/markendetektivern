@@ -992,6 +992,33 @@ export default function ExploreScreen() {
     return `${sorted.length} Stufen`;
   }, [stufeSelection]);
 
+  // ─── Image prefetch — warm the cache for the first batch of cards ───
+  // Whenever a product list (browse or search) gets new items, fire
+  // off `Image.prefetch()` for the first PREFETCH_BATCH URIs so they
+  // arrive in memory before the user actually scrolls down to them.
+  // Uses expo-image's prefetch (memory-disk cache) which respects the
+  // ProductCard's cachePolicy. No-ops on duplicates internally.
+  useEffect(() => {
+    const PREFETCH_BATCH = 12;
+    const uris = new Set<string>();
+    const collect = (arr: any[]) => {
+      for (let i = 0; i < Math.min(PREFETCH_BATCH, arr.length); i++) {
+        const url = getProductImage(arr[i]);
+        if (url) uris.add(url);
+      }
+    };
+    collect(nonames);
+    collect(markenprodukte);
+    collect(searchHitsEigen);
+    collect(searchHitsMarken);
+    if (uris.size === 0) return;
+    // Fire-and-forget — failures land in expo-image's internal logs,
+    // we don't want to surface them to the user.
+    import('expo-image').then(({ Image: EI }) => {
+      EI.prefetch(Array.from(uris)).catch(() => {});
+    });
+  }, [nonames, markenprodukte, searchHitsEigen, searchHitsMarken]);
+
   // ─── Lookup maps keyed by doc id, built once per reference-data load ──
   const discounterMap = useMemo(() => {
     const m: Record<string, { color: string; short: string; bild?: string }> = {};
