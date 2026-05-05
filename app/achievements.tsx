@@ -12,6 +12,7 @@
 // StatusHero already owns those, this screen is the deep-dive.
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useNavigation } from 'expo-router';
@@ -25,6 +26,7 @@ import React, {
   useState,
 } from 'react';
 import {
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -32,6 +34,8 @@ import {
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useColorScheme } from '@/hooks/useColorScheme';
 
 import { BestenlisteTab } from '@/components/rewards/Bestenliste';
 import {
@@ -143,6 +147,7 @@ type ProgressedAchievement = Achievement & {
 
 export default function AchievementsScreen() {
   const { theme } = useTokens();
+  const scheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { user, userProfile } = useAuth();
@@ -267,10 +272,17 @@ export default function AchievementsScreen() {
     useState<'overall' | 'region'>('overall');
   const [geo, setGeo] = useState<'bundesland' | 'stadt'>('bundesland');
 
-  // Chrome height — DetailHeader row only. Tabs scroll WITH the
-  // content (rendered as the first item in each page's ScrollView)
-  // so there's no hard cut between sticky-strip and scroll content.
-  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
+  // Chrome height — DetailHeader row + a single sticky tabs row
+  // rendered ONCE at screen level (above PagerView). Two reasons:
+  //   1) Inline-per-page tabs flickered during the swipe transition
+  //      (each page rendered its own copy, you saw them slide out
+  //      and a new copy slide in).
+  //   2) The tabs row uses the SAME BlurView/tint backdrop as
+  //      DetailHeader so there's no hard "grey strip" cutting into
+  //      the content below — the whole chrome reads as one piece.
+  const TABS_ROW_HEIGHT = 50;
+  const chromeBaseHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
+  const chromeHeight = chromeBaseHeight + TABS_ROW_HEIGHT;
 
   // Loading state: render the chrome + a skeleton body instead of a
   // centered ActivityIndicator. Two reasons:
@@ -280,28 +292,6 @@ export default function AchievementsScreen() {
   //   2. The skeleton mirrors the page layout (hero card + 2 card
   //      rows) so the eventual data swap doesn't shift content.
   const isLoading = levelsLoading || achievementsLoading;
-
-  // Tabs row rendered inline at the top of each page's ScrollView so
-  // it scrolls naturally with content — no hard sticky-strip cut
-  // under DetailHeader. Same JSX in both pages, shared state.
-  const tabsRow = (
-    <View
-      style={{
-        paddingHorizontal: 20,
-        paddingTop: 8,
-        paddingBottom: 12,
-      }}
-    >
-      <SegmentedTabs
-        tabs={[
-          { key: 'errungen', label: 'Errungenschaften' },
-          { key: 'bestenliste', label: 'Bestenliste' },
-        ] as const}
-        value={tab}
-        onChange={onTabChange}
-      />
-    </View>
-  );
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -321,7 +311,6 @@ export default function AchievementsScreen() {
         showsVerticalScrollIndicator={false}
         scrollEnabled={!isLoading}
       >
-        {tabsRow}
         {isLoading ? (
           <AchievementsSkeleton />
         ) : (
@@ -436,7 +425,6 @@ export default function AchievementsScreen() {
             }}
             showsVerticalScrollIndicator={false}
           >
-            {tabsRow}
             <BestenlisteTab
               outerScope={outerScope}
               setOuterScope={setOuterScope}
@@ -477,6 +465,66 @@ export default function AchievementsScreen() {
           </Pressable>
         }
       />
+
+      {/* Single sticky tabs row — sits absolute right under the
+          DetailHeader chrome, on the SAME BlurView (iOS) / tinted
+          backdrop (Android) so the two read as one continuous
+          chrome surface. Rendered ONCE here at screen level so
+          it stays put during PagerView swipes (used to flicker
+          when each page rendered its own copy). */}
+      {Platform.OS === 'ios' ? (
+        <BlurView
+          tint={scheme === 'dark' ? 'dark' : 'light'}
+          intensity={80}
+          style={{
+            position: 'absolute',
+            top: chromeBaseHeight,
+            left: 0,
+            right: 0,
+            height: TABS_ROW_HEIGHT,
+            zIndex: 10,
+            paddingHorizontal: 20,
+            paddingTop: 7,
+            paddingBottom: 7,
+          }}
+        >
+          <SegmentedTabs
+            tabs={[
+              { key: 'errungen', label: 'Errungenschaften' },
+              { key: 'bestenliste', label: 'Bestenliste' },
+            ] as const}
+            value={tab}
+            onChange={onTabChange}
+          />
+        </BlurView>
+      ) : (
+        <View
+          style={{
+            position: 'absolute',
+            top: chromeBaseHeight,
+            left: 0,
+            right: 0,
+            height: TABS_ROW_HEIGHT,
+            zIndex: 10,
+            paddingHorizontal: 20,
+            paddingTop: 7,
+            paddingBottom: 7,
+            backgroundColor:
+              scheme === 'dark'
+                ? 'rgba(15,18,20,0.92)'
+                : 'rgba(245,247,248,0.92)',
+          }}
+        >
+          <SegmentedTabs
+            tabs={[
+              { key: 'errungen', label: 'Errungenschaften' },
+              { key: 'bestenliste', label: 'Bestenliste' },
+            ] as const}
+            value={tab}
+            onChange={onTabChange}
+          />
+        </View>
+      )}
 
       {/* Info bottom-sheet — same `FilterSheet` component used
           for the Region-Setup on the Belohnungen tab so all sheets
