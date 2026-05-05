@@ -629,6 +629,24 @@ export default function ProfileScreen() {
       Alert.alert('Fehler', String(e?.message ?? e));
     }
   };
+  const onShowBonScanConsent = async () => {
+    // Wipe the cashback consent so the screen mounts in its
+    // first-time state, then navigate. Fail-soft if there's no user
+    // (anonymous flow lands on /auth before /cashback/consent anyway).
+    try {
+      if (user?.uid) {
+        const { revokeCashbackConsent } = await import(
+          '@/lib/services/cashbackService'
+        );
+        await revokeCashbackConsent(user.uid);
+      }
+    } catch (e: any) {
+      // Non-fatal — the consent screen still renders, just won't
+      // be in the pristine "first time" state.
+      console.warn('revokeCashbackConsent failed', e?.message);
+    }
+    router.push('/cashback/consent' as any);
+  };
   const onResetUnlocks = async () => {
     try {
       const { categoryAccessService } = await import(
@@ -1377,6 +1395,13 @@ export default function ProfileScreen() {
                 color="#10b981"
                 label="Consent-Status anzeigen"
                 onPress={onConsentStatus}
+              />
+              <MenuRow
+                icon="receipt"
+                color="#0d8575"
+                label="Bon-Scan-Seite anzeigen"
+                sub="Setzt Cashback-Consent zurück + öffnet die Seite"
+                onPress={onShowBonScanConsent}
               />
               <MenuRow
                 icon="lock-reset"
