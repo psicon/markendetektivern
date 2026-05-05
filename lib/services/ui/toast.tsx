@@ -17,7 +17,6 @@
  *   • POINTS, STREAK            → BOTTOM (gamification rewards)
  *   • All others                → TOP    (UI feedback / errors / info)
  */
-import { Colors } from '@/constants/Colors';
 import {
   extractEmoji,
   getToastDuration,
@@ -26,7 +25,6 @@ import {
   ToastCategory,
   interpolateMessage,
 } from '@/constants/ToastMessages';
-import { useColorScheme } from '@/hooks/useColorScheme';
 import {
   resolveValue,
   Toast as RNToast,
@@ -34,6 +32,7 @@ import {
   ToastPosition,
 } from '@backpackapp-io/react-native-toast';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import {
   Dimensions,
@@ -48,34 +47,35 @@ type ToastType = 'success' | 'error' | 'info' | 'points';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// Per-category accent colour. Used for the icon-circle tint + the
-// optional action chip background. The card itself stays neutral
-// (theme.surface) regardless of category.
-const CATEGORY_ACCENT: Record<ToastCategory, string> = {
-  POINTS: '#bf9b30',
-  FAVORITES: '#e87676',
-  SHOPPING: '#0d8575',
-  RATINGS: '#9c27b0',
-  STREAK: '#ff9800',
-  ERROR: '#dc2626',
-  INFO: '#2196f3',
-  ANTI_ABUSE: '#FF9500',
+// Per-category gradient — same vibe as LevelUp / Achievement-Unlock
+// overlays (saturated start → slightly darker end, white content on
+// top). Toast carries the category identity through its colour, not
+// through a tiny tinted circle on a white card.
+const CATEGORY_GRADIENT: Record<ToastCategory, [string, string]> = {
+  POINTS: ['#f0b938', '#bf9b30'],
+  STREAK: ['#ffa940', '#ff7a00'],
+  ANTI_ABUSE: ['#ffb340', '#e07b00'],
+  RATINGS: ['#b15dd1', '#7e2aa8'],
+  FAVORITES: ['#f08a8a', '#c84d4d'],
+  SHOPPING: ['#10a18a', '#0a6f62'],
+  INFO: ['#3aa4ee', '#1976d2'],
+  ERROR: ['#ee5044', '#c0271b'],
 };
 
-// Where the toast flies in from. Gamification rewards appear at the
-// bottom; everything else (UI feedback, errors, info) appears at the
-// top. Single source of truth — change here, propagates everywhere.
+// Where the toast flies in from. Anything tied to the gamification
+// economy (points, streaks, anti-spam cooldowns) drops in from the
+// bottom — those are reward/feedback animations that belong near the
+// score zone, not over the title bar. UI feedback (favourites,
+// shopping, info, errors) stays at the top.
 function positionForCategory(category: ToastCategory): ToastPosition {
-  return category === 'POINTS' || category === 'STREAK'
-    ? ToastPosition.BOTTOM
-    : ToastPosition.TOP;
-}
-
-function getCurrentColorScheme(): 'light' | 'dark' {
-  if (typeof (global as any).__colorScheme !== 'undefined') {
-    return (global as any).__colorScheme;
+  switch (category) {
+    case 'POINTS':
+    case 'STREAK':
+    case 'ANTI_ABUSE':
+      return ToastPosition.BOTTOM;
+    default:
+      return ToastPosition.TOP;
   }
-  return 'light';
 }
 
 const StandardToast: React.FC<{
@@ -83,84 +83,54 @@ const StandardToast: React.FC<{
   category: ToastCategory;
   actionLabel?: string;
   onActionPress?: () => void;
-  colorScheme?: 'light' | 'dark';
-}> = ({
-  message,
-  category,
-  actionLabel,
-  onActionPress,
-  colorScheme: explicitColorScheme,
-}) => {
-  const hookColorScheme = useColorScheme();
-  const scheme = explicitColorScheme || hookColorScheme || 'light';
-  const colors = Colors[scheme];
-  const accent = CATEGORY_ACCENT[category];
+}> = ({ message, category, actionLabel, onActionPress }) => {
+  const gradient = CATEGORY_GRADIENT[category];
   const { emoji, text } = extractEmoji(message);
 
-  // Card surface — surface from the palette, never the saturated
-  // category colour. Border + shadow give it definition without
-  // shouting.
-  const surface = colors.surface ?? (scheme === 'dark' ? '#1a1d1f' : '#ffffff');
-  const borderColor =
-    scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
-  const textColor = colors.text ?? (scheme === 'dark' ? '#f5f5f5' : '#191c1d');
-
   return (
-    <View
-      style={[
-        styles.card,
-        {
-          backgroundColor: surface,
-          borderColor,
-          width: SCREEN_WIDTH - 24,
-        },
-      ]}
+    <LinearGradient
+      colors={gradient}
+      start={{ x: -0.5, y: 0 }}
+      end={{ x: 1.2, y: 1 }}
+      style={[styles.card, { width: SCREEN_WIDTH - 24 }]}
     >
-      {/* Icon-circle — accent colour at 18% alpha so the card stays
-          calm but the category is still clearly recognisable. */}
-      <View
-        style={[
-          styles.iconCircle,
-          { backgroundColor: hexWithAlpha(accent, 0.18) },
-        ]}
-      >
+      {/* Icon-circle on translucent white — same pattern as the
+          LevelUp / Achievement-Unlock overlays so the visual family
+          is consistent. */}
+      <View style={styles.iconCircle}>
         {emoji ? (
           <Text style={styles.emoji}>{emoji}</Text>
         ) : (
           <MaterialCommunityIcons
             name={mdiForCategory(category)}
             size={18}
-            color={accent}
+            color="#fff"
           />
         )}
       </View>
 
-      {/* Body text — single line of crisp message. numberOfLines=2
-          for the rare case a translated string spills over. */}
-      <Text
-        numberOfLines={2}
-        style={[styles.text, { color: textColor }]}
-      >
+      {/* Body text — up to 3 lines so longer ANTI_ABUSE / ERROR
+          messages don't clip. Font is small enough to fit, big
+          enough to read at arm's length. */}
+      <Text numberOfLines={3} style={styles.text}>
         {text}
       </Text>
 
-      {/* Optional action chip — accent-coloured, white text. */}
+      {/* Optional action chip — translucent white, white text, same
+          shape as the icon-circle so the right side feels balanced. */}
       {actionLabel && onActionPress ? (
         <Pressable
           onPress={onActionPress}
           style={({ pressed }) => [
             styles.actionChip,
-            {
-              backgroundColor: accent,
-              opacity: pressed ? 0.85 : 1,
-            },
+            { opacity: pressed ? 0.85 : 1 },
           ]}
           hitSlop={6}
         >
           <Text style={styles.actionText}>{actionLabel}</Text>
         </Pressable>
       ) : null}
-    </View>
+    </LinearGradient>
   );
 };
 
@@ -189,14 +159,6 @@ function mdiForCategory(
   }
 }
 
-// Append an alpha to a 6-char hex colour. `#0d8575` + 0.18 → '#0d857529'.
-function hexWithAlpha(hex: string, alpha: number): string {
-  const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255)
-    .toString(16)
-    .padStart(2, '0');
-  return `${hex}${a}`;
-}
-
 // Single render path used by every helper below. Every toast goes
 // through here so position + visual style are consistent everywhere.
 function showToast(
@@ -205,12 +167,10 @@ function showToast(
   options?: {
     actionLabel?: string;
     onActionPress?: () => void;
-    colorScheme?: 'light' | 'dark';
     durationMs?: number;
     id?: string;
   },
 ) {
-  const scheme = options?.colorScheme || getCurrentColorScheme();
   const duration = options?.durationMs ?? getToastDuration(category);
 
   toast(message, {
@@ -226,7 +186,6 @@ function showToast(
         category={category}
         actionLabel={options?.actionLabel}
         onActionPress={options?.onActionPress}
-        colorScheme={scheme}
       />
     ),
   });
@@ -422,17 +381,17 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-    minHeight: 52,
-    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 16,
+    minHeight: 56,
     marginHorizontal: 12,
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    elevation: 6,
   },
   iconCircle: {
     width: 36,
@@ -441,6 +400,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+    backgroundColor: 'rgba(255,255,255,0.22)',
   },
   emoji: {
     fontSize: 18,
@@ -449,14 +409,16 @@ const styles = StyleSheet.create({
   text: {
     flex: 1,
     fontFamily: 'Nunito_600SemiBold',
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 17,
+    color: '#fff',
   },
   actionChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 10,
     marginLeft: 10,
+    backgroundColor: 'rgba(255,255,255,0.22)',
   },
   actionText: {
     fontFamily: 'Nunito_600SemiBold',

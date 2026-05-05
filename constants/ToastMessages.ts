@@ -256,15 +256,15 @@ export const TOAST_MESSAGES = {
     generalError: '❌ Ein Fehler ist aufgetreten. Versuch es nochmal!'
   },
   ANTI_ABUSE: {
-    oneTimeRestriction: '⚠️ Diese Action kann nur einmal ausgeführt werden',
-    dedupeWindow: '⏳ Bitte warte {timeLeft} bevor du diese Action wiederholst um wieder Punkte zu erhalten',
-    dailyCapReached: '📅 Tageslimit fürs Punkte sammeln erreicht! Du kannst diese Action heute nicht mehr ausführen',
-    weeklyCapReached: '📊 Wochenlimit fürs Punkte sammeln erreicht! Du kannst diese Action diese Woche nicht mehr ausführen',
-    
-    // Spezifische Action-Nachrichten
-    dailyCapReachedSpecific: '📅 Die Action "{actionName}" gibt dir heute keine Punkte mehr, da du das Tageslimit von {limit} überschritten hast.',
-    weeklyCapReachedSpecific: '📊 Die Action "{actionName}" gibt dir diese Woche keine Punkte mehr, da du das Wochenlimit von {limit} überschritten hast.',
-    dedupeWindowSpecific: '⏳ Die Action "{actionName}" gibt dir erst in {timeLeft} wieder Punkte, um Spam zu vermeiden.'
+    oneTimeRestriction: '⚠️ Nur einmal pro Tag möglich',
+    dedupeWindow: '⏳ Noch {timeLeft} Cooldown',
+    dailyCapReached: '📅 Tageslimit erreicht',
+    weeklyCapReached: '📊 Wochenlimit erreicht',
+
+    // Spezifische Action-Nachrichten — Format kurz halten, sonst clippt der Toast.
+    dailyCapReachedSpecific: '📅 "{actionName}" — Tageslimit ({limit}) erreicht',
+    weeklyCapReachedSpecific: '📊 "{actionName}" — Wochenlimit ({limit}) erreicht',
+    dedupeWindowSpecific: '⏳ "{actionName}" — noch {timeLeft} Cooldown'
   }
 } as const;
 
