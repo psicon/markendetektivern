@@ -2344,10 +2344,9 @@ export default function ExploreScreen() {
               paddingHorizontal: 14,
             }}
             ListHeaderComponent={
-              reserveBannerSpot('alle') ? (
+              mountBanner('alle') ? (
                 <View
                   style={{
-                    height: 70,
                     alignItems: 'center',
                     justifyContent: 'center',
                     overflow: 'hidden',
@@ -2355,9 +2354,7 @@ export default function ExploreScreen() {
                     marginHorizontal: -14,
                   }}
                 >
-                  {mountBanner('alle') ? (
-                    <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                  ) : null}
+                  <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
                 </View>
               ) : null
             }
@@ -2410,10 +2407,9 @@ export default function ExploreScreen() {
               paddingHorizontal: 14,
             }}
             ListHeaderComponent={
-              reserveBannerSpot('eigen') ? (
+              mountBanner('eigen') ? (
                 <View
                   style={{
-                    height: 70,
                     alignItems: 'center',
                     justifyContent: 'center',
                     overflow: 'hidden',
@@ -2421,9 +2417,7 @@ export default function ExploreScreen() {
                     marginHorizontal: -14,
                   }}
                 >
-                  {mountBanner('eigen') ? (
-                    <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                  ) : null}
+                  <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
                 </View>
               ) : null
             }
@@ -2469,10 +2463,9 @@ export default function ExploreScreen() {
               paddingHorizontal: 14,
             }}
             ListHeaderComponent={
-              reserveBannerSpot('marken') ? (
+              mountBanner('marken') ? (
                 <View
                   style={{
-                    height: 70,
                     alignItems: 'center',
                     justifyContent: 'center',
                     overflow: 'hidden',
@@ -2480,9 +2473,7 @@ export default function ExploreScreen() {
                     marginHorizontal: -14,
                   }}
                 >
-                  {mountBanner('marken') ? (
-                    <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                  ) : null}
+                  <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
                 </View>
               ) : null
             }
