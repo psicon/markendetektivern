@@ -951,7 +951,7 @@ function QuickActionTile({
       }}
       style={({ pressed }) => ({
         flex: 1,
-        minHeight: 138,
+        minHeight: 112,
         backgroundColor: action.bg,
         borderRadius: 14,
         padding: 12,
