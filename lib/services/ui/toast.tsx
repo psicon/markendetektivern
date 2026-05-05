@@ -16,7 +16,6 @@
  *   • POINTS, STREAK, ANTI_ABUSE  → BOTTOM
  *   • All others                  → TOP
  */
-import { BlurView } from 'expo-blur';
 import {
   extractEmoji,
   getToastDuration,
@@ -25,7 +24,6 @@ import {
   ToastCategory,
   interpolateMessage,
 } from '@/constants/ToastMessages';
-import { useColorScheme } from '@/hooks/useColorScheme';
 import {
   resolveValue,
   Toast as RNToast,
@@ -33,10 +31,10 @@ import {
   ToastPosition,
 } from '@backpackapp-io/react-native-toast';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import {
   Dimensions,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -48,18 +46,26 @@ type ToastType = 'success' | 'error' | 'info' | 'points';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// Per-category accent — only used for the icon glyph (small, ~16-18 px).
-// The pill itself is BlurView/tint, NOT coloured. Category identity
-// comes through the icon, not a saturated fill.
-const CATEGORY_ACCENT: Record<ToastCategory, string> = {
-  POINTS: '#0d8575',     // brand teal — points are brand currency
-  STREAK: '#f97316',     // soft orange — streak warmth
-  ANTI_ABUSE: '#b45309', // amber — warning
-  RATINGS: '#a855f7',    // purple
-  FAVORITES: '#e11d48',  // rose — heart
-  SHOPPING: '#0d8575',   // brand teal
-  INFO: '#0d8575',       // brand teal — neutral but on-brand
-  ERROR: '#dc2626',      // red
+// Per-category palette — `bg` is a 2-stop pastel gradient applied to
+// the pill background, `accent` is the saturated version of the same
+// hue used for the icon and the text. Picked so the toast hints at
+// its category (gold = reward, green = positive shopping, red =
+// removal, gray = neutral) without ever shouting. Direct user spec:
+//   "Punkte → minimal goldene Pille"
+//   "Favs → minimal rot/lila"
+//   "Aus Einkaufsliste entfernen → minimal rot"
+//   "Gekauft / umgewandelt → leicht grün"
+//   "Anti-Fraud → grau mit Verlauf"
+type CategoryStyle = { bg: [string, string]; accent: string };
+const CATEGORY_STYLE: Record<ToastCategory, CategoryStyle> = {
+  POINTS: { bg: ['#fef3c7', '#fde68a'], accent: '#b45309' },     // gold / amber
+  STREAK: { bg: ['#ffedd5', '#fed7aa'], accent: '#c2410c' },     // soft orange
+  ANTI_ABUSE: { bg: ['#f3f4f6', '#e5e7eb'], accent: '#4b5563' }, // gray
+  RATINGS: { bg: ['#ede9fe', '#ddd6fe'], accent: '#6d28d9' },    // soft purple
+  FAVORITES: { bg: ['#fce7f3', '#fbcfe8'], accent: '#be185d' },  // rose / pink
+  SHOPPING: { bg: ['#d1fae5', '#a7f3d0'], accent: '#047857' },   // soft green
+  INFO: { bg: ['#f3f4f6', '#e5e7eb'], accent: '#374151' },       // gray
+  ERROR: { bg: ['#fee2e2', '#fecaca'], accent: '#b91c1c' },      // soft red
 };
 
 // Where the toast flies in from. Anything tied to the gamification
@@ -84,81 +90,58 @@ const StandardToast: React.FC<{
   actionLabel?: string;
   onActionPress?: () => void;
 }> = ({ message, category, actionLabel, onActionPress }) => {
-  const scheme = useColorScheme() ?? 'light';
-  const accent = CATEGORY_ACCENT[category];
+  // We intentionally keep the same pastel palette for both light and
+  // dark schemes — the pill's job is to be a small, attention-getting
+  // chip that briefly hovers over the page. The pastels are calm
+  // enough to read in light mode and pop just enough on a dark
+  // background.
+  const { bg, accent } = CATEGORY_STYLE[category];
   const { emoji, text } = extractEmoji(message);
-  const textColor = scheme === 'dark' ? '#f5f5f5' : '#191c1d';
-  const isIOS = Platform.OS === 'ios';
+  // Saturated icon + text colour = same hue family as the pill bg,
+  // but darker. Reads like a "stamp" on the chip.
+  const textColor = accent;
+  // Soft 1-px border in the accent at low alpha so the pill has
+  // definition without an outline-shouting effect.
+  const borderColor = accent + '33'; // ~20% alpha
 
-  // Body — auto-width pill: BlurView (iOS) / opaque tinted card
-  // (Android). Padding gives the icon + text breathing room without
-  // making the pill bulky. maxWidth caps long messages so the pill
-  // doesn't go full-screen.
-  const Inner = (
-    <View style={styles.inner}>
-      {emoji ? (
-        <Text style={styles.emoji}>{emoji}</Text>
-      ) : (
-        <MaterialCommunityIcons
-          name={mdiForCategory(category)}
-          size={16}
-          color={accent}
-        />
-      )}
-      <Text numberOfLines={3} style={[styles.text, { color: textColor }]}>
-        {text}
-      </Text>
-      {actionLabel && onActionPress ? (
-        <Pressable
-          onPress={onActionPress}
-          style={({ pressed }) => [
-            styles.actionChip,
-            { backgroundColor: accent, opacity: pressed ? 0.85 : 1 },
-          ]}
-          hitSlop={6}
-        >
-          <Text style={styles.actionText}>{actionLabel}</Text>
-        </Pressable>
-      ) : null}
-    </View>
-  );
-
-  if (isIOS) {
-    return (
-      <View style={styles.shell}>
-        <BlurView
-          tint={scheme === 'dark' ? 'dark' : 'light'}
-          intensity={70}
-          style={styles.pill}
-        >
-          {Inner}
-        </BlurView>
-      </View>
-    );
-  }
-  // Android: BlurView's quality on Android is poor — fall back to a
-  // tinted opaque pill (slightly different from light theme.bg so
-  // it reads as "above the page" rather than blending in).
   return (
     <View style={styles.shell}>
-      <View
-        style={[
-          styles.pill,
-          {
-            backgroundColor:
-              scheme === 'dark'
-                ? 'rgba(28,30,33,0.96)'
-                : 'rgba(252,252,253,0.96)',
-            borderWidth: 1,
-            borderColor:
-              scheme === 'dark'
-                ? 'rgba(255,255,255,0.08)'
-                : 'rgba(0,0,0,0.08)',
-          },
-        ]}
+      <LinearGradient
+        colors={bg}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.pill, { borderColor }]}
       >
-        {Inner}
-      </View>
+        <View style={styles.inner}>
+          {emoji ? (
+            <Text style={styles.emoji}>{emoji}</Text>
+          ) : (
+            <MaterialCommunityIcons
+              name={mdiForCategory(category)}
+              size={16}
+              color={accent}
+            />
+          )}
+          <Text
+            numberOfLines={2}
+            style={[styles.text, { color: textColor }]}
+          >
+            {text}
+          </Text>
+          {actionLabel && onActionPress ? (
+            <Pressable
+              onPress={onActionPress}
+              style={({ pressed }) => [
+                styles.actionChip,
+                { backgroundColor: accent, opacity: pressed ? 0.85 : 1 },
+              ]}
+              hitSlop={6}
+            >
+              <Text style={styles.actionText}>{actionLabel}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </LinearGradient>
     </View>
   );
 };
@@ -419,10 +402,11 @@ const styles = StyleSheet.create({
   pill: {
     maxWidth: SCREEN_WIDTH * 0.9,
     borderRadius: 999,
+    borderWidth: 1,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.10,
     shadowRadius: 10,
     elevation: 4,
   },
