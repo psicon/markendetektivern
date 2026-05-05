@@ -1733,7 +1733,7 @@ export default function ExploreScreen() {
         const unit = packTypId ? packungstypenMap[packTypId] : undefined;
         const { sizeLabel, unitPriceLabel } = formatPack(p.packSize, unit, p.preis);
         return (
-          <View style={{ paddingHorizontal: 6, paddingBottom: 12 }}>
+          <View style={{ paddingHorizontal: 6 }}>
             <ProductCard
               title={p.name ?? ''}
               brand={handelsmarkeName ?? null}
@@ -1757,7 +1757,7 @@ export default function ExploreScreen() {
       const unit = packTypId ? packungstypenMap[packTypId] : undefined;
       const { sizeLabel, unitPriceLabel } = formatPack(m.packSize, unit, m.preis);
       return (
-        <View style={{ paddingHorizontal: 6, paddingBottom: 12 }}>
+        <View style={{ paddingHorizontal: 6 }}>
           <BrandCard
             title={m.name ?? ''}
             brand={marke}
@@ -2319,74 +2319,61 @@ export default function ExploreScreen() {
             from Eigenmarken (page 1) to the LEFT lands here, matching
             the SegmentedTabs visual order. */}
         <View key="alle" style={{ flex: 1 }}>
-          {itemsForTab('alle').length === 0 ? (
-            // Empty / skeleton path lives in a plain ScrollView so the
-            // chrome-paddingTop is honoured (LegendList v2's
-            // ListEmptyComponent renders without that padding,
-            // pushing skeleton rows behind the chrome).
-            <ScrollView
-              contentContainerStyle={{
-                paddingTop: chromeTotalHeight + 12,
-                paddingBottom: 120,
-              }}
-              showsVerticalScrollIndicator={false}
-            >
-              {renderGrid('alle')}
-            </ScrollView>
-          ) : (
-            <AnimatedLegendList
-              ref={alleScrollRef}
-              data={itemsForTab('alle')}
-              keyExtractor={(item: any, index: number) =>
-                String(item?.id ?? item?.objectID ?? index)
-              }
-              renderItem={({ item, index }: any) =>
-                renderListCard(item, index, 'alle')
-              }
-              numColumns={2}
-              estimatedItemSize={240}
-              recycleItems
-              onScroll={scrollHandlerAlle}
-              scrollEventThrottle={16}
-              keyboardShouldPersistTaps="handled"
-              overScrollMode="auto"
-              scrollsToTop={tab === 'alle'}
-              onEndReached={checkLoadMoreAlle}
-              onEndReachedThreshold={0.5}
-              contentContainerStyle={{
-                paddingTop: chromeTotalHeight + 12,
-                paddingBottom: 120,
-                paddingHorizontal: 14,
-              }}
-              ListHeaderComponent={
-                showBannerOn('alle') ? (
-                  <View
-                    style={{
-                      height: 70,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      overflow: 'hidden',
-                      marginBottom: 12,
-                      marginHorizontal: -14,
-                    }}
-                  >
-                    <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                  </View>
-                ) : null
-              }
-              ListFooterComponent={
-                ((nonameLoading || markenLoading || searchLoadingMore) &&
-                  (nonames.length > 0 ||
-                    markenprodukte.length > 0 ||
-                    searchHitsEigen.length > 0 ||
-                    searchHitsMarken.length > 0)) ? (
-                  <View style={{ marginHorizontal: -14 }}>
-                    <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
-                  </View>
-                ) : null
-              }
-            />
-          )}
+          <AnimatedLegendList
+            ref={alleScrollRef}
+            data={itemsForTab('alle')}
+            keyExtractor={(item: any, index: number) =>
+              String(item?.id ?? item?.objectID ?? index)
+            }
+            renderItem={({ item, index }: any) =>
+              renderListCard(item, index, 'alle')
+            }
+            numColumns={2}
+            estimatedItemSize={240}
+            recycleItems
+            onScroll={scrollHandlerAlle}
+            scrollEventThrottle={16}
+            keyboardShouldPersistTaps="handled"
+            overScrollMode="auto"
+            scrollsToTop={tab === 'alle'}
+            onEndReached={checkLoadMoreAlle}
+            onEndReachedThreshold={0.5}
+            contentContainerStyle={{
+              paddingTop: chromeTotalHeight + 12,
+              paddingBottom: 120,
+              paddingHorizontal: 14,
+            }}
+            ListHeaderComponent={
+              showBannerOn('alle') ? (
+                <View
+                  style={{
+                    height: 70,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                    marginBottom: 12,
+                    marginHorizontal: -14,
+                  }}
+                >
+                  <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
+                </View>
+              ) : null
+            }
+            ListFooterComponent={
+              ((nonameLoading || markenLoading || searchLoadingMore) &&
+                (nonames.length > 0 ||
+                  markenprodukte.length > 0 ||
+                  searchHitsEigen.length > 0 ||
+                  searchHitsMarken.length > 0)) ? (
+                <View style={{ marginHorizontal: -14 }}>
+                  <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
+                </View>
+              ) : null
+            }
+            ListEmptyComponent={
+              <View style={{ marginHorizontal: -14 }}>{renderGrid('alle')}</View>
+            }
+          />
         </View>
 
         {/* ─── Page 1 — Eigenmarken ─────────────────────────────────── */}
@@ -2395,132 +2382,114 @@ export default function ExploreScreen() {
             status-bar-tap scroll-to-top for all of them (documented
             UIScrollView behaviour when multiple responders exist). */}
         <View key="eigen" style={{ flex: 1 }}>
-          {itemsForTab('eigen').length === 0 ? (
-            <ScrollView
-              contentContainerStyle={{
-                paddingTop: chromeTotalHeight + 12,
-                paddingBottom: 120,
-              }}
-              showsVerticalScrollIndicator={false}
-            >
-              {renderGrid('eigen')}
-            </ScrollView>
-          ) : (
-            <AnimatedLegendList
-              ref={eigenScrollRef}
-              data={itemsForTab('eigen')}
-              keyExtractor={(item: any, index: number) =>
-                String(item?.id ?? item?.objectID ?? index)
-              }
-              renderItem={({ item, index }: any) =>
-                renderListCard(item, index, 'eigen')
-              }
-              numColumns={2}
-              estimatedItemSize={240}
-              recycleItems
-              onScroll={scrollHandlerEigen}
-              scrollEventThrottle={16}
-              keyboardShouldPersistTaps="handled"
-              overScrollMode="auto"
-              scrollsToTop={tab === 'eigen'}
-              onEndReached={checkLoadMoreEigen}
-              onEndReachedThreshold={0.5}
-              contentContainerStyle={{
-                paddingTop: chromeTotalHeight + 12,
-                paddingBottom: 120,
-                paddingHorizontal: 14,
-              }}
-              ListHeaderComponent={
-                showBannerOn('eigen') ? (
-                  <View
-                    style={{
-                      height: 70,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      overflow: 'hidden',
-                      marginBottom: 12,
-                      marginHorizontal: -14,
-                    }}
-                  >
-                    <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                  </View>
-                ) : null
-              }
-              ListFooterComponent={
-                ((nonameLoading || (searchActiveQuery && searchLoadingMore)) &&
-                  (nonames.length > 0 || searchHitsEigen.length > 0)) ? (
-                  <View style={{ marginHorizontal: -14 }}>
-                    <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
-                  </View>
-                ) : null
-              }
-            />
-          )}
+          <AnimatedLegendList
+            ref={eigenScrollRef}
+            data={itemsForTab('eigen')}
+            keyExtractor={(item: any, index: number) =>
+              String(item?.id ?? item?.objectID ?? index)
+            }
+            renderItem={({ item, index }: any) =>
+              renderListCard(item, index, 'eigen')
+            }
+            numColumns={2}
+            estimatedItemSize={240}
+            recycleItems
+            onScroll={scrollHandlerEigen}
+            scrollEventThrottle={16}
+            keyboardShouldPersistTaps="handled"
+            overScrollMode="auto"
+            scrollsToTop={tab === 'eigen'}
+            onEndReached={checkLoadMoreEigen}
+            onEndReachedThreshold={0.5}
+            contentContainerStyle={{
+              paddingTop: chromeTotalHeight + 12,
+              paddingBottom: 120,
+              paddingHorizontal: 14,
+            }}
+            ListHeaderComponent={
+              showBannerOn('eigen') ? (
+                <View
+                  style={{
+                    height: 70,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                    marginBottom: 12,
+                    marginHorizontal: -14,
+                  }}
+                >
+                  <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
+                </View>
+              ) : null
+            }
+            ListFooterComponent={
+              ((nonameLoading || (searchActiveQuery && searchLoadingMore)) &&
+                (nonames.length > 0 || searchHitsEigen.length > 0)) ? (
+                <View style={{ marginHorizontal: -14 }}>
+                  <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
+                </View>
+              ) : null
+            }
+            ListEmptyComponent={
+              <View style={{ marginHorizontal: -14 }}>{renderGrid('eigen')}</View>
+            }
+          />
         </View>
 
         {/* ─── Page 2 — Marken ──────────────────────────────────────── */}
         <View key="marken" style={{ flex: 1 }}>
-          {itemsForTab('marken').length === 0 ? (
-            <ScrollView
-              contentContainerStyle={{
-                paddingTop: chromeTotalHeight + 12,
-                paddingBottom: 120,
-              }}
-              showsVerticalScrollIndicator={false}
-            >
-              {renderGrid('marken')}
-            </ScrollView>
-          ) : (
-            <AnimatedLegendList
-              ref={markenScrollRef}
-              data={itemsForTab('marken')}
-              keyExtractor={(item: any, index: number) =>
-                String(item?.id ?? item?.objectID ?? index)
-              }
-              renderItem={({ item, index }: any) =>
-                renderListCard(item, index, 'marken')
-              }
-              numColumns={2}
-              estimatedItemSize={240}
-              recycleItems
-              onScroll={scrollHandlerMarken}
-              scrollEventThrottle={16}
-              keyboardShouldPersistTaps="handled"
-              overScrollMode="auto"
-              scrollsToTop={tab === 'marken'}
-              onEndReached={checkLoadMoreMarken}
-              onEndReachedThreshold={0.5}
-              contentContainerStyle={{
-                paddingTop: chromeTotalHeight + 12,
-                paddingBottom: 120,
-                paddingHorizontal: 14,
-              }}
-              ListHeaderComponent={
-                showBannerOn('marken') ? (
-                  <View
-                    style={{
-                      height: 70,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      overflow: 'hidden',
-                      marginBottom: 12,
-                      marginHorizontal: -14,
-                    }}
-                  >
-                    <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                  </View>
-                ) : null
-              }
-              ListFooterComponent={
-                ((markenLoading || (searchActiveQuery && searchLoadingMore)) &&
-                  (markenprodukte.length > 0 || searchHitsMarken.length > 0)) ? (
-                  <View style={{ marginHorizontal: -14 }}>
-                    <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
-                  </View>
-                ) : null
-              }
-            />
-          )}
+          <AnimatedLegendList
+            ref={markenScrollRef}
+            data={itemsForTab('marken')}
+            keyExtractor={(item: any, index: number) =>
+              String(item?.id ?? item?.objectID ?? index)
+            }
+            renderItem={({ item, index }: any) =>
+              renderListCard(item, index, 'marken')
+            }
+            numColumns={2}
+            estimatedItemSize={240}
+            recycleItems
+            onScroll={scrollHandlerMarken}
+            scrollEventThrottle={16}
+            keyboardShouldPersistTaps="handled"
+            overScrollMode="auto"
+            scrollsToTop={tab === 'marken'}
+            onEndReached={checkLoadMoreMarken}
+            onEndReachedThreshold={0.5}
+            contentContainerStyle={{
+              paddingTop: chromeTotalHeight + 12,
+              paddingBottom: 120,
+              paddingHorizontal: 14,
+            }}
+            ListHeaderComponent={
+              showBannerOn('marken') ? (
+                <View
+                  style={{
+                    height: 70,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                    marginBottom: 12,
+                    marginHorizontal: -14,
+                  }}
+                >
+                  <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
+                </View>
+              ) : null
+            }
+            ListFooterComponent={
+              ((markenLoading || (searchActiveQuery && searchLoadingMore)) &&
+                (markenprodukte.length > 0 || searchHitsMarken.length > 0)) ? (
+                <View style={{ marginHorizontal: -14 }}>
+                  <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
+                </View>
+              ) : null
+            }
+            ListEmptyComponent={
+              <View style={{ marginHorizontal: -14 }}>{renderGrid('marken')}</View>
+            }
+          />
         </View>
       </PagerView>
 
