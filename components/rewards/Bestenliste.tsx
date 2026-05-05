@@ -62,11 +62,6 @@ import type { Level } from '@/lib/types/achievements';
 //     yearly counters once we deploy that schema upgrade
 //   • Rising Star (Diese Woche) — same; weekly rolling counter
 
-// Fixed hero height — locks the StatusHero (this tab) and the
-// Cashback hero (Belohnungen tab) to the SAME total height so the
-// layout doesn't jump on tab swipe across screens.
-const HERO_HEIGHT = 144;
-
 type LbScopeOuter = 'overall' | 'region';
 type OverallMetric = 'pts' | 'eur';
 type RegionGeo = 'bundesland' | 'stadt';
@@ -1637,9 +1632,13 @@ function StatusHero({
   userProfile: any;
   levels: Level[];
 }) {
-  // Resolve all values from the real data sources. Fallbacks mirror
-  // the cascade used in app/achievements.tsx:
+  // Resolve identity values from the real data sources. Fallbacks
+  // mirror the cascade used in app/achievements.tsx:
   //   userStats → userProfile.stats → userProfile.level → 1
+  // The Bestenliste-Tab hero is now ranking-focused only — name,
+  // avatar, level chip (= identity), and total points (= the metric
+  // you rank by). Level/savings progress bars dropped: that lives
+  // one tab over (Errungenschaften), no point repeating it here.
   const level: number =
     userStats?.currentLevel ??
     userProfile?.stats?.currentLevel ??
@@ -1649,53 +1648,14 @@ function StatusHero({
     userStats?.pointsTotal ??
     userProfile?.stats?.pointsTotal ??
     0;
-  const eur: number =
-    Number(userProfile?.totalSavings ?? userProfile?.stats?.savingsTotal ?? 0);
-  // streak / freezeTokens are intentionally not surfaced in this
-  // card anymore — they live on /achievements (the card is a
-  // tap-target into that screen). Keeps the hero focused on the
-  // single thing that matters here: progress to the next level.
-
-  // Pull current + next level from the real Firestore-loaded list.
   const currentLevelInfo = levels.find((l) => l.id === level);
-  const nextLevel = levels.find((l) => l.id === level + 1);
-
-  // Progress numbers for the next level. From level 3 onwards the
-  // legacy `/achievements` screen also requires savings (€) to
-  // unlock — we mirror that here so the user sees BOTH gates.
-  const requiredPts = nextLevel?.pointsRequired || 0;
-  const requiredEur = nextLevel?.savingsRequired || 0;
-  const ptsPct =
-    requiredPts > 0
-      ? Math.min(100, Math.max(0, Math.round((pts / requiredPts) * 100)))
-      : 100;
-  const eurPct =
-    requiredEur > 0
-      ? Math.min(100, Math.max(0, Math.round((eur / requiredEur) * 100)))
-      : 100;
-  const ptsRemaining = Math.max(0, requiredPts - pts);
-  const eurRemaining = Math.max(0, requiredEur - eur);
   const levelName = currentLevelInfo?.name ?? '';
-  // Gradient colours follow the user's CURRENT level — exact same
-  // mapping as the legacy /achievements screen so the card colour
-  // is consistent between the two screens. (Diagonal start/end
-  // tweaked to match the legacy card too.)
+  // Gradient still follows the user's current level so colour-
+  // continuity with the Errungenschaften tab is preserved (same
+  // user, same colour).
   const gradient = levelGradient(level, currentLevelInfo?.color);
 
-  // The whole card is the entry-point to the dedicated
-  // /achievements screen — that's where Errungenschaften, full level
-  // catalogue, lottie animations and progress live. Keeping that off
-  // the Bestenliste avoids stacking two heavy sections on one screen.
-  const onPress = () => safePush('/achievements' as any);
-
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        opacity: pressed ? 0.92 : 1,
-        borderRadius: 20,
-      })}
-    >
     <LinearGradient
       colors={gradient}
       start={{ x: -1, y: 0.34 }}
@@ -1705,16 +1665,12 @@ function StatusHero({
         paddingHorizontal: 14,
         paddingVertical: 12,
         overflow: 'hidden',
-        // Locked to the same height as the Cashback hero on the
-        // Einlösen tab — see HERO_HEIGHT for the rationale.
-        height: HERO_HEIGHT,
       }}
     >
-      <View style={{ flex: 1, justifyContent: 'space-between' }}>
-      {/* Same alignment trick as the Cashback hero: stretch the
-          row to the avatar's height, then space-between in each
-          content column → both pills sit at the bottom of the
-          row on the same baseline. */}
+      {/* Single row — avatar | name + level pill | total points +
+          label pill. No progress bars: the level/savings progress
+          lives on the Errungenschaften tab next door, no need to
+          duplicate the same gates here. */}
       <View
         style={{
           flexDirection: 'row',
@@ -1801,38 +1757,7 @@ function StatusHero({
           <HeroPill icon="star-four-points" label="Detektiv-Punkte" />
         </View>
       </View>
-
-      {/* Progress bars — Pkt always, € only when the next level
-          actually requires savings (Level 3+). Two compact 21 px
-          rows max. No extra "motivation banner" / chip row below
-          on this card — the bars ARE the content. */}
-      {nextLevel ? (
-        <View style={{ marginTop: 12, gap: 7 }}>
-          <ProgressBar
-            icon="star-four-points"
-            label={`Lv ${level + 1} · ${nextLevel.name}`}
-            current={pts.toLocaleString('de-DE')}
-            required={requiredPts.toLocaleString('de-DE')}
-            pct={requiredPts > 0 ? ptsPct : 100}
-          />
-          {requiredEur > 0 ? (
-            <ProgressBar
-              icon="cash"
-              label="Ersparnis"
-              current={`${eur.toFixed(2).replace('.', ',')} €`}
-              required={`${requiredEur.toFixed(2).replace('.', ',')} €`}
-              pct={eurPct}
-            />
-          ) : null}
-        </View>
-      ) : null}
-
-      {/* No dedicated "Errungenschaften & Level →" affordance row
-          anymore — the whole card is a Pressable, the press
-          feedback (opacity 0.92) signals tap-ability. */}
-      </View>
     </LinearGradient>
-    </Pressable>
   );
 }
 
