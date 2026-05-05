@@ -1817,7 +1817,7 @@ export default function ExploreScreen() {
         const unit = packTypId ? packungstypenMap[packTypId] : undefined;
         const { sizeLabel, unitPriceLabel } = formatPack(p.packSize, unit, p.preis);
         nodes.push(
-          <View key={p.id} style={{ width: GRID_ITEM_WIDTH, minHeight: 260 }}>
+          <View key={p.id} style={{ width: GRID_ITEM_WIDTH }}>
             <ProductCard
               title={p.name ?? ''}
               brand={handelsmarkeName ?? null}
@@ -1862,7 +1862,7 @@ export default function ExploreScreen() {
         const unit = packTypId ? packungstypenMap[packTypId] : undefined;
         const { sizeLabel, unitPriceLabel } = formatPack(m.packSize, unit, m.preis);
         nodes.push(
-          <View key={m.id} style={{ width: GRID_ITEM_WIDTH, minHeight: 260 }}>
+          <View key={m.id} style={{ width: GRID_ITEM_WIDTH }}>
             <BrandCard
               title={m.name ?? ''}
               brand={marke}
@@ -1873,6 +1873,33 @@ export default function ExploreScreen() {
               unitPriceLabel={unitPriceLabel}
               alternativeCount={m.relatedProdukteIDs?.length ?? 0}
               onPress={() => openBrand(m, index)}
+              infos={(m as any).marke?.infos ?? null}
+              onInfoPress={() => {
+                // `infos` liegt auf dem MARKE-Doc (= hersteller-
+                // Collection in der DB, "MARKEN" in User-Terminologie),
+                // NICHT auf dem hersteller_new-Doc.
+                const markeDoc = (m as any).marke;
+                const raw = markeDoc?.infos ?? (m as any).infos;
+                const infosText =
+                  typeof raw === 'string' && raw.trim().length > 0
+                    ? raw.trim()
+                    : null;
+                // Fallback: Marke-Adresse falls `infos` leer ist.
+                const fallbackLines = [
+                  markeDoc?.adresse ? String(markeDoc.adresse) : null,
+                  [markeDoc?.plz, markeDoc?.stadt].filter(Boolean).join(' ') || null,
+                  markeDoc?.land ? String(markeDoc.land) : null,
+                ].filter(Boolean) as string[];
+                const body =
+                  infosText ??
+                  (fallbackLines.length > 0
+                    ? fallbackLines.join('\n')
+                    : 'Zu dieser Marke sind aktuell keine Zusatz-Informationen hinterlegt.');
+                setInfoSheet({
+                  title: markeDoc?.name || marke || m.name || 'Info',
+                  body,
+                });
+              }}
             />
           </View>,
         );
