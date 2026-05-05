@@ -888,6 +888,18 @@ export default function ExploreScreen() {
     setHandels('all');
     setStufeSelection([]);
     setBrandId('all');
+    // Reset destination list's scroll BEFORE PagerView animates the
+    // swap — page isn't visible yet, so the scroll is invisible (no
+    // popping). This is the right surface for "tap a tab → top",
+    // since onPageSelected fires AFTER a swipe is done and the
+    // destination is already on-screen.
+    const destRef =
+      k === 'alle'
+        ? alleScrollRef
+        : k === 'eigen'
+          ? eigenScrollRef
+          : markenScrollRef;
+    destRef.current?.scrollToOffset?.({ offset: 0, animated: false });
     // Keep PagerView in sync (user tapped a tab). PAGE_AT_TAB
     // returns 0 for eigen, 1 for marken, 2 for alle — the same
     // physical order pages were declared in the JSX below.
