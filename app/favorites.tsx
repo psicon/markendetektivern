@@ -446,35 +446,20 @@ export default function FavoritesScreen() {
     return sum + s;
   }, 0);
 
-  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
+  // SegmentedTabs sit INSIDE the DetailHeader's BlurView (via the
+  // `below` slot) so the title row + tabs share the same chrome
+  // material — no two-BlurView seam, no theme.bg strip beneath the
+  // chrome. paddingTop on the body grows by the tabs row height.
+  const TABS_ROW_HEIGHT = 54;
+  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT + TABS_ROW_HEIGHT;
 
   // ─── Render ─────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* Body lives BEHIND the chrome. The body's first child reserves
-          chromeHeight via a top spacer so SegmentedTabs land just below
-          the DetailHeader regardless of safe-area inset. */}
+      {/* Body lives BEHIND the chrome. paddingTop reserves room for
+          the chrome (header row + tabs row) so the SelectionBar /
+          PagerView land cleanly below it. */}
       <View style={{ flex: 1, paddingTop: chromeHeight }}>
-        {/* SegmentedTabs row — counts bake into the labels so the user
-            sees how many favourites per type without a separate stat
-            line. */}
-        <View
-          style={{
-            paddingHorizontal: 20,
-            paddingTop: 12,
-            paddingBottom: 6,
-          }}
-        >
-          <SegmentedTabs
-            tabs={[
-              { key: 'brand', label: `Marken (${brandFavorites.length})` },
-              { key: 'noname', label: `NoNames (${noNameFavorites.length})` },
-            ] as const}
-            value={activeTab}
-            onChange={onTabChange}
-          />
-        </View>
-
         {/* Bulk action bar — slides in when at least 1 favourite is
             selected. Counts + total savings + select-all + add-to-cart
             in one row. The whole bar lives in normal flow (so the list
@@ -553,6 +538,26 @@ export default function FavoritesScreen() {
       <DetailHeader
         title="Favoriten"
         onBack={() => router.back()}
+        below={
+          <View
+            style={{
+              height: TABS_ROW_HEIGHT,
+              paddingHorizontal: 20,
+              paddingTop: 8,
+              paddingBottom: 12,
+              justifyContent: 'center',
+            }}
+          >
+            <SegmentedTabs
+              tabs={[
+                { key: 'brand', label: `Marken (${brandFavorites.length})` },
+                { key: 'noname', label: `NoNames (${noNameFavorites.length})` },
+              ] as const}
+              value={activeTab}
+              onChange={onTabChange}
+            />
+          </View>
+        }
         right={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <SelectAllPill

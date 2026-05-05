@@ -32,6 +32,15 @@ type Props = {
    *  same vertical alignment as the back button. Use for screen
    *  actions (info, share, settings, …). */
   right?: React.ReactNode;
+  /** Optional sticky content rendered INSIDE the same BlurView/tint
+   *  surface, right below the title row. Typical use: SegmentedTabs,
+   *  filter chips, count summaries — anything that should share the
+   *  chrome material so there's no two-BlurView seam. The caller is
+   *  responsible for the row height (just style it as needed); the
+   *  chrome's container grows to fit. Pad your ScrollView's
+   *  `paddingTop` accordingly: `insets.top + DETAIL_HEADER_ROW_HEIGHT
+   *  + <yourBelowHeight>`. */
+  below?: React.ReactNode;
 };
 
 /** Height of the row below the safe-area inset. Used by screens to pad
@@ -55,6 +64,7 @@ export function DetailHeader({
   swapAt = 120,
   onBack,
   right,
+  below,
 }: Props) {
   const { theme } = useTokens();
   const scheme = useColorScheme() ?? 'light';
@@ -239,6 +249,7 @@ export function DetailHeader({
         style={commonContainerStyle}
       >
         {Row}
+        {below}
         {Border}
       </BlurView>
     );
@@ -255,6 +266,7 @@ export function DetailHeader({
       ]}
     >
       {Row}
+      {below}
       {Border}
     </View>
   );

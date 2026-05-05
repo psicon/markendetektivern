@@ -202,7 +202,10 @@ export default function PurchaseHistoryScreen() {
     }
   };
 
-  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
+  // Tabs sit INSIDE the DetailHeader BlurView (`below` slot) so the
+  // chrome is one continuous material — no two-BlurView seam.
+  const TABS_ROW_HEIGHT = 54;
+  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT + TABS_ROW_HEIGHT;
 
   // Erfolgsfall-Branch oben raus, damit der Render-Tree drunter
   // sauber bleibt.
@@ -276,30 +279,6 @@ export default function PurchaseHistoryScreen() {
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       {/* Body lebt unter dem Chrome via paddingTop. */}
       <View style={{ flex: 1, paddingTop: chromeHeight }}>
-        {/* Tabs row */}
-        <View
-          style={{
-            paddingHorizontal: 20,
-            paddingTop: 12,
-            paddingBottom: 6,
-          }}
-        >
-          <SegmentedTabs
-            tabs={[
-              {
-                key: 'brands',
-                label: `Marken (${totalBrandCount.toLocaleString('de-DE')})`,
-              },
-              {
-                key: 'nonames',
-                label: `NoNames (${totalNoNameCount.toLocaleString('de-DE')})`,
-              },
-            ] as const}
-            value={activeTab}
-            onChange={onTabChange}
-          />
-        </View>
-
         {/* Body — Crossfade zwischen Skeleton und PagerView. fillParent
             ist Pflicht, damit die FlatLists ihren flex:1 bekommen. */}
         <Crossfade
@@ -397,7 +376,36 @@ export default function PurchaseHistoryScreen() {
       </View>
 
       {/* Chrome */}
-      <DetailHeader title="Kaufhistorie" onBack={() => router.back()} />
+      <DetailHeader
+        title="Kaufhistorie"
+        onBack={() => router.back()}
+        below={
+          <View
+            style={{
+              height: TABS_ROW_HEIGHT,
+              paddingHorizontal: 20,
+              paddingTop: 8,
+              paddingBottom: 12,
+              justifyContent: 'center',
+            }}
+          >
+            <SegmentedTabs
+              tabs={[
+                {
+                  key: 'brands',
+                  label: `Marken (${totalBrandCount.toLocaleString('de-DE')})`,
+                },
+                {
+                  key: 'nonames',
+                  label: `NoNames (${totalNoNameCount.toLocaleString('de-DE')})`,
+                },
+              ] as const}
+              value={activeTab}
+              onChange={onTabChange}
+            />
+          </View>
+        }
+      />
     </View>
   );
 }

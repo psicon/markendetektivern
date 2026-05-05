@@ -236,30 +236,15 @@ export default function HistoryScreen() {
     }
   };
 
-  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
+  // Tabs sit INSIDE DetailHeader's BlurView (`below` slot) so the
+  // chrome reads as one continuous material — no two-BlurView seam.
+  const TABS_ROW_HEIGHT = 54;
+  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT + TABS_ROW_HEIGHT;
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       {/* Body lives below the chrome via paddingTop on the wrapper. */}
       <View style={{ flex: 1, paddingTop: chromeHeight }}>
-        {/* Tabs row */}
-        <View
-          style={{
-            paddingHorizontal: 20,
-            paddingTop: 12,
-            paddingBottom: 6,
-          }}
-        >
-          <SegmentedTabs
-            tabs={[
-              { key: 'search', label: `Suchverlauf (${searchHistory.length})` },
-              { key: 'scan', label: `Scanverlauf (${scanHistory.length})` },
-            ] as const}
-            value={activeTab}
-            onChange={onTabChange}
-          />
-        </View>
-
         {/* Body — Crossfade between skeleton list and live PagerView.
             `fillParent` is required so the PagerView claims height. */}
         <Crossfade
@@ -322,6 +307,26 @@ export default function HistoryScreen() {
       <DetailHeader
         title="Such- & Scanverlauf"
         onBack={() => router.back()}
+        below={
+          <View
+            style={{
+              height: TABS_ROW_HEIGHT,
+              paddingHorizontal: 20,
+              paddingTop: 8,
+              paddingBottom: 12,
+              justifyContent: 'center',
+            }}
+          >
+            <SegmentedTabs
+              tabs={[
+                { key: 'search', label: `Suchverlauf (${searchHistory.length})` },
+                { key: 'scan', label: `Scanverlauf (${scanHistory.length})` },
+              ] as const}
+              value={activeTab}
+              onChange={onTabChange}
+            />
+          </View>
+        }
       />
     </View>
   );
