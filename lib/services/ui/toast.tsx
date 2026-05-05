@@ -47,19 +47,30 @@ type ToastType = 'success' | 'error' | 'info' | 'points';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// Per-category gradient — same vibe as LevelUp / Achievement-Unlock
-// overlays (saturated start → slightly darker end, white content on
-// top). Toast carries the category identity through its colour, not
-// through a tiny tinted circle on a white card.
+// Toast palettes — DELIBERATELY MUTED so the toast doesn't shout
+// at the user. Same family-of-three logic as the difficulty + level
+// systems already in the app:
+//   • Brand-teal      → positive gamification rewards (points, streak)
+//   • Dark slate      → neutral UI feedback (favourites, shopping, …)
+//   • Warm amber      → gamification warnings (anti-spam, cooldowns)
+//   • Deep red        → errors
+// Each pair is the SAME hue family, just slightly darker on the end —
+// so you get the "depth" of a gradient (à la LevelUp / Achievement-
+// Unlock cards) without any contrast clash.
+const BRAND_TEAL: [string, string] = ['#0d8575', '#0a6f62'];
+const NEUTRAL_SLATE: [string, string] = ['#3a4754', '#1f2937'];
+const WARM_AMBER: [string, string] = ['#b45309', '#92400e'];
+const DEEP_RED: [string, string] = ['#b91c1c', '#7f1d1d'];
+
 const CATEGORY_GRADIENT: Record<ToastCategory, [string, string]> = {
-  POINTS: ['#f0b938', '#bf9b30'],
-  STREAK: ['#ffa940', '#ff7a00'],
-  ANTI_ABUSE: ['#ffb340', '#e07b00'],
-  RATINGS: ['#b15dd1', '#7e2aa8'],
-  FAVORITES: ['#f08a8a', '#c84d4d'],
-  SHOPPING: ['#10a18a', '#0a6f62'],
-  INFO: ['#3aa4ee', '#1976d2'],
-  ERROR: ['#ee5044', '#c0271b'],
+  POINTS: BRAND_TEAL,
+  STREAK: BRAND_TEAL,
+  ANTI_ABUSE: WARM_AMBER,
+  RATINGS: NEUTRAL_SLATE,
+  FAVORITES: NEUTRAL_SLATE,
+  SHOPPING: NEUTRAL_SLATE,
+  INFO: NEUTRAL_SLATE,
+  ERROR: DEEP_RED,
 };
 
 // Where the toast flies in from. Anything tied to the gamification
@@ -90,8 +101,8 @@ const StandardToast: React.FC<{
   return (
     <LinearGradient
       colors={gradient}
-      start={{ x: -0.5, y: 0 }}
-      end={{ x: 1.2, y: 1 }}
+      start={{ x: -1, y: 0.34 }}
+      end={{ x: 1, y: -0.34 }}
       style={[styles.card, { width: SCREEN_WIDTH - 24 }]}
     >
       {/* Icon-circle on translucent white — same pattern as the
