@@ -2370,14 +2370,7 @@ export default function ExploreScreen() {
               ) : null
             }
             ListEmptyComponent={
-              // ListEmptyComponent renders WITHOUT the contentContainer
-              // paddingTop in LegendList v2 — own paddingTop fixes that.
-              <View
-                style={{
-                  paddingTop: chromeTotalHeight + 12,
-                  marginHorizontal: -14,
-                }}
-              >
+              <View style={{ marginHorizontal: -14 }}>
                 {renderGrid('alle')}
               </View>
             }
@@ -2445,12 +2438,7 @@ export default function ExploreScreen() {
               ) : null
             }
             ListEmptyComponent={
-              <View
-                style={{
-                  paddingTop: chromeTotalHeight + 12,
-                  marginHorizontal: -14,
-                }}
-              >
+              <View style={{ marginHorizontal: -14 }}>
                 {renderGrid('eigen')}
               </View>
             }
@@ -2514,12 +2502,7 @@ export default function ExploreScreen() {
               ) : null
             }
             ListEmptyComponent={
-              <View
-                style={{
-                  paddingTop: chromeTotalHeight + 12,
-                  marginHorizontal: -14,
-                }}
-              >
+              <View style={{ marginHorizontal: -14 }}>
                 {renderGrid('marken')}
               </View>
             }
