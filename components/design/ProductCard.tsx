@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Image, Platform, Pressable, Text, View } from 'react-native';
 import {
   fontFamily,
@@ -121,6 +121,19 @@ function ProductCardImpl({
   // helper.
   const resolvedImageUri = imageUri ?? getProductImage(product);
 
+  // Track whether the product image has actually loaded into memory.
+  // While we're waiting (network fetch / decode), we render a Shimmer
+  // overlay on top so the card never shows a blank white square.
+  // useState is plenty here — no Reanimated worklets needed (the
+  // Shimmer's pulse already runs on the UI thread internally), so
+  // this stays cheap even with 60+ tiles mounted across PagerView
+  // pages. Reset on URI change so paginated rows re-shimmer until
+  // their image arrives.
+  const [imageLoaded, setImageLoaded] = useState(false);
+  React.useEffect(() => {
+    setImageLoaded(false);
+  }, [resolvedImageUri]);
+
   return (
     <Pressable
       onPress={onPress}
@@ -144,21 +157,44 @@ function ProductCardImpl({
         }}
       >
         {resolvedImageUri ? (
-          // Plain RN-Image (KEIN Reanimated-Wrapper hier!) — wir
-          // hatten kurzzeitig ein FadingImage mit useSharedValue +
-          // useAnimatedStyle pro Karte. Bei 20-40 mounted Karten in 3
-          // PagerView-Pages = 60-120 Worklets, kombiniert mit Scroll-
-          // Handler-Worklets + Chrome-Collapse-Animations + Shadows
-          // = spürbares Scroll-Stocking. RNs `fadeDuration`-Prop
-          // macht den Soft-Fade auf Android nativ (kein JS/Worklet),
-          // iOS dekodiert Bilder so schnell dass kein expliziter
-          // Fade nötig ist.
-          <Image
-            source={{ uri: resolvedImageUri }}
-            style={{ width: '100%', height: '100%' }}
-            resizeMode="contain"
-            fadeDuration={200}
-          />
+          <>
+            {/* Plain RN-Image (KEIN Reanimated-Wrapper hier!) — wir
+                hatten kurzzeitig ein FadingImage mit useSharedValue +
+                useAnimatedStyle pro Karte. Bei 20-40 mounted Karten
+                in 3 PagerView-Pages = 60-120 Worklets, kombiniert
+                mit Scroll-Handler-Worklets + Chrome-Collapse-Anims
+                + Shadows = spürbares Scroll-Stocking. RNs
+                `fadeDuration`-Prop macht den Soft-Fade auf Android
+                nativ; iOS dekodiert Bilder so schnell dass kein
+                expliziter Fade nötig ist. */}
+            <Image
+              source={{ uri: resolvedImageUri }}
+              style={{ width: '100%', height: '100%' }}
+              resizeMode="contain"
+              fadeDuration={200}
+              onLoad={() => setImageLoaded(true)}
+              onError={() => setImageLoaded(true)}
+            />
+            {/* Shimmer overlay — covers the image area until onLoad
+                fires (or onError, since we don't want infinite
+                shimmer on a 404). Sits absolute so it doesn't push
+                the layout around. Pointer-events:none lets taps fall
+                through to the parent Pressable. */}
+            {!imageLoaded ? (
+              <View
+                pointerEvents="none"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                }}
+              >
+                <Shimmer width="100%" height={imageHeight} radius={0} />
+              </View>
+            ) : null}
+          </>
         ) : (
           <View
             style={{
