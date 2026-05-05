@@ -624,7 +624,14 @@ df = pd.DataFrame([to_row(r) for r in page_receipts])
 display_df = df.drop(columns=["_id_full"])
 
 # Click-to-select: st.dataframe with selection_mode='single-row' returns
-# the selected indexes in the event object on rerun. Streamlit ≥1.35.
+# the selected indexes in the event object on rerun (Streamlit ≥1.35).
+#
+# Key includes the current page so the selection state resets cleanly
+# when the user paginates (otherwise stale row indexes would point at
+# wrong bons after page change).
+current_page = int(st.session_state.get("bon_page", 1))
+table_key = f"bon_table_p{current_page}"
+
 selection_event = st.dataframe(
     display_df,
     use_container_width=True,
@@ -648,53 +655,70 @@ selection_event = st.dataframe(
     },
     selection_mode="single-row",
     on_select="rerun",
-    key="bon_table",
+    key=table_key,
 )
 
-st.caption("👆 Klick auf eine Zeile, um die Bon-Details unten anzuzeigen.")
-
 
 # ---------------------------------------------------------------------------
-# Detail view
+# Detail view — row-click is THE selection mechanism. Falls back to first
+# bon of the current page so the detail panel is never empty.
 # ---------------------------------------------------------------------------
 
-st.markdown("---")
-st.markdown("## 🔍 Bon-Detail")
-
-# Resolve selected bon: row-click first, fall back to manual selectbox
-selected_id: Optional[str] = None
+# Pull the row index Streamlit returned for this rerun
+sel_rows: list[int] = []
 try:
-    sel_rows = (selection_event or {}).get("selection", {}).get("rows") or []
-    if sel_rows:
-        selected_id = page_receipts[sel_rows[0]]["_id"]
+    sel = getattr(selection_event, "selection", None) or (selection_event or {}).get("selection", {})
+    sel_rows = list(getattr(sel, "rows", None) or sel.get("rows", []) or [])
 except Exception:  # noqa: BLE001
+    sel_rows = []
+
+if sel_rows and 0 <= sel_rows[0] < len(page_receipts):
+    selected_id = page_receipts[sel_rows[0]]["_id"]
+    selection_origin = "row-click"
+elif page_receipts:
+    selected_id = page_receipts[0]["_id"]
+    selection_origin = "default (first on page)"
+else:
     selected_id = None
-
-# Always show a selectbox too (drives detail when nothing is row-selected,
-# OR lets you pick from outside the current page).
-default_index = 0
-if selected_id is not None:
-    try:
-        default_index = [r["_id"] for r in receipts].index(selected_id)
-    except ValueError:
-        default_index = 0
-
-picked = st.selectbox(
-    "…oder per ID auswählen (auch von anderen Seiten)",
-    options=[r["_id"] for r in receipts],
-    format_func=lambda i: (
-        f"{i[:10]}  ·  "
-        f"{next(((r.get('merchant') or {}).get('name') or '?' for r in receipts if r['_id'] == i), '?')}"
-        f"  ·  {next((r.get('status') for r in receipts if r['_id'] == i), '?')}"
-    ),
-    index=default_index,
-    key="bon_picker",
-)
-# Selectbox wins if the user explicitly picked something different
-if picked and picked != selected_id:
-    selected_id = picked
+    selection_origin = "—"
 
 selected = next((r for r in receipts if r["_id"] == selected_id), None)
+
+st.markdown("---")
+st.markdown(
+    f"## 🔍 Bon-Detail "
+    f"<span style='font-size:13px;color:#57606a;font-weight:400'>"
+    f"({selection_origin}: <code>{selected_id[:10] if selected_id else '—'}</code>)"
+    f"</span>",
+    unsafe_allow_html=True,
+)
+st.caption(
+    "👆 Klick eine Zeile in der Tabelle oben, um den Bon hier zu sehen. "
+    "Wenn nichts gewählt: erste Zeile der aktuellen Seite."
+)
+
+# Cross-page picker (doesn't drive selection — opens that bon in a new page)
+with st.expander("Bon von einer anderen Seite öffnen"):
+    if total_rows > PAGE_SIZE:
+        all_ids = [r["_id"] for r in receipts]
+        cross_picked = st.selectbox(
+            "Wähle einen Bon (auch über alle Seiten hinweg)",
+            options=all_ids,
+            format_func=lambda i: (
+                f"{i[:10]}  ·  "
+                f"{next(((r.get('merchant') or {}).get('name') or '?' for r in receipts if r['_id'] == i), '?')}"
+                f"  ·  {next((r.get('status') for r in receipts if r['_id'] == i), '?')}"
+            ),
+            index=0,
+            key="cross_page_picker",
+        )
+        if st.button("Auf diesen Bon springen"):
+            target_idx = all_ids.index(cross_picked)
+            target_page = (target_idx // PAGE_SIZE) + 1
+            st.session_state.bon_page = target_page
+            st.rerun()
+    else:
+        st.caption("Nur eine Seite — alle Bons sind oben in der Tabelle sichtbar.")
 
 
 def render_status_pill(status: Optional[str]) -> str:
