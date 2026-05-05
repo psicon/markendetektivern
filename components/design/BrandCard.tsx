@@ -1,9 +1,11 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import React from 'react';
-import { Image, Platform, Pressable, Text, View } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
+import React, { useEffect, useState } from 'react';
+import { Platform, Pressable, Text, View } from 'react-native';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { getProductImage } from '@/lib/utils/productImage';
+import { Shimmer } from './Skeletons';
 
 type Props = {
   title: string;
@@ -78,6 +80,14 @@ function BrandCardImpl({
 
   const resolvedImageUri = imageUri ?? getProductImage(product);
 
+  // Same shimmer-until-loaded behaviour as ProductCard so brand
+  // tiles never flash blank white before the image arrives. Reset
+  // on URI change so paginated / recycled cards re-shimmer.
+  const [imageLoaded, setImageLoaded] = useState(false);
+  useEffect(() => {
+    setImageLoaded(false);
+  }, [resolvedImageUri]);
+
   return (
     <Pressable
       onPress={onPress}
@@ -100,14 +110,31 @@ function BrandCardImpl({
         }}
       >
         {resolvedImageUri ? (
-          // Plain RN-Image — siehe ProductCard für die Performance-
-          // Begründung gegen FadingImage in der Grid-Zelle.
-          <Image
-            source={{ uri: resolvedImageUri }}
-            style={{ width: '100%', height: '100%' }}
-            resizeMode="contain"
-            fadeDuration={200}
-          />
+          <>
+            <ExpoImage
+              source={{ uri: resolvedImageUri }}
+              style={{ width: '100%', height: '100%' }}
+              contentFit="contain"
+              transition={150}
+              cachePolicy="memory-disk"
+              onLoad={() => setImageLoaded(true)}
+              onError={() => setImageLoaded(true)}
+            />
+            {!imageLoaded ? (
+              <View
+                pointerEvents="none"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                }}
+              >
+                <Shimmer width="100%" height={162} radius={0} />
+              </View>
+            ) : null}
+          </>
         ) : (
           <View
             style={{
@@ -178,10 +205,11 @@ function BrandCardImpl({
                   borderColor: theme.border,
                 }}
               >
-                <Image
+                <ExpoImage
                   source={{ uri: brandLogoUri }}
                   style={{ width: '100%', height: '100%' }}
-                  resizeMode="contain"
+                  contentFit="contain"
+                  cachePolicy="memory-disk"
                 />
               </View>
             ) : null}
