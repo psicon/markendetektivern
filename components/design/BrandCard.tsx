@@ -38,6 +38,10 @@ type Props = {
    */
   infos?: string | null;
   onInfoPress?: () => void;
+  /** Height override — when set, the Pressable fills exactly this
+   *  many px so adjacent cards in a grid row are visually identical
+   *  height regardless of internal content length. */
+  height?: number;
 };
 
 function formatEur(value: number): string {
@@ -68,6 +72,7 @@ function BrandCardImpl({
   onPress,
   infos,
   onInfoPress,
+  height,
 }: Props) {
   const { theme, shadows } = useTokens();
 
@@ -78,6 +83,7 @@ function BrandCardImpl({
       onPress={onPress}
       style={({ pressed }) => ({
         width: '100%',
+        ...(height ? { height } : null),
         backgroundColor: theme.surface,
         borderRadius: radii.lg,
         overflow: 'hidden',

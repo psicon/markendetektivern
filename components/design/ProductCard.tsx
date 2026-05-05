@@ -62,6 +62,10 @@ type Props = {
   onPress?: () => void;
   /** Width override (defaults: horizontal=168, grid='100%'). */
   width?: number | string;
+  /** Height override — when set, the Pressable fills exactly this
+   *  many px so the card's white visual is uniform across rows. Use
+   *  in grids where adjacent cards have different content lengths. */
+  height?: number;
   /**
    * Optionale Overlay-Slots — der Top-Rated-Card-Wrapper auf Home
    * nutzt sie, um Rank-Badge oben links und Rating-Pill unten links
@@ -105,6 +109,7 @@ function ProductCardImpl({
   variant = 'horizontal',
   onPress,
   width,
+  height,
   imageOverlayTopLeft,
   imageOverlayBottomLeft,
   footer,
@@ -140,6 +145,7 @@ function ProductCardImpl({
       onPress={onPress}
       style={({ pressed }) => ({
         width: cardWidth,
+        ...(height ? { height } : null),
         backgroundColor: theme.surface,
         borderRadius: radii.lg,
         overflow: 'hidden',
