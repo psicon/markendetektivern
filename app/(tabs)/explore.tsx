@@ -914,7 +914,20 @@ export default function ExploreScreen() {
     const pos = e.nativeEvent.position;
     pageIndexShared.value = pos;
     const k: Tab = TAB_AT_PAGE[pos] ?? 'eigen';
-    if (k !== tab) setTab(k);
+    if (k !== tab) {
+      setTab(k);
+      // Same scroll-to-top semantic as switchTab: when we land on a
+      // new tab via swipe, snap the destination to offset 0 so the
+      // first card row isn't clipped behind the chrome. animated:
+      // false → instant snap, no visible scroll animation.
+      const destRef =
+        k === 'alle'
+          ? alleScrollRef
+          : k === 'eigen'
+            ? eigenScrollRef
+            : markenScrollRef;
+      destRef.current?.scrollToOffset?.({ offset: 0, animated: false });
+    }
   }, [tab, pageIndexShared]);
 
 
