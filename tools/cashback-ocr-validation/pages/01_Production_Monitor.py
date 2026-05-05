@@ -159,10 +159,10 @@ with st.sidebar:
     )
     engine_filter = st.multiselect(
         "Engine",
-        options=["cv-hybrid", "docai", "gemini-direct", "(alt: gemini)"],
-        default=["cv-hybrid", "docai", "gemini-direct"],
-        help="Older bons might have engine=null (logged before Phase 2.2). "
-             "Filter by 'gemini-direct' to see legacy runs.",
+        options=["cv-hybrid", "docai", "gemini-direct", "legacy/null"],
+        default=["cv-hybrid", "docai", "gemini-direct", "legacy/null"],
+        help="'legacy/null' = Bons aus der Zeit VOR Phase 2.2 (heute deployed). "
+             "Die haben kein engine-Feld auf dem Doc. Standardmäßig drin.",
     )
 
     st.markdown("---")
@@ -226,7 +226,7 @@ def passes_filter(r: dict) -> bool:
     if status_filter and r.get("status") not in status_filter:
         return False
     if engine_filter:
-        engine = (r.get("ocr") or {}).get("engine") or "(alt: gemini)"
+        engine = (r.get("ocr") or {}).get("engine") or "legacy/null"
         if engine not in engine_filter:
             return False
     return True
