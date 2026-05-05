@@ -959,22 +959,13 @@ function QuickActionTile({
         opacity: pressed ? 0.85 : 1,
       })}
     >
-      <View
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: 8,
-          backgroundColor: action.dark ? 'rgba(255,255,255,0.22)' : '#fff',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <MaterialCommunityIcons
-          name={action.icon}
-          size={17}
-          color={action.dark ? '#fff' : '#0d8575'}
-        />
-      </View>
+      {/* Icon rendered directly, matching the Home Schnellzugriff
+          card style. White on dark tiles, theme.text on light. */}
+      <MaterialCommunityIcons
+        name={action.icon}
+        size={22}
+        color={fg}
+      />
 
       <View>
         <Text
