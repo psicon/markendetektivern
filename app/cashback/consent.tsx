@@ -1,29 +1,30 @@
 /**
- * Cashback consent screen — gate for the cashback flow.
+ * Cashback consent — gate before any Bon upload.
  *
- * User MUST accept here before they can upload any Bons. Consent
- * is recorded with timestamp + version + appVersion to /users/{uid}.
+ * Kept short on purpose: a long DSGVO essay drives users away. The
+ * regulator wants the user to know (a) what data is processed, (b)
+ * the legal basis, (c) where to read more — three bullets + a link
+ * to the full Datenschutzerklärung covers that.
  *
- * UX:
- *  - DetailHeader with back button (cancel = navigate back)
- *  - Hero gradient block explaining the value
- *  - Bullet list with what they're agreeing to (DSGVO §13 minimum)
- *  - "Akzeptieren & weiter" CTA → records consent → routes to /cashback/capture
- *  - "Abbrechen" link → router.back()
- *
- * No emojis in body unless requested. We use MaterialCommunityIcons
- * to stay consistent with the rest of the app.
+ * If the user already accepted (valid version + timestamp), we skip
+ * straight to /cashback/capture in the mount effect — they don't see
+ * this screen on second-and-onwards taps.
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useNavigation } from 'expo-router';
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from 'react';
 import {
   ActivityIndicator,
   Alert,
   Linking,
-  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -31,8 +32,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
-import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import {
+  DETAIL_HEADER_ROW_HEIGHT,
+  DetailHeader,
+} from '@/components/design/DetailHeader';
+import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import {
@@ -44,46 +48,33 @@ import {
 const PRIVACY_URL = 'https://markendetektive.de/datenschutz';
 const TERMS_URL = 'https://markendetektive.de/agb';
 
+// Three plain-language bullets — the legal minimum, not marketing.
+// Order: WHAT we do → WHAT we keep → HOW you opt out.
 const BULLETS: { icon: string; title: string; body: string }[] = [
   {
     icon: 'camera-outline',
-    title: 'Bon-Foto wird verarbeitet',
-    body:
-      'Du machst ein Foto deines Kassenbons. Wir senden es verschlüsselt an unseren OCR-Service, um Filiale, Datum und Artikel auszulesen.',
+    title: 'Bon-Foto wird ausgelesen',
+    body: 'Filiale, Datum und Artikel werden aus deinem Foto extrahiert.',
   },
   {
     icon: 'database-check-outline',
-    title: 'Wir speichern strukturierte Daten',
-    body:
-      'Wir speichern Filiale, Datum, gekaufte Produkte und den Endbetrag. Das Bon-Bild selbst wird nach 30 Tagen automatisch gelöscht.',
-  },
-  {
-    icon: 'shield-check-outline',
-    title: 'Betrugsschutz',
-    body:
-      'Wir prüfen Bons automatisch auf Manipulation, Doppel-Uploads und KI-generierte Fakes. Bei Auffälligkeiten halten wir die Auszahlung an.',
-  },
-  {
-    icon: 'cash-multiple',
-    title: 'Auszahlung über Tremendous',
-    body:
-      'Ab 15 € Cashback-Guthaben kannst du dir das Geld via PayPal, SEPA oder Gutschein auszahlen lassen. Steuerliche Pflichten liegen bei dir.',
+    title: 'Bild wird nach 30 Tagen gelöscht',
+    body: 'Die strukturierten Daten bleiben gespeichert, das Foto nicht.',
   },
   {
     icon: 'account-cancel-outline',
-    title: 'Du behältst die Kontrolle',
-    body:
-      'Du kannst deine Einwilligung jederzeit widerrufen. Bereits gesammeltes Guthaben bleibt erhalten und ist auszahlbar.',
+    title: 'Jederzeit widerrufbar',
+    body: 'Bereits gesammeltes Cashback bleibt auszahlbar.',
   },
 ];
 
 export default function CashbackConsentScreen() {
-  const { theme, shadows } = useTokens();
+  const { theme } = useTokens();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { user, isAnonymous } = useAuth();
 
-  const [consentVersion, setConsentVersion] = useState<string>('…');
+  const [, setConsentVersion] = useState<string>('');
   const [isSubmitting, setSubmitting] = useState(false);
   const [hasAccepted, setHasAccepted] = useState(false);
 
@@ -91,18 +82,16 @@ export default function CashbackConsentScreen() {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
-  // Read the current config + existing consent status.
+  // Skip the screen entirely if consent is already valid + current.
   useEffect(() => {
     let alive = true;
     (async () => {
       const config = await getCashbackConfig();
       if (!alive) return;
       setConsentVersion(config.consentVersion);
-
       if (user?.uid) {
         const valid = await hasValidCashbackConsent(user.uid);
         if (alive && valid) {
-          // Already consented — go straight to capture.
           router.replace('/cashback/capture');
         }
       }
@@ -116,7 +105,7 @@ export default function CashbackConsentScreen() {
     if (!user?.uid) {
       Alert.alert(
         'Bitte erst anmelden',
-        'Cashback ist nur für angemeldete Konten verfügbar. Logge dich ein oder erstelle ein Konto, um mitzumachen.',
+        'Cashback ist nur für angemeldete Konten verfügbar.',
         [
           { text: 'Abbrechen', style: 'cancel' },
           { text: 'Zum Login', onPress: () => router.push('/auth/login') },
@@ -124,11 +113,10 @@ export default function CashbackConsentScreen() {
       );
       return;
     }
-
     if (isAnonymous) {
       Alert.alert(
         'Konto erforderlich',
-        'Cashback brauchst du ein vollständiges Konto. Bei einer anonymen Sitzung ist eine Auszahlung nicht möglich.',
+        'Für Cashback brauchst du ein vollständiges Konto.',
         [
           { text: 'Abbrechen', style: 'cancel' },
           { text: 'Konto erstellen', onPress: () => router.push('/auth/register') },
@@ -141,229 +129,221 @@ export default function CashbackConsentScreen() {
     try {
       await acceptCashbackConsent(user.uid);
       setHasAccepted(true);
-      // Forward to the capture screen now that consent landed.
-      setTimeout(() => {
-        router.replace('/cashback/capture');
-      }, 350);
+      setTimeout(() => router.replace('/cashback/capture'), 300);
     } catch (error: any) {
-      console.warn('⚠️ acceptCashbackConsent failed:', error);
+      console.warn('acceptCashbackConsent failed:', error);
       Alert.alert(
         'Speichern fehlgeschlagen',
-        'Wir konnten deine Einwilligung gerade nicht speichern. Bitte prüfe deine Internetverbindung und versuch es erneut.',
+        'Bitte prüfe deine Internetverbindung und versuch es erneut.',
       );
     } finally {
       setSubmitting(false);
     }
   }, [user?.uid, isAnonymous]);
 
-  const handleCancel = useCallback(() => {
-    router.back();
-  }, []);
+  const handleCancel = useCallback(() => router.back(), []);
 
-  const cardBg = theme.surface ?? theme.bg;
-  const headerBgEnd = theme.primary ?? '#0d8575';
+  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
+  const accent = theme.primary ?? '#0d8575';
 
   const styles = useMemo(
     () => ({
-      heroGradient: {
-        marginHorizontal: 16,
-        marginTop: 12,
-        borderRadius: radii.lg,
-        padding: 20,
-        ...(shadows.md ?? {}),
+      hero: {
+        marginHorizontal: 20,
+        marginTop: 6,
+        borderRadius: 18,
+        paddingHorizontal: 18,
+        paddingVertical: 22,
+        overflow: 'hidden' as const,
+      },
+      heroIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 12,
+        backgroundColor: 'rgba(255,255,255,0.22)',
+        alignItems: 'center' as const,
+        justifyContent: 'center' as const,
       },
       heroTitle: {
         color: '#fff',
-        fontSize: 22,
-        fontFamily: fontFamily.heading,
-        fontWeight: fontWeight.bold as any,
-        marginTop: 12,
+        fontSize: 20,
+        fontFamily,
+        fontWeight: fontWeight.extraBold as any,
+        letterSpacing: -0.3,
+        marginTop: 14,
       },
       heroBody: {
         color: 'rgba(255,255,255,0.92)',
-        fontSize: 15,
-        lineHeight: 22,
-        fontFamily: fontFamily.body,
-        marginTop: 8,
-      },
-      sectionTitle: {
-        color: theme.text,
         fontSize: 13,
-        fontFamily: fontFamily.body,
-        fontWeight: fontWeight.bold as any,
-        textTransform: 'uppercase' as const,
-        letterSpacing: 0.7,
-        marginHorizontal: 20,
-        marginTop: 24,
-        marginBottom: 8,
+        lineHeight: 19,
+        fontFamily,
+        marginTop: 6,
       },
-      bulletCard: {
-        marginHorizontal: 16,
-        marginVertical: 6,
-        backgroundColor: cardBg,
-        borderRadius: radii.lg,
-        padding: 16,
+      bulletList: {
+        marginTop: 18,
+        marginHorizontal: 20,
+        backgroundColor: theme.surface,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
+        overflow: 'hidden' as const,
+      },
+      bulletRow: {
         flexDirection: 'row' as const,
-        gap: 14,
-        ...(shadows.md ?? {}),
+        alignItems: 'flex-start' as const,
+        gap: 12,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+      },
+      bulletDivider: {
+        height: 1,
+        backgroundColor: theme.border ?? 'rgba(0,0,0,0.06)',
+        marginLeft: 14 + 32 + 12, // align under text, after icon column
       },
       bulletIconBox: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        backgroundColor: accent + '18',
         alignItems: 'center' as const,
         justifyContent: 'center' as const,
-        backgroundColor: theme.primary
-          ? `${theme.primary}15`
-          : 'rgba(13,133,117,0.1)',
+        marginTop: 1,
       },
       bulletTitle: {
         color: theme.text,
-        fontSize: 15,
-        fontFamily: fontFamily.body,
+        fontSize: 14,
+        fontFamily,
         fontWeight: fontWeight.bold as any,
       },
       bulletBody: {
         color: theme.textSub,
-        fontSize: 14,
-        lineHeight: 20,
-        marginTop: 4,
-        fontFamily: fontFamily.body,
-      },
-      legalBlock: {
-        marginHorizontal: 20,
-        marginTop: 24,
-        marginBottom: 12,
+        fontSize: 12,
+        lineHeight: 17,
+        fontFamily,
+        marginTop: 2,
       },
       legalText: {
-        color: theme.textSub,
-        fontSize: 12,
-        lineHeight: 18,
-        fontFamily: fontFamily.body,
+        marginTop: 16,
+        marginHorizontal: 20,
+        color: theme.textMuted,
+        fontSize: 11,
+        lineHeight: 16,
+        fontFamily,
       },
       legalLink: {
-        color: theme.primary ?? headerBgEnd,
+        color: accent,
         textDecorationLine: 'underline' as const,
       },
       footer: {
         paddingHorizontal: 16,
         paddingTop: 12,
-        paddingBottom: insets.bottom + 16,
-        gap: 10,
+        paddingBottom: insets.bottom + 12,
+        gap: 8,
         borderTopWidth: 1,
         borderTopColor: theme.border ?? 'rgba(0,0,0,0.06)',
         backgroundColor: theme.bg,
       },
       acceptButton: {
-        backgroundColor: theme.primary ?? headerBgEnd,
+        backgroundColor: accent,
         borderRadius: 14,
-        paddingVertical: 14,
+        height: 52,
         alignItems: 'center' as const,
         justifyContent: 'center' as const,
         flexDirection: 'row' as const,
         gap: 8,
         opacity: isSubmitting ? 0.7 : 1,
       },
-      acceptButtonText: {
+      acceptText: {
         color: '#fff',
-        fontFamily: fontFamily.body,
-        fontWeight: fontWeight.bold as any,
-        fontSize: 16,
+        fontFamily,
+        fontWeight: fontWeight.extraBold as any,
+        fontSize: 15,
+        letterSpacing: 0.2,
       },
-      cancelButton: {
-        paddingVertical: 12,
-        alignItems: 'center' as const,
-      },
-      cancelButtonText: {
+      cancelText: {
         color: theme.textSub,
-        fontFamily: fontFamily.body,
-        fontSize: 14,
-      },
-      versionBadge: {
-        alignSelf: 'flex-start' as const,
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 14,
-        backgroundColor: 'rgba(255,255,255,0.18)',
-      },
-      versionBadgeText: {
-        color: 'rgba(255,255,255,0.9)',
-        fontSize: 11,
-        fontFamily: fontFamily.body,
-        fontWeight: fontWeight.medium as any,
+        fontFamily,
+        fontSize: 13,
+        textAlign: 'center' as const,
+        paddingVertical: 8,
       },
     }),
-    [theme, shadows, cardBg, insets.bottom, isSubmitting, headerBgEnd],
+    [theme, accent, insets.bottom, isSubmitting],
   );
-
-  const headerOffset = insets.top + DETAIL_HEADER_ROW_HEIGHT;
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <DetailHeader title="Cashback" onBack={handleCancel} />
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingTop: headerOffset + 8, paddingBottom: 32 }}
+        contentContainerStyle={{
+          paddingTop: chromeHeight + 4,
+          paddingBottom: 24,
+        }}
         showsVerticalScrollIndicator={false}
       >
         <LinearGradient
-          colors={[headerBgEnd, '#0a6e5f']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.heroGradient}
+          colors={['#0a6f62', '#0d8575', '#10a18a']}
+          start={{ x: -1, y: 0.34 }}
+          end={{ x: 1, y: -0.34 }}
+          style={styles.hero}
         >
-          <View style={styles.versionBadge}>
-            <Text style={styles.versionBadgeText}>Einwilligung {consentVersion}</Text>
+          <View style={styles.heroIcon}>
+            <MaterialCommunityIcons
+              name="cash-multiple"
+              size={22}
+              color="#fff"
+            />
           </View>
-          <MaterialCommunityIcons name="cash-multiple" size={36} color="#fff" />
-          <Text style={styles.heroTitle}>Echtes Cashback. Keine Punkte.</Text>
+          <Text style={styles.heroTitle}>Cashback freischalten</Text>
           <Text style={styles.heroBody}>
-            Lade nach dem Einkauf deinen Kassenbon hoch. Wir prüfen die enthaltenen
-            Produkte automatisch und schreiben dir Cashback in Euro gut. Auszahlung
-            ab 15 € — wahlweise als PayPal, SEPA-Überweisung oder Gutschein.
+            Bon hochladen, automatisch auswerten lassen, ab 15 € auszahlen.
           </Text>
         </LinearGradient>
 
-        <Text style={styles.sectionTitle}>Was du zustimmst</Text>
-
-        {BULLETS.map((bullet) => (
-          <View key={bullet.title} style={styles.bulletCard}>
-            <View style={styles.bulletIconBox}>
-              <MaterialCommunityIcons
-                name={bullet.icon as any}
-                size={22}
-                color={theme.primary ?? headerBgEnd}
-              />
+        <View style={styles.bulletList}>
+          {BULLETS.map((bullet, idx) => (
+            <View key={bullet.title}>
+              {idx > 0 ? <View style={styles.bulletDivider} /> : null}
+              <View style={styles.bulletRow}>
+                <View style={styles.bulletIconBox}>
+                  <MaterialCommunityIcons
+                    name={bullet.icon as any}
+                    size={17}
+                    color={accent}
+                  />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.bulletTitle}>{bullet.title}</Text>
+                  <Text style={styles.bulletBody}>{bullet.body}</Text>
+                </View>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.bulletTitle}>{bullet.title}</Text>
-              <Text style={styles.bulletBody}>{bullet.body}</Text>
-            </View>
-          </View>
-        ))}
-
-        <View style={styles.legalBlock}>
-          <Text style={styles.legalText}>
-            Mit der Nutzung von Cashback stimmst du unseren{' '}
-            <Text style={styles.legalLink} onPress={() => Linking.openURL(TERMS_URL)}>
-              AGB
-            </Text>{' '}
-            und der{' '}
-            <Text style={styles.legalLink} onPress={() => Linking.openURL(PRIVACY_URL)}>
-              Datenschutzerklärung
-            </Text>{' '}
-            zu. Auszahlungen erfolgen über unseren Partner Tremendous, deren Bedingungen
-            zusätzlich gelten. Die Verarbeitung deiner Bon-Daten erfolgt auf Servern in
-            der Europäischen Union.
-          </Text>
+          ))}
         </View>
+
+        <Text style={styles.legalText}>
+          Mit "Akzeptieren" stimmst du unseren{' '}
+          <Text
+            style={styles.legalLink}
+            onPress={() => Linking.openURL(TERMS_URL)}
+          >
+            AGB
+          </Text>
+          {' '}und der{' '}
+          <Text
+            style={styles.legalLink}
+            onPress={() => Linking.openURL(PRIVACY_URL)}
+          >
+            Datenschutzerklärung
+          </Text>
+          {' '}zu. Verarbeitung in der EU. Auszahlung über Tremendous.
+        </Text>
       </ScrollView>
 
       <View style={styles.footer}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Cashback-Einwilligung akzeptieren und fortfahren"
-          accessibilityState={{ disabled: isSubmitting || hasAccepted }}
           disabled={isSubmitting || hasAccepted}
           style={styles.acceptButton}
           onPress={handleAccept}
@@ -377,20 +357,15 @@ export default function CashbackConsentScreen() {
                 size={18}
                 color="#fff"
               />
-              <Text style={styles.acceptButtonText}>
-                {hasAccepted ? 'Gespeichert' : 'Akzeptieren & Bon scannen'}
+              <Text style={styles.acceptText}>
+                {hasAccepted ? 'Gespeichert' : 'Akzeptieren & weiter'}
               </Text>
             </>
           )}
         </Pressable>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Abbrechen"
-          style={styles.cancelButton}
-          onPress={handleCancel}
-        >
-          <Text style={styles.cancelButtonText}>Jetzt nicht</Text>
+        <Pressable accessibilityRole="button" onPress={handleCancel}>
+          <Text style={styles.cancelText}>Jetzt nicht</Text>
         </Pressable>
       </View>
     </View>
