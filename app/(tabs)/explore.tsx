@@ -1742,7 +1742,7 @@ export default function ExploreScreen() {
         const unit = packTypId ? packungstypenMap[packTypId] : undefined;
         const { sizeLabel, unitPriceLabel } = formatPack(p.packSize, unit, p.preis);
         return (
-          <View style={{ paddingHorizontal: 6, paddingBottom: 12, minHeight: 268 }}>
+          <View style={{ paddingHorizontal: 6, paddingBottom: 12, height: 290 }}>
             <ProductCard
               title={p.name ?? ''}
               brand={handelsmarkeName ?? null}
@@ -1766,7 +1766,7 @@ export default function ExploreScreen() {
       const unit = packTypId ? packungstypenMap[packTypId] : undefined;
       const { sizeLabel, unitPriceLabel } = formatPack(m.packSize, unit, m.preis);
       return (
-        <View style={{ paddingHorizontal: 6, paddingBottom: 12, minHeight: 268 }}>
+        <View style={{ paddingHorizontal: 6, paddingBottom: 12, height: 290 }}>
           <BrandCard
             title={m.name ?? ''}
             brand={marke}
@@ -2330,8 +2330,8 @@ export default function ExploreScreen() {
                 renderListCard(item, index, 'alle')
               }
               numColumns={2}
-              estimatedItemSize={240}
-              recycleItems
+              estimatedItemSize={290}
+              initialScrollIndex={0}
               onScroll={scrollHandlerAlle}
               scrollEventThrottle={16}
               keyboardShouldPersistTaps="handled"
@@ -2404,8 +2404,8 @@ export default function ExploreScreen() {
                 renderListCard(item, index, 'eigen')
               }
               numColumns={2}
-              estimatedItemSize={240}
-              recycleItems
+              estimatedItemSize={290}
+              initialScrollIndex={0}
               onScroll={scrollHandlerEigen}
               scrollEventThrottle={16}
               keyboardShouldPersistTaps="handled"
@@ -2471,8 +2471,8 @@ export default function ExploreScreen() {
                 renderListCard(item, index, 'marken')
               }
               numColumns={2}
-              estimatedItemSize={240}
-              recycleItems
+              estimatedItemSize={290}
+              initialScrollIndex={0}
               onScroll={scrollHandlerMarken}
               scrollEventThrottle={16}
               keyboardShouldPersistTaps="handled"
