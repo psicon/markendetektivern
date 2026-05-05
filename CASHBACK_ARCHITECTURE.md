@@ -235,12 +235,13 @@ at payout is the hammer.
 
 ### L1 — Image forensics (server, on upload)
 
-- Recompute pHash + dHash + aHash → reject on duplicate match across
-  all-time receipts (Bloom filter for fast lookup).
-- ELA (Error Level Analysis) for Photoshop signs.
-- Metadata (software tag, content provenance C2PA when present).
-- **AI-generation detector** (Hive AI / SightEngine, or in-house ResNet
-  on a curated set when we have data — Sprint 4+).
+- ✅ **dHash** (64-bit difference hash) computed server-side in `enqueueCashback` after Storage download. Stored as `capture.perceptualHashServer`. Duplicate detection runs in two passes: exact-match Firestore query, then Hamming-distance scan over the user's last 50 receipts (threshold ≤3 bits). Catches re-encoded JPEGs + small crops that sha256 misses.
+- ✅ **EXIF cross-check** via `exifr`: `DateTimeOriginal` (or `CreateDate`/`ModifyDate` fallback) compared to upload time. Hard-reject if older than `MAX_BON_AGE_DAYS` or future-dated by >6h. Soft-flag if gap > 1 day. Software tag matched against `EDITED_SOFTWARE_PATTERNS` (Photoshop, GIMP, Pixelmator, Affinity, Photopea, Paint.NET) → `forensicFlags.suspiciousSoftware`.
+- ⏭️ pHash (DCT-based, more transform-robust than dHash). Add when we see false-negatives on dHash.
+- ⏭️ Bloom filter for cross-user dHash dedup (currently per-user only — tradeoff: privacy + cheaper. Cross-user lands when L4 device-graph clustering is built).
+- ⏭️ ELA (Error Level Analysis) for Photoshop signs.
+- ⏭️ Content provenance C2PA when present.
+- ⏭️ **AI-generation detector** (Hive AI / SightEngine, or in-house ResNet on a curated set when we have data — Sprint 4+).
 
 ### L2 — OCR sanity
 
@@ -543,7 +544,8 @@ Existing relevant code/projects (NOT in this repo):
 | 2.1 — Real FCM | ⏭️ Pending | — | Needs `@react-native-firebase/messaging` + dev-client rebuild |
 | 3 — Catalog match | ⏭️ Pending | — | productId/brandId mapping per OCR'd item |
 | 4 — Per-user product index | ⏭️ Pending | — | journeys + purchased_products writes |
-| 4.5 — Trust + behavioural | ⏭️ Pending | — | trust_score model, device graph, IP rep |
+| 4.5a — L1 image forensics | ✅ Done | this commit | server-trusted dHash + EXIF cross-check + near-duplicate scan in `enqueueCashback`. Library in `lib/forensics.js`, deps `sharp` + `exifr` |
+| 4.5b — Trust + behavioural | ⏭️ Pending | — | trust_score model, device graph, IP rep |
 | 5 — AI Review (LLM-as-judge) | ⏭️ Pending | — | Gemini 2.5 Pro reviewer Cloud Function |
 | 6 — Tremendous payouts | ⏭️ Pending | — | needs Tremendous API key |
 | 7 — RevealyIQ dashboard | ⏭️ Pending | — | post-MVP integration into existing project |

@@ -54,6 +54,12 @@ const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 const { extractReceipt, reconcile, countEligibleItems, tierFor, DEFAULT_MODEL } = require('./lib/ocr');
 const { resolveMerchant } = require('./lib/merchant');
 const { sendCashbackReady } = require('./lib/push');
+const {
+  computeDHash,
+  hammingDistance,
+  readExifMeta,
+  deriveForensicFlags,
+} = require('./lib/forensics');
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -66,6 +72,19 @@ const CONFIG_DOC_PATH = 'cashback_config/v1';
 // client). Avoids backdated bons + bons forgotten in a drawer for
 // months. Configurable via cashback_config.maxBonAgeDays in future.
 const MAX_BON_AGE_DAYS = 5;
+
+// Hamming-distance threshold for "near-duplicate" dHash matches.
+// 0 = bit-identical (same image, possibly re-encoded at different
+// JPEG quality). ≤5 still very likely the same image. We pick a
+// conservative ≤3 so we catch obvious re-uploads without false-flagging
+// distinct bons that happen to be visually similar (two Aldi bons
+// with mostly the same items).
+const DHASH_DUPLICATE_THRESHOLD = 3;
+
+// How many recent receipts to load for the near-duplicate scan.
+// Bigger = better recall, more cost per upload. 50 covers typical
+// power users (50 days @ 1 bon/day, or 50 last bons of any cadence).
+const DHASH_DEDUP_LOOKBACK = 50;
 
 // In-memory PubSub publisher (re-used across invocations).
 const pubsub = new PubSub();
@@ -291,7 +310,10 @@ async function verifyAuthFromRequest(req) {
 // ─── enqueueCashback (HTTPS) ────────────────────────────────────────
 
 exports.enqueueCashback = onRequest(
-  { region: REGION, timeoutSeconds: 30, memory: '256MiB', cors: true, invoker: 'public' },
+  // 512MiB + 60s: forensics step downloads the bon image, runs sharp
+  // (native) for dHash, parses EXIF, scans last 50 receipts for
+  // near-duplicates. ~500-800ms typical, headroom for cold-start.
+  { region: REGION, timeoutSeconds: 60, memory: '512MiB', cors: true, invoker: 'public' },
   async (req, res) => {
     if (req.method !== 'POST') {
       res.status(405).json({ code: 'method_not_allowed' });
@@ -344,7 +366,9 @@ exports.enqueueCashback = onRequest(
       return;
     }
 
-    // Idempotency: dedup on bytesHash (24h window).
+    // ─── Layer 1: exact-byte duplicate (sha256) ──────────────────────
+    // Cheapest check first: caught the trivial "user retry-tapped" case
+    // without any image processing.
     const dedupQuery = await db
       .collection('receipts')
       .where('userId', '==', uid)
@@ -373,8 +397,127 @@ exports.enqueueCashback = onRequest(
         cashbackId: existing.id,
         status: existing.get('status'),
         duplicate: true,
+        duplicateMode: 'exact',
       });
       return;
+    }
+
+    // ─── Layer 2: server-side image forensics (dHash + EXIF) ─────────
+    // This is the meaningful anti-fraud step — catches:
+    //   - same bon re-encoded at different JPEG quality (sha256 misses)
+    //   - same bon cropped slightly differently (sha256 misses)
+    //   - bons photographed weeks ago (EXIF age cross-check)
+    //   - bons edited in Photoshop/GIMP (EXIF software flag)
+    //
+    // Costs ~500-800ms (storage download + sharp resize + Firestore
+    // dedup lookup of last 50 receipts). Done BEFORE PubSub publish
+    // so we don't waste OCR cents on known-bad uploads.
+    let serverDhash = null;
+    let exifMeta = null;
+    let forensicFlags = null;
+    let serverBytesSize = 0;
+    try {
+      const bucket = admin.storage().bucket();
+      const file = bucket.file(storagePath);
+      const [bytes] = await file.download();
+      serverBytesSize = bytes.length;
+
+      // Compute server-trusted hash + read EXIF in parallel
+      const [dHash, exif] = await Promise.all([
+        computeDHash(bytes),
+        readExifMeta(bytes),
+      ]);
+      serverDhash = dHash;
+      exifMeta = exif;
+      forensicFlags = deriveForensicFlags(exif, Date.now(), MAX_BON_AGE_DAYS);
+
+      // Hard reject: EXIF says the photo is too old or future-dated
+      if (forensicFlags.exifAgeRejectable) {
+        logger.warn('forensics-reject-exif-age', {
+          uid,
+          exifAgeDays: forensicFlags.exifAgeDays,
+          maxBonAgeDays: MAX_BON_AGE_DAYS,
+        });
+        res.status(422).json({
+          code: 'bon_too_old',
+          message: forensicFlags.exifAgeDays > 0
+            ? `Bon ist ${Math.round(forensicFlags.exifAgeDays)} Tage alt — max. ${MAX_BON_AGE_DAYS} Tage erlaubt.`
+            : 'Bon-Aufnahmezeit liegt in der Zukunft — bitte Geräte-Uhr prüfen.',
+          exifAgeDays: forensicFlags.exifAgeDays,
+        });
+        return;
+      }
+
+      // Near-duplicate scan: dHash equality first (Firestore exact match,
+      // catches the bit-identical pHash case after JPEG re-encoding).
+      // Then Hamming-distance scan over the user's recent receipts to
+      // catch crop/resave attacks where bits flip a little.
+      const exactDhashQuery = await db
+        .collection('receipts')
+        .where('userId', '==', uid)
+        .where('capture.perceptualHashServer', '==', serverDhash)
+        .limit(1)
+        .get();
+
+      let nearDuplicate = null;
+      if (!exactDhashQuery.empty) {
+        nearDuplicate = { doc: exactDhashQuery.docs[0], distance: 0, mode: 'dhash_exact' };
+      } else {
+        // Hamming-distance scan: pull last N receipts that have a
+        // server-dHash, compute distance client-side. This is bounded
+        // by DHASH_DEDUP_LOOKBACK so cost is predictable.
+        const recentSnap = await db
+          .collection('receipts')
+          .where('userId', '==', uid)
+          .orderBy('createdAt', 'desc')
+          .limit(DHASH_DEDUP_LOOKBACK)
+          .get();
+        for (const d of recentSnap.docs) {
+          const otherHash = d.get('capture.perceptualHashServer');
+          if (typeof otherHash !== 'string' || otherHash.length !== serverDhash.length) continue;
+          const dist = hammingDistance(serverDhash, otherHash);
+          if (dist >= 0 && dist <= DHASH_DUPLICATE_THRESHOLD) {
+            nearDuplicate = { doc: d, distance: dist, mode: 'dhash_near' };
+            break;
+          }
+        }
+      }
+
+      if (nearDuplicate) {
+        const existing = nearDuplicate.doc;
+        if (clientUploadId && clientUploadId !== existing.id) {
+          await db
+            .doc(`users/${uid}/cashback_status/${clientUploadId}`)
+            .set(
+              {
+                status: 'superseded',
+                supersededBy: existing.id,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              { merge: true },
+            )
+            .catch(() => {});
+        }
+        logger.info('forensics-duplicate', {
+          uid,
+          existingId: existing.id,
+          mode: nearDuplicate.mode,
+          distance: nearDuplicate.distance,
+        });
+        res.status(200).json({
+          cashbackId: existing.id,
+          status: existing.get('status'),
+          duplicate: true,
+          duplicateMode: nearDuplicate.mode,
+          duplicateDistance: nearDuplicate.distance,
+        });
+        return;
+      }
+    } catch (e) {
+      // Non-fatal: if forensics fail (e.g. storage IAM hiccup), log
+      // and continue without the signal. Better to under-flag than to
+      // block legit users on infra glitches.
+      logger.warn('forensics-failed', { uid, err: e.message });
     }
 
     // Use the client-provided id (so the placeholder mirror doc and
@@ -433,14 +576,26 @@ exports.enqueueCashback = onRequest(
         appCheck: false, // wire when the App Check token lands
         deviceAttest: false,
         hash: bytesHash,
-        perceptualHash: perceptualHash || null,
+        perceptualHash: perceptualHash || null,           // client-provided, untrusted
+        perceptualHashServer: serverDhash,                // server-computed, authoritative
         capturedAt: capturedAt ? new Date(capturedAt) : new Date(),
+        // EXIF forensic signals — null when EXIF was missing/unreadable.
+        exif: exifMeta
+          ? {
+              capturedAtMs: exifMeta.capturedAtMs,
+              make: exifMeta.make,
+              model: exifMeta.model,
+              software: exifMeta.software,
+              present: exifMeta.present,
+            }
+          : null,
+        forensicFlags: forensicFlags || null,
       },
       storage: {
         bucket: admin.storage().bucket().name,
         path: storagePath,
         contentType: 'image/jpeg',
-        sizeBytes: 0, // process step fills the real number
+        sizeBytes: serverBytesSize, // we now know it from the forensics download
       },
       journey: safeJourney,
       createdAt: now,
