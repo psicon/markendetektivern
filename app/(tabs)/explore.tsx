@@ -1742,7 +1742,7 @@ export default function ExploreScreen() {
         const unit = packTypId ? packungstypenMap[packTypId] : undefined;
         const { sizeLabel, unitPriceLabel } = formatPack(p.packSize, unit, p.preis);
         return (
-          <View style={{ paddingHorizontal: 6, paddingBottom: 12 }}>
+          <View style={{ paddingHorizontal: 6, paddingBottom: 12, minHeight: 268 }}>
             <ProductCard
               title={p.name ?? ''}
               brand={handelsmarkeName ?? null}
@@ -1766,7 +1766,7 @@ export default function ExploreScreen() {
       const unit = packTypId ? packungstypenMap[packTypId] : undefined;
       const { sizeLabel, unitPriceLabel } = formatPack(m.packSize, unit, m.preis);
       return (
-        <View style={{ paddingHorizontal: 6, paddingBottom: 12 }}>
+        <View style={{ paddingHorizontal: 6, paddingBottom: 12, minHeight: 268 }}>
           <BrandCard
             title={m.name ?? ''}
             brand={marke}
@@ -1777,29 +1777,6 @@ export default function ExploreScreen() {
             unitPriceLabel={unitPriceLabel}
             alternativeCount={m.relatedProdukteIDs?.length ?? 0}
             onPress={() => openBrand(m, index)}
-            infos={(m as any).marke?.infos ?? null}
-            onInfoPress={() => {
-              const markeDoc = (m as any).marke;
-              const raw = markeDoc?.infos ?? (m as any).infos;
-              const infosText =
-                typeof raw === 'string' && raw.trim().length > 0
-                  ? raw.trim()
-                  : null;
-              const fallbackLines = [
-                markeDoc?.adresse ? String(markeDoc.adresse) : null,
-                [markeDoc?.plz, markeDoc?.stadt].filter(Boolean).join(' ') || null,
-                markeDoc?.land ? String(markeDoc.land) : null,
-              ].filter(Boolean) as string[];
-              const body =
-                infosText ??
-                (fallbackLines.length > 0
-                  ? fallbackLines.join('\n')
-                  : 'Zu dieser Marke sind aktuell keine Zusatz-Informationen hinterlegt.');
-              setInfoSheet({
-                title: markeDoc?.name || marke || m.name || 'Info',
-                body,
-              });
-            }}
           />
         </View>
       );
