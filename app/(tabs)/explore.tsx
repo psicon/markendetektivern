@@ -24,6 +24,12 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LegendList, type LegendListRef } from '@legendapp/list';
+
+// Animated wrapper around LegendList — same pattern Animated.ScrollView
+// uses internally — so the existing useAnimatedScrollHandler workers
+// (chrome collapse, banner gating) keep firing on the UI thread.
+const AnimatedLegendList = Animated.createAnimatedComponent(LegendList) as any;
 
 import { BrandCard } from '@/components/design/BrandCard';
 import { FilterChip } from '@/components/design/FilterChip';
@@ -228,9 +234,9 @@ export default function ExploreScreen() {
   // aber wir wollen ZUSÄTZLICH dass ein Re-Tap auf das Stöbern-Icon
   // im Tab-Bar die aktive Page zum Anfang scrollt. Wird via
   // `navigation.addListener('tabPress')` weiter unten gewired.
-  const alleScrollRef = useRef<Animated.ScrollView | null>(null);
-  const eigenScrollRef = useRef<Animated.ScrollView | null>(null);
-  const markenScrollRef = useRef<Animated.ScrollView | null>(null);
+  const alleScrollRef = useRef<LegendListRef | null>(null);
+  const eigenScrollRef = useRef<LegendListRef | null>(null);
+  const markenScrollRef = useRef<LegendListRef | null>(null);
 
   // Reanimated shared values — per-page scroll offset so the tab-bar
   // collapse state snaps to the active page (if you scrolled down in
@@ -416,7 +422,7 @@ export default function ExploreScreen() {
           : tab === 'eigen'
             ? eigenScrollRef
             : markenScrollRef;
-      ref.current?.scrollTo({ y: 0, animated: true });
+      ref.current?.scrollToOffset?.({ offset: 0, animated: true });
     });
     return unsub;
   }, [navigation, tab]);
@@ -1709,6 +1715,118 @@ export default function ExploreScreen() {
     });
   }, [filteredSearchEigen, filteredSearchMarken]);
 
+  // ─── Single-item renderer for LegendList. Pure JSX builder; lives
+  // outside renderGrid so LegendList can recycle item views without
+  // touching the heavy renderGrid code path (which is still used
+  // for the skeleton + empty states). The forTab is closed-over by
+  // the caller via a tiny wrapper below. ──────────────────────────
+  const renderListCard = useCallback(
+    (item: any, index: number, forTab: Tab) => {
+      const kind: 'eigen' | 'marken' =
+        forTab === 'alle' ? (item as any).__kind : forTab;
+      if (kind === 'eigen') {
+        const p = item as any;
+        const disc = p.discounter as Discounter | undefined;
+        const hm = p.handelsmarke as Handelsmarken | undefined;
+        const handelsmarkeName = hm?.bezeichnung ?? (hm as any)?.name ?? null;
+        const packTypId = p.packTyp?.id;
+        const unit = packTypId ? packungstypenMap[packTypId] : undefined;
+        const { sizeLabel, unitPriceLabel } = formatPack(p.packSize, unit, p.preis);
+        return (
+          <View style={{ paddingHorizontal: 6 }}>
+            <ProductCard
+              title={p.name ?? ''}
+              brand={handelsmarkeName ?? null}
+              hersteller={(p as any).hersteller?.herstellername ?? (p as any).hersteller?.name ?? null}
+              eyebrowLogoUri={disc?.bild ?? null}
+              product={p}
+              price={p.preis ?? 0}
+              stufe={parseInt(p.stufe) || 1}
+              sizeLabel={sizeLabel}
+              unitPriceLabel={unitPriceLabel}
+              variant="grid"
+              onPress={() => openProduct(p, index)}
+            />
+          </View>
+        );
+      }
+      const m = item as any;
+      const marke = m.hersteller?.name ?? '';
+      const brandLogoUri = m.hersteller?.bild ?? null;
+      const packTypId = m.packTyp?.id;
+      const unit = packTypId ? packungstypenMap[packTypId] : undefined;
+      const { sizeLabel, unitPriceLabel } = formatPack(m.packSize, unit, m.preis);
+      return (
+        <View style={{ paddingHorizontal: 6 }}>
+          <BrandCard
+            title={m.name ?? ''}
+            brand={marke}
+            brandLogoUri={brandLogoUri}
+            product={m}
+            price={m.preis ?? 0}
+            sizeLabel={sizeLabel}
+            unitPriceLabel={unitPriceLabel}
+            alternativeCount={m.relatedProdukteIDs?.length ?? 0}
+            onPress={() => openBrand(m, index)}
+            infos={(m as any).marke?.infos ?? null}
+            onInfoPress={() => {
+              const markeDoc = (m as any).marke;
+              const raw = markeDoc?.infos ?? (m as any).infos;
+              const infosText =
+                typeof raw === 'string' && raw.trim().length > 0
+                  ? raw.trim()
+                  : null;
+              const fallbackLines = [
+                markeDoc?.adresse ? String(markeDoc.adresse) : null,
+                [markeDoc?.plz, markeDoc?.stadt].filter(Boolean).join(' ') || null,
+                markeDoc?.land ? String(markeDoc.land) : null,
+              ].filter(Boolean) as string[];
+              const body =
+                infosText ??
+                (fallbackLines.length > 0
+                  ? fallbackLines.join('\n')
+                  : 'Zu dieser Marke sind aktuell keine Zusatz-Informationen hinterlegt.');
+              setInfoSheet({
+                title: markeDoc?.name || marke || m.name || 'Info',
+                body,
+              });
+            }}
+          />
+        </View>
+      );
+    },
+    [packungstypenMap, openProduct, openBrand],
+  );
+
+  // ─── Items per tab — factored out so the LegendList path can reuse
+  // it without going through the full renderGrid (which still lives
+  // below, used as the loading/empty skeleton + crossfade host). ──
+  const itemsForTab = useCallback(
+    (forTab: Tab) => {
+      const inSearch = !!searchActiveQuery;
+      return inSearch
+        ? forTab === 'alle'
+          ? alleSearchItems
+          : forTab === 'eigen'
+            ? filteredSearchEigen
+            : filteredSearchMarken
+        : forTab === 'alle'
+          ? alleItems
+          : forTab === 'eigen'
+            ? nonames
+            : markenprodukte;
+    },
+    [
+      searchActiveQuery,
+      alleSearchItems,
+      filteredSearchEigen,
+      filteredSearchMarken,
+      alleItems,
+      nonames,
+      markenprodukte,
+    ],
+  );
+
   const renderGrid = (forTab: Tab) => {
     // Search mode overlays browse mode: when a search is active, the
     // grid sources its items from the Algolia hits instead of the
@@ -2201,47 +2319,61 @@ export default function ExploreScreen() {
             from Eigenmarken (page 1) to the LEFT lands here, matching
             the SegmentedTabs visual order. */}
         <View key="alle" style={{ flex: 1 }}>
-          <Animated.ScrollView
+          <AnimatedLegendList
             ref={alleScrollRef}
+            data={itemsForTab('alle')}
+            keyExtractor={(item: any, index: number) =>
+              String(item?.id ?? item?.objectID ?? index)
+            }
+            renderItem={({ item, index }: any) =>
+              renderListCard(item, index, 'alle')
+            }
+            numColumns={2}
+            estimatedItemSize={240}
+            recycleItems
             onScroll={scrollHandlerAlle}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            // removeClippedSubviews ENTFERNT — bekannt-problematisch
-            // bei ScrollViews mit Reanimated-Childs / Image-Childs:
-            // bei jedem Off-/On-Screen-Wechsel werden native Views
-            // de-/re-attached → spürbares Scroll-Stocking. Mit
-            // <100 Karten in einem memoized-React-Tree ist der
-            // Memory-Vorteil minimal, aber der Scroll-Smoothness-
-            // Verlust ist signifikant.
             overScrollMode="auto"
             scrollsToTop={tab === 'alle'}
+            onEndReached={checkLoadMoreAlle}
+            onEndReachedThreshold={0.5}
             contentContainerStyle={{
-              paddingTop: chromeTotalHeight,
+              paddingTop: chromeTotalHeight + 12,
               paddingBottom: 120,
+              paddingHorizontal: 14,
             }}
-          >
-            {showBannerOn('alle') ? (
-              <View
-                style={{
-                  marginTop: 12,
-                  height: 70,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  overflow: 'hidden',
-                }}
-              >
-                <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-              </View>
-            ) : null}
-            <View style={{ paddingTop: 12 }}>{renderGrid('alle')}</View>
-            {((nonameLoading || markenLoading || searchLoadingMore) &&
-              (nonames.length > 0 ||
-                markenprodukte.length > 0 ||
-                searchHitsEigen.length > 0 ||
-                searchHitsMarken.length > 0)) ? (
-              <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
-            ) : null}
-          </Animated.ScrollView>
+            ListHeaderComponent={
+              showBannerOn('alle') ? (
+                <View
+                  style={{
+                    height: 70,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                    marginBottom: 12,
+                    marginHorizontal: -14,
+                  }}
+                >
+                  <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
+                </View>
+              ) : null
+            }
+            ListFooterComponent={
+              ((nonameLoading || markenLoading || searchLoadingMore) &&
+                (nonames.length > 0 ||
+                  markenprodukte.length > 0 ||
+                  searchHitsEigen.length > 0 ||
+                  searchHitsMarken.length > 0)) ? (
+                <View style={{ marginHorizontal: -14 }}>
+                  <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
+                </View>
+              ) : null
+            }
+            ListEmptyComponent={
+              <View style={{ marginHorizontal: -14 }}>{renderGrid('alle')}</View>
+            }
+          />
         </View>
 
         {/* ─── Page 1 — Eigenmarken ─────────────────────────────────── */}
@@ -2250,85 +2382,114 @@ export default function ExploreScreen() {
             status-bar-tap scroll-to-top for all of them (documented
             UIScrollView behaviour when multiple responders exist). */}
         <View key="eigen" style={{ flex: 1 }}>
-          <Animated.ScrollView
+          <AnimatedLegendList
             ref={eigenScrollRef}
+            data={itemsForTab('eigen')}
+            keyExtractor={(item: any, index: number) =>
+              String(item?.id ?? item?.objectID ?? index)
+            }
+            renderItem={({ item, index }: any) =>
+              renderListCard(item, index, 'eigen')
+            }
+            numColumns={2}
+            estimatedItemSize={240}
+            recycleItems
             onScroll={scrollHandlerEigen}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            // Detach off-screen tiles from the native view hierarchy
-            // while scrolling. For a flex-wrap grid with 20+ cards on
-            // screen, this keeps frame pacing smooth on older devices.
-            removeClippedSubviews
-            // iOS-native overscroll "pull" — adds the subtle rubber
-            // band that the system uses, costs nothing on Android.
             overScrollMode="auto"
             scrollsToTop={tab === 'eigen'}
+            onEndReached={checkLoadMoreEigen}
+            onEndReachedThreshold={0.5}
             contentContainerStyle={{
-              paddingTop: chromeTotalHeight,
+              paddingTop: chromeTotalHeight + 12,
               paddingBottom: 120,
+              paddingHorizontal: 14,
             }}
-          >
-            {showBannerOn('eigen') ? (
-              <View
-                style={{
-                  marginTop: 12,
-                  height: 70,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  overflow: 'hidden',
-                }}
-              >
-                <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-              </View>
-            ) : null}
-            <View style={{ paddingTop: 12 }}>{renderGrid('eigen')}</View>
-            {((nonameLoading || (searchActiveQuery && searchLoadingMore)) &&
-              (nonames.length > 0 || searchHitsEigen.length > 0)) ? (
-              <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
-            ) : null}
-          </Animated.ScrollView>
+            ListHeaderComponent={
+              showBannerOn('eigen') ? (
+                <View
+                  style={{
+                    height: 70,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                    marginBottom: 12,
+                    marginHorizontal: -14,
+                  }}
+                >
+                  <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
+                </View>
+              ) : null
+            }
+            ListFooterComponent={
+              ((nonameLoading || (searchActiveQuery && searchLoadingMore)) &&
+                (nonames.length > 0 || searchHitsEigen.length > 0)) ? (
+                <View style={{ marginHorizontal: -14 }}>
+                  <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
+                </View>
+              ) : null
+            }
+            ListEmptyComponent={
+              <View style={{ marginHorizontal: -14 }}>{renderGrid('eigen')}</View>
+            }
+          />
         </View>
 
         {/* ─── Page 2 — Marken ──────────────────────────────────────── */}
         <View key="marken" style={{ flex: 1 }}>
-          <Animated.ScrollView
+          <AnimatedLegendList
             ref={markenScrollRef}
+            data={itemsForTab('marken')}
+            keyExtractor={(item: any, index: number) =>
+              String(item?.id ?? item?.objectID ?? index)
+            }
+            renderItem={({ item, index }: any) =>
+              renderListCard(item, index, 'marken')
+            }
+            numColumns={2}
+            estimatedItemSize={240}
+            recycleItems
             onScroll={scrollHandlerMarken}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            // removeClippedSubviews ENTFERNT — bekannt-problematisch
-            // bei ScrollViews mit Reanimated-Childs / Image-Childs:
-            // bei jedem Off-/On-Screen-Wechsel werden native Views
-            // de-/re-attached → spürbares Scroll-Stocking. Mit
-            // <100 Karten in einem memoized-React-Tree ist der
-            // Memory-Vorteil minimal, aber der Scroll-Smoothness-
-            // Verlust ist signifikant.
             overScrollMode="auto"
             scrollsToTop={tab === 'marken'}
+            onEndReached={checkLoadMoreMarken}
+            onEndReachedThreshold={0.5}
             contentContainerStyle={{
-              paddingTop: chromeTotalHeight,
+              paddingTop: chromeTotalHeight + 12,
               paddingBottom: 120,
+              paddingHorizontal: 14,
             }}
-          >
-            {showBannerOn('marken') ? (
-              <View
-                style={{
-                  marginTop: 12,
-                  height: 70,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  overflow: 'hidden',
-                }}
-              >
-                <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-              </View>
-            ) : null}
-            <View style={{ paddingTop: 12 }}>{renderGrid('marken')}</View>
-            {((markenLoading || (searchActiveQuery && searchLoadingMore)) &&
-              (markenprodukte.length > 0 || searchHitsMarken.length > 0)) ? (
-              <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
-            ) : null}
-          </Animated.ScrollView>
+            ListHeaderComponent={
+              showBannerOn('marken') ? (
+                <View
+                  style={{
+                    height: 70,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                    marginBottom: 12,
+                    marginHorizontal: -14,
+                  }}
+                >
+                  <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
+                </View>
+              ) : null
+            }
+            ListFooterComponent={
+              ((markenLoading || (searchActiveQuery && searchLoadingMore)) &&
+                (markenprodukte.length > 0 || searchHitsMarken.length > 0)) ? (
+                <View style={{ marginHorizontal: -14 }}>
+                  <LoadMoreSkeletonRow itemWidth={GRID_ITEM_WIDTH} />
+                </View>
+              ) : null
+            }
+            ListEmptyComponent={
+              <View style={{ marginHorizontal: -14 }}>{renderGrid('marken')}</View>
+            }
+          />
         </View>
       </PagerView>
 
