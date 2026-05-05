@@ -162,11 +162,19 @@ const formatEur = (n: number) =>
 // ═══════════════════════════════════════════════════════════════════
 // Skeletons
 // ═══════════════════════════════════════════════════════════════════
-function ShoppingListSkeleton() {
+function ShoppingListSkeleton({ topInset }: { topInset: number }) {
   const { theme } = useTokens();
   return (
     <ScrollView
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 140 }}
+      contentContainerStyle={{
+        paddingHorizontal: 16,
+        // Skeleton sits inside Crossfade which fills the full screen
+        // (incl. behind the chrome). Push the first card DOWN past
+        // the chrome so it doesn't get clipped behind DetailHeader +
+        // sticky tabs row.
+        paddingTop: topInset + 12,
+        paddingBottom: 140,
+      }}
       scrollEnabled={false}
     >
       {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -2679,7 +2687,7 @@ export default function ShoppingListScreen() {
         duration={320}
         fillParent
         style={{ flex: 1 }}
-        skeleton={<ShoppingListSkeleton />}
+        skeleton={<ShoppingListSkeleton topInset={chromeHeight + SEG_BAR_HEIGHT} />}
       >
         <PagerView
           ref={pagerRef}
