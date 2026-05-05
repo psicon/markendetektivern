@@ -33,10 +33,7 @@ import {
 import PagerView from 'react-native-pager-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import {
-  BestenlisteTab,
-  PositionStickyBar,
-} from '@/components/rewards/Bestenliste';
+import { BestenlisteTab } from '@/components/rewards/Bestenliste';
 import {
   DETAIL_HEADER_ROW_HEIGHT,
   DetailHeader,
@@ -435,10 +432,7 @@ export default function AchievementsScreen() {
           <ScrollView
             contentContainerStyle={{
               paddingTop: chromeHeight,
-              // Extra room at bottom so the floating PositionStickyBar
-              // (~50 px tall, sits ~95 px above safe-area) doesn't hide
-              // the last list row.
-              paddingBottom: 220,
+              paddingBottom: 60,
             }}
             showsVerticalScrollIndicator={false}
           >
@@ -454,19 +448,6 @@ export default function AchievementsScreen() {
           </ScrollView>
         </View>
       </PagerView>
-
-      {/* Floating "Deine Position" — only visible on the Bestenliste
-          tab, sibling of PagerView so it stays screen-fixed against
-          the scroll content. */}
-      {tab === 'bestenliste' && userProfile ? (
-        <PositionStickyBar
-          userProfile={userProfile}
-          outerScope={outerScope}
-          geo={geo}
-          userStats={userStats}
-          levels={levels}
-        />
-      ) : null}
 
       {/* Chrome — shared `DetailHeader` (BlurView on iOS, tinted
           View on Android, arrow-left back button, optional right

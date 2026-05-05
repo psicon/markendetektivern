@@ -210,6 +210,8 @@ export function BestenlisteTab({
           userStats={userStats}
           userProfile={userProfile}
           levels={levels}
+          outerScope={outerScope}
+          geo={geo}
         />
       </View>
 
@@ -1625,35 +1627,110 @@ function StatusHero({
   userStats,
   userProfile,
   levels,
+  outerScope,
+  geo,
 }: {
   name: string;
   photoUrl: string | null;
   userStats: { currentLevel?: number; currentStreak?: number; freezeTokens?: number; pointsTotal?: number } | null;
   userProfile: any;
   levels: Level[];
+  outerScope: LbScopeOuter;
+  geo: RegionGeo;
 }) {
-  // Resolve identity values from the real data sources. Fallbacks
-  // mirror the cascade used in app/achievements.tsx:
-  //   userStats → userProfile.stats → userProfile.level → 1
-  // The Bestenliste-Tab hero is now ranking-focused only — name,
-  // avatar, level chip (= identity), and total points (= the metric
-  // you rank by). Level/savings progress bars dropped: that lives
-  // one tab over (Errungenschaften), no point repeating it here.
+  // Identity for the gradient colour only — the hero itself is now
+  // exclusively about WHERE THE USER STANDS in the active leaderboard
+  // selection. Level/points-total info lives on the Errungenschaften
+  // tab one swipe away.
   const level: number =
     userStats?.currentLevel ??
     userProfile?.stats?.currentLevel ??
     userProfile?.level ??
     1;
-  const pts: number =
-    userStats?.pointsTotal ??
-    userProfile?.stats?.pointsTotal ??
-    0;
   const currentLevelInfo = levels.find((l) => l.id === level);
-  const levelName = currentLevelInfo?.name ?? '';
-  // Gradient still follows the user's current level so colour-
-  // continuity with the Errungenschaften tab is preserved (same
-  // user, same colour).
   const gradient = levelGradient(level, currentLevelInfo?.color);
+
+  // ── Position fetching (was on the floating PositionStickyBar) ──
+  // Overall mode: percentile / rank from the aggregator service.
+  const userPts = Number(userProfile?.stats?.pointsTotal ?? 0);
+  const userNick: string | null = userProfile?.display_name ?? null;
+  const [position, setPosition] = useState<LbPosition | null>(null);
+  useEffect(() => {
+    if (outerScope !== 'overall') return;
+    let alive = true;
+    getUserPosition(userPts, userNick).then((p) => alive && setPosition(p));
+    return () => {
+      alive = false;
+    };
+  }, [outerScope, userPts, userNick]);
+
+  // Region mode: find the user's own BL/Stadt row in the league.
+  const userBL: string | null =
+    (userProfile as any)?.bundesland ??
+    (userProfile as any)?.guessedBundesland ??
+    null;
+  const userCity: string | null =
+    (userProfile as any)?.city ??
+    (userProfile as any)?.guessedCity ??
+    null;
+  const [regionRow, setRegionRow] = useState<LbRow | null>(null);
+  const [regionTotal, setRegionTotal] = useState(0);
+  useEffect(() => {
+    if (outerScope !== 'region') return;
+    let alive = true;
+    const target = geo === 'bundesland' ? userBL : userCity;
+    const fetcher =
+      geo === 'bundesland'
+        ? getBundeslandRanks(target, 'all', 'pts')
+        : getCityRanks(target, 'all', 'pts');
+    fetcher.then((rows) => {
+      if (!alive) return;
+      setRegionTotal(rows.length);
+      setRegionRow(rows.find((r) => r.isMe) ?? null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [outerScope, geo, userBL, userCity]);
+
+  // ── Resolve badge + message from current selection ──
+  let badge: string;
+  let message: string;
+  if (outerScope === 'region') {
+    const target = geo === 'bundesland' ? userBL : userCity;
+    if (!target) {
+      badge = geo === 'bundesland' ? 'Bundesland' : 'Stadt';
+      message =
+        geo === 'bundesland'
+          ? '🗺️ Setze dein Bundesland um in der Liga mitzuspielen!'
+          : '🏙️ Setze deine Stadt um in der Liga mitzuspielen!';
+    } else if (!regionRow) {
+      badge = target;
+      message =
+        geo === 'bundesland'
+          ? '🗺️ Sammle Punkte für dein Bundesland!'
+          : '🏙️ Sammle Punkte für deine Stadt!';
+    } else {
+      badge =
+        regionRow.rank <= 3
+          ? `Platz ${regionRow.rank}`
+          : `Platz ${regionRow.rank}/${regionTotal}`;
+      message = regionMessage(regionRow.rank, regionTotal, target, geo);
+    }
+  } else {
+    if (position?.rank !== undefined && position?.rank !== null && position.rank <= 50) {
+      badge = `Top ${position.rank}`;
+    } else if (position?.rank !== undefined && position?.rank !== null) {
+      badge = `Platz ${position.rank}`;
+    } else if (position?.approxRank) {
+      badge = `Platz ~${position.approxRank.toLocaleString('de-DE')}`;
+    } else if (userPts > 0) {
+      badge = `${userPts.toLocaleString('de-DE')} Pkt`;
+    } else {
+      badge = 'Liga';
+    }
+    message = position?.message ?? '🚀 Sammle Punkte und steige in der Liga auf!';
+  }
 
   return (
     <LinearGradient
@@ -1667,19 +1744,16 @@ function StatusHero({
         overflow: 'hidden',
       }}
     >
-      {/* Single row — avatar | name + level pill | total points +
-          label pill. No progress bars: the level/savings progress
-          lives on the Errungenschaften tab next door, no need to
-          duplicate the same gates here. */}
+      {/* Avatar | name top, then a single row badge + message
+          underneath. Hero is now position-only — no level pill,
+          no total-points number. Both live on Errungenschaften. */}
       <View
         style={{
           flexDirection: 'row',
-          alignItems: 'stretch',
+          alignItems: 'center',
           gap: 12,
-          minHeight: 52,
         }}
       >
-        {/* Avatar */}
         {photoUrl ? (
           <View
             style={{
@@ -1712,13 +1786,7 @@ function StatusHero({
             <Text style={{ fontSize: 26 }}>🦉</Text>
           </View>
         )}
-        <View
-          style={{
-            flex: 1,
-            minWidth: 0,
-            justifyContent: 'space-between',
-          }}
-        >
+        <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
           <Text
             numberOfLines={1}
             style={{
@@ -1731,30 +1799,48 @@ function StatusHero({
           >
             {name}
           </Text>
-          <HeroPill
-            icon="star-circle"
-            label={`Level ${level}${levelName ? ` · ${levelName}` : ''}`}
-          />
-        </View>
-        <View
-          style={{
-            alignItems: 'flex-end',
-            justifyContent: 'space-between',
-          }}
-        >
-          <Text
+          <View
             style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 24,
-              lineHeight: 28,
-              color: '#fff',
-              letterSpacing: -0.4,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
             }}
           >
-            {pts.toLocaleString('de-DE')}
-          </Text>
-          <HeroPill icon="star-four-points" label="Detektiv-Punkte" />
+            <View
+              style={{
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 8,
+                backgroundColor: 'rgba(255,255,255,0.22)',
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 11,
+                  color: '#fff',
+                  letterSpacing: 0.2,
+                }}
+              >
+                {badge}
+              </Text>
+            </View>
+            <Text
+              numberOfLines={2}
+              style={{
+                flex: 1,
+                fontFamily,
+                fontWeight: fontWeight.semibold,
+                fontSize: 11,
+                lineHeight: 14,
+                color: '#fff',
+                opacity: 0.95,
+              }}
+            >
+              {message}
+            </Text>
+          </View>
         </View>
       </View>
     </LinearGradient>
@@ -2194,185 +2280,6 @@ function PodiumCard({
 //     Tab toggle.
 // Both modes share the same compact layout: badge + one-line message.
 
-export function PositionStickyBar({
-  userProfile,
-  outerScope,
-  geo,
-  userStats,
-  levels,
-}: {
-  userProfile: any;
-  outerScope: LbScopeOuter;
-  geo: RegionGeo;
-  userStats: ReturnType<typeof useAchievements>['userStats'];
-  levels: Level[];
-}) {
-  const insets = useSafeAreaInsets();
-  // Level-tinted gradient — same colour the user sees on the
-  // StatusHero card above. Single source of truth: levelGradient().
-  const userLevel: number =
-    userStats?.currentLevel ??
-    userProfile?.stats?.currentLevel ??
-    userProfile?.level ??
-    1;
-  const userLevelInfo = levels.find((l) => l.id === userLevel);
-  const gradient = levelGradient(userLevel, userLevelInfo?.color);
-
-  // ── Overall mode — user's personal percentile / rank ──
-  const userPts = Number(userProfile?.stats?.pointsTotal ?? 0);
-  const userNick: string | null = userProfile?.display_name ?? null;
-  const [position, setPosition] = useState<LbPosition | null>(null);
-  useEffect(() => {
-    if (outerScope !== 'overall') return;
-    let alive = true;
-    getUserPosition(userPts, userNick).then((p) => alive && setPosition(p));
-    return () => {
-      alive = false;
-    };
-  }, [outerScope, userPts, userNick]);
-
-  // ── Region mode — find the user's OWN BL/Stadt in the league ──
-  const userBL: string | null =
-    (userProfile as any)?.bundesland ??
-    (userProfile as any)?.guessedBundesland ??
-    null;
-  const userCity: string | null =
-    (userProfile as any)?.city ??
-    (userProfile as any)?.guessedCity ??
-    null;
-  const [regionRow, setRegionRow] = useState<LbRow | null>(null);
-  const [regionTotal, setRegionTotal] = useState(0);
-  useEffect(() => {
-    if (outerScope !== 'region') return;
-    let alive = true;
-    const target = geo === 'bundesland' ? userBL : userCity;
-    const fetcher =
-      geo === 'bundesland'
-        ? getBundeslandRanks(target, 'all', 'pts')
-        : getCityRanks(target, 'all', 'pts');
-    fetcher.then((rows) => {
-      if (!alive) return;
-      setRegionTotal(rows.length);
-      // The list is already sorted+ranked by the service; the user's
-      // row carries `isMe: true` thanks to the target arg above.
-      setRegionRow(rows.find((r) => r.isMe) ?? null);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [outerScope, geo, userBL, userCity]);
-
-  // ── Render ──
-  let badge: string;
-  let message: string;
-  if (outerScope === 'region') {
-    const target = geo === 'bundesland' ? userBL : userCity;
-    if (!target) {
-      badge = geo === 'bundesland' ? 'Bundesland' : 'Stadt';
-      message =
-        geo === 'bundesland'
-          ? '🗺️ Setze dein Bundesland um in der Liga mitzuspielen!'
-          : '🏙️ Setze deine Stadt um in der Liga mitzuspielen!';
-    } else if (!regionRow) {
-      badge = target;
-      message =
-        geo === 'bundesland'
-          ? '🗺️ Sammle Punkte für dein Bundesland!'
-          : '🏙️ Sammle Punkte für deine Stadt!';
-    } else {
-      badge =
-        regionRow.rank <= 3
-          ? `Platz ${regionRow.rank}`
-          : `Platz ${regionRow.rank}/${regionTotal}`;
-      message = regionMessage(regionRow.rank, regionTotal, target, geo);
-    }
-  } else {
-    if (!position) return null;
-    if (position.rank !== null && position.rank <= 50) {
-      badge = `Top ${position.rank}`;
-    } else if (position.rank !== null) {
-      badge = `Platz ${position.rank}`;
-    } else if (position.approxRank) {
-      badge = `Platz ~${position.approxRank.toLocaleString('de-DE')}`;
-    } else if (userPts > 0) {
-      badge = `${userPts.toLocaleString('de-DE')} Pkt`;
-    } else {
-      badge = 'Liga';
-    }
-    message = position.message;
-  }
-
-  return (
-    <View
-      pointerEvents="box-none"
-      style={{
-        position: 'absolute',
-        left: 12,
-        right: 12,
-        // Tab bar (~49 px) + safe-area + extra clearance for the
-        // raised "Stöbern" floating button in the centre of our tab
-        // bar (sits ~25 px above the bar baseline). Total offset:
-        // safe-area + ~95 px — keeps the bar visible without
-        // overlapping the elevated button.
-        bottom: insets.bottom + 95,
-        zIndex: 20,
-      }}
-    >
-      <LinearGradient
-        colors={gradient}
-        start={{ x: -1, y: 0.34 }}
-        end={{ x: 1, y: -0.34 }}
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 10,
-          paddingHorizontal: 14,
-          paddingVertical: 10,
-          borderRadius: 14,
-          shadowColor: '#000',
-          shadowOpacity: 0.22,
-          shadowOffset: { width: 0, height: 6 },
-          shadowRadius: 12,
-          elevation: 6,
-        }}
-      >
-        <View
-          style={{
-            paddingHorizontal: 8,
-            paddingVertical: 4,
-            borderRadius: 8,
-            backgroundColor: 'rgba(255,255,255,0.22)',
-          }}
-        >
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 12,
-              color: '#fff',
-              letterSpacing: 0.2,
-            }}
-          >
-            {badge}
-          </Text>
-        </View>
-        <Text
-          numberOfLines={2}
-          style={{
-            flex: 1,
-            fontFamily,
-            fontWeight: fontWeight.semibold,
-            fontSize: 11,
-            lineHeight: 14,
-            color: '#fff',
-          }}
-        >
-          {message}
-        </Text>
-      </LinearGradient>
-    </View>
-  );
-}
 
 // Region-side motivational copy. Symmetric to motivationalLine()
 // in the leaderboard service but tied to the user's BL/Stadt rank
