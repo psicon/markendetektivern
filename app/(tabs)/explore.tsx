@@ -302,17 +302,12 @@ export default function ExploreScreen() {
   // (App crasht in Production-Builds mit
   // "Cannot read property 'length' of undefined" beim Stöbern-Mount).
   // Siehe weiter unten nach `searchHitsMarken`-Init.
-  // Two distinct booleans:
-  //   • reserveBannerSpot — Premium check only. As long as the user
-  //     isn't Premium AND we're on the active page, we keep the 70-px
-  //     header slot reserved so the actual ad mount later doesn't
-  //     push content down (no "ad pops in, list jumps" jank).
-  //   • mountBanner — also requires `adsReady` (data loaded + 2-s
-  //     buffer, see CLAUDE.md / the gating useEffect below). Drives
-  //     whether we render <BannerAd /> inside the reserved slot.
-  const reserveBannerSpot = (forTab: Tab) => !isPremium && tab === forTab;
-  const mountBanner = (forTab: Tab) =>
-    !isPremium && adsReady && tab === forTab;
+  // BannerAd mounts on ALL three pages once ads are ready — no
+  // `tab === forTab` gate. Otherwise the ad would unmount/remount
+  // every tab switch (visible flicker, fresh AdMob fetch each time).
+  // PagerView keeps all pages in memory; only one is visible. Cost:
+  // 3 simultaneous ad slots instead of 1, but no remount jank.
+  const mountBanner = () => !isPremium && adsReady;
 
   // ─── Reference data (filters + card lookup) ───────────────────────────
   const [discounter, setDiscounter] = useState<FirestoreDocument<Discounter>[]>([]);
@@ -2370,7 +2365,7 @@ export default function ExploreScreen() {
               paddingHorizontal: 14,
             }}
             ListHeaderComponent={
-              mountBanner('alle') ? (
+              mountBanner() ? (
                 <View
                   style={{
                     alignItems: 'center',
@@ -2433,7 +2428,7 @@ export default function ExploreScreen() {
               paddingHorizontal: 14,
             }}
             ListHeaderComponent={
-              mountBanner('eigen') ? (
+              mountBanner() ? (
                 <View
                   style={{
                     alignItems: 'center',
@@ -2489,7 +2484,7 @@ export default function ExploreScreen() {
               paddingHorizontal: 14,
             }}
             ListHeaderComponent={
-              mountBanner('marken') ? (
+              mountBanner() ? (
                 <View
                   style={{
                     alignItems: 'center',
