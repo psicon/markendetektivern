@@ -1,22 +1,22 @@
 /**
- * Toast helpers — calm card-style design.
+ * Toast helpers — compact pill design.
  *
- * Design rationale (User: "die levelup meldungen (neu) sind schöner.
- * orientiere dich daran"):
- *  • White / surface card backdrop, NOT a saturated full-width colour
- *    block. The category accent only shows up in a small icon-circle
- *    on the left + the optional action chip on the right.
- *  • Subtle shadow + rounded corners, looks like every other card in
- *    the app.
- *  • Lower vertical presence — the old toasts were 56-px slabs of
- *    primary colour that hijacked the eye. New ones are quiet
- *    confirmations.
+ * After a few iterations (white / vibrant / dark), the user landed
+ * on: small, transluzent, NOT in your face. So the toast is now an
+ * iOS-Dynamic-Island-style PILL:
+ *   • Auto-width (only as wide as the content needs)
+ *   • Pill-shaped (borderRadius 999), centered
+ *   • BlurView backdrop (iOS) / tinted View (Android), light or dark
+ *     based on color scheme
+ *   • Category identity carried by the small accent icon — NO full
+ *     coloured fills
  *
- * Position by category (User: "alles was mit gamification zu tun hat
- * soll unten einfliegen. alle anderen meldungen oben"):
- *   • POINTS, STREAK            → BOTTOM (gamification rewards)
- *   • All others                → TOP    (UI feedback / errors / info)
+ * Position (gamification ↓, rest ↑) is unchanged from the previous
+ * iteration:
+ *   • POINTS, STREAK, ANTI_ABUSE  → BOTTOM
+ *   • All others                  → TOP
  */
+import { BlurView } from 'expo-blur';
 import {
   extractEmoji,
   getToastDuration,
@@ -25,6 +25,7 @@ import {
   ToastCategory,
   interpolateMessage,
 } from '@/constants/ToastMessages';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import {
   resolveValue,
   Toast as RNToast,
@@ -32,10 +33,10 @@ import {
   ToastPosition,
 } from '@backpackapp-io/react-native-toast';
 import * as Haptics from 'expo-haptics';
-import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import {
   Dimensions,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -47,30 +48,18 @@ type ToastType = 'success' | 'error' | 'info' | 'points';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// Toast palettes — DELIBERATELY MUTED so the toast doesn't shout
-// at the user. Same family-of-three logic as the difficulty + level
-// systems already in the app:
-//   • Brand-teal      → positive gamification rewards (points, streak)
-//   • Dark slate      → neutral UI feedback (favourites, shopping, …)
-//   • Warm amber      → gamification warnings (anti-spam, cooldowns)
-//   • Deep red        → errors
-// Each pair is the SAME hue family, just slightly darker on the end —
-// so you get the "depth" of a gradient (à la LevelUp / Achievement-
-// Unlock cards) without any contrast clash.
-const BRAND_TEAL: [string, string] = ['#0d8575', '#0a6f62'];
-const NEUTRAL_SLATE: [string, string] = ['#3a4754', '#1f2937'];
-const WARM_AMBER: [string, string] = ['#b45309', '#92400e'];
-const DEEP_RED: [string, string] = ['#b91c1c', '#7f1d1d'];
-
-const CATEGORY_GRADIENT: Record<ToastCategory, [string, string]> = {
-  POINTS: BRAND_TEAL,
-  STREAK: BRAND_TEAL,
-  ANTI_ABUSE: WARM_AMBER,
-  RATINGS: NEUTRAL_SLATE,
-  FAVORITES: NEUTRAL_SLATE,
-  SHOPPING: NEUTRAL_SLATE,
-  INFO: NEUTRAL_SLATE,
-  ERROR: DEEP_RED,
+// Per-category accent — only used for the icon glyph (small, ~16-18 px).
+// The pill itself is BlurView/tint, NOT coloured. Category identity
+// comes through the icon, not a saturated fill.
+const CATEGORY_ACCENT: Record<ToastCategory, string> = {
+  POINTS: '#0d8575',     // brand teal — points are brand currency
+  STREAK: '#f97316',     // soft orange — streak warmth
+  ANTI_ABUSE: '#b45309', // amber — warning
+  RATINGS: '#a855f7',    // purple
+  FAVORITES: '#e11d48',  // rose — heart
+  SHOPPING: '#0d8575',   // brand teal
+  INFO: '#0d8575',       // brand teal — neutral but on-brand
+  ERROR: '#dc2626',      // red
 };
 
 // Where the toast flies in from. Anything tied to the gamification
@@ -95,53 +84,82 @@ const StandardToast: React.FC<{
   actionLabel?: string;
   onActionPress?: () => void;
 }> = ({ message, category, actionLabel, onActionPress }) => {
-  const gradient = CATEGORY_GRADIENT[category];
+  const scheme = useColorScheme() ?? 'light';
+  const accent = CATEGORY_ACCENT[category];
   const { emoji, text } = extractEmoji(message);
+  const textColor = scheme === 'dark' ? '#f5f5f5' : '#191c1d';
+  const isIOS = Platform.OS === 'ios';
 
-  return (
-    <LinearGradient
-      colors={gradient}
-      start={{ x: -1, y: 0.34 }}
-      end={{ x: 1, y: -0.34 }}
-      style={[styles.card, { width: SCREEN_WIDTH - 24 }]}
-    >
-      {/* Icon-circle on translucent white — same pattern as the
-          LevelUp / Achievement-Unlock overlays so the visual family
-          is consistent. */}
-      <View style={styles.iconCircle}>
-        {emoji ? (
-          <Text style={styles.emoji}>{emoji}</Text>
-        ) : (
-          <MaterialCommunityIcons
-            name={mdiForCategory(category)}
-            size={18}
-            color="#fff"
-          />
-        )}
-      </View>
-
-      {/* Body text — up to 3 lines so longer ANTI_ABUSE / ERROR
-          messages don't clip. Font is small enough to fit, big
-          enough to read at arm's length. */}
-      <Text numberOfLines={3} style={styles.text}>
+  // Body — auto-width pill: BlurView (iOS) / opaque tinted card
+  // (Android). Padding gives the icon + text breathing room without
+  // making the pill bulky. maxWidth caps long messages so the pill
+  // doesn't go full-screen.
+  const Inner = (
+    <View style={styles.inner}>
+      {emoji ? (
+        <Text style={styles.emoji}>{emoji}</Text>
+      ) : (
+        <MaterialCommunityIcons
+          name={mdiForCategory(category)}
+          size={16}
+          color={accent}
+        />
+      )}
+      <Text numberOfLines={3} style={[styles.text, { color: textColor }]}>
         {text}
       </Text>
-
-      {/* Optional action chip — translucent white, white text, same
-          shape as the icon-circle so the right side feels balanced. */}
       {actionLabel && onActionPress ? (
         <Pressable
           onPress={onActionPress}
           style={({ pressed }) => [
             styles.actionChip,
-            { opacity: pressed ? 0.85 : 1 },
+            { backgroundColor: accent, opacity: pressed ? 0.85 : 1 },
           ]}
           hitSlop={6}
         >
           <Text style={styles.actionText}>{actionLabel}</Text>
         </Pressable>
       ) : null}
-    </LinearGradient>
+    </View>
+  );
+
+  if (isIOS) {
+    return (
+      <View style={styles.shell}>
+        <BlurView
+          tint={scheme === 'dark' ? 'dark' : 'light'}
+          intensity={70}
+          style={styles.pill}
+        >
+          {Inner}
+        </BlurView>
+      </View>
+    );
+  }
+  // Android: BlurView's quality on Android is poor — fall back to a
+  // tinted opaque pill (slightly different from light theme.bg so
+  // it reads as "above the page" rather than blending in).
+  return (
+    <View style={styles.shell}>
+      <View
+        style={[
+          styles.pill,
+          {
+            backgroundColor:
+              scheme === 'dark'
+                ? 'rgba(28,30,33,0.96)'
+                : 'rgba(252,252,253,0.96)',
+            borderWidth: 1,
+            borderColor:
+              scheme === 'dark'
+                ? 'rgba(255,255,255,0.08)'
+                : 'rgba(0,0,0,0.08)',
+          },
+        ]}
+      >
+        {Inner}
+      </View>
+    </View>
   );
 };
 
@@ -389,51 +407,51 @@ export function showAlreadyInCartToast(
 }
 
 const styles = StyleSheet.create({
-  card: {
+  // Outer wrapper — centers the auto-width pill inside the toast lib's
+  // full-width container.
+  shell: {
+    width: SCREEN_WIDTH,
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  // Pill — auto-width, max-width 90% of the screen so very long
+  // messages still fit without going edge-to-edge.
+  pill: {
+    maxWidth: SCREEN_WIDTH * 0.9,
+    borderRadius: 999,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  inner: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 16,
-    minHeight: 56,
-    marginHorizontal: 12,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-    elevation: 6,
-  },
-  iconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-    backgroundColor: 'rgba(255,255,255,0.22)',
+    paddingVertical: 9,
+    gap: 8,
   },
   emoji: {
-    fontSize: 18,
-    lineHeight: 22,
+    fontSize: 16,
+    lineHeight: 20,
   },
   text: {
-    flex: 1,
+    flexShrink: 1,
     fontFamily: 'Nunito_600SemiBold',
     fontSize: 13,
     lineHeight: 17,
-    color: '#fff',
   },
   actionChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 10,
-    marginLeft: 10,
-    backgroundColor: 'rgba(255,255,255,0.22)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    marginLeft: 4,
   },
   actionText: {
     fontFamily: 'Nunito_600SemiBold',
-    fontSize: 13,
+    fontSize: 12,
     color: '#fff',
   },
 });
