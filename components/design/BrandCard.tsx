@@ -115,9 +115,25 @@ function BrandCardImpl({
               height: '100%',
               alignItems: 'center',
               justifyContent: 'center',
+              backgroundColor: theme.surfaceAlt,
+              gap: 6,
             }}
           >
-            <MaterialCommunityIcons name="tag-outline" size={44} color={theme.textMuted} />
+            <MaterialCommunityIcons
+              name="package-variant"
+              size={56}
+              color={theme.textMuted}
+            />
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 11,
+                color: theme.textMuted,
+              }}
+            >
+              Kein Bild
+            </Text>
           </View>
         )}
         {alternativeCount > 0 ? (

@@ -37,7 +37,7 @@ import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
 import { ProductCard } from '@/components/design/ProductCard';
 import { SearchableOptionList } from '@/components/design/SearchableOptionList';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
-import { Crossfade, ProductCardSkeleton } from '@/components/design/Skeletons';
+import { Crossfade, ProductCardSkeleton, Shimmer } from '@/components/design/Skeletons';
 import { getStufeCopy, loadStufeCopy } from '@/lib/utils/stufeCopy';
 import { StufenChips } from '@/components/design/StufenChips';
 import { collection, getDocs } from 'firebase/firestore';
@@ -1761,8 +1761,13 @@ export default function ExploreScreen() {
         );
       }
       const m = item as any;
-      const marke = m.hersteller?.name ?? '';
-      const brandLogoUri = m.hersteller?.bild ?? null;
+      // Brand-Eyebrow priorisiert das `marke`-Doc (User-Sicht: "die
+      // Marke") über `hersteller_new` (legaler Hersteller). Wenn marke
+      // leer ist, fallback auf hersteller. Damit fehlt der Markenname
+      // nie auf der Card.
+      const marke =
+        m.marke?.name ?? m.hersteller?.name ?? m.hersteller?.herstellername ?? '';
+      const brandLogoUri = m.marke?.bild ?? m.hersteller?.bild ?? null;
       const packTypId = m.packTyp?.id;
       const unit = packTypId ? packungstypenMap[packTypId] : undefined;
       const { sizeLabel, unitPriceLabel } = formatPack(m.packSize, unit, m.preis);
@@ -2345,7 +2350,11 @@ export default function ExploreScreen() {
                 >
                   {mountBanner('alle') ? (
                     <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                  ) : null}
+                  ) : (
+                    <View style={{ width: '92%', height: 50 }}>
+                      <Shimmer width="100%" height={50} radius={8} />
+                    </View>
+                  )}
                 </View>
               ) : null
             }
@@ -2419,7 +2428,11 @@ export default function ExploreScreen() {
                 >
                   {mountBanner('eigen') ? (
                     <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                  ) : null}
+                  ) : (
+                    <View style={{ width: '92%', height: 50 }}>
+                      <Shimmer width="100%" height={50} radius={8} />
+                    </View>
+                  )}
                 </View>
               ) : null
             }
@@ -2484,7 +2497,11 @@ export default function ExploreScreen() {
                 >
                   {mountBanner('marken') ? (
                     <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                  ) : null}
+                  ) : (
+                    <View style={{ width: '92%', height: 50 }}>
+                      <Shimmer width="100%" height={50} radius={8} />
+                    </View>
+                  )}
                 </View>
               ) : null
             }
