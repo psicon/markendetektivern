@@ -38,10 +38,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from '@/hooks/useColorScheme';
 
 import { BestenlisteTab } from '@/components/rewards/Bestenliste';
-import {
-  DETAIL_HEADER_ROW_HEIGHT,
-  DetailHeader,
-} from '@/components/design/DetailHeader';
+import { DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { FilterSheet } from '@/components/design/FilterSheet';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { AchievementsSkeleton } from '@/components/design/Skeletons';
@@ -272,17 +269,12 @@ export default function AchievementsScreen() {
     useState<'overall' | 'region'>('overall');
   const [geo, setGeo] = useState<'bundesland' | 'stadt'>('bundesland');
 
-  // Chrome height — DetailHeader row + a single sticky tabs row
-  // rendered ONCE at screen level (above PagerView). Two reasons:
-  //   1) Inline-per-page tabs flickered during the swipe transition
-  //      (each page rendered its own copy, you saw them slide out
-  //      and a new copy slide in).
-  //   2) The tabs row uses the SAME BlurView/tint backdrop as
-  //      DetailHeader so there's no hard "grey strip" cutting into
-  //      the content below — the whole chrome reads as one piece.
-  const TABS_ROW_HEIGHT = 50;
-  const chromeBaseHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
-  const chromeHeight = chromeBaseHeight + TABS_ROW_HEIGHT;
+  // Chrome layout — ONE BlurView (iOS) / tinted View (Android) holds
+  // BOTH the title row AND the tabs row. Two stacked BlurViews show
+  // a visible seam (each samples its own backdrop) — same lesson
+  // shopping-list.tsx already learned. Inlined Chrome below.
+  const SEG_BAR_HEIGHT = 56;
+  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT + SEG_BAR_HEIGHT;
 
   // Loading state: render the chrome + a skeleton body instead of a
   // centered ActivityIndicator. Two reasons:
@@ -437,116 +429,136 @@ export default function AchievementsScreen() {
         </View>
       </PagerView>
 
-      {/* Chrome — shared `DetailHeader` (BlurView on iOS, tinted
-          View on Android, arrow-left back button, optional right
-          slot). One header pattern across all detail screens. */}
-      <DetailHeader
-        title="Errungenschaften"
-        onBack={() => router.back()}
-        right={
-          <Pressable
-            onPress={() => setShowInfo(true)}
-            hitSlop={6}
-            style={({ pressed }) => ({
-              width: 36,
-              height: 36,
-              borderRadius: 18,
-              backgroundColor: theme.surfaceAlt,
+      {/* Chrome — ONE BlurView (iOS) / tinted View (Android) hosts
+          BOTH the title row AND the tabs row. Two stacked BlurViews
+          would show a seam at their boundary; one continuous surface
+          reads cleanly under scrolled content. Same pattern as
+          shopping-list.tsx. */}
+      {(() => {
+        const titleRow = (
+          <View
+            style={{
+              flexDirection: 'row',
               alignItems: 'center',
-              justifyContent: 'center',
-              opacity: pressed ? 0.7 : 1,
-            })}
+              height: DETAIL_HEADER_ROW_HEIGHT,
+              paddingHorizontal: 16,
+              gap: 8,
+            }}
           >
-            <MaterialCommunityIcons
-              name="information-outline"
-              size={18}
-              color={theme.textMuted}
+            <Pressable
+              onPress={() => router.back()}
+              style={({ pressed }) => ({
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.6 : 1,
+              })}
+              hitSlop={6}
+            >
+              <MaterialCommunityIcons
+                name="arrow-left"
+                size={24}
+                color={theme.text}
+              />
+            </Pressable>
+            <View
+              style={{
+                flex: 1,
+                position: 'relative',
+                height: 24,
+                justifyContent: 'center',
+              }}
+            >
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 20,
+                  color: theme.text,
+                  letterSpacing: -0.2,
+                }}
+              >
+                Errungenschaften
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => setShowInfo(true)}
+              hitSlop={6}
+              style={({ pressed }) => ({
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                backgroundColor: theme.surfaceAlt,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <MaterialCommunityIcons
+                name="information-outline"
+                size={18}
+                color={theme.textMuted}
+              />
+            </Pressable>
+          </View>
+        );
+        const tabsRow = (
+          <View
+            style={{
+              height: SEG_BAR_HEIGHT,
+              paddingHorizontal: 20,
+              paddingTop: 8,
+              paddingBottom: 12,
+              justifyContent: 'center',
+            }}
+          >
+            <SegmentedTabs
+              tabs={[
+                { key: 'errungen', label: 'Errungenschaften' },
+                { key: 'bestenliste', label: 'Bestenliste' },
+              ] as const}
+              value={tab}
+              onChange={onTabChange}
             />
-          </Pressable>
-        }
-      />
-
-      {/* Single sticky tabs row — sits absolute right under the
-          DetailHeader chrome, on the SAME BlurView (iOS) / tinted
-          backdrop (Android) so the two read as one continuous
-          chrome surface. Rendered ONCE here at screen level so
-          it stays put during PagerView swipes (used to flicker
-          when each page rendered its own copy). */}
-      {Platform.OS === 'ios' ? (
-        <BlurView
-          tint={scheme === 'dark' ? 'dark' : 'light'}
-          intensity={80}
-          style={{
-            position: 'absolute',
-            top: chromeBaseHeight,
-            left: 0,
-            right: 0,
-            height: TABS_ROW_HEIGHT,
-            zIndex: 10,
-            paddingHorizontal: 20,
-            paddingTop: 7,
-            paddingBottom: 7,
-          }}
-        >
-          <SegmentedTabs
-            tabs={[
-              { key: 'errungen', label: 'Errungenschaften' },
-              { key: 'bestenliste', label: 'Bestenliste' },
-            ] as const}
-            value={tab}
-            onChange={onTabChange}
-          />
-        </BlurView>
-      ) : (
-        <View
-          style={{
-            position: 'absolute',
-            top: chromeBaseHeight,
-            left: 0,
-            right: 0,
-            height: TABS_ROW_HEIGHT,
-            zIndex: 10,
-            paddingHorizontal: 20,
-            paddingTop: 7,
-            paddingBottom: 7,
-            backgroundColor:
-              scheme === 'dark'
-                ? 'rgba(15,18,20,0.92)'
-                : 'rgba(245,247,248,0.92)',
-          }}
-        >
-          <SegmentedTabs
-            tabs={[
-              { key: 'errungen', label: 'Errungenschaften' },
-              { key: 'bestenliste', label: 'Bestenliste' },
-            ] as const}
-            value={tab}
-            onChange={onTabChange}
-          />
-        </View>
-      )}
-
-      {/* Soft fade below the chrome — kills the hard rectangle line
-          when colored content (StatusHero gradient, level cards)
-          scrolls under the BlurView. 14 px gradient zone going from
-          ~80% bg-tint at the top to fully transparent at the bottom,
-          so the chrome dissolves into the content instead of cutting. */}
-      <LinearGradient
-        pointerEvents="none"
-        colors={
-          scheme === 'dark'
-            ? ['rgba(15,18,20,0.85)', 'rgba(15,18,20,0)']
-            : ['rgba(245,247,248,0.85)', 'rgba(245,247,248,0)']
-        }
-        style={{
-          position: 'absolute',
-          top: chromeBaseHeight + TABS_ROW_HEIGHT,
+          </View>
+        );
+        const containerStyle = {
+          position: 'absolute' as const,
+          top: 0,
           left: 0,
           right: 0,
-          height: 14,
-          zIndex: 9,
-        }}
-      />
+          zIndex: 10,
+          paddingTop: insets.top,
+        };
+        return Platform.OS === 'ios' ? (
+          <BlurView
+            tint={scheme === 'dark' ? 'dark' : 'light'}
+            intensity={80}
+            style={containerStyle}
+          >
+            {titleRow}
+            {tabsRow}
+          </BlurView>
+        ) : (
+          <View
+            style={[
+              containerStyle,
+              {
+                backgroundColor:
+                  scheme === 'dark'
+                    ? 'rgba(15,18,20,0.92)'
+                    : 'rgba(245,247,248,0.92)',
+              },
+            ]}
+          >
+            {titleRow}
+            {tabsRow}
+          </View>
+        );
+      })()}
 
       {/* Info bottom-sheet — same `FilterSheet` component used
           for the Region-Setup on the Belohnungen tab so all sheets
