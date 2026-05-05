@@ -339,6 +339,12 @@ export function BestenlisteTab({
             setSetupOpen(false);
           }}
           onPickOther={() => setSetupOpen(false)}
+          onPickBundesland={async (bl) => {
+            // Save BL only — keep whatever city the profile already
+            // had (or empty). City picker is a follow-up.
+            await saveRegion(bl, userCity ?? '');
+            setSetupOpen(false);
+          }}
         />
       </FilterSheet>
     </>
@@ -2303,20 +2309,156 @@ function regionMessage(
   } ${noun} ${name} weiter nach oben!`;
 }
 
-// ─── Region setup sheet content (kept) ──────────────────────────────────
+// ─── Region setup sheet content ──────────────────────────────────────
+// Two modes:
+//   • Suggestion mode — when we have a guessed city+bundesland, ask
+//     "stimmt das?" with [Ja, mitspielen] / [Nein, anderes wählen].
+//   • Picker mode — list of 16 Bundesländer to tap. Used when no
+//     suggestion exists OR user clicked "Nein" in suggestion mode.
+// City picker is a future TODO (1000s of cities → needs search) —
+// for now BL alone gets the user into the Bundesländer-Liga, and
+// the Städte-Liga shows "Sammle Punkte für deine Stadt!" until they
+// set a city via a separate flow.
+
+const BUNDESLAENDER = [
+  'Baden-Württemberg',
+  'Bayern',
+  'Berlin',
+  'Brandenburg',
+  'Bremen',
+  'Hamburg',
+  'Hessen',
+  'Mecklenburg-Vorpommern',
+  'Niedersachsen',
+  'Nordrhein-Westfalen',
+  'Rheinland-Pfalz',
+  'Saarland',
+  'Sachsen',
+  'Sachsen-Anhalt',
+  'Schleswig-Holstein',
+  'Thüringen',
+];
 
 function RegionSetupContent({
   suggestion,
   onAccept,
   onPickOther,
+  onPickBundesland,
 }: {
   suggestion: { city: string | null; bundesland: string | null };
   onAccept: () => void;
   onPickOther: () => void;
+  onPickBundesland: (bl: string) => void;
 }) {
   const { theme } = useTokens();
   const city = suggestion.city ?? '';
   const bl = suggestion.bundesland ?? '';
+  // Picker mode toggles when user clicks "Nein, woanders" — also the
+  // default when no suggestion exists.
+  const [picking, setPicking] = useState(false);
+  const showPicker = picking || !(city && bl);
+
+  if (showPicker) {
+    return (
+      <View>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 20,
+            color: theme.text,
+            textAlign: 'center',
+          }}
+        >
+          Wähle dein Bundesland
+        </Text>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 13,
+            lineHeight: 18,
+            color: theme.textSub,
+            textAlign: 'center',
+            marginTop: 6,
+            marginBottom: 14,
+          }}
+        >
+          Tippe dein Bundesland an — deine Punkte zählen dann für die
+          Bundesländer-Liga.
+        </Text>
+        <ScrollView
+          style={{ maxHeight: 360 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View
+            style={{
+              backgroundColor: theme.surface,
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: theme.border,
+              overflow: 'hidden',
+            }}
+          >
+            {BUNDESLAENDER.map((b, i) => (
+              <Pressable
+                key={b}
+                onPress={() => onPickBundesland(b)}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                  paddingHorizontal: 14,
+                  paddingVertical: 14,
+                  borderTopWidth: i === 0 ? 0 : 1,
+                  borderTopColor: theme.border,
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <MaterialCommunityIcons
+                  name="map-marker-outline"
+                  size={18}
+                  color={theme.textMuted}
+                />
+                <Text
+                  style={{
+                    flex: 1,
+                    fontFamily,
+                    fontWeight: fontWeight.bold,
+                    fontSize: 14,
+                    color: theme.text,
+                  }}
+                >
+                  {b}
+                </Text>
+                <MaterialCommunityIcons
+                  name="chevron-right"
+                  size={18}
+                  color={theme.textMuted}
+                />
+              </Pressable>
+            ))}
+          </View>
+        </ScrollView>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 11,
+            lineHeight: 16,
+            color: theme.textMuted,
+            marginTop: 14,
+            textAlign: 'center',
+          }}
+        >
+          Stadt-Liga folgt — wir aggregieren anonym, du tauchst nirgends einzeln auf.
+        </Text>
+      </View>
+    );
+  }
+
+  // Avoid unused-variable warning while picker mode hides this branch.
+  void onPickOther;
   return (
     <View>
       {city && bl ? (
@@ -2389,7 +2531,7 @@ function RegionSetupContent({
             </Text>
           </Pressable>
           <Pressable
-            onPress={onPickOther}
+            onPress={() => setPicking(true)}
             style={({ pressed }) => ({
               marginTop: 8,
               height: 50,
@@ -2408,7 +2550,7 @@ function RegionSetupContent({
                 color: theme.text,
               }}
             >
-              Nein, ich wohne woanders
+              Nein, anderes Bundesland wählen
             </Text>
           </Pressable>
           <Text
@@ -2427,6 +2569,8 @@ function RegionSetupContent({
         </>
       ) : (
         <>
+          {/* Unreachable now — `showPicker` short-circuits at the top
+              when no suggestion exists. Kept as a defensive fallback. */}
           <Text
             style={{
               fontFamily,
@@ -2436,20 +2580,7 @@ function RegionSetupContent({
               textAlign: 'center',
             }}
           >
-            Wähle deine Stadt
-          </Text>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 14,
-              lineHeight: 20,
-              color: theme.textSub,
-              textAlign: 'center',
-              marginTop: 6,
-            }}
-          >
-            Damit deine Punkte für deine Region zählen.
+            Wähle dein Bundesland
           </Text>
         </>
       )}
