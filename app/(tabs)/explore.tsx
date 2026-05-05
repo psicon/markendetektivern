@@ -302,16 +302,7 @@ export default function ExploreScreen() {
   // (App crasht in Production-Builds mit
   // "Cannot read property 'length' of undefined" beim Stöbern-Mount).
   // Siehe weiter unten nach `searchHitsMarken`-Init.
-  // Two distinct booleans:
-  //   • reserveBannerSpot — Premium check only. As long as the user
-  //     isn't Premium AND we're on the active page, we keep the 70-px
-  //     header slot reserved so the actual ad mount later doesn't
-  //     push content down (no "ad pops in, list jumps" jank).
-  //   • mountBanner — also requires `adsReady` (data loaded + 2-s
-  //     buffer, see CLAUDE.md / the gating useEffect below). Drives
-  //     whether we render <BannerAd /> inside the reserved slot.
-  const reserveBannerSpot = (forTab: Tab) => !isPremium && tab === forTab;
-  const mountBanner = (forTab: Tab) =>
+  const showBannerOn = (forTab: Tab) =>
     !isPremium && adsReady && tab === forTab;
 
   // ─── Reference data (filters + card lookup) ───────────────────────────
@@ -2368,7 +2359,7 @@ export default function ExploreScreen() {
                 paddingHorizontal: 14,
               }}
               ListHeaderComponent={
-                reserveBannerSpot('alle') ? (
+                showBannerOn('alle') ? (
                   <View
                     style={{
                       height: 70,
@@ -2379,9 +2370,7 @@ export default function ExploreScreen() {
                       marginHorizontal: -14,
                     }}
                   >
-                    {mountBanner('alle') ? (
-                      <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                    ) : null}
+                    <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
                   </View>
                 ) : null
               }
@@ -2442,7 +2431,7 @@ export default function ExploreScreen() {
                 paddingHorizontal: 14,
               }}
               ListHeaderComponent={
-                reserveBannerSpot('eigen') ? (
+                showBannerOn('eigen') ? (
                   <View
                     style={{
                       height: 70,
@@ -2453,9 +2442,7 @@ export default function ExploreScreen() {
                       marginHorizontal: -14,
                     }}
                   >
-                    {mountBanner('eigen') ? (
-                      <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                    ) : null}
+                    <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
                   </View>
                 ) : null
               }
@@ -2509,7 +2496,7 @@ export default function ExploreScreen() {
                 paddingHorizontal: 14,
               }}
               ListHeaderComponent={
-                reserveBannerSpot('marken') ? (
+                showBannerOn('marken') ? (
                   <View
                     style={{
                       height: 70,
@@ -2520,9 +2507,7 @@ export default function ExploreScreen() {
                       marginHorizontal: -14,
                     }}
                   >
-                    {mountBanner('marken') ? (
-                      <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
-                    ) : null}
+                    <BannerAd onAdLoaded={() => {}} onAdFailedToLoad={() => {}} />
                   </View>
                 ) : null
               }
