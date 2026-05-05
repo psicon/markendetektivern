@@ -62,6 +62,11 @@ import type { Level } from '@/lib/types/achievements';
 //     yearly counters once we deploy that schema upgrade
 //   • Rising Star (Diese Woche) — same; weekly rolling counter
 
+// Fixed hero height — locks the StatusHero (this tab) and the
+// Cashback hero (Belohnungen tab) to the SAME total height so the
+// layout doesn't jump on tab swipe across screens.
+const HERO_HEIGHT = 144;
+
 type LbScopeOuter = 'overall' | 'region';
 type OverallMetric = 'pts' | 'eur';
 type RegionGeo = 'bundesland' | 'stadt';

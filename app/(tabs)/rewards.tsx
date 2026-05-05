@@ -119,7 +119,8 @@ export default function RewardsScreen() {
   // Bestenliste lebt jetzt unter Errungenschaften (eigener Tab dort).
   // Hier nur noch der Einlösen-Flow → keine Tabs, kein PagerView,
   // kein Gamification-Toggle-Geraffel mehr nötig.
-  const chromeHeight = insets.top + HEADER_ROW_HEIGHT + 14;
+  // Chrome inner padding: 8 top + 52 row + 14 bottom = 74. Match.
+  const chromeHeight = insets.top + 8 + HEADER_ROW_HEIGHT + 14;
 
   const ChromeContent = (
     <View style={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 14 }}>
