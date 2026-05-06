@@ -13,6 +13,6 @@ class BonEdgeDetectorModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("BonEdgeDetector")
 
-    AsyncFunction("detectAndCropDocument") { _: String -> null }
+    AsyncFunction("detectAndCropDocument") { _: String -> null as String? }
   }
 }

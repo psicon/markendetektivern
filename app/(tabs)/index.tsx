@@ -318,32 +318,52 @@ export default function HomeScreen() {
 
       const productsPromise = (async () => {
         try {
-          const produkteData = await FirestoreService.getTopEnttarnteProdukteRandomized(200, 10);
+          // W1 — Pool von 200 auf 90 reduziert. Mit 90 randomized
+          // pickt Home's Top-Enttarnte aus einem ausreichend großen
+          // Pool für sichtbare Variety, ohne 200 Doc-Reads bei
+          // jedem Home-Mount (auf Web SDK Android 2-3 s Roundtrip).
+          const produkteData = await FirestoreService.getTopEnttarnteProdukteRandomized(90, 10);
           if (cancelled) return;
           setEnttarnteProdukte(produkteData);
 
-          // Per-product handelsmarke joins (kicked off inside the
-          // products promise so we have the IDs to look up). Läuft
-          // in eigener Promise im Hintergrund — blockt den Stage-
-          // Done nicht, denn Eyebrow-Logos füllen sich nach.
-          Promise.all(
-            produkteData.map(async p => {
-              if (!p.handelsmarke) return [p.id, null] as const;
-              try {
-                const hm = await FirestoreService.getDocumentByReference<Handelsmarken>(p.handelsmarke);
-                return [p.id, (hm as any)?.bezeichnung ?? null] as const;
-              } catch {
-                return [p.id, null] as const;
+          // W2 — Pre-Batch der handelsmarke-Refs: statt N individuelle
+          // getDoc-Calls (auf Web SDK Android jeweils ~250 ms) nutzen
+          // wir `getDocumentsBatch` mit `where(documentId(), 'in', ...)`.
+          // 10 Refs werden in 1-2 Roundtrips gebatcht statt 10 separaten.
+          // Eyebrow-Logos füllen sich weiterhin nach (Stage-Done ist
+          // nicht geblockt) — nur eben deutlich schneller.
+          (async () => {
+            const refIds = new Set<string>();
+            const productToRefId = new Map<string, string>();
+            for (const p of produkteData) {
+              if (!p.handelsmarke) continue;
+              const path = (p.handelsmarke as any).referencePath ?? p.handelsmarke.path;
+              if (!path) continue;
+              const [coll, id] = String(path).split('/');
+              if (coll === 'handelsmarken' && id) {
+                refIds.add(id);
+                productToRefId.set(p.id, id);
               }
-            })
-          ).then(pairs => {
-            if (cancelled) return;
-            const hMap: Record<string, string> = {};
-            for (const [id, name] of pairs) {
-              if (name) hMap[id] = name;
             }
-            setHandelsmarken(hMap);
-          });
+            if (refIds.size === 0) return;
+            try {
+              const resolved = await FirestoreService.getDocumentsBatch<Handelsmarken>(
+                'handelsmarken',
+                Array.from(refIds),
+              );
+              if (cancelled) return;
+              const hMap: Record<string, string> = {};
+              for (const [productId, refId] of productToRefId) {
+                const hm = resolved[refId];
+                if (hm && (hm as any).bezeichnung) {
+                  hMap[productId] = (hm as any).bezeichnung;
+                }
+              }
+              setHandelsmarken(hMap);
+            } catch {
+              // swallow
+            }
+          })();
         } catch {
           if (!cancelled) setError('Fehler beim Laden der Daten');
         } finally {
@@ -377,6 +397,21 @@ export default function HomeScreen() {
       // Sequenz-Gate nicht blockiert.
       Promise.allSettled([productsPromise, discounterPromise]).then(() => {
         if (!cancelled) setProductsStageDone(true);
+
+        // W4 — Stöbern Prewarm: nachdem Home's eigene Reads fertig
+        // sind, im Hintergrund die ersten Stöbern-Queries laden.
+        // Cache-Schicht in `stoebernCache.ts` merkt sich die
+        // Resultate; wenn der User später auf Stöbern tippt rendert
+        // die Page instant aus dem Cache statt 13 s zu warten.
+        // 2 s Delay damit der UI-Thread nach Home-Render kurz Luft
+        // hat. Idempotent (prewarmStoebern() macht nix wenn schon
+        // gecached oder in-flight).
+        setTimeout(() => {
+          if (cancelled) return;
+          import('@/lib/services/stoebernCache')
+            .then(({ prewarmStoebern }) => prewarmStoebern())
+            .catch(() => {});
+        }, 2000);
       });
     });
 

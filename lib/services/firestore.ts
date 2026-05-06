@@ -4,6 +4,7 @@ import {
     deleteDoc,
     doc,
     DocumentReference,
+    documentId,
     getCountFromServer,
     getDoc,
     getDocs,
@@ -417,7 +418,7 @@ export class FirestoreService {
     try {
       console.log(`🔍 Loading ${pageSize} NoName products...`);
       const startTime = Date.now();
-      
+
       const produkteRef = collection(db, 'produkte');
       
       // Sortierung standardmäßig nach Name, außer bei Preis-Filtern
@@ -507,8 +508,46 @@ export class FirestoreService {
       q = query(q, limit(pageSize));
 
       const querySnapshot = await getDocs(q);
-      
-      // ✅ Parallel processing für bessere Performance
+
+      // Fix K — Pre-Batch alle Ref-IDs, lade jede Collection in
+      // EINEM Roundtrip (statt 3 × N parallel getDocs). Seedet
+      // refDocCache, sodass die per-Produkt-Resolution unten
+      // ausschließlich Cache-Hits macht.
+      const refIdsByCollection: Record<string, Set<string>> = {
+        discounter: new Set(),
+        handelsmarken: new Set(),
+        hersteller_new: new Set(),
+      };
+      const refPathsByCollection: Record<string, Map<string, any>> = {
+        discounter: new Map(),
+        handelsmarken: new Map(),
+        hersteller_new: new Map(),
+      };
+      const collectIdFromRef = (ref: any, collName: string) => {
+        if (!ref) return;
+        const path = (ref as any).referencePath ?? ref.path;
+        if (!path) return;
+        const [coll, id] = String(path).split('/');
+        if (coll && id && coll === collName) {
+          refIdsByCollection[collName].add(id);
+          refPathsByCollection[collName].set(id, ref);
+        }
+      };
+      for (const d of querySnapshot.docs) {
+        const data = d.data() as any;
+        collectIdFromRef(data.discounter, 'discounter');
+        collectIdFromRef(data.handelsmarke, 'handelsmarken');
+        collectIdFromRef(data.hersteller, 'hersteller_new');
+      }
+      // Drei Batched Queries parallel — füllt refDocCache.
+      await Promise.all([
+        FirestoreService.getDocumentsBatch<Discounter>('discounter', Array.from(refIdsByCollection.discounter)),
+        FirestoreService.getDocumentsBatch<Handelsmarken>('handelsmarken', Array.from(refIdsByCollection.handelsmarken)),
+        FirestoreService.getDocumentsBatch<any>('hersteller_new', Array.from(refIdsByCollection.hersteller_new)),
+      ]);
+
+      // ✅ Parallel processing für bessere Performance — jetzt
+      // alles Cache-Hits.
       const productPromises = querySnapshot.docs.map(async (docSnap) => {
         const productData = docSnap.data() as Produkte;
         const productWithDetails: FirestoreDocument<Produkte> & {
@@ -522,12 +561,10 @@ export class FirestoreService {
 
         // Populate references parallel für UI-Daten
         // hersteller_new ist neu dabei — UI zeigt seinen `name` als
-        // zweite Zeile unter dem Produkttitel auf NoName-Karten
-        // (Stöbern, shopping-list, comparison alt-cards). Cost: +1
-        // ref-fetch pro Produkt — aber `getDocumentByReference` cacht
-        // 30 min sessionsweit, und viele Produkte teilen denselben
-        // Hersteller (e.g. "Andechser Molkerei" für 50 Produkte) →
-        // praktisch fast immer Cache-Hits nach dem ersten Load.
+        // zweite Zeile unter dem Produkttitel auf NoName-Karten.
+        // `getDocumentByReference` ist mit Fix K oben pre-cached →
+        // diese drei Aufrufe sind reine Map-Lookups, keine
+        // Firestore-Roundtrips mehr.
         const [discounter, handelsmarke, hersteller] = await Promise.all([
           this.getDocumentByReference<Discounter>(productData.discounter),
           this.getDocumentByReference<Handelsmarken>(productData.handelsmarke),
@@ -542,7 +579,7 @@ export class FirestoreService {
 
         return productWithDetails;
       });
-      
+
       let products = await Promise.all(productPromises);
       
       // Client-Side Filtering für Allergene und Nährwerte
@@ -693,6 +730,71 @@ export class FirestoreService {
   }
 
   /**
+   * Fix K — Lädt mehrere Docs aus einer Collection in EINEM Round-trip
+   * via `where(documentId(), 'in', chunk)`. Firestore-`in` ist auf
+   * 10 Werte begrenzt → Auto-Chunking. Resultat wird in `refDocCache`
+   * geseeded damit nachfolgende `getDocumentByReference`-Calls
+   * Cache-Hits werden.
+   *
+   * Vor diesem Fix: Stöbern lädt 6 Produkte → 6 × 3 = 18 separate
+   * `getDoc`-Aufrufe für Discounter / Handelsmarke / Hersteller-Refs.
+   * Auf Android Web SDK = 18 × ~250 ms = 4.5 s blocker.
+   * Mit dieser Methode: 3 batched Queries → ~750 ms total.
+   */
+  static async getDocumentsBatch<T = any>(
+    collectionName: string,
+    ids: string[],
+  ): Promise<Record<string, T | null>> {
+    const result: Record<string, T | null> = {};
+    if (!ids.length) return result;
+    // Cache-Check first — wenn alle schon gecached sind, kein Roundtrip.
+    const uncached: string[] = [];
+    for (const id of ids) {
+      const cacheKey = `${collectionName}/${id}`;
+      const cached = readCache(refDocCache, cacheKey);
+      if (cached !== undefined) {
+        result[id] = cached as T | null;
+      } else {
+        uncached.push(id);
+      }
+    }
+    if (uncached.length === 0) {
+      return result;
+    }
+    // Chunk auf 10 (Firestore `in` Limit)
+    const chunks: string[][] = [];
+    for (let i = 0; i < uncached.length; i += 10) {
+      chunks.push(uncached.slice(i, i + 10));
+    }
+    try {
+      const collRef = collection(db, collectionName);
+      const queryPromises = chunks.map(async (chunk) => {
+        const q = query(collRef, where(documentId(), 'in', chunk));
+        const snap = await getDocs(q);
+        const seen = new Set<string>();
+        snap.forEach((d) => {
+          const id = d.id;
+          const data = d.data() as T;
+          result[id] = data;
+          writeCache(refDocCache, `${collectionName}/${id}`, data, TTL_LONG_MS);
+          seen.add(id);
+        });
+        // Fehlende IDs (nicht-existente Docs) als null cachen
+        for (const id of chunk) {
+          if (!seen.has(id)) {
+            result[id] = null;
+            writeCache(refDocCache, `${collectionName}/${id}`, null, TTL_LONG_MS);
+          }
+        }
+      });
+      await Promise.all(queryPromises);
+    } catch (e) {
+      console.error(`getDocumentsBatch(${collectionName}) failed:`, e);
+    }
+    return result;
+  }
+
+  /**
    * Holt alle Kategorien
    */
   static async getKategorien(): Promise<FirestoreDocument<Kategorien>[]> {
@@ -800,8 +902,36 @@ export class FirestoreService {
       q = query(q, limit(pageSize));
 
       const querySnapshot = await getDocs(q);
-      
-      // Parallel processing für bessere Performance
+
+      // Fix K — Pre-Batch der primären `hersteller`-Refs der
+      // Markenprodukte. Die Refs zeigen entweder auf `hersteller`
+      // (= Marke mit `herstellerref` → 2-Step-Resolution) oder direkt
+      // auf `hersteller_new`. Wir batchen pro Collection. Die ggf.
+      // notwendigen 2nd-Step-Refs (sub-fetches via `herstellerref`)
+      // bleiben pro-Produkt (oft wenige unique → cache hits).
+      const primaryRefIds: Record<string, Set<string>> = {
+        hersteller: new Set(),
+        hersteller_new: new Set(),
+      };
+      for (const d of querySnapshot.docs) {
+        const data = d.data() as any;
+        const ref = data.hersteller;
+        if (!ref) continue;
+        const path = (ref as any).referencePath ?? ref.path;
+        if (!path) continue;
+        const [coll, id] = String(path).split('/');
+        if (coll === 'hersteller' && id) primaryRefIds.hersteller.add(id);
+        else if (coll === 'hersteller_new' && id) primaryRefIds.hersteller_new.add(id);
+      }
+      await Promise.all([
+        FirestoreService.getDocumentsBatch<any>('hersteller', Array.from(primaryRefIds.hersteller)),
+        FirestoreService.getDocumentsBatch<any>('hersteller_new', Array.from(primaryRefIds.hersteller_new)),
+      ]);
+
+      // Parallel processing — primäre Ref-Lookups sind nun
+      // Cache-Hits dank Pre-Batch oben. Step-2 sub-fetches
+      // (herstellerref) bleiben individuell, aber typisch wenige
+      // unique Refs → mostly cache hits.
       const productPromises = querySnapshot.docs.map(async (docSnap) => {
         const productData = docSnap.data();
         const productWithDetails: any = {
@@ -838,7 +968,7 @@ export class FirestoreService {
 
         return productWithDetails;
       });
-      
+
       let products = await Promise.all(productPromises);
       
       // Client-Side Filtering für Allergene und Nährwerte (gleiche Logik wie bei NoName)

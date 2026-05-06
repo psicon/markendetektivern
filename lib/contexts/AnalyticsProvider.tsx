@@ -1,11 +1,12 @@
 import { useAuth } from '@/lib/contexts/AuthContext';
 import Constants from 'expo-constants';
 import { useFocusEffect, usePathname } from 'expo-router';
-import React, { createContext, useCallback, useContext, useEffect, useRef } from 'react';
-import { Platform } from 'react-native';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
+import { InteractionManager, Platform } from 'react-native';
 // Version wird aus Constants gelesen, nicht aus package.json
 import { analyticsService } from '../services/analyticsService';
 import journeyTrackingService from '../services/journeyTrackingService';
+import { PERF } from '../perfFlags';
 import { isExpoGo } from '../utils/platform';
 
 interface AnalyticsContextType {
@@ -96,36 +97,51 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
     useCallback(() => {
       const screenName = pathname.replace(/^\//, '').replace(/\//g, '_') || 'home';
       const now = new Date();
-      
-      // Track Screen-Transition für Pfadanalyse
-      if (lastScreenRef.current) {
-        const dwellTime = now.getTime() - screenStartTimeRef.current.getTime();
-        analyticsService.trackEvent({
-          event_name: 'screen_transition',
-          event_category: 'navigation',
-          from_screen: lastScreenRef.current,
-          to_screen: screenName,
-          dwell_time_ms: dwellTime
-        }, user?.uid);
-        
-        // Zusätzlich: screen_left für Backwards-Kompatibilität
-        analyticsService.trackEvent({
-          event_name: 'screen_left',
-          event_category: 'navigation',
-          screen_name: lastScreenRef.current,
-          dwell_time_ms: dwellTime
-        }, user?.uid);
-      }
 
-      // Track neuen Screen-View
-      analyticsService.trackScreenView(screenName, user?.uid);
-      
-      // 🎯 Journey-Management bei Screen-Wechsel
-      journeyTrackingService.onScreenChange(screenName, {}, user?.uid);
-      
-      // Update Refs für nächsten Screen-Wechsel
+      // Refs SOFORT updaten (nicht im deferred Block) — sonst
+      // berechnet der nächste Focus-Effect ggf. mit veraltetem
+      // lastScreenRef einen falschen dwellTime.
+      const previousScreen = lastScreenRef.current;
+      const previousStartTime = screenStartTimeRef.current;
       lastScreenRef.current = screenName;
       screenStartTimeRef.current = now;
+
+      // Fix C — Screen-Tracking-Writes (3 Firestore-Writes pro Nav)
+      // sind teuer und nicht zeit-kritisch. Mit `PERF.deferScreenTracking=true`:
+      // in `runAfterInteractions` schicken, damit die Navigation-
+      // Animation nicht gegen die Writes konkurriert. Events
+      // sind eh fire-and-forget — User merkt nichts.
+      // Rollback: PERF.deferScreenTracking = false.
+      const fireWrites = () => {
+        if (previousScreen) {
+          const dwellTime = now.getTime() - previousStartTime.getTime();
+          analyticsService.trackEvent({
+            event_name: 'screen_transition',
+            event_category: 'navigation',
+            from_screen: previousScreen,
+            to_screen: screenName,
+            dwell_time_ms: dwellTime,
+          }, user?.uid);
+
+          analyticsService.trackEvent({
+            event_name: 'screen_left',
+            event_category: 'navigation',
+            screen_name: previousScreen,
+            dwell_time_ms: dwellTime,
+          }, user?.uid);
+        }
+
+        analyticsService.trackScreenView(screenName, user?.uid);
+
+        // 🎯 Journey-Management bei Screen-Wechsel
+        journeyTrackingService.onScreenChange(screenName, {}, user?.uid);
+      };
+
+      if (PERF.deferScreenTracking) {
+        InteractionManager.runAfterInteractions(fireWrites);
+      } else {
+        fireWrites();
+      }
     }, [pathname, user?.uid])
   );
 
@@ -339,76 +355,147 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
     };
   }, [user?.uid]);
 
-  const contextValue: AnalyticsContextType = {
-    trackProductView,
-    trackSearch,
-    trackFilter,
-    trackConversion,
-    trackMotivation,
-    trackCustomEvent,
-    trackAddToCart,
-    trackRemoveFromCart,
-    trackPurchaseCompleted,
-    trackProductConversion,
-    trackSortChanged,
-    trackFilterChanged,
-    trackSavingsWidgetClicked,
-    startJourney,
-    updateJourneyFilters,
-    
-    // Enhanced Filter Journey Tracking
-    trackJourneyAbandonment,
-    trackFilterCleared,
-    trackNoResultsFound,
-    trackTabSwitched,
-    checkFilterComplexityOverload,
-    trackProductViewWithJourney,
-    trackAddToCartWithJourney,
-    trackAddToFavoritesWithJourney,
-    trackPurchaseWithJourney,
-    
-    // NEU: Comparison Tracking
-    trackProductComparison: useCallback((
-      mainProductId: string,
-      mainProductName: string,
-      mainProductType: 'brand' | 'noname',
-      comparedProducts: any[]
-    ) => {
-      journeyTrackingService.trackProductComparison(
-        mainProductId,
-        mainProductName,
-        mainProductType,
-        comparedProducts,
-        user?.uid
-      );
-    }, [user?.uid]),
-    
-    trackComparisonEnd: useCallback((
-      mainProductId: string,
-      selectedProductId?: string,
-      abandonmentReason?: string
-    ) => {
-      journeyTrackingService.trackComparisonEnd(
-        mainProductId,
-        selectedProductId,
-        abandonmentReason as any
-      );
-    }, []),
-    
-    // NEU: Einkaufszettel Actions
-    trackRemoveFromCartWithJourney: useCallback((
-      productId: string,
-      productName: string,
-      productType: 'brand' | 'noname'
-    ) => {
-      journeyTrackingService.trackRemoveFromCart(
-        productId,
-        productName,
-        productType,
-        user?.uid
-      );
-    }, [user?.uid])
-  };
+  // Inline-useCallbacks aus dem contextValue-Object herausgezogen,
+  // damit der useMemo darunter ein deterministisches Dep-Set hat
+  // (sonst würde React für jeden useCallback ein neues Object pro
+  // Render erzeugen — bricht den Memo).
+  const trackProductComparison = useCallback((
+    mainProductId: string,
+    mainProductName: string,
+    mainProductType: 'brand' | 'noname',
+    comparedProducts: any[]
+  ) => {
+    journeyTrackingService.trackProductComparison(
+      mainProductId,
+      mainProductName,
+      mainProductType,
+      comparedProducts,
+      user?.uid
+    );
+  }, [user?.uid]);
+
+  const trackComparisonEnd = useCallback((
+    mainProductId: string,
+    selectedProductId?: string,
+    abandonmentReason?: string
+  ) => {
+    journeyTrackingService.trackComparisonEnd(
+      mainProductId,
+      selectedProductId,
+      abandonmentReason as any
+    );
+  }, []);
+
+  const trackRemoveFromCartWithJourney = useCallback((
+    productId: string,
+    productName: string,
+    productType: 'brand' | 'noname'
+  ) => {
+    journeyTrackingService.trackRemoveFromCart(
+      productId,
+      productName,
+      productType,
+      user?.uid
+    );
+  }, [user?.uid]);
+
+  // Fix B — Mit `PERF.memoAnalyticsValue=true`: stabilisiert das
+  // contextValue-Object via useMemo. AnalyticsProvider rendert
+  // besonders oft (`usePathname()` als Auth+Pathname-Dep), daher
+  // ist die Cascade hier doppelt teuer ohne Memo.
+  // Rollback: PERF.memoAnalyticsValue = false.
+  const valueMemo = useMemo<AnalyticsContextType>(
+    () => ({
+      trackProductView,
+      trackSearch,
+      trackFilter,
+      trackConversion,
+      trackMotivation,
+      trackCustomEvent,
+      trackAddToCart,
+      trackRemoveFromCart,
+      trackPurchaseCompleted,
+      trackProductConversion,
+      trackSortChanged,
+      trackFilterChanged,
+      trackSavingsWidgetClicked,
+      startJourney,
+      updateJourneyFilters,
+      trackJourneyAbandonment,
+      trackFilterCleared,
+      trackNoResultsFound,
+      trackTabSwitched,
+      checkFilterComplexityOverload,
+      trackProductViewWithJourney,
+      trackAddToCartWithJourney,
+      trackAddToFavoritesWithJourney,
+      trackPurchaseWithJourney,
+      trackProductComparison,
+      trackComparisonEnd,
+      trackRemoveFromCartWithJourney,
+    }),
+    [
+      trackProductView,
+      trackSearch,
+      trackFilter,
+      trackConversion,
+      trackMotivation,
+      trackCustomEvent,
+      trackAddToCart,
+      trackRemoveFromCart,
+      trackPurchaseCompleted,
+      trackProductConversion,
+      trackSortChanged,
+      trackFilterChanged,
+      trackSavingsWidgetClicked,
+      startJourney,
+      updateJourneyFilters,
+      trackJourneyAbandonment,
+      trackFilterCleared,
+      trackNoResultsFound,
+      trackTabSwitched,
+      checkFilterComplexityOverload,
+      trackProductViewWithJourney,
+      trackAddToCartWithJourney,
+      trackAddToFavoritesWithJourney,
+      trackPurchaseWithJourney,
+      trackProductComparison,
+      trackComparisonEnd,
+      trackRemoveFromCartWithJourney,
+    ],
+  );
+
+  const contextValue: AnalyticsContextType = PERF.memoAnalyticsValue
+    ? valueMemo
+    : {
+        trackProductView,
+        trackSearch,
+        trackFilter,
+        trackConversion,
+        trackMotivation,
+        trackCustomEvent,
+        trackAddToCart,
+        trackRemoveFromCart,
+        trackPurchaseCompleted,
+        trackProductConversion,
+        trackSortChanged,
+        trackFilterChanged,
+        trackSavingsWidgetClicked,
+        startJourney,
+        updateJourneyFilters,
+        trackJourneyAbandonment,
+        trackFilterCleared,
+        trackNoResultsFound,
+        trackTabSwitched,
+        checkFilterComplexityOverload,
+        trackProductViewWithJourney,
+        trackAddToCartWithJourney,
+        trackAddToFavoritesWithJourney,
+        trackPurchaseWithJourney,
+        trackProductComparison,
+        trackComparisonEnd,
+        trackRemoveFromCartWithJourney,
+      };
 
   return (
     <AnalyticsContext.Provider value={contextValue}>

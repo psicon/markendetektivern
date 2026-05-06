@@ -19,8 +19,10 @@ import Animated, {
   Extrapolation,
   interpolate,
   runOnJS,
+  useAnimatedRef,
   useAnimatedScrollHandler,
   useAnimatedStyle,
+  useScrollViewOffset,
   useSharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,6 +31,10 @@ import { LegendList, type LegendListRef } from '@legendapp/list';
 // Animated wrapper around LegendList — same pattern Animated.ScrollView
 // uses internally — so the existing useAnimatedScrollHandler workers
 // (chrome collapse, banner gating) keep firing on the UI thread.
+//
+// HINWEIS: Mit PERF.useScrollOffset=true wird statt dieser Wrapper
+// die plain LegendList verwendet (siehe `ListComp` weiter unten).
+// Der Animated-Wrapper bleibt für den Rollback-Pfad erhalten.
 const AnimatedLegendList = Animated.createAnimatedComponent(LegendList) as any;
 
 import { BrandCard } from '@/components/design/BrandCard';
@@ -51,6 +57,7 @@ import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { db } from '@/lib/firebase';
+import { PERF } from '@/lib/perfFlags';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { FirestoreService } from '@/lib/services/firestore';
 import {
@@ -118,6 +125,61 @@ const LAND_TO_CODE: Record<string, string> = {
 const landToCode = (land: string | undefined): string => {
   if (!land) return '??';
   return LAND_TO_CODE[land] ?? land.slice(0, 2).toUpperCase();
+};
+
+// ────────────────────────────────────────────────────────────────────────
+// JS-Thread-Saturation-Fixes (2026-05)
+// ────────────────────────────────────────────────────────────────────────
+// Symptom: nach Besuch von Stöbern war die App träge — Tap-Handler
+// (z.B. "zu Favoriten hinzufügen" auf Detail-Pages) stauten sich auf
+// und feuerten dann gleichzeitig in einem Burst. Ursache: mehrere
+// fire-and-forget Background-Operationen die nicht canceln, wenn
+// der User wegnavigiert (Stöbern selbst bleibt mounted, da Tab —
+// also läuft alles weiter). Zentrale Schalter; einzeln auf `false`
+// setzen rollbacked den jeweiligen Fix sofort, ohne Code-Änderungen.
+const PERF_FIXES = {
+  // Fix #1: Background-Prefetch der nächsten Page hinter
+  // `runAfterInteractions` + Sequence-Check stellen, damit er den
+  // JS-Thread nicht während User-Interaktion auslastet und stale
+  // Resultate nach Filter-Wechsel verworfen werden.
+  // Auswirkung: erste Page (6 Items) erscheint sofort. Items 7–18
+  // landen lautlos, sobald der JS-Thread idle ist. Wenn User
+  // schon weggetappt hat, läuft die Pagination zwar zu Ende, aber
+  // setState rotiert die UI nicht mehr.
+  deferBackgroundPrefetch: true,
+  // Fix #2: Image.prefetch-Loop debouncen — heute feuert der
+  // useEffect bei jedem der mehreren Pagination-Updates erneut.
+  // Mit Debounce: nur 1× pro 250 ms gesammelt. ProductCard hat
+  // bereits Shimmer-bis-geladen, also ist der globale Prefetch
+  // Optimization-on-top — Debounce ändert sichtbar nichts.
+  debounceImagePrefetch: true,
+  // Fix M: Focus-Pause — wenn Stöbern blurred (User auf andere
+  // Tab/Page) und 30 s nicht zurück → render-data wird auf [] gesetzt.
+  // Effekt: alle Card-Components unmounten + ihre Bilder werden vom
+  // expo-image-Cache evicted → Memory-Pressure auf Android weg.
+  // Stöbern-Tab in Expo-Router unmountet NIE, deshalb bleibt
+  // ohne Fix M die ganze Card-Tree (3 LegendLists × 30+ Cards × Bilder)
+  // permanent im Speicher. Wenn User innerhalb 30 s zurückkommt,
+  // kein Pause → instant.
+  // Beim Pause: Underlying-State (`nonames`, `markenprodukte` etc.)
+  // bleibt unverändert. Beim Resume: dataAlle/Eigen/Marken kriegt
+  // wieder die echten Items → LegendLists rendern sofort, weil
+  // expo-image disk-Cache die meisten Bilder ohne neuen Download
+  // wiederherstellt.
+  //
+  // OBSOLET — abgelöst durch `freezeOnBlur: true` in
+  // (tabs)/_layout.tsx. Die offizielle React-Navigation-API friert
+  // den gesamten Tab-Subtree sofort beim Blur ein (kein 30-s-Timer
+  // nötig, kein Re-Mount-Cost, Scroll-Position bleibt erhalten).
+  // Flag bleibt `false` — die Empty-Array-Logik darunter wird nicht
+  // mehr greifen, weil React Navigation den Subtree früher einfriert.
+  pauseStoebernOnBlur: false,
+
+  // Fix #3: Algolia-Search + Firestore-Enrichment per
+  // AbortController canceln, sobald a) eine neue Suche kommt
+  // oder b) Stöbern unmounted. Vorher liefen 40 enrichWithFirestore-
+  // Calls noch zu Ende, auch wenn der User längst weiter ist.
+  abortStaleSearch: true,
 };
 
 // 2-column grid math — precomputed once. 20 = horizontal padding, 12 = gap.
@@ -195,15 +257,24 @@ const STUFE_INFO: Record<1 | 2 | 3 | 4 | 5, { label: string; line: string }> = {
 // render instantly; the reload effect then refreshes in the
 // background. Cache stores only the first page (what the user sees
 // first), to keep memory bounded and state re-hydration cheap.
-type CachedPage = { items: any[]; lastDoc: any; hasMore: boolean };
-let cachedEigen: CachedPage | null = null;
-let cachedMarken: CachedPage | null = null;
+//
+// W4 — Cache lebt jetzt im SHARED Service-Modul `stoebernCache.ts`,
+// damit Home (und andere Pages) den Cache via `prewarmStoebern()`
+// vorladen können. Bei Stöbern-Mount: lesen aus shared cache, falls
+// gefüllt → instant render statt 13 s warten.
+import {
+  getCachedEigen,
+  getCachedMarken,
+  setCachedEigen,
+  setCachedMarken,
+} from '@/lib/services/stoebernCache';
 
 export default function ExploreScreen() {
   const { theme, brand, shadows, stufen } = useTokens();
   const scheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+
   const params = useLocalSearchParams<{
     tab?: string;
     categoryFilter?: string;
@@ -238,15 +309,58 @@ export default function ExploreScreen() {
   const eigenScrollRef = useRef<LegendListRef | null>(null);
   const markenScrollRef = useRef<LegendListRef | null>(null);
 
+  // Fix F — `useAnimatedRef` versions: wenn PERF.useScrollOffset aktiv
+  // ist, werden DIESE Refs statt der `LegendListRef`-Refs oben an die
+  // (plain, nicht-Animated) LegendList gehängt. `useScrollViewOffset`
+  // liest die Scroll-Position direkt vom native UIScrollView ohne
+  // Animated-Wrapper-Klasse → iOS-Status-Bar-Tap funktioniert wieder.
+  // useAnimatedRef gibt einen Ref der ALLE LegendListRef-Methoden
+  // weiterleitet (scrollToOffset etc.), also bleibt die imperative
+  // Scroll-API erhalten — getestet via die scroll-to-0-on-data-arrival
+  // useEffects und das tab-press-Listener weiter unten.
+  const animatedRefAlle = useAnimatedRef<any>();
+  const animatedRefEigen = useAnimatedRef<any>();
+  const animatedRefMarken = useAnimatedRef<any>();
+
   // Reanimated shared values — per-page scroll offset so the tab-bar
   // collapse state snaps to the active page (if you scrolled down in
   // "Eigenmarken", then swipe to "Marken" at top, tabs reappear).
-  const scrollYEigen = useSharedValue(0);
-  const scrollYMarken = useSharedValue(0);
+  //
+  // Fix F: wenn PERF.useScrollOffset aktiv → useScrollViewOffset
+  // liefert die Shared Value direkt vom native UIScrollView (kein
+  // manueller scrollHandler nötig). Sonst → useSharedValue + manueller
+  // useAnimatedScrollHandler (alter Pfad).
+  const scrollYEigenOffset = useScrollViewOffset(animatedRefEigen);
+  const scrollYMarkenOffset = useScrollViewOffset(animatedRefMarken);
+  const scrollYAlleOffset = useScrollViewOffset(animatedRefAlle);
+  const scrollYEigenLegacy = useSharedValue(0);
+  const scrollYMarkenLegacy = useSharedValue(0);
+  const scrollYAlleLegacy = useSharedValue(0);
+  // Auswahl-Logik:
+  //   • Fix G (plain ScrollView) AKTIV: useScrollViewOffset funktioniert
+  //     nicht mit plain ScrollView → Legacy-SharedValue (gefüllt aus
+  //     JS-onScroll) ist die einzige Quelle.
+  //   • Fix F AKTIV, Fix G AUS: Reanimated-tracked Path,
+  //     useScrollViewOffset liefert UI-Thread-Wert.
+  //   • Beide AUS: useAnimatedScrollHandler füllt Legacy-SharedValue.
+  const scrollYEigen = PERF.legendListPlainScrollView
+    ? scrollYEigenLegacy
+    : PERF.useScrollOffset
+      ? scrollYEigenOffset
+      : scrollYEigenLegacy;
+  const scrollYMarken = PERF.legendListPlainScrollView
+    ? scrollYMarkenLegacy
+    : PERF.useScrollOffset
+      ? scrollYMarkenOffset
+      : scrollYMarkenLegacy;
   // Shared value for the merged "Alle"-tab scroll position. Drives
   // the chrome-collapse animation when the user is on the Alle page,
   // same as the per-collection ones above.
-  const scrollYAlle = useSharedValue(0);
+  const scrollYAlle = PERF.legendListPlainScrollView
+    ? scrollYAlleLegacy
+    : PERF.useScrollOffset
+      ? scrollYAlleOffset
+      : scrollYAlleLegacy;
   const pageIndexShared = useSharedValue(0);
 
   // ─── UI state ──────────────────────────────────────────────────────────
@@ -324,21 +438,21 @@ export default function ExploreScreen() {
   // reload effect still fires and replaces the data with a fresh
   // response in the background.
   const [nonames, setNonames] = useState<FirestoreDocument<Produkte>[]>(
-    () => (cachedEigen?.items as any) ?? [],
+    () => (getCachedEigen()?.items as any) ?? [],
   );
-  const [nonameLoading, setNonameLoading] = useState(!cachedEigen);
-  const [nonameLastDoc, setNonameLastDoc] = useState<any>(cachedEigen?.lastDoc ?? null);
-  const [nonameHasMore, setNonameHasMore] = useState(cachedEigen?.hasMore ?? true);
+  const [nonameLoading, setNonameLoading] = useState(!getCachedEigen());
+  const [nonameLastDoc, setNonameLastDoc] = useState<any>(getCachedEigen()?.lastDoc ?? null);
+  const [nonameHasMore, setNonameHasMore] = useState(getCachedEigen()?.hasMore ?? true);
 
   const [markenprodukte, setMarkenprodukte] = useState<FirestoreDocument<any>[]>(
-    () => (cachedMarken?.items as any) ?? [],
+    () => (getCachedMarken()?.items as any) ?? [],
   );
   // Start in loading state (unless we have a cache to seed from) so
   // the Marken tab shows the skeleton grid instead of the "Keine
   // Treffer" lupe flash while its first query is in flight.
-  const [markenLoading, setMarkenLoading] = useState(!cachedMarken);
-  const [markenLastDoc, setMarkenLastDoc] = useState<any>(cachedMarken?.lastDoc ?? null);
-  const [markenHasMore, setMarkenHasMore] = useState(cachedMarken?.hasMore ?? true);
+  const [markenLoading, setMarkenLoading] = useState(!getCachedMarken());
+  const [markenLastDoc, setMarkenLastDoc] = useState<any>(getCachedMarken()?.lastDoc ?? null);
+  const [markenHasMore, setMarkenHasMore] = useState(getCachedMarken()?.hasMore ?? true);
 
   // ─── In-place Algolia search state ─────────────────────────────────────
   // Stöbern owns the canonical search experience — when the user
@@ -420,16 +534,50 @@ export default function ExploreScreen() {
   useEffect(() => {
     const unsub = (navigation as any).addListener?.('tabPress', () => {
       if (!(navigation as any).isFocused?.()) return;
-      const ref =
-        tab === 'alle'
-          ? alleScrollRef
-          : tab === 'eigen'
-            ? eigenScrollRef
-            : markenScrollRef;
+      const ref: any = PERF.useScrollOffset
+        ? (tab === 'alle' ? animatedRefAlle : tab === 'eigen' ? animatedRefEigen : animatedRefMarken)
+        : (tab === 'alle' ? alleScrollRef : tab === 'eigen' ? eigenScrollRef : markenScrollRef);
       ref.current?.scrollToOffset?.({ offset: 0, animated: true });
     });
     return unsub;
   }, [navigation, tab]);
+
+  // ─── Fix M — Focus-Pause ─────────────────────────────────────────────
+  // Stöbern-Tab unmountet in Expo Router NIE → 3 LegendLists × 30+ Cards
+  // × 12 Bilder bleiben permanent im RAM. Auf Android trigger das
+  // app-weite GC-Pausen die ALLE anderen Pages langsam machen.
+  // Mit Fix M: 30 s nach blur (User auf andere Tab/Detail-Page) wird
+  // die Card-Tree auf [] gerendert → expo-image evicted Cache → RAM
+  // frei. Beim Resume (Tab/Page wird wieder fokussiert) steht der
+  // underlying State noch (nonames, markenprodukte) → LegendLists
+  // re-rendern instant aus Memory + disk-Image-Cache.
+  // Wenn User schnell zurück (innerhalb 30 s, typisch nach Detail-View),
+  // KEIN Pause — Timer wird gecanceld.
+  const [paused, setPaused] = useState(false);
+  useEffect(() => {
+    if (!PERF_FIXES.pauseStoebernOnBlur) return;
+    let blurTimer: ReturnType<typeof setTimeout> | null = null;
+    const onBlur = () => {
+      // 30 s Karenz — typische "tap product → look → back"-Flows
+      // brauchen 5-15 s. Bei kürzeren Latenz-Flows mit Detail-View
+      // bleibt Stöbern aktiv, kein Re-Mount-Cost.
+      blurTimer = setTimeout(() => setPaused(true), 30000);
+    };
+    const onFocus = () => {
+      if (blurTimer) {
+        clearTimeout(blurTimer);
+        blurTimer = null;
+      }
+      setPaused(false);
+    };
+    const unsubBlur = (navigation as any).addListener?.('blur', onBlur);
+    const unsubFocus = (navigation as any).addListener?.('focus', onFocus);
+    return () => {
+      if (blurTimer) clearTimeout(blurTimer);
+      unsubBlur?.();
+      unsubFocus?.();
+    };
+  }, [navigation]);
 
   // ─── Route param handling (from Home quick-access) ─────────────────────
   useEffect(() => {
@@ -511,22 +659,39 @@ export default function ExploreScreen() {
     const handle = InteractionManager.runAfterInteractions(async () => {
       try {
         const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
-        // Mount-Time: nur die schlanken Reference-Daten, die für die
-        // Produkt-Cards selbst nötig sind (Discounter-Logos, Pack-
-        // typen-Label, Kategorie-Chip). Die TEUERSTE Reference-Query
-        // (`getMarken()` ~ 968 Docs) wird nicht mehr hier gefeuert,
-        // sondern erst wenn der User das Marken-Filter-Sheet öffnet
-        // — siehe lazy-load useEffect direkt unter diesem.
-        // Spart bei ~30k DAU × 2 Cold Starts × 968 Reads ≈ 1,7 Mrd
-        // Reads/Monat → ~1.000 €/Monat bei 100k MAU.
-        const [ds, cats, hmSnap, ptSnap] = await Promise.all([
+        // Mount-Time: NUR die schlanken Reference-Daten die für
+        // Produkt-Cards essentiell sind (Discounter-Logos via per-
+        // Produkt ref + Packungstypen für unit-Label).
+        //
+        // Phase 0 C+D: kategorien (~21 docs) und handelsmarken (~1160
+        // docs!) sind aus dem Critical-Path RAUSGEZOGEN — die werden
+        // erst geladen wenn das jeweilige Filter-Sheet geöffnet wird
+        // (siehe lazy-Effekte weiter unten). Card-Rendering braucht
+        // sie nicht: Brand-Eyebrow-Text kommt aus per-Produkt
+        // `p.handelsmarke` (gefüllt via getDocumentsBatch in firestore.ts,
+        // Fix K).
+        // Bei Lazy: 1 große + 1 kleine Query weniger auf Mount = ~1.2 s
+        // schneller First-Paint auf Android.
+        // Rollback: PERF.lazyHandelsmarken / lazyKategorien = false.
+        const queries: Promise<any>[] = [
           FirestoreService.getDiscounter(),
-          categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium),
-          getDocs(collection(db, 'handelsmarken')).catch(() => null),
           getDocs(collection(db, 'packungstypen')).catch(() => null),
-        ]);
-        setDiscounter([...ds].sort(byName));
-        setKategorien([...cats].sort(byName));
+        ];
+        if (!PERF.lazyKategorien) {
+          queries.push(categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium));
+        }
+        if (!PERF.lazyHandelsmarken) {
+          queries.push(getDocs(collection(db, 'handelsmarken')).catch(() => null));
+        }
+        const results = await Promise.all(queries);
+        const [ds, ptSnap, ...rest] = results;
+        const cats = !PERF.lazyKategorien ? rest.shift() : undefined;
+        const hmSnap = !PERF.lazyHandelsmarken ? rest.shift() : undefined;
+
+        setDiscounter([...(ds ?? [])].sort(byName));
+        if (cats) {
+          setKategorien([...cats].sort(byName));
+        }
         if (hmSnap) {
           const hms: FirestoreDocument<Handelsmarken>[] = [];
           hmSnap.forEach((d: any) => {
@@ -546,7 +711,22 @@ export default function ExploreScreen() {
       }
     });
     return () => handle.cancel();
-  }, [userProfile, isPremium]);
+    // CRITICAL: deps müssen STABILE Primitives sein, nicht das ganze
+    // userProfile-Object. Vorher: `[userProfile, isPremium]` →
+    // jeder trackAction (Favorit/Wagen/etc) triggerte refreshUserProfile
+    // → setUserProfile mit neuem Object → useEffect re-fired → 4
+    // Firestore-Queries (inkl. 1160 handelsmarken) à ~1.2 s. Bei
+    // mehreren Taps = mehrere Sekunden Hintergrund-Arbeit auf JS-Thread.
+    // Jetzt: nur die WERTE die DIE Queries beeinflussen — userLevel
+    // (für categoryAccessService) + isPremium. Wenn der User auf Stöbern
+    // ist und seine Daten sich ändern OHNE dass Level/Premium-Status
+    // wechselt, kein Reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    (userProfile as any)?.stats?.currentLevel,
+    userProfile?.level,
+    isPremium,
+  ]);
 
   // Marken-Liste lazy laden — erst wenn der User den Marken-Filter
   // aufmacht, NICHT beim Mount. Die Liste hat ~968 Einträge und ist
@@ -580,6 +760,67 @@ export default function ExploreScreen() {
     // byName ist stable, kein dep nötig — eslint-disable-next-line
   }, [sheet]);
 
+  // Phase 0 C — Kategorien lazy: erst laden wenn Kategorie-Filter
+  // geöffnet. Spart 1 Firestore-Query auf Stöbern-Mount.
+  // Card-Rendering braucht kategorien NICHT (Cards zeigen keine
+  // Kategorie-Chips inline; nur das Filter-Chip oben braucht's
+  // für seinen Label, aber das initial 'Alle Kategorien' rendert
+  // ohne kategorien-Liste).
+  const kategorienLoaded = useRef(false);
+  useEffect(() => {
+    if (!PERF.lazyKategorien) return;
+    if (sheet !== 'kategorie') return;
+    if (kategorienLoaded.current) return;
+    kategorienLoaded.current = true;
+    const byNameLocal = (a: any, b: any) =>
+      String(a.name ?? a.bezeichnung ?? '').localeCompare(
+        String(b.name ?? b.bezeichnung ?? ''),
+        'de',
+        { sensitivity: 'base' },
+      );
+    (async () => {
+      try {
+        const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
+        const cats = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
+        setKategorien([...cats].sort(byNameLocal));
+      } catch (e) {
+        console.warn('Explore: failed to load kategorien lazy', e);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheet]);
+
+  // Phase 0 D — Handelsmarken lazy: erst laden wenn Handelsmarke-
+  // Filter geöffnet. Größte Reference-Query (~1160 docs, ~1.2 s
+  // auf Android Web SDK). Card-Rendering braucht das Bulk-Array
+  // NICHT — Cards bekommen ihren Brand-Eyebrow-Text aus
+  // p.handelsmarke (per-Produkt-Resolution via getDocumentsBatch).
+  const handelsmarkenLoaded = useRef(false);
+  useEffect(() => {
+    if (!PERF.lazyHandelsmarken) return;
+    if (sheet !== 'handels') return;
+    if (handelsmarkenLoaded.current) return;
+    handelsmarkenLoaded.current = true;
+    const byNameLocal = (a: any, b: any) =>
+      String(a.name ?? a.bezeichnung ?? '').localeCompare(
+        String(b.name ?? b.bezeichnung ?? ''),
+        'de',
+        { sensitivity: 'base' },
+      );
+    (async () => {
+      try {
+        const hmSnap = await getDocs(collection(db, 'handelsmarken'));
+        const hms: FirestoreDocument<Handelsmarken>[] = [];
+        hmSnap.forEach((d: any) => {
+          hms.push({ id: d.id, ...(d.data() as any) });
+        });
+        setHandelsmarken(hms.sort(byNameLocal));
+      } catch (e) {
+        console.warn('Explore: failed to load handelsmarken lazy', e);
+      }
+    })();
+  }, [sheet]);
+
   // ─── Filter-change-driven reload ───────────────────────────────────
   // First mount fires BOTH lists in parallel (no debounce) so the
   // Marken tab has data ready by the time the user swipes over — no
@@ -588,6 +829,23 @@ export default function ExploreScreen() {
   // search field doesn't hammer the backend.
   const reloadSeq = useRef(0);
   const isFirstMount = useRef(true);
+
+  // Search-Sequence-Counter — analog zu reloadSeq, aber für die
+  // Algolia-Such-Pipeline. Jeder runSearch / loadMoreSearch Aufruf
+  // memoiert den Counter-Wert beim Start; nach dem await wird vor
+  // setState verglichen. Liegt eine neuere Suche an oder wurde
+  // Stöbern unmounted, droppen die alten Resultate. Gated auf
+  // `PERF_FIXES.abortStaleSearch`.
+  const searchSeq = useRef(0);
+  // Bump beim Unmount damit alle in-flight Such-Promises ihren
+  // setState-Tail droppen statt eine umgemountete Component zu
+  // berühren. (Stöbern ist ein Tab — unmount feuert nur beim
+  // Logout / Stack-Reset, aber dann ist der Effekt sauber.)
+  useEffect(() => {
+    return () => {
+      if (PERF_FIXES.abortStaleSearch) searchSeq.current++;
+    };
+  }, []);
   useEffect(() => {
     const mySeq = ++reloadSeq.current;
     const wasFirst = isFirstMount.current;
@@ -597,8 +855,8 @@ export default function ExploreScreen() {
       if (reloadSeq.current !== mySeq) return;
       if (wasFirst) {
         // Warm both tabs' first pages concurrently.
-        if (!cachedEigen) loadNonames(true);
-        if (!cachedMarken) loadMarken(true);
+        if (!getCachedEigen()) loadNonames(true);
+        if (!getCachedMarken()) loadMarken(true);
       } else if (tab === 'alle') {
         // 'Alle' merges both lists — refresh both.
         loadNonames(true);
@@ -745,7 +1003,7 @@ export default function ExploreScreen() {
           // lands on this state instantly. Only do it for default
           // filters (see isDefaultFilters comment).
           if (reset && isDefaultFilters()) {
-            cachedEigen = { items: next, lastDoc: res.lastDoc, hasMore: res.hasMore };
+            setCachedEigen({ items: next, lastDoc: res.lastDoc, hasMore: res.hasMore });
           }
           return next;
         });
@@ -757,14 +1015,24 @@ export default function ExploreScreen() {
         // we just got; the next 12 arrive while the user is still
         // looking at row 1. No await, and we only do it on reset so
         // normal pagination continues to be user-driven.
+        //
+        // Mit `PERF_FIXES.deferBackgroundPrefetch`: in
+        // `runAfterInteractions` gewrappt + `reloadSeq`-Snapshot
+        // gemerkt → Prefetch läuft nur wenn JS-Thread idle ist
+        // und droppt sein Resultat falls Filter inzwischen
+        // wechselten oder User ein anderes Verhalten triggerte.
         if (reset && res.hasMore) {
-          (async () => {
+          const fireBgPrefetch = async () => {
+            const mySeq = reloadSeq.current;
             try {
               const next = await FirestoreService.getNoNameProductsPaginated(
                 PAGE_SIZE,
                 res.lastDoc,
                 buildNonameFilters() as any,
               );
+              if (PERF_FIXES.deferBackgroundPrefetch && reloadSeq.current !== mySeq) {
+                return; // stale — Filter changed, drop result
+              }
               setNonames((prev) => {
                 const existing = new Set(prev.map((p: any) => p.id));
                 const incoming = (next.products as any[]).filter(
@@ -777,7 +1045,14 @@ export default function ExploreScreen() {
             } catch {
               // swallow — user-triggered pagination will recover
             }
-          })();
+          };
+          if (PERF_FIXES.deferBackgroundPrefetch) {
+            InteractionManager.runAfterInteractions(() => {
+              void fireBgPrefetch();
+            });
+          } else {
+            void fireBgPrefetch();
+          }
         }
       } catch (e) {
         console.warn('Explore: loadNonames failed', e);
@@ -806,22 +1081,27 @@ export default function ExploreScreen() {
             ? ([...incoming].sort(productSorter) as any)
             : ([...prev, ...incoming] as any);
           if (reset && isDefaultFilters()) {
-            cachedMarken = { items: next, lastDoc: res.lastDoc, hasMore: res.hasMore };
+            setCachedMarken({ items: next, lastDoc: res.lastDoc, hasMore: res.hasMore });
           }
           return next;
         });
         setMarkenLastDoc(res.lastDoc);
         setMarkenHasMore(res.hasMore);
 
-        // Same background prefetch as for nonames.
+        // Same background prefetch as for nonames — siehe dort für
+        // den `PERF_FIXES.deferBackgroundPrefetch` Mechanismus.
         if (reset && res.hasMore) {
-          (async () => {
+          const fireBgPrefetch = async () => {
+            const mySeq = reloadSeq.current;
             try {
               const next = await FirestoreService.getMarkenproduktePaginated(
                 PAGE_SIZE,
                 res.lastDoc,
                 buildMarkenFilters() as any,
               );
+              if (PERF_FIXES.deferBackgroundPrefetch && reloadSeq.current !== mySeq) {
+                return; // stale
+              }
               setMarkenprodukte((prev) => {
                 const existing = new Set(prev.map((p: any) => p.id));
                 const incoming = (next.products as any[]).filter(
@@ -834,7 +1114,14 @@ export default function ExploreScreen() {
             } catch {
               // swallow
             }
-          })();
+          };
+          if (PERF_FIXES.deferBackgroundPrefetch) {
+            InteractionManager.runAfterInteractions(() => {
+              void fireBgPrefetch();
+            });
+          } else {
+            void fireBgPrefetch();
+          }
         }
       } catch (e) {
         console.warn('Explore: loadMarken failed', e);
@@ -888,12 +1175,9 @@ export default function ExploreScreen() {
     // popping). This is the right surface for "tap a tab → top",
     // since onPageSelected fires AFTER a swipe is done and the
     // destination is already on-screen.
-    const destRef =
-      k === 'alle'
-        ? alleScrollRef
-        : k === 'eigen'
-          ? eigenScrollRef
-          : markenScrollRef;
+    const destRef: any = PERF.useScrollOffset
+      ? (k === 'alle' ? animatedRefAlle : k === 'eigen' ? animatedRefEigen : animatedRefMarken)
+      : (k === 'alle' ? alleScrollRef : k === 'eigen' ? eigenScrollRef : markenScrollRef);
     destRef.current?.scrollToOffset?.({ offset: 0, animated: false });
     // Keep PagerView in sync (user tapped a tab). PAGE_AT_TAB
     // returns 0 for eigen, 1 for marken, 2 for alle — the same
@@ -915,12 +1199,9 @@ export default function ExploreScreen() {
       // new tab via swipe, snap the destination to offset 0 so the
       // first card row isn't clipped behind the chrome. animated:
       // false → instant snap, no visible scroll animation.
-      const destRef =
-        k === 'alle'
-          ? alleScrollRef
-          : k === 'eigen'
-            ? eigenScrollRef
-            : markenScrollRef;
+      const destRef: any = PERF.useScrollOffset
+        ? (k === 'alle' ? animatedRefAlle : k === 'eigen' ? animatedRefEigen : animatedRefMarken)
+        : (k === 'alle' ? alleScrollRef : k === 'eigen' ? eigenScrollRef : markenScrollRef);
       destRef.current?.scrollToOffset?.({ offset: 0, animated: false });
     }
   }, [tab, pageIndexShared]);
@@ -1041,25 +1322,37 @@ export default function ExploreScreen() {
   // arrive in memory before the user actually scrolls down to them.
   // Uses expo-image's prefetch (memory-disk cache) which respects the
   // ProductCard's cachePolicy. No-ops on duplicates internally.
+  //
+  // Mit `PERF_FIXES.debounceImagePrefetch`: 250 ms Debounce —
+  // sammelt mehrere Pagination-Bursts (initial 6 → nächste 12
+  // → loadMore 12) in EINEN Prefetch-Call zusammen, statt 3×
+  // hintereinander den JS-Thread mit Bilddekodierung zu sättigen.
   useEffect(() => {
     const PREFETCH_BATCH = 12;
-    const uris = new Set<string>();
-    const collect = (arr: any[]) => {
-      for (let i = 0; i < Math.min(PREFETCH_BATCH, arr.length); i++) {
-        const url = getProductImage(arr[i]);
-        if (url) uris.add(url);
-      }
+    const fire = () => {
+      const uris = new Set<string>();
+      const collect = (arr: any[]) => {
+        for (let i = 0; i < Math.min(PREFETCH_BATCH, arr.length); i++) {
+          const url = getProductImage(arr[i]);
+          if (url) uris.add(url);
+        }
+      };
+      collect(nonames);
+      collect(markenprodukte);
+      collect(searchHitsEigen);
+      collect(searchHitsMarken);
+      if (uris.size === 0) return;
+      // Fire-and-forget — failures land in expo-image's internal logs,
+      // we don't want to surface them to the user.
+      import('expo-image').then(({ Image: EI }) => {
+        EI.prefetch(Array.from(uris)).catch(() => {});
+      });
     };
-    collect(nonames);
-    collect(markenprodukte);
-    collect(searchHitsEigen);
-    collect(searchHitsMarken);
-    if (uris.size === 0) return;
-    // Fire-and-forget — failures land in expo-image's internal logs,
-    // we don't want to surface them to the user.
-    import('expo-image').then(({ Image: EI }) => {
-      EI.prefetch(Array.from(uris)).catch(() => {});
-    });
+    if (PERF_FIXES.debounceImagePrefetch) {
+      const t = setTimeout(fire, 250);
+      return () => clearTimeout(t);
+    }
+    fire();
   }, [nonames, markenprodukte, searchHitsEigen, searchHitsMarken]);
 
   // ─── Lookup maps keyed by doc id, built once per reference-data load ──
@@ -1396,6 +1689,9 @@ export default function ExploreScreen() {
     async (q: string) => {
       const trimmed = q.trim();
       if (!trimmed) return;
+      const mySeq = ++searchSeq.current;
+      const isStale = () =>
+        PERF_FIXES.abortStaleSearch && searchSeq.current !== mySeq;
       setSearchActiveQuery(trimmed);
       setSearchLoading(true);
       if (analytics?.trackCustomEvent) {
@@ -1412,6 +1708,7 @@ export default function ExploreScreen() {
         // enough to keep the initial enrichment round-trip under
         // ~200 ms even on a cold cache.
         const res = await AlgoliaService.searchAll(trimmed, 0, 40);
+        if (isStale()) return;
         const [eigen, marken] = await Promise.all([
           Promise.all(
             res.noNameResults.hits.map((h) => enrichWithFirestore(h, true)),
@@ -1422,6 +1719,7 @@ export default function ExploreScreen() {
             ),
           ),
         ]);
+        if (isStale()) return;
         setSearchHitsEigen(eigen);
         setSearchHitsMarken(marken);
         setSearchTotalEigen(res.noNameResults.nbHits);
@@ -1433,11 +1731,12 @@ export default function ExploreScreen() {
         setSearchQueryIdEigen(res.queryIdEigen);
         setSearchQueryIdMarken(res.queryIdMarken);
       } catch (e) {
+        if (isStale()) return;
         console.warn('Stöbern in-place search failed', e);
         setSearchHitsEigen([]);
         setSearchHitsMarken([]);
       } finally {
-        setSearchLoading(false);
+        if (!isStale()) setSearchLoading(false);
       }
     },
     [tab, analytics, enrichWithFirestore],
@@ -1460,6 +1759,14 @@ export default function ExploreScreen() {
     const eigenDone = searchHitsEigen.length >= searchTotalEigen;
     const markenDone = searchHitsMarken.length >= searchTotalMarken;
     if (eigenDone && markenDone) return;
+
+    // Pagination soll an die AKTUELLE Suche gebunden sein —
+    // Counter NICHT inkrementieren, nur snapshotten. Wenn jetzt
+    // eine neue Suche kommt (runSearch ++) wird unser
+    // Pagination-Resultat gedroppt.
+    const mySeq = searchSeq.current;
+    const isStale = () =>
+      PERF_FIXES.abortStaleSearch && searchSeq.current !== mySeq;
 
     setSearchLoadingMore(true);
     try {
@@ -1506,6 +1813,7 @@ export default function ExploreScreen() {
         setSearchPageMarken(nextPage);
       }
       const results = await Promise.all(tasks);
+      if (isStale()) return;
       for (const r of results) {
         if (r.kind === 'eigen' && r.hits.length > 0) {
           setSearchHitsEigen((prev) => {
@@ -1524,9 +1832,10 @@ export default function ExploreScreen() {
         }
       }
     } catch (e) {
+      if (isStale()) return;
       console.warn('Stöbern search pagination failed', e);
     } finally {
-      setSearchLoadingMore(false);
+      if (!isStale()) setSearchLoadingMore(false);
     }
   }, [
     searchActiveQuery,
@@ -1852,9 +2161,26 @@ export default function ExploreScreen() {
   // `data` prop changes by reference, which on tab-switch caused the
   // visible jump. useMemo keeps the reference stable across renders
   // until the underlying source array actually changes.
-  const dataAlle = useMemo(() => itemsForTab('alle'), [itemsForTab]);
-  const dataEigen = useMemo(() => itemsForTab('eigen'), [itemsForTab]);
-  const dataMarken = useMemo(() => itemsForTab('marken'), [itemsForTab]);
+  //
+  // Fix M — wenn `paused` (siehe oben), liefern die Memos `[]` statt
+  // der echten Items. LegendList rendert dann nur ListEmptyComponent
+  // (oder gar nichts wenn empty), die ProductCard-Components werden
+  // unmounted, expo-image evicted die Bilder aus dem Memory-Cache.
+  // Underlying-State (nonames, markenprodukte etc.) bleibt unverändert
+  // → bei resume rehydraten die Memos sofort.
+  const EMPTY_ARR: any[] = useMemo(() => [], []);
+  const dataAlle = useMemo(
+    () => (paused ? EMPTY_ARR : itemsForTab('alle')),
+    [itemsForTab, paused, EMPTY_ARR],
+  );
+  const dataEigen = useMemo(
+    () => (paused ? EMPTY_ARR : itemsForTab('eigen')),
+    [itemsForTab, paused, EMPTY_ARR],
+  );
+  const dataMarken = useMemo(
+    () => (paused ? EMPTY_ARR : itemsForTab('marken')),
+    [itemsForTab, paused, EMPTY_ARR],
+  );
 
   // First-load scroll-to-top per tab: when data goes from empty to
   // populated (e.g. user opened Stöbern + switched tabs BEFORE the
@@ -1862,24 +2188,30 @@ export default function ExploreScreen() {
   // this, the prior scrollToOffset(0) ran while ListEmptyComponent
   // was on screen — once real cards mount the layout shifts and
   // the list ends up mid-row. We only act on the 0 → >0 transition.
+  // Imperative scroll-to-top: bei PERF.useScrollOffset=true wird
+  // der animatedRef benutzt (sonst bleibt der List-Ref leer), sonst
+  // der klassische LegendListRef. Beide haben `scrollToOffset`.
   useEffect(() => {
     if (prevAlleLen.current === 0 && dataAlle.length > 0) {
-      alleScrollRef.current?.scrollToOffset?.({ offset: 0, animated: false });
+      const ref: any = PERF.useScrollOffset ? animatedRefAlle : alleScrollRef;
+      ref.current?.scrollToOffset?.({ offset: 0, animated: false });
     }
     prevAlleLen.current = dataAlle.length;
-  }, [dataAlle.length]);
+  }, [dataAlle.length, animatedRefAlle]);
   useEffect(() => {
     if (prevEigenLen.current === 0 && dataEigen.length > 0) {
-      eigenScrollRef.current?.scrollToOffset?.({ offset: 0, animated: false });
+      const ref: any = PERF.useScrollOffset ? animatedRefEigen : eigenScrollRef;
+      ref.current?.scrollToOffset?.({ offset: 0, animated: false });
     }
     prevEigenLen.current = dataEigen.length;
-  }, [dataEigen.length]);
+  }, [dataEigen.length, animatedRefEigen]);
   useEffect(() => {
     if (prevMarkenLen.current === 0 && dataMarken.length > 0) {
-      markenScrollRef.current?.scrollToOffset?.({ offset: 0, animated: false });
+      const ref: any = PERF.useScrollOffset ? animatedRefMarken : markenScrollRef;
+      ref.current?.scrollToOffset?.({ offset: 0, animated: false });
     }
     prevMarkenLen.current = dataMarken.length;
-  }, [dataMarken.length]);
+  }, [dataMarken.length, animatedRefMarken]);
 
   const renderGrid = (forTab: Tab) => {
     // Search mode overlays browse mode: when a search is active, the
@@ -2176,16 +2508,18 @@ export default function ExploreScreen() {
 
   const scrollHandlerEigen = useAnimatedScrollHandler({
     onScroll: (e) => {
-      scrollYEigen.value = e.contentOffset.y;
+      if (!PERF.useScrollOffset) {
+        scrollYEigen.value = e.contentOffset.y;
+      }
       const dist =
         e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
-      // Threshold von 1200 → 2200 px hochgezogen — damit feuert der
-      // Page-Load AB ZWEI volle Bildschirmhöhen vom Boden, statt erst
-      // wenn der User ihn schon fast erreicht hat. Vorher wurde der
-      // Spinner-Footer kurz sichtbar bevor neue Items rein-faden;
-      // jetzt sind die neuen Items meist schon da bevor der User die
-      // bestehenden zu Ende scrollt.
-      const nearBottom = dist < 2200;
+      // Threshold von 2200 → 4500 px hochgezogen — auf Android Web SDK
+      // braucht eine Pagination-Query ~1 s, der User scrollt aber
+      // schneller. Mit 4500 px (~5 Viewport-Höhen / ~15 Card-Reihen)
+      // hat der Server-Roundtrip Zeit anzukommen bevor der User am
+      // Ende ist. Auch scroll-fließende User triggern jetzt früh
+      // genug.
+      const nearBottom = dist < 4500;
       if (nearBottom && !loadingZoneEigen.value) {
         loadingZoneEigen.value = true;
         runOnJS(checkLoadMoreEigen)();
@@ -2196,16 +2530,18 @@ export default function ExploreScreen() {
   });
   const scrollHandlerMarken = useAnimatedScrollHandler({
     onScroll: (e) => {
-      scrollYMarken.value = e.contentOffset.y;
+      if (!PERF.useScrollOffset) {
+        scrollYMarken.value = e.contentOffset.y;
+      }
       const dist =
         e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
-      // Threshold von 1200 → 2200 px hochgezogen — damit feuert der
-      // Page-Load AB ZWEI volle Bildschirmhöhen vom Boden, statt erst
-      // wenn der User ihn schon fast erreicht hat. Vorher wurde der
-      // Spinner-Footer kurz sichtbar bevor neue Items rein-faden;
-      // jetzt sind die neuen Items meist schon da bevor der User die
-      // bestehenden zu Ende scrollt.
-      const nearBottom = dist < 2200;
+      // Threshold von 2200 → 4500 px hochgezogen — auf Android Web SDK
+      // braucht eine Pagination-Query ~1 s, der User scrollt aber
+      // schneller. Mit 4500 px (~5 Viewport-Höhen / ~15 Card-Reihen)
+      // hat der Server-Roundtrip Zeit anzukommen bevor der User am
+      // Ende ist. Auch scroll-fließende User triggern jetzt früh
+      // genug.
+      const nearBottom = dist < 4500;
       if (nearBottom && !loadingZoneMarken.value) {
         loadingZoneMarken.value = true;
         runOnJS(checkLoadMoreMarken)();
@@ -2216,16 +2552,21 @@ export default function ExploreScreen() {
   });
   const scrollHandlerAlle = useAnimatedScrollHandler({
     onScroll: (e) => {
-      scrollYAlle.value = e.contentOffset.y;
+      // Bei PERF.useScrollOffset=true ist scrollYAlle eine
+      // vom useScrollViewOffset gelieferte read-only SharedValue —
+      // nicht beschreiben (Reanimated wirft sonst).
+      if (!PERF.useScrollOffset) {
+        scrollYAlle.value = e.contentOffset.y;
+      }
       const dist =
         e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
-      // Threshold von 1200 → 2200 px hochgezogen — damit feuert der
-      // Page-Load AB ZWEI volle Bildschirmhöhen vom Boden, statt erst
-      // wenn der User ihn schon fast erreicht hat. Vorher wurde der
-      // Spinner-Footer kurz sichtbar bevor neue Items rein-faden;
-      // jetzt sind die neuen Items meist schon da bevor der User die
-      // bestehenden zu Ende scrollt.
-      const nearBottom = dist < 2200;
+      // Threshold von 2200 → 4500 px hochgezogen — auf Android Web SDK
+      // braucht eine Pagination-Query ~1 s, der User scrollt aber
+      // schneller. Mit 4500 px (~5 Viewport-Höhen / ~15 Card-Reihen)
+      // hat der Server-Roundtrip Zeit anzukommen bevor der User am
+      // Ende ist. Auch scroll-fließende User triggern jetzt früh
+      // genug.
+      const nearBottom = dist < 4500;
       if (nearBottom && !loadingZoneAlle.value) {
         loadingZoneAlle.value = true;
         runOnJS(checkLoadMoreAlle)();
@@ -2234,6 +2575,78 @@ export default function ExploreScreen() {
       }
     },
   });
+
+  // Fix F — Plain JS onScroll callbacks für die neuen, nicht-Animated
+  // LegendLists. Übernehmen NUR die Load-More-Trigger-Logik
+  // (Decision lief eh schon auf JS-Thread via `runOnJS`). Die
+  // Scroll-Position selbst kommt jetzt direkt aus useScrollViewOffset
+  // (UI-Thread, keine Bridge-Round-Trip nötig).
+  const onScrollJsAlle = useCallback(
+    (e: any) => {
+      const ne = e?.nativeEvent;
+      if (!ne) return;
+      // Fix G: bei plain ScrollView ist useScrollViewOffset blind,
+      // also driven wir scrollYAlleLegacy direkt aus dem JS-Thread.
+      // Die Chrome-Animation hängt 1 Frame hinterher — unsichtbar.
+      if (PERF.legendListPlainScrollView) {
+        scrollYAlleLegacy.value = ne.contentOffset.y;
+      }
+      const dist =
+        ne.contentSize.height - ne.contentOffset.y - ne.layoutMeasurement.height;
+      const nearBottom = dist < 2200;
+      if (nearBottom && !loadingZoneAlle.value) {
+        loadingZoneAlle.value = true;
+        checkLoadMoreAlle();
+      } else if (!nearBottom && loadingZoneAlle.value) {
+        loadingZoneAlle.value = false;
+      }
+    },
+    // checkLoadMoreAlle is defined further down via useCallback;
+    // referencing it here is safe because closures capture the
+    // identity at render time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const onScrollJsEigen = useCallback(
+    (e: any) => {
+      const ne = e?.nativeEvent;
+      if (!ne) return;
+      if (PERF.legendListPlainScrollView) {
+        scrollYEigenLegacy.value = ne.contentOffset.y;
+      }
+      const dist =
+        ne.contentSize.height - ne.contentOffset.y - ne.layoutMeasurement.height;
+      const nearBottom = dist < 2200;
+      if (nearBottom && !loadingZoneEigen.value) {
+        loadingZoneEigen.value = true;
+        checkLoadMoreEigen();
+      } else if (!nearBottom && loadingZoneEigen.value) {
+        loadingZoneEigen.value = false;
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const onScrollJsMarken = useCallback(
+    (e: any) => {
+      const ne = e?.nativeEvent;
+      if (!ne) return;
+      if (PERF.legendListPlainScrollView) {
+        scrollYMarkenLegacy.value = ne.contentOffset.y;
+      }
+      const dist =
+        ne.contentSize.height - ne.contentOffset.y - ne.layoutMeasurement.height;
+      const nearBottom = dist < 2200;
+      if (nearBottom && !loadingZoneMarken.value) {
+        loadingZoneMarken.value = true;
+        checkLoadMoreMarken();
+      } else if (!nearBottom && loadingZoneMarken.value) {
+        loadingZoneMarken.value = false;
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   // Wenn neue Items reingeflowt sind (= contentSize wächst), reset
   // wir die Zone-Flags damit der nächste Page-Load triggerbar ist
@@ -2356,6 +2769,33 @@ export default function ExploreScreen() {
 
   const chromeTotalHeight = insets.top + TAB_BAR_HEIGHT + SEARCH_FILTER_HEIGHT;
 
+  // Fix F — Component + Ref + onScroll werden anhand des Flags
+  // ausgewählt. Bei PERF.useScrollOffset=true: plain LegendList +
+  // useAnimatedRef + JS-onScroll (Load-More-Trigger), Scroll-Position
+  // kommt automatisch via useScrollViewOffset auf UI-Thread an.
+  // Sonst: AnimatedLegendList + useRef + useAnimatedScrollHandler
+  // (alter Pfad).
+  const ListComp: any = PERF.useScrollOffset ? LegendList : AnimatedLegendList;
+  const refAlle = PERF.useScrollOffset ? animatedRefAlle : alleScrollRef;
+  const refEigen = PERF.useScrollOffset ? animatedRefEigen : eigenScrollRef;
+  const refMarken = PERF.useScrollOffset ? animatedRefMarken : markenScrollRef;
+  const onScrollAlleProp = PERF.useScrollOffset ? onScrollJsAlle : scrollHandlerAlle;
+  const onScrollEigenProp = PERF.useScrollOffset ? onScrollJsEigen : scrollHandlerEigen;
+  const onScrollMarkenProp = PERF.useScrollOffset ? onScrollJsMarken : scrollHandlerMarken;
+
+  // Fix G — Wenn aktiv, gibt LegendList intern eine plain
+  // `<ScrollView>` zum Rendern, statt seines default
+  // `react-native.Animated.ScrollView`. Damit erkennt iOS das
+  // native UIScrollView wieder und Status-Bar-Tap funktioniert.
+  // `renderScrollComponent` ist eine offizielle LegendList-Prop.
+  const plainScrollComponent = useCallback(
+    (scrollProps: any) => <ScrollView {...scrollProps} />,
+    [],
+  );
+  const renderScrollComponentProp = PERF.legendListPlainScrollView
+    ? plainScrollComponent
+    : undefined;
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <PagerView
@@ -2367,14 +2807,27 @@ export default function ExploreScreen() {
         // Tab-Swipe-Animation von Eigenmarken auf Alle nach Mount.
         initialPage={PAGE_AT_TAB[tab]}
         onPageSelected={onPageSelected}
+        // Lazy-Mount der nicht-sichtbaren Pages. Ohne diesen Prop
+        // mountet PagerView ALLE 3 Pages (= 3 LegendLists × ~6 Cards =
+        // 18 parallele Card-Mounts) beim allerersten Stöbern-Tap.
+        // Mit `offscreenPageLimit={1}` werden nur die aktive Page +
+        // direkte Nachbar-Page gemountet — initial nur die aktive
+        // (es gibt keine Nachbar-Pages bevor man swipet). Trade-off:
+        // beim ersten Swipe zur entfernten Page (z.B. Alle → Marken
+        // wenn auf Eigenmarken gestartet) muss die Page mounten —
+        // ~50-100 ms zusätzliche Latenz beim Swipe. Akzeptabel weil
+        // die Daten bereits geladen sind (loadNonames + loadMarken
+        // feuern beide auf Mount, siehe `wasFirst`-Branch in
+        // reloadSeq-useEffect).
+        offscreenPageLimit={1}
       >
         {/* ─── Page 0 — Alle (merged eigen + marken) ──────────────────
             Visual leftmost tab; PagerView page index 0 so swiping
             from Eigenmarken (page 1) to the LEFT lands here, matching
             the SegmentedTabs visual order. */}
         <View key="alle" style={{ flex: 1 }}>
-          <AnimatedLegendList
-            ref={alleScrollRef}
+          <ListComp
+            ref={refAlle}
             data={dataAlle}
             keyExtractor={(item: any, index: number) =>
               String(item?.id ?? item?.objectID ?? index)
@@ -2384,13 +2837,14 @@ export default function ExploreScreen() {
             }
             numColumns={2}
             estimatedItemSize={290}
-            onScroll={scrollHandlerAlle}
+            onScroll={onScrollAlleProp}
+            renderScrollComponent={renderScrollComponentProp}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
             overScrollMode="auto"
             scrollsToTop={tab === 'alle'}
             onEndReached={checkLoadMoreAlle}
-            onEndReachedThreshold={0.5}
+            onEndReachedThreshold={2.5}
             contentContainerStyle={{
               paddingTop: chromeTotalHeight + 12,
               paddingBottom: 120,
@@ -2436,8 +2890,8 @@ export default function ExploreScreen() {
             status-bar-tap scroll-to-top for all of them (documented
             UIScrollView behaviour when multiple responders exist). */}
         <View key="eigen" style={{ flex: 1 }}>
-          <AnimatedLegendList
-            ref={eigenScrollRef}
+          <ListComp
+            ref={refEigen}
             data={dataEigen}
             keyExtractor={(item: any, index: number) =>
               String(item?.id ?? item?.objectID ?? index)
@@ -2447,13 +2901,14 @@ export default function ExploreScreen() {
             }
             numColumns={2}
             estimatedItemSize={290}
-            onScroll={scrollHandlerEigen}
+            onScroll={onScrollEigenProp}
+            renderScrollComponent={renderScrollComponentProp}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
             overScrollMode="auto"
             scrollsToTop={tab === 'eigen'}
             onEndReached={checkLoadMoreEigen}
-            onEndReachedThreshold={0.5}
+            onEndReachedThreshold={2.5}
             contentContainerStyle={{
               paddingTop: chromeTotalHeight + 12,
               paddingBottom: 120,
@@ -2492,8 +2947,8 @@ export default function ExploreScreen() {
 
         {/* ─── Page 2 — Marken ──────────────────────────────────────── */}
         <View key="marken" style={{ flex: 1 }}>
-          <AnimatedLegendList
-            ref={markenScrollRef}
+          <ListComp
+            ref={refMarken}
             data={dataMarken}
             keyExtractor={(item: any, index: number) =>
               String(item?.id ?? item?.objectID ?? index)
@@ -2503,13 +2958,14 @@ export default function ExploreScreen() {
             }
             numColumns={2}
             estimatedItemSize={290}
-            onScroll={scrollHandlerMarken}
+            onScroll={onScrollMarkenProp}
+            renderScrollComponent={renderScrollComponentProp}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
             overScrollMode="auto"
             scrollsToTop={tab === 'marken'}
             onEndReached={checkLoadMoreMarken}
-            onEndReachedThreshold={0.5}
+            onEndReachedThreshold={2.5}
             contentContainerStyle={{
               paddingTop: chromeTotalHeight + 12,
               paddingBottom: 120,

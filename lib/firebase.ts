@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp } from 'firebase/app';
 import { getReactNativePersistence, initializeAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 // Firebase configuration - PRODUCTION
@@ -20,15 +20,24 @@ const app = initializeApp(firebaseConfig);
 
 // Initialize Firestore.
 //
-// NOTE: We deliberately use the plain in-memory cache here.
-// `persistentLocalCache` from firebase/firestore is a web-only
-// API (IndexedDB-backed) and does NOT work in React Native — it
-// triggers a runtime crash via `NativeEventEmitter` when the SDK
-// tries to wire up its sync/storage event paths. The in-memory
-// product-detail cache in `services/firestore.ts` (5-min TTL +
-// inflight-promise dedup) gives us the same UX win for repeat
-// visits within a session.
-export const db = getFirestore(app);
+// `experimentalAutoDetectLongPolling: true` ist ESSENZIELL auf
+// Android. Ohne diese Option versucht das Firebase Web SDK
+// zuerst WebChannel-Streaming, was RNs Networking-Layer nicht
+// vollständig unterstützt — der SDK probiert mehrere fehl-
+// schlagende Verbindungs-Versuche durch, bevor er auf
+// Long-Polling zurückfällt. Das hat First-Loads auf Android
+// auf 8–10 s aufgeblasen UND Pagination-Calls in die gleiche
+// Latenz-Kategorie gezogen. Mit AutoDetect: Long-Polling
+// sofort, sub-second Cold-Start, schnelle Folge-Pages.
+//
+// NOTE: NIEMALS `persistentLocalCache` / `persistentSingleTabManager`
+// hier hinzufügen. Das ist eine Web-API (IndexedDB), die
+// auf RN den NativeEventEmitter-Crash auslöst. Die In-Memory-
+// Caches in `services/firestore.ts` (5-Min TTL + Inflight-Dedup)
+// liefern denselben Repeat-Visit-Win ohne Crash.
+export const db = initializeFirestore(app, {
+  experimentalAutoDetectLongPolling: true,
+});
 
 // Initialize Firebase Auth with persistence
 export const auth = initializeAuth(app, {

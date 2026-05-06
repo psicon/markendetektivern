@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PagerView from 'react-native-pager-view';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
+import { usePressLock } from '@/lib/hooks/usePressLock';
 import { FadingImage } from '@/components/design/FadingImage';
 import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
 import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
@@ -116,7 +117,7 @@ export default function NoNameDetailScreen() {
   const insets = useSafeAreaInsets();
   const { theme, brand, shadows } = useTokens();
   const { user } = useAuth();
-  const { toggleFavorite } = useFavorites();
+  const { toggleFavorite, isFavorite } = useFavorites();
 
   // ─── Coachmark Walkthrough ───────────────────────────────────
   // Tour 'product-detail' fires beim ersten Aufruf einer Detail-
@@ -168,6 +169,25 @@ export default function NoNameDetailScreen() {
     setTab((prev) => (prev === next ? prev : next));
   };
   const [isFav, setIsFav] = useState(false);
+  // Sync isFav mit echtem Server-Status sobald die productId bekannt
+  // ist. Vorher: useState(false) initial → Heart blieb leer auch wenn
+  // das Produkt schon gefavt war → Tap zeigte "Toggled" (gefüllt)
+  // mit Toast "Entfernt" → User-Verwirrung.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await isFavorite(id, 'noname');
+        if (!cancelled) setIsFav(status);
+      } catch {
+        // swallow — heart bleibt im default-state
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, isFavorite]);
   const [inCart, setInCart] = useState(false);
   const [ratingsOpen, setRatingsOpen] = useState(false);
   // Connected Brands des Herstellers — separat geladen, weil das
@@ -464,18 +484,25 @@ export default function NoNameDetailScreen() {
   // All handlers bail early if the basic product hasn't landed yet;
   // the action buttons render disabled-skeleton circles in that
   // state so this should never actually fire, but we guard anyway.
-  const onFavPress = async () => {
+  const onFavPress = usePressLock(async () => {
     if (!p) return;
-    setIsFav((v) => !v);
+    // Optimistic toggle — UI flippt sofort.
+    const optimisticNext = !isFav;
+    setIsFav(optimisticNext);
     try {
       const now = await toggleFavorite(p.id, 'noname', p);
+      // Server-Truth sync: falls das initiale isFav state stale war
+      // (z.B. der User hat das Produkt auf einer anderen Page entfavt
+      // und kommt dann hier rein), korrigieren wir hier.
+      setIsFav(now);
       if (now) showFavoriteAddedToast(p.name ?? 'Produkt');
       else showFavoriteRemovedToast(p.name ?? 'Produkt');
     } catch {
-      setIsFav((v) => !v);
+      // Bei Fehler: optimistisches Toggle revert.
+      setIsFav(!optimisticNext);
     }
-  };
-  const onCartPress = async () => {
+  });
+  const onCartPress = usePressLock(async () => {
     if (!p) return;
     if (!user?.uid) {
       showInfoToast('Bitte anmelden');
@@ -537,7 +564,7 @@ export default function NoNameDetailScreen() {
       setInCart(false);
       showInfoToast('Fehler — bitte erneut versuchen');
     }
-  };
+  });
   const [existingRating, setExistingRating] = useState<Rating | null>(null);
   const onRatingsPress = async () => {
     if (!p) return;

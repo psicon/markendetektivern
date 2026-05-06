@@ -56,6 +56,58 @@ function ThemedApp() {
     });
   }, []);
 
+  // Fix Q — Pre-warm Firestore connection + reference data at app boot.
+  //
+  // Problem: Stöbern feuert beim ersten Aufruf 6+ Firestore-Queries
+  // gleichzeitig. Auf Android Web SDK muss die ERSTE dieser Queries den
+  // WebChannel-Handshake aufbauen (~2-3 s cold), die anderen warten
+  // serialisiert auf die gleiche Connection bis sie verfügbar wird.
+  // Plus jede Query selbst ist 500-1000 ms auf Web SDK Android.
+  //
+  // Mit Pre-Warm: 4 Reference-Queries (discounter, handelsmarken,
+  // packungstypen, kategorien) feuern am App-Boot via
+  // runAfterInteractions — deferred genug damit sie nicht den App-
+  // Start blocken, früh genug damit sie meist schon durch sind wenn
+  // User auf Stöbern tippt (typisch 5-10 s nach Boot).
+  // Resultate werden im FirestoreService-Cache (5 min TTL) abgelegt
+  // → Stöbern's reference-data-useEffect findet Cache-Hits und
+  // skippt die Roundtrips.
+  // Zusätzlich: WebChannel-Connection ist warm, Stöbern's
+  // Product-Queries hängen nicht mehr am Handshake.
+  // Erwartete Einsparung: 3-5 s auf erstem Stöbern-Aufruf.
+  useEffect(() => {
+    let cancelled = false;
+    const handle = require('react-native').InteractionManager.runAfterInteractions(async () => {
+      if (cancelled) return;
+      try {
+        // Service-level Imports (lazy damit Bundle-Mount nicht blockt)
+        const { FirestoreService } = await import('@/lib/services/firestore');
+        const { db } = await import('@/lib/firebase');
+        const { collection, getDocs } = await import('firebase/firestore');
+        // Alle 3 öffentlich-lesbaren Reference-Collections parallel.
+        // Errors werden geschluckt — Stöbern's eigener Fetch erholt sich.
+        // `getDiscounter` hat Service-Level-Cache → Stöbern's Aufruf
+        // wird Cache-Hit. handelsmarken/packungstypen werden im
+        // Firestore-SDK-Memory-Cache landen → Re-Query in Stöbern
+        // ist immerhin wesentlich schneller.
+        await Promise.all([
+          FirestoreService.getDiscounter().catch(() => null),
+          getDocs(collection(db, 'handelsmarken')).catch(() => null),
+          getDocs(collection(db, 'packungstypen')).catch(() => null),
+        ]);
+        if (!cancelled) {
+          console.log('🔥 Stöbern Reference-Data prewarmed');
+        }
+      } catch {
+        // swallow — Stöbern eigene Logik handelt Recovery
+      }
+    });
+    return () => {
+      cancelled = true;
+      handle.cancel();
+    };
+  }, []);
+
   // Initialize Firebase Crashlytics
   useEffect(() => {
     const initCrashlytics = async () => {

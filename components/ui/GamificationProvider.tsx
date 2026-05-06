@@ -13,6 +13,7 @@ import {
 } from '@/lib/services/gamificationSettingsService';
 import { overlayManager } from '@/lib/services/overlayManager';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
+import { RATING_POLL_INTERVAL_MS } from '@/lib/perfFlags';
 import { showPointsToast, showStreakToast as showStreakToastNew } from '@/lib/services/ui/toast';
 import { Achievement } from '@/lib/types/achievements';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -604,7 +605,7 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
       } catch (error) {
         console.error('❌ Periodic rating check error:', error);
       }
-    }, 2000); // Check every 2 seconds
+    }, RATING_POLL_INTERVAL_MS); // Fix E: 2 s → 10 s (perfFlags.RATING_POLL_INTERVAL_MS). Modal-Verzögerung max +8 s — vernachlässigbar weil Modal eh erst nach Level-Up-Overlay erscheint.
     
     return () => {
       console.log('📱 Stopping periodic rating check');

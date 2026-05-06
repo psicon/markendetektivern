@@ -142,6 +142,23 @@ export default function TabLayout() {
         // Mount-Lag beim ersten Stöbern-Tap visuell ab — der User
         // sieht sofort Shimmer, dann Daten.
         lazy: true,
+        // freezeOnBlur — wenn ein Tab den Focus verliert, friert
+        // React Navigation seinen kompletten Subtree ein: keine
+        // Renders, keine useEffect-Trigger, keine reaktive Arbeit.
+        // State und Scroll-Position bleiben erhalten — beim erneuten
+        // Focus läuft alles ab dem Punkt weiter wo es war.
+        // Kritisch für unser Stöbern-Problem: nach Aufruf bleibt der
+        // Stöbern-Tab mounted, sein React-Tree (PagerView + 3 LegendLists
+        // + 30 Cards) muss bei JEDEM Re-Render von AuthContext /
+        // AnalyticsProvider durchgewalked werden — auch wenn er
+        // unsichtbar ist. Das ist die "App lahmt nach Stöbern"-
+        // Ursache. Mit `freezeOnBlur: true` wird Stöbern's Subtree
+        // bei Tab-Wechsel sofort eingefroren — Reconciliation-Cost
+        // weg, Cards-State bleibt erhalten.
+        // Background-Work (Firestore-Listener, Timer, etc.) der NICHT
+        // im React-Tree hängt, läuft weiter — Journey-Tracking,
+        // Achievement-Service, Analytics bleiben unangetastet.
+        freezeOnBlur: true,
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tabIconSelected,
         tabBarInactiveTintColor: Colors[colorScheme ?? 'light'].tabIconDefault,
         headerShown: false,

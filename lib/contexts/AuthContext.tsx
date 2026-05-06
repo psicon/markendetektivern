@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { createUserWithEmailAndPassword, onAuthStateChanged, signInAnonymously, signInWithEmailAndPassword, signOut, updateProfile, User } from 'firebase/auth';
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { PERF } from '../perfFlags';
 import { auth } from '../firebase';
 import achievementService, { setProfileRefreshCallback } from '../services/achievementService';
 import { isAppleAuthAvailable, signInWithApple, signOutApple } from '../services/auth/appleAuth';
@@ -131,7 +132,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUserProfile(null);
       }
     }
-  }, [user]);
+    // Phase 0 B: Deps sind string/boolean primitives statt das ganze
+    // user-Object. Vorher: `[user]` → callback-identity wechselt
+    // bei JEDER user-Object-Mutation → AuthContext memo invalidates
+    // → komplette useAuth()-Consumer-Cascade rerendert.
+    // Jetzt: nur bei tatsächlichem uid- oder anonymous-Wechsel.
+    // user.uid und user.isAnonymous innerhalb des Callbacks bleiben
+    // funktional unverändert (closure capturet aktuelle Werte).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, user?.isAnonymous]);
 
   useEffect(() => {
     // Registriere Profile-Refresh-Callback für Achievement-System
@@ -582,21 +591,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [user?.uid, userProfile, refreshUserProfile]);
 
-  const value = {
-    user,
-    userProfile,
-    loading,
-    isAnonymous,
-    signIn,
-    signUp,
-    signInWithGoogle: handleSignInWithGoogle,
-    signInWithApple: handleSignInWithApple,
-    signInAnonymously: handleSignInAnonymously,
-    logout,
-    isAppleAuthAvailable,
-    refreshUserProfile,
-    ...__DEV__ && { resetAuthForDevelopment }
-  };
+  // Fix A — Mit `PERF.memoAuthValue=true`: memoized value-Object,
+  // damit Consumer (alle `useAuth()`-Aufrufer = halbe App) nicht
+  // bei jedem unrelated Re-Render des AuthProviders mit-rendern.
+  // Ohne Memo: jeder Render erzeugt neues Object → React vergleicht
+  // per ===, sieht "neu", rendert alle Consumer durch.
+  // Rollback: PERF.memoAuthValue = false → fällt zurück auf
+  // referenz-instabiles Object (Original-Verhalten).
+  const valueMemo = useMemo(
+    () => ({
+      user,
+      userProfile,
+      loading,
+      isAnonymous,
+      signIn,
+      signUp,
+      signInWithGoogle: handleSignInWithGoogle,
+      signInWithApple: handleSignInWithApple,
+      signInAnonymously: handleSignInAnonymously,
+      logout,
+      isAppleAuthAvailable,
+      refreshUserProfile,
+      ...__DEV__ && { resetAuthForDevelopment },
+    }),
+    [
+      user,
+      userProfile,
+      loading,
+      isAnonymous,
+      signIn,
+      signUp,
+      handleSignInWithGoogle,
+      handleSignInWithApple,
+      handleSignInAnonymously,
+      logout,
+      refreshUserProfile,
+    ],
+  );
+  const value = PERF.memoAuthValue
+    ? valueMemo
+    : {
+        user,
+        userProfile,
+        loading,
+        isAnonymous,
+        signIn,
+        signUp,
+        signInWithGoogle: handleSignInWithGoogle,
+        signInWithApple: handleSignInWithApple,
+        signInAnonymously: handleSignInAnonymously,
+        logout,
+        isAppleAuthAvailable,
+        refreshUserProfile,
+        ...(__DEV__ && { resetAuthForDevelopment }),
+      };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

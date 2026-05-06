@@ -46,7 +46,14 @@ export const getUserProfile = async (uid: string): Promise<UserProfile | null> =
     const userDoc = await getDoc(doc(db, 'users', uid));
     
     if (userDoc.exists()) {
-      console.log('✅ User-Profil gefunden:', userDoc.data());
+      // Vorher: console.log('✅ User-Profil gefunden:', userDoc.data())
+      // entfernt — der Object-Dump auf Android via RN-Bridge kostete
+      // 100-300 ms pro Aufruf (User-Doc enthält alle Achievements
+      // und Stats). Bei jedem trackAction → refreshUserProfile feuerte
+      // dieser Log → mehrsekündiger JS-Thread-Freeze.
+      // Babel `transform-remove-console` strippt zwar Production-
+      // Builds eh, aber dieser Log war so teuer dass wir ihn auch
+      // im Dev-Modus nicht haben wollen.
       return userDoc.data() as UserProfile;
     }
     

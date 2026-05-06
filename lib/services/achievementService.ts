@@ -13,8 +13,9 @@ import {
     where,
     writeBatch
 } from 'firebase/firestore';
-import { Alert } from 'react-native';
+import { Alert, InteractionManager } from 'react-native';
 import { db } from '../firebase';
+import { PERF } from '../perfFlags';
 import {
     Achievement,
     AchievementEvent,
@@ -50,6 +51,10 @@ class AchievementService {
   static onPointsEarned: ((points: number, action: string, message: string) => void) | null = null;
   static onLevelUp: ((newLevel: number, oldLevel: number, unlockedCategory?: { id: string; name: string; imageUrl: string }) => void) | null = null;
   static onProfileRefreshNeeded: (() => Promise<void>) | null = null;
+  // Fix H: per-(userId+action+productId) Last-Call-Map für Dedupe
+  // im 5-s-Fenster. Static damit auch über Hot-Reload / verschiedene
+  // Service-Aufrufer hinweg geteilt.
+  static recentTrackActionAt: Map<string, number> = new Map();
 
   private constructor() {
     console.log('🎯 AchievementService Singleton erstellt');
@@ -518,19 +523,54 @@ class AchievementService {
 
   /**
    * Trackt eine User-Aktion und aktualisiert Achievement-Progress
+   *
+   * Fix D — Mit `PERF.deferTrackAction=true`: der gesamte Heavy-Body
+   * (6-10 Firestore-Calls + Profile-Refresh-Cascade) wird in
+   * `InteractionManager.runAfterInteractions` gelegt, damit er nicht
+   * gegen User-Input konkurriert. `await trackAction(...)`-Caller
+   * warten weiterhin sauber bis die Arbeit DURCH ist (Promise-Wrap),
+   * aber die Arbeit STARTET erst wenn der JS-Thread idle ist.
+   * Visible Tradeoff: Achievement-Unlock-Toast erscheint ggf. ~100 ms
+   * später — User merkt nichts.
+   * Rollback: PERF.deferTrackAction = false.
    */
   async trackAction(userId: string, action: ActionType, metadata?: any): Promise<void> {
     if (!userId) {
       console.warn('⚠️ trackAction called without userId');
       return;
     }
-    
+
+    // Fix H — Dedupe: skip identical action+productId calls innerhalb
+    // 5 s. Verhindert dass 10 schnelle Taps auf "Add to Favorite"
+    // dieselbe Produkts 10× die Achievement-Cascade triggern.
+    if (PERF.dedupeTrackAction) {
+      const productId = metadata?.productId ?? '';
+      const dedupeKey = `${userId}:${action}:${productId}`;
+      const now = Date.now();
+      const last = AchievementService.recentTrackActionAt.get(dedupeKey) ?? 0;
+      if (now - last < 5000) {
+        console.log(`🚫 trackAction dedupe-skip: ${dedupeKey} (last ${now - last}ms ago)`);
+        return;
+      }
+      AchievementService.recentTrackActionAt.set(dedupeKey, now);
+      // Ältere Einträge aufräumen damit der Map nicht unbounded wächst.
+      if (AchievementService.recentTrackActionAt.size > 100) {
+        const cutoff = now - 30000;
+        for (const [k, t] of AchievementService.recentTrackActionAt) {
+          if (t < cutoff) AchievementService.recentTrackActionAt.delete(k);
+        }
+      }
+    }
+
     // Ensure initialization
     if (!this.isInitialized) {
       console.log('🔄 Achievement Service nicht initialisiert - starte Initialisierung...');
       await this.initialize();
     }
 
+    // Heavy-Body als Helper extrahiert, damit er optional in
+    // runAfterInteractions gelegt werden kann ohne Code-Dupli.
+    const heavyBody = async (): Promise<void> => {
     try {
       console.log(`📊 Tracking action: ${action} für User: ${userId}`);
 
@@ -713,7 +753,7 @@ class AchievementService {
 
       batch.update(userRef, updates);
       await batch.commit();
-      
+
       // Trigger UI-Benachrichtigungen für abgeschlossene Achievements
       if (completedAchievements.length > 0) {
         await this.notifyAchievementUnlock(completedAchievements);
@@ -722,7 +762,7 @@ class AchievementService {
       // IMMER Level-Check nach Achievement-Action (auch ohne neue Punkte - Ersparnis kann sich ändern!)
       console.log('🎯 Triggering level check after achievement action');
       await this.checkAndUpdateLevel(userId);
-      
+
       // 🔄 ZENTRALER Profile-Refresh am Ende (verhindert Duplikate)
       if (AchievementService.onProfileRefreshNeeded) {
         await AchievementService.onProfileRefreshNeeded();
@@ -736,6 +776,17 @@ class AchievementService {
       console.error('❌ Fehler beim Tracken der Action:', error);
       throw error;
     }
+    }; // end heavyBody
+
+    if (PERF.deferTrackAction) {
+      return new Promise<void>((resolve, reject) => {
+        InteractionManager.runAfterInteractions(() => {
+          heavyBody().then(resolve, reject);
+        });
+      });
+    }
+
+    return heavyBody();
   }
 
   /**

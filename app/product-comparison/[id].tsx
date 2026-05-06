@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PagerView from 'react-native-pager-view';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
+import { usePressLock } from '@/lib/hooks/usePressLock';
 import {
   EnttarnteAlternativesList,
   type EnttarnteAlternative,
@@ -177,7 +178,7 @@ export default function ProductComparisonScreen() {
   const insets = useSafeAreaInsets();
   const { theme, brand, shadows, stufen } = useTokens();
   const { user } = useAuth();
-  const { toggleFavorite } = useFavorites();
+  const { toggleFavorite, isFavorite } = useFavorites();
   const analytics = useAnalytics();
 
   // ─── Coachmark Walkthrough ───────────────────────────────────
@@ -416,6 +417,39 @@ export default function ProductComparisonScreen() {
     else productImageRefs.current.delete(productId);
   };
   const [favMap, setFavMap] = useState<Record<string, boolean>>({});
+  // Sync favMap mit echtem Server-Status sobald mainProduct + nonames
+  // geladen sind. Vorher: favMap initial {} → favMap[id] === undefined
+  // → Heart leer. User tippt → optimistic toggle macht aus undefined→true,
+  // Server sagt "removed" weil's WAR gefavt → Verwirrung.
+  useEffect(() => {
+    if (!mainProduct) return;
+    let cancelled = false;
+    const idsToCheck: { id: string; type: 'markenprodukt' | 'noname' }[] = [
+      { id: mainProduct.id, type: 'markenprodukt' },
+      ...nonames.map((nn) => ({ id: nn.id, type: 'noname' as const })),
+    ];
+    (async () => {
+      try {
+        const results = await Promise.all(
+          idsToCheck.map(async ({ id, type }) => ({
+            id,
+            status: await isFavorite(id, type),
+          })),
+        );
+        if (cancelled) return;
+        setFavMap((prev) => {
+          const next = { ...prev };
+          for (const r of results) next[r.id] = r.status;
+          return next;
+        });
+      } catch {
+        // swallow
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mainProduct, nonames, isFavorite]);
   const [cartMap, setCartMap] = useState<Record<string, boolean>>({});
   const [ratingsSheet, setRatingsSheet] = useState<{
     productId: string;
@@ -683,22 +717,28 @@ export default function ProductComparisonScreen() {
   const pickedInfo = getStufeInfo(pickedStufe);
 
   // ─── Handlers ─────────────────────────────────────────────────────────
-  const onToggleFav = async (
+  const onToggleFav = usePressLock(async (
     productId: string,
     productType: 'markenprodukt' | 'noname',
     productData: any,
   ) => {
+    // Optimistic toggle.
     setFavMap((prev) => ({ ...prev, [productId]: !prev[productId] }));
     try {
       const now = await toggleFavorite(productId, productType, productData);
+      // Server-Truth sync: falls favMap stale war (Produkt war eigentlich
+      // schon gefavt obwohl Map das nicht wusste), setzen wir hier den
+      // echten Wert. So bleibt UI + Toast konsistent.
+      setFavMap((prev) => ({ ...prev, [productId]: now }));
       if (now) showFavoriteAddedToast(productData?.name ?? 'Produkt');
       else showFavoriteRemovedToast(productData?.name ?? 'Produkt');
     } catch {
+      // Bei Fehler: optimistisches Toggle revert.
       setFavMap((prev) => ({ ...prev, [productId]: !prev[productId] }));
     }
-  };
+  });
 
-  const onToggleCart = async (
+  const onToggleCart = usePressLock(async (
     productId: string,
     productType: 'markenprodukt' | 'noname',
     productData: any,
@@ -781,7 +821,7 @@ export default function ProductComparisonScreen() {
       setCartMap((prev) => ({ ...prev, [productId]: already }));
       showInfoToast('Fehler — bitte erneut versuchen');
     }
-  };
+  });
 
   const [existingRating, setExistingRating] = useState<Rating | null>(null);
   const onOpenRatings = async (
