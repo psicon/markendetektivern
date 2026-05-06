@@ -223,6 +223,25 @@ class JourneyTrackingService {
   private backgroundTimeout: NodeJS.Timeout | null = null;
   private readonly JOURNEY_SESSION_KEY = 'active_journey_id';
   private isLoadingJourney: boolean = false; // NEU: Verhindert Race Conditions
+
+  // ─── PERF: Debounced persist ────────────────────────────────────
+  // Tap-burst-fix (2026-05-06): bei schnellen Aktionen (favorisieren,
+  // entfavorisieren, in den Einkaufszettel etc.) wurde
+  // persistJourneyToFirestore pro Event aufgerufen. Jeder Call macht
+  // einen Deep-Clone der gesamten Journey (inkl. viewedProducts[]
+  // .actions[] mit motivations + DocumentReferences) plus einen
+  // updateDoc-Roundtrip mit großem Payload. 10 Taps in 1 s →
+  // 10× komplettes Re-Klonen + 10× Firestore-Write → ~27 MB JS-
+  // Allokationen pro Sekunde + JS-Thread saturated → 15-30 s freezes.
+  //
+  // Fix: in-memory Journey wird wie bisher synchron updated (kein
+  // Tracking-Verlust!), aber der FIRESTORE-WRITE wird gebatcht.
+  // Mehrere Aufrufe innerhalb des `PERSIST_DEBOUNCE_MS`-Fensters
+  // werden zu einem einzigen Write zusammengefasst — letzter
+  // Aufruf gewinnt, alle vorherigen werden verworfen.
+  private persistDebounceTimer: NodeJS.Timeout | null = null;
+  private persistPendingUserId: string | null = null;
+  private readonly PERSIST_DEBOUNCE_MS = 1500;
   // Welchem User gehört die aktuell im Memory liegende Journey? Wird in
   // startJourney + loadActiveJourney gesetzt, in completeJourney
   // gelöscht. Wenn sich der User mitten in der Session ändert (Logout
@@ -1459,7 +1478,59 @@ class JourneyTrackingService {
   /**
    * Persistiert Journey zu Firestore
    */
-  private async persistJourneyToFirestore(userId: string): Promise<void> {
+  /**
+   * Debounced public entry-point. Setzt Timer auf PERSIST_DEBOUNCE_MS
+   * und feuert den echten Write erst wenn keine weiteren Calls mehr
+   * kommen. Bei tap-burst → 1 Write statt N. Letzte userId gewinnt
+   * (defensive Handling von Owner-Wechsel: der echte Write prüft
+   * weiterhin currentJourneyUserId).
+   *
+   * Aufrufer können wie bisher fire-and-forget arbeiten — die
+   * Funktion gibt eine Promise zurück die sofort resolvet (nicht
+   * den eigentlichen Write).
+   */
+  private persistJourneyCallCount = 0;
+  private persistJourneyToFirestore(userId: string): void {
+    this.persistPendingUserId = userId;
+    this.persistJourneyCallCount += 1;
+    if (this.persistDebounceTimer) {
+      clearTimeout(this.persistDebounceTimer);
+    }
+    this.persistDebounceTimer = setTimeout(() => {
+      this.persistDebounceTimer = null;
+      const uid = this.persistPendingUserId;
+      const coalesced = this.persistJourneyCallCount;
+      this.persistPendingUserId = null;
+      this.persistJourneyCallCount = 0;
+      if (uid) {
+        // console.error damit es babel transform-remove-console exclude:
+        // ['error'] überlebt → in production logs (adb logcat ReactNativeJS)
+        // sehen wir wieviele Aufrufe in einen einzigen Write zusammen-
+        // gefasst wurden. Bei tap-burst sollte coalesced > 1 sein.
+        console.error('[journey] persist flush', { coalesced });
+        this._persistJourneyToFirestoreImmediate(uid).catch((e) => {
+          console.warn('Journey persist debounced flush failed', e);
+        });
+      }
+    }, this.PERSIST_DEBOUNCE_MS);
+  }
+
+  /**
+   * Forciert einen sofortigen Write (cancelt den debounce-Timer).
+   * Aufrufen von completeJourney/abandonJourney/Logout — überall
+   * wo wir SICHER sein müssen dass die Änderung committed ist
+   * bevor der user/screen weg ist.
+   */
+  private async flushPendingPersist(userId: string): Promise<void> {
+    if (this.persistDebounceTimer) {
+      clearTimeout(this.persistDebounceTimer);
+      this.persistDebounceTimer = null;
+    }
+    this.persistPendingUserId = null;
+    await this._persistJourneyToFirestoreImmediate(userId);
+  }
+
+  private async _persistJourneyToFirestoreImmediate(userId: string): Promise<void> {
     // WICHTIG: Sichere Referenz vor async Operationen
     const journey = this.currentJourney;
     
