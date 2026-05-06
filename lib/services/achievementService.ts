@@ -56,6 +56,74 @@ class AchievementService {
   // Service-Aufrufer hinweg geteilt.
   static recentTrackActionAt: Map<string, number> = new Map();
 
+  // Fix I (2026-05-06) — Profile-Refresh-Debounce.
+  // Bei tap-burst (10 Favoriten/Cart-Taps in 2 s) wurde
+  // onProfileRefreshNeeded 10× sequentiell aufgerufen. Jeder Call
+  // setzt setUserProfile mit einem NEUEN Object → AuthContext memo
+  // invalidate → ALLE useAuth()-Consumer (halbe App) re-rendern →
+  // useFavorites/useShoppingCart/etc. unsubscribe + resubscribe →
+  // 10× initial-load-getDocs aller Listener. Resultat:
+  // 27 MB/s GC-Allokation + 10-15 s App-freeze.
+  //
+  // Fix: alle requestProfileRefresh-Aufrufe in einem 1500-ms-
+  // Fenster werden auf EINEN tatsächlichen Refresh-Call coalesced.
+  // Achievement-Logik bleibt 1:1 erhalten — nur der UI-Refresh
+  // wird gebatcht.
+  private static profileRefreshTimer: NodeJS.Timeout | null = null;
+  private static profileRefreshInflight: Promise<void> | null = null;
+  private static profileRefreshCallCount = 0;
+  private static readonly PROFILE_REFRESH_DEBOUNCE_MS = 1500;
+
+  /**
+   * Debounced Wrapper um onProfileRefreshNeeded. Mehrere Aufrufe
+   * innerhalb des Debounce-Fensters werden zu EINEM tatsächlichen
+   * Refresh-Call coalesced. Verhindert die AuthContext-Cascade
+   * bei tap-burst.
+   *
+   * Returns sofort (Promise resolvet wenn der debouncete Refresh
+   * fertig ist — Caller können wie bisher fire-and-forget).
+   */
+  private static requestProfileRefresh(): Promise<void> {
+    if (!AchievementService.onProfileRefreshNeeded) {
+      return Promise.resolve();
+    }
+    AchievementService.profileRefreshCallCount += 1;
+    if (AchievementService.profileRefreshTimer) {
+      clearTimeout(AchievementService.profileRefreshTimer);
+    }
+    if (!AchievementService.profileRefreshInflight) {
+      AchievementService.profileRefreshInflight = new Promise<void>((resolve) => {
+        AchievementService.profileRefreshTimer = setTimeout(async () => {
+          AchievementService.profileRefreshTimer = null;
+          const coalesced = AchievementService.profileRefreshCallCount;
+          AchievementService.profileRefreshCallCount = 0;
+          const inflight = AchievementService.profileRefreshInflight;
+          // Wichtig: erst nach Resolve auf null setzen, sonst feuert
+          // ein während-des-Refresh kommender requestProfileRefresh
+          // einen neuen Timer im selben Promise.
+          try {
+            // console.error damit babel transform-remove-console
+            // exclude:['error'] das überleben lässt → in adb logcat
+            // ReactNativeJS sehen wir wieviele Aufrufe pro Refresh
+            // zusammengefasst wurden.
+            console.error('[refresh] profile flush', { coalesced });
+            if (AchievementService.onProfileRefreshNeeded) {
+              await AchievementService.onProfileRefreshNeeded();
+            }
+          } catch (err) {
+            console.warn('Profile refresh debounced flush failed', err);
+          } finally {
+            if (AchievementService.profileRefreshInflight === inflight) {
+              AchievementService.profileRefreshInflight = null;
+            }
+            resolve();
+          }
+        }, AchievementService.PROFILE_REFRESH_DEBOUNCE_MS);
+      });
+    }
+    return AchievementService.profileRefreshInflight;
+  }
+
   private constructor() {
     console.log('🎯 AchievementService Singleton erstellt');
   }
@@ -765,8 +833,9 @@ class AchievementService {
 
       // 🔄 ZENTRALER Profile-Refresh am Ende (verhindert Duplikate)
       if (AchievementService.onProfileRefreshNeeded) {
-        await AchievementService.onProfileRefreshNeeded();
-        console.log('✅ Profile refreshed at end of trackAction');
+        // Fix I: debounced — bei tap-burst werden N Refreshes auf 1 coalesced.
+        await AchievementService.requestProfileRefresh();
+        console.log('✅ Profile refreshed at end of trackAction (debounced)');
       }
 
       // 📱 App Rating temporär deaktiviert - verursacht Freeze
@@ -892,9 +961,9 @@ class AchievementService {
         } else {
           console.log(`🔄 Level-Korrektur ohne Benachrichtigung: ${currentLevel} → ${correctLevel}`);
           
-          // Profile-Refresh nur bei Korrektur
+          // Profile-Refresh nur bei Korrektur (debounced, Fix I)
           if (AchievementService.onProfileRefreshNeeded) {
-            await AchievementService.onProfileRefreshNeeded();
+            await AchievementService.requestProfileRefresh();
           }
         }
       }
