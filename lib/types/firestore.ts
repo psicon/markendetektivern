@@ -1,4 +1,11 @@
-import { DocumentReference, Timestamp } from 'firebase/firestore';
+import type { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
+
+// L Migration: DocumentReference + Timestamp kommen jetzt aus
+// @react-native-firebase/firestore (Native SDK) statt Web SDK.
+// Aliases damit der bestehende Code mit `DocumentReference` /
+// `Timestamp` als Top-Level-Typen unverändert kompiliert.
+export type DocumentReference<T = any> = FirebaseFirestoreTypes.DocumentReference<T>;
+export type Timestamp = FirebaseFirestoreTypes.Timestamp;
 
 // Firestore TypeScript Interfaces basierend auf echtem Schema
 

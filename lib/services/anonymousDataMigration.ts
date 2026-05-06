@@ -1,5 +1,5 @@
-import { linkWithCredential, User } from 'firebase/auth';
-import { collection, doc, getDocs, writeBatch } from 'firebase/firestore';
+import { linkWithCredential, User } from '@react-native-firebase/auth';
+import { collection, doc, getDocs, writeBatch } from '@react-native-firebase/firestore';
 import { db } from '../firebase';
 
 /**

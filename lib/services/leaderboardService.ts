@@ -11,7 +11,7 @@ import {
     setDoc,
     Timestamp,
     where
-} from 'firebase/firestore';
+} from '@react-native-firebase/firestore';
 import { db } from '../firebase';
 
 export interface LeaderboardEntry {

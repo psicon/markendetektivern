@@ -12,9 +12,9 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useNavigation } from 'expo-router';
-import { updateProfile } from 'firebase/auth';
-import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { updateProfile } from '@react-native-firebase/auth';
+import { doc, getDoc, serverTimestamp, updateDoc } from '@react-native-firebase/firestore';
+import { getDownloadURL, ref, uploadBytes } from '@react-native-firebase/storage';
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
   ActivityIndicator,

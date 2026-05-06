@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import { createUserWithEmailAndPassword, onAuthStateChanged, signInAnonymously, signInWithEmailAndPassword, signOut, updateProfile, User } from 'firebase/auth';
+import { createUserWithEmailAndPassword, onAuthStateChanged, signInAnonymously, signInWithEmailAndPassword, signOut, updateProfile, User } from '@react-native-firebase/auth';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { PERF } from '../perfFlags';
 import { auth } from '../firebase';
@@ -10,7 +10,7 @@ import { signInWithGoogle, signOutGoogle } from '../services/auth/googleAuth';
 import { createUserProfile, getUserProfile, UserProfile } from '../services/userProfile';
 import { scheduleRegionGuess } from '../services/regionGuess';
 import { FirestoreService } from '../services/firestore';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc } from '@react-native-firebase/firestore';
 import { db } from '../firebase';
 import { InteractionManager } from 'react-native';
 

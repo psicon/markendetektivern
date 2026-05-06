@@ -1,5 +1,5 @@
 import { db } from '@/lib/firebase';
-import { addDoc, collection, doc, DocumentReference, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, DocumentReference, serverTimestamp, updateDoc } from '@react-native-firebase/firestore';
 import { analyticsService } from './analyticsService';
 import { AnonymousLocationService } from './anonymousLocationService';
 

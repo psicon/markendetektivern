@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, startAfter } from 'firebase/firestore';
+import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, startAfter } from '@react-native-firebase/firestore';
 import { db } from '../firebase';
 
 export interface PurchasedProduct {

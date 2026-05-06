@@ -19,7 +19,7 @@
  */
 
 import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from '@react-native-firebase/firestore';
 import { db } from '@/lib/firebase';
 
 let _registered = false;

@@ -12,7 +12,7 @@ import {
     updateDoc,
     where,
     writeBatch
-} from 'firebase/firestore';
+} from '@react-native-firebase/firestore';
 import { db } from '../firebase';
 import { FirestoreDocument, Kategorien, Produkte } from '../types/firestore';
 

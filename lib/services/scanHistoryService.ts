@@ -12,7 +12,7 @@ import {
     serverTimestamp,
     where,
     writeBatch
-} from 'firebase/firestore';
+} from '@react-native-firebase/firestore';
 import { db } from '../firebase';
 
 export interface ScanHistoryItem {

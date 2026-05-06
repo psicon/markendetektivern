@@ -1,4 +1,4 @@
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from '@react-native-firebase/firestore';
 import { Alert } from 'react-native';
 import { db } from '../firebase';
 import { isExpoGo } from '../utils/platform';

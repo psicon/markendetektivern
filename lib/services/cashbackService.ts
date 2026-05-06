@@ -9,7 +9,7 @@
  * See CASHBACK_ARCHITECTURE.md §3 for the schema and §11 for hard rules.
  */
 
-import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc, type Unsubscribe } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc, type Unsubscribe } from '@react-native-firebase/firestore';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 

@@ -15,7 +15,7 @@
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image as ExpoImage } from 'expo-image';
-import { getDownloadURL, ref as storageRef } from 'firebase/storage';
+import { getDownloadURL, ref as storageRef } from '@react-native-firebase/storage';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {

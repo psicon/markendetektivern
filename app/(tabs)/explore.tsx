@@ -46,7 +46,7 @@ import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { Crossfade, ProductCardSkeleton } from '@/components/design/Skeletons';
 import { getStufeCopy, loadStufeCopy } from '@/lib/utils/stufeCopy';
 import { StufenChips } from '@/components/design/StufenChips';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs } from '@react-native-firebase/firestore';
 
 import { BannerAd } from '@/components/ads/BannerAd';
 import { LockedCategoryModal } from '@/components/ui/LockedCategoryModal';

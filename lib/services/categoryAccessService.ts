@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where } from '@react-native-firebase/firestore';
 import { db } from '../firebase';
 import { FirestoreDocument, Kategorien } from '../types/firestore';
 

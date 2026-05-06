@@ -1,6 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc } from '@react-native-firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Image as RNImage,

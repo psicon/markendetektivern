@@ -7,7 +7,7 @@ import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { rewardedAdService, RewardedAdError } from '@/lib/services/rewardedAdService';
 import { showInfoToast } from '@/lib/services/ui/toast';
 import { LinearGradient } from 'expo-linear-gradient';
-import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp, Timestamp } from '@react-native-firebase/firestore';
 import LottieView from 'lottie-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {

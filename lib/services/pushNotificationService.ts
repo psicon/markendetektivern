@@ -1,7 +1,7 @@
 import { isExpoGo } from '@/lib/utils/platform';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import { doc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc } from '@react-native-firebase/firestore';
 import { Platform } from 'react-native';
 import { db } from '../firebase';
 

@@ -8,7 +8,7 @@
  * All amounts are CENTS (integers), never euros (floats).
  */
 
-import type { Timestamp } from 'firebase/firestore';
+import type { Timestamp } from '@react-native-firebase/firestore';
 
 // ─── Config ─────────────────────────────────────────────────────────
 

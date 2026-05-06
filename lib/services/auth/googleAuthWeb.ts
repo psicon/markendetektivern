@@ -2,7 +2,7 @@
 import { auth } from '@/lib/firebase';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
-import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { GoogleAuthProvider, signInWithCredential } from '@react-native-firebase/auth';
 import { Platform } from 'react-native';
 
 WebBrowser.maybeCompleteAuthSession();

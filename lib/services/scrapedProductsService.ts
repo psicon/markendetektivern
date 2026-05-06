@@ -1,5 +1,5 @@
 import { db } from '@/lib/firebase';
-import { collection, getDocs, limit, query, where } from 'firebase/firestore';
+import { collection, getDocs, limit, query, where } from '@react-native-firebase/firestore';
 import OpenFoodService, { OpenFoodProduct } from './openfood';
 
 export interface ScrapedProduct {

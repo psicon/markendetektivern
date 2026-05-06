@@ -18,8 +18,8 @@ import {
   serverTimestamp,
   setDoc,
   type Unsubscribe,
-} from 'firebase/firestore';
-import { ref as storageRef, uploadBytesResumable } from 'firebase/storage';
+} from '@react-native-firebase/firestore';
+import { ref as storageRef, uploadBytesResumable } from '@react-native-firebase/storage';
 
 import { db } from '@/lib/firebase';
 import type { ReceiptDoc } from '@/lib/types/cashback';

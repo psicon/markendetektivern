@@ -20,7 +20,7 @@ import {
   orderBy,
   query,
   updateDoc,
-} from 'firebase/firestore';
+} from '@react-native-firebase/firestore';
 import { InteractionManager } from 'react-native';
 import { db } from '@/lib/firebase';
 import {

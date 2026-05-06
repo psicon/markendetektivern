@@ -19,7 +19,7 @@ import {
     updateDoc,
     where,
     writeBatch
-} from 'firebase/firestore';
+} from '@react-native-firebase/firestore';
 import { Image as RNImage } from 'react-native';
 import { db } from '../firebase';
 import {

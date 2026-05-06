@@ -21,7 +21,7 @@ import {
   limit as fsLimit,
   orderBy,
   query,
-} from 'firebase/firestore';
+} from '@react-native-firebase/firestore';
 import { db } from '@/lib/firebase';
 import { CITY_TO_BUNDESLAND, normalizeCityName } from '@/lib/data/city-to-bundesland';
 

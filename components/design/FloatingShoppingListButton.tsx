@@ -27,7 +27,7 @@ import {
   onSnapshot,
   query,
   where,
-} from 'firebase/firestore';
+} from '@react-native-firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 

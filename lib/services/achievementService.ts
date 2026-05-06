@@ -12,7 +12,7 @@ import {
     updateDoc,
     where,
     writeBatch
-} from 'firebase/firestore';
+} from '@react-native-firebase/firestore';
 import { Alert, InteractionManager } from 'react-native';
 import { db } from '../firebase';
 import { PERF } from '../perfFlags';
