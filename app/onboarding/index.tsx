@@ -204,7 +204,7 @@ export default function OnboardingScreen() {
   // Lade Märkte aus Firestore
   const loadMarkets = async () => {
     try {
-      const { collection, getDocs, query, where } = await import('firebase/firestore');
+      const { collection, getDocs, query, where } = await import('@react-native-firebase/firestore');
       const { db } = await import('@/lib/firebase');
       
       console.log('🔍 Loading markets for country:', country);
@@ -253,7 +253,7 @@ export default function OnboardingScreen() {
     if (currentStep <= 1) return;
     
     try {
-      const { setDoc, doc, serverTimestamp } = await import('firebase/firestore');
+      const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
       const { db, auth } = await import('@/lib/firebase');
       
       const userId = auth.currentUser?.uid || 'anonymous';
@@ -395,7 +395,7 @@ export default function OnboardingScreen() {
     
     // Speichere Skip/Abandon
     try {
-      const { setDoc, doc, serverTimestamp } = await import('firebase/firestore');
+      const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
       const { db, auth } = await import('@/lib/firebase');
       
       await setDoc(doc(db, 'onboardingResultsV5', sessionId), {
@@ -455,7 +455,7 @@ export default function OnboardingScreen() {
     try {
       await signInAnonymously();
       
-      const { setDoc, doc, serverTimestamp } = await import('firebase/firestore');
+      const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
       const { db, auth } = await import('@/lib/firebase');
       
       // Vervollständige die Session

@@ -83,7 +83,7 @@ function ThemedApp() {
         // Service-level Imports (lazy damit Bundle-Mount nicht blockt)
         const { FirestoreService } = await import('@/lib/services/firestore');
         const { db } = await import('@/lib/firebase');
-        const { collection, getDocs } = await import('firebase/firestore');
+        const { collection, getDocs } = await import('@react-native-firebase/firestore');
         // Alle 3 öffentlich-lesbaren Reference-Collections parallel.
         // Errors werden geschluckt — Stöbern's eigener Fetch erholt sich.
         // `getDiscounter` hat Service-Level-Cache → Stöbern's Aufruf

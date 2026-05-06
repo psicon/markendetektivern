@@ -40,7 +40,7 @@ export class OnboardingTrackingService {
    * Initialisiere Onboarding Session
    */
   static async initializeSession(userId?: string) {
-    const { serverTimestamp } = await import('firebase/firestore');
+    const { serverTimestamp } = await import('@react-native-firebase/firestore');
     
     this.currentResult = {
       userId: userId || 'anonymous',
@@ -67,7 +67,7 @@ export class OnboardingTrackingService {
     }
     
     if (this.currentResult) {
-      const { serverTimestamp } = await import('firebase/firestore');
+      const { serverTimestamp } = await import('@react-native-firebase/firestore');
       
       this.currentResult.currentStep = stepNumber;
       this.currentResult.lastUpdateTime = serverTimestamp();
@@ -101,7 +101,7 @@ export class OnboardingTrackingService {
     }
     
     if (this.currentResult) {
-      const { serverTimestamp } = await import('firebase/firestore');
+      const { serverTimestamp } = await import('@react-native-firebase/firestore');
       
       this.currentResult.status = 'abandoned';
       this.currentResult.abandonedAtStep = currentStep;
@@ -126,7 +126,7 @@ export class OnboardingTrackingService {
     }
     
     if (this.currentResult) {
-      const { serverTimestamp } = await import('firebase/firestore');
+      const { serverTimestamp } = await import('@react-native-firebase/firestore');
       
       this.currentResult.status = 'completed';
       this.currentResult.completedAt = serverTimestamp();
@@ -151,7 +151,7 @@ export class OnboardingTrackingService {
     if (!this.currentResult) return;
     
     try {
-      const { setDoc, doc } = await import('firebase/firestore');
+      const { setDoc, doc } = await import('@react-native-firebase/firestore');
       const { db } = await import('@/lib/firebase');
       
       // Verwende sessionId als Document ID für Updates

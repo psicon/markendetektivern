@@ -441,8 +441,16 @@ export default function ExploreScreen() {
     () => (getCachedEigen()?.items as any) ?? [],
   );
   const [nonameLoading, setNonameLoading] = useState(!getCachedEigen());
-  const [nonameLastDoc, setNonameLastDoc] = useState<any>(getCachedEigen()?.lastDoc ?? null);
-  const [nonameHasMore, setNonameHasMore] = useState(getCachedEigen()?.hasMore ?? true);
+  const [nonameLastDoc, _setNonameLastDoc] = useState<any>(getCachedEigen()?.lastDoc ?? null);
+  const setNonameLastDoc = useCallback((v: any) => {
+    nonameLastDocRef.current = v;
+    _setNonameLastDoc(v);
+  }, []);
+  const [nonameHasMore, _setNonameHasMore] = useState(getCachedEigen()?.hasMore ?? true);
+  const setNonameHasMore = useCallback((v: boolean) => {
+    nonameHasMoreRef.current = v;
+    _setNonameHasMore(v);
+  }, []);
 
   const [markenprodukte, setMarkenprodukte] = useState<FirestoreDocument<any>[]>(
     () => (getCachedMarken()?.items as any) ?? [],
@@ -451,8 +459,16 @@ export default function ExploreScreen() {
   // the Marken tab shows the skeleton grid instead of the "Keine
   // Treffer" lupe flash while its first query is in flight.
   const [markenLoading, setMarkenLoading] = useState(!getCachedMarken());
-  const [markenLastDoc, setMarkenLastDoc] = useState<any>(getCachedMarken()?.lastDoc ?? null);
-  const [markenHasMore, setMarkenHasMore] = useState(getCachedMarken()?.hasMore ?? true);
+  const [markenLastDoc, _setMarkenLastDoc] = useState<any>(getCachedMarken()?.lastDoc ?? null);
+  const setMarkenLastDoc = useCallback((v: any) => {
+    markenLastDocRef.current = v;
+    _setMarkenLastDoc(v);
+  }, []);
+  const [markenHasMore, _setMarkenHasMore] = useState(getCachedMarken()?.hasMore ?? true);
+  const setMarkenHasMore = useCallback((v: boolean) => {
+    markenHasMoreRef.current = v;
+    _setMarkenHasMore(v);
+  }, []);
 
   // ─── In-place Algolia search state ─────────────────────────────────────
   // Stöbern owns the canonical search experience — when the user
@@ -828,6 +844,25 @@ export default function ExploreScreen() {
   // the active tab's query, with a 120 ms debounce so typing in the
   // search field doesn't hammer the backend.
   const reloadSeq = useRef(0);
+  // Synchroner Inflight-Guard + hasMore-Mirror für Pagination.
+  // Refs werden bei jedem render auf aktuelle state-werte synced
+  // (siehe useEffect drunter). onScroll-Handler und checkLoadMore
+  // lesen die Refs, nicht React-state — damit klappt das auch
+  // wenn Closures stale sind (z.B. onScroll mit [] deps).
+  const nonameInflightRef = useRef(false);
+  const markenInflightRef = useRef(false);
+  const nonameHasMoreRef = useRef(true);
+  const markenHasMoreRef = useRef(true);
+  // Cursor-Refs — KRITISCH für korrekte Pagination. Die JS-Scroll-
+  // Handler (`onScrollJsEigen`/`onScrollJsMarken`/`onScrollJsAlle`)
+  // sind mit [] deps memoisiert (damit sie auf JEDEM Frame ohne
+  // Re-Subscribe feuern können). Würden `loadNonames`/`loadMarken`
+  // ihren cursor aus React-State lesen, wäre dieser bei jedem Call
+  // der INITIAL-Wert (null) → es würde ewig page 1 fetchen, items
+  // werden als duplicates gefiltert, Liste wächst nie. Refs sind
+  // synchron + always-current → Pagination funktioniert.
+  const nonameLastDocRef = useRef<any>(getCachedEigen()?.lastDoc ?? null);
+  const markenLastDocRef = useRef<any>(getCachedMarken()?.lastDoc ?? null);
   const isFirstMount = useRef(true);
 
   // Search-Sequence-Counter — analog zu reloadSeq, aber für die
@@ -981,13 +1016,25 @@ export default function ExploreScreen() {
 
   const loadNonames = useCallback(
     async (reset: boolean) => {
-      if (!reset && (nonameLoading || !nonameHasMore)) return;
+      // Synchroner Inflight-Guard via ref. Verhindert dass mehrere
+      // gleichzeitige scroll-trigger (onEndReached + ggf. anderes)
+      // alle dieselbe pagination feuern bevor State updated.
+      // React-state `nonameLoading` ist innerhalb eines Ticks stale,
+      // ref ist synchron + immediate.
+      //
+      // ALLE pagination-state reads via ref (.current) — die JS-Scroll-
+      // Handler sind mit [] deps memoisiert und würden sonst die
+      // INITIAL-React-state-werte aus dem closure lesen → ewig page 1.
+      if (!reset && (nonameInflightRef.current || !nonameHasMoreRef.current)) {
+        return;
+      }
+      if (!reset) nonameInflightRef.current = true;
       try {
         setNonameLoading(true);
         const size = reset ? FIRST_PAGE_SIZE : PAGE_SIZE;
         const res = await FirestoreService.getNoNameProductsPaginated(
           size,
-          reset ? null : nonameLastDoc,
+          reset ? null : nonameLastDocRef.current,
           buildNonameFilters() as any,
         );
         setNonames((prev) => {
@@ -1058,20 +1105,27 @@ export default function ExploreScreen() {
         console.warn('Explore: loadNonames failed', e);
       } finally {
         setNonameLoading(false);
+        nonameInflightRef.current = false;
       }
     },
-    [nonameLoading, nonameHasMore, nonameLastDoc, buildNonameFilters, productSorter],
+    // Refs (nonameLastDocRef/nonameHasMoreRef) liefern die aktuellen
+    // Werte — daher KEINE state-deps, sonst hätten wir wieder das
+    // closure-staleness-Problem in den JS-Scroll-Handlern.
+    [buildNonameFilters, productSorter],
   );
 
   const loadMarken = useCallback(
     async (reset: boolean) => {
-      if (!reset && (markenLoading || !markenHasMore)) return;
+      if (!reset && (markenInflightRef.current || !markenHasMoreRef.current)) {
+        return;
+      }
+      if (!reset) markenInflightRef.current = true;
       try {
         setMarkenLoading(true);
         const size = reset ? FIRST_PAGE_SIZE : PAGE_SIZE;
         const res = await FirestoreService.getMarkenproduktePaginated(
           size,
-          reset ? null : markenLastDoc,
+          reset ? null : markenLastDocRef.current,
           buildMarkenFilters() as any,
         );
         setMarkenprodukte((prev) => {
@@ -1127,9 +1181,12 @@ export default function ExploreScreen() {
         console.warn('Explore: loadMarken failed', e);
       } finally {
         setMarkenLoading(false);
+        markenInflightRef.current = false;
       }
     },
-    [markenLoading, markenHasMore, markenLastDoc, buildMarkenFilters, productSorter],
+    // Refs liefern aktuelle Werte — keine state-deps, sonst stale-
+    // closure in den JS-Scroll-Handlern.
+    [buildMarkenFilters, productSorter],
   );
 
   const loadMore = useCallback(() => {
@@ -2465,30 +2522,34 @@ export default function ExploreScreen() {
   const inSearchMode =
     typeof searchActiveQuery === 'string' && searchActiveQuery.length > 0;
 
+  // Pagination-Trigger lesen Refs (synchron, nie stale) statt
+  // React-State. Damit funktioniert das auch wenn die enthaltene
+  // onScroll-Closure stale ist (typischer fall mit [] deps).
+  // `loadNonames(false)` selbst hat ebenfalls einen Inflight-Ref-Guard
+  // → simultane Trigger werden gededuplciert, der erste fetcht,
+  // weitere returnen sofort.
   const checkLoadMoreEigen = useCallback(() => {
     if (inSearchMode) {
       void loadMoreSearch();
       return;
     }
-    if (nonameHasMore && !nonameLoading) loadNonames(false);
-  }, [inSearchMode, loadMoreSearch, nonameHasMore, nonameLoading, loadNonames]);
+    if (nonameHasMoreRef.current && !nonameInflightRef.current) loadNonames(false);
+  }, [inSearchMode, loadMoreSearch, loadNonames]);
   const checkLoadMoreMarken = useCallback(() => {
     if (inSearchMode) {
       void loadMoreSearch();
       return;
     }
-    if (markenHasMore && !markenLoading) loadMarken(false);
-  }, [inSearchMode, loadMoreSearch, markenHasMore, markenLoading, loadMarken]);
-  // 'Alle' tab pulls from BOTH collections in browse mode — fire
-  // pagination on whichever side still has pages left.
+    if (markenHasMoreRef.current && !markenInflightRef.current) loadMarken(false);
+  }, [inSearchMode, loadMoreSearch, loadMarken]);
   const checkLoadMoreAlle = useCallback(() => {
     if (inSearchMode) {
       void loadMoreSearch();
       return;
     }
-    if (nonameHasMore && !nonameLoading) loadNonames(false);
-    if (markenHasMore && !markenLoading) loadMarken(false);
-  }, [inSearchMode, loadMoreSearch, nonameHasMore, nonameLoading, markenHasMore, markenLoading, loadNonames, loadMarken]);
+    if (nonameHasMoreRef.current && !nonameInflightRef.current) loadNonames(false);
+    if (markenHasMoreRef.current && !markenInflightRef.current) loadMarken(false);
+  }, [inSearchMode, loadMoreSearch, loadNonames, loadMarken]);
 
   // Animated scroll handlers driven both die per-page scrollYxxx
   // (→ powert die Tab-Bar-Collapse-Animation auf dem UI-Thread) und
@@ -2506,25 +2567,15 @@ export default function ExploreScreen() {
   const loadingZoneMarken = useSharedValue(false);
   const loadingZoneAlle = useSharedValue(false);
 
+  // Animated scroll handler: NUR Scroll-Y-Tracking für Chrome-Animation,
+  // KEIN Pagination-Trigger mehr. Pagination kommt ausschließlich von
+  // LegendList's `onEndReached` (siehe JSX). Vorher: doppelter Trigger
+  // (Worklet + onEndReached) = Race-Condition mit 3 simultanen
+  // loadNonames-Calls auf gleichem stale-state-lastDoc.
   const scrollHandlerEigen = useAnimatedScrollHandler({
     onScroll: (e) => {
       if (!PERF.useScrollOffset) {
         scrollYEigen.value = e.contentOffset.y;
-      }
-      const dist =
-        e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
-      // Threshold von 2200 → 4500 px hochgezogen — auf Android Web SDK
-      // braucht eine Pagination-Query ~1 s, der User scrollt aber
-      // schneller. Mit 4500 px (~5 Viewport-Höhen / ~15 Card-Reihen)
-      // hat der Server-Roundtrip Zeit anzukommen bevor der User am
-      // Ende ist. Auch scroll-fließende User triggern jetzt früh
-      // genug.
-      const nearBottom = dist < 4500;
-      if (nearBottom && !loadingZoneEigen.value) {
-        loadingZoneEigen.value = true;
-        runOnJS(checkLoadMoreEigen)();
-      } else if (!nearBottom && loadingZoneEigen.value) {
-        loadingZoneEigen.value = false;
       }
     },
   });
@@ -2533,45 +2584,12 @@ export default function ExploreScreen() {
       if (!PERF.useScrollOffset) {
         scrollYMarken.value = e.contentOffset.y;
       }
-      const dist =
-        e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
-      // Threshold von 2200 → 4500 px hochgezogen — auf Android Web SDK
-      // braucht eine Pagination-Query ~1 s, der User scrollt aber
-      // schneller. Mit 4500 px (~5 Viewport-Höhen / ~15 Card-Reihen)
-      // hat der Server-Roundtrip Zeit anzukommen bevor der User am
-      // Ende ist. Auch scroll-fließende User triggern jetzt früh
-      // genug.
-      const nearBottom = dist < 4500;
-      if (nearBottom && !loadingZoneMarken.value) {
-        loadingZoneMarken.value = true;
-        runOnJS(checkLoadMoreMarken)();
-      } else if (!nearBottom && loadingZoneMarken.value) {
-        loadingZoneMarken.value = false;
-      }
     },
   });
   const scrollHandlerAlle = useAnimatedScrollHandler({
     onScroll: (e) => {
-      // Bei PERF.useScrollOffset=true ist scrollYAlle eine
-      // vom useScrollViewOffset gelieferte read-only SharedValue —
-      // nicht beschreiben (Reanimated wirft sonst).
       if (!PERF.useScrollOffset) {
         scrollYAlle.value = e.contentOffset.y;
-      }
-      const dist =
-        e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
-      // Threshold von 2200 → 4500 px hochgezogen — auf Android Web SDK
-      // braucht eine Pagination-Query ~1 s, der User scrollt aber
-      // schneller. Mit 4500 px (~5 Viewport-Höhen / ~15 Card-Reihen)
-      // hat der Server-Roundtrip Zeit anzukommen bevor der User am
-      // Ende ist. Auch scroll-fließende User triggern jetzt früh
-      // genug.
-      const nearBottom = dist < 4500;
-      if (nearBottom && !loadingZoneAlle.value) {
-        loadingZoneAlle.value = true;
-        runOnJS(checkLoadMoreAlle)();
-      } else if (!nearBottom && loadingZoneAlle.value) {
-        loadingZoneAlle.value = false;
       }
     },
   });
@@ -2585,25 +2603,22 @@ export default function ExploreScreen() {
     (e: any) => {
       const ne = e?.nativeEvent;
       if (!ne) return;
-      // Fix G: bei plain ScrollView ist useScrollViewOffset blind,
-      // also driven wir scrollYAlleLegacy direkt aus dem JS-Thread.
-      // Die Chrome-Animation hängt 1 Frame hinterher — unsichtbar.
       if (PERF.legendListPlainScrollView) {
         scrollYAlleLegacy.value = ne.contentOffset.y;
       }
+      // Custom Pagination-Trigger: feuert wenn within 4 viewport
+      // heights vom Ende. Synchroner Inflight-Guard + Reset-on-finish
+      // (in loadNonames/loadMarken finally) sorgt dafür dass neue
+      // Pages kontinuierlich nachgeladen werden während User scrollt.
+      // LegendList's onEndReached ist nicht zuverlässig (feuert oft
+      // nicht nach erster Daten-Update) — daher eigene Trigger-Logik.
       const dist =
         ne.contentSize.height - ne.contentOffset.y - ne.layoutMeasurement.height;
-      const nearBottom = dist < 2200;
-      if (nearBottom && !loadingZoneAlle.value) {
-        loadingZoneAlle.value = true;
+      const viewport = ne.layoutMeasurement.height || 800;
+      if (dist < viewport * 4) {
         checkLoadMoreAlle();
-      } else if (!nearBottom && loadingZoneAlle.value) {
-        loadingZoneAlle.value = false;
       }
     },
-    // checkLoadMoreAlle is defined further down via useCallback;
-    // referencing it here is safe because closures capture the
-    // identity at render time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -2616,12 +2631,9 @@ export default function ExploreScreen() {
       }
       const dist =
         ne.contentSize.height - ne.contentOffset.y - ne.layoutMeasurement.height;
-      const nearBottom = dist < 2200;
-      if (nearBottom && !loadingZoneEigen.value) {
-        loadingZoneEigen.value = true;
+      const viewport = ne.layoutMeasurement.height || 800;
+      if (dist < viewport * 4) {
         checkLoadMoreEigen();
-      } else if (!nearBottom && loadingZoneEigen.value) {
-        loadingZoneEigen.value = false;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2636,12 +2648,9 @@ export default function ExploreScreen() {
       }
       const dist =
         ne.contentSize.height - ne.contentOffset.y - ne.layoutMeasurement.height;
-      const nearBottom = dist < 2200;
-      if (nearBottom && !loadingZoneMarken.value) {
-        loadingZoneMarken.value = true;
+      const viewport = ne.layoutMeasurement.height || 800;
+      if (dist < viewport * 4) {
         checkLoadMoreMarken();
-      } else if (!nearBottom && loadingZoneMarken.value) {
-        loadingZoneMarken.value = false;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps

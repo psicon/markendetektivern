@@ -19,7 +19,11 @@ import {
   setDoc,
   type Unsubscribe,
 } from '@react-native-firebase/firestore';
-import { ref as storageRef, uploadBytesResumable } from '@react-native-firebase/storage';
+// L Migration: putFile statt uploadBytesResumable. RNFirebase Storage
+// auf Native unterstützt Blob-Upload zwar grundsätzlich, ist aber
+// memory-ineffizient und auf großen Bildern unzuverlässig. putFile
+// nutzt direkt den nativen Datei-Pfad ohne Blob-Konversion.
+import { ref as storageRef, putFile } from '@react-native-firebase/storage';
 
 import { db } from '@/lib/firebase';
 import type { ReceiptDoc } from '@/lib/types/cashback';
@@ -58,28 +62,79 @@ export async function uploadBonImage(
     e.code = 'not_authenticated';
     throw e;
   }
+  if (!localUri || typeof localUri !== 'string') {
+    const e: any = new Error('upload_no_uri');
+    e.code = 'upload_no_uri';
+    throw e;
+  }
+
   const filename = `${randomId()}.jpg`;
   const storagePath = `cashback-uploads/${uid}/${filename}`;
 
-  const response = await fetch(localUri);
-  if (!response.ok) {
-    const e: any = new Error(`local_read_failed_${response.status}`);
-    e.code = 'local_read_failed';
+  console.error('[bonUpload] start', {
+    uri: localUri.slice(0, 80),
+    uid: uid.slice(0, 8),
+    storagePath,
+  });
+
+  // L Migration: putFile mit lokalem URI statt Blob. RNFirebase
+  // akzeptiert sowohl `file://`-prefix als auch absolute Pfade
+  // (toFilePath strippt den prefix intern + dekodiert URL-encoding).
+  let ref: any;
+  try {
+    ref = storageRef(storage, storagePath);
+  } catch (err: any) {
+    console.error('[bonUpload] ref_failed', err);
+    const e: any = new Error(err?.message || 'storage_ref_failed');
+    e.code = err?.code || 'storage_ref_failed';
     throw e;
   }
-  const blob = await response.blob();
-  const sizeBytes = (blob as any).size ?? 0;
 
-  const ref = storageRef(storage, storagePath);
+  // Watchdog tickt erst wenn bereits Progress lief — sonst würde ein
+  // langsamer Connect-Handshake (z.B. EU-RTT, ColdStart) fälschlich
+  // als timeout enden bevor RNFirebase überhaupt das erste Event
+  // gefeuert hat. firstTickWaitMs = großzügiges Initial-Budget bis
+  // zum ersten state_changed.
   const timeoutMs = opts?.timeoutMs ?? 60_000;
+  const firstTickWaitMs = Math.max(timeoutMs, 30_000);
+  let sizeBytes = 0;
 
   await new Promise<void>((resolve, reject) => {
-    const task = uploadBytesResumable(ref, blob, { contentType: 'image/jpeg' });
+    let task: any;
+    try {
+      task = putFile(ref, localUri, { contentType: 'image/jpeg' });
+    } catch (err: any) {
+      console.error('[bonUpload] putFile_threw', {
+        code: err?.code,
+        message: err?.message,
+        uri: localUri.slice(0, 80),
+      });
+      const e: any = new Error(err?.message || 'putFile_failed');
+      e.code = err?.code || 'storage/unknown';
+      reject(e);
+      return;
+    }
 
+    if (!task || typeof task.on !== 'function') {
+      console.error('[bonUpload] task_invalid', { task: typeof task });
+      const e: any = new Error('upload_task_invalid');
+      e.code = 'upload_task_invalid';
+      reject(e);
+      return;
+    }
+
+    let firstTickSeen = false;
     let lastTick = Date.now();
     const watchdog = setInterval(() => {
-      if (Date.now() - lastTick > timeoutMs) {
+      const elapsed = Date.now() - lastTick;
+      const budget = firstTickSeen ? timeoutMs : firstTickWaitMs;
+      if (elapsed > budget) {
         clearInterval(watchdog);
+        console.error('[bonUpload] timeout', {
+          elapsed,
+          budget,
+          firstTickSeen,
+        });
         try {
           task.cancel();
         } catch {}
@@ -91,18 +146,27 @@ export async function uploadBonImage(
 
     task.on(
       'state_changed',
-      (snap) => {
+      (snap: any) => {
+        firstTickSeen = true;
         lastTick = Date.now();
-        const total = snap.totalBytes || sizeBytes || 1;
-        const pct = Math.round((snap.bytesTransferred / total) * 100);
-        opts?.onProgress?.(pct, snap.bytesTransferred, total);
+        sizeBytes = snap?.totalBytes || sizeBytes;
+        const total = snap?.totalBytes || sizeBytes || 1;
+        const transferred = snap?.bytesTransferred || 0;
+        const pct = Math.round((transferred / total) * 100);
+        opts?.onProgress?.(pct, transferred, total);
       },
-      (err) => {
+      (err: any) => {
         clearInterval(watchdog);
+        console.error('[bonUpload] state_changed_error', {
+          code: err?.code,
+          message: err?.message,
+          nativeErrorCode: err?.nativeErrorCode,
+        });
         reject(err);
       },
       () => {
         clearInterval(watchdog);
+        console.error('[bonUpload] complete', { sizeBytes });
         opts?.onProgress?.(100, sizeBytes, sizeBytes);
         resolve();
       },
@@ -256,22 +320,56 @@ export async function enqueueCashback(args: EnqueueArgs): Promise<EnqueueResult>
   if (!user) {
     throw new Error('not_authenticated');
   }
-  const idToken = await user.getIdToken();
+  let idToken: string;
+  try {
+    idToken = await user.getIdToken();
+  } catch (err: any) {
+    console.error('[bonUpload] getIdToken_failed', {
+      code: err?.code,
+      message: err?.message,
+    });
+    const e: any = new Error(err?.message || 'token_failed');
+    e.code = 'token_failed';
+    throw e;
+  }
   const url = `${FUNCTIONS_BASE}/enqueueCashback`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify(args),
+  console.error('[bonUpload] enqueue_post', {
+    url,
+    storagePath: args.storagePath,
+    hasHash: Boolean(args.bytesHash),
+    source: args.source,
   });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify(args),
+    });
+  } catch (err: any) {
+    console.error('[bonUpload] fetch_failed', {
+      code: err?.code,
+      message: err?.message,
+    });
+    const e: any = new Error(err?.message || 'network_failed');
+    e.code = 'network_failed';
+    throw e;
+  }
   let payload: any = null;
   try {
     payload = await res.json();
   } catch {
     payload = null;
   }
+  console.error('[bonUpload] enqueue_response', {
+    status: res.status,
+    code: payload?.code,
+    message: payload?.message,
+    cashbackId: payload?.cashbackId,
+  });
   if (!res.ok) {
     const err: any = new Error(payload?.message || `enqueue_${res.status}`);
     err.code = payload?.code || `http_${res.status}`;

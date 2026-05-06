@@ -323,7 +323,7 @@ export default function ProfileScreen() {
           onPress: async () => {
             if (!user) return;
             try {
-              const { deleteUser } = await import('firebase/auth');
+              const { deleteUser } = await import('@react-native-firebase/auth');
               await deleteUser(user);
               router.replace('/');
             } catch (e: any) {
@@ -657,6 +657,50 @@ export default function ProfileScreen() {
     } catch (e: any) {
       Alert.alert('Fehler', String(e?.message ?? e));
     }
+  };
+
+  // Dev-Reset: löscht alle Mirror-Docs (`users/{uid}/cashback_status/*`)
+  // damit der nächste Bon-Upload mit frischen Counter-Limits startet
+  // und keine "duplicate"-Treffer durch alte clientUploadIds entstehen.
+  // Affects nur den Mirror — die echten /receipts/* Server-Docs bleiben
+  // (das ist Cloud-Function-Domäne, kein Client-Schreibrecht).
+  const onResetCashbackBons = async () => {
+    if (!user?.uid) {
+      Alert.alert('Nicht angemeldet', 'Bitte zuerst anmelden.');
+      return;
+    }
+    Alert.alert(
+      'Bons zurücksetzen?',
+      'Entfernt alle lokalen Mirror-Einträge unter cashback_status. Server-seitige Receipts bleiben erhalten.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Zurücksetzen',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const [{ collection, getDocs, deleteDoc }, { db }] =
+                await Promise.all([
+                  import('@react-native-firebase/firestore'),
+                  import('@/lib/firebase'),
+                ]);
+              const snap = await getDocs(
+                collection(db, `users/${user.uid}/cashback_status`),
+              );
+              let n = 0;
+              for (const d of snap.docs) {
+                await deleteDoc(d.ref);
+                n++;
+              }
+              Alert.alert('Erledigt', `${n} Bon-Einträge gelöscht.`);
+            } catch (e: any) {
+              console.error('[debug] resetCashbackBons failed', e);
+              Alert.alert('Fehler', String(e?.message ?? e));
+            }
+          },
+        },
+      ],
+    );
   };
 
   // ── Header chrome (DetailHeader, like achievements + product details)
@@ -1408,6 +1452,13 @@ export default function ProfileScreen() {
                 color="#f59e0b"
                 label="Kategorie-Freischaltungen löschen"
                 onPress={onResetUnlocks}
+              />
+              <MenuRow
+                icon="receipt-text-remove"
+                color="#dc2626"
+                label="Bons zurücksetzen"
+                sub="Löscht alle lokalen Bon-Einträge (cashback_status)"
+                onPress={onResetCashbackBons}
                 last
               />
             </MenuCard>

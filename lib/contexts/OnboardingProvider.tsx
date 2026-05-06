@@ -146,7 +146,7 @@ export const OnboardingProvider: React.FC<OnboardingProviderProps> = ({ children
 async function saveOnboardingResults(data: OnboardingData) {
   try {
     // Dynamischer Import um Circular Dependencies zu vermeiden
-    const { addDoc, collection } = await import('firebase/firestore');
+    const { addDoc, collection } = await import('@react-native-firebase/firestore');
     const { db } = await import('@/lib/firebase');
     const { auth } = await import('@/lib/firebase');
     

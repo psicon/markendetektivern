@@ -43,9 +43,13 @@ class FavoritesService {
     productData?: any
   ): Promise<void> {
     try {
-      const userRef = doc(db, 'users', userId);
+      // L Migration: doc(parent, ...) wo parent ein DocumentReference ist
+      // ruft in @react-native-firebase/firestore intern parent.doc.call(...).
+      // DocumentReference hat aber kein .doc()-Method (nur .collection()) →
+      // "Cannot read property 'call' of undefined". Lösung: flat-path-Form
+      // mit Firestore-Instance als parent.
       const favoriteId = `${productType}_${productId}`;
-      const favoriteRef = doc(userRef, 'favorites', favoriteId);
+      const favoriteRef = doc(db, 'users', userId, 'favorites', favoriteId);
 
       // Bereinige productData von undefined Werten
       const cleanProductData = productData ? {
@@ -87,9 +91,13 @@ class FavoritesService {
     productType: 'markenprodukt' | 'noname'
   ): Promise<void> {
     try {
-      const userRef = doc(db, 'users', userId);
+      // L Migration: doc(parent, ...) wo parent ein DocumentReference ist
+      // ruft in @react-native-firebase/firestore intern parent.doc.call(...).
+      // DocumentReference hat aber kein .doc()-Method (nur .collection()) →
+      // "Cannot read property 'call' of undefined". Lösung: flat-path-Form
+      // mit Firestore-Instance als parent.
       const favoriteId = `${productType}_${productId}`;
-      const favoriteRef = doc(userRef, 'favorites', favoriteId);
+      const favoriteRef = doc(db, 'users', userId, 'favorites', favoriteId);
 
       await deleteDoc(favoriteRef);
     } catch (error: any) {
@@ -113,9 +121,13 @@ class FavoritesService {
     productType: 'markenprodukt' | 'noname'
   ): Promise<boolean> {
     try {
-      const userRef = doc(db, 'users', userId);
+      // L Migration: doc(parent, ...) wo parent ein DocumentReference ist
+      // ruft in @react-native-firebase/firestore intern parent.doc.call(...).
+      // DocumentReference hat aber kein .doc()-Method (nur .collection()) →
+      // "Cannot read property 'call' of undefined". Lösung: flat-path-Form
+      // mit Firestore-Instance als parent.
       const favoriteId = `${productType}_${productId}`;
-      const favoriteRef = doc(userRef, 'favorites', favoriteId);
+      const favoriteRef = doc(db, 'users', userId, 'favorites', favoriteId);
 
       const favoriteDoc = await getDoc(favoriteRef);
       return favoriteDoc.exists();

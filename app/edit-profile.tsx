@@ -14,7 +14,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useNavigation } from 'expo-router';
 import { updateProfile } from '@react-native-firebase/auth';
 import { doc, getDoc, serverTimestamp, updateDoc } from '@react-native-firebase/firestore';
-import { getDownloadURL, ref, uploadBytes } from '@react-native-firebase/storage';
+import { getDownloadURL, ref, uploadBytesResumable } from '@react-native-firebase/storage';
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -197,7 +197,10 @@ export default function EditProfileScreen() {
       const response = await fetch(uri);
       const blob = await response.blob();
       const storageRef = ref(storage, `profilePictures/${user.uid}`);
-      await uploadBytes(storageRef, blob);
+      // L Migration: RNFirebase hat kein uploadBytes(), nur
+      // uploadBytesResumable(). Beide returnen ein awaitables Task —
+      // identisches Verhalten für simple await-Use-Case.
+      await uploadBytesResumable(storageRef, blob);
       const downloadURL = await getDownloadURL(storageRef);
       setFormData((prev) => ({ ...prev, photoURL: downloadURL }));
       await updateProfile(user, { photoURL: downloadURL });

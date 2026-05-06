@@ -39,7 +39,7 @@ class RemoteConfigService {
       }
 
       // Native Firebase Remote Config (nur wenn nicht Expo Go)
-      const { getRemoteConfig, fetchAndActivate } = await import('firebase/remote-config');
+      const { getRemoteConfig, fetchAndActivate } = await import('@react-native-firebase/remote-config');
       
       this.remoteConfig = getRemoteConfig(app);
       
@@ -91,7 +91,7 @@ class RemoteConfigService {
     }
 
     try {
-      const { fetchAndActivate } = await import('firebase/remote-config');
+      const { fetchAndActivate } = await import('@react-native-firebase/remote-config');
       const activated = await fetchAndActivate(this.remoteConfig);
       console.log('🔄 Remote Config updated:', activated ? 'New values' : 'No changes');
     } catch (error) {
@@ -115,11 +115,11 @@ class RemoteConfigService {
     }
 
     try {
-      const { getBoolean } = await import('firebase/remote-config');
+      const { getBoolean } = await import('@react-native-firebase/remote-config');
       
       // Erst fetchAndActivate aufrufen um sicherzustellen, dass wir die neuesten Werte haben
       if (this.remoteConfig) {
-        const { fetchAndActivate } = await import('firebase/remote-config');
+        const { fetchAndActivate } = await import('@react-native-firebase/remote-config');
         try {
           await fetchAndActivate(this.remoteConfig);
           console.log('🔄 Remote Config: Fetched latest values');
@@ -150,7 +150,7 @@ class RemoteConfigService {
     }
 
     try {
-      const { getValue } = await import('firebase/remote-config');
+      const { getValue } = await import('@react-native-firebase/remote-config');
       const value = getValue(this.remoteConfig, key);
       return value.asString();
     } catch (error) {
@@ -172,7 +172,7 @@ class RemoteConfigService {
     }
 
     try {
-      const { getBoolean } = await import('firebase/remote-config');
+      const { getBoolean } = await import('@react-native-firebase/remote-config');
       return getBoolean(this.remoteConfig, key);
     } catch (error) {
       console.error(`❌ Error getting Remote Config boolean ${key}:`, error);

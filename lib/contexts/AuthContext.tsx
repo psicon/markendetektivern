@@ -344,7 +344,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Save additional profile data to Firestore
         if (additionalData) {
-          const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+          const { doc, setDoc, serverTimestamp } = await import('@react-native-firebase/firestore');
           const { db } = await import('../firebase');
           
           await setDoc(doc(db, 'users', userCredential.user.uid), {

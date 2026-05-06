@@ -323,7 +323,7 @@ class JourneyTrackingService {
     }
 
     try {
-      const { doc, updateDoc, serverTimestamp, collection } = await import('firebase/firestore');
+      const { doc, updateDoc, serverTimestamp, collection } = await import('@react-native-firebase/firestore');
       const userJourneysRef = collection(db, 'users', userId, 'journeys');
       const docRef = doc(userJourneysRef, this.currentJourney.firestoreDocId);
 
@@ -398,7 +398,7 @@ class JourneyTrackingService {
 
     try {
       // Suche nach aktiver Journey
-      const { getDocs, query, where, orderBy, limit, Timestamp } = await import('firebase/firestore');
+      const { getDocs, query, where, orderBy, limit, Timestamp } = await import('@react-native-firebase/firestore');
       const userJourneysRef = collection(db, 'users', userId, 'journeys');
       const q = query(
         userJourneysRef,
@@ -2081,7 +2081,7 @@ class JourneyTrackingService {
   ): Promise<void> {
     
     try {
-      const { query, where, getDocs, updateDoc, collection } = await import('firebase/firestore');
+      const { query, where, getDocs, updateDoc, collection } = await import('@react-native-firebase/firestore');
       
       // Finde die spezifische Journey
       const userJourneysRef = collection(db, 'users', userId, 'journeys');
@@ -2187,7 +2187,7 @@ class JourneyTrackingService {
     userId: string
   ): Promise<void> {
     try {
-      const { query, where, getDocs, updateDoc, collection } = await import('firebase/firestore');
+      const { query, where, getDocs, updateDoc, collection } = await import('@react-native-firebase/firestore');
       
       // Finde die spezifische Journey
       const userJourneysRef = collection(db, 'users', userId, 'journeys');
@@ -2324,7 +2324,7 @@ class JourneyTrackingService {
     viewedProductIndex?: number // NEU: Index für eindeutige Zuordnung
   ): Promise<void> {
     try {
-      const { query, where, getDocs, updateDoc, collection } = await import('firebase/firestore');
+      const { query, where, getDocs, updateDoc, collection } = await import('@react-native-firebase/firestore');
       
       // Finde die spezifische Journey
       const userJourneysRef = collection(db, 'users', userId, 'journeys');

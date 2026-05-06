@@ -634,7 +634,7 @@ class AchievementService {
       if (!userDoc.exists()) {
         console.log('📝 User-Dokument existiert noch nicht für:', userId, '- wird jetzt erstellt');
         // Create default user document
-        const { setDoc } = await import('firebase/firestore');
+        const { setDoc } = await import('@react-native-firebase/firestore');
         const defaultStats = this.getDefaultUserStats();
         await setDoc(userRef, {
           stats: defaultStats,
@@ -1360,7 +1360,7 @@ class AchievementService {
         });
       } else {
         // Create new user document mit Default Stats
-        const { setDoc } = await import('firebase/firestore');
+        const { setDoc } = await import('@react-native-firebase/firestore');
         await setDoc(userRef, {
           stats: updatedStats,
           achievements: {},

@@ -504,7 +504,7 @@ export class FirestoreService {
       if (lastDoc) {
         q = query(q, startAfter(lastDoc));
       }
-      
+
       q = query(q, limit(pageSize));
 
       const querySnapshot = await getDocs(q);
@@ -898,7 +898,7 @@ export class FirestoreService {
       if (lastDoc) {
         q = query(q, startAfter(lastDoc));
       }
-      
+
       q = query(q, limit(pageSize));
 
       const querySnapshot = await getDocs(q);
@@ -1053,10 +1053,18 @@ export class FirestoreService {
       );
       
       if (lastDoc) {
+        // L: explicit field-value cursor (sortiert nach 'name')
+        let cursorValue: any;
+        try {
+          const data = typeof lastDoc?.data === 'function' ? lastDoc.data() : null;
+          cursorValue = data?.name;
+        } catch {
+          cursorValue = undefined;
+        }
         q = query(
           markenRef,
           orderBy('name', 'asc'),
-          startAfter(lastDoc),
+          startAfter(cursorValue !== undefined ? cursorValue : lastDoc),
           limit(pageSize)
         );
       }
@@ -3726,8 +3734,9 @@ export class FirestoreService {
    */
   static async removeFromShoppingCart(userId: string, itemId: string): Promise<void> {
     try {
-      const userRef = doc(db, 'users', userId);
-      const cartItemRef = doc(userRef, 'einkaufswagen', itemId);
+      // L Migration: flat-path statt doc(userRef, ...) — RNFirebase
+      // doc() unterstützt keine DocumentReference als parent.
+      const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
       
       // Lade Produktdaten vor dem Löschen für Journey-Tracking
       const cartItemDoc = await getDoc(cartItemRef);
@@ -3829,8 +3838,8 @@ export class FirestoreService {
    */
   static async markAsPurchased(userId: string, itemId: string): Promise<void> {
     try {
-      const userRef = doc(db, 'users', userId);
-      const cartItemRef = doc(userRef, 'einkaufswagen', itemId);
+      // L: flat-path
+      const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
       
       // 1. Lade die aktuellen Einkaufszettel-Daten
       const cartItemDoc = await getDoc(cartItemRef);
@@ -3927,8 +3936,8 @@ export class FirestoreService {
    */
   static async markAsPurchasedWithoutTracking(userId: string, itemId: string): Promise<void> {
     try {
-      const userRef = doc(db, 'users', userId);
-      const cartItemRef = doc(userRef, 'einkaufswagen', itemId);
+      // L: flat-path
+      const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
       
       // 1. Lade Einkaufszettel-Item
       const cartItemDoc = await getDoc(cartItemRef);
@@ -4099,7 +4108,8 @@ export class FirestoreService {
       };
       
       // Verwende setDoc mit eindeutiger ID statt addDoc um Duplikate zu vermeiden
-      await setDoc(doc(userRef, 'purchases', uniquePurchaseId), cleanedData);
+      // L: flat-path
+      await setDoc(doc(db, 'users', userId, 'purchases', uniquePurchaseId), cleanedData);
       console.log('✅ Created purchase history entry with ID:', uniquePurchaseId, 'for:', purchaseData.name);
       
     } catch (error) {
@@ -4126,7 +4136,7 @@ export class FirestoreService {
         const [markenDoc, noNameDoc, cartDoc] = await Promise.all([
           getDoc(doc(db, 'markenProdukte', conversion.markenProduktRef)),
           getDoc(doc(db, 'produkte', conversion.produktRef)),
-          getDoc(doc(userRef, 'einkaufswagen', conversion.einkaufswagenRef))
+          getDoc(doc(db, 'users', userId, 'einkaufswagen', conversion.einkaufswagenRef))
         ]);
         
         const noNameData = noNameDoc.exists() ? noNameDoc.data() : null;
@@ -4165,7 +4175,7 @@ export class FirestoreService {
       
       conversions.forEach((conversion, index) => {
         // Lösche alten Eintrag
-        batch.delete(doc(userRef, 'einkaufswagen', conversion.einkaufswagenRef));
+        batch.delete(doc(db, 'users', userId, 'einkaufswagen', conversion.einkaufswagenRef));
         
         // Füge neuen NoName Eintrag hinzu
         const newDoc = doc(collection(userRef, 'einkaufswagen'));
