@@ -163,7 +163,7 @@ const getSavingsData = (
   };
 };
 
-/** Pack-Details im "100g · 8,90€/kg" Stil. Returns null wenn keine Daten. */
+/** Pack-Details im "185g | 9,68€/kg" Stil. Returns null wenn keine Daten. */
 function formatPack(size?: number, unit?: string, price?: number): string | null {
   if (!size || !unit) return null;
   const u = String(unit).toLowerCase().replace(/\.$/, '');
@@ -177,7 +177,7 @@ function formatPack(size?: number, unit?: string, price?: number): string | null
     else if (u === 'l') unitPrice = `${(price / size).toFixed(2).replace('.', ',')}€/L`;
     else if (isStk) unitPrice = `${(price / size).toFixed(2).replace('.', ',')}€/${unit}`;
   }
-  return unitPrice ? `${sizeLabel} · ${unitPrice}` : sizeLabel;
+  return unitPrice ? `${sizeLabel} | ${unitPrice}` : sizeLabel;
 }
 
 const formatEur = (n: number) =>
@@ -1058,16 +1058,6 @@ function BrandCard({
             {item.name || product?.name || 'Unbekanntes Produkt'}
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 13,
-                color: theme.text,
-              }}
-            >
-              {formatEur(product?.preis || 0)}
-            </Text>
             {(() => {
               const pack = formatPack(
                 (product as any)?.packSize,
@@ -1088,6 +1078,16 @@ function BrandCard({
                 </Text>
               ) : null;
             })()}
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 13,
+                color: theme.text,
+              }}
+            >
+              {formatEur(product?.preis || 0)}
+            </Text>
           </View>
           {potential > 0 && product?.preis > 0 ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
@@ -1444,16 +1444,6 @@ function NoNameCard({
           </Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 13,
-              color: theme.text,
-            }}
-          >
-            {formatEur(p?.preis || 0)}
-          </Text>
           {(() => {
             const pack = formatPack(
               (p as any)?.packSize,
@@ -1474,6 +1464,16 @@ function NoNameCard({
               </Text>
             ) : null;
           })()}
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 13,
+              color: theme.text,
+            }}
+          >
+            {formatEur(p?.preis || 0)}
+          </Text>
         </View>
       </View>
       <RowActions
