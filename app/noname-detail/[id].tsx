@@ -1745,13 +1745,13 @@ function ActionButton({ icon, iconColor, bg, subLabel, onPress, badge }: ActionB
             position: 'absolute',
             top: -6,
             right: -6,
-            minWidth: 22,
-            height: 22,
-            borderRadius: 11,
+            minWidth: 20,
+            height: 20,
+            borderRadius: 10,
             paddingHorizontal: 6,
-            backgroundColor: brand.primary,
+            backgroundColor: '#fff',
             borderWidth: 2,
-            borderColor: theme.surface,
+            borderColor: brand.primary,
             alignItems: 'center',
             justifyContent: 'center',
           }}
@@ -1761,11 +1761,13 @@ function ActionButton({ icon, iconColor, bg, subLabel, onPress, badge }: ActionB
               fontFamily,
               fontWeight: fontWeight.extraBold,
               fontSize: 11,
-              color: '#fff',
-              letterSpacing: -0.2,
+              lineHeight: 13,
+              color: brand.primary,
+              textAlign: 'center',
+              includeFontPadding: false as any,
             }}
           >
-            {badge}
+            {badge > 99 ? '99+' : badge}
           </Text>
         </View>
       ) : null}
