@@ -3576,14 +3576,22 @@ export class FirestoreService {
     }
   ): Promise<string> {
     const __t0 = Date.now();
-    console.error('[cart] add start', { productId: productId.slice(0, 8), source });
+    const __callId = Math.random().toString(36).slice(2, 6);
+    console.error('[cart] add start', { id: __callId, productId: productId.slice(0, 8), source });
+    let __step = 'init';
+    const __mark = (s: string) => {
+      console.error('[cart] step', { id: __callId, step: __step, ms: Date.now() - __t0 });
+      __step = s;
+    };
     try {
       const userRef = doc(db, 'users', userId);
-      
+
       // Hole aktuelle Journey-ID
+      __mark('journey-import-1');
       const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
+      __mark('build-data');
       const currentJourneyId = journeyTrackingService.getCurrentJourneyId();
-      
+
       const data: any = {
         gekauft: false,
         timestamp: serverTimestamp(),
@@ -3606,40 +3614,47 @@ export class FirestoreService {
         data.handelsmarkenProdukt = doc(db, 'produkte', productId);
       }
 
+      __mark('addDoc');
       const docRef = await addDoc(collection(userRef, 'einkaufswagen'), data);
-      
+
       // 📊 Track Add-to-Cart Event mit Source UND Journey-Context
       if (source) {
+        __mark('analytics-import');
         const { analyticsService } = await import('./analyticsService');
+        __mark('journey-import-2');
         const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
-        
+
         // Track mit normaler Analytics
+        __mark('analytics-trackAddToCart');
         await analyticsService.trackAddToCart(
-          productId, 
-          productName, 
-          isMarke, 
-          source, 
-          userId, 
+          productId,
+          productName,
+          isMarke,
+          source,
+          userId,
           {
             screen_name: sourceMetadata?.screenName || 'unknown',
             ...sourceMetadata
           }
         );
-        
+
         // Track mit Journey-Context und hole Index zurück
+        __mark('journey-trackAddToCart');
         const viewedProductIndex = journeyTrackingService.trackAddToCart(productId, productName, isMarke, userId, priceInfo, comparisonContext);
-        
+
         // WICHTIG: Speichere Index im Einkaufszettel für spätere Zuordnung
         if (viewedProductIndex !== null) {
+          __mark('updateDoc-index');
           await updateDoc(docRef, {
             viewedProductIndex: viewedProductIndex
           });
           console.log(`📍 ViewedProduct Index ${viewedProductIndex} gespeichert für ${productName}`);
         }
       }
-      
+
+      __mark('end');
       console.log('✅ Added to shopping cart:', docRef.id);
-      console.error('[cart] add done', { ms: Date.now() - __t0 });
+      console.error('[cart] add done', { id: __callId, ms: Date.now() - __t0 });
       return docRef.id;
     } catch (error) {
       console.error('Error adding to shopping cart:', error);
