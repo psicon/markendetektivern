@@ -2345,6 +2345,10 @@ export default function ShoppingListScreen() {
     }
     try {
       await FirestoreService.decrementCartQuantity(user.uid, productId, isMarke);
+      // Wenn voll-entfernt: gleichen Toast wie Swipe-to-delete zeigen
+      if (newAnzahl <= 0) {
+        showInfoToast(TOAST_MESSAGES.SHOPPING.removedFromCart, 'ERROR');
+      }
     } catch (e) {
       // Revert
       if (newAnzahl <= 0) {

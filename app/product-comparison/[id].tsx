@@ -1,6 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { safeReplace } from '@/lib/utils/safeNav';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -475,6 +475,63 @@ export default function ProductComparisonScreen() {
   const openPillProductId = openPill?.productId ?? null;
   // Map<productId, ref> für Cart-Button-Refs (zum Positionsmessen)
   const cartButtonRefs = useRef<Map<string, View | null>>(new Map());
+  // Auto-Dismiss-Timer für die Pill (4 s ohne Interaktion)
+  const pillAutoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const armPillAutoClose = useCallback(() => {
+    if (pillAutoCloseTimer.current) clearTimeout(pillAutoCloseTimer.current);
+    pillAutoCloseTimer.current = setTimeout(() => {
+      setOpenPill(null);
+    }, 4000);
+  }, []);
+  useEffect(() => {
+    if (openPill) armPillAutoClose();
+    return () => {
+      if (pillAutoCloseTimer.current) clearTimeout(pillAutoCloseTimer.current);
+    };
+  }, [openPill, armPillAutoClose]);
+
+  // ─── Cart-Status bei Focus refreshen ───
+  // Wenn User aus dem Einkaufszettel zurück auf die Detail-Seite
+  // navigiert, wurden dort vielleicht Items entfernt/dekrementiert.
+  // useFocusEffect feuert bei JEDER Re-Fokussierung, useEffect nur
+  // beim Mount.
+  const refreshCartState = useCallback(async () => {
+    if (!user?.uid) return;
+    try {
+      const items = await FirestoreService.getShoppingCartItems(user.uid);
+      const anzahlByPid = new Map<string, number>();
+      for (const it of items as any[]) {
+        const pid = it?.markenProdukt?.id || it?.handelsmarkenProdukt?.id;
+        if (pid) {
+          const a = (it.anzahl ?? 1) as number;
+          anzahlByPid.set(pid, (anzahlByPid.get(pid) ?? 0) + a);
+        }
+      }
+      const nextBool: Record<string, boolean> = {};
+      const nextAnzahl: Record<string, number> = {};
+      const set = (pid?: string) => {
+        if (!pid) return;
+        const a = anzahlByPid.get(pid) ?? 0;
+        nextBool[pid] = a > 0;
+        nextAnzahl[pid] = a;
+      };
+      // Main product + alle alternativen sichtbaren Produkte
+      set(mainProduct?.id);
+      for (const nn of nonames) set(nn.id);
+      // VOLLSTÄNDIG ersetzen (nicht mergen) damit Items die NICHT
+      // mehr im Cart sind ihre Anzeige verlieren.
+      setCartMap(nextBool);
+      setCartAnzahlMap(nextAnzahl);
+    } catch {
+      /* non-fatal */
+    }
+  }, [user?.uid, mainProduct?.id, nonames]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshCartState();
+    }, [refreshCartState]),
+  );
   const [ratingsSheet, setRatingsSheet] = useState<{
     productId: string;
     productName: string;
@@ -2347,23 +2404,13 @@ export default function ProductComparisonScreen() {
           it sits visually on top of the FAB at landing time. */}
       <FlyToCart ref={flyRef} />
 
-      {/* QuantityPill (NEU 2026-05-07): floating bottom-center overlay
-          nach Cart-Add. Zeigt aktuelle Anzahl + +/− zum Anpassen.
-          Schließt bei Tap außerhalb (Backdrop-Pressable) oder bei
-          Scroll der Detailseite (handled via scrollY-watcher unten). */}
-      {openPillProductId && (
-        <Pressable
-          onPress={() => setOpenPill(null)}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'transparent',
-          }}
-        />
-      )}
+      {/* QuantityPill (NEU 2026-05-07): floating overlay anchored am
+          Cart-Button. Blockt KEINE anderen Touches (kein Backdrop).
+          Schließt automatisch:
+          - bei Scroll (scroll-handler unten)
+          - nach 4s ohne Pill-Interaktion (Auto-Timer)
+          - beim Tap auf einen anderen Cart-Button (neuer setOpenPill)
+          - bei Navigation away (component unmount). */}
       {openPill && (() => {
         // Pill am Cart-Button positionieren — Top des Buttons minus
         // Pill-Höhe (44 + 8 Abstand). Pill ist 116-150 px breit, also
@@ -2392,6 +2439,7 @@ export default function ProductComparisonScreen() {
               visible={!!openPillProductId}
               anzahl={cartAnzahlMap[openPillProductId!] ?? 1}
               onIncrement={() => {
+                armPillAutoClose(); // Timer re-armen bei Interaktion
                 const pid = openPillProductId;
                 if (!pid) return;
                 const isMain = mp?.id === pid;
@@ -2400,6 +2448,7 @@ export default function ProductComparisonScreen() {
                 if (productData) onIncrementCart(pid, productType, productData);
               }}
               onDecrement={() => {
+                armPillAutoClose();
                 const pid = openPillProductId;
                 if (!pid) return;
                 const isMain = mp?.id === pid;

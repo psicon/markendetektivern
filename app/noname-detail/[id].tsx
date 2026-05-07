@@ -1,7 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Image,
   InteractionManager,
@@ -200,6 +200,42 @@ export default function NoNameDetailScreen() {
     if (!open) setPillAnchor(null);
   };
   const cartButtonAnchorRef = useRef<View | null>(null);
+  // Auto-Close-Timer für die Pill (4 s ohne Interaktion)
+  const pillAutoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const armPillAutoClose = useCallback(() => {
+    if (pillAutoCloseTimer.current) clearTimeout(pillAutoCloseTimer.current);
+    pillAutoCloseTimer.current = setTimeout(() => {
+      setPillAnchor(null);
+    }, 4000);
+  }, []);
+  useEffect(() => {
+    if (pillOpen) armPillAutoClose();
+    return () => {
+      if (pillAutoCloseTimer.current) clearTimeout(pillAutoCloseTimer.current);
+    };
+  }, [pillOpen, armPillAutoClose]);
+
+  // ─── Cart-Status bei Focus refreshen (Back-Navigation aus Einkaufszettel) ───
+  const refreshCartState = useCallback(async () => {
+    if (!user?.uid || !id) return;
+    try {
+      const items = await FirestoreService.getShoppingCartItems(user.uid);
+      let total = 0;
+      for (const it of items as any[]) {
+        const pid = it?.handelsmarkenProdukt?.id;
+        if (pid === String(id)) total += (it.anzahl ?? 1) as number;
+      }
+      setCartAnzahl(total);
+      setInCart(total > 0);
+    } catch {
+      /* non-fatal */
+    }
+  }, [user?.uid, id]);
+  useFocusEffect(
+    useCallback(() => {
+      refreshCartState();
+    }, [refreshCartState]),
+  );
   const [ratingsOpen, setRatingsOpen] = useState(false);
   // Connected Brands des Herstellers — separat geladen, weil das
   // Aggregat im Cloud-Function-Job (`connected-brands-aggregator`)
@@ -1564,19 +1600,8 @@ export default function NoNameDetailScreen() {
 
       {/* QuantityPill (NEU 2026-05-07): floating bottom-center overlay
           nach Cart-Add. Schließt bei Tap außerhalb. */}
-      {pillOpen && (
-        <Pressable
-          onPress={() => setPillOpen(false)}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'transparent',
-          }}
-        />
-      )}
+      {/* Pill blockt nichts. Schließt via Auto-Timer + Scroll +
+          Re-Click auf Cart-Button. */}
       {pillOpen && pillAnchor && (() => {
         const PILL_HEIGHT = 44;
         const GAP = 10;
@@ -1596,8 +1621,14 @@ export default function NoNameDetailScreen() {
             <QuantityPill
               visible={pillOpen}
               anzahl={Math.max(1, cartAnzahl)}
-              onIncrement={onIncrementFromPill}
-              onDecrement={onDecrementFromPill}
+              onIncrement={() => {
+                armPillAutoClose();
+                onIncrementFromPill();
+              }}
+              onDecrement={() => {
+                armPillAutoClose();
+                onDecrementFromPill();
+              }}
             />
           </View>
         );
