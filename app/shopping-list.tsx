@@ -1282,16 +1282,9 @@ function BrandCard({
                   >
                     {formatEur(alt.preis || 0)}
                   </Text>
-                  <Text
-                    style={{
-                      fontFamily,
-                      fontWeight: fontWeight.bold,
-                      fontSize: 10,
-                      color: brand.primary,
-                    }}
-                  >
-                    −{formatEur(sd.savingsEur)}
-                  </Text>
+                  {/* −X€ entfernt (User-Wunsch). Spacer behält die
+                      Card-Höhe damit Layout nicht springt. */}
+                  <View style={{ height: 12 }} />
                   <Text
                     style={{
                       fontFamily,
