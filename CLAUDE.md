@@ -71,10 +71,40 @@ EAS synchronisiert beide Stellen pro Plattform automatisch.
 Builds erscheinen unter
 `https://expo.dev/accounts/patze1411/projects/markendetektive/builds`.
 Beim `--no-wait` Flag returnt der CLI sofort, der Build läuft
-auf EAS-Servern weiter. Submit zu Play Store / TestFlight
-passiert via `production`-Submit-Profile (siehe `eas.json`):
+auf EAS-Servern weiter.
+
+### WICHTIG: `eas build` ≠ Auto-Submit zu TestFlight / Play Store
+
+Der `eas build`-Befehl baut **nur** und lädt das IPA/AAB als
+Artefakt zu EAS hoch. Er pushed **NICHT** automatisch zu
+TestFlight oder zum Play-Internal-Track. Wenn der User sagt
+"mach ne neue TestFlight-Version", müssen ZWEI Schritte laufen:
+
+```bash
+# 1. Bauen
+eas build --platform ios --profile production --non-interactive --no-wait
+
+# 2. NACH Build-Finish: Submitten
+eas submit --platform ios --profile production --latest --non-interactive
+```
+
+Analog für Android:
+```bash
+eas submit --platform android --profile production --latest --non-interactive
+```
+
+Submit-Profile-Konfig steckt in `eas.json` unter `submit.production`:
 - iOS: appleId `patrick@markendetektive.de`, ascAppId `6471081082`
 - Android: serviceAccount `markendetektive-895f7-ee3923910ddd.json`
+
+**Alternativ** den Build mit `--auto-submit` triggern, dann
+läuft Submit automatisch nach Build-Finish:
+```bash
+eas build --platform ios --profile production --auto-submit --non-interactive --no-wait
+```
+Default für dieses Projekt: `--auto-submit` benutzen, wenn der
+User das Wort **TestFlight** oder **Play Store** im Prompt hat —
+sonst nur builden.
 
 ## Redesign status — what's done, what's left
 
