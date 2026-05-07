@@ -56,18 +56,34 @@ export class AnonymousLocationService {
     return this.inflight;
   }
   
+  // ipapi.co Paid-Tier API-Key (2026-05). Höhere Rate-Limits +
+  // schnellere Server. Wenn dieser leer ist, fällt der Service auf
+  // den Free-Tier zurück (1000 req/Tag, geteilte Server, langsamer).
+  // Optional via env override: process.env.EXPO_PUBLIC_IPAPI_KEY
+  private static readonly IPAPI_KEY =
+    (typeof process !== 'undefined' &&
+      (process as any).env?.EXPO_PUBLIC_IPAPI_KEY) ||
+    'nAa8WN18A4pXWqrfp3Z2nfGzDP1Y3j0etDFrPQeqmp491AvUtO';
+
   /**
    * IP-basierte Location (ipapi.co)
    */
   private static async getLocationFromIP(): Promise<LocationData | null> {
     try {
       console.log('🌐 Versuche IP-Location via ipapi.co...');
-      
+
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s timeout
-      
-      const response = await fetch('https://ipapi.co/json/', {
-        signal: controller.signal
+      // 5 s Timeout (vorher 2 s — zu kurz auf Mobile-Netzen mit schwachem
+      // Signal). Mit API-Key + Inflight-Dedup + 1 h Cache wird das nur
+      // 1× pro Stunde wirklich wartend ausgeführt.
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      const url = this.IPAPI_KEY
+        ? `https://ipapi.co/json/?key=${this.IPAPI_KEY}`
+        : 'https://ipapi.co/json/';
+
+      const response = await fetch(url, {
+        signal: controller.signal,
       });
       clearTimeout(timeoutId);
       
