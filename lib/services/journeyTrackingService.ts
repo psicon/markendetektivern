@@ -2160,9 +2160,37 @@ class JourneyTrackingService {
    */
   async trackPurchaseInSpecificJourney(
     journeyId: string,
-    products: { 
-      productId: string; 
-      productName: string; 
+    products: {
+      productId: string;
+      productName: string;
+      productType: 'brand' | 'noname';
+      finalPrice?: number;
+      finalSavings?: number;
+      viewedProductIndex?: number;
+    }[],
+    totalSavings: number,
+    userId: string
+  ): Promise<void> {
+    // Fix (2026-05-07): in per-Journey-Buffer akkumulieren statt direkt
+    // schreiben. Verhindert WriteStream-Drops bei Mark-as-Purchased-Burst.
+    let entry = this.historicalJourneyDebounce.get(journeyId);
+    if (!entry) {
+      entry = { timer: null, removeActions: [], purchaseActions: [] };
+      this.historicalJourneyDebounce.set(journeyId, entry);
+    }
+    for (const p of products) {
+      entry.purchaseActions.push(p);
+    }
+    this.scheduleHistoricalJourneyFlush(journeyId, userId);
+    return;
+  }
+
+  // ─── Original-Implementierung als Backup (nicht mehr direkt aufgerufen) ───
+  async _legacyTrackPurchaseInSpecificJourney(
+    journeyId: string,
+    products: {
+      productId: string;
+      productName: string;
       productType: 'brand' | 'noname';
       finalPrice?: number;
       finalSavings?: number;
@@ -2170,7 +2198,7 @@ class JourneyTrackingService {
     totalSavings: number,
     userId: string
   ): Promise<void> {
-    
+
     try {
       const { query, where, getDocs, updateDoc, collection } = await import('@react-native-firebase/firestore');
       
@@ -2406,7 +2434,180 @@ class JourneyTrackingService {
   /**
    * NEU: Trackt Remove in einer SPEZIFISCHEN Journey (aus Einkaufszettel)
    */
+  /**
+   * Per-Journey-Debounce für historische Journey-Writes.
+   *
+   * Fix (2026-05-07): Cart-Burst (Remove/Mark-as-Purchased) verursachte
+   * mehrere getDocs + updateDoc auf das SELBE alte Journey-Doc innerhalb
+   * von Sekunden. Firestore-Server kickte den WriteStream (1 Write/Sek/
+   * Doc soft-limit) → 30-75 s exponential-backoff-Retry → User-perceived
+   * "Freeze" obwohl JS-Thread fine ist.
+   *
+   * Lösung: pending Actions pro Journey akkumulieren, nach 1.2 s Ruhe
+   * EIN gemeinsamer Read+Write. Bei tap-burst → 1 Write statt N.
+   * Datenstand identisch (alle Actions landen).
+   */
+  private historicalJourneyDebounce: Map<
+    string,
+    {
+      timer: NodeJS.Timeout | null;
+      removeActions: Array<{
+        productId: string;
+        productName: string;
+        productType: 'brand' | 'noname';
+        viewedProductIndex?: number;
+      }>;
+      purchaseActions: Array<{
+        productId: string;
+        productName: string;
+        productType: 'brand' | 'noname';
+        finalPrice?: number;
+        finalSavings?: number;
+        viewedProductIndex?: number;
+      }>;
+    }
+  > = new Map();
+  private readonly HIST_JOURNEY_DEBOUNCE_MS = 1200;
+
+  private scheduleHistoricalJourneyFlush(journeyId: string, userId: string): void {
+    const entry = this.historicalJourneyDebounce.get(journeyId);
+    if (!entry) return;
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => {
+      this.historicalJourneyDebounce.delete(journeyId);
+      this._flushHistoricalJourney(journeyId, userId, entry).catch((err) => {
+        console.warn('historicalJourney flush failed', err);
+      });
+    }, this.HIST_JOURNEY_DEBOUNCE_MS);
+  }
+
+  private async _flushHistoricalJourney(
+    journeyId: string,
+    userId: string,
+    entry: {
+      removeActions: Array<any>;
+      purchaseActions: Array<any>;
+    },
+  ): Promise<void> {
+    const removeCount = entry.removeActions.length;
+    const purchaseCount = entry.purchaseActions.length;
+    if (removeCount === 0 && purchaseCount === 0) return;
+    console.error('[journey] hist flush', { journeyId: journeyId.slice(0, 8), removes: removeCount, purchases: purchaseCount });
+
+    try {
+      const { query, where, getDocs, updateDoc, collection } = await import('@react-native-firebase/firestore');
+      const userJourneysRef = collection(db, 'users', userId, 'journeys');
+      const q = query(userJourneysRef, where('journeyId', '==', journeyId));
+      const snapshot = await getDocs(q);
+      if (snapshot.empty) {
+        console.warn(`⚠️ Journey ${journeyId} nicht gefunden beim batch-flush`);
+        return;
+      }
+
+      const journeyDoc = snapshot.docs[0];
+      const journeyData = journeyDoc.data() as JourneyContext;
+      const updatedViewedProducts = [...(journeyData.viewedProducts || [])];
+
+      // Apply alle pending Removes
+      for (const removeAction of entry.removeActions) {
+        let viewedProduct: any = null;
+        if (removeAction.viewedProductIndex !== undefined && removeAction.viewedProductIndex !== null) {
+          viewedProduct = updatedViewedProducts[removeAction.viewedProductIndex];
+        } else {
+          viewedProduct = updatedViewedProducts.find((p: any) => p.productId === removeAction.productId);
+        }
+        if (!viewedProduct) {
+          viewedProduct = {
+            productId: removeAction.productId,
+            productName: removeAction.productName,
+            productType: removeAction.productType,
+            timestamp: Date.now(),
+            discoveryContext: { method: 'repurchase', fromScreen: 'shopping-list' },
+            actions: [],
+          };
+          updatedViewedProducts.push(viewedProduct);
+        }
+        if (!viewedProduct.actions) viewedProduct.actions = [];
+        const safeAction: any = {
+          timestamp: Date.now(),
+          type: 'removedFromCart',
+          productId: removeAction.productId,
+          productName: removeAction.productName,
+          productType: removeAction.productType,
+          productRef: doc(db, removeAction.productType === 'brand' ? 'markenProdukte' : 'produkte', removeAction.productId),
+          motivation: { primary: 'exploration', confidence: 0.5 },
+        };
+        viewedProduct.actions.push(safeAction);
+      }
+
+      // Apply alle pending Purchases
+      for (const purchaseAction of entry.purchaseActions) {
+        let viewedProduct: any = null;
+        if (purchaseAction.viewedProductIndex !== undefined && purchaseAction.viewedProductIndex !== null) {
+          viewedProduct = updatedViewedProducts[purchaseAction.viewedProductIndex];
+        } else {
+          viewedProduct = updatedViewedProducts.find((p: any) => p.productId === purchaseAction.productId);
+        }
+        if (!viewedProduct) {
+          viewedProduct = {
+            productId: purchaseAction.productId,
+            productName: purchaseAction.productName,
+            productType: purchaseAction.productType,
+            timestamp: Date.now(),
+            discoveryContext: { method: 'repurchase', fromScreen: 'shopping-list' },
+            actions: [],
+          };
+          updatedViewedProducts.push(viewedProduct);
+        }
+        if (!viewedProduct.actions) viewedProduct.actions = [];
+        const safeAction: any = {
+          timestamp: Date.now(),
+          type: 'purchased',
+          productId: purchaseAction.productId,
+          productName: purchaseAction.productName,
+          productType: purchaseAction.productType,
+          productRef: doc(db, purchaseAction.productType === 'brand' ? 'markenProdukte' : 'produkte', purchaseAction.productId),
+          motivation: { primary: 'price', confidence: 0.8 },
+        };
+        if (purchaseAction.finalPrice !== undefined) safeAction.price = purchaseAction.finalPrice;
+        if (purchaseAction.finalSavings !== undefined) safeAction.savings = purchaseAction.finalSavings;
+        viewedProduct.actions.push(safeAction);
+      }
+
+      await updateDoc(journeyDoc.ref, {
+        viewedProducts: updatedViewedProducts,
+        lastUpdated: serverTimestamp(),
+      });
+
+      console.error('[journey] hist flush done', { journeyId: journeyId.slice(0, 8), removes: removeCount, purchases: purchaseCount });
+    } catch (error) {
+      console.error('❌ Error in historical journey batch flush:', error);
+    }
+  }
+
   async trackRemoveInSpecificJourney(
+    journeyId: string,
+    productId: string,
+    productName: string,
+    productType: 'brand' | 'noname',
+    userId: string,
+    viewedProductIndex?: number // NEU: Index für eindeutige Zuordnung
+  ): Promise<void> {
+    // Fix (2026-05-07): Statt direkt zu schreiben, in den per-Journey-
+    // Buffer akkumulieren. Nach 1.2 s Ruhe wird EIN gemeinsamer
+    // updateDoc ausgeführt. Verhindert WriteStream-Drops bei Cart-Burst.
+    let entry = this.historicalJourneyDebounce.get(journeyId);
+    if (!entry) {
+      entry = { timer: null, removeActions: [], purchaseActions: [] };
+      this.historicalJourneyDebounce.set(journeyId, entry);
+    }
+    entry.removeActions.push({ productId, productName, productType, viewedProductIndex });
+    this.scheduleHistoricalJourneyFlush(journeyId, userId);
+    return;
+  }
+
+  // ─── Original-Implementierung als Backup belassen (wird nicht mehr direkt aufgerufen, nur via Buffer) ───
+  async _legacyTrackRemoveInSpecificJourney(
     journeyId: string,
     productId: string,
     productName: string,
