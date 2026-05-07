@@ -3814,14 +3814,24 @@ export class FirestoreService {
           // NEU: Verwende die gespeicherte journeyId UND Index!
           if (cartData.journeyId) {
             console.log('🎯 Tracking Remove in Specific Journey:', cartData.journeyId, 'Index:', cartData.viewedProductIndex);
-            await journeyTrackingService.trackRemoveInSpecificJourney(
+            // Fix (2026-05-07): Fire-and-forget. trackRemoveInSpecificJourney
+            // macht intern getDocs + updateDoc mit der KOMPLETTEN
+            // viewedProducts-Liste der alten Journey — bei 3 parallelen
+            // Cart-Removes auf dasselbe Produkt serialisierten sich diese
+            // Writes serverseitig auf demselben Journey-Doc → 25 s Freeze.
+            // Der Tracking-Datenstand bleibt unverändert (gleiche
+            // Funktion, gleiche Writes), nur die Cart-Delete-Operation
+            // wartet jetzt nicht mehr darauf.
+            void journeyTrackingService.trackRemoveInSpecificJourney(
               cartData.journeyId,
               productId,
               productName,
               productType,
               userId,
               cartData.viewedProductIndex // NEU: Index für eindeutige Zuordnung
-            );
+            ).catch((err) => {
+              console.warn('trackRemoveInSpecificJourney failed (background):', err);
+            });
           } else {
             // Fallback: Normale trackRemoveFromCart wenn keine journeyId
             console.warn('⚠️ Keine journeyId - verwende normale trackRemoveFromCart');
