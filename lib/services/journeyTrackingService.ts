@@ -1531,8 +1531,17 @@ class JourneyTrackingService {
   }
 
   private async _persistJourneyToFirestoreImmediate(userId: string): Promise<void> {
+    // Diag (2026-05-07): Misst die synchrone Arbeit vor dem ersten
+    // await. Wenn das viele MB allokiert + viele ms läuft, ist DAS
+    // der freeze-Auslöser bei tap-burst.
+    const __t0 = Date.now();
     // WICHTIG: Sichere Referenz vor async Operationen
     const journey = this.currentJourney;
+    const __vpCount = journey?.viewedProducts?.length ?? 0;
+    const __actionsCount = (journey?.viewedProducts ?? []).reduce(
+      (sum, p) => sum + (p.actions?.length ?? 0),
+      0,
+    );
     
     console.log('📝 Attempting to persist journey to Firestore...', {
       userId: userId || 'NO USER ID!',
@@ -1749,7 +1758,18 @@ class JourneyTrackingService {
       const userJourneysRef = collection(db, 'users', userId, 'journeys');
 
       // Rekursiv alle undefined entfernen
+      const __cleanT0 = Date.now();
       const cleanedJourneyData = this.removeUndefinedValues(journeyData);
+      const __cleanMs = Date.now() - __cleanT0;
+      const __syncTotalMs = Date.now() - __t0;
+      // Diag: wenn der synchrone Block mehr als 50 ms läuft, ist es
+      // der Hauptverdächtige für tap-burst freezes.
+      console.error('[journey] persist sync', {
+        viewedProducts: __vpCount,
+        actions: __actionsCount,
+        cleanMs: __cleanMs,
+        syncTotalMs: __syncTotalMs,
+      });
 
       if (!journey.firestoreDocId) {
         // Neue Journey erstellen

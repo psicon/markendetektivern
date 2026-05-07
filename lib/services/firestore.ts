@@ -3575,6 +3575,8 @@ export class FirestoreService {
       mainProductType: 'brand' | 'noname';
     }
   ): Promise<string> {
+    const __t0 = Date.now();
+    console.error('[cart] add start', { productId: productId.slice(0, 8), source });
     try {
       const userRef = doc(db, 'users', userId);
       
@@ -3637,13 +3639,15 @@ export class FirestoreService {
       }
       
       console.log('✅ Added to shopping cart:', docRef.id);
+      console.error('[cart] add done', { ms: Date.now() - __t0 });
       return docRef.id;
     } catch (error) {
       console.error('Error adding to shopping cart:', error);
+      console.error('[cart] add fail', { ms: Date.now() - __t0 });
       throw error;
     }
   }
-  
+
   /**
    * Prüft ob ein Produkt bereits im Einkaufszettel ist
    */

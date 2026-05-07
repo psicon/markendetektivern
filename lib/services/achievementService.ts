@@ -639,6 +639,8 @@ class AchievementService {
     // Heavy-Body als Helper extrahiert, damit er optional in
     // runAfterInteractions gelegt werden kann ohne Code-Dupli.
     const heavyBody = async (): Promise<void> => {
+    const __t0 = Date.now();
+    console.error('[track] start', { action });
     try {
       console.log(`📊 Tracking action: ${action} für User: ${userId}`);
 
@@ -844,6 +846,8 @@ class AchievementService {
     } catch (error) {
       console.error('❌ Fehler beim Tracken der Action:', error);
       throw error;
+    } finally {
+      console.error('[track] done', { action, ms: Date.now() - __t0 });
     }
     }; // end heavyBody
 
