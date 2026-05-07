@@ -71,56 +71,62 @@ class AchievementService {
   // wird gebatcht.
   private static profileRefreshTimer: NodeJS.Timeout | null = null;
   private static profileRefreshInflight: Promise<void> | null = null;
+  private static profileRefreshResolve: (() => void) | null = null;
   private static profileRefreshCallCount = 0;
   private static readonly PROFILE_REFRESH_DEBOUNCE_MS = 1500;
 
   /**
-   * Debounced Wrapper um onProfileRefreshNeeded. Mehrere Aufrufe
-   * innerhalb des Debounce-Fensters werden zu EINEM tatsächlichen
-   * Refresh-Call coalesced. Verhindert die AuthContext-Cascade
-   * bei tap-burst.
+   * Debounced Wrapper um onProfileRefreshNeeded.
    *
-   * Returns sofort (Promise resolvet wenn der debouncete Refresh
-   * fertig ist — Caller können wie bisher fire-and-forget).
+   * BUG-FIX (2026-05-07): Vorherige Version hat clearTimeout()
+   * gemacht aber dann im if (!inflight)-Branch keinen NEUEN Timer
+   * gesetzt → Promise hängt für immer → trackAction-heavyBody
+   * blockiert für immer im await → InteractionManager-Queue staut →
+   * 5+ min freeze. Jetzt: Resolve und Promise getrennt verwaltet,
+   * Timer wird IMMER neu gesetzt, Promise wird wiederverwendet bis
+   * sie endlich resolvet.
    */
   private static requestProfileRefresh(): Promise<void> {
     if (!AchievementService.onProfileRefreshNeeded) {
       return Promise.resolve();
     }
     AchievementService.profileRefreshCallCount += 1;
+
+    // Cancel ALTen Timer (debounce: jeder Aufruf verlängert)
     if (AchievementService.profileRefreshTimer) {
       clearTimeout(AchievementService.profileRefreshTimer);
+      AchievementService.profileRefreshTimer = null;
     }
+
+    // Erstes Aufrufen im Burst → Promise + Resolve-Capture anlegen.
+    // Folgeaufrufe teilen sich diese Promise.
     if (!AchievementService.profileRefreshInflight) {
       AchievementService.profileRefreshInflight = new Promise<void>((resolve) => {
-        AchievementService.profileRefreshTimer = setTimeout(async () => {
-          AchievementService.profileRefreshTimer = null;
-          const coalesced = AchievementService.profileRefreshCallCount;
-          AchievementService.profileRefreshCallCount = 0;
-          const inflight = AchievementService.profileRefreshInflight;
-          // Wichtig: erst nach Resolve auf null setzen, sonst feuert
-          // ein während-des-Refresh kommender requestProfileRefresh
-          // einen neuen Timer im selben Promise.
-          try {
-            // console.error damit babel transform-remove-console
-            // exclude:['error'] das überleben lässt → in adb logcat
-            // ReactNativeJS sehen wir wieviele Aufrufe pro Refresh
-            // zusammengefasst wurden.
-            console.error('[refresh] profile flush', { coalesced });
-            if (AchievementService.onProfileRefreshNeeded) {
-              await AchievementService.onProfileRefreshNeeded();
-            }
-          } catch (err) {
-            console.warn('Profile refresh debounced flush failed', err);
-          } finally {
-            if (AchievementService.profileRefreshInflight === inflight) {
-              AchievementService.profileRefreshInflight = null;
-            }
-            resolve();
-          }
-        }, AchievementService.PROFILE_REFRESH_DEBOUNCE_MS);
+        AchievementService.profileRefreshResolve = resolve;
       });
     }
+
+    // Timer IMMER neu setzen — auch wenn Promise schon existiert.
+    // Sonst hängt sie für immer.
+    AchievementService.profileRefreshTimer = setTimeout(async () => {
+      AchievementService.profileRefreshTimer = null;
+      const coalesced = AchievementService.profileRefreshCallCount;
+      AchievementService.profileRefreshCallCount = 0;
+      const resolve = AchievementService.profileRefreshResolve;
+      AchievementService.profileRefreshResolve = null;
+      AchievementService.profileRefreshInflight = null;
+      try {
+        console.error('[refresh] profile flush', { coalesced });
+        if (AchievementService.onProfileRefreshNeeded) {
+          await AchievementService.onProfileRefreshNeeded();
+        }
+      } catch (err) {
+        console.warn('Profile refresh debounced flush failed', err);
+      } finally {
+        resolve?.();
+      }
+    }, AchievementService.PROFILE_REFRESH_DEBOUNCE_MS);
+
     return AchievementService.profileRefreshInflight;
   }
 
