@@ -3629,36 +3629,30 @@ export class FirestoreService {
         data.handelsmarkenProdukt = doc(db, 'produkte', productId);
       }
 
-      // Fix (2026-05-07): Client-generierte ID + setDoc fire-and-forget.
-      // Vorher: await addDoc() blockierte ~121 s wenn die Firestore-
-      // Write-Stream stockte (Token-Refresh, Bridge-Stau, slow connection).
-      // Cart-UI ist bereits optimistisch geflippt — User braucht das
-      // Server-Ack nicht. Firestore SDK queued den Write und retried
-      // selbst, also keine Datenverluste.
+      // Single Write: client-generierte ID + setDoc awaited. Daten
+      // MÜSSEN sicher in Firestore landen — kein fire-and-forget.
+      // Die anderen Perf-Fixes (journey debounce, refresh debounce,
+      // GPS→IP, favorites snapshot throttle) reduzieren bereits den
+      // Bridge-Druck so dass dieses await nicht mehr 121 s hängt.
       const newDocRef = doc(collection(userRef, 'einkaufswagen'));
-      void setDoc(newDocRef, data).catch((err) => {
-        console.warn('[cart] setDoc background-fail:', err?.message);
-      });
+      await setDoc(newDocRef, data);
 
-      // 📊 Analytics fire-and-forget (war vorher awaited → unnötiger Block)
+      // 📊 Analytics fire-and-forget — Analytics-Event ist nicht
+      // kritisch für die Cart-Funktionalität, kann async laufen.
       if (source) {
-        const { analyticsService } = await import('./analyticsService');
-        void analyticsService.trackAddToCart(
-          productId,
-          productName,
-          isMarke,
-          source,
-          userId,
-          {
-            screen_name: sourceMetadata?.screenName || 'unknown',
-            ...sourceMetadata,
-          },
-        ).catch((err) => {
-          console.warn('[cart] analytics trackAddToCart bg-fail:', err?.message);
+        import('./analyticsService').then(({ analyticsService }) => {
+          analyticsService
+            .trackAddToCart(productId, productName, isMarke, source, userId, {
+              screen_name: sourceMetadata?.screenName || 'unknown',
+              ...sourceMetadata,
+            })
+            .catch((err) => {
+              console.error('[cart] analytics trackAddToCart bg-fail:', err?.message);
+            });
         });
       }
 
-      console.log('✅ Added to shopping cart (queued):', newDocRef.id);
+      console.log('✅ Added to shopping cart:', newDocRef.id);
       console.error('[cart] add done', { id: __callId, ms: Date.now() - __t0 });
       return newDocRef.id;
     } catch (error) {
@@ -3861,13 +3855,12 @@ export class FirestoreService {
         // ENTFERNT: laterUpdates - Tracking passiert direkt in aktueller Journey
       }
       
-      // Fix (2026-05-07): deleteDoc fire-and-forget. Cart-UI ist
-      // bereits optimistisch geflippt — User braucht keinen
-      // Server-Ack. Firestore SDK queued + retried selbst.
-      void deleteDoc(cartItemRef).catch((err) => {
-        console.warn('[cart] deleteDoc bg-fail:', err?.message);
-      });
-      console.log('✅ Removed from shopping cart (queued):', itemId);
+      // Awaited delete — Daten MÜSSEN sicher gelöscht werden.
+      // Der frühere 25 s Freeze kam von synchronen Journey-Writes
+      // davor (jetzt fire-and-forget) und vom blockierten Firestore-
+      // Write-Stream durch parallele Cart-Operationen.
+      await deleteDoc(cartItemRef);
+      console.log('✅ Removed from shopping cart:', itemId);
       console.error('[cart] remove done', { itemId: itemId.slice(0, 8), ms: Date.now() - __t0 });
     } catch (error) {
       console.error('Error removing from shopping cart:', error);
@@ -3894,19 +3887,13 @@ export class FirestoreService {
       
       const cartData = cartItemDoc.data();
 
-      // Fix (2026-05-07): Beide Writes fire-and-forget. Bei "alle als
-      // gekauft markieren" (complete_shopping) hat der User N Items
-      // → vorher N × 2 awaited Writes seriell → mehrsekündiger Freeze.
-      // Jetzt: Schreibanfragen rausschicken + sofort weiter.
-      // Tracking-Daten bleiben erhalten (Purchase-History-Doc wird
-      // weiterhin geschrieben, gekauft:true wird gesetzt — nur eben
-      // async, ohne UI zu blockieren).
-      void this.createPurchaseHistoryEntry(userId, cartData).catch((e) =>
-        console.warn('[purchase] history write bg-fail:', e?.message),
-      );
-      void updateDoc(cartItemRef, { gekauft: true }).catch((e) =>
-        console.warn('[purchase] gekauft:true bg-fail:', e?.message),
-      );
+      // Awaited writes — Daten MÜSSEN sicher landen.
+      // Purchase-History + gekauft:true parallel über Promise.all
+      // damit beide Writes gleichzeitig laufen statt seriell.
+      await Promise.all([
+        this.createPurchaseHistoryEntry(userId, cartData),
+        updateDoc(cartItemRef, { gekauft: true }),
+      ]);
       
       // 4. Track Purchase in der ORIGINAL Journey (nicht neue!)
       // Hole die richtigen Produktdaten aus dem cartData
@@ -4000,18 +3987,15 @@ export class FirestoreService {
       
       const cartData = cartItemDoc.data();
 
-      // Fix (2026-05-07): Fire-and-forget — bei Bulk "alle gekauft"
-      // mit N Items wäre das sonst N × 2 sequenzielle awaited Writes.
-      void this.createPurchaseHistoryEntry(userId, cartData).catch((e) =>
-        console.warn('[purchase] bulk history bg-fail:', e?.message),
-      );
-      void updateDoc(cartItemRef, { gekauft: true }).catch((e) =>
-        console.warn('[purchase] bulk gekauft:true bg-fail:', e?.message),
-      );
+      // Awaited writes (parallel via Promise.all). Daten müssen landen.
+      await Promise.all([
+        this.createPurchaseHistoryEntry(userId, cartData),
+        updateDoc(cartItemRef, { gekauft: true }),
+      ]);
 
       // KEIN Journey-Tracking hier! Das passiert im Bulk
 
-      console.log('✅ Marked as purchased without tracking (queued):', itemId);
+      console.log('✅ Marked as purchased without tracking:', itemId);
     } catch (error) {
       console.error('Error marking as purchased:', error);
       throw error;
