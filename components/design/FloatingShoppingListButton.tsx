@@ -31,6 +31,7 @@ import {
 import React, { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { CounterBadge } from '@/components/design/CounterBadge';
 import { Shimmer } from '@/components/design/Skeletons';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
@@ -147,7 +148,7 @@ export function FloatingShoppingListButton({
             position: 'absolute',
             top: -6,
             right: -6,
-            width: 24,
+            width: 20,
             height: 20,
             borderRadius: 10,
             borderWidth: 2,
@@ -158,38 +159,9 @@ export function FloatingShoppingListButton({
         >
           <Shimmer width="100%" height={16} radius={8} />
         </View>
-      ) : count > 0 ? (
-        <View
-          style={{
-            position: 'absolute',
-            top: -6,
-            right: -6,
-            minWidth: 20,
-            height: 20,
-            paddingHorizontal: 6,
-            borderRadius: 10,
-            backgroundColor: '#fff',
-            borderWidth: 2,
-            borderColor: brandTokens.primary,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 11,
-              lineHeight: 13,
-              color: brandTokens.primary,
-              textAlign: 'center',
-              includeFontPadding: false as any,
-            }}
-          >
-            {count > 99 ? '99+' : count}
-          </Text>
-        </View>
-      ) : null}
+      ) : (
+        <CounterBadge count={count} />
+      )}
     </Pressable>
   );
 }

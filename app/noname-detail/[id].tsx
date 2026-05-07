@@ -25,6 +25,7 @@ import PagerView from 'react-native-pager-view';
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { usePressLock } from '@/lib/hooks/usePressLock';
 import { FadingImage } from '@/components/design/FadingImage';
+import { CounterBadge } from '@/components/design/CounterBadge';
 import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
 import { QuantityPill } from '@/components/design/QuantityPill';
 import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
@@ -1738,39 +1739,7 @@ function ActionButton({ icon, iconColor, bg, subLabel, onPress, badge }: ActionB
           </Text>
         ) : null}
       </Pressable>
-      {badge !== undefined && badge > 0 ? (
-        <View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            top: -6,
-            right: -6,
-            minWidth: 20,
-            height: 20,
-            borderRadius: 10,
-            paddingHorizontal: 6,
-            backgroundColor: '#fff',
-            borderWidth: 2,
-            borderColor: brand.primary,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 11,
-              lineHeight: 13,
-              color: brand.primary,
-              textAlign: 'center',
-              includeFontPadding: false as any,
-            }}
-          >
-            {badge > 99 ? '99+' : badge}
-          </Text>
-        </View>
-      ) : null}
+      {badge !== undefined && badge > 0 ? <CounterBadge count={badge} /> : null}
     </View>
   );
 }
