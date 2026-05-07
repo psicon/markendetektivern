@@ -163,6 +163,23 @@ const getSavingsData = (
   };
 };
 
+/** Pack-Details im "100g · 8,90€/kg" Stil. Returns null wenn keine Daten. */
+function formatPack(size?: number, unit?: string, price?: number): string | null {
+  if (!size || !unit) return null;
+  const u = String(unit).toLowerCase().replace(/\.$/, '');
+  const isStk = u === 'stk' || u === 'stück';
+  const sizeLabel = isStk ? `${size} ${unit}` : `${size}${unit}`;
+  let unitPrice: string | null = null;
+  if (price && price > 0) {
+    if (u === 'g') unitPrice = `${((price / size) * 1000).toFixed(2).replace('.', ',')}€/kg`;
+    else if (u === 'kg') unitPrice = `${(price / size).toFixed(2).replace('.', ',')}€/kg`;
+    else if (u === 'ml') unitPrice = `${((price / size) * 1000).toFixed(2).replace('.', ',')}€/L`;
+    else if (u === 'l') unitPrice = `${(price / size).toFixed(2).replace('.', ',')}€/L`;
+    else if (isStk) unitPrice = `${(price / size).toFixed(2).replace('.', ',')}€/${unit}`;
+  }
+  return unitPrice ? `${sizeLabel} · ${unitPrice}` : sizeLabel;
+}
+
 const formatEur = (n: number) =>
   `${(n || 0).toFixed(2).replace('.', ',')} €`;
 
@@ -1051,20 +1068,28 @@ function BrandCard({
             >
               {formatEur(product?.preis || 0)}
             </Text>
-            {selectedAlt ? (
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.bold,
-                  fontSize: 11,
-                  color: brand.primary,
-                }}
-              >
-                → {formatEur(selectedAlt.preis || 0)}
-              </Text>
-            ) : null}
+            {(() => {
+              const pack = formatPack(
+                (product as any)?.packSize,
+                (product as any)?.packTypInfo?.typKurz ?? (product as any)?.packTypInfo?.typ,
+                product?.preis,
+              );
+              return pack ? (
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 11,
+                    color: theme.textMuted,
+                  }}
+                  numberOfLines={1}
+                >
+                  {pack}
+                </Text>
+              ) : null;
+            })()}
           </View>
-          {potential > 0 ? (
+          {potential > 0 && product?.preis > 0 ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
               <MaterialCommunityIcons name="tag-outline" size={11} color={brand.primary} />
               <Text
@@ -1075,7 +1100,7 @@ function BrandCard({
                   color: brand.primary,
                 }}
               >
-                Ersparnis möglich: {formatEur(potential)}
+                Ersparnis möglich: {Math.round((potential / product.preis) * 100)}%
               </Text>
             </View>
           ) : null}
@@ -1429,18 +1454,26 @@ function NoNameCard({
           >
             {formatEur(p?.preis || 0)}
           </Text>
-          {savings > 0 ? (
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold,
-                fontSize: 11,
-                color: brand.primary,
-              }}
-            >
-              (−{formatEur(savings)})
-            </Text>
-          ) : null}
+          {(() => {
+            const pack = formatPack(
+              (p as any)?.packSize,
+              (p as any)?.packTypInfo?.typKurz ?? (p as any)?.packTypInfo?.typ,
+              p?.preis,
+            );
+            return pack ? (
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 11,
+                  color: theme.textMuted,
+                }}
+                numberOfLines={1}
+              >
+                {pack}
+              </Text>
+            ) : null;
+          })()}
         </View>
       </View>
       <RowActions
@@ -1774,6 +1807,16 @@ export default function ShoppingListScreen() {
                 }
               }
 
+              // packTypInfo lazy lookup für Pack-Details (XYg · X€/kg)
+              let packTypInfo: any = null;
+              if ((productData as any).packTypInfo) {
+                try {
+                  packTypInfo = await FirestoreService.getDocumentByReference<any>(
+                    (productData as any).packTypInfo,
+                  );
+                } catch {}
+              }
+
               return {
                 kind: 'brand' as const,
                 enriched: {
@@ -1786,6 +1829,7 @@ export default function ShoppingListScreen() {
                     id: ref.id, // FIX: getDocumentByReference returnt nur data()
                     hersteller: herstellerData,
                     marke: markeData, // Für info-icon → mp.marke.infos
+                    packTypInfo, // resolved für Pack-Details-Anzeige
                   },
                   alternatives,
                   bestAlternative,
@@ -1799,7 +1843,7 @@ export default function ShoppingListScreen() {
               const ref = (item as any).handelsmarkenProdukt;
               const productData = await FirestoreService.getDocumentByReference<Produkte>(ref);
               if (!productData) return null;
-              const [handelsmarkeData, discounterData, markenProdukt, herstellerData] = await Promise.all([
+              const [handelsmarkeData, discounterData, markenProdukt, herstellerData, packTypInfoData] = await Promise.all([
                 (productData as any).handelsmarke
                   ? FirestoreService.getDocumentByReference(
                       (productData as any).handelsmarke,
@@ -1820,6 +1864,12 @@ export default function ShoppingListScreen() {
                 (productData as any).hersteller
                   ? FirestoreService.getDocumentByReference(
                       (productData as any).hersteller,
+                    ).catch(() => null)
+                  : Promise.resolve(null),
+                // packTypInfo für Pack-Details (XYg · X€/kg)
+                (productData as any).packTypInfo
+                  ? FirestoreService.getDocumentByReference(
+                      (productData as any).packTypInfo,
                     ).catch(() => null)
                   : Promise.resolve(null),
               ]);
@@ -1848,6 +1898,7 @@ export default function ShoppingListScreen() {
                     handelsmarke: handelsmarkeData,
                     discounter: finalDiscounter,
                     hersteller: herstellerData,
+                    packTypInfo: packTypInfoData,
                   },
                   savings,
                   // preserve journey info for bulk purchase
