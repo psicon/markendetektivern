@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Location from 'expo-location';
 import { isExpoGo } from '../utils/platform';
+import { AnonymousLocationService } from './anonymousLocationService';
 
 // Firebase Analytics (nur außerhalb Expo Go)
 let analytics: any = null;
@@ -173,27 +173,24 @@ class AnalyticsService {
         event.user_level = parseInt(userLevel);
       }
 
-      // Geolocation (komplett optional - DSGVO-konform)
+      // Fix (2026-05-07): Geohash5 jetzt aus AnonymousLocationService
+      // (IP-basiert, 1h Cache, 2s Timeout) statt aus GPS-Lookup.
+      // Vorher: Location.getCurrentPositionAsync() blockierte 30-60 s
+      // wenn GPS keinen Fix hatte (Indoor/schwaches Signal). Bei
+      // 3 parallelen trackEvent-Aufrufen (z.B. tap-burst auf Cart)
+      // serialisierte das GPS-Modul → 3 × 60 s = 180 s Freeze.
+      //
+      // AnonymousLocationService liefert dieselbe 5 km-Genauigkeit
+      // (Math.round(lat * 20) / 20 → 5km buckets) wie der vorherige
+      // coordinatesToGeohash5 — also verändert sich am Analytics-
+      // Datenstand NICHTS.
       try {
-        // Nur in Production und nur wenn Permission bereits vorhanden
-        if (!isExpoGo()) {
-          const { status } = await Location.getForegroundPermissionsAsync();
-          if (status === 'granted') {
-            const location = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Lowest, // Nur grobe Position
-              maximumAge: 300000 // 5 Minuten Cache
-            });
-            
-            // Konvertiere zu Geohash5 (~5km Genauigkeit)
-            event.store_geohash5 = this.coordinatesToGeohash5(
-              location.coords.latitude, 
-              location.coords.longitude
-            );
-          }
+        const loc = await AnonymousLocationService.getLocation();
+        if (loc?.geohash5) {
+          event.store_geohash5 = loc.geohash5;
         }
       } catch (error) {
-        // Geolocation komplett optional - nie Error werfen
-        console.log('📍 Location optional - übersprungen');
+        // optional - nie throwen
       }
 
       // Session-Kontext

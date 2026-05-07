@@ -14,7 +14,10 @@ export interface LocationData {
 export class AnonymousLocationService {
   private static cache: LocationData | null = null;
   private static cacheExpiry: number = 0;
-  
+  // Inflight-Dedup: bei N parallelen Aufrufen mit leerem Cache wird
+  // nur 1 IP-API-Call rausgeschickt, alle awaiten dieselbe Promise.
+  private static inflight: Promise<LocationData | null> | null = null;
+
   /**
    * Holt Location-Daten ohne User Permission
    */
@@ -23,26 +26,34 @@ export class AnonymousLocationService {
     if (this.cache && Date.now() < this.cacheExpiry) {
       return this.cache;
     }
-    
-    try {
-      // Versuch 1: IP-basierte Location (schnell & genau)
-      const ipLocation = await this.getLocationFromIP();
-      if (ipLocation) {
-        this.cache = ipLocation;
-        this.cacheExpiry = Date.now() + (60 * 60 * 1000); // 1 Stunde
-        return ipLocation;
-      }
-      
-      // Versuch 2: Einfacher Fallback
-      const fallbackLocation = this.getFallbackLocation();
-      this.cache = fallbackLocation;
-      this.cacheExpiry = Date.now() + (10 * 60 * 1000); // 10 Minuten
-      return fallbackLocation;
-      
-    } catch (error) {
-      console.log('📍 Location detection failed, using fallback');
-      return this.getFallbackLocation();
+    if (this.inflight) {
+      return this.inflight;
     }
+
+    this.inflight = (async () => {
+      try {
+        // Versuch 1: IP-basierte Location (schnell & genau)
+        const ipLocation = await this.getLocationFromIP();
+        if (ipLocation) {
+          this.cache = ipLocation;
+          this.cacheExpiry = Date.now() + (60 * 60 * 1000); // 1 Stunde
+          return ipLocation;
+        }
+
+        // Versuch 2: Einfacher Fallback
+        const fallbackLocation = this.getFallbackLocation();
+        this.cache = fallbackLocation;
+        this.cacheExpiry = Date.now() + (10 * 60 * 1000); // 10 Minuten
+        return fallbackLocation;
+      } catch (error) {
+        console.log('📍 Location detection failed, using fallback');
+        return this.getFallbackLocation();
+      } finally {
+        this.inflight = null;
+      }
+    })();
+
+    return this.inflight;
   }
   
   /**
