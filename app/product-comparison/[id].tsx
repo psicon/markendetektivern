@@ -1005,10 +1005,27 @@ export default function ProductComparisonScreen() {
       closePill(); // Pill schließen wenn anzahl=0 (mit Exit-Anim)
     }
     try {
+      // Fast-Path: anzahl + Tracking-Payload aus dem UI-State.
+      // Name nur ungefähr — Tracking stellt das nur als Display-
+      // Label fürs Journey-Action-Log dar, kein Functional Impact.
+      const productName =
+        productType === 'markenprodukt'
+          ? mp?.name ?? 'Markenprodukt'
+          : nonames.find((nn) => nn.id === productId)?.name ?? 'NoName-Produkt';
+      const trackingPayload = newAnzahl === 0
+        ? {
+            productId,
+            productName,
+            productType:
+              productType === 'markenprodukt' ? ('brand' as const) : ('noname' as const),
+          }
+        : undefined;
       await FirestoreService.decrementCartQuantity(
         user.uid,
         productId,
         productType === 'markenprodukt',
+        prevAnzahl,
+        trackingPayload,
       );
       if (newAnzahl === 0) {
         showInfoToast('🗑️ Aus Einkaufsliste entfernt', 'ERROR');

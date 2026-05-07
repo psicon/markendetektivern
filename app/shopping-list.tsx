@@ -126,6 +126,10 @@ type EnrichedItem = {
    *  getDocumentByReference returnt nur doc.data() ohne .id, daher
    *  müssen wir die ID separat halten. */
   productId?: string;
+  /** NEU: Journey-Tracking-Daten (vom cart-doc). Werden beim Remove
+   *  als Payload mitgegeben → kein getDoc mehr im Critical-Path. */
+  journeyId?: string;
+  viewedProductIndex?: number;
 };
 
 // Height of the sticky SegmentedTabs row that sits below the DetailHeader.
@@ -1835,6 +1839,12 @@ export default function ShoppingListScreen() {
                   bestAlternative,
                   potentialSavings: maxSavings,
                   anzahl: ((item as any).anzahl ?? 1) as number,
+                  // Journey-Tracking-Daten aus dem cart-doc übernehmen,
+                  // damit der Remove-Fast-Path keinen zusätzlichen
+                  // getDoc braucht.
+                  journeyId: (item as any).journeyId,
+                  viewedProductIndex: (item as any).viewedProductIndex,
+                  name: productData?.name,
                 } satisfies EnrichedItem,
                 potentialSavings: maxSavings,
                 bestAlternative,
@@ -2221,12 +2231,17 @@ export default function ShoppingListScreen() {
     setLoadingItems((prev) => new Set(prev).add(itemId));
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-      const isCustomItem = [...brandProducts, ...noNameProducts].some(
-        (item) => item.id === itemId && item.isCustom,
-      );
+      const matched = [...brandProducts, ...noNameProducts].find((it) => it.id === itemId);
+      const isCustomItem = !!matched?.isCustom;
 
       if (isCustomItem) {
-        await FirestoreService.removeFromShoppingCart(user.uid, itemId);
+        // Fast-Path: custom-items haben kein Journey-Tracking → minimaler Payload.
+        await FirestoreService.removeFromShoppingCart(user.uid, itemId, {
+          productId: itemId,
+          productName: matched?.name ?? 'Custom item',
+          productType: matched?.customType === 'brand' ? 'brand' : 'noname',
+          isCustomItem: true,
+        });
       } else {
         await FirestoreService.markAsPurchased(user.uid, itemId);
       }
@@ -2284,7 +2299,25 @@ export default function ShoppingListScreen() {
     setDeletingItems((prev) => new Set(prev).add(itemId));
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      await FirestoreService.removeFromShoppingCart(user.uid, itemId);
+      // Tracking-Payload aus dem UI-State bauen (KEIN getDoc nötig).
+      // Macht den Critical-Path identisch zu Favoriten-Remove: 1 awaited
+      // deleteDoc auf det-ID, fertig.
+      const matched = [...brandProducts, ...noNameProducts].find((it) => it.id === itemId);
+      const payload = matched
+        ? {
+            productId: matched.productId ?? matched.id,
+            productName:
+              matched.product?.name ?? matched.name ?? (matched.kind === 'brand' ? 'Markenprodukt' : 'NoName-Produkt'),
+            productType:
+              matched.kind === 'brand' || matched.customType === 'brand'
+                ? ('brand' as const)
+                : ('noname' as const),
+            journeyId: matched.journeyId,
+            viewedProductIndex: matched.viewedProductIndex,
+            isCustomItem: !!matched.isCustom,
+          }
+        : undefined;
+      await FirestoreService.removeFromShoppingCart(user.uid, itemId, payload);
       showInfoToast(TOAST_MESSAGES.SHOPPING.removedFromCart, 'ERROR');
       // Optimistic update
       setBrandProducts((prev) => prev.filter((i) => i.id !== itemId));
@@ -2395,7 +2428,24 @@ export default function ShoppingListScreen() {
       }
     }
     try {
-      await FirestoreService.decrementCartQuantity(user.uid, productId, isMarke);
+      // Fast-Path: anzahl + Tracking-Payload aus dem UI-State.
+      // → kein getDoc, kein zusätzlicher Read. 1 awaited Op auf 1 Doc.
+      const trackingPayload = newAnzahl <= 0
+        ? {
+            productId,
+            productName: productData?.name ?? item.name ?? 'Produkt',
+            productType: isMarke ? ('brand' as const) : ('noname' as const),
+            journeyId: item.journeyId,
+            viewedProductIndex: item.viewedProductIndex,
+          }
+        : undefined;
+      await FirestoreService.decrementCartQuantity(
+        user.uid,
+        productId,
+        isMarke,
+        prevAnzahl,
+        trackingPayload,
+      );
       // Wenn voll-entfernt: gleichen Toast wie Swipe-to-delete zeigen
       if (newAnzahl <= 0) {
         showInfoToast(TOAST_MESSAGES.SHOPPING.removedFromCart, 'ERROR');
@@ -2509,10 +2559,18 @@ export default function ShoppingListScreen() {
           ...dbBrandItems.map((item) => FirestoreService.markAsPurchased(user.uid, item.id)),
         );
       }
-      // Custom items: simple removal
+      // Custom items: simple removal — Fast-Path ohne getDoc (custom-items
+      // brauchen kein Journey-Tracking).
       if (customItems.length > 0) {
         promises.push(
-          ...customItems.map((item) => FirestoreService.removeFromShoppingCart(user.uid, item.id)),
+          ...customItems.map((item) =>
+            FirestoreService.removeFromShoppingCart(user.uid, item.id, {
+              productId: item.id,
+              productName: item.name ?? 'Custom item',
+              productType: item.customType === 'brand' ? 'brand' : 'noname',
+              isCustomItem: true,
+            }),
+          ),
         );
       }
 

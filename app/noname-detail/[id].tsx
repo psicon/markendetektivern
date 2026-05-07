@@ -690,7 +690,19 @@ export default function NoNameDetailScreen() {
       closePill(); // mit Exit-Animation
     }
     try {
-      await FirestoreService.decrementCartQuantity(user.uid, p.id, false);
+      await FirestoreService.decrementCartQuantity(
+        user.uid,
+        p.id,
+        false,
+        prev,
+        next === 0
+          ? {
+              productId: p.id,
+              productName: p.name ?? 'Produkt',
+              productType: 'noname',
+            }
+          : undefined,
+      );
       if (next === 0) showInfoToast('🗑️ Aus Einkaufsliste entfernt', 'ERROR');
     } catch {
       setCartAnzahl(prev);

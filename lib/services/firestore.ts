@@ -288,6 +288,27 @@ function prefetchImage(uri: string | undefined | null) {
   });
 }
 
+/**
+ * Payload für Cart-Remove Fast-Path. Caller liefert die Daten mit,
+ * die normalerweise via `getDoc(cart-doc)` ermittelt würden — damit
+ * der Critical-Path nur noch aus EINEM `deleteDoc` besteht (analog
+ * Favoriten / Lieblingsmarkt).
+ */
+export type CartRemoveTrackingPayload = {
+  /** Produkt-ID (markenProdukt.id oder produkt.id). */
+  productId: string;
+  /** Anzeigename, fürs Tracking-Action-Log. */
+  productName: string;
+  /** 'brand' = Markenprodukt, 'noname' = Eigenmarke. */
+  productType: 'brand' | 'noname';
+  /** Optional: Journey-Doc-ID (aus dem cart-doc, beim Add gespeichert). */
+  journeyId?: string;
+  /** Optional: Index in viewedProducts[]-Array der Journey. */
+  viewedProductIndex?: number;
+  /** Bei custom-items skippen wir das Tracking komplett. */
+  isCustomItem?: boolean;
+};
+
 export class FirestoreService {
 
   /**
@@ -3729,7 +3750,15 @@ export class FirestoreService {
   /**
    * Verringert die anzahl im Einkaufszettel um 1.
    * Wenn anzahl > 1: updateDoc mit anzahl-1.
-   * Wenn anzahl === 1 oder anzahl-Feld fehlt (Legacy): full removeFromShoppingCart
+   * Wenn anzahl === 1: full removeFromShoppingCart (mit Tracking-Payload).
+   *
+   * Fast-Path (Cart-Schema v2, identisch zu Favoriten):
+   *   Caller kennt currentAnzahl + Tracking-Daten → KEIN getDoc, EIN
+   *   awaited updateDoc/deleteDoc auf det-ID. Genau wie Favoriten:
+   *   1 Op auf 1 Doc, fertig.
+   *
+   * Slow-Path (Legacy, ohne currentAnzahl): macht weiterhin getDoc
+   * davor — bleibt für Aufrufer ohne State erhalten.
    *
    * Returns die neue anzahl, oder 0 wenn entfernt.
    */
@@ -3737,34 +3766,38 @@ export class FirestoreService {
     userId: string,
     productId: string,
     isMarke: boolean,
+    currentAnzahl?: number,
+    trackingPayload?: CartRemoveTrackingPayload,
   ): Promise<number> {
     try {
       const detId = `${isMarke ? 'brand' : 'noname'}_${productId}`;
       const detRef = doc(db, 'users', userId, 'einkaufswagen', detId);
+
+      // ─── Fast-Path: Caller weiß was er hat ───
+      if (typeof currentAnzahl === 'number') {
+        if (currentAnzahl > 1) {
+          // 1 awaited write — analog Favoriten remove.
+          await updateDoc(detRef, { anzahl: increment(-1), timestamp: serverTimestamp() });
+          return currentAnzahl - 1;
+        } else {
+          // anzahl === 1 → full remove. Caller liefert Tracking-Daten,
+          // KEIN getDoc nötig.
+          await this.removeFromShoppingCart(userId, detId, trackingPayload);
+          return 0;
+        }
+      }
+
+      // ─── Slow-Path: legacy / Aufrufer ohne State ───
       const snap = await getDoc(detRef);
       if (!snap.exists()) {
-        // Legacy fallback: vielleicht ein altes Auto-ID-Doc
-        const removed = await this.removeFromShoppingCartByProductId(userId, productId, isMarke);
+        await this.removeFromShoppingCartByProductId(userId, productId, isMarke);
         return 0;
       }
-      const currentAnzahl = ((snap.data() as any)?.anzahl ?? 1) as number;
-      if (currentAnzahl > 1) {
-        // Atomares Decrement (race-safe für rapid-taps).
-        // Fix (2026-05-07): fire-and-forget. Auf Android stresste der
-        // awaited updateDoc den nativen WriteStream bei rapid-Taps so
-        // stark, dass der UI-Thread bis zu 25 s wartete, obwohl
-        // Favoriten/Lieblingsmarkt-Writes parallel sauber durchliefen.
-        // Der Firestore-SDK queued + retried den Write intern; Daten
-        // gehen nicht verloren, der UI-Thread kommt sofort zurück.
-        void updateDoc(detRef, { anzahl: increment(-1), timestamp: serverTimestamp() }).catch((err) => {
-          console.warn('[cart] decrement updateDoc bg-fail:', (err as Error)?.message);
-        });
-        return currentAnzahl - 1;
+      const anz = ((snap.data() as any)?.anzahl ?? 1) as number;
+      if (anz > 1) {
+        await updateDoc(detRef, { anzahl: increment(-1), timestamp: serverTimestamp() });
+        return anz - 1;
       } else {
-        // anzahl === 1 → full remove (mit Journey-Tracking).
-        // removeFromShoppingCart ist intern bereits fire-and-forget für
-        // den deleteDoc-Teil; das await hier wartet nur auf den getDoc-
-        // Read + den Tracking-Kickoff (beides schnell).
         await this.removeFromShoppingCart(userId, detId);
         return 0;
       }
@@ -3888,14 +3921,67 @@ export class FirestoreService {
   }
 
   /**
-   * Entfernt ein Produkt vom Einkaufszettel
+   * Entfernt ein Produkt vom Einkaufszettel.
+   *
+   * Fast-Path (Cart-Schema v2, identisch zu Favoriten-remove):
+   *   Wenn `trackingPayload` mitgegeben wird, machen wir NUR den
+   *   awaited deleteDoc — KEIN getDoc davor, KEIN dynamischer Import.
+   *   Tracking läuft im Hintergrund mit den vom Caller gelieferten
+   *   Daten (der hat sie eh schon im UI-State). Das ist exakt das
+   *   Pattern, das Favoriten / Lieblingsmarkt-Setzen verwenden und
+   *   das auf Android nicht freezed: 1 Op auf 1 Doc, fertig.
+   *
+   * Slow-Path (Legacy-Aufrufer ohne payload): macht weiterhin
+   * getDoc + dynamic-import + Tracking inline. Bleibt erhalten,
+   * damit alte Aufrufer (z.B. Bulk-Operationen, custom-items über
+   * den itemId-Pfad) nicht brechen — aber NICHT der UI-Critical-
+   * Path bei rapid-Taps.
    */
-  static async removeFromShoppingCart(userId: string, itemId: string): Promise<void> {
+  static async removeFromShoppingCart(
+    userId: string,
+    itemId: string,
+    trackingPayload?: CartRemoveTrackingPayload,
+  ): Promise<void> {
     try {
-      // L Migration: flat-path statt doc(userRef, ...) — RNFirebase
-      // doc() unterstützt keine DocumentReference als parent.
       const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
-      
+
+      // ─── Fast-Path ───────────────────────────────────────────────
+      if (trackingPayload) {
+        // 1 awaited write. Genau wie Favoriten.
+        await deleteDoc(cartItemRef);
+
+        // Background tracking — der Caller hat die Daten geliefert,
+        // kein zusätzlicher Read auf den eben gelöschten Doc nötig.
+        if (!trackingPayload.isCustomItem && trackingPayload.productId) {
+          void (async () => {
+            try {
+              const journeyTrackingService = (await import('./journeyTrackingService')).default;
+              if (trackingPayload.journeyId) {
+                await journeyTrackingService.trackRemoveInSpecificJourney(
+                  trackingPayload.journeyId,
+                  trackingPayload.productId,
+                  trackingPayload.productName,
+                  trackingPayload.productType,
+                  userId,
+                  trackingPayload.viewedProductIndex,
+                );
+              } else {
+                journeyTrackingService.trackRemoveFromCart(
+                  trackingPayload.productId,
+                  trackingPayload.productName,
+                  trackingPayload.productType,
+                  userId,
+                );
+              }
+            } catch (e) {
+              console.warn('[cart] bg tracking failed:', (e as Error)?.message);
+            }
+          })();
+        }
+        return;
+      }
+
+      // ─── Slow-Path (legacy) ──────────────────────────────────────
       // Lade Produktdaten vor dem Löschen für Journey-Tracking
       const cartItemDoc = await getDoc(cartItemRef);
       if (cartItemDoc.exists()) {
@@ -3904,12 +3990,9 @@ export class FirestoreService {
         // ZUERST prüfen ob es ein Custom Item ist!
         if (cartData.customItem) {
           console.log('🛒 Custom Item - kein Journey-Tracking nötig');
-          // Fire-and-forget (siehe Begründung unten beim regulären delete)
-          void deleteDoc(cartItemRef).catch((err) => {
-            console.warn('[cart] custom-item deleteDoc bg-fail:', (err as Error)?.message);
-          });
-          console.log('✅ Custom item removed from shopping cart (queued):', itemId);
-          return; // Früh beenden für Custom Items
+          await deleteDoc(cartItemRef);
+          console.log('✅ Custom item removed from shopping cart:', itemId);
+          return;
         }
         
         // KORRIGIERT: Hole Produktdaten aus der richtigen Quelle
@@ -3996,18 +4079,8 @@ export class FirestoreService {
         // ENTFERNT: laterUpdates - Tracking passiert direkt in aktueller Journey
       }
       
-      // Fix (2026-05-07): fire-and-forget. Beim awaited deleteDoc
-      // hing der Cart-Remove auf Android weiterhin 25 s+, obwohl
-      // Favoriten-Writes (gleicher deleteDoc-Pfad, gleiche
-      // deterministische ID) sauber durchliefen. Vermutlich blockiert
-      // der parallel laufende Tracking-getDocs+updateDoc auf dem
-      // gleichen User den nativen WriteStream; durch fire-and-forget
-      // kommt der UI-Thread sofort zurück, der Firestore-SDK queued
-      // + retried den Write intern.
-      void deleteDoc(cartItemRef).catch((err) => {
-        console.warn('[cart] remove deleteDoc bg-fail:', (err as Error)?.message);
-      });
-      console.log('✅ Removed from shopping cart (queued):', itemId);
+      await deleteDoc(cartItemRef);
+      console.log('✅ Removed from shopping cart:', itemId);
     } catch (error) {
       console.error('Error removing from shopping cart:', error);
       throw error;
