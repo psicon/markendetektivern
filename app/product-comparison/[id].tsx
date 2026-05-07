@@ -464,8 +464,17 @@ export default function ProductComparisonScreen() {
   const [cartMap, setCartMap] = useState<Record<string, boolean>>({});
   // NEU (2026-05-07): Anzahl pro Produkt im Cart, für Quantity-Pill.
   const [cartAnzahlMap, setCartAnzahlMap] = useState<Record<string, number>>({});
-  // NEU: welche Produkt-Pill ist gerade offen (overlay)
-  const [openPillProductId, setOpenPillProductId] = useState<string | null>(null);
+  // NEU: welche Produkt-Pill ist gerade offen (overlay) + Anchor-Position
+  const [openPill, setOpenPill] = useState<{
+    productId: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null>(null);
+  const openPillProductId = openPill?.productId ?? null;
+  // Map<productId, ref> für Cart-Button-Refs (zum Positionsmessen)
+  const cartButtonRefs = useRef<Map<string, View | null>>(new Map());
   const [ratingsSheet, setRatingsSheet] = useState<{
     productId: string;
     productName: string;
@@ -567,7 +576,7 @@ export default function ProductComparisonScreen() {
   // Ref auf den setOpenPillProductId-State, damit der Worklet-Handler
   // ihn via runOnJS aufrufen kann ohne Closure-Staleness.
   const closePillRef = useRef<() => void>(() => {});
-  closePillRef.current = () => setOpenPillProductId(null);
+  closePillRef.current = () => setOpenPill(null);
   const lastScrollPillCloseY = useSharedValue(0);
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => {
@@ -785,7 +794,18 @@ export default function ProductComparisonScreen() {
     const newAnzahl = prevAnzahl + 1;
     setCartAnzahlMap((prev) => ({ ...prev, [productId]: newAnzahl }));
     setCartMap((prev) => ({ ...prev, [productId]: true }));
-    setOpenPillProductId(productId);
+
+    // Pill am Cart-Button positionieren — measureInWindow gibt
+    // Bildschirm-Koordinaten zurück. Pill wird darüber angezeigt.
+    const btnRef = cartButtonRefs.current.get(productId);
+    if (btnRef && (btnRef as any).measureInWindow) {
+      (btnRef as any).measureInWindow((x: number, y: number, w: number, h: number) => {
+        setOpenPill({ productId, x, y, w, h });
+      });
+    } else {
+      // Fallback ohne measure → bottom-center
+      setOpenPill({ productId, x: 0, y: 0, w: 0, h: 0 });
+    }
 
     // 📊 Analytics: comparison-end nur beim ERSTEN add (anzahl 0→1)
     if (prevAnzahl === 0 && analytics?.trackComparisonEnd && mp?.id) {
@@ -872,7 +892,7 @@ export default function ProductComparisonScreen() {
     setCartAnzahlMap((prev) => ({ ...prev, [productId]: newAnzahl }));
     if (newAnzahl === 0) {
       setCartMap((prev) => ({ ...prev, [productId]: false }));
-      setOpenPillProductId(null); // Pill schließen wenn anzahl=0
+      setOpenPill(null); // Pill schließen wenn anzahl=0
     }
     try {
       await FirestoreService.decrementCartQuantity(
@@ -1305,12 +1325,14 @@ export default function ProductComparisonScreen() {
                   onLayout={cartAnchor.onLayout}
                   collapsable={false}
                 >
-                  <ActionButton
-                    icon={cartMap[mp.id] ? 'cart-check' : 'cart-plus'}
-                    iconColor={cartMap[mp.id] ? '#fff' : theme.text}
-                    bg={cartMap[mp.id] ? brand.primary : undefined}
-                    onPress={() => onToggleCart(mp.id, 'markenprodukt', mp)}
-                  />
+                  <View ref={(el) => { if (mp?.id) cartButtonRefs.current.set(mp.id, el); }}>
+                    <ActionButton
+                      icon={cartMap[mp.id] ? 'cart-check' : 'cart-plus'}
+                      iconColor={cartMap[mp.id] ? '#fff' : theme.text}
+                      bg={cartMap[mp.id] ? brand.primary : undefined}
+                      onPress={() => onToggleCart(mp.id, 'markenprodukt', mp)}
+                    />
+                  </View>
                 </View>
                 <View
                   ref={ratingAnchor.ref}
@@ -1774,12 +1796,14 @@ export default function ProductComparisonScreen() {
                           iconColor={favMap[nn.id] ? '#e53935' : theme.text}
                           onPress={() => onToggleFav(nn.id, 'noname', nn)}
                         />
-                        <ActionButton
-                          icon={cartMap[nn.id] ? 'cart-check' : 'cart-plus'}
-                          iconColor={cartMap[nn.id] ? '#fff' : theme.text}
-                          bg={cartMap[nn.id] ? brand.primary : undefined}
-                          onPress={() => onToggleCart(nn.id, 'noname', nn)}
-                        />
+                        <View ref={(el) => { if (nn.id) cartButtonRefs.current.set(nn.id, el); }}>
+                          <ActionButton
+                            icon={cartMap[nn.id] ? 'cart-check' : 'cart-plus'}
+                            iconColor={cartMap[nn.id] ? '#fff' : theme.text}
+                            bg={cartMap[nn.id] ? brand.primary : undefined}
+                            onPress={() => onToggleCart(nn.id, 'noname', nn)}
+                          />
+                        </View>
                         <ActionButton
                           icon="star"
                           iconColor="#f5b301"
@@ -2327,7 +2351,7 @@ export default function ProductComparisonScreen() {
           Scroll der Detailseite (handled via scrollY-watcher unten). */}
       {openPillProductId && (
         <Pressable
-          onPress={() => setOpenPillProductId(null)}
+          onPress={() => setOpenPill(null)}
           style={{
             position: 'absolute',
             top: 0,
@@ -2338,39 +2362,52 @@ export default function ProductComparisonScreen() {
           }}
         />
       )}
-      {openPillProductId && (
-        <View
-          pointerEvents="box-none"
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: insets.bottom + 90,
-            alignItems: 'center',
-          }}
-        >
-          <QuantityPill
-            visible={!!openPillProductId}
-            anzahl={cartAnzahlMap[openPillProductId] ?? 1}
-            onIncrement={() => {
-              const pid = openPillProductId;
-              if (!pid) return;
-              // ProductData ermitteln: main oder alternative finden
-              const isMain = mp?.id === pid;
-              const productData = isMain ? mp : (nonames.find((n) => n.id === pid) ?? null);
-              const productType: 'markenprodukt' | 'noname' = isMain ? 'markenprodukt' : 'noname';
-              if (productData) onIncrementCart(pid, productType, productData);
+      {openPill && (() => {
+        // Pill am Cart-Button positionieren — Top des Buttons minus
+        // Pill-Höhe (44 + 8 Abstand). Pill ist 116-150 px breit, also
+        // horizontal über der Mitte des Buttons zentrieren.
+        const PILL_HEIGHT = 44;
+        const GAP_ABOVE_BUTTON = 10;
+        const PILL_WIDTH_EST = 124;
+        const screenWidth = require('react-native').Dimensions.get('window').width;
+        let pillTop = openPill.y - PILL_HEIGHT - GAP_ABOVE_BUTTON;
+        if (pillTop < insets.top + 8) {
+          // Wenn nicht genug Platz oben → unter den Button setzen
+          pillTop = openPill.y + openPill.h + GAP_ABOVE_BUTTON;
+        }
+        let pillLeft = openPill.x + openPill.w / 2 - PILL_WIDTH_EST / 2;
+        pillLeft = Math.max(8, Math.min(screenWidth - PILL_WIDTH_EST - 8, pillLeft));
+        return (
+          <View
+            pointerEvents="box-none"
+            style={{
+              position: 'absolute',
+              left: pillLeft,
+              top: pillTop,
             }}
-            onDecrement={() => {
-              const pid = openPillProductId;
-              if (!pid) return;
-              const isMain = mp?.id === pid;
-              const productType: 'markenprodukt' | 'noname' = isMain ? 'markenprodukt' : 'noname';
-              onDecrementCart(pid, productType);
-            }}
-          />
-        </View>
-      )}
+          >
+            <QuantityPill
+              visible={!!openPillProductId}
+              anzahl={cartAnzahlMap[openPillProductId!] ?? 1}
+              onIncrement={() => {
+                const pid = openPillProductId;
+                if (!pid) return;
+                const isMain = mp?.id === pid;
+                const productData = isMain ? mp : (nonames.find((n) => n.id === pid) ?? null);
+                const productType: 'markenprodukt' | 'noname' = isMain ? 'markenprodukt' : 'noname';
+                if (productData) onIncrementCart(pid, productType, productData);
+              }}
+              onDecrement={() => {
+                const pid = openPillProductId;
+                if (!pid) return;
+                const isMain = mp?.id === pid;
+                const productType: 'markenprodukt' | 'noname' = isMain ? 'markenprodukt' : 'noname';
+                onDecrementCart(pid, productType);
+              }}
+            />
+          </View>
+        );
+      })()}
 
       {/* ProductDetail-Walkthrough — Welcome-Card + Spotlights.
           Gleiche Tour-Key 'product-detail' wie noname-detail.

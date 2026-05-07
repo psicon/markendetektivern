@@ -192,9 +192,14 @@ export default function NoNameDetailScreen() {
     };
   }, [id, isFavorite]);
   const [inCart, setInCart] = useState(false);
-  // NEU (2026-05-07): Cart-Anzahl + Pill-Open-State
+  // NEU (2026-05-07): Cart-Anzahl + Pill-Anchor (Position des Cart-Buttons)
   const [cartAnzahl, setCartAnzahl] = useState(0);
-  const [pillOpen, setPillOpen] = useState(false);
+  const [pillAnchor, setPillAnchor] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const pillOpen = pillAnchor !== null;
+  const setPillOpen = (open: boolean) => {
+    if (!open) setPillAnchor(null);
+  };
+  const cartButtonAnchorRef = useRef<View | null>(null);
   const [ratingsOpen, setRatingsOpen] = useState(false);
   // Connected Brands des Herstellers — separat geladen, weil das
   // Aggregat im Cloud-Function-Job (`connected-brands-aggregator`)
@@ -534,7 +539,16 @@ export default function NoNameDetailScreen() {
     const next = prev + 1;
     setCartAnzahl(next);
     setInCart(true);
-    setPillOpen(true);
+    // Pill am Cart-Button positionieren
+    if (cartButtonAnchorRef.current && (cartButtonAnchorRef.current as any).measureInWindow) {
+      (cartButtonAnchorRef.current as any).measureInWindow(
+        (x: number, y: number, w: number, h: number) => {
+          setPillAnchor({ x, y, w, h });
+        },
+      );
+    } else {
+      setPillAnchor({ x: 0, y: 0, w: 0, h: 0 });
+    }
 
     // FlyToCart-Animation nur bei initialem Add (anzahl 0→1).
     if (prev === 0) {
@@ -939,7 +953,10 @@ export default function NoNameDetailScreen() {
                   />
                 </View>
                 <View
-                  ref={cartAnchor.ref}
+                  ref={(el) => {
+                    cartAnchor.ref.current = el as any;
+                    cartButtonAnchorRef.current = el;
+                  }}
                   onLayout={cartAnchor.onLayout}
                   collapsable={false}
                 >
@@ -1559,25 +1576,31 @@ export default function NoNameDetailScreen() {
           }}
         />
       )}
-      {pillOpen && (
-        <View
-          pointerEvents="box-none"
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: insets.bottom + 90,
-            alignItems: 'center',
-          }}
-        >
-          <QuantityPill
-            visible={pillOpen}
-            anzahl={Math.max(1, cartAnzahl)}
-            onIncrement={onIncrementFromPill}
-            onDecrement={onDecrementFromPill}
-          />
-        </View>
-      )}
+      {pillOpen && pillAnchor && (() => {
+        const PILL_HEIGHT = 44;
+        const GAP = 10;
+        const PILL_WIDTH_EST = 124;
+        const screenWidth = require('react-native').Dimensions.get('window').width;
+        let pillTop = pillAnchor.y - PILL_HEIGHT - GAP;
+        if (pillTop < insets.top + 8) {
+          pillTop = pillAnchor.y + pillAnchor.h + GAP;
+        }
+        let pillLeft = pillAnchor.x + pillAnchor.w / 2 - PILL_WIDTH_EST / 2;
+        pillLeft = Math.max(8, Math.min(screenWidth - PILL_WIDTH_EST - 8, pillLeft));
+        return (
+          <View
+            pointerEvents="box-none"
+            style={{ position: 'absolute', left: pillLeft, top: pillTop }}
+          >
+            <QuantityPill
+              visible={pillOpen}
+              anzahl={Math.max(1, cartAnzahl)}
+              onIncrement={onIncrementFromPill}
+              onDecrement={onDecrementFromPill}
+            />
+          </View>
+        );
+      })()}
 
       {/* ProductDetail-Walkthrough — Welcome-Card + Spotlights.
           CoachmarkScrollProvider gibt der SpotlightOverlay-Engine

@@ -4073,10 +4073,16 @@ export class FirestoreService {
 
       if (productId) {
         const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
-        
+
         // NEU: Hole den aktuellen Index für dieses Produkt
         const viewedProductIndex = journeyTrackingService.getViewedProductIndexAfterAction(productId);
-        
+
+        // NEU (2026-05-07): Quantity aus cartData mitschicken — User
+        // hat ggf. anzahl > 1 in den Einkaufszettel gelegt, beim
+        // "gekauft markieren" wird die GESAMTE anzahl als 1 Action
+        // mit quantity:N in der Journey getrackt.
+        const cartAnzahl = ((cartData as any).anzahl ?? 1) as number;
+
         // NEU: Verwende die gespeicherte journeyId!
         if (cartData.journeyId) {
           // 🚀 PERFORMANCE: Sequential Non-Blocking - UI ist sofort frei!
@@ -4088,8 +4094,9 @@ export class FirestoreService {
               productType: productType,
               finalPrice: finalPrice,
               finalSavings: finalSavings,
-              viewedProductIndex: viewedProductIndex // NEU: Index für eindeutige Zuordnung
-            }],
+              viewedProductIndex: viewedProductIndex,
+              quantity: cartAnzahl, // NEU: Anzahl gekaufter Einheiten
+            } as any],
             finalSavings,
             userId
           ).catch(error => {
@@ -4103,8 +4110,9 @@ export class FirestoreService {
             productName: productName,
             productType: productType,
             finalPrice: finalPrice,
-            finalSavings: finalSavings
-          }], finalSavings, userId);
+            finalSavings: finalSavings,
+            quantity: cartAnzahl,
+          } as any], finalSavings, userId);
         }
       } else {
         console.error('❌ Keine productId gefunden für Journey-Tracking!', cartData);

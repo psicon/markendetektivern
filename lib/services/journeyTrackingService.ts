@@ -1094,12 +1094,13 @@ class JourneyTrackingService {
    * Trackt Purchase mit vollständiger Journey-Attribution
    */
   trackPurchase(
-    products: { 
-      productId: string; 
-      productName: string; 
+    products: {
+      productId: string;
+      productName: string;
       productType: 'brand' | 'noname';
       finalPrice?: number;
       finalSavings?: number;
+      quantity?: number; // NEU 2026-05-07
     }[],
     totalSavings: number,
     userId?: string
@@ -1133,7 +1134,7 @@ class JourneyTrackingService {
       }
       
       if (!viewedProduct.actions) viewedProduct.actions = [];
-      viewedProduct.actions.push({
+      const purchaseAction: any = {
         timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
         type: 'purchased',
         productId: product.productId,
@@ -1146,8 +1147,12 @@ class JourneyTrackingService {
           type: 'purchased',
           price: product.finalPrice,
           savings: product.finalSavings
-        }, this.currentJourney!.activeFilters)
-      });
+        }, this.currentJourney!.activeFilters),
+      };
+      if ((product as any).quantity !== undefined) {
+        purchaseAction.quantity = (product as any).quantity;
+      }
+      viewedProduct.actions.push(purchaseAction);
     });
 
     console.log(`💰 Purchase mit Journey: ${products.length} Produkte, €${totalSavings.toFixed(2)}`, {
@@ -2170,6 +2175,7 @@ class JourneyTrackingService {
       finalPrice?: number;
       finalSavings?: number;
       viewedProductIndex?: number;
+      quantity?: number; // NEU 2026-05-07: gekaufte Anzahl-Einheiten
     }[],
     totalSavings: number,
     userId: string
@@ -2467,6 +2473,7 @@ class JourneyTrackingService {
         finalPrice?: number;
         finalSavings?: number;
         viewedProductIndex?: number;
+        quantity?: number;
       }>;
     }
   > = new Map();
@@ -2574,6 +2581,9 @@ class JourneyTrackingService {
         };
         if (purchaseAction.finalPrice !== undefined) safeAction.price = purchaseAction.finalPrice;
         if (purchaseAction.finalSavings !== undefined) safeAction.savings = purchaseAction.finalSavings;
+        if ((purchaseAction as any).quantity !== undefined) {
+          safeAction.quantity = (purchaseAction as any).quantity;
+        }
         viewedProduct.actions.push(safeAction);
       }
 

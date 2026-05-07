@@ -782,9 +782,9 @@ function EmptyState({
 // ═══════════════════════════════════════════════════════════════════
 function RowActions({
   onCheck,
-  onDelete,
+  onDelete: _onDelete, // beibehalten für API-Kompat (Custom-Items, Bulk), aber nicht mehr im UI
   loadingCheck,
-  loadingDelete,
+  loadingDelete: _loadingDelete,
   anzahl,
   onIncrement,
   onDecrement,
@@ -799,9 +799,14 @@ function RowActions({
   onDecrement?: () => void;
 }) {
   const { brand, theme } = useTokens();
+  // Layout (User-Vorgabe 2026-05-07):
+  //   [ - N + ]  [    ✓ Gekauft    ]
+  // Quantity-Pill links, größerer Check-Button rechts. Kein Lösch-
+  // Button mehr — Löschen läuft via Swipe (oder via "−" wenn anzahl=1
+  // → Pill zeigt dann Mülleimer-Icon statt "−").
   return (
-    <View style={{ gap: 6, alignItems: 'center' }}>
-      {/* Quantity-Steuerung — nur bei DB-Items mit anzahl-Feld */}
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      {/* Quantity-Pill (nur bei DB-Items mit anzahl-Feld) */}
       {anzahl !== undefined && onIncrement && onDecrement && (
         <View
           style={{
@@ -810,38 +815,42 @@ function RowActions({
             backgroundColor: theme.surface,
             borderWidth: 1,
             borderColor: theme.border,
-            borderRadius: 14,
+            borderRadius: 18,
             paddingHorizontal: 2,
-            height: 28,
-            gap: 2,
+            height: 36,
           }}
         >
           <Pressable
             onPress={onDecrement}
             hitSlop={4}
             style={({ pressed }) => ({
-              width: 22,
-              height: 22,
-              borderRadius: 11,
+              width: 30,
+              height: 30,
+              borderRadius: 15,
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: pressed ? theme.surfaceAlt : 'transparent',
+              backgroundColor: pressed
+                ? anzahl <= 1
+                  ? '#fee2e2'
+                  : theme.surfaceAlt
+                : 'transparent',
             })}
           >
             <MaterialCommunityIcons
               name={anzahl <= 1 ? 'trash-can-outline' : 'minus'}
-              size={14}
-              color={anzahl <= 1 ? brand.error : theme.text}
+              size={16}
+              color={anzahl <= 1 ? '#dc2626' : theme.text}
             />
           </Pressable>
           <Text
             style={{
               fontFamily,
               fontWeight: fontWeight.extraBold,
-              fontSize: 12,
+              fontSize: 14,
               color: theme.text,
-              minWidth: 16,
+              minWidth: 20,
               textAlign: 'center',
+              letterSpacing: -0.2,
             }}
           >
             {anzahl}
@@ -850,26 +859,29 @@ function RowActions({
             onPress={onIncrement}
             hitSlop={4}
             style={({ pressed }) => ({
-              width: 22,
-              height: 22,
-              borderRadius: 11,
+              width: 30,
+              height: 30,
+              borderRadius: 15,
               alignItems: 'center',
               justifyContent: 'center',
               backgroundColor: pressed ? brand.primaryContainer ?? theme.surfaceAlt : brand.primary,
             })}
           >
-            <MaterialCommunityIcons name="plus" size={14} color="#fff" />
+            <MaterialCommunityIcons name="plus" size={16} color="#fff" />
           </Pressable>
         </View>
       )}
+
+      {/* Großer Check-Button (Gekauft markieren) */}
       <Pressable
         onPress={onCheck}
         disabled={loadingCheck}
         hitSlop={4}
         style={({ pressed }) => ({
-          width: 34,
-          height: 34,
-          borderRadius: 17,
+          height: 44,
+          minWidth: 44,
+          paddingHorizontal: 12,
+          borderRadius: 22,
           backgroundColor: brand.primary,
           alignItems: 'center',
           justifyContent: 'center',
@@ -879,27 +891,7 @@ function RowActions({
         {loadingCheck ? (
           <ActivityIndicator size="small" color="#fff" />
         ) : (
-          <MaterialCommunityIcons name="check" size={18} color="#fff" />
-        )}
-      </Pressable>
-      <Pressable
-        onPress={onDelete}
-        disabled={loadingDelete}
-        hitSlop={4}
-        style={({ pressed }) => ({
-          width: 34,
-          height: 34,
-          borderRadius: 17,
-          backgroundColor: brand.error,
-          alignItems: 'center',
-          justifyContent: 'center',
-          opacity: pressed || loadingDelete ? 0.7 : 1,
-        })}
-      >
-        {loadingDelete ? (
-          <ActivityIndicator size="small" color="#fff" />
-        ) : (
-          <MaterialCommunityIcons name="trash-can-outline" size={18} color="#fff" />
+          <MaterialCommunityIcons name="check" size={22} color="#fff" />
         )}
       </Pressable>
     </View>
