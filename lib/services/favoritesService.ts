@@ -377,32 +377,70 @@ class FavoritesService {
 
   /**
    * Subscription für Realtime Updates
+   *
+   * Fix (2026-05-07): Throttled callback via Trailing-Edge-Timer +
+   * Signature-Dedupe. Bei tap-burst auf Favoriten-Toggle feuert
+   * onSnapshot pro Firestore-Write → ohne Throttle re-rendert
+   * jeder useFavorites-Consumer (inkl. ProductComparison, ein
+   * großer Tree) für jeden Snapshot. UI-Thread fällt zurück
+   * (fps 0.17 gemessen).
+   *
+   * Mit Throttle: nach jedem Snapshot wird ein 250ms-Timer gesetzt,
+   * der den NEUESTEN Stand emittet. Mehrere Snapshots in <250ms
+   * werden zu 1 callback gequetscht. Wenn die Signatur (length +
+   * erste/letzte ID) identisch ist → kein callback (kein
+   * State-Update → kein Re-Render).
    */
   subscribeToFavorites(userId: string, callback: (favorites: FavoriteProduct[]) => void) {
     const userRef = doc(db, 'users', userId);
     const favoritesRef = collection(userRef, 'favorites');
 
-    return onSnapshot(favoritesRef, (snapshot) => {
+    let pendingTimer: NodeJS.Timeout | null = null;
+    let pendingSnapshot: any = null;
+    let lastSig = '';
+    const THROTTLE_MS = 250;
+
+    const emit = () => {
+      pendingTimer = null;
+      const snapshot = pendingSnapshot;
+      pendingSnapshot = null;
+      if (!snapshot) return;
+
       const favorites: FavoriteProduct[] = [];
-      
-      snapshot.forEach((doc) => {
-        const data = doc.data();
+      snapshot.forEach((d: any) => {
+        const data = d.data();
         favorites.push({
-          id: doc.id,
+          id: d.id,
           userId,
           productId: data.productId,
           productType: data.productType,
           productData: data.productData,
-          addedAt: data.addedAt?.toDate() || new Date()
+          addedAt: data.addedAt?.toDate() || new Date(),
         });
       });
 
+      const sig = `${favorites.length}:${favorites[0]?.id ?? ''}:${favorites[favorites.length - 1]?.id ?? ''}`;
+      if (sig === lastSig) {
+        // Identische Liste → State-Update unnötig, kein Re-Render-Trigger
+        return;
+      }
+      lastSig = sig;
       callback(favorites);
-    }, (error) => {
-      console.error('❌ Error in favorites subscription:', error);
-      // Bei Fehler: Leere Liste zurückgeben
-      callback([]);
-    });
+    };
+
+    return onSnapshot(
+      favoritesRef,
+      (snapshot) => {
+        // Speichere den NEUESTEN Stand (ältere werden überschrieben)
+        pendingSnapshot = snapshot;
+        if (pendingTimer) return; // Timer läuft schon, neuer Stand wird beim Feuern verwendet
+        pendingTimer = setTimeout(emit, THROTTLE_MS);
+      },
+      (error) => {
+        console.error('❌ Error in favorites subscription:', error);
+        callback([]);
+      },
+    );
   }
   
   /**
