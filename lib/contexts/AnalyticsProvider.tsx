@@ -51,7 +51,9 @@ interface AnalyticsProviderProps {
   children: React.ReactNode;
 }
 
+import { tick as _tick } from '@/lib/utils/renderCounter';
 export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }) => {
+  _tick('AnalyticsProvider');
   const { user, userProfile } = useAuth();
   const pathname = usePathname();
   const lastScreenRef = useRef<string>('');

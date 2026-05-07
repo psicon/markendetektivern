@@ -172,7 +172,9 @@ function savings(
 // Screen
 // ────────────────────────────────────────────────────────────────────────
 
+import { tick as _tick } from '@/lib/utils/renderCounter';
 export default function ProductComparisonScreen() {
+  _tick('ProductComparison');
   const { id, type } = useLocalSearchParams<{ id: string; type?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
