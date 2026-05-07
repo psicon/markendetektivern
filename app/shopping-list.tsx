@@ -122,6 +122,10 @@ type EnrichedItem = {
   /** NEU (2026-05-07): Cart-Anzahl. Default 1 für Backwards-Compat
    *  mit Legacy-Auto-ID-Docs ohne anzahl-Feld. */
   anzahl?: number;
+  /** NEU (2026-05-07): Produkt-ID explizit (für Quantity-Operations).
+   *  getDocumentByReference returnt nur doc.data() ohne .id, daher
+   *  müssen wir die ID separat halten. */
+  productId?: string;
 };
 
 // Height of the sticky SegmentedTabs row that sits below the DetailHeader.
@@ -1776,8 +1780,10 @@ export default function ShoppingListScreen() {
                   id: item.id,
                   kind: 'brand' as const,
                   markenProduktRef: ref.id,
+                  productId: ref.id, // explizit für Quantity-Ops
                   product: {
                     ...productData,
+                    id: ref.id, // FIX: getDocumentByReference returnt nur data()
                     hersteller: herstellerData,
                     marke: markeData, // Für info-icon → mp.marke.infos
                   },
@@ -1835,8 +1841,10 @@ export default function ShoppingListScreen() {
                 enriched: {
                   id: item.id,
                   kind: 'noname' as const,
+                  productId: ref.id, // explizit für Quantity-Ops
                   product: {
                     ...productData,
+                    id: ref.id, // FIX: getDocumentByReference returnt nur data()
                     handelsmarke: handelsmarkeData,
                     discounter: finalDiscounter,
                     hersteller: herstellerData,
@@ -1844,6 +1852,7 @@ export default function ShoppingListScreen() {
                   savings,
                   // preserve journey info for bulk purchase
                   ...(item as any),
+                  anzahl: ((item as any).anzahl ?? 1) as number,
                 } satisfies EnrichedItem,
                 savings,
               };
@@ -2255,9 +2264,14 @@ export default function ShoppingListScreen() {
     if (!user?.uid) return;
     if (item.isCustom) return; // Custom-Items haben keinen productId
     const productData = item.product;
-    const productId = productData?.id;
+    // Fix (2026-05-07): explicit productId Feld nutzen, NICHT product.id
+    // (getDocumentByReference returnt nur doc.data() ohne id-Feld).
+    const productId = item.productId ?? productData?.id;
     const isMarke = item.kind === 'brand';
-    if (!productId) return;
+    if (!productId) {
+      console.warn('[cart] handleIncrementCart: kein productId gefunden', { item });
+      return;
+    }
     const prevAnzahl = item.anzahl ?? 1;
     // Optimistisch
     if (isMarke) {
@@ -2302,9 +2316,12 @@ export default function ShoppingListScreen() {
       return;
     }
     const productData = item.product;
-    const productId = productData?.id;
+    const productId = item.productId ?? productData?.id;
     const isMarke = item.kind === 'brand';
-    if (!productId) return;
+    if (!productId) {
+      console.warn('[cart] handleDecrementCart: kein productId gefunden', { item });
+      return;
+    }
     const prevAnzahl = item.anzahl ?? 1;
     const newAnzahl = prevAnzahl - 1;
     // Optimistisch
@@ -2399,7 +2416,7 @@ export default function ShoppingListScreen() {
 
       if (dbProducts.length > 0) {
         productsForJourneyTracking = dbProducts.map((item) => ({
-          productId: item.product?.id || '',
+          productId: (item as any).productId || item.product?.id || '',
           productName:
             item.product?.name || item.product?.produktName || item.name || 'Unbekannt',
           productType: 'noname' as 'brand' | 'noname',
@@ -2407,6 +2424,7 @@ export default function ShoppingListScreen() {
           finalSavings: item.savings || 0,
           journeyId: (item as any).journeyId,
           viewedProductIndex: (item as any).viewedProductIndex,
+          quantity: (item as any).anzahl ?? 1, // NEU: Bulk-Purchase weiß wieviele
         }));
         if (
           productsForJourneyTracking.length > 0 &&

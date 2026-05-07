@@ -965,6 +965,7 @@ export default function NoNameDetailScreen() {
                     iconColor={inCart ? '#fff' : theme.text}
                     bg={inCart ? brand.primary : undefined}
                     onPress={onCartPress}
+                    badge={cartAnzahl || 0}
                   />
                 </View>
                 <View
@@ -1635,47 +1636,82 @@ type ActionButtonProps = {
   bg?: string;
   subLabel?: string;
   onPress?: () => void;
+  /** NEU (2026-05-07): Anzahl-Badge oben rechts (zb für Cart-Button). */
+  badge?: number;
 };
 
-function ActionButton({ icon, iconColor, bg, subLabel, onPress }: ActionButtonProps) {
-  const { theme } = useTokens();
+function ActionButton({ icon, iconColor, bg, subLabel, onPress, badge }: ActionButtonProps) {
+  const { theme, brand } = useTokens();
   const filled = !!bg;
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        width: 48,
-        height: 48,
-        borderRadius: 14,
-        backgroundColor: bg ?? theme.surface,
-        borderWidth: filled ? 0 : 1,
-        borderColor: theme.border,
-        alignItems: 'center',
-        justifyContent: 'center',
-        opacity: pressed ? 0.88 : 1,
-        shadowColor: '#000',
-        shadowOpacity: 0.08,
-        shadowOffset: { width: 0, height: 2 },
-        shadowRadius: 6,
-        elevation: 2,
-      })}
-    >
-      <MaterialCommunityIcons name={icon} size={subLabel ? 14 : 22} color={iconColor} />
-      {subLabel ? (
-        <Text
+    <View style={{ position: 'relative' }}>
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => ({
+          width: 48,
+          height: 48,
+          borderRadius: 14,
+          backgroundColor: bg ?? theme.surface,
+          borderWidth: filled ? 0 : 1,
+          borderColor: theme.border,
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: pressed ? 0.88 : 1,
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowOffset: { width: 0, height: 2 },
+          shadowRadius: 6,
+          elevation: 2,
+        })}
+      >
+        <MaterialCommunityIcons name={icon} size={subLabel ? 14 : 22} color={iconColor} />
+        {subLabel ? (
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 11,
+              lineHeight: 13,
+              color: filled ? '#fff' : theme.text,
+              marginTop: 2,
+            }}
+          >
+            {subLabel}
+          </Text>
+        ) : null}
+      </Pressable>
+      {badge !== undefined && badge > 0 ? (
+        <View
+          pointerEvents="none"
           style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 11,
-            lineHeight: 13,
-            color: filled ? '#fff' : theme.text,
-            marginTop: 2,
+            position: 'absolute',
+            top: -6,
+            right: -6,
+            minWidth: 22,
+            height: 22,
+            borderRadius: 11,
+            paddingHorizontal: 6,
+            backgroundColor: brand.primary,
+            borderWidth: 2,
+            borderColor: theme.surface,
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
-          {subLabel}
-        </Text>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 11,
+              color: '#fff',
+              letterSpacing: -0.2,
+            }}
+          >
+            {badge}
+          </Text>
+        </View>
       ) : null}
-    </Pressable>
+    </View>
   );
 }
 

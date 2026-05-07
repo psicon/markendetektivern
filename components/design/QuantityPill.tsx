@@ -39,21 +39,34 @@ export function QuantityPill({
 }: QuantityPillProps) {
   const { theme, brand, shadows } = useTokens();
   const opacity = useSharedValue(0);
-  const scale = useSharedValue(0.8);
+  const scale = useSharedValue(0.5);
+  const translateY = useSharedValue(8);
 
   useEffect(() => {
     if (visible) {
-      opacity.value = withTiming(1, { duration: 180 });
-      scale.value = withSpring(1, { damping: 14, stiffness: 220 });
+      opacity.value = withTiming(1, { duration: 140 });
+      // Bouncy spring mit Overshoot — Pop-Effect: 0.5 → 1.08 → 1
+      scale.value = withSpring(1, {
+        damping: 9,
+        stiffness: 280,
+        mass: 0.6,
+        overshootClamping: false,
+      });
+      translateY.value = withSpring(0, {
+        damping: 12,
+        stiffness: 300,
+        mass: 0.6,
+      });
     } else {
-      opacity.value = withTiming(0, { duration: 160 });
-      scale.value = withTiming(0.85, { duration: 160 });
+      opacity.value = withTiming(0, { duration: 120 });
+      scale.value = withTiming(0.8, { duration: 120 });
+      translateY.value = withTiming(4, { duration: 120 });
     }
-  }, [visible, opacity, scale]);
+  }, [visible, opacity, scale, translateY]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
-    transform: [{ scale: scale.value }],
+    transform: [{ scale: scale.value }, { translateY: translateY.value }],
   }));
 
   if (!visible && opacity.value === 0) return null;

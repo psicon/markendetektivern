@@ -2266,11 +2266,12 @@ class JourneyTrackingService {
           if (product.productType) safeAction.productType = product.productType;
           if (product.finalPrice !== undefined) safeAction.price = product.finalPrice;
           if (product.finalSavings !== undefined) safeAction.savings = product.finalSavings;
+          if ((product as any).quantity !== undefined) safeAction.quantity = (product as any).quantity;
           if (product.productId) {
             safeAction.productRef = doc(db, product.productType === 'brand' ? 'markenProdukte' : 'produkte', product.productId);
           }
           safeAction.motivation = { primary: 'price', confidence: 0.8 };
-          
+
           viewedProduct.actions.push(safeAction);
         });
         
@@ -2310,6 +2311,7 @@ class JourneyTrackingService {
       finalPrice?: number;
       finalSavings?: number;
       viewedProductIndex?: number; // NEU: Index für eindeutige Zuordnung
+      quantity?: number; // NEU 2026-05-07
     }[],
     totalSavings: number,
     userId: string
@@ -2396,11 +2398,12 @@ class JourneyTrackingService {
           if (product.productType) safeAction.productType = product.productType;
           if (product.finalPrice !== undefined) safeAction.price = product.finalPrice;
           if (product.finalSavings !== undefined) safeAction.savings = product.finalSavings;
+          if ((product as any).quantity !== undefined) safeAction.quantity = (product as any).quantity;
           if (product.productId) {
             safeAction.productRef = doc(db, product.productType === 'brand' ? 'markenProdukte' : 'produkte', product.productId);
           }
           safeAction.motivation = { primary: 'price', confidence: 0.8 };
-          
+
           viewedProduct.actions.push(safeAction);
           
           console.log(`🔍 AFTER adding purchased action:`, {

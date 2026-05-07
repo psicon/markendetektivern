@@ -3643,14 +3643,20 @@ export class FirestoreService {
       const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
       const currentJourneyId = journeyTrackingService.getCurrentJourneyId();
 
-      // Existierenden Det-Doc lesen (1 read aus local cache wenn vorhanden).
+      // Existierenden Det-Doc lesen (für gekauft-Reset und newAnzahl-Schätzung
+      // für Journey-Tracking). Read aus local-cache wenn vorhanden.
       const existingSnap = await getDoc(detRef);
       const exists = existingSnap.exists();
-      const prevAnzahl = exists ? ((existingSnap.data() as any)?.anzahl ?? 1) : 0;
+      const existingData = exists ? ((existingSnap.data() as any) ?? {}) : null;
+      const wasGekauft = existingData?.gekauft === true;
+      // Bei "war gekauft" → Cycle resetten: anzahl wieder auf 1.
+      // Sonst: client-seitiges newAnzahl als Best-Guess für journey-tracking.
+      // Der ECHTE Server-Write nutzt atomares increment(1) (kein read-modify-write
+      // → race-safe bei rapid-taps).
+      const prevAnzahl = wasGekauft ? 0 : exists ? ((existingData?.anzahl ?? 1) as number) : 0;
       const newAnzahl = prevAnzahl + 1;
 
-      // Journey-Tracking (in-memory, sync) — bekommt viewedProductIndex.
-      // quantity-Feld in der Action wird auf newAnzahl gesetzt.
+      // Journey-Tracking (in-memory, sync)
       let viewedProductIndex: number | null = null;
       if (source) {
         try {
@@ -3661,53 +3667,45 @@ export class FirestoreService {
             userId,
             priceInfo,
             comparisonContext,
-            newAnzahl, // NEU: quantity in Action speichern
+            newAnzahl, // quantity in Action
           );
         } catch (e) {
           console.warn('journey trackAddToCart sync failed:', e);
         }
       }
 
-      if (exists) {
-        // Increment: nur die geänderten Felder updaten (kein Doc-Replace)
-        const updatePayload: any = {
-          anzahl: newAnzahl,
-          timestamp: serverTimestamp(),
-          gekauft: false, // falls vorher als gekauft markiert war + neu hinzugefügt
-        };
-        if (currentJourneyId) updatePayload.journeyId = currentJourneyId;
-        if (source) updatePayload.source = source;
-        if (sourceMetadata) updatePayload.sourceMetadata = sourceMetadata;
-        if (priceInfo) {
-          updatePayload.priceAtTime = priceInfo.price;
-          updatePayload.savingsAtTime = priceInfo.savings;
-        }
-        if (viewedProductIndex !== null) updatePayload.viewedProductIndex = viewedProductIndex;
-
-        await updateDoc(detRef, updatePayload);
-      } else {
-        // Erstmaliges Hinzufügen: vollständiges Doc schreiben
-        const data: any = {
-          gekauft: false,
-          timestamp: serverTimestamp(),
-          name: productName,
-          anzahl: 1,
-          journeyId: currentJourneyId,
-          ...(priceInfo && {
-            priceAtTime: priceInfo.price,
-            savingsAtTime: priceInfo.savings,
-          }),
-          ...(source && { source }),
-          ...(sourceMetadata && { sourceMetadata }),
-          ...(viewedProductIndex !== null && { viewedProductIndex }),
-        };
-        if (isMarke) {
-          data.markenProdukt = doc(db, 'markenProdukte', productId);
-        } else {
-          data.handelsmarkenProdukt = doc(db, 'produkte', productId);
-        }
-        await setDoc(detRef, data);
+      // ─── Single atomic write ───
+      // setDoc + merge=true. Der einzige nicht-atomare Operator wäre
+      // anzahl, daher nutzen wir Firestore's increment(1) das Server-
+      // seitig atomar ist. Bei rapid-taps gehen alle Increments
+      // korrekt durch ohne Race-Condition.
+      // Wenn doc gekauft:true war, RESETTEN wir anzahl explizit auf 1
+      // (kein increment).
+      const writePayload: any = {
+        gekauft: false,
+        timestamp: serverTimestamp(),
+        name: productName,
+        anzahl: wasGekauft || !exists ? 1 : increment(1),
+      };
+      if (currentJourneyId !== null && currentJourneyId !== undefined) {
+        writePayload.journeyId = currentJourneyId;
       }
+      if (source) writePayload.source = source;
+      if (sourceMetadata) writePayload.sourceMetadata = sourceMetadata;
+      if (priceInfo) {
+        writePayload.priceAtTime = priceInfo.price;
+        writePayload.savingsAtTime = priceInfo.savings;
+      }
+      if (viewedProductIndex !== null) writePayload.viewedProductIndex = viewedProductIndex;
+      if (!exists) {
+        // Erstmalig: Produkt-Reference setzen
+        if (isMarke) {
+          writePayload.markenProdukt = doc(db, 'markenProdukte', productId);
+        } else {
+          writePayload.handelsmarkenProdukt = doc(db, 'produkte', productId);
+        }
+      }
+      await setDoc(detRef, writePayload, { merge: true });
 
       // 📊 Analytics fire-and-forget
       if (source) {
@@ -3760,8 +3758,8 @@ export class FirestoreService {
       }
       const currentAnzahl = ((snap.data() as any)?.anzahl ?? 1) as number;
       if (currentAnzahl > 1) {
-        // Decrement nur das Feld
-        await updateDoc(detRef, { anzahl: currentAnzahl - 1, timestamp: serverTimestamp() });
+        // Atomares Decrement (race-safe für rapid-taps)
+        await updateDoc(detRef, { anzahl: increment(-1), timestamp: serverTimestamp() });
         console.error('[cart] decrement done', { newAnzahl: currentAnzahl - 1, ms: Date.now() - __t0 });
         return currentAnzahl - 1;
       } else {
