@@ -3715,6 +3715,8 @@ export class FirestoreService {
     productId: string,
     isMarke: boolean,
   ): Promise<number> {
+    const __t0 = Date.now();
+    console.error('[cart] removeByProduct start', { productId: productId.slice(0, 8) });
     try {
       const userRef = doc(db, 'users', userId);
       const productRef = isMarke
@@ -3726,8 +3728,13 @@ export class FirestoreService {
         where(refField, '==', productRef),
         where('gekauft', '==', false),
       );
+      const __qT0 = Date.now();
       const snap = await getDocs(q);
-      if (snap.empty) return 0;
+      console.error('[cart] removeByProduct getDocs', { ms: Date.now() - __qT0, found: snap.size });
+      if (snap.empty) {
+        console.error('[cart] removeByProduct done (empty)', { ms: Date.now() - __t0 });
+        return 0;
+      }
       // Sequenziell löschen (kleine Liste, sollte fast immer 1 sein).
       // `removeFromShoppingCart` triggered Journey-Tracking +
       // Achievement-Logik korrekt — nutzen wir hier auch.
@@ -3740,9 +3747,11 @@ export class FirestoreService {
           console.warn('removeFromShoppingCartByProductId: single delete failed', e);
         }
       }
+      console.error('[cart] removeByProduct done', { ms: Date.now() - __t0, removed });
       return removed;
     } catch (error) {
       console.error('Error removing by product id from cart:', error);
+      console.error('[cart] removeByProduct fail', { ms: Date.now() - __t0 });
       throw error;
     }
   }

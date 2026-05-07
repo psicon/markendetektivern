@@ -48,6 +48,24 @@ setInterval(() => {
   console.error('[hb]', Date.now() - __hbStart);
 }, 500);
 
+// Firestore-Connectivity-Probe — alle 5 s ein winziger getDoc auf
+// einen statischen Path. Loggt die Latenz. Wenn diese während des
+// Freezes hochschießt (z.B. von 50 ms auf 30 s), wissen wir dass
+// die Firestore-Bridge stockt — User-Operationen würden in der
+// gleichen Pipeline serialisiert.
+import { doc as __probeDoc, getDoc as __probeGet } from '@react-native-firebase/firestore';
+setInterval(() => {
+  const t0 = Date.now();
+  // /aggregates/leaderboard_v1 ist read-allowed für alle (per rules)
+  __probeGet(__probeDoc(db, 'aggregates', 'leaderboard_v1'))
+    .then((snap) => {
+      console.error('[probe] firestore', { ms: Date.now() - t0, exists: snap.exists() });
+    })
+    .catch((err) => {
+      console.error('[probe] firestore fail', { ms: Date.now() - t0, code: err?.code, msg: err?.message });
+    });
+}, 5000);
+
 // Auth — native persistent session. RN-Persistence ist eingebaut,
 // kein AsyncStorage-Wrapper mehr nötig.
 export const auth = getAuth();

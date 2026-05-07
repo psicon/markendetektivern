@@ -724,6 +724,7 @@ export default function ProductComparisonScreen() {
     productType: 'markenprodukt' | 'noname',
     productData: any,
   ) => {
+    console.error('[tap] fav', { productId: productId.slice(0, 8) });
     // Optimistic toggle.
     setFavMap((prev) => ({ ...prev, [productId]: !prev[productId] }));
     try {
@@ -745,6 +746,8 @@ export default function ProductComparisonScreen() {
     productType: 'markenprodukt' | 'noname',
     productData: any,
   ) => {
+    const __t0 = Date.now();
+    console.error('[tap] cart', { productId: productId.slice(0, 8), already: !!cartMap[productId] });
     if (!user?.uid) {
       showInfoToast('Bitte anmelden');
       return;
@@ -823,6 +826,7 @@ export default function ProductComparisonScreen() {
       setCartMap((prev) => ({ ...prev, [productId]: already }));
       showInfoToast('Fehler — bitte erneut versuchen');
     }
+    console.error('[tap] cart done', { productId: productId.slice(0, 8), ms: Date.now() - __t0 });
   });
 
   const [existingRating, setExistingRating] = useState<Rating | null>(null);
