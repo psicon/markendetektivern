@@ -3749,11 +3749,22 @@ export class FirestoreService {
       }
       const currentAnzahl = ((snap.data() as any)?.anzahl ?? 1) as number;
       if (currentAnzahl > 1) {
-        // Atomares Decrement (race-safe für rapid-taps)
-        await updateDoc(detRef, { anzahl: increment(-1), timestamp: serverTimestamp() });
+        // Atomares Decrement (race-safe für rapid-taps).
+        // Fix (2026-05-07): fire-and-forget. Auf Android stresste der
+        // awaited updateDoc den nativen WriteStream bei rapid-Taps so
+        // stark, dass der UI-Thread bis zu 25 s wartete, obwohl
+        // Favoriten/Lieblingsmarkt-Writes parallel sauber durchliefen.
+        // Der Firestore-SDK queued + retried den Write intern; Daten
+        // gehen nicht verloren, der UI-Thread kommt sofort zurück.
+        void updateDoc(detRef, { anzahl: increment(-1), timestamp: serverTimestamp() }).catch((err) => {
+          console.warn('[cart] decrement updateDoc bg-fail:', (err as Error)?.message);
+        });
         return currentAnzahl - 1;
       } else {
-        // anzahl === 1 → full remove (mit Journey-Tracking)
+        // anzahl === 1 → full remove (mit Journey-Tracking).
+        // removeFromShoppingCart ist intern bereits fire-and-forget für
+        // den deleteDoc-Teil; das await hier wartet nur auf den getDoc-
+        // Read + den Tracking-Kickoff (beides schnell).
         await this.removeFromShoppingCart(userId, detId);
         return 0;
       }
@@ -3893,8 +3904,11 @@ export class FirestoreService {
         // ZUERST prüfen ob es ein Custom Item ist!
         if (cartData.customItem) {
           console.log('🛒 Custom Item - kein Journey-Tracking nötig');
-          await deleteDoc(cartItemRef);
-          console.log('✅ Custom item removed from shopping cart:', itemId);
+          // Fire-and-forget (siehe Begründung unten beim regulären delete)
+          void deleteDoc(cartItemRef).catch((err) => {
+            console.warn('[cart] custom-item deleteDoc bg-fail:', (err as Error)?.message);
+          });
+          console.log('✅ Custom item removed from shopping cart (queued):', itemId);
           return; // Früh beenden für Custom Items
         }
         
@@ -3982,12 +3996,18 @@ export class FirestoreService {
         // ENTFERNT: laterUpdates - Tracking passiert direkt in aktueller Journey
       }
       
-      // Awaited delete — Daten MÜSSEN sicher gelöscht werden.
-      // Der frühere 25 s Freeze kam von synchronen Journey-Writes
-      // davor (jetzt fire-and-forget) und vom blockierten Firestore-
-      // Write-Stream durch parallele Cart-Operationen.
-      await deleteDoc(cartItemRef);
-      console.log('✅ Removed from shopping cart:', itemId);
+      // Fix (2026-05-07): fire-and-forget. Beim awaited deleteDoc
+      // hing der Cart-Remove auf Android weiterhin 25 s+, obwohl
+      // Favoriten-Writes (gleicher deleteDoc-Pfad, gleiche
+      // deterministische ID) sauber durchliefen. Vermutlich blockiert
+      // der parallel laufende Tracking-getDocs+updateDoc auf dem
+      // gleichen User den nativen WriteStream; durch fire-and-forget
+      // kommt der UI-Thread sofort zurück, der Firestore-SDK queued
+      // + retried den Write intern.
+      void deleteDoc(cartItemRef).catch((err) => {
+        console.warn('[cart] remove deleteDoc bg-fail:', (err as Error)?.message);
+      });
+      console.log('✅ Removed from shopping cart (queued):', itemId);
     } catch (error) {
       console.error('Error removing from shopping cart:', error);
       throw error;
