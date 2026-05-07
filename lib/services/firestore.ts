@@ -3757,6 +3757,8 @@ export class FirestoreService {
    * Entfernt ein Produkt vom Einkaufszettel
    */
   static async removeFromShoppingCart(userId: string, itemId: string): Promise<void> {
+    const __t0 = Date.now();
+    console.error('[cart] remove start', { itemId: itemId.slice(0, 8) });
     try {
       // L Migration: flat-path statt doc(userRef, ...) — RNFirebase
       // doc() unterstützt keine DocumentReference als parent.
@@ -3859,10 +3861,17 @@ export class FirestoreService {
         // ENTFERNT: laterUpdates - Tracking passiert direkt in aktueller Journey
       }
       
-      await deleteDoc(cartItemRef);
-      console.log('✅ Removed from shopping cart:', itemId);
+      // Fix (2026-05-07): deleteDoc fire-and-forget. Cart-UI ist
+      // bereits optimistisch geflippt — User braucht keinen
+      // Server-Ack. Firestore SDK queued + retried selbst.
+      void deleteDoc(cartItemRef).catch((err) => {
+        console.warn('[cart] deleteDoc bg-fail:', err?.message);
+      });
+      console.log('✅ Removed from shopping cart (queued):', itemId);
+      console.error('[cart] remove done', { itemId: itemId.slice(0, 8), ms: Date.now() - __t0 });
     } catch (error) {
       console.error('Error removing from shopping cart:', error);
+      console.error('[cart] remove fail', { itemId: itemId.slice(0, 8), ms: Date.now() - __t0 });
       throw error;
     }
   }
@@ -3871,6 +3880,8 @@ export class FirestoreService {
    * Markiert ein Produkt als gekauft UND erstellt Kaufhistorie-Eintrag
    */
   static async markAsPurchased(userId: string, itemId: string): Promise<void> {
+    const __t0 = Date.now();
+    console.error('[purchase] mark start', { itemId: itemId.slice(0, 8) });
     try {
       // L: flat-path
       const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
@@ -3882,14 +3893,20 @@ export class FirestoreService {
       }
       
       const cartData = cartItemDoc.data();
-      
-      // 2. Erstelle vollständigen Kaufhistorie-Eintrag
-      await this.createPurchaseHistoryEntry(userId, cartData);
-      
-      // 3. Markiere im Einkaufszettel als gekauft
-      await updateDoc(cartItemRef, {
-        gekauft: true
-      });
+
+      // Fix (2026-05-07): Beide Writes fire-and-forget. Bei "alle als
+      // gekauft markieren" (complete_shopping) hat der User N Items
+      // → vorher N × 2 awaited Writes seriell → mehrsekündiger Freeze.
+      // Jetzt: Schreibanfragen rausschicken + sofort weiter.
+      // Tracking-Daten bleiben erhalten (Purchase-History-Doc wird
+      // weiterhin geschrieben, gekauft:true wird gesetzt — nur eben
+      // async, ohne UI zu blockieren).
+      void this.createPurchaseHistoryEntry(userId, cartData).catch((e) =>
+        console.warn('[purchase] history write bg-fail:', e?.message),
+      );
+      void updateDoc(cartItemRef, { gekauft: true }).catch((e) =>
+        console.warn('[purchase] gekauft:true bg-fail:', e?.message),
+      );
       
       // 4. Track Purchase in der ORIGINAL Journey (nicht neue!)
       // Hole die richtigen Produktdaten aus dem cartData
@@ -3958,13 +3975,15 @@ export class FirestoreService {
         console.error('❌ Keine productId gefunden für Journey-Tracking!', cartData);
       }
       
-      console.log('✅ Marked as purchased and added to history:', itemId);
+      console.log('✅ Marked as purchased and added to history (queued):', itemId);
+      console.error('[purchase] mark done', { itemId: itemId.slice(0, 8), ms: Date.now() - __t0 });
     } catch (error) {
       console.error('Error marking as purchased:', error);
+      console.error('[purchase] mark fail', { itemId: itemId.slice(0, 8), ms: Date.now() - __t0 });
       throw error;
     }
   }
-  
+
   /**
    * Markiert ein Produkt als gekauft OHNE Journey-Tracking (für Bulk-Operations)
    */
@@ -3980,18 +3999,19 @@ export class FirestoreService {
       }
       
       const cartData = cartItemDoc.data();
-      
-      // 2. Erstelle Kaufhistorie-Eintrag
-      await this.createPurchaseHistoryEntry(userId, cartData);
-      
-      // 3. Markiere im Einkaufszettel als gekauft
-      await updateDoc(cartItemRef, {
-        gekauft: true
-      });
-      
+
+      // Fix (2026-05-07): Fire-and-forget — bei Bulk "alle gekauft"
+      // mit N Items wäre das sonst N × 2 sequenzielle awaited Writes.
+      void this.createPurchaseHistoryEntry(userId, cartData).catch((e) =>
+        console.warn('[purchase] bulk history bg-fail:', e?.message),
+      );
+      void updateDoc(cartItemRef, { gekauft: true }).catch((e) =>
+        console.warn('[purchase] bulk gekauft:true bg-fail:', e?.message),
+      );
+
       // KEIN Journey-Tracking hier! Das passiert im Bulk
-      
-      console.log('✅ Marked as purchased (without tracking):', itemId);
+
+      console.log('✅ Marked as purchased without tracking (queued):', itemId);
     } catch (error) {
       console.error('Error marking as purchased:', error);
       throw error;
