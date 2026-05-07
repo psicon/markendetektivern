@@ -97,14 +97,25 @@ Submit-Profile-Konfig steckt in `eas.json` unter `submit.production`:
 - iOS: appleId `patrick@markendetektive.de`, ascAppId `6471081082`
 - Android: serviceAccount `markendetektive-895f7-ee3923910ddd.json`
 
-**Alternativ** den Build mit `--auto-submit` triggern, dann
-läuft Submit automatisch nach Build-Finish:
+**REGEL (User-Wort)**: Wenn der User **TestFlight**, **Play
+Store**, **Internal-Track**, oder sinngemäß "in TestFlight haben",
+"aufs Device der Tester", "an die Beta-User" sagt → **Submit ist
+Pflicht**. Build allein reicht NICHT. Default-Vorgehen:
+
 ```bash
+# In einem Schritt — Build + Auto-Submit
 eas build --platform ios --profile production --auto-submit --non-interactive --no-wait
 ```
-Default für dieses Projekt: `--auto-submit` benutzen, wenn der
-User das Wort **TestFlight** oder **Play Store** im Prompt hat —
-sonst nur builden.
+
+Oder zwei Schritte (wenn der Build schon läuft / fertig ist):
+```bash
+eas submit --platform ios --profile production --latest --non-interactive
+```
+
+Niemals einen iOS-Build als "TestFlight-Version 1063" verkaufen,
+solange `eas submit` nicht durch ist und Apple die Verarbeitung
+nicht abgeschlossen hat (i.d.R. 5–30 min nach submit). Bis dahin
+ist der Build NUR ein IPA-Artefakt auf den EAS-Servern.
 
 ## Redesign status — what's done, what's left
 
