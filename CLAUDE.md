@@ -1,5 +1,57 @@
 # Project notes for Claude Code
 
+## Builds & deploys — ALWAYS via EAS, NEVER local
+
+**Beide Plattformen** werden über EAS Build gebaut, nicht lokal.
+Das ist der etablierte Workflow für dieses Projekt — nicht
+selbst nachdenken, einfach die Befehle nehmen.
+
+```bash
+# Android (Play Store internal/production)
+eas build --platform android --profile production --non-interactive --no-wait
+
+# iOS (TestFlight)
+eas build --platform ios --profile production --non-interactive --no-wait
+```
+
+**NIEMALS** `cd android && ./gradlew assembleRelease` o.ä. lokal
+ausführen. Das hat schonmal Java-14-vs-17-Stress + ANDROID_HOME-
+Stress + 1 h Zeitverlust verursacht. Lokale Builds sind in diesem
+Projekt keine Option.
+
+### versionCode / buildNumber
+
+`eas.json` hat `production.autoIncrement: true` mit
+`appVersionSource: "local"`. Das bedeutet:
+- EAS liest die Version aus `app.json` + `Info.plist` /
+  `android/app/build.gradle`
+- **Beim Build-Start** bumped EAS automatisch +1 und committed
+  die neuen Werte zurück in die lokalen Dateien
+
+Wenn der User "TestFlight 1063" sagt, ist das die FINALE Nummer,
+die im Build laufen soll. Das heißt: lokal auf 1062 setzen, dann
+EAS triggern → autoIncrement macht 1063. Oder autoIncrement für
+diesen einen Build deaktivieren. NICHT lokal auf 1063 setzen,
+weil EAS dann auf 1064 bumped.
+
+Beide Plattformen haben getrennte Zähler:
+- iOS: `app.json` → `expo.ios.buildNumber` + `Info.plist` →
+  `CFBundleVersion`
+- Android: `app.json` → `expo.android.versionCode` +
+  `android/app/build.gradle` → `versionCode`
+
+EAS synchronisiert beide Stellen pro Plattform automatisch.
+
+### Build-Ergebnisse
+
+Builds erscheinen unter
+`https://expo.dev/accounts/patze1411/projects/markendetektive/builds`.
+Beim `--no-wait` Flag returnt der CLI sofort, der Build läuft
+auf EAS-Servern weiter. Submit zu Play Store / TestFlight
+passiert via `production`-Submit-Profile (siehe `eas.json`):
+- iOS: appleId `patrick@markendetektive.de`, ascAppId `6471081082`
+- Android: serviceAccount `markendetektive-895f7-ee3923910ddd.json`
+
 ## Redesign status — what's done, what's left
 
 Check before suggesting "next screen": grep for `DetailHeader |
