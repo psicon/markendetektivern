@@ -200,16 +200,25 @@ export default function NoNameDetailScreen() {
     if (!open) setPillAnchor(null);
   };
   const cartButtonAnchorRef = useRef<View | null>(null);
-  // Auto-Close-Timer für die Pill (4 s ohne Interaktion)
+  // Auto-Close-Timer + smoother exit (Pill bleibt mounted für Animation)
+  const [pillVisible, setPillVisible] = useState(false);
   const pillAutoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pillUnmountTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closePill = useCallback(() => {
+    setPillVisible(false);
+    if (pillUnmountTimer.current) clearTimeout(pillUnmountTimer.current);
+    pillUnmountTimer.current = setTimeout(() => setPillAnchor(null), 320);
+  }, []);
   const armPillAutoClose = useCallback(() => {
     if (pillAutoCloseTimer.current) clearTimeout(pillAutoCloseTimer.current);
-    pillAutoCloseTimer.current = setTimeout(() => {
-      setPillAnchor(null);
-    }, 4000);
-  }, []);
+    pillAutoCloseTimer.current = setTimeout(closePill, 4000);
+  }, [closePill]);
   useEffect(() => {
-    if (pillOpen) armPillAutoClose();
+    if (pillOpen) {
+      if (pillUnmountTimer.current) clearTimeout(pillUnmountTimer.current);
+      setPillVisible(true);
+      armPillAutoClose();
+    }
     return () => {
       if (pillAutoCloseTimer.current) clearTimeout(pillAutoCloseTimer.current);
     };
@@ -225,17 +234,23 @@ export default function NoNameDetailScreen() {
         const pid = it?.handelsmarkenProdukt?.id;
         if (pid === String(id)) total += (it.anzahl ?? 1) as number;
       }
+      console.error('[cart] refresh noname-detail', { id: String(id).slice(0, 8), total });
       setCartAnzahl(total);
       setInCart(total > 0);
-    } catch {
-      /* non-fatal */
+    } catch (err) {
+      console.warn('[cart] refresh noname-detail failed:', err);
     }
   }, [user?.uid, id]);
+  // Focus-Reload (zurück aus Einkaufszettel)
   useFocusEffect(
     useCallback(() => {
       refreshCartState();
     }, [refreshCartState]),
   );
+  // Plus initial load wenn id/user wechselt
+  useEffect(() => {
+    refreshCartState();
+  }, [refreshCartState]);
   const [ratingsOpen, setRatingsOpen] = useState(false);
   // Connected Brands des Herstellers — separat geladen, weil das
   // Aggregat im Cloud-Function-Job (`connected-brands-aggregator`)
@@ -347,10 +362,11 @@ export default function NoNameDetailScreen() {
   }, [id]);
 
   // Initial-Load des Cart-Status. Ohne diesen useEffect startet
-  // `inCart` immer mit `false`, auch wenn das Produkt schon im
-  // Einkaufszettel liegt — der Toggle-Button zeigt dann den falschen
-  // Zustand und ein erneuter Tap würde das Produkt ein zweites Mal
-  // hinzufügen. Re-runs bei id- und uid-Wechsel.
+  // Initial-Load des Cart-Status — wird ersetzt durch
+  // refreshCartState() in useFocusEffect + useEffect weiter unten.
+  // Dieses useEffect bleibt für den Fall dass user/id geändert wurden
+  // aber Screen schon gemountet war (= refreshCartState wird über
+  // dessen useCallback-deps neu erstellt).
   useEffect(() => {
     let alive = true;
     if (!user?.uid || !id) {
@@ -563,8 +579,9 @@ export default function NoNameDetailScreen() {
       setIsFav(!optimisticNext);
     }
   });
-  // NEU (2026-05-07): Cart-Tap = ADD/INCREMENT + Pill öffnen.
-  // Remove läuft jetzt über die Pill (− bei anzahl=1).
+  // NEU (2026-05-07): Cart-Tap-Logik:
+  //   - Wenn schon im Cart (anzahl > 0): nur Pill öffnen, kein +1
+  //   - Wenn nicht im Cart (anzahl = 0): +1 + Pill öffnen + FlyToCart
   const onCartPress = usePressLock(async () => {
     if (!p) return;
     if (!user?.uid) {
@@ -572,34 +589,44 @@ export default function NoNameDetailScreen() {
       return;
     }
     const prev = cartAnzahl;
+
+    // Pill am Button positionieren (egal ob Add oder nur Open)
+    const openPillAtButton = () => {
+      if (cartButtonAnchorRef.current && (cartButtonAnchorRef.current as any).measureInWindow) {
+        (cartButtonAnchorRef.current as any).measureInWindow(
+          (x: number, y: number, w: number, h: number) => {
+            setPillAnchor({ x, y, w, h });
+          },
+        );
+      } else {
+        setPillAnchor({ x: 0, y: 0, w: 0, h: 0 });
+      }
+    };
+
+    // Schon im Cart → nur Pill öffnen
+    if (prev > 0) {
+      openPillAtButton();
+      return;
+    }
+
+    // Erstes Mal: ADD
     const next = prev + 1;
     setCartAnzahl(next);
     setInCart(true);
-    // Pill am Cart-Button positionieren
-    if (cartButtonAnchorRef.current && (cartButtonAnchorRef.current as any).measureInWindow) {
-      (cartButtonAnchorRef.current as any).measureInWindow(
-        (x: number, y: number, w: number, h: number) => {
-          setPillAnchor({ x, y, w, h });
-        },
-      );
-    } else {
-      setPillAnchor({ x: 0, y: 0, w: 0, h: 0 });
-    }
+    openPillAtButton();
 
-    // FlyToCart-Animation nur bei initialem Add (anzahl 0→1).
-    if (prev === 0) {
-      const flyImageUri = getProductImage(p);
-      if (heroRef.current && flyImageUri) {
-        heroRef.current.measureInWindow((x, y, w, h) => {
-          flyRef.current?.fly({
-            sourceX: x,
-            sourceY: y,
-            sourceW: w,
-            sourceH: h,
-            imageUri: flyImageUri,
-          });
+    // FlyToCart-Animation immer beim initialem Add (prev === 0)
+    const flyImageUri = getProductImage(p);
+    if (heroRef.current && flyImageUri) {
+      heroRef.current.measureInWindow((x, y, w, h) => {
+        flyRef.current?.fly({
+          sourceX: x,
+          sourceY: y,
+          sourceW: w,
+          sourceH: h,
+          imageUri: flyImageUri,
         });
-      }
+      });
     }
 
     try {
@@ -647,7 +674,7 @@ export default function NoNameDetailScreen() {
     setCartAnzahl(next);
     if (next === 0) {
       setInCart(false);
-      setPillOpen(false);
+      closePill(); // mit Exit-Animation
     }
     try {
       await FirestoreService.decrementCartQuantity(user.uid, p.id, false);
@@ -1619,7 +1646,7 @@ export default function NoNameDetailScreen() {
             style={{ position: 'absolute', left: pillLeft, top: pillTop }}
           >
             <QuantityPill
-              visible={pillOpen}
+              visible={pillVisible}
               anzahl={Math.max(1, cartAnzahl)}
               onIncrement={() => {
                 armPillAutoClose();

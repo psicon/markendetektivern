@@ -44,8 +44,8 @@ export function QuantityPill({
 
   useEffect(() => {
     if (visible) {
+      // Pop-In: bouncy spring mit overshoot, leicht von unten nach oben
       opacity.value = withTiming(1, { duration: 140 });
-      // Bouncy spring mit Overshoot — Pop-Effect: 0.5 → 1.08 → 1
       scale.value = withSpring(1, {
         damping: 9,
         stiffness: 280,
@@ -58,9 +58,20 @@ export function QuantityPill({
         mass: 0.6,
       });
     } else {
-      opacity.value = withTiming(0, { duration: 120 });
-      scale.value = withTiming(0.8, { duration: 120 });
-      translateY.value = withTiming(4, { duration: 120 });
+      // Pop-Out: spiegelbildlich zur Pop-In-Animation. Spring statt
+      // linearer Timing damit es gleich verspielt wirkt — kleines
+      // Schrumpfen + nach unten gleiten + ausblenden.
+      opacity.value = withTiming(0, { duration: 200 });
+      scale.value = withSpring(0.5, {
+        damping: 12,
+        stiffness: 240,
+        mass: 0.6,
+      });
+      translateY.value = withSpring(8, {
+        damping: 14,
+        stiffness: 260,
+        mass: 0.6,
+      });
     }
   }, [visible, opacity, scale, translateY]);
 
@@ -69,7 +80,9 @@ export function QuantityPill({
     transform: [{ scale: scale.value }, { translateY: translateY.value }],
   }));
 
-  if (!visible && opacity.value === 0) return null;
+  // Hinweis: bewusst KEIN early-return mehr. Pill bleibt gemountet
+  // damit die exit-Animation sauber durchläuft. pointerEvents='none'
+  // (s. unten) verhindert Touch-Interaktion wenn nicht visible.
 
   return (
     <Animated.View
@@ -78,7 +91,7 @@ export function QuantityPill({
         {
           flexDirection: 'row',
           alignItems: 'center',
-          backgroundColor: theme.surface,
+          backgroundColor: '#fff',
           borderRadius: 22,
           height: 44,
           paddingHorizontal: 4,
@@ -100,13 +113,13 @@ export function QuantityPill({
           borderRadius: 18,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: pressed ? theme.surfaceAlt : 'transparent',
+          backgroundColor: pressed ? (anzahl <= 1 ? '#fee2e2' : '#f1f5f9') : 'transparent',
         })}
       >
         <MaterialCommunityIcons
           name={anzahl <= 1 ? 'trash-can-outline' : 'minus'}
           size={18}
-          color={anzahl <= 1 ? '#dc2626' : theme.text}
+          color={anzahl <= 1 ? '#dc2626' : brand.primary}
         />
       </Pressable>
 
@@ -115,7 +128,7 @@ export function QuantityPill({
           fontFamily,
           fontWeight: fontWeight.extraBold,
           fontSize: 16,
-          color: theme.text,
+          color: brand.primary,
           minWidth: 28,
           textAlign: 'center',
           letterSpacing: -0.2,
@@ -133,10 +146,10 @@ export function QuantityPill({
           borderRadius: 18,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: pressed ? brand.primaryContainer ?? theme.surfaceAlt : brand.primary,
+          backgroundColor: pressed ? '#f1f5f9' : 'transparent',
         })}
       >
-        <MaterialCommunityIcons name="plus" size={18} color="#fff" />
+        <MaterialCommunityIcons name="plus" size={18} color={brand.primary} />
       </Pressable>
     </Animated.View>
   );

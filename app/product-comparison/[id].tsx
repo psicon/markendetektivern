@@ -475,16 +475,29 @@ export default function ProductComparisonScreen() {
   const openPillProductId = openPill?.productId ?? null;
   // Map<productId, ref> für Cart-Button-Refs (zum Positionsmessen)
   const cartButtonRefs = useRef<Map<string, View | null>>(new Map());
-  // Auto-Dismiss-Timer für die Pill (4 s ohne Interaktion)
+  // Auto-Dismiss-Timer für die Pill (4 s ohne Interaktion).
+  // pillVisible steuert die Animation, openPill hält die Position
+  // bis zur Animation-Ende (Pill bleibt gemountet damit Exit-Anim
+  // sauber durchläuft). 280 ms Verzögerung passt zur Pop-Out-Spring.
+  const [pillVisible, setPillVisible] = useState(false);
+  const pillUnmountTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pillAutoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closePill = useCallback(() => {
+    setPillVisible(false);
+    if (pillUnmountTimer.current) clearTimeout(pillUnmountTimer.current);
+    pillUnmountTimer.current = setTimeout(() => setOpenPill(null), 320);
+  }, []);
   const armPillAutoClose = useCallback(() => {
     if (pillAutoCloseTimer.current) clearTimeout(pillAutoCloseTimer.current);
-    pillAutoCloseTimer.current = setTimeout(() => {
-      setOpenPill(null);
-    }, 4000);
-  }, []);
+    pillAutoCloseTimer.current = setTimeout(closePill, 4000);
+  }, [closePill]);
   useEffect(() => {
-    if (openPill) armPillAutoClose();
+    if (openPill) {
+      // Re-Mount oder Re-Open: visible flippen
+      if (pillUnmountTimer.current) clearTimeout(pillUnmountTimer.current);
+      setPillVisible(true);
+      armPillAutoClose();
+    }
     return () => {
       if (pillAutoCloseTimer.current) clearTimeout(pillAutoCloseTimer.current);
     };
@@ -493,8 +506,17 @@ export default function ProductComparisonScreen() {
   // ─── Cart-Status bei Focus refreshen ───
   // Wenn User aus dem Einkaufszettel zurück auf die Detail-Seite
   // navigiert, wurden dort vielleicht Items entfernt/dekrementiert.
-  // useFocusEffect feuert bei JEDER Re-Fokussierung, useEffect nur
-  // beim Mount.
+  //
+  // Muster mit Refs für mainProduct/nonames damit refreshCartState
+  // KEINE deps-Probleme hat (Array-Reference-Wechsel triggert sonst
+  // useFocusEffect-Re-runs). Der Refresh liest die jeweils aktuellen
+  // Werte aus den Refs.
+  const mainProductRef = useRef(mainProduct);
+  const nonamesRef = useRef(nonames);
+  useEffect(() => {
+    mainProductRef.current = mainProduct;
+    nonamesRef.current = nonames;
+  });
   const refreshCartState = useCallback(async () => {
     if (!user?.uid) return;
     try {
@@ -515,23 +537,33 @@ export default function ProductComparisonScreen() {
         nextBool[pid] = a > 0;
         nextAnzahl[pid] = a;
       };
-      // Main product + alle alternativen sichtbaren Produkte
-      set(mainProduct?.id);
-      for (const nn of nonames) set(nn.id);
+      // CURRENT mainProduct + nonames aus Refs lesen (nicht aus closure)
+      set(mainProductRef.current?.id);
+      for (const nn of nonamesRef.current) set(nn.id);
+      console.error('[cart] refresh detail', { count: Object.keys(nextAnzahl).length, anzahls: nextAnzahl });
       // VOLLSTÄNDIG ersetzen (nicht mergen) damit Items die NICHT
       // mehr im Cart sind ihre Anzeige verlieren.
       setCartMap(nextBool);
       setCartAnzahlMap(nextAnzahl);
-    } catch {
-      /* non-fatal */
+    } catch (err) {
+      console.warn('[cart] refresh detail failed:', err);
     }
-  }, [user?.uid, mainProduct?.id, nonames]);
+  }, [user?.uid]);
 
+  // Focus-Reload: bei jeder Re-Fokussierung des Screens
   useFocusEffect(
     useCallback(() => {
       refreshCartState();
     }, [refreshCartState]),
   );
+
+  // Zusätzlich: wenn Produkt-Daten neu geladen werden (z.B. erste
+  // Initialisierung), Cart-State auch refreshen
+  useEffect(() => {
+    if (mainProduct?.id || nonames.length > 0) {
+      refreshCartState();
+    }
+  }, [mainProduct?.id, nonames.length, refreshCartState]);
   const [ratingsSheet, setRatingsSheet] = useState<{
     productId: string;
     productName: string;
@@ -633,7 +665,7 @@ export default function ProductComparisonScreen() {
   // Ref auf den setOpenPillProductId-State, damit der Worklet-Handler
   // ihn via runOnJS aufrufen kann ohne Closure-Staleness.
   const closePillRef = useRef<() => void>(() => {});
-  closePillRef.current = () => setOpenPill(null);
+  closePillRef.current = closePill;
   const lastScrollPillCloseY = useSharedValue(0);
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => {
@@ -847,22 +879,30 @@ export default function ProductComparisonScreen() {
       return;
     }
 
-    // Optimistisches Update — anzahl +1, Pill öffnen, Cart-Icon "in Cart"
-    const newAnzahl = prevAnzahl + 1;
+    // Pill am Cart-Button positionieren (immer, egal ob add oder open)
+    const openPillAtButton = () => {
+      const btnRef = cartButtonRefs.current.get(productId);
+      if (btnRef && (btnRef as any).measureInWindow) {
+        (btnRef as any).measureInWindow((x: number, y: number, w: number, h: number) => {
+          setOpenPill({ productId, x, y, w, h });
+        });
+      } else {
+        setOpenPill({ productId, x: 0, y: 0, w: 0, h: 0 });
+      }
+    };
+
+    // Schon im Cart? Dann nur Pill öffnen — kein Increment.
+    // User entscheidet dann via + ob mehr, oder via − ob weniger.
+    if (prevAnzahl > 0) {
+      openPillAtButton();
+      return;
+    }
+
+    // Erstes Mal: ADD + Pill öffnen + FlyToCart-Animation
+    const newAnzahl = 1;
     setCartAnzahlMap((prev) => ({ ...prev, [productId]: newAnzahl }));
     setCartMap((prev) => ({ ...prev, [productId]: true }));
-
-    // Pill am Cart-Button positionieren — measureInWindow gibt
-    // Bildschirm-Koordinaten zurück. Pill wird darüber angezeigt.
-    const btnRef = cartButtonRefs.current.get(productId);
-    if (btnRef && (btnRef as any).measureInWindow) {
-      (btnRef as any).measureInWindow((x: number, y: number, w: number, h: number) => {
-        setOpenPill({ productId, x, y, w, h });
-      });
-    } else {
-      // Fallback ohne measure → bottom-center
-      setOpenPill({ productId, x: 0, y: 0, w: 0, h: 0 });
-    }
+    openPillAtButton();
 
     // 📊 Analytics: comparison-end nur beim ERSTEN add (anzahl 0→1)
     if (prevAnzahl === 0 && analytics?.trackComparisonEnd && mp?.id) {
@@ -949,7 +989,7 @@ export default function ProductComparisonScreen() {
     setCartAnzahlMap((prev) => ({ ...prev, [productId]: newAnzahl }));
     if (newAnzahl === 0) {
       setCartMap((prev) => ({ ...prev, [productId]: false }));
-      setOpenPill(null); // Pill schließen wenn anzahl=0
+      closePill(); // Pill schließen wenn anzahl=0 (mit Exit-Anim)
     }
     try {
       await FirestoreService.decrementCartQuantity(
@@ -2436,7 +2476,7 @@ export default function ProductComparisonScreen() {
             }}
           >
             <QuantityPill
-              visible={!!openPillProductId}
+              visible={pillVisible}
               anzahl={cartAnzahlMap[openPillProductId!] ?? 1}
               onIncrement={() => {
                 armPillAutoClose(); // Timer re-armen bei Interaktion
