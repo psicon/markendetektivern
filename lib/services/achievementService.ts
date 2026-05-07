@@ -840,10 +840,16 @@ class AchievementService {
       await this.checkAndUpdateLevel(userId);
 
       // 🔄 ZENTRALER Profile-Refresh am Ende (verhindert Duplikate)
+      // Fix B (2026-05-07): Fire-and-forget statt await. Der Refresh ist
+      // rein UI-cosmetic (UserContext aktualisieren) — alle Achievement-
+      // Daten + Stats sind zu diesem Zeitpunkt bereits in Firestore
+      // geschrieben. await hier blockierte trackAction für 1.5 s
+      // (Debounce-Timer-Wartezeit) → bei tap-burst summierte sich das.
       if (AchievementService.onProfileRefreshNeeded) {
-        // Fix I: debounced — bei tap-burst werden N Refreshes auf 1 coalesced.
-        await AchievementService.requestProfileRefresh();
-        console.log('✅ Profile refreshed at end of trackAction (debounced)');
+        void AchievementService.requestProfileRefresh().catch((err) => {
+          console.warn('Profile refresh failed', err);
+        });
+        console.log('✅ Profile refresh requested (fire-and-forget)');
       }
 
       // 📱 App Rating temporär deaktiviert - verursacht Freeze
@@ -971,9 +977,9 @@ class AchievementService {
         } else {
           console.log(`🔄 Level-Korrektur ohne Benachrichtigung: ${currentLevel} → ${correctLevel}`);
           
-          // Profile-Refresh nur bei Korrektur (debounced, Fix I)
+          // Profile-Refresh nur bei Korrektur (Fix B: fire-and-forget)
           if (AchievementService.onProfileRefreshNeeded) {
-            await AchievementService.requestProfileRefresh();
+            void AchievementService.requestProfileRefresh().catch(() => {});
           }
         }
       }
