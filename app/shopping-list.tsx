@@ -1232,17 +1232,38 @@ function BrandCard({
                   resizeMode="contain"
                 />
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text
-                    numberOfLines={1}
+                  {/* Zeile 1: Name + Preis (gleiche Baseline) */}
+                  <View
                     style={{
-                      fontFamily,
-                      fontWeight: fontWeight.bold,
-                      fontSize: 12,
-                      color: theme.text,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
                     }}
                   >
-                    {alt.produktName || alt.name}
-                  </Text>
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        flex: 1,
+                        fontFamily,
+                        fontWeight: fontWeight.bold,
+                        fontSize: 12,
+                        color: theme.text,
+                      }}
+                    >
+                      {alt.produktName || alt.name}
+                    </Text>
+                    <Text
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.extraBold,
+                        fontSize: 12,
+                        color: theme.text,
+                      }}
+                    >
+                      {formatEur(alt.preis || 0)}
+                    </Text>
+                  </View>
+                  {/* Zeile 2: Markt + −X% (gleiche Baseline) */}
                   <View
                     style={{
                       flexDirection: 'row',
@@ -1260,6 +1281,7 @@ function BrandCard({
                     <Text
                       numberOfLines={1}
                       style={{
+                        flex: 1,
                         fontFamily,
                         fontWeight: fontWeight.medium,
                         fontSize: 10,
@@ -1269,32 +1291,17 @@ function BrandCard({
                       {alt.discounter?.name || 'Unbekannt'}
                       {alt.discounter?.land ? ` (${alt.discounter.land})` : ''}
                     </Text>
+                    <Text
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.semibold,
+                        fontSize: 10,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      −{sd.savingsPercent}%
+                    </Text>
                   </View>
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <Text
-                    style={{
-                      fontFamily,
-                      fontWeight: fontWeight.extraBold,
-                      fontSize: 12,
-                      color: theme.text,
-                    }}
-                  >
-                    {formatEur(alt.preis || 0)}
-                  </Text>
-                  {/* −X€ entfernt (User-Wunsch). Spacer behält die
-                      Card-Höhe damit Layout nicht springt. */}
-                  <View style={{ height: 12 }} />
-                  <Text
-                    style={{
-                      fontFamily,
-                      fontWeight: fontWeight.semibold,
-                      fontSize: 9,
-                      color: theme.textMuted,
-                    }}
-                  >
-                    −{sd.savingsPercent}%
-                  </Text>
                 </View>
                 <Pressable
                   onPress={() => onConvertAlt(alt.id)}
