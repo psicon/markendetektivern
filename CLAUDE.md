@@ -1,5 +1,29 @@
 # Project notes for Claude Code
 
+## Meta-Regel: "merk dir das" → SOFORT in CLAUDE.md
+
+Wenn der User sagt **"merk dir das"**, **"schreib dir das auf"**,
+**"mark this down"**, **"speicher dir das"**, oder etwas
+sinngemäßes ("du verlierst immer den Kontext", "behalt das"…),
+dann ist das eine **direkte Anweisung an dieses File**.
+
+Was tun:
+1. Sofort an passender Stelle in `/Users/patricksieber/Documents/src/markendetektivern/CLAUDE.md`
+   eine Notiz dazu hinzufügen (eigene Section oder unter
+   passendem bestehenden Abschnitt).
+2. Konkret + actionable formulieren — nicht "User mag X", sondern
+   "tu Y, nicht Z, weil W".
+3. Mit committen (`git add CLAUDE.md && git commit`) im selben
+   Schwung wie die andere Arbeit, oder als eigener Commit.
+
+**Nicht** auf den nächsten Turn verschieben, **nicht** im
+Conversation-Memory parken. Conversation-Memory ist flüchtig,
+CLAUDE.md ist persistent über Sessions hinweg.
+
+Diese Regel gilt für jede zukünftige Erinnerungs-Aufforderung.
+Wenn unklar ist, wo das hin soll, lieber unter ein neues Heading
+am Ende von CLAUDE.md legen als gar nicht.
+
 ## Builds & deploys — ALWAYS via EAS, NEVER local
 
 **Beide Plattformen** werden über EAS Build gebaut, nicht lokal.
