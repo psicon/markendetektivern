@@ -87,9 +87,7 @@ export const useAuth = () => {
   return context;
 };
 
-import { tick as _tick } from '@/lib/utils/renderCounter';
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  _tick('AuthProvider');
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);

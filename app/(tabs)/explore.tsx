@@ -269,9 +269,7 @@ import {
   setCachedMarken,
 } from '@/lib/services/stoebernCache';
 
-import { tick as _tick } from '@/lib/utils/renderCounter';
 export default function ExploreScreen() {
-  _tick('ExploreScreen');
   const { theme, brand, shadows, stufen } = useTokens();
   const scheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();

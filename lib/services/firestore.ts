@@ -3626,9 +3626,6 @@ export class FirestoreService {
       mainProductType: 'brand' | 'noname';
     }
   ): Promise<string> {
-    const __t0 = Date.now();
-    const __callId = Math.random().toString(36).slice(2, 6);
-    console.error('[cart] add start', { id: __callId, productId: productId.slice(0, 8), source });
     try {
       const userRef = doc(db, 'users', userId);
 
@@ -3717,17 +3714,14 @@ export class FirestoreService {
               quantity: newAnzahl,
             })
             .catch((err) => {
-              console.error('[cart] analytics trackAddToCart bg-fail:', err?.message);
             });
         });
       }
 
       console.log('✅ Added to shopping cart:', detId, 'anzahl:', newAnzahl);
-      console.error('[cart] add done', { id: __callId, ms: Date.now() - __t0, anzahl: newAnzahl });
       return detId;
     } catch (error) {
       console.error('Error adding to shopping cart:', error);
-      console.error('[cart] add fail', { ms: Date.now() - __t0 });
       throw error;
     }
   }
@@ -3744,8 +3738,6 @@ export class FirestoreService {
     productId: string,
     isMarke: boolean,
   ): Promise<number> {
-    const __t0 = Date.now();
-    console.error('[cart] decrement start', { productId: productId.slice(0, 8) });
     try {
       const detId = `${isMarke ? 'brand' : 'noname'}_${productId}`;
       const detRef = doc(db, 'users', userId, 'einkaufswagen', detId);
@@ -3753,19 +3745,16 @@ export class FirestoreService {
       if (!snap.exists()) {
         // Legacy fallback: vielleicht ein altes Auto-ID-Doc
         const removed = await this.removeFromShoppingCartByProductId(userId, productId, isMarke);
-        console.error('[cart] decrement fallback removed', { count: removed, ms: Date.now() - __t0 });
         return 0;
       }
       const currentAnzahl = ((snap.data() as any)?.anzahl ?? 1) as number;
       if (currentAnzahl > 1) {
         // Atomares Decrement (race-safe für rapid-taps)
         await updateDoc(detRef, { anzahl: increment(-1), timestamp: serverTimestamp() });
-        console.error('[cart] decrement done', { newAnzahl: currentAnzahl - 1, ms: Date.now() - __t0 });
         return currentAnzahl - 1;
       } else {
         // anzahl === 1 → full remove (mit Journey-Tracking)
         await this.removeFromShoppingCart(userId, detId);
-        console.error('[cart] decrement removed', { ms: Date.now() - __t0 });
         return 0;
       }
     } catch (error) {
@@ -3827,8 +3816,6 @@ export class FirestoreService {
     productId: string,
     isMarke: boolean,
   ): Promise<number> {
-    const __t0 = Date.now();
-    console.error('[cart] removeByProduct start', { productId: productId.slice(0, 8) });
     try {
       // ─── Cart-Schema v2 Fast-Path (analog Favoriten) ───
       // Versuche direkt das Det-ID-Doc zu löschen — KEIN getDocs-Server-Query.
@@ -3844,7 +3831,6 @@ export class FirestoreService {
           detExisted = true;
           await this.removeFromShoppingCart(userId, detId);
           totalRemoved += 1;
-          console.error('[cart] removeByProduct det-fast done', { ms: Date.now() - __t0 });
         }
       } catch (e) {
         console.warn('removeByProduct det-fast lookup failed:', e);
@@ -3873,7 +3859,6 @@ export class FirestoreService {
             if (docSnap.id === detId) continue;
             try {
               await this.removeFromShoppingCart(userId, docSnap.id);
-              console.error('[cart] legacy cleanup', { itemId: docSnap.id.slice(0, 8) });
             } catch (e) {
               console.warn('legacy cleanup single delete failed:', e);
             }
@@ -3884,11 +3869,9 @@ export class FirestoreService {
       };
       void cleanupLegacy();
 
-      console.error('[cart] removeByProduct done', { ms: Date.now() - __t0, detExisted, removed: totalRemoved });
       return totalRemoved;
     } catch (error) {
       console.error('Error removing by product id from cart:', error);
-      console.error('[cart] removeByProduct fail', { ms: Date.now() - __t0 });
       throw error;
     }
   }
@@ -3897,8 +3880,6 @@ export class FirestoreService {
    * Entfernt ein Produkt vom Einkaufszettel
    */
   static async removeFromShoppingCart(userId: string, itemId: string): Promise<void> {
-    const __t0 = Date.now();
-    console.error('[cart] remove start', { itemId: itemId.slice(0, 8) });
     try {
       // L Migration: flat-path statt doc(userRef, ...) — RNFirebase
       // doc() unterstützt keine DocumentReference als parent.
@@ -4007,10 +3988,8 @@ export class FirestoreService {
       // Write-Stream durch parallele Cart-Operationen.
       await deleteDoc(cartItemRef);
       console.log('✅ Removed from shopping cart:', itemId);
-      console.error('[cart] remove done', { itemId: itemId.slice(0, 8), ms: Date.now() - __t0 });
     } catch (error) {
       console.error('Error removing from shopping cart:', error);
-      console.error('[cart] remove fail', { itemId: itemId.slice(0, 8), ms: Date.now() - __t0 });
       throw error;
     }
   }
@@ -4019,8 +3998,6 @@ export class FirestoreService {
    * Markiert ein Produkt als gekauft UND erstellt Kaufhistorie-Eintrag
    */
   static async markAsPurchased(userId: string, itemId: string): Promise<void> {
-    const __t0 = Date.now();
-    console.error('[purchase] mark start', { itemId: itemId.slice(0, 8) });
     try {
       // L: flat-path
       const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
@@ -4117,10 +4094,8 @@ export class FirestoreService {
       }
       
       console.log('✅ Marked as purchased and added to history (queued):', itemId);
-      console.error('[purchase] mark done', { itemId: itemId.slice(0, 8), ms: Date.now() - __t0 });
     } catch (error) {
       console.error('Error marking as purchased:', error);
-      console.error('[purchase] mark fail', { itemId: itemId.slice(0, 8), ms: Date.now() - __t0 });
       throw error;
     }
   }

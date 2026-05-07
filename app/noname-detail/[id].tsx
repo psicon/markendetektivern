@@ -113,9 +113,7 @@ function formatPack(size?: number, unit?: string, price?: number): string | null
 // meaningful comparison target.
 // ────────────────────────────────────────────────────────────────────────
 
-import { tick as _tick } from '@/lib/utils/renderCounter';
 export default function NoNameDetailScreen() {
-  _tick('NoNameDetail');
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -235,7 +233,6 @@ export default function NoNameDetailScreen() {
         const pid = it?.handelsmarkenProdukt?.id;
         if (pid === String(id)) total += (it.anzahl ?? 1) as number;
       }
-      console.error('[cart] refresh noname-detail', { id: String(id).slice(0, 8), total });
       setCartAnzahl(total);
       setInCart(total > 0);
     } catch (err) {

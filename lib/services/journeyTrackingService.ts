@@ -1515,7 +1515,6 @@ class JourneyTrackingService {
         // ['error'] überlebt → in production logs (adb logcat ReactNativeJS)
         // sehen wir wieviele Aufrufe in einen einzigen Write zusammen-
         // gefasst wurden. Bei tap-burst sollte coalesced > 1 sein.
-        console.error('[journey] persist flush', { coalesced });
         this._persistJourneyToFirestoreImmediate(uid).catch((e) => {
           console.warn('Journey persist debounced flush failed', e);
         });
@@ -1542,15 +1541,8 @@ class JourneyTrackingService {
     // Diag (2026-05-07): Misst die synchrone Arbeit vor dem ersten
     // await. Wenn das viele MB allokiert + viele ms läuft, ist DAS
     // der freeze-Auslöser bei tap-burst.
-    const __t0 = Date.now();
     // WICHTIG: Sichere Referenz vor async Operationen
     const journey = this.currentJourney;
-    const __vpCount = journey?.viewedProducts?.length ?? 0;
-    const __actionsCount = (journey?.viewedProducts ?? []).reduce(
-      (sum, p) => sum + (p.actions?.length ?? 0),
-      0,
-    );
-    
     console.log('📝 Attempting to persist journey to Firestore...', {
       userId: userId || 'NO USER ID!',
       hasCurrentJourney: !!journey,
@@ -1766,19 +1758,9 @@ class JourneyTrackingService {
       const userJourneysRef = collection(db, 'users', userId, 'journeys');
 
       // Rekursiv alle undefined entfernen
-      const __cleanT0 = Date.now();
       const cleanedJourneyData = this.removeUndefinedValues(journeyData);
-      const __cleanMs = Date.now() - __cleanT0;
-      const __syncTotalMs = Date.now() - __t0;
       // Diag: wenn der synchrone Block mehr als 50 ms läuft, ist es
       // der Hauptverdächtige für tap-burst freezes.
-      console.error('[journey] persist sync', {
-        viewedProducts: __vpCount,
-        actions: __actionsCount,
-        cleanMs: __cleanMs,
-        syncTotalMs: __syncTotalMs,
-      });
-
       if (!journey.firestoreDocId) {
         // Neue Journey erstellen
         const docRef = await addDoc(userJourneysRef, cleanedJourneyData);
@@ -2505,8 +2487,6 @@ class JourneyTrackingService {
     const removeCount = entry.removeActions.length;
     const purchaseCount = entry.purchaseActions.length;
     if (removeCount === 0 && purchaseCount === 0) return;
-    console.error('[journey] hist flush', { journeyId: journeyId.slice(0, 8), removes: removeCount, purchases: purchaseCount });
-
     try {
       const { query, where, getDocs, updateDoc, collection } = await import('@react-native-firebase/firestore');
       const userJourneysRef = collection(db, 'users', userId, 'journeys');
@@ -2595,7 +2575,6 @@ class JourneyTrackingService {
         lastUpdated: serverTimestamp(),
       });
 
-      console.error('[journey] hist flush done', { journeyId: journeyId.slice(0, 8), removes: removeCount, purchases: purchaseCount });
     } catch (error) {
       console.error('❌ Error in historical journey batch flush:', error);
     }

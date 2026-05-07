@@ -91,11 +91,10 @@ export function QuantityPill({
         {
           flexDirection: 'row',
           alignItems: 'center',
-          backgroundColor: '#fff',
+          backgroundColor: theme.surface,
           borderRadius: 22,
           height: 44,
           paddingHorizontal: 4,
-          gap: 2,
           borderWidth: 1,
           borderColor: theme.border,
           ...shadows.md,
@@ -113,13 +112,17 @@ export function QuantityPill({
           borderRadius: 18,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: pressed ? (anzahl <= 1 ? '#fee2e2' : '#f1f5f9') : 'transparent',
+          backgroundColor: pressed
+            ? anzahl <= 1
+              ? '#fee2e2'
+              : theme.surfaceAlt
+            : 'transparent',
         })}
       >
         <MaterialCommunityIcons
           name={anzahl <= 1 ? 'trash-can-outline' : 'minus'}
           size={18}
-          color={anzahl <= 1 ? '#dc2626' : brand.primary}
+          color={anzahl <= 1 ? '#dc2626' : theme.text}
         />
       </Pressable>
 
@@ -128,8 +131,8 @@ export function QuantityPill({
           fontFamily,
           fontWeight: fontWeight.extraBold,
           fontSize: 16,
-          color: brand.primary,
-          minWidth: 28,
+          color: theme.text,
+          minWidth: 24,
           textAlign: 'center',
           letterSpacing: -0.2,
         }}
@@ -146,10 +149,10 @@ export function QuantityPill({
           borderRadius: 18,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: pressed ? '#f1f5f9' : 'transparent',
+          backgroundColor: pressed ? brand.primaryContainer ?? theme.surfaceAlt : brand.primary,
         })}
       >
-        <MaterialCommunityIcons name="plus" size={18} color={brand.primary} />
+        <MaterialCommunityIcons name="plus" size={18} color="#fff" />
       </Pressable>
     </Animated.View>
   );

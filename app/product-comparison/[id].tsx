@@ -175,9 +175,7 @@ function savings(
 // Screen
 // ────────────────────────────────────────────────────────────────────────
 
-import { tick as _tick } from '@/lib/utils/renderCounter';
 export default function ProductComparisonScreen() {
-  _tick('ProductComparison');
   const { id, type } = useLocalSearchParams<{ id: string; type?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -541,7 +539,6 @@ export default function ProductComparisonScreen() {
       // CURRENT mainProduct + nonames aus Refs lesen (nicht aus closure)
       set(mainProductRef.current?.id);
       for (const nn of nonamesRef.current) set(nn.id);
-      console.error('[cart] refresh detail', { count: Object.keys(nextAnzahl).length, anzahls: nextAnzahl });
       // VOLLSTÄNDIG ersetzen (nicht mergen) damit Items die NICHT
       // mehr im Cart sind ihre Anzeige verlieren.
       setCartMap(nextBool);
@@ -848,7 +845,6 @@ export default function ProductComparisonScreen() {
     productType: 'markenprodukt' | 'noname',
     productData: any,
   ) => {
-    console.error('[tap] fav', { productId: productId.slice(0, 8) });
     // Optimistic toggle.
     setFavMap((prev) => ({ ...prev, [productId]: !prev[productId] }));
     try {
@@ -872,9 +868,7 @@ export default function ProductComparisonScreen() {
     productType: 'markenprodukt' | 'noname',
     productData: any,
   ) => {
-    const __t0 = Date.now();
     const prevAnzahl = cartAnzahlMap[productId] ?? 0;
-    console.error('[tap] cart', { productId: productId.slice(0, 8), prevAnzahl });
     if (!user?.uid) {
       showInfoToast('Bitte anmelden');
       return;
@@ -947,7 +941,6 @@ export default function ProductComparisonScreen() {
       setCartMap((prev) => ({ ...prev, [productId]: prevAnzahl > 0 }));
       showInfoToast('Fehler — bitte erneut versuchen');
     }
-    console.error('[tap] cart done', { productId: productId.slice(0, 8), ms: Date.now() - __t0 });
   });
 
   // QuantityPill +/− Handler — werden vom geöffneten Pill aufgerufen.
