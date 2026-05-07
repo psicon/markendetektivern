@@ -955,6 +955,25 @@ export default function ProductComparisonScreen() {
     if (!user?.uid) return;
     const prevAnzahl = cartAnzahlMap[productId] ?? 0;
     setCartAnzahlMap((prev) => ({ ...prev, [productId]: prevAnzahl + 1 }));
+
+    // FlyToCart-Animation auch beim Increment via Pill — gleiche
+    // visuelle Sprache wie beim ersten Add.
+    const flyImageUri = getProductImage(productData);
+    if (flyImageUri) {
+      const imgRef = productImageRefs.current.get(productId);
+      if (imgRef) {
+        imgRef.measureInWindow((x, y, w, h) => {
+          flyRef.current?.fly({
+            sourceX: x,
+            sourceY: y,
+            sourceW: w,
+            sourceH: h,
+            imageUri: flyImageUri,
+          });
+        });
+      }
+    }
+
     try {
       await FirestoreService.addToShoppingCart(
         user.uid,

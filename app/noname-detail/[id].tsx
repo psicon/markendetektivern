@@ -649,6 +649,21 @@ export default function NoNameDetailScreen() {
     if (!p || !user?.uid) return;
     const prev = cartAnzahl;
     setCartAnzahl(prev + 1);
+
+    // FlyToCart-Animation auch beim Increment via Pill
+    const flyImageUri = getProductImage(p);
+    if (heroRef.current && flyImageUri) {
+      heroRef.current.measureInWindow((x, y, w, h) => {
+        flyRef.current?.fly({
+          sourceX: x,
+          sourceY: y,
+          sourceW: w,
+          sourceH: h,
+          imageUri: flyImageUri,
+        });
+      });
+    }
+
     try {
       await FirestoreService.addToShoppingCart(
         user.uid,
