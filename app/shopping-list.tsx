@@ -119,6 +119,9 @@ type EnrichedItem = {
    *  (legacy custom items predating the icon picker). */
   customIcon?: string;
   markt?: { name?: string; land?: string; bild?: string } | null;
+  /** NEU (2026-05-07): Cart-Anzahl. Default 1 für Backwards-Compat
+   *  mit Legacy-Auto-ID-Docs ohne anzahl-Feld. */
+  anzahl?: number;
 };
 
 // Height of the sticky SegmentedTabs row that sits below the DetailHeader.
@@ -782,15 +785,83 @@ function RowActions({
   onDelete,
   loadingCheck,
   loadingDelete,
+  anzahl,
+  onIncrement,
+  onDecrement,
 }: {
   onCheck: () => void;
   onDelete: () => void;
   loadingCheck?: boolean;
   loadingDelete?: boolean;
+  /** NEU (2026-05-07): wenn definiert, wird inline +/− gezeigt. */
+  anzahl?: number;
+  onIncrement?: () => void;
+  onDecrement?: () => void;
 }) {
-  const { brand } = useTokens();
+  const { brand, theme } = useTokens();
   return (
     <View style={{ gap: 6, alignItems: 'center' }}>
+      {/* Quantity-Steuerung — nur bei DB-Items mit anzahl-Feld */}
+      {anzahl !== undefined && onIncrement && onDecrement && (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: theme.surface,
+            borderWidth: 1,
+            borderColor: theme.border,
+            borderRadius: 14,
+            paddingHorizontal: 2,
+            height: 28,
+            gap: 2,
+          }}
+        >
+          <Pressable
+            onPress={onDecrement}
+            hitSlop={4}
+            style={({ pressed }) => ({
+              width: 22,
+              height: 22,
+              borderRadius: 11,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: pressed ? theme.surfaceAlt : 'transparent',
+            })}
+          >
+            <MaterialCommunityIcons
+              name={anzahl <= 1 ? 'trash-can-outline' : 'minus'}
+              size={14}
+              color={anzahl <= 1 ? brand.error : theme.text}
+            />
+          </Pressable>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 12,
+              color: theme.text,
+              minWidth: 16,
+              textAlign: 'center',
+            }}
+          >
+            {anzahl}
+          </Text>
+          <Pressable
+            onPress={onIncrement}
+            hitSlop={4}
+            style={({ pressed }) => ({
+              width: 22,
+              height: 22,
+              borderRadius: 11,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: pressed ? brand.primaryContainer ?? theme.surfaceAlt : brand.primary,
+            })}
+          >
+            <MaterialCommunityIcons name="plus" size={14} color="#fff" />
+          </Pressable>
+        </View>
+      )}
       <Pressable
         onPress={onCheck}
         disabled={loadingCheck}
@@ -859,6 +930,9 @@ type BrandCardProps = {
    *  `onInfoPress` — Parent öffnet ein FilterSheet mit dem Text. */
   infos?: string | null;
   onInfoPress?: () => void;
+  /** NEU (2026-05-07): Anzahl-Steuerung. */
+  onIncrement?: () => void;
+  onDecrement?: () => void;
 };
 
 function BrandCard({
@@ -867,6 +941,8 @@ function BrandCard({
   onToggleExpand,
   onCheck,
   onDelete,
+  onIncrement,
+  onDecrement,
   selectedAltId,
   onSelectAlt,
   onConvertAlt,
@@ -1032,6 +1108,9 @@ function BrandCard({
             onDelete={onDelete}
             loadingCheck={loadingCheck}
             loadingDelete={loadingDelete}
+            anzahl={item.anzahl ?? 1}
+            onIncrement={onIncrement}
+            onDecrement={onDecrement}
           />
         </View>
       </Pressable>
@@ -1246,6 +1325,9 @@ type NoNameCardProps = {
   loadingCheck: boolean;
   loadingDelete: boolean;
   favoriteMarketId?: string;
+  /** NEU (2026-05-07): Anzahl-Steuerung. */
+  onIncrement?: () => void;
+  onDecrement?: () => void;
 };
 
 function NoNameCard({
@@ -1255,6 +1337,8 @@ function NoNameCard({
   loadingCheck,
   loadingDelete,
   favoriteMarketId,
+  onIncrement,
+  onDecrement,
 }: NoNameCardProps) {
   const { theme, brand } = useTokens();
   const p = item.product;
@@ -1368,6 +1452,9 @@ function NoNameCard({
         onDelete={onDelete}
         loadingCheck={loadingCheck}
         loadingDelete={loadingDelete}
+        anzahl={item.anzahl ?? 1}
+        onIncrement={onIncrement}
+        onDecrement={onDecrement}
       />
     </View>
   );
@@ -1635,6 +1722,7 @@ export default function ShoppingListScreen() {
                     bild: item.customItem.marketBild,
                   }
                 : null,
+            anzahl: ((item as any).anzahl ?? 1) as number,
           };
           if (item.customItem.type === 'brand') customBrandItems.push(enriched);
           else customNoNameItems.push(enriched);
@@ -1704,6 +1792,7 @@ export default function ShoppingListScreen() {
                   alternatives,
                   bestAlternative,
                   potentialSavings: maxSavings,
+                  anzahl: ((item as any).anzahl ?? 1) as number,
                 } satisfies EnrichedItem,
                 potentialSavings: maxSavings,
                 bestAlternative,
@@ -2167,6 +2256,106 @@ export default function ShoppingListScreen() {
     }
   };
 
+  // ─── NEU (2026-05-07): Quantity-Steuerung ───
+  // Optimistisches +1 / -1 auf den im State gehaltenen anzahl-Wert,
+  // dahinter der Firestore-Sync via addToShoppingCart bzw. decrementCartQuantity.
+  const handleIncrementCart = async (item: EnrichedItem) => {
+    if (!user?.uid) return;
+    if (item.isCustom) return; // Custom-Items haben keinen productId
+    const productData = item.product;
+    const productId = productData?.id;
+    const isMarke = item.kind === 'brand';
+    if (!productId) return;
+    const prevAnzahl = item.anzahl ?? 1;
+    // Optimistisch
+    if (isMarke) {
+      setBrandProducts((prev) =>
+        prev.map((it) => (it.id === item.id ? { ...it, anzahl: prevAnzahl + 1 } : it)),
+      );
+    } else {
+      setNoNameProducts((prev) =>
+        prev.map((it) => (it.id === item.id ? { ...it, anzahl: prevAnzahl + 1 } : it)),
+      );
+    }
+    try {
+      await FirestoreService.addToShoppingCart(
+        user.uid,
+        productId,
+        productData?.name ?? item.name ?? 'Produkt',
+        isMarke,
+        'shopping_list_increment' as any,
+        { screenName: 'shopping-list' },
+        { price: productData?.preis ?? 0, savings: 0 },
+      );
+    } catch (e) {
+      // Revert
+      if (isMarke) {
+        setBrandProducts((prev) =>
+          prev.map((it) => (it.id === item.id ? { ...it, anzahl: prevAnzahl } : it)),
+        );
+      } else {
+        setNoNameProducts((prev) =>
+          prev.map((it) => (it.id === item.id ? { ...it, anzahl: prevAnzahl } : it)),
+        );
+      }
+      showInfoToast('Fehler — bitte erneut versuchen');
+    }
+  };
+
+  const handleDecrementCart = async (item: EnrichedItem) => {
+    if (!user?.uid) return;
+    if (item.isCustom) {
+      // Custom-Items: bei − direkt entfernen (haben kein anzahl-Konzept)
+      handleRemoveFromCart(item.id);
+      return;
+    }
+    const productData = item.product;
+    const productId = productData?.id;
+    const isMarke = item.kind === 'brand';
+    if (!productId) return;
+    const prevAnzahl = item.anzahl ?? 1;
+    const newAnzahl = prevAnzahl - 1;
+    // Optimistisch
+    if (newAnzahl <= 0) {
+      // Aus Liste entfernen — die echte Logik macht decrementCartQuantity → removeFromShoppingCart
+      if (isMarke) {
+        setBrandProducts((prev) => prev.filter((it) => it.id !== item.id));
+      } else {
+        setNoNameProducts((prev) => prev.filter((it) => it.id !== item.id));
+      }
+    } else {
+      if (isMarke) {
+        setBrandProducts((prev) =>
+          prev.map((it) => (it.id === item.id ? { ...it, anzahl: newAnzahl } : it)),
+        );
+      } else {
+        setNoNameProducts((prev) =>
+          prev.map((it) => (it.id === item.id ? { ...it, anzahl: newAnzahl } : it)),
+        );
+      }
+    }
+    try {
+      await FirestoreService.decrementCartQuantity(user.uid, productId, isMarke);
+    } catch (e) {
+      // Revert
+      if (newAnzahl <= 0) {
+        // Re-add (best effort — full reload würde besser passen)
+        loadShoppingCart();
+      } else {
+        if (isMarke) {
+          setBrandProducts((prev) =>
+            prev.map((it) => (it.id === item.id ? { ...it, anzahl: prevAnzahl } : it)),
+          );
+        } else {
+          setNoNameProducts((prev) =>
+            prev.map((it) => (it.id === item.id ? { ...it, anzahl: prevAnzahl } : it)),
+          );
+        }
+      }
+      showInfoToast('Fehler — bitte erneut versuchen');
+    }
+  };
+
   // Confirm-wrapped delete (used on the inline trash button)
   const handleRemoveFromCartConfirm = (itemId: string) => {
     Alert.alert(
@@ -2439,6 +2628,8 @@ export default function ShoppingListScreen() {
             onToggleExpand={() => toggleExpanded(item.id)}
             onCheck={() => handleMarkAsPurchased(item.id)}
             onDelete={() => handleRemoveFromCartConfirm(item.id)}
+            onIncrement={() => handleIncrementCart(item)}
+            onDecrement={() => handleDecrementCart(item)}
             selectedAltId={sel?.produktRef}
             onSelectAlt={(altId) =>
               handleSelectAlternative(item.id, item.markenProduktRef!, altId)
@@ -2493,6 +2684,8 @@ export default function ShoppingListScreen() {
           item={item}
           onCheck={() => handleMarkAsPurchased(item.id, item.savings)}
           onDelete={() => handleRemoveFromCartConfirm(item.id)}
+          onIncrement={() => handleIncrementCart(item)}
+          onDecrement={() => handleDecrementCart(item)}
           loadingCheck={loadingCheck}
           loadingDelete={loadingDelete}
           favoriteMarketId={favoriteMarketId}

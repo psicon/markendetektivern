@@ -16,6 +16,7 @@ import Animated, {
   Easing,
   Extrapolation,
   interpolate,
+  runOnJS,
   useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
@@ -33,6 +34,7 @@ import {
 import { FadingImage } from '@/components/design/FadingImage';
 import { FilterSheet } from '@/components/design/FilterSheet';
 import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
+import { QuantityPill } from '@/components/design/QuantityPill';
 import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
 import { ImageZoomModal, type SourceRect } from '@/components/design/ImageZoomModal';
 import { getProductImage } from '@/lib/utils/productImage';
@@ -288,24 +290,31 @@ export default function ProductComparisonScreen() {
           try {
             const items = await FirestoreService.getShoppingCartItems(user.uid);
             if (!alive) return;
-            const inCartIds = new Set<string>();
+            // Map productId → anzahl aus dem geladenen Cart-State
+            const anzahlByPid = new Map<string, number>();
             for (const it of items as any[]) {
               const pid = it?.markenProdukt?.id || it?.handelsmarkenProdukt?.id;
-              if (pid) inCartIds.add(pid);
+              if (pid) {
+                const a = (it.anzahl ?? 1) as number;
+                anzahlByPid.set(pid, (anzahlByPid.get(pid) ?? 0) + a);
+              }
             }
-            const next: Record<string, boolean> = {};
-            if (data.mainProduct?.id && inCartIds.has(data.mainProduct.id)) {
-              next[data.mainProduct.id] = true;
-            }
-            for (const nn of sorted) {
-              if (nn.id && inCartIds.has(nn.id)) next[nn.id] = true;
-            }
-            // Funktional setzen, damit User-getriggerte Toggles, die
-            // zwischen den Awaits passiert sind, nicht überschrieben
-            // werden.
-            setCartMap((prev) => ({ ...prev, ...next }));
+            const nextBool: Record<string, boolean> = {};
+            const nextAnzahl: Record<string, number> = {};
+            const collect = (pid?: string) => {
+              if (!pid) return;
+              const a = anzahlByPid.get(pid);
+              if (a && a > 0) {
+                nextBool[pid] = true;
+                nextAnzahl[pid] = a;
+              }
+            };
+            collect(data.mainProduct?.id);
+            for (const nn of sorted) collect(nn.id);
+            setCartMap((prev) => ({ ...prev, ...nextBool }));
+            setCartAnzahlMap((prev) => ({ ...prev, ...nextAnzahl }));
           } catch {
-            /* non-fatal — cartMap bleibt im aktuellen Stand */
+            /* non-fatal */
           }
         }
 
@@ -453,6 +462,10 @@ export default function ProductComparisonScreen() {
     };
   }, [mainProduct, nonames, isFavorite]);
   const [cartMap, setCartMap] = useState<Record<string, boolean>>({});
+  // NEU (2026-05-07): Anzahl pro Produkt im Cart, für Quantity-Pill.
+  const [cartAnzahlMap, setCartAnzahlMap] = useState<Record<string, number>>({});
+  // NEU: welche Produkt-Pill ist gerade offen (overlay)
+  const [openPillProductId, setOpenPillProductId] = useState<string | null>(null);
   const [ratingsSheet, setRatingsSheet] = useState<{
     productId: string;
     productName: string;
@@ -551,9 +564,21 @@ export default function ProductComparisonScreen() {
   // DetailHeader. Everything reads `scrollY.value` from the UI thread,
   // so the animation stays on the native side on both iOS and Android.
   const scrollY = useSharedValue(0);
+  // Ref auf den setOpenPillProductId-State, damit der Worklet-Handler
+  // ihn via runOnJS aufrufen kann ohne Closure-Staleness.
+  const closePillRef = useRef<() => void>(() => {});
+  closePillRef.current = () => setOpenPillProductId(null);
+  const lastScrollPillCloseY = useSharedValue(0);
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => {
       scrollY.value = e.contentOffset.y;
+      // Schließe QuantityPill wenn User > 30 px scrollt (kleine
+      // Bewegungen ignorieren damit Pill nicht bei Inertia closet).
+      const dy = Math.abs(e.contentOffset.y - lastScrollPillCloseY.value);
+      if (dy > 30) {
+        lastScrollPillCloseY.value = e.contentOffset.y;
+        runOnJS(closePillRef.current)();
+      }
     },
   });
 
@@ -741,93 +766,129 @@ export default function ProductComparisonScreen() {
     }
   });
 
+  // NEU (2026-05-07): Cart-Tap = ADD (oder INCREMENT) + öffne QuantityPill.
+  // Remove erfolgt jetzt über die Pill (− Button bei anzahl=1).
   const onToggleCart = usePressLock(async (
     productId: string,
     productType: 'markenprodukt' | 'noname',
     productData: any,
   ) => {
     const __t0 = Date.now();
-    console.error('[tap] cart', { productId: productId.slice(0, 8), already: !!cartMap[productId] });
+    const prevAnzahl = cartAnzahlMap[productId] ?? 0;
+    console.error('[tap] cart', { productId: productId.slice(0, 8), prevAnzahl });
     if (!user?.uid) {
       showInfoToast('Bitte anmelden');
       return;
     }
-    const already = !!cartMap[productId];
-    // Optimistisches Toggle der UI, danach Firestore-Sync. Bei Fehler
-    // revert.
-    setCartMap((prev) => ({ ...prev, [productId]: !already }));
 
-    // Fly-to-cart animation only on the ADD path. Measure the
-    // product's image rect (main hero or alt thumbnail) and clone
-    // it into the floating cart button. Runs in parallel with the
-    // Firestore call.
-    // 📊 Analytics — comparison-end with a chosen product (the one
-    // the user adds to cart). Only fires on the ADD path; remove
-    // doesn't count as resolution. Note: `productId` here is the
-    // PICKED product (could be the main brand or any NoName alt),
-    // mp.id is the comparison's main product (the entry point).
-    if (!already && analytics?.trackComparisonEnd && mp?.id) {
-      analytics.trackComparisonEnd(
-        mp.id,
-        productId, // the product the user actually added to cart
-        undefined, // no abandonment — comparison was resolved
-      );
+    // Optimistisches Update — anzahl +1, Pill öffnen, Cart-Icon "in Cart"
+    const newAnzahl = prevAnzahl + 1;
+    setCartAnzahlMap((prev) => ({ ...prev, [productId]: newAnzahl }));
+    setCartMap((prev) => ({ ...prev, [productId]: true }));
+    setOpenPillProductId(productId);
+
+    // 📊 Analytics: comparison-end nur beim ERSTEN add (anzahl 0→1)
+    if (prevAnzahl === 0 && analytics?.trackComparisonEnd && mp?.id) {
+      analytics.trackComparisonEnd(mp.id, productId, undefined);
     }
 
-    const flyImageUri = getProductImage(productData);
-    if (!already && flyImageUri) {
-      const imgRef = productImageRefs.current.get(productId);
-      if (imgRef) {
-        imgRef.measureInWindow((x, y, w, h) => {
-          flyRef.current?.fly({
-            sourceX: x,
-            sourceY: y,
-            sourceW: w,
-            sourceH: h,
-            imageUri: flyImageUri,
+    // FlyToCart-Animation nur beim ERSTEN add (anzahl 0→1) — bei
+    // Increments wäre die Animation visuell zu viel. Bestehende
+    // FlyToCart-Logik 1:1 übernommen.
+    if (prevAnzahl === 0) {
+      const flyImageUri = getProductImage(productData);
+      if (flyImageUri) {
+        const imgRef = productImageRefs.current.get(productId);
+        if (imgRef) {
+          imgRef.measureInWindow((x, y, w, h) => {
+            flyRef.current?.fly({
+              sourceX: x,
+              sourceY: y,
+              sourceW: w,
+              sourceH: h,
+              imageUri: flyImageUri,
+            });
           });
-        });
+        }
       }
     }
 
     try {
-      if (already) {
-        // Tatsächlich aus Firestore entfernen — vorher hat der
-        // Toggle-Off-Path nur den lokalen State geflippt und beim
-        // nächsten Page-Reload tauchte der Eintrag wieder auf.
-        await FirestoreService.removeFromShoppingCartByProductId(
-          user.uid,
-          productId,
-          productType === 'markenprodukt',
-        );
-        // ERROR category → soft-red pill, signals the destructive
-        // (but successful) action. Leading 🗑️ wins over extractEmoji's
-        // default ✅ so the icon matches the action.
-        showInfoToast('🗑️ Aus Einkaufsliste entfernt', 'ERROR');
-      } else {
-        await FirestoreService.addToShoppingCart(
-          user.uid,
-          productId,
-          productData?.name ?? 'Produkt',
-          productType === 'markenprodukt',
-          'comparison',
-          { screenName: 'product-comparison' },
-          {
-            price: productData?.preis ?? 0,
-            savings: 0,
-          },
-        );
-        // No toast on single-add — the FlyToCart animation + the
-        // cart-icon state flip already make the action self-evident.
-        // Toast stays for the favorites BULK action where there's
-        // no fly-to-cart hand-off.
-      }
+      await FirestoreService.addToShoppingCart(
+        user.uid,
+        productId,
+        productData?.name ?? 'Produkt',
+        productType === 'markenprodukt',
+        'comparison',
+        { screenName: 'product-comparison' },
+        { price: productData?.preis ?? 0, savings: 0 },
+      );
     } catch (e) {
-      setCartMap((prev) => ({ ...prev, [productId]: already }));
+      // Bei Fehler: anzahl revert
+      setCartAnzahlMap((prev) => ({ ...prev, [productId]: prevAnzahl }));
+      setCartMap((prev) => ({ ...prev, [productId]: prevAnzahl > 0 }));
       showInfoToast('Fehler — bitte erneut versuchen');
     }
     console.error('[tap] cart done', { productId: productId.slice(0, 8), ms: Date.now() - __t0 });
   });
+
+  // QuantityPill +/− Handler — werden vom geöffneten Pill aufgerufen.
+  // Increment ruft denselben addToShoppingCart-Pfad. Decrement ruft
+  // decrementCartQuantity (server-seitig: anzahl-1 oder full-remove
+  // wenn anzahl=1 → mit Journey-Tracking).
+  const onIncrementCart = async (
+    productId: string,
+    productType: 'markenprodukt' | 'noname',
+    productData: any,
+  ) => {
+    if (!user?.uid) return;
+    const prevAnzahl = cartAnzahlMap[productId] ?? 0;
+    setCartAnzahlMap((prev) => ({ ...prev, [productId]: prevAnzahl + 1 }));
+    try {
+      await FirestoreService.addToShoppingCart(
+        user.uid,
+        productId,
+        productData?.name ?? 'Produkt',
+        productType === 'markenprodukt',
+        'comparison',
+        { screenName: 'product-comparison' },
+        { price: productData?.preis ?? 0, savings: 0 },
+      );
+    } catch (e) {
+      setCartAnzahlMap((prev) => ({ ...prev, [productId]: prevAnzahl }));
+      showInfoToast('Fehler — bitte erneut versuchen');
+    }
+  };
+
+  const onDecrementCart = async (
+    productId: string,
+    productType: 'markenprodukt' | 'noname',
+  ) => {
+    if (!user?.uid) return;
+    const prevAnzahl = cartAnzahlMap[productId] ?? 0;
+    if (prevAnzahl <= 0) return;
+    const newAnzahl = prevAnzahl - 1;
+    // Optimistisch
+    setCartAnzahlMap((prev) => ({ ...prev, [productId]: newAnzahl }));
+    if (newAnzahl === 0) {
+      setCartMap((prev) => ({ ...prev, [productId]: false }));
+      setOpenPillProductId(null); // Pill schließen wenn anzahl=0
+    }
+    try {
+      await FirestoreService.decrementCartQuantity(
+        user.uid,
+        productId,
+        productType === 'markenprodukt',
+      );
+      if (newAnzahl === 0) {
+        showInfoToast('🗑️ Aus Einkaufsliste entfernt', 'ERROR');
+      }
+    } catch (e) {
+      setCartAnzahlMap((prev) => ({ ...prev, [productId]: prevAnzahl }));
+      setCartMap((prev) => ({ ...prev, [productId]: prevAnzahl > 0 }));
+      showInfoToast('Fehler — bitte erneut versuchen');
+    }
+  };
 
   const [existingRating, setExistingRating] = useState<Rating | null>(null);
   const onOpenRatings = async (
@@ -2259,6 +2320,57 @@ export default function ProductComparisonScreen() {
           animates it into the floating cart button. Mounted last so
           it sits visually on top of the FAB at landing time. */}
       <FlyToCart ref={flyRef} />
+
+      {/* QuantityPill (NEU 2026-05-07): floating bottom-center overlay
+          nach Cart-Add. Zeigt aktuelle Anzahl + +/− zum Anpassen.
+          Schließt bei Tap außerhalb (Backdrop-Pressable) oder bei
+          Scroll der Detailseite (handled via scrollY-watcher unten). */}
+      {openPillProductId && (
+        <Pressable
+          onPress={() => setOpenPillProductId(null)}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'transparent',
+          }}
+        />
+      )}
+      {openPillProductId && (
+        <View
+          pointerEvents="box-none"
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: insets.bottom + 90,
+            alignItems: 'center',
+          }}
+        >
+          <QuantityPill
+            visible={!!openPillProductId}
+            anzahl={cartAnzahlMap[openPillProductId] ?? 1}
+            onIncrement={() => {
+              const pid = openPillProductId;
+              if (!pid) return;
+              // ProductData ermitteln: main oder alternative finden
+              const isMain = mp?.id === pid;
+              const productData = isMain ? mp : (nonames.find((n) => n.id === pid) ?? null);
+              const productType: 'markenprodukt' | 'noname' = isMain ? 'markenprodukt' : 'noname';
+              if (productData) onIncrementCart(pid, productType, productData);
+            }}
+            onDecrement={() => {
+              const pid = openPillProductId;
+              if (!pid) return;
+              const isMain = mp?.id === pid;
+              const productType: 'markenprodukt' | 'noname' = isMain ? 'markenprodukt' : 'noname';
+              onDecrementCart(pid, productType);
+            }}
+          />
+        </View>
+      )}
 
       {/* ProductDetail-Walkthrough — Welcome-Card + Spotlights.
           Gleiche Tour-Key 'product-detail' wie noname-detail.

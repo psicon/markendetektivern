@@ -26,6 +26,7 @@ import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/Deta
 import { usePressLock } from '@/lib/hooks/usePressLock';
 import { FadingImage } from '@/components/design/FadingImage';
 import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
+import { QuantityPill } from '@/components/design/QuantityPill';
 import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
 import { getProductImage } from '@/lib/utils/productImage';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
@@ -191,6 +192,9 @@ export default function NoNameDetailScreen() {
     };
   }, [id, isFavorite]);
   const [inCart, setInCart] = useState(false);
+  // NEU (2026-05-07): Cart-Anzahl + Pill-Open-State
+  const [cartAnzahl, setCartAnzahl] = useState(0);
+  const [pillOpen, setPillOpen] = useState(false);
   const [ratingsOpen, setRatingsOpen] = useState(false);
   // Connected Brands des Herstellers — separat geladen, weil das
   // Aggregat im Cloud-Function-Job (`connected-brands-aggregator`)
@@ -310,14 +314,28 @@ export default function NoNameDetailScreen() {
     let alive = true;
     if (!user?.uid || !id) {
       setInCart(false);
+      setCartAnzahl(0);
       return;
     }
-    FirestoreService.isInShoppingCart(user.uid, String(id), false)
-      .then((res) => {
-        if (alive) setInCart(!!res);
+    // Det-ID-Doc lesen — analog zur neuen Cart-Schema-v2.
+    FirestoreService.getShoppingCartItems(user.uid)
+      .then((items) => {
+        if (!alive) return;
+        let total = 0;
+        for (const it of items as any[]) {
+          const pid = it?.handelsmarkenProdukt?.id;
+          if (pid === String(id)) {
+            total += (it.anzahl ?? 1) as number;
+          }
+        }
+        setCartAnzahl(total);
+        setInCart(total > 0);
       })
       .catch(() => {
-        if (alive) setInCart(false);
+        if (alive) {
+          setInCart(false);
+          setCartAnzahl(0);
+        }
       });
     return () => {
       alive = false;
@@ -504,50 +522,34 @@ export default function NoNameDetailScreen() {
       setIsFav(!optimisticNext);
     }
   });
+  // NEU (2026-05-07): Cart-Tap = ADD/INCREMENT + Pill öffnen.
+  // Remove läuft jetzt über die Pill (− bei anzahl=1).
   const onCartPress = usePressLock(async () => {
     if (!p) return;
     if (!user?.uid) {
       showInfoToast('Bitte anmelden');
       return;
     }
-    if (inCart) {
-      // Optimistisches UI-Update: Button springt sofort auf
-      // "nicht im Wagen", danach Firestore-Delete im Hintergrund.
-      // Bei Fehler revert.
-      setInCart(false);
-      try {
-        await FirestoreService.removeFromShoppingCartByProductId(
-          user.uid,
-          p.id,
-          false,
-        );
-        // ERROR category → soft-red pill, signals the destructive
-        // (but successful) action. Leading 🗑️ wins over extractEmoji's
-        // default ✅ so the icon matches the action.
-        showInfoToast('🗑️ Aus Einkaufsliste entfernt', 'ERROR');
-      } catch {
-        setInCart(true);
-        showInfoToast('Fehler — bitte erneut versuchen');
-      }
-      return;
-    }
+    const prev = cartAnzahl;
+    const next = prev + 1;
+    setCartAnzahl(next);
     setInCart(true);
+    setPillOpen(true);
 
-    // Fire the fly-to-cart animation in parallel with the Firestore
-    // call. measureInWindow gives us the hero's screen rect; FlyToCart
-    // clones it and animates the clone into the floating cart button.
-    // The clone is `pointerEvents="none"` so taps still hit the page.
-    const flyImageUri = getProductImage(p);
-    if (heroRef.current && flyImageUri) {
-      heroRef.current.measureInWindow((x, y, w, h) => {
-        flyRef.current?.fly({
-          sourceX: x,
-          sourceY: y,
-          sourceW: w,
-          sourceH: h,
-          imageUri: flyImageUri,
+    // FlyToCart-Animation nur bei initialem Add (anzahl 0→1).
+    if (prev === 0) {
+      const flyImageUri = getProductImage(p);
+      if (heroRef.current && flyImageUri) {
+        heroRef.current.measureInWindow((x, y, w, h) => {
+          flyRef.current?.fly({
+            sourceX: x,
+            sourceY: y,
+            sourceW: w,
+            sourceH: h,
+            imageUri: flyImageUri,
+          });
         });
-      });
+      }
     }
 
     try {
@@ -560,13 +562,52 @@ export default function NoNameDetailScreen() {
         { screenName: 'noname-detail' },
         { price: p.preis ?? 0, savings: 0 },
       );
-      // No toast on single-add — the FlyToCart animation + the
-      // cart-icon state flip already make the action self-evident.
     } catch {
-      setInCart(false);
+      // Bei Fehler: revert
+      setCartAnzahl(prev);
+      setInCart(prev > 0);
       showInfoToast('Fehler — bitte erneut versuchen');
     }
   });
+
+  const onIncrementFromPill = async () => {
+    if (!p || !user?.uid) return;
+    const prev = cartAnzahl;
+    setCartAnzahl(prev + 1);
+    try {
+      await FirestoreService.addToShoppingCart(
+        user.uid,
+        p.id,
+        p.name ?? 'Produkt',
+        false,
+        'comparison',
+        { screenName: 'noname-detail' },
+        { price: p.preis ?? 0, savings: 0 },
+      );
+    } catch {
+      setCartAnzahl(prev);
+      showInfoToast('Fehler — bitte erneut versuchen');
+    }
+  };
+
+  const onDecrementFromPill = async () => {
+    if (!p || !user?.uid || cartAnzahl <= 0) return;
+    const prev = cartAnzahl;
+    const next = prev - 1;
+    setCartAnzahl(next);
+    if (next === 0) {
+      setInCart(false);
+      setPillOpen(false);
+    }
+    try {
+      await FirestoreService.decrementCartQuantity(user.uid, p.id, false);
+      if (next === 0) showInfoToast('🗑️ Aus Einkaufsliste entfernt', 'ERROR');
+    } catch {
+      setCartAnzahl(prev);
+      setInCart(prev > 0);
+      showInfoToast('Fehler — bitte erneut versuchen');
+    }
+  };
   const [existingRating, setExistingRating] = useState<Rating | null>(null);
   const onRatingsPress = async () => {
     if (!p) return;
@@ -1502,6 +1543,41 @@ export default function NoNameDetailScreen() {
           into the floating cart button. Mounted last so it sits on
           top of the FAB visually. */}
       <FlyToCart ref={flyRef} />
+
+      {/* QuantityPill (NEU 2026-05-07): floating bottom-center overlay
+          nach Cart-Add. Schließt bei Tap außerhalb. */}
+      {pillOpen && (
+        <Pressable
+          onPress={() => setPillOpen(false)}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'transparent',
+          }}
+        />
+      )}
+      {pillOpen && (
+        <View
+          pointerEvents="box-none"
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: insets.bottom + 90,
+            alignItems: 'center',
+          }}
+        >
+          <QuantityPill
+            visible={pillOpen}
+            anzahl={Math.max(1, cartAnzahl)}
+            onIncrement={onIncrementFromPill}
+            onDecrement={onDecrementFromPill}
+          />
+        </View>
+      )}
 
       {/* ProductDetail-Walkthrough — Welcome-Card + Spotlights.
           CoachmarkScrollProvider gibt der SpotlightOverlay-Engine

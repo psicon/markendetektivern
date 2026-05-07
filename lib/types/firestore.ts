@@ -183,6 +183,20 @@ export interface Einkaufswagen {
   gekauft: boolean; // Ob das Produkt bereits gekauft wurde
   timestamp: Timestamp;
   name: string; // Name des Produkts für schnelle Anzeige
+
+  // NEU (2026-05-07, Cart-Schema-v2): Anzahl im Einkaufszettel.
+  // Optional damit Legacy-Auto-ID-Docs ohne Feld weiterhin funktionieren
+  // (treated als anzahl=1). Neue Det-ID-Docs schreiben das Feld immer.
+  anzahl?: number;
+
+  // Optionaler Snapshot für Analytics/Tracking — bestand schon vorher,
+  // hier zur Vollständigkeit deklariert
+  priceAtTime?: number;
+  savingsAtTime?: number;
+  source?: string;
+  sourceMetadata?: any;
+  journeyId?: string | null;
+  viewedProductIndex?: number | null;
 }
 
 export interface CartMarkenProduktData {

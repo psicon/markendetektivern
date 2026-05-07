@@ -3501,14 +3501,65 @@ export class FirestoreService {
         where('gekauft', '==', false),
         orderBy('timestamp', 'desc')
       );
-      
+
       const snapshot = await getDocs(q);
-      const items = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
+      const rawItems = snapshot.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
       })) as FirestoreDocument<Einkaufswagen>[];
-      
-      console.log(`✅ Loaded ${items.length} shopping cart items`);
+
+      // ─── Cart-Schema v2: Read-Side Merge by productId ───
+      // Falls User Legacy Auto-ID-Docs UND neue Det-ID-Docs für dasselbe
+      // Produkt hat (Edge-Case während Migration), merge sie zu einem
+      // einzigen UI-Eintrag mit summierter anzahl. Custom-Items haben
+      // keinen productId und werden nie gemerged.
+      const productKey = (item: any): string | null => {
+        if (item.customItem) return null; // Custom items not mergeable
+        if (item.markenProdukt?.id) return `brand_${item.markenProdukt.id}`;
+        if (item.handelsmarkenProdukt?.id) return `noname_${item.handelsmarkenProdukt.id}`;
+        return null;
+      };
+
+      const mergedMap = new Map<string, FirestoreDocument<Einkaufswagen>>();
+      const customs: FirestoreDocument<Einkaufswagen>[] = [];
+
+      for (const item of rawItems) {
+        const key = productKey(item);
+        if (!key) {
+          customs.push(item);
+          continue;
+        }
+        const existing = mergedMap.get(key);
+        if (!existing) {
+          // Erste Vorkommen — anzahl auf gespeichertem Wert oder 1 (Legacy)
+          mergedMap.set(key, {
+            ...item,
+            anzahl: (item as any).anzahl ?? 1,
+          } as any);
+        } else {
+          // Weiteres Doc für dasselbe Produkt — anzahl summieren
+          const prevAnzahl = (existing as any).anzahl ?? 1;
+          const thisAnzahl = (item as any).anzahl ?? 1;
+          // Wir behalten den NEUSTEN Doc als "Hauptzeile" (höhere
+          // timestamp), addieren aber die anzahl aller Legacy-Docs.
+          // ID des neueren Docs gewinnt — UI-Operations gehen dann
+          // auf die Det-ID falls vorhanden, sonst die Legacy-ID.
+          const isDetId = item.id.startsWith('brand_') || item.id.startsWith('noname_');
+          const existingIsDet = existing.id.startsWith('brand_') || existing.id.startsWith('noname_');
+          if (isDetId && !existingIsDet) {
+            // Det gewinnt über Legacy
+            mergedMap.set(key, {
+              ...item,
+              anzahl: prevAnzahl + thisAnzahl,
+            } as any);
+          } else {
+            (existing as any).anzahl = prevAnzahl + thisAnzahl;
+          }
+        }
+      }
+
+      const items = [...mergedMap.values(), ...customs];
+      console.log(`✅ Loaded ${items.length} shopping cart items (raw: ${rawItems.length})`);
       return items;
     } catch (error) {
       console.error('Error loading shopping cart:', error);
@@ -3581,14 +3632,25 @@ export class FirestoreService {
     try {
       const userRef = doc(db, 'users', userId);
 
-      // Hole aktuelle Journey-ID + tracke synchron in-memory.
-      // Beides läuft auf dem main JS-thread, nicht durch Firestore.
+      // ─── Cart-Schema v2 (2026-05-07): Deterministische Doc-ID ───
+      // analog zu Favoriten — eine Cart-Zeile pro Produkt mit anzahl
+      // statt N separate Auto-ID-Docs. Eliminiert getDocs-Query im
+      // Remove-Pfad (war WatchStream-Stress-Quelle bei Cart-Burst).
+      const detId = `${isMarke ? 'brand' : 'noname'}_${productId}`;
+      const detRef = doc(db, 'users', userId, 'einkaufswagen', detId);
+
+      // Hole Journey-ID + tracke synchron in-memory.
       const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
       const currentJourneyId = journeyTrackingService.getCurrentJourneyId();
 
-      // Fix (2026-05-07): Track ZUERST in-memory (sync) → bekommt
-      // viewedProductIndex → wird direkt mitgespeichert. Vorher
-      // 2 Firestore-Writes (addDoc + updateDoc-with-index). Jetzt 1.
+      // Existierenden Det-Doc lesen (1 read aus local cache wenn vorhanden).
+      const existingSnap = await getDoc(detRef);
+      const exists = existingSnap.exists();
+      const prevAnzahl = exists ? ((existingSnap.data() as any)?.anzahl ?? 1) : 0;
+      const newAnzahl = prevAnzahl + 1;
+
+      // Journey-Tracking (in-memory, sync) — bekommt viewedProductIndex.
+      // quantity-Feld in der Action wird auf newAnzahl gesetzt.
       let viewedProductIndex: number | null = null;
       if (source) {
         try {
@@ -3599,52 +3661,62 @@ export class FirestoreService {
             userId,
             priceInfo,
             comparisonContext,
+            newAnzahl, // NEU: quantity in Action speichern
           );
         } catch (e) {
           console.warn('journey trackAddToCart sync failed:', e);
         }
       }
 
-      const data: any = {
-        gekauft: false,
-        timestamp: serverTimestamp(),
-        name: productName,
-        // 🎯 Journey-ID für späteres Tracking speichern!
-        journeyId: currentJourneyId,
-        // 💰 Preis-Snapshot zum Zeitpunkt des Hinzufügens
-        ...(priceInfo && {
-          priceAtTime: priceInfo.price,
-          savingsAtTime: priceInfo.savings
-        }),
-        // 📊 Source Attribution (optional)
-        ...(source && { source }),
-        ...(sourceMetadata && { sourceMetadata }),
-        // NEU: Index direkt mitspeichern (1 Write statt 2)
-        ...(viewedProductIndex !== null && { viewedProductIndex }),
-      };
+      if (exists) {
+        // Increment: nur die geänderten Felder updaten (kein Doc-Replace)
+        const updatePayload: any = {
+          anzahl: newAnzahl,
+          timestamp: serverTimestamp(),
+          gekauft: false, // falls vorher als gekauft markiert war + neu hinzugefügt
+        };
+        if (currentJourneyId) updatePayload.journeyId = currentJourneyId;
+        if (source) updatePayload.source = source;
+        if (sourceMetadata) updatePayload.sourceMetadata = sourceMetadata;
+        if (priceInfo) {
+          updatePayload.priceAtTime = priceInfo.price;
+          updatePayload.savingsAtTime = priceInfo.savings;
+        }
+        if (viewedProductIndex !== null) updatePayload.viewedProductIndex = viewedProductIndex;
 
-      if (isMarke) {
-        data.markenProdukt = doc(db, 'markenProdukte', productId);
+        await updateDoc(detRef, updatePayload);
       } else {
-        data.handelsmarkenProdukt = doc(db, 'produkte', productId);
+        // Erstmaliges Hinzufügen: vollständiges Doc schreiben
+        const data: any = {
+          gekauft: false,
+          timestamp: serverTimestamp(),
+          name: productName,
+          anzahl: 1,
+          journeyId: currentJourneyId,
+          ...(priceInfo && {
+            priceAtTime: priceInfo.price,
+            savingsAtTime: priceInfo.savings,
+          }),
+          ...(source && { source }),
+          ...(sourceMetadata && { sourceMetadata }),
+          ...(viewedProductIndex !== null && { viewedProductIndex }),
+        };
+        if (isMarke) {
+          data.markenProdukt = doc(db, 'markenProdukte', productId);
+        } else {
+          data.handelsmarkenProdukt = doc(db, 'produkte', productId);
+        }
+        await setDoc(detRef, data);
       }
 
-      // Single Write: client-generierte ID + setDoc awaited. Daten
-      // MÜSSEN sicher in Firestore landen — kein fire-and-forget.
-      // Die anderen Perf-Fixes (journey debounce, refresh debounce,
-      // GPS→IP, favorites snapshot throttle) reduzieren bereits den
-      // Bridge-Druck so dass dieses await nicht mehr 121 s hängt.
-      const newDocRef = doc(collection(userRef, 'einkaufswagen'));
-      await setDoc(newDocRef, data);
-
-      // 📊 Analytics fire-and-forget — Analytics-Event ist nicht
-      // kritisch für die Cart-Funktionalität, kann async laufen.
+      // 📊 Analytics fire-and-forget
       if (source) {
         import('./analyticsService').then(({ analyticsService }) => {
           analyticsService
             .trackAddToCart(productId, productName, isMarke, source, userId, {
               screen_name: sourceMetadata?.screenName || 'unknown',
               ...sourceMetadata,
+              quantity: newAnzahl,
             })
             .catch((err) => {
               console.error('[cart] analytics trackAddToCart bg-fail:', err?.message);
@@ -3652,12 +3724,54 @@ export class FirestoreService {
         });
       }
 
-      console.log('✅ Added to shopping cart:', newDocRef.id);
-      console.error('[cart] add done', { id: __callId, ms: Date.now() - __t0 });
-      return newDocRef.id;
+      console.log('✅ Added to shopping cart:', detId, 'anzahl:', newAnzahl);
+      console.error('[cart] add done', { id: __callId, ms: Date.now() - __t0, anzahl: newAnzahl });
+      return detId;
     } catch (error) {
       console.error('Error adding to shopping cart:', error);
       console.error('[cart] add fail', { ms: Date.now() - __t0 });
+      throw error;
+    }
+  }
+
+  /**
+   * Verringert die anzahl im Einkaufszettel um 1.
+   * Wenn anzahl > 1: updateDoc mit anzahl-1.
+   * Wenn anzahl === 1 oder anzahl-Feld fehlt (Legacy): full removeFromShoppingCart
+   *
+   * Returns die neue anzahl, oder 0 wenn entfernt.
+   */
+  static async decrementCartQuantity(
+    userId: string,
+    productId: string,
+    isMarke: boolean,
+  ): Promise<number> {
+    const __t0 = Date.now();
+    console.error('[cart] decrement start', { productId: productId.slice(0, 8) });
+    try {
+      const detId = `${isMarke ? 'brand' : 'noname'}_${productId}`;
+      const detRef = doc(db, 'users', userId, 'einkaufswagen', detId);
+      const snap = await getDoc(detRef);
+      if (!snap.exists()) {
+        // Legacy fallback: vielleicht ein altes Auto-ID-Doc
+        const removed = await this.removeFromShoppingCartByProductId(userId, productId, isMarke);
+        console.error('[cart] decrement fallback removed', { count: removed, ms: Date.now() - __t0 });
+        return 0;
+      }
+      const currentAnzahl = ((snap.data() as any)?.anzahl ?? 1) as number;
+      if (currentAnzahl > 1) {
+        // Decrement nur das Feld
+        await updateDoc(detRef, { anzahl: currentAnzahl - 1, timestamp: serverTimestamp() });
+        console.error('[cart] decrement done', { newAnzahl: currentAnzahl - 1, ms: Date.now() - __t0 });
+        return currentAnzahl - 1;
+      } else {
+        // anzahl === 1 → full remove (mit Journey-Tracking)
+        await this.removeFromShoppingCart(userId, detId);
+        console.error('[cart] decrement removed', { ms: Date.now() - __t0 });
+        return 0;
+      }
+    } catch (error) {
+      console.error('Error decrementing cart quantity:', error);
       throw error;
     }
   }
@@ -3718,37 +3832,62 @@ export class FirestoreService {
     const __t0 = Date.now();
     console.error('[cart] removeByProduct start', { productId: productId.slice(0, 8) });
     try {
-      const userRef = doc(db, 'users', userId);
-      const productRef = isMarke
-        ? doc(db, 'markenProdukte', productId)
-        : doc(db, 'produkte', productId);
-      const refField = isMarke ? 'markenProdukt' : 'handelsmarkenProdukt';
-      const q = query(
-        collection(userRef, 'einkaufswagen'),
-        where(refField, '==', productRef),
-        where('gekauft', '==', false),
-      );
-      const __qT0 = Date.now();
-      const snap = await getDocs(q);
-      console.error('[cart] removeByProduct getDocs', { ms: Date.now() - __qT0, found: snap.size });
-      if (snap.empty) {
-        console.error('[cart] removeByProduct done (empty)', { ms: Date.now() - __t0 });
-        return 0;
-      }
-      // Sequenziell löschen (kleine Liste, sollte fast immer 1 sein).
-      // `removeFromShoppingCart` triggered Journey-Tracking +
-      // Achievement-Logik korrekt — nutzen wir hier auch.
-      let removed = 0;
-      for (const docSnap of snap.docs) {
-        try {
-          await this.removeFromShoppingCart(userId, docSnap.id);
-          removed += 1;
-        } catch (e) {
-          console.warn('removeFromShoppingCartByProductId: single delete failed', e);
+      // ─── Cart-Schema v2 Fast-Path (analog Favoriten) ───
+      // Versuche direkt das Det-ID-Doc zu löschen — KEIN getDocs-Server-Query.
+      // Dieser Pfad ist identisch zu Favoriten-Remove und ist die UI-
+      // Critical-Path-Operation.
+      const detId = `${isMarke ? 'brand' : 'noname'}_${productId}`;
+      const detRef = doc(db, 'users', userId, 'einkaufswagen', detId);
+      let totalRemoved = 0;
+      let detExisted = false;
+      try {
+        const detSnap = await getDoc(detRef);
+        if (detSnap.exists()) {
+          detExisted = true;
+          await this.removeFromShoppingCart(userId, detId);
+          totalRemoved += 1;
+          console.error('[cart] removeByProduct det-fast done', { ms: Date.now() - __t0 });
         }
+      } catch (e) {
+        console.warn('removeByProduct det-fast lookup failed:', e);
       }
-      console.error('[cart] removeByProduct done', { ms: Date.now() - __t0, removed });
-      return removed;
+
+      // ─── Legacy-Cleanup im Hintergrund ───
+      // Falls Det-ID NICHT gefunden wurde, gibt's keine Daten für dieses
+      // Produkt. Wenn Det-ID gefunden wurde, könnten ZUSÄTZLICH alte
+      // Auto-ID-Legacy-Docs existieren (Edge-Case bei pre-update Daten).
+      // Da das selten ist, machen wir den Legacy-Sweep fire-and-forget
+      // im Hintergrund — UI muss nicht warten.
+      const cleanupLegacy = async () => {
+        try {
+          const userRef = doc(db, 'users', userId);
+          const productRef = isMarke
+            ? doc(db, 'markenProdukte', productId)
+            : doc(db, 'produkte', productId);
+          const refField = isMarke ? 'markenProdukt' : 'handelsmarkenProdukt';
+          const q = query(
+            collection(userRef, 'einkaufswagen'),
+            where(refField, '==', productRef),
+            where('gekauft', '==', false),
+          );
+          const snap = await getDocs(q);
+          for (const docSnap of snap.docs) {
+            if (docSnap.id === detId) continue;
+            try {
+              await this.removeFromShoppingCart(userId, docSnap.id);
+              console.error('[cart] legacy cleanup', { itemId: docSnap.id.slice(0, 8) });
+            } catch (e) {
+              console.warn('legacy cleanup single delete failed:', e);
+            }
+          }
+        } catch (e) {
+          console.warn('legacy cleanup failed:', e);
+        }
+      };
+      void cleanupLegacy();
+
+      console.error('[cart] removeByProduct done', { ms: Date.now() - __t0, detExisted, removed: totalRemoved });
+      return totalRemoved;
     } catch (error) {
       console.error('Error removing by product id from cart:', error);
       console.error('[cart] removeByProduct fail', { ms: Date.now() - __t0 });

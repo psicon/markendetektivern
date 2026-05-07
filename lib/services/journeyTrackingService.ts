@@ -844,7 +844,8 @@ class JourneyTrackingService {
       mainProductId: string;
       mainProductName: string;
       mainProductType: 'brand' | 'noname';
-    }
+    },
+    quantity?: number, // NEU (2026-05-07): Cart-Anzahl nach diesem Add
   ): number | null {
     if (!this.currentJourney) {
       console.warn('⚠️ Add-to-Cart ohne aktive Journey!');
@@ -896,7 +897,9 @@ class JourneyTrackingService {
         price: priceInfo?.price,
         savings: priceInfo?.savings,
         comparedProducts: priceInfo?.comparedProducts
-      }, this.currentJourney!.activeFilters)
+      }, this.currentJourney!.activeFilters),
+      // NEU (2026-05-07): quantity nach diesem Add (default 1 für Backwards-Compat)
+      ...(quantity !== undefined && { quantity }),
     };
     
     // NEU: Füge Vergleichskontext hinzu wenn vorhanden
