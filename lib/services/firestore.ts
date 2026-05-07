@@ -3578,19 +3578,32 @@ export class FirestoreService {
     const __t0 = Date.now();
     const __callId = Math.random().toString(36).slice(2, 6);
     console.error('[cart] add start', { id: __callId, productId: productId.slice(0, 8), source });
-    let __step = 'init';
-    const __mark = (s: string) => {
-      console.error('[cart] step', { id: __callId, step: __step, ms: Date.now() - __t0 });
-      __step = s;
-    };
     try {
       const userRef = doc(db, 'users', userId);
 
-      // Hole aktuelle Journey-ID
-      __mark('journey-import-1');
+      // Hole aktuelle Journey-ID + tracke synchron in-memory.
+      // Beides läuft auf dem main JS-thread, nicht durch Firestore.
       const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
-      __mark('build-data');
       const currentJourneyId = journeyTrackingService.getCurrentJourneyId();
+
+      // Fix (2026-05-07): Track ZUERST in-memory (sync) → bekommt
+      // viewedProductIndex → wird direkt mitgespeichert. Vorher
+      // 2 Firestore-Writes (addDoc + updateDoc-with-index). Jetzt 1.
+      let viewedProductIndex: number | null = null;
+      if (source) {
+        try {
+          viewedProductIndex = journeyTrackingService.trackAddToCart(
+            productId,
+            productName,
+            isMarke,
+            userId,
+            priceInfo,
+            comparisonContext,
+          );
+        } catch (e) {
+          console.warn('journey trackAddToCart sync failed:', e);
+        }
+      }
 
       const data: any = {
         gekauft: false,
@@ -3605,7 +3618,9 @@ export class FirestoreService {
         }),
         // 📊 Source Attribution (optional)
         ...(source && { source }),
-        ...(sourceMetadata && { sourceMetadata })
+        ...(sourceMetadata && { sourceMetadata }),
+        // NEU: Index direkt mitspeichern (1 Write statt 2)
+        ...(viewedProductIndex !== null && { viewedProductIndex }),
       };
 
       if (isMarke) {
@@ -3614,19 +3629,21 @@ export class FirestoreService {
         data.handelsmarkenProdukt = doc(db, 'produkte', productId);
       }
 
-      __mark('addDoc');
-      const docRef = await addDoc(collection(userRef, 'einkaufswagen'), data);
+      // Fix (2026-05-07): Client-generierte ID + setDoc fire-and-forget.
+      // Vorher: await addDoc() blockierte ~121 s wenn die Firestore-
+      // Write-Stream stockte (Token-Refresh, Bridge-Stau, slow connection).
+      // Cart-UI ist bereits optimistisch geflippt — User braucht das
+      // Server-Ack nicht. Firestore SDK queued den Write und retried
+      // selbst, also keine Datenverluste.
+      const newDocRef = doc(collection(userRef, 'einkaufswagen'));
+      void setDoc(newDocRef, data).catch((err) => {
+        console.warn('[cart] setDoc background-fail:', err?.message);
+      });
 
-      // 📊 Track Add-to-Cart Event mit Source UND Journey-Context
+      // 📊 Analytics fire-and-forget (war vorher awaited → unnötiger Block)
       if (source) {
-        __mark('analytics-import');
         const { analyticsService } = await import('./analyticsService');
-        __mark('journey-import-2');
-        const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
-
-        // Track mit normaler Analytics
-        __mark('analytics-trackAddToCart');
-        await analyticsService.trackAddToCart(
+        void analyticsService.trackAddToCart(
           productId,
           productName,
           isMarke,
@@ -3634,28 +3651,16 @@ export class FirestoreService {
           userId,
           {
             screen_name: sourceMetadata?.screenName || 'unknown',
-            ...sourceMetadata
-          }
-        );
-
-        // Track mit Journey-Context und hole Index zurück
-        __mark('journey-trackAddToCart');
-        const viewedProductIndex = journeyTrackingService.trackAddToCart(productId, productName, isMarke, userId, priceInfo, comparisonContext);
-
-        // WICHTIG: Speichere Index im Einkaufszettel für spätere Zuordnung
-        if (viewedProductIndex !== null) {
-          __mark('updateDoc-index');
-          await updateDoc(docRef, {
-            viewedProductIndex: viewedProductIndex
-          });
-          console.log(`📍 ViewedProduct Index ${viewedProductIndex} gespeichert für ${productName}`);
-        }
+            ...sourceMetadata,
+          },
+        ).catch((err) => {
+          console.warn('[cart] analytics trackAddToCart bg-fail:', err?.message);
+        });
       }
 
-      __mark('end');
-      console.log('✅ Added to shopping cart:', docRef.id);
+      console.log('✅ Added to shopping cart (queued):', newDocRef.id);
       console.error('[cart] add done', { id: __callId, ms: Date.now() - __t0 });
-      return docRef.id;
+      return newDocRef.id;
     } catch (error) {
       console.error('Error adding to shopping cart:', error);
       console.error('[cart] add fail', { ms: Date.now() - __t0 });
