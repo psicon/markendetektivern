@@ -464,6 +464,16 @@ export default function ProductComparisonScreen() {
   const [cartMap, setCartMap] = useState<Record<string, boolean>>({});
   // NEU (2026-05-07): Anzahl pro Produkt im Cart, für Quantity-Pill.
   const [cartAnzahlMap, setCartAnzahlMap] = useState<Record<string, number>>({});
+  // Pro Produkt-ID tracken ob der MorphingCartButton expanded ist —
+  // damit der Wrapper-View dieses Buttons zIndex/elevation hochziehen
+  // kann (sonst überlagert star/rating-ActionButton das +).
+  const [pillExpandedMap, setPillExpandedMap] = useState<Record<string, boolean>>({});
+  const setPillExpanded = useCallback((productId: string, expanded: boolean) => {
+    setPillExpandedMap((prev) => {
+      if ((prev[productId] ?? false) === expanded) return prev;
+      return { ...prev, [productId]: expanded };
+    });
+  }, []);
   // NEU: welche Produkt-Pill ist gerade offen (overlay) + Anchor-Position
   const [openPill, setOpenPill] = useState<{
     productId: string;
@@ -1452,13 +1462,18 @@ export default function ProductComparisonScreen() {
                   ref={cartAnchor.ref}
                   onLayout={cartAnchor.onLayout}
                   collapsable={false}
+                  style={{
+                    zIndex: pillExpandedMap[mp.id] ? 100 : 1,
+                    elevation: pillExpandedMap[mp.id] ? 24 : 2,
+                  }}
                 >
                   <View ref={(el) => { if (mp?.id) cartButtonRefs.current.set(mp.id, el); }}>
                     <MorphingCartButton
                       anzahl={cartAnzahlMap[mp.id] || 0}
                       onAddToCart={() => onToggleCart(mp.id, 'markenprodukt', mp)}
-                      onIncrement={() => onIncrementCart(mp.id, 'markenprodukt')}
+                      onIncrement={() => onIncrementCart(mp.id, 'markenprodukt', mp)}
                       onDecrement={() => onDecrementCart(mp.id, 'markenprodukt')}
+                      onExpansionChange={(exp) => setPillExpanded(mp.id, exp)}
                     />
                   </View>
                 </View>
@@ -1924,12 +1939,19 @@ export default function ProductComparisonScreen() {
                           iconColor={favMap[nn.id] ? '#e53935' : theme.text}
                           onPress={() => onToggleFav(nn.id, 'noname', nn)}
                         />
-                        <View ref={(el) => { if (nn.id) cartButtonRefs.current.set(nn.id, el); }}>
+                        <View
+                          ref={(el) => { if (nn.id) cartButtonRefs.current.set(nn.id, el); }}
+                          style={{
+                            zIndex: pillExpandedMap[nn.id] ? 100 : 1,
+                            elevation: pillExpandedMap[nn.id] ? 24 : 2,
+                          }}
+                        >
                           <MorphingCartButton
                             anzahl={cartAnzahlMap[nn.id] || 0}
                             onAddToCart={() => onToggleCart(nn.id, 'noname', nn)}
-                            onIncrement={() => onIncrementCart(nn.id, 'noname')}
+                            onIncrement={() => onIncrementCart(nn.id, 'noname', nn)}
                             onDecrement={() => onDecrementCart(nn.id, 'noname')}
+                            onExpansionChange={(exp) => setPillExpanded(nn.id, exp)}
                           />
                         </View>
                         <ActionButton

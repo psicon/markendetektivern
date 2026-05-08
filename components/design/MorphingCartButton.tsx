@@ -29,8 +29,11 @@ import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 
 const SLOT_SIZE = 48;
-const EXPANDED_W = 140;
-const SIDE_GROW = (EXPANDED_W - SLOT_SIZE) / 2; // 46 px je Seite
+// Expanded-Width = 1× heart (48) + gap (8) + 1× cart (48) + gap (8)
+// + 1× star (48) = 160. Damit verdeckt die Pill heart und star
+// links/rechts EXAKT genausoweit wie sie breit sind (User-Wunsch).
+const EXPANDED_W = 160;
+const SIDE_GROW = (EXPANDED_W - SLOT_SIZE) / 2; // 56 px je Seite
 const AUTO_COLLAPSE_MS = 3000;
 const MORPH_MS = 280;
 
@@ -49,6 +52,10 @@ interface MorphingCartButtonProps {
   onDecrement: () => void;
   /** Spinner statt Icon zeigen während pending Firestore-Action. */
   loading?: boolean;
+  /** Callback wenn die Pill expanded/idle wechselt. Parent nutzt
+   *  das um zIndex/elevation auf seinem Wrapper-View zu setzen
+   *  (sonst rendert star/rating ActionButton über das +). */
+  onExpansionChange?: (expanded: boolean) => void;
 }
 
 export function MorphingCartButton({
@@ -57,6 +64,7 @@ export function MorphingCartButton({
   onIncrement,
   onDecrement,
   loading,
+  onExpansionChange,
 }: MorphingCartButtonProps) {
   const { theme, brand, shadows } = useTokens();
   const inCart = anzahl > 0;
@@ -76,10 +84,11 @@ export function MorphingCartButton({
       easing: Easing.bezier(0.4, 0, 0.2, 1),
     });
     if (expanded) restartAutoTimer();
+    onExpansionChange?.(expanded);
     return () => {
       if (autoTimer.current) clearTimeout(autoTimer.current);
     };
-  }, [expanded, t, restartAutoTimer]);
+  }, [expanded, t, restartAutoTimer, onExpansionChange]);
 
   // Auto-Expand wenn anzahl 0 → >0 wechselt (initialer Add).
   // Auto-Collapse wenn anzahl auf 0 fällt (Item entfernt).

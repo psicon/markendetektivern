@@ -194,6 +194,10 @@ export default function NoNameDetailScreen() {
   const [inCart, setInCart] = useState(false);
   // NEU (2026-05-07): Cart-Anzahl + Pill-Anchor (Position des Cart-Buttons)
   const [cartAnzahl, setCartAnzahl] = useState(0);
+  // Tracking ob die MorphingCartButton-Pill grade expanded ist
+  // (für zIndex/elevation auf dem Wrapper-View damit der + sichtbar
+  // bleibt über dem star-ActionButton).
+  const [cartPillExpanded, setCartPillExpanded] = useState(false);
   const [pillAnchor, setPillAnchor] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const pillOpen = pillAnchor !== null;
   const setPillOpen = (open: boolean) => {
@@ -1048,12 +1052,20 @@ export default function NoNameDetailScreen() {
                   }}
                   onLayout={cartAnchor.onLayout}
                   collapsable={false}
+                  // zIndex/elevation hochziehen wenn Cart-Pill
+                  // expanded ist — sonst überlagert der star-
+                  // ActionButton (siblingschwester rechts) das +.
+                  style={{
+                    zIndex: cartPillExpanded ? 100 : 1,
+                    elevation: cartPillExpanded ? 24 : 2,
+                  }}
                 >
                   <MorphingCartButton
                     anzahl={cartAnzahl}
                     onAddToCart={onCartPress}
                     onIncrement={onIncrementFromPill}
                     onDecrement={onDecrementFromPill}
+                    onExpansionChange={setCartPillExpanded}
                   />
                 </View>
                 <View
