@@ -1485,7 +1485,7 @@ function BrandCard({
               letterSpacing: 0.1,
             }}
           >
-            {expanded ? 'Alternativen ausblenden' : 'Alternativen anzeigen'}
+            {expanded ? 'Alternativen ausblenden' : 'Alternativen'}
           </Text>
           <MaterialCommunityIcons
             name={expanded ? 'chevron-up' : 'chevron-down'}
