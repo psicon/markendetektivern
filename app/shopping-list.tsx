@@ -25,7 +25,15 @@ import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -368,15 +376,38 @@ type SwipeRowProps = {
   disabled?: boolean;
 };
 
+export type SwipeRowHandle = {
+  /** Triggers the same "marked as bought" animation that swipe-left
+   *  uses — strikethrough + pop-out + collapse — and fires
+   *  onSwipeBought when the animation completes. Used by the
+   *  EdgeCheckButton (Tap = gekauft markieren) so the visual
+   *  feedback ist identisch zur Swipe-Geste. */
+  playBought: () => void;
+};
+
 const ROW_GAP = 10; // marginBottom between rows in normal flow
 const SWIPE_FLING_DURATION = 200;
 const COLLAPSE_DURATION = 260;
+// Bought-Animation Timing (Strike + Pop-Out)
+const BOUGHT_STRIKE_DURATION = 220;   // Stiftstrich zieht durch
+const BOUGHT_HOLD_DURATION = 90;      // kurz die fertig-gestrichene Zeile sehen
+const BOUGHT_POP_DURATION = 260;      // scale + fade + collapse
+const BOUGHT_TOTAL = BOUGHT_STRIKE_DURATION + BOUGHT_HOLD_DURATION + BOUGHT_POP_DURATION;
 
-function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRowProps) {
+const SwipeRow = forwardRef<SwipeRowHandle, SwipeRowProps>(function SwipeRow(
+  { children, onSwipeBought, onSwipeDelete, disabled },
+  ref,
+) {
   const { theme, brand } = useTokens();
   const tx = useSharedValue(0);
   // collapse: 0 = full row visible, 1 = fully collapsed (height 0, opacity 0)
   const collapse = useSharedValue(0);
+  // Bought-Animation Progress: 0 = idle, 1 = fully struck-through+popped.
+  // Phasen-Mapping (bei TOTAL = strike+hold+pop ms):
+  //   t ∈ [0, strike/total]                → strike line draws 0→1
+  //   t ∈ [strike/total, (strike+hold)/total] → hold (line at 1)
+  //   t ∈ [(strike+hold)/total, 1]         → pop: scale+fade+collapse 0→1
+  const boughtAnim = useSharedValue(0);
   // Measured intrinsic height of the row content. Until measured we
   // don't constrain height (let layout compute naturally).
   const [measuredHeight, setMeasuredHeight] = useState<number>(0);
@@ -418,6 +449,31 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
     onSwipeDelete();
   };
 
+  // Spielt die Bought-Animation: erst Strike-Line zieht durch, dann
+  // pop-out (scale + fade + collapse). Triggered sowohl bei Swipe
+  // links als auch bei EdgeCheckButton-Tap → konsistente Visual.
+  const playBoughtAnimation = () => {
+    if (phase !== 'idle') return;
+    setPhase('collapsing');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    boughtAnim.value = withTiming(
+      1,
+      { duration: BOUGHT_TOTAL, easing: Easing.bezier(0.25, 0.1, 0.25, 1) },
+      (done) => {
+        if (done) runOnJS(triggerBought)();
+      },
+    );
+  };
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      playBought: playBoughtAnimation,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [phase],
+  );
+
   // Safety net: if the parent doesn't unmount us within ~2.5s after
   // collapse completes (action failed and parent didn't remove the
   // item), re-open the row so it stays visible. The user already saw
@@ -428,10 +484,11 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
       // Still mounted → parent didn't remove. Reset.
       tx.value = withTiming(0, { duration: 240, easing: Easing.out(Easing.cubic) });
       collapse.value = withTiming(0, { duration: 240, easing: Easing.out(Easing.cubic) });
+      boughtAnim.value = withTiming(0, { duration: 240, easing: Easing.out(Easing.cubic) });
       setPhase('idle');
     }, 2500);
     return () => clearTimeout(timer);
-  }, [phase, tx, collapse]);
+  }, [phase, tx, collapse, boughtAnim]);
 
   const pan = Gesture.Pan()
     .activeOffsetX([-12, 12])
@@ -460,18 +517,10 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
         runOnJS(enterCollapse)();
       } else if (dx <= -SWIPE_THRESH) {
         // Links wischen → BOUGHT (gekauft markieren).
-        tx.value = withTiming(-SWIPE_FLING_OFFSCREEN, {
-          duration: SWIPE_FLING_DURATION,
-          easing: Easing.in(Easing.cubic),
-        });
-        collapse.value = withTiming(
-          1,
-          { duration: COLLAPSE_DURATION, easing: Easing.in(Easing.cubic) },
-          (done) => {
-            if (done) runOnJS(triggerBought)();
-          },
-        );
-        runOnJS(enterCollapse)();
+        // Snap zurück zur Mitte und spiel die Strike+Pop-Anim ab —
+        // gleicher Visual wie der EdgeCheckButton-Tap.
+        tx.value = withTiming(0, { duration: 160, easing: Easing.out(Easing.cubic) });
+        runOnJS(playBoughtAnimation)();
       } else {
         // Snap back to rest position with a calmer spring-style ease-out.
         tx.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
@@ -496,7 +545,27 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
   // die Höhe auf measuredHeight. Im Idle-State (collapse.value === 0)
   // lassen wir die Höhe frei — sonst würde ein expanded BrandCard
   // (Inner-Content wächst) auf den initial gemessenen Wert geclippt.
+  // Phasen-Cutoffs für die Bought-Animation
+  const STRIKE_END = BOUGHT_STRIKE_DURATION / BOUGHT_TOTAL;
+  const POP_START = (BOUGHT_STRIKE_DURATION + BOUGHT_HOLD_DURATION) / BOUGHT_TOTAL;
+
   const wrapperStyle = useAnimatedStyle(() => {
+    // Während der Bought-Animation kollabiert die Höhe in Phase 3
+    // (POP_START → 1). Vorher behält die Row volle Höhe damit der
+    // Strike-Strich auf der vollen Breite gezogen werden kann.
+    const popT = interpolate(boughtAnim.value, [POP_START, 1], [0, 1], Extrapolation.CLAMP);
+    const popOpacity = interpolate(popT, [0, 1], [1, 0], Extrapolation.CLAMP);
+    const popScale = interpolate(popT, [0, 1], [1, 0.92], Extrapolation.CLAMP);
+
+    if (boughtAnim.value > 0 && measuredHeight > 0) {
+      return {
+        height: interpolate(popT, [0, 1], [measuredHeight, 0], Extrapolation.CLAMP),
+        marginBottom: interpolate(popT, [0, 1], [ROW_GAP, 0], Extrapolation.CLAMP),
+        opacity: popOpacity,
+        transform: [{ scale: popScale }],
+      };
+    }
+
     if (measuredHeight === 0 || collapse.value === 0) {
       // Nicht messbar oder im Idle: natürliches Layout, kein Clamp.
       return { marginBottom: ROW_GAP, opacity: 1 };
@@ -515,6 +584,17 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
         Extrapolation.CLAMP,
       ),
       opacity: interpolate(collapse.value, [0, 1], [1, 0], Extrapolation.CLAMP),
+    };
+  });
+
+  // Strike-Line Overlay: zieht von links nach rechts während der
+  // ersten Phase, hält dann während Pop-Out.
+  const strikeStyle = useAnimatedStyle(() => {
+    if (boughtAnim.value <= 0) return { opacity: 0, width: '0%' as const };
+    const drawT = interpolate(boughtAnim.value, [0, STRIKE_END], [0, 1], Extrapolation.CLAMP);
+    return {
+      opacity: 1,
+      width: `${Math.round(drawT * 100)}%` as `${number}%`,
     };
   });
 
@@ -600,7 +680,7 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
               fontSize: 14,
             }}
           >
-            Als gekauft markieren
+            Gekauft
           </Text>
           <MaterialCommunityIcons name="check-circle" size={26} color="#fff" />
         </Animated.View>
@@ -609,9 +689,39 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
       <GestureDetector gesture={pan}>
         <Animated.View style={fgStyle}>{children}</Animated.View>
       </GestureDetector>
+
+      {/* Strike-Line Overlay: liegt über der Card, wird beim Bought-
+          Trigger von links nach rechts "wie mit einem Stift" gezogen.
+          Outer-Wrapper definiert die absolute Box (left:14, right:14
+          → 14 px Inset von beiden Card-Rändern, mittig vertikal),
+          Inner Animated.View fühlt mit width:0%→100% den Stiftstrich.
+          pointerEvents:none damit Taps nicht blockiert werden. */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          left: 14,
+          right: 14,
+          top: '50%',
+          height: 3,
+          marginTop: -1.5,
+          overflow: 'hidden',
+        }}
+      >
+        <Animated.View
+          style={[
+            {
+              height: '100%',
+              backgroundColor: brand.primary,
+              borderRadius: 2,
+            },
+            strikeStyle,
+          ]}
+        />
+      </View>
     </Animated.View>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════════════
 // SummaryBanner — pro Tab unterschiedlicher Gradient + Wert
@@ -804,6 +914,39 @@ function EmptyState({
         </Text>
       </Pressable>
     </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ShoppingRowWithBoughtAnim — kleiner Wrapper der jedem Item-Row
+// einen eigenen SwipeRow-Ref + `playBought()`-Trigger gibt. Damit
+// kann der inline EdgeCheckButton (Tap = gekauft markieren) die
+// gleiche Strike+Pop-Animation auslösen wie der Swipe-links — der
+// optimistische Remove fired erst NACH der Animation am Anim-Ende
+// (siehe SwipeRow.playBought).
+// ═══════════════════════════════════════════════════════════════════
+function ShoppingRowWithBoughtAnim({
+  onSwipeBought,
+  onSwipeDelete,
+  disabled,
+  renderChild,
+}: {
+  onSwipeBought: () => void;
+  onSwipeDelete: () => void;
+  disabled?: boolean;
+  renderChild: (playBought: () => void) => React.ReactNode;
+}) {
+  const swipeRef = useRef<SwipeRowHandle>(null);
+  const play = useCallback(() => swipeRef.current?.playBought(), []);
+  return (
+    <SwipeRow
+      ref={swipeRef}
+      onSwipeBought={onSwipeBought}
+      onSwipeDelete={onSwipeDelete}
+      disabled={disabled}
+    >
+      {renderChild(play)}
+    </SwipeRow>
   );
 }
 
@@ -2845,37 +2988,38 @@ export default function ShoppingListScreen() {
 
     if (item.isCustom) {
       return (
-        <SwipeRow
+        <ShoppingRowWithBoughtAnim
           key={item.id}
           onSwipeBought={() => handleMarkAsPurchased(item.id)}
           onSwipeDelete={() => handleRemoveFromCart(item.id)}
           disabled={loadingCheck || loadingDelete}
-        >
-          <CustomCard
-            item={item}
-            onCheck={() => handleMarkAsPurchased(item.id)}
-            onDelete={() => handleRemoveFromCartConfirm(item.id)}
-            loadingCheck={loadingCheck}
-            loadingDelete={loadingDelete}
-          />
-        </SwipeRow>
+          renderChild={(playBought) => (
+            <CustomCard
+              item={item}
+              onCheck={playBought}
+              onDelete={() => handleRemoveFromCartConfirm(item.id)}
+              loadingCheck={loadingCheck}
+              loadingDelete={loadingDelete}
+            />
+          )}
+        />
       );
     }
     if (item.kind === 'brand') {
       const sel = selectedConversions.find((c) => c.einkaufswagenRef === item.id);
       const expanded = expandedItems.includes(item.id);
       return (
-        <SwipeRow
+        <ShoppingRowWithBoughtAnim
           key={item.id}
           onSwipeBought={() => handleMarkAsPurchased(item.id)}
           onSwipeDelete={() => handleRemoveFromCart(item.id)}
           disabled={loadingCheck || loadingDelete}
-        >
+          renderChild={(playBought) => (
           <BrandCard
             item={item}
             expanded={expanded}
             onToggleExpand={() => toggleExpanded(item.id)}
-            onCheck={() => handleMarkAsPurchased(item.id)}
+            onCheck={playBought}
             onDelete={() => handleRemoveFromCartConfirm(item.id)}
             onIncrement={() => handleIncrementCart(item)}
             onDecrement={() => handleDecrementCart(item)}
@@ -2919,19 +3063,20 @@ export default function ShoppingListScreen() {
               setInfoSheet({ title, body });
             }}
           />
-        </SwipeRow>
+          )}
+        />
       );
     }
     return (
-      <SwipeRow
+      <ShoppingRowWithBoughtAnim
         key={item.id}
         onSwipeBought={() => handleMarkAsPurchased(item.id, item.savings)}
         onSwipeDelete={() => handleRemoveFromCart(item.id)}
         disabled={loadingCheck || loadingDelete}
-      >
+        renderChild={(playBought) => (
         <NoNameCard
           item={item}
-          onCheck={() => handleMarkAsPurchased(item.id, item.savings)}
+          onCheck={playBought}
           onDelete={() => handleRemoveFromCartConfirm(item.id)}
           onIncrement={() => handleIncrementCart(item)}
           onDecrement={() => handleDecrementCart(item)}
@@ -2939,7 +3084,8 @@ export default function ShoppingListScreen() {
           loadingDelete={loadingDelete}
           favoriteMarketId={favoriteMarketId}
         />
-      </SwipeRow>
+        )}
+      />
     );
   };
 
