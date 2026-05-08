@@ -2956,10 +2956,48 @@ export class FirestoreService {
           return empty;
         }
         const data = snap.data() as any;
+        const overallRaw = Array.isArray(data?.overall) ? data.overall : [];
+        const monthlyRaw = Array.isArray(data?.monthly) ? data.monthly : [];
+        const mostViewedRaw = Array.isArray(data?.mostViewed) ? data.mostViewed : [];
+
+        // Aggregat enthält bisher nur die Legacy `bild`-URL pro
+        // Item. Pro Item das Produkt-Doc nachladen und bildClean/
+        // bildCleanPng/bildCleanHq mergen — sonst rendert
+        // getProductImage(item) nur die alte unkomprimierte URL
+        // statt der WebP-cleanen Variante. Identisches Pattern wie
+        // explore.tsx für Algolia-Hits (enrichWithFirestore).
+        const enrichBildClean = async (items: any[]): Promise<any[]> => {
+          if (items.length === 0) return items;
+          return Promise.all(
+            items.map(async (item) => {
+              if (item?.bildClean) return item; // bereits enriched (zukünftig vom Aggregator gelieferte Felder)
+              if (!item?.id) return item;
+              const collectionPath = item.type === 'noname' ? 'produkte' : 'markenProdukte';
+              try {
+                const productSnap = await getDoc(doc(db, collectionPath, item.id));
+                if (!productSnap.exists()) return item;
+                const p = productSnap.data() as any;
+                return {
+                  ...item,
+                  bildClean: p?.bildClean ?? null,
+                  bildCleanPng: p?.bildCleanPng ?? null,
+                  bildCleanHq: p?.bildCleanHq ?? null,
+                };
+              } catch {
+                return item;
+              }
+            }),
+          );
+        };
+        const [overall, monthly, mostViewed] = await Promise.all([
+          enrichBildClean(overallRaw),
+          enrichBildClean(monthlyRaw),
+          enrichBildClean(mostViewedRaw),
+        ]);
         const result = {
-          overall: Array.isArray(data?.overall) ? data.overall : [],
-          monthly: Array.isArray(data?.monthly) ? data.monthly : [],
-          mostViewed: Array.isArray(data?.mostViewed) ? data.mostViewed : [],
+          overall,
+          monthly,
+          mostViewed,
           updatedAt:
             data?.updatedAt?.toDate?.() ?? null,
         };
