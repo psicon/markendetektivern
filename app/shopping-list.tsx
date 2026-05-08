@@ -3649,17 +3649,30 @@ export default function ShoppingListScreen() {
             </Pressable>
           </View>
         }
-        bottom={
-          <SegmentedTabs
-            tabs={[
-              { key: 'brand', label: `Marken (${brandProducts.length})` },
-              { key: 'noname', label: `NoNames (${noNameProducts.length})` },
-              { key: 'all', label: `Alle (${brandProducts.length + noNameProducts.length})` },
-            ] as const}
-            value={activeTab}
-            onChange={onTabChange}
-          />
-        }
+        bottom={(() => {
+          // Anzahl-aware Tab-Counts: Σ anzahl statt Σ unique-products.
+          // Damit zeigt der Tab-Counter dieselbe Zahl wie der
+          // FloatingShoppingListButton (Doc-Count) und das matcht
+          // dem User-Mental-Model "wieviele Items hab ich im
+          // Wagen". Einzelne Produkte werden in der Liste nach
+          // wie vor als 1 Card pro unique product gerendert (mit
+          // Anzahl-Pill rechts).
+          const sumAnzahl = (items: EnrichedItem[]) =>
+            items.reduce((s, it) => s + (it.anzahl ?? 1), 0);
+          const brandCount = sumAnzahl(brandProducts);
+          const nonameCount = sumAnzahl(noNameProducts);
+          return (
+            <SegmentedTabs
+              tabs={[
+                { key: 'brand', label: `Marken (${brandCount})` },
+                { key: 'noname', label: `NoNames (${nonameCount})` },
+                { key: 'all', label: `Alle (${brandCount + nonameCount})` },
+              ] as const}
+              value={activeTab}
+              onChange={onTabChange}
+            />
+          );
+        })()}
       />
 
       {/* Bottom CTA — sticky, solid bg backplate. Scroll content
