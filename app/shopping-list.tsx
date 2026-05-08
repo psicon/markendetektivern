@@ -53,6 +53,9 @@ import PagerView from 'react-native-pager-view';
 import Animated, {
   Easing,
   Extrapolation,
+  FadeIn,
+  FadeOut,
+  LinearTransition,
   interpolate,
   runOnJS,
   useAnimatedStyle,
@@ -1320,7 +1323,11 @@ function BrandCard({
   const canExpand = allowExpand && hasAlts;
 
   return (
-    <View
+    <Animated.View
+      // layout={LinearTransition} animiert die Card-Höhe automatisch
+      // wenn die Alternatives-Sektion mountet/unmountet → smoothes
+      // Aufklappen statt Layout-Sprung.
+      layout={LinearTransition.springify().damping(20).stiffness(200)}
       style={{
         backgroundColor: theme.surface,
         borderRadius: 14,
@@ -1485,7 +1492,7 @@ function BrandCard({
               letterSpacing: 0.1,
             }}
           >
-            {expanded ? 'Alternativen ausblenden' : 'Alternativen'}
+            Alternativen
           </Text>
           <MaterialCommunityIcons
             name={expanded ? 'chevron-up' : 'chevron-down'}
@@ -1498,9 +1505,13 @@ function BrandCard({
       <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
       </View>{/* /Action-Top-Section */}
 
-      {/* Expanded NoName-Alternatives */}
+      {/* Expanded NoName-Alternatives — animiertes Ein-/Ausblenden
+          via FadeIn/FadeOut. Card-Höhe morpht automatisch durch
+          das LinearTransition-Layout am Card-Outer. */}
       {allowExpand && expanded && hasAlts ? (
-        <View
+        <Animated.View
+          entering={FadeIn.duration(220)}
+          exiting={FadeOut.duration(160)}
           style={{
             backgroundColor: theme.surfaceAlt,
             paddingHorizontal: 10,
@@ -1692,9 +1703,9 @@ function BrandCard({
               </Pressable>
             );
           })}
-        </View>
+        </Animated.View>
       ) : null}
-    </View>
+    </Animated.View>
   );
 }
 
