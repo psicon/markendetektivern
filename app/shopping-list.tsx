@@ -2297,25 +2297,45 @@ export default function ShoppingListScreen() {
               //     `hersteller`-Coll, "MARKEN" in User-Lingo, mit
               //     `infos`-Feld). Resolve real hersteller daraus.
               //   • Sonst: direkt Hersteller-Doc.
-              let markeData: any = null;
-              let herstellerData: any = null;
-              if ((productData as any).hersteller) {
+              // Hersteller (Marke ↔ Manufacturer-Chain) und packTypInfo
+              // PARALLEL holen statt seriell — beide hängen nur vom
+              // productData ab und sind unabhängig voneinander.
+              const resolveHersteller = async (): Promise<{
+                markeData: any;
+                herstellerData: any;
+              }> => {
+                if (!(productData as any).hersteller) {
+                  return { markeData: null, herstellerData: null };
+                }
                 try {
                   const herstellerOrMarke = await FirestoreService.getDocumentByReference<any>(
                     (productData as any).hersteller,
                   );
                   if (herstellerOrMarke?.herstellerref) {
-                    markeData = herstellerOrMarke;
-                    herstellerData = await FirestoreService.getDocumentByReference<any>(
+                    const real = await FirestoreService.getDocumentByReference<any>(
                       herstellerOrMarke.herstellerref,
                     ).catch(() => null);
-                  } else {
-                    herstellerData = herstellerOrMarke;
+                    return { markeData: herstellerOrMarke, herstellerData: real };
                   }
+                  return { markeData: null, herstellerData: herstellerOrMarke };
                 } catch {
-                  /* ignore */
+                  return { markeData: null, herstellerData: null };
                 }
-              }
+              };
+              const resolvePackTypInfo = async (): Promise<any> => {
+                if (!(productData as any).packTypInfo) return null;
+                try {
+                  return await FirestoreService.getDocumentByReference<any>(
+                    (productData as any).packTypInfo,
+                  );
+                } catch {
+                  return null;
+                }
+              };
+              const [{ markeData, herstellerData }, packTypInfo] = await Promise.all([
+                resolveHersteller(),
+                resolvePackTypInfo(),
+              ]);
 
               let bestAlternative: any = null;
               let maxSavings = 0;
@@ -2327,16 +2347,6 @@ export default function ShoppingListScreen() {
                   maxSavingsPercent = sd.savingsPercent;
                   bestAlternative = alt;
                 }
-              }
-
-              // packTypInfo lazy lookup für Pack-Details (XYg · X€/kg)
-              let packTypInfo: any = null;
-              if ((productData as any).packTypInfo) {
-                try {
-                  packTypInfo = await FirestoreService.getDocumentByReference<any>(
-                    (productData as any).packTypInfo,
-                  );
-                } catch {}
               }
 
               return {
