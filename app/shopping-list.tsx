@@ -2247,10 +2247,16 @@ export default function ShoppingListScreen() {
       }
 
       if (!isCustomItem) {
-        await updateUserStats(user.uid, {
+        // updateUserStats schreibt auf den USER-doc, parallel zum
+        // gerade abgefeuerten cart-Write (gekauft:true). Auf Android
+        // serialisiert der native WriteStream alle User-Writes —
+        // wenn wir das hier awaiten, addiert sich die Latenz beider
+        // Writes auf den UI-Thread. → fire-and-forget, der Write
+        // landet trotzdem zuverlässig (Firestore-SDK queued+retried).
+        updateUserStats(user.uid, {
           savingsToAdd: savings || 0,
           productsToAdd: 1,
-        });
+        }).catch((e) => console.warn('[mark-purchased] updateUserStats bg-fail:', e));
         achievementService
           .trackAction(user.uid, 'complete_shopping', {
             productCount: 1,
@@ -2589,10 +2595,15 @@ export default function ShoppingListScreen() {
 
       const productsToAdd = dbProducts.length;
       if (totalSavings > 0 || productsToAdd > 0) {
-        await updateUserStats(user.uid, {
+        // Fire-and-forget: schreibt auf user-doc parallel zu den
+        // gerade ausgeführten cart-Updates. Awaiten würde den
+        // native-WriteStream zusätzlich blockieren ohne UI-Mehrwert
+        // (die optimistische Local-State-Removal weiter unten ist
+        // unabhängig vom Server-ACK).
+        updateUserStats(user.uid, {
           savingsToAdd: totalSavings,
           productsToAdd,
-        });
+        }).catch((e) => console.warn('[bulk-purchase] updateUserStats bg-fail:', e));
       }
 
       // Local state

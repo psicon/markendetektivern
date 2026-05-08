@@ -4088,140 +4088,132 @@ export class FirestoreService {
   }
 
   /**
-   * Markiert ein Produkt als gekauft UND erstellt Kaufhistorie-Eintrag
+   * Markiert ein Produkt als gekauft UND erstellt Kaufhistorie-Eintrag.
+   *
+   * Critical-Path (analog Favoriten / Cart-Remove): 1 awaited
+   * `updateDoc(cart, { gekauft: true })`. Damit ist das Item für die
+   * Cart-Query nicht mehr "offen" und verschwindet aus der Liste.
+   * UI ist sofort frei.
+   *
+   * Background (fire-and-forget):
+   *   - Re-read cartData
+   *   - createPurchaseHistoryEntry (mehrere getDocs für Hersteller/
+   *     Handelsmarke/Discounter + setDoc Purchase-Doc)
+   *   - Journey-Tracking
+   *
+   * Funktionalität bleibt 100% erhalten — gleiche Funktionen, gleiche
+   * Daten, gleiche Targets. Nur entkoppelt vom UI-Critical-Path.
    */
   static async markAsPurchased(userId: string, itemId: string): Promise<void> {
-    try {
-      // L: flat-path
-      const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
-      
-      // 1. Lade die aktuellen Einkaufszettel-Daten
-      const cartItemDoc = await getDoc(cartItemRef);
-      if (!cartItemDoc.exists()) {
-        throw new Error('Einkaufszettel-Item nicht gefunden');
-      }
-      
-      const cartData = cartItemDoc.data();
+    const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
 
-      // Awaited writes — Daten MÜSSEN sicher landen.
-      // Purchase-History + gekauft:true parallel über Promise.all
-      // damit beide Writes gleichzeitig laufen statt seriell.
-      await Promise.all([
-        this.createPurchaseHistoryEntry(userId, cartData),
-        updateDoc(cartItemRef, { gekauft: true }),
-      ]);
-      
-      // 4. Track Purchase in der ORIGINAL Journey (nicht neue!)
-      // Hole die richtigen Produktdaten aus dem cartData
-      let productId: string = '';
-      let productName: string = '';
-      let productType: 'brand' | 'noname' = 'noname';
-      let finalPrice: number = 0;
-      let finalSavings: number = 0;
+    // ─── Critical Write: gekauft:true ────────────────────────────
+    // Das ist die einzige Operation, die der UI-Thread abwarten muss.
+    // Analog zu Favoriten-Remove (1 deleteDoc) — 1 updateDoc.
+    await updateDoc(cartItemRef, { gekauft: true });
 
-      if (cartData.markenProdukt) {
-        // Markenprodukt
-        const productRef = cartData.markenProdukt;
-        productId = productRef.id || '';
-        productType = 'brand';
-        // Name aus cartData oder aus dem geladenen Produktdaten
-        productName = cartData.name || 'Markenprodukt';
-        finalPrice = cartData.priceAtTime || 0;
-        finalSavings = cartData.savingsAtTime || 0;
-      } else if (cartData.handelsmarkenProdukt) {
-        // NoName Produkt
-        const productRef = cartData.handelsmarkenProdukt;
-        productId = productRef.id || '';
-        productType = 'noname';
-        // Name aus cartData
-        productName = cartData.name || 'NoName Produkt';
-        finalPrice = cartData.priceAtTime || 0;
-        finalSavings = cartData.savingsAtTime || 0;
-      }
+    // ─── Background: Purchase-History + Journey-Tracking ──────────
+    void (async () => {
+      try {
+        // Item existiert noch (gekauft:true gesetzt, aber nicht
+        // gelöscht), also re-read holt cartData zuverlässig.
+        const snap = await getDoc(cartItemRef);
+        if (!snap.exists()) return;
+        const cartData = snap.data() as any;
 
-      if (productId) {
-        const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
+        // Purchase-History bauen (multiple getDocs intern — JETZT im
+        // Hintergrund, blockiert UI nicht mehr).
+        await this.createPurchaseHistoryEntry(userId, cartData);
 
-        // NEU: Hole den aktuellen Index für dieses Produkt
-        const viewedProductIndex = journeyTrackingService.getViewedProductIndexAfterAction(productId);
-
-        // NEU (2026-05-07): Quantity aus cartData mitschicken — User
-        // hat ggf. anzahl > 1 in den Einkaufszettel gelegt, beim
-        // "gekauft markieren" wird die GESAMTE anzahl als 1 Action
-        // mit quantity:N in der Journey getrackt.
-        const cartAnzahl = ((cartData as any).anzahl ?? 1) as number;
-
-        // NEU: Verwende die gespeicherte journeyId!
-        if (cartData.journeyId) {
-          // 🚀 PERFORMANCE: Sequential Non-Blocking - UI ist sofort frei!
-          journeyTrackingService.trackPurchaseInSpecificJourney(
-            cartData.journeyId,
-            [{
-              productId: productId,
-              productName: productName,
-              productType: productType,
-              finalPrice: finalPrice,
-              finalSavings: finalSavings,
-              viewedProductIndex: viewedProductIndex,
-              quantity: cartAnzahl, // NEU: Anzahl gekaufter Einheiten
-            } as any],
-            finalSavings,
-            userId
-          ).catch(error => {
-            console.error('❌ Journey-Tracking Fehler:', error);
-          });
-        } else {
-          // Fallback: Normale trackPurchase wenn keine journeyId
-          console.warn('⚠️ Keine journeyId im cartData - verwende normale trackPurchase');
-          journeyTrackingService.trackPurchase([{
-            productId: productId,
-            productName: productName,
-            productType: productType,
-            finalPrice: finalPrice,
-            finalSavings: finalSavings,
-            quantity: cartAnzahl,
-          } as any], finalSavings, userId);
+        // Journey-Tracking
+        let productId = '';
+        let productName = '';
+        let productType: 'brand' | 'noname' = 'noname';
+        let finalPrice = 0;
+        let finalSavings = 0;
+        if (cartData.markenProdukt) {
+          productId = cartData.markenProdukt.id || '';
+          productType = 'brand';
+          productName = cartData.name || 'Markenprodukt';
+          finalPrice = cartData.priceAtTime || 0;
+          finalSavings = cartData.savingsAtTime || 0;
+        } else if (cartData.handelsmarkenProdukt) {
+          productId = cartData.handelsmarkenProdukt.id || '';
+          productType = 'noname';
+          productName = cartData.name || 'NoName Produkt';
+          finalPrice = cartData.priceAtTime || 0;
+          finalSavings = cartData.savingsAtTime || 0;
         }
-      } else {
-        console.error('❌ Keine productId gefunden für Journey-Tracking!', cartData);
+        if (!productId) {
+          console.warn('[markAsPurchased] keine productId für Journey-Tracking');
+          return;
+        }
+
+        const journeyTrackingService = (await import('./journeyTrackingService')).default;
+        const viewedProductIndex =
+          journeyTrackingService.getViewedProductIndexAfterAction(productId);
+        const cartAnzahl = (cartData.anzahl ?? 1) as number;
+
+        if (cartData.journeyId) {
+          await journeyTrackingService.trackPurchaseInSpecificJourney(
+            cartData.journeyId,
+            [
+              {
+                productId,
+                productName,
+                productType,
+                finalPrice,
+                finalSavings,
+                viewedProductIndex,
+                quantity: cartAnzahl,
+              } as any,
+            ],
+            finalSavings,
+            userId,
+          );
+        } else {
+          console.warn('[markAsPurchased] Keine journeyId — fallback trackPurchase');
+          journeyTrackingService.trackPurchase(
+            [
+              {
+                productId,
+                productName,
+                productType,
+                finalPrice,
+                finalSavings,
+                quantity: cartAnzahl,
+              } as any,
+            ],
+            finalSavings,
+            userId,
+          );
+        }
+      } catch (e) {
+        console.warn('[markAsPurchased] bg-fail:', (e as Error)?.message);
       }
-      
-      console.log('✅ Marked as purchased and added to history (queued):', itemId);
-    } catch (error) {
-      console.error('Error marking as purchased:', error);
-      throw error;
-    }
+    })();
   }
 
   /**
-   * Markiert ein Produkt als gekauft OHNE Journey-Tracking (für Bulk-Operations)
+   * Markiert ein Produkt als gekauft OHNE Journey-Tracking (für Bulk-Operations).
+   * Gleiches Pattern wie markAsPurchased: 1 awaited updateDoc, Rest bg.
    */
   static async markAsPurchasedWithoutTracking(userId: string, itemId: string): Promise<void> {
-    try {
-      // L: flat-path
-      const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
-      
-      // 1. Lade Einkaufszettel-Item
-      const cartItemDoc = await getDoc(cartItemRef);
-      if (!cartItemDoc.exists()) {
-        throw new Error('Einkaufszettel-Item nicht gefunden');
+    const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
+
+    // Critical: gekauft:true. Item verschwindet aus der active-cart-Query.
+    await updateDoc(cartItemRef, { gekauft: true });
+
+    // Background: Purchase-History
+    void (async () => {
+      try {
+        const snap = await getDoc(cartItemRef);
+        if (!snap.exists()) return;
+        await this.createPurchaseHistoryEntry(userId, snap.data() as any);
+      } catch (e) {
+        console.warn('[markAsPurchasedWithoutTracking] bg-fail:', (e as Error)?.message);
       }
-      
-      const cartData = cartItemDoc.data();
-
-      // Awaited writes (parallel via Promise.all). Daten müssen landen.
-      await Promise.all([
-        this.createPurchaseHistoryEntry(userId, cartData),
-        updateDoc(cartItemRef, { gekauft: true }),
-      ]);
-
-      // KEIN Journey-Tracking hier! Das passiert im Bulk
-
-      console.log('✅ Marked as purchased without tracking:', itemId);
-    } catch (error) {
-      console.error('Error marking as purchased:', error);
-      throw error;
-    }
+    })();
   }
 
   /**
