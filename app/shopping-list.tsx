@@ -1747,6 +1747,7 @@ function NoNameCard({
   const { theme, brand } = useTokens();
   const p = item.product;
   const isFav = favoriteMarketId && p?.discounter?.id === favoriteMarketId;
+  const savings = item.savings || 0;
 
   return (
     <View
@@ -1857,6 +1858,21 @@ function NoNameCard({
             {formatEur((p?.preis || 0) * (item.anzahl ?? 1))}
           </Text>
         </View>
+        {savings > 0 ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
+            <MaterialCommunityIcons name="check-circle-outline" size={11} color={brand.primary} />
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.semibold,
+                fontSize: 10,
+                color: brand.primary,
+              }}
+            >
+              Gespart: {formatEur(savings * (item.anzahl ?? 1))}
+            </Text>
+          </View>
+        ) : null}
       </View>
       </View>
       <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
