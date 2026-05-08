@@ -516,11 +516,22 @@ const SwipeRow = forwardRef<SwipeRowHandle, SwipeRowProps>(function SwipeRow(
         );
         runOnJS(enterCollapse)();
       } else if (dx <= -SWIPE_THRESH) {
-        // Links wischen → BOUGHT (gekauft markieren).
-        // Snap zurück zur Mitte und spiel die Strike+Pop-Anim ab —
-        // gleicher Visual wie der EdgeCheckButton-Tap.
-        tx.value = withTiming(0, { duration: 160, easing: Easing.out(Easing.cubic) });
-        runOnJS(playBoughtAnimation)();
+        // Links wischen → BOUGHT. Card fliegt nach links raus,
+        // Höhe kollabiert parallel — die Strike-Anim ist NUR für den
+        // Tap-Pfad (EdgeCheckButton), Swipes haben ihr eigenes
+        // Visual-Feedback durch die Geste selbst.
+        tx.value = withTiming(-SWIPE_FLING_OFFSCREEN, {
+          duration: SWIPE_FLING_DURATION,
+          easing: Easing.in(Easing.cubic),
+        });
+        collapse.value = withTiming(
+          1,
+          { duration: COLLAPSE_DURATION, easing: Easing.in(Easing.cubic) },
+          (done) => {
+            if (done) runOnJS(triggerBought)();
+          },
+        );
+        runOnJS(enterCollapse)();
       } else {
         // Snap back to rest position with a calmer spring-style ease-out.
         tx.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
@@ -588,14 +599,32 @@ const SwipeRow = forwardRef<SwipeRowHandle, SwipeRowProps>(function SwipeRow(
   });
 
   // Strike-Line Overlay: zieht von links nach rechts während der
-  // ersten Phase, hält dann während Pop-Out.
+  // ersten Phase. Verwendet scaleX mit transformOrigin:'left center'
+  // statt width:%-Animation — so läuft die Anim auf der UI-thread
+  // ohne Layout-Recalc und ohne Integer-Stepping. Der Strich ist
+  // dezent (theme.text statt brand.primary), 5 px dick mit Round-
+  // Caps via borderRadius, leicht schräg gestellt für "wie mit Stift"
+  // Feel.
   const strikeStyle = useAnimatedStyle(() => {
-    if (boughtAnim.value <= 0) return { opacity: 0, width: '0%' as const };
+    if (boughtAnim.value <= 0) return { transform: [{ scaleX: 0 }] };
     const drawT = interpolate(boughtAnim.value, [0, STRIKE_END], [0, 1], Extrapolation.CLAMP);
-    return {
-      opacity: 1,
-      width: `${Math.round(drawT * 100)}%` as `${number}%`,
-    };
+    return { transform: [{ scaleX: drawT }] };
+  });
+
+  // Check-Icon-Flourish: erscheint kurz NACH dem Strike (ab STRIKE_END)
+  // mit Spring-Bounce in der Mitte der Card. Gibt der Animation einen
+  // satisfying "Erledigt!"-Moment bevor die Row rauspoppt.
+  const checkStyle = useAnimatedStyle(() => {
+    if (boughtAnim.value <= STRIKE_END) return { opacity: 0, transform: [{ scale: 0.4 }] };
+    // Bounce-In von STRIKE_END → POP_START, dann konstant bis kurz
+    // vor Ende, dann fade mit dem Pop-Out.
+    const bounceT = interpolate(boughtAnim.value, [STRIKE_END, POP_START], [0, 1], Extrapolation.CLAMP);
+    const fadeT = interpolate(boughtAnim.value, [POP_START, 1], [1, 0], Extrapolation.CLAMP);
+    // Overshoot + settle: 0 → 1.15 (auf 0.7 von Bounce) → 1.0
+    const scale = bounceT < 0.7
+      ? interpolate(bounceT, [0, 0.7], [0.4, 1.15], Extrapolation.CLAMP)
+      : interpolate(bounceT, [0.7, 1], [1.15, 1], Extrapolation.CLAMP);
+    return { opacity: bounceT * fadeT, transform: [{ scale }] };
   });
 
   return (
@@ -690,35 +719,67 @@ const SwipeRow = forwardRef<SwipeRowHandle, SwipeRowProps>(function SwipeRow(
         <Animated.View style={fgStyle}>{children}</Animated.View>
       </GestureDetector>
 
-      {/* Strike-Line Overlay: liegt über der Card, wird beim Bought-
-          Trigger von links nach rechts "wie mit einem Stift" gezogen.
-          Outer-Wrapper definiert die absolute Box (left:14, right:14
-          → 14 px Inset von beiden Card-Rändern, mittig vertikal),
-          Inner Animated.View fühlt mit width:0%→100% den Stiftstrich.
+      {/* Strike-Line Overlay: dezenter Stift-Strich, theme.text mit
+          reduzierter Opacity. Inset 90 px von links (skip Image),
+          70 px von rechts (skip EdgeCheckButton). Leichter Schräg-
+          Effekt (-1.2°) für "handgezeichnet" Feel. scaleX mit
+          transformOrigin:'left center' simuliert Stift-Bewegung von
+          links nach rechts ohne Layout-Recalc.
           pointerEvents:none damit Taps nicht blockiert werden. */}
       <View
         pointerEvents="none"
         style={{
           position: 'absolute',
-          left: 14,
-          right: 14,
+          left: 90,
+          right: 70,
           top: '50%',
-          height: 3,
-          marginTop: -1.5,
-          overflow: 'hidden',
+          height: 5,
+          marginTop: -2.5,
+          transform: [{ rotate: '-1.2deg' }],
         }}
       >
         <Animated.View
           style={[
             {
+              width: '100%',
               height: '100%',
-              backgroundColor: brand.primary,
-              borderRadius: 2,
-            },
+              backgroundColor: theme.text,
+              opacity: 0.7,
+              borderRadius: 3,
+              transformOrigin: 'left center',
+            } as any,
             strikeStyle,
           ]}
         />
       </View>
+      {/* Check-Icon-Flourish: scale-bouncing primary-Circle in der
+          Card-Mitte, erscheint nach dem Strike und holdet bis Pop. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            width: 44,
+            height: 44,
+            marginTop: -22,
+            marginLeft: -22,
+            borderRadius: 22,
+            backgroundColor: brand.primary,
+            alignItems: 'center',
+            justifyContent: 'center',
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.18,
+            shadowRadius: 4,
+            elevation: 4,
+          },
+          checkStyle,
+        ]}
+      >
+        <MaterialCommunityIcons name="check-bold" size={26} color="#fff" />
+      </Animated.View>
     </Animated.View>
   );
 });
