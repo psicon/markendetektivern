@@ -1081,10 +1081,8 @@ function CompactQuantityPill({
 }) {
   const { brand, theme } = useTokens();
   if (!onIncrement || !onDecrement) return null;
-  // Schlanker: Buttons 30×30 (vorher 36), Icons 17, Container-Height
-  // 38, paddingHorizontal 2, minWidth 18 für N. Spart ~22 px Breite
-  // → mehr Platz für lange Produktnamen. Tap-Area mit hitSlop 10
-  // bleibt 50 px (über Material 48-px-Standard).
+  // Mittelgroß: Buttons 36×36, Container-Height 46, Icon 18, N
+  // font 16, minWidth 22 — gut tap-bar ohne zu klobig.
   return (
     <View
       style={{
@@ -1093,18 +1091,18 @@ function CompactQuantityPill({
         backgroundColor: theme.surface,
         borderWidth: 1,
         borderColor: theme.border,
-        borderRadius: 19,
-        paddingHorizontal: 2,
-        height: 38,
+        borderRadius: 23,
+        paddingHorizontal: 3,
+        height: 46,
       }}
     >
       <Pressable
         onPress={onDecrement}
-        hitSlop={10}
+        hitSlop={8}
         style={({ pressed }) => ({
-          width: 30,
-          height: 30,
-          borderRadius: 15,
+          width: 36,
+          height: 36,
+          borderRadius: 18,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: pressed
@@ -1116,7 +1114,7 @@ function CompactQuantityPill({
       >
         <MaterialCommunityIcons
           name={anzahl <= 1 ? 'trash-can-outline' : 'minus'}
-          size={17}
+          size={18}
           color={anzahl <= 1 ? '#dc2626' : theme.text}
         />
       </Pressable>
@@ -1124,9 +1122,9 @@ function CompactQuantityPill({
         style={{
           fontFamily,
           fontWeight: fontWeight.extraBold,
-          fontSize: 15,
+          fontSize: 16,
           color: theme.text,
-          minWidth: 18,
+          minWidth: 22,
           textAlign: 'center',
           letterSpacing: -0.2,
         }}
@@ -1135,17 +1133,17 @@ function CompactQuantityPill({
       </Text>
       <Pressable
         onPress={onIncrement}
-        hitSlop={10}
+        hitSlop={8}
         style={({ pressed }) => ({
-          width: 30,
-          height: 30,
-          borderRadius: 15,
+          width: 36,
+          height: 36,
+          borderRadius: 18,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: pressed ? brand.primaryContainer ?? theme.surfaceAlt : brand.primary,
         })}
       >
-        <MaterialCommunityIcons name="plus" size={17} color="#fff" />
+        <MaterialCommunityIcons name="plus" size={18} color="#fff" />
       </Pressable>
     </View>
   );
@@ -1350,7 +1348,7 @@ function BrandCard({
           beider zusammen). So füllt der Edge-Strip die komplette
           Card-Höhe ohne durch den Footer abgeschnitten zu werden. */}
       <View style={{ flexDirection: 'row', alignItems: 'stretch' }}>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, position: 'relative' }}>
       <View style={{ flexDirection: 'row', alignItems: 'stretch' }}>
       <Pressable
         onPress={canExpand ? onToggleExpand : undefined}
@@ -1361,7 +1359,13 @@ function BrandCard({
           flexDirection: 'row',
           alignItems: 'center',
           gap: 10,
-          padding: 10,
+          paddingTop: 10,
+          paddingBottom: 10,
+          paddingLeft: 10,
+          // paddingRight reserviert Platz für die absolut positionierte
+          // Pill rechts (Pill ~110 wide + 8 right-offset). Damit der
+          // Content nicht unter der Pill verschwindet.
+          paddingRight: 120,
           opacity: pressed && canExpand ? 0.7 : 1,
         })}
       >
@@ -1454,13 +1458,6 @@ function BrandCard({
               wird dadurch um eine Row geringer. */}
         </View>
       </Pressable>
-      <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
-        <CompactQuantityPill
-          anzahl={item.anzahl ?? 1}
-          onIncrement={onIncrement}
-          onDecrement={onDecrement}
-        />
-      </View>
       </View>{/* /Body-Row */}
       {/* Footer "Alternativen" — paddingLeft kompensiert die
           EdgeCheckButton-Breite rechts → Text+Chevron landen exakt
@@ -1497,6 +1494,28 @@ function BrandCard({
           />
         </Pressable>
       ) : null}
+      {/* Pill absolut auf leftCol-Level: top:0 bottom:0 spannt
+          BODY+FOOTER zusammen → Pill-Mitte ist exakt auf der
+          gleichen vertikalen Linie wie die EdgeCheckButton-Mitte
+          (beide laufen über die volle Card-Höhe). right:8 schafft
+          Abstand zum Edge-Strip. */}
+      <View
+        pointerEvents="box-none"
+        style={{
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          right: 8,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <CompactQuantityPill
+          anzahl={item.anzahl ?? 1}
+          onIncrement={onIncrement}
+          onDecrement={onDecrement}
+        />
+      </View>
       </View>{/* /Linke Spalte (Body+Footer) */}
       <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
       </View>{/* /Action-Top-Section */}
@@ -1804,7 +1823,9 @@ function NoNameCard({
         overflow: 'hidden',
       }}
     >
-      <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 }}>
+      {/* leftCol mit position:relative damit die Pill absolute
+          positioniert vertikal mittig zur Card-Höhe sitzt. */}
+      <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 10, paddingBottom: 10, paddingLeft: 10, paddingRight: 120, position: 'relative' }}>
       {/* Image-Wrapper mit absolutem Spar-Banner oben links —
           zeigt das % was bei diesem NoName-Kauf vs. dem
           Brand-Original gespart wird. */}
@@ -1940,13 +1961,25 @@ function NoNameCard({
         </View>
         {/* Gespart-% liegt jetzt als Banner auf dem Image-Sticker. */}
       </View>
-      </View>
-      <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
+      {/* Pill absolut positioniert in leftCol → exakt vertikal mittig
+          zur Card-Höhe (= Höhe des EdgeCheckButton-Strips). */}
+      <View
+        pointerEvents="box-none"
+        style={{
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          right: 8,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
         <CompactQuantityPill
           anzahl={item.anzahl ?? 1}
           onIncrement={onIncrement}
           onDecrement={onDecrement}
         />
+      </View>
       </View>
       <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
     </View>
