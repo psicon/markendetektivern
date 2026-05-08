@@ -3552,29 +3552,33 @@ export class FirestoreService {
         }
         const existing = mergedMap.get(key);
         if (!existing) {
-          // Erste Vorkommen — anzahl auf gespeichertem Wert oder 1 (Legacy)
           mergedMap.set(key, {
             ...item,
             anzahl: (item as any).anzahl ?? 1,
+            // legacyIds tracken: zusätzliche raw-Doc-IDs für dasselbe
+            // Produkt. Bei Mark-as-Purchased / Remove müssen alle
+            // davon mitmarkiert/-gelöscht werden, sonst bleiben
+            // Legacy-Auto-ID-Dupes als Geister im Firestore zurück.
+            legacyIds: [] as string[],
           } as any);
         } else {
-          // Weiteres Doc für dasselbe Produkt — anzahl summieren
           const prevAnzahl = (existing as any).anzahl ?? 1;
           const thisAnzahl = (item as any).anzahl ?? 1;
-          // Wir behalten den NEUSTEN Doc als "Hauptzeile" (höhere
-          // timestamp), addieren aber die anzahl aller Legacy-Docs.
-          // ID des neueren Docs gewinnt — UI-Operations gehen dann
-          // auf die Det-ID falls vorhanden, sonst die Legacy-ID.
           const isDetId = item.id.startsWith('brand_') || item.id.startsWith('noname_');
           const existingIsDet = existing.id.startsWith('brand_') || existing.id.startsWith('noname_');
           if (isDetId && !existingIsDet) {
-            // Det gewinnt über Legacy
+            // Det gewinnt — bisheriger Primary wird zu Legacy.
+            const prevLegacyIds = ((existing as any).legacyIds ?? []) as string[];
             mergedMap.set(key, {
               ...item,
               anzahl: prevAnzahl + thisAnzahl,
+              legacyIds: [...prevLegacyIds, existing.id],
             } as any);
           } else {
+            // Existing bleibt Primary, aktueller Doc wird Legacy.
             (existing as any).anzahl = prevAnzahl + thisAnzahl;
+            const prevLegacyIds = ((existing as any).legacyIds ?? []) as string[];
+            (existing as any).legacyIds = [...prevLegacyIds, item.id];
           }
         }
       }

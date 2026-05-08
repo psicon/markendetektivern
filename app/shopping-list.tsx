@@ -149,6 +149,12 @@ type EnrichedItem = {
    *  als Payload mitgegeben → kein getDoc mehr im Critical-Path. */
   journeyId?: string;
   viewedProductIndex?: number;
+  /** Cart-Schema v1→v2 Legacy-Migration: zusätzliche cart-doc-IDs
+   *  für dasselbe Produkt, die durch read-side merge konsolidiert
+   *  wurden. Bei Mark-as-Purchased / Remove müssen alle davon
+   *  mitmarkiert/-gelöscht werden, sonst bleiben Geister-Docs in
+   *  Firestore und tauchen beim nächsten Refresh wieder auf. */
+  legacyIds?: string[];
 };
 
 // Height of the sticky SegmentedTabs row that sits below the DetailHeader.
@@ -2373,6 +2379,9 @@ export default function ShoppingListScreen() {
                   // getDoc braucht.
                   journeyId: (item as any).journeyId,
                   viewedProductIndex: (item as any).viewedProductIndex,
+                  // Legacy-Dupe-IDs aus dem read-side merge — beim
+                  // Mark/Remove müssen alle mit weggeräumt werden.
+                  legacyIds: (item as any).legacyIds ?? [],
                   name: productData?.name,
                 } satisfies EnrichedItem,
                 potentialSavings: maxSavings,
@@ -2774,6 +2783,15 @@ export default function ShoppingListScreen() {
       } else {
         await FirestoreService.markAsPurchased(user.uid, itemId);
       }
+      // Legacy-Dupes (cart-schema v1 auto-IDs für dasselbe Produkt) auch
+      // marken — sonst tauchen sie beim nächsten Refresh wieder auf.
+      // Fire-and-forget, blockiert UI nicht.
+      const legacyIds = matched?.legacyIds ?? [];
+      for (const legacyId of legacyIds) {
+        FirestoreService.markAsPurchasedWithoutTracking(user.uid, legacyId).catch((e) => {
+          console.warn('[mark-purchased] legacy dupe fail:', legacyId, (e as Error)?.message);
+        });
+      }
 
       if (!isCustomItem) {
         // updateUserStats schreibt auf den USER-doc, parallel zum
@@ -2852,6 +2870,15 @@ export default function ShoppingListScreen() {
           }
         : undefined;
       await FirestoreService.removeFromShoppingCart(user.uid, itemId, payload);
+      // Legacy-Dupes (cart-schema v1) auch löschen, sonst tauchen sie
+      // beim nächsten Refresh wieder auf. Fire-and-forget, ohne
+      // Tracking-Payload (kein zweites Tracking-Event).
+      const legacyIds = matched?.legacyIds ?? [];
+      for (const legacyId of legacyIds) {
+        FirestoreService.removeFromShoppingCart(user.uid, legacyId).catch((e) => {
+          console.warn('[remove] legacy dupe fail:', legacyId, (e as Error)?.message);
+        });
+      }
       showInfoToast(TOAST_MESSAGES.SHOPPING.removedFromCart, 'ERROR');
       // Optimistic update — Totals werden automatisch via useMemo
       // aus brandProducts/noNameProducts neu derived.
@@ -3087,19 +3114,30 @@ export default function ShoppingListScreen() {
       }
 
       const promises: Promise<any>[] = [];
+      // Helper: zusätzlich zu item.id auch alle legacyIds (Cart-
+      // Schema v1 Auto-ID-Dupes) mitmarken — sonst bleiben Geister-
+      // Docs in Firestore die beim Refresh wieder auftauchen.
+      const allIdsForItem = (item: EnrichedItem): string[] => [
+        item.id,
+        ...((item.legacyIds ?? []) as string[]),
+      ];
       // DB noname: mark as purchased (without journey tracking — we batch it)
       if (dbProducts.length > 0) {
-        promises.push(
-          ...dbProducts.map((item) =>
-            FirestoreService.markAsPurchasedWithoutTracking(user.uid, item.id),
-          ),
-        );
+        for (const item of dbProducts) {
+          for (const id of allIdsForItem(item)) {
+            promises.push(FirestoreService.markAsPurchasedWithoutTracking(user.uid, id));
+          }
+        }
       }
       // DB brand on this list: mark as purchased too (kept for "Alle"-Tab semantics)
       if (dbBrandItems.length > 0) {
-        promises.push(
-          ...dbBrandItems.map((item) => FirestoreService.markAsPurchased(user.uid, item.id)),
-        );
+        for (const item of dbBrandItems) {
+          // Primary mit Tracking, Legacy-Dupes ohne (sonst Doppel-Tracking).
+          promises.push(FirestoreService.markAsPurchased(user.uid, item.id));
+          for (const legacyId of (item.legacyIds ?? []) as string[]) {
+            promises.push(FirestoreService.markAsPurchasedWithoutTracking(user.uid, legacyId));
+          }
+        }
       }
       // Custom items: simple removal — Fast-Path ohne getDoc (custom-items
       // brauchen kein Journey-Tracking).
