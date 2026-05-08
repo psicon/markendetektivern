@@ -1019,17 +1019,19 @@ function ShoppingRowWithBoughtAnim({
 // ═══════════════════════════════════════════════════════════════════
 function EdgeCheckButton({ onPress, loading }: { onPress: () => void; loading?: boolean }) {
   const { brand, theme } = useTokens();
+  // Action-Zone-Pattern: leichte bg-Tönung (theme.surfaceAlt) statt
+  // borderLeft-Hairline. Liest sich softer und macht den Strip
+  // visuell zur "Action-Zone" ohne die Card mit einer Linie zu
+  // zerschneiden.
   return (
     <Pressable
       onPress={onPress}
       disabled={loading}
       hitSlop={4}
       style={({ pressed }) => ({
-        alignSelf: 'stretch', // füllt full card height
+        alignSelf: 'stretch',
         width: 48,
-        backgroundColor: pressed ? theme.surfaceAlt : theme.background,
-        borderLeftWidth: 1,
-        borderLeftColor: theme.border,
+        backgroundColor: pressed ? theme.border : theme.surfaceAlt,
         alignItems: 'center',
         justifyContent: 'center',
         opacity: loading ? 0.7 : 1,
@@ -1445,21 +1447,21 @@ function BrandCard({
       </View>
       <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
       </View>
-      {/* Footer "Alternativen anzeigen" — vollbreiter Tap-Handler
-          unter der Body-Row, nur bei canExpand. Ersetzt den Chevron
-          (der hier visuell deplaziert wirkte). */}
+      {/* Footer "Alternativen anzeigen" — Action-Zone-Pattern:
+          theme.surfaceAlt-Tönung statt borderTop-Hairline.
+          Konsistent mit EdgeCheckButton-bg → die Card hat nur ZWEI
+          visuelle Systeme: weißer Content + getönte Action-Zonen
+          (Edge-rechts + Footer-unten). */}
       {canExpand ? (
         <Pressable
           onPress={onToggleExpand}
           style={({ pressed }) => ({
-            borderTopWidth: 1,
-            borderTopColor: theme.border,
+            backgroundColor: pressed ? theme.border : theme.surfaceAlt,
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'center',
             gap: 6,
-            paddingVertical: 8,
-            opacity: pressed ? 0.55 : 1,
+            paddingVertical: 10,
           })}
         >
           <Text
