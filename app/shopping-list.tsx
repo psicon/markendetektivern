@@ -1359,48 +1359,11 @@ function BrandCard({
           opacity: pressed && canExpand ? 0.7 : 1,
         })}
       >
-        {/* Image-Wrapper mit absolutem Spar-Banner oben links.
-            overflow:visible damit das Banner leicht aus der
-            Image-Box rausragt für den "Sticker"-Effekt. */}
-        <View style={{ position: 'relative' }}>
-          <ImageWithShimmer
-            source={{ uri: getProductImage(product) ?? undefined }}
-            style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
-            resizeMode="contain"
-          />
-          {potential > 0 && product?.preis > 0 ? (
-            <View
-              pointerEvents="none"
-              style={{
-                position: 'absolute',
-                top: -4,
-                left: -8,
-                backgroundColor: brand.primary,
-                paddingHorizontal: 6,
-                paddingVertical: 2,
-                borderRadius: 4,
-                transform: [{ rotate: '-14deg' }],
-                shadowColor: '#000',
-                shadowOpacity: 0.18,
-                shadowOffset: { width: 0, height: 1 },
-                shadowRadius: 2,
-                elevation: 3,
-              }}
-            >
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.extraBold,
-                  fontSize: 10,
-                  color: '#fff',
-                  letterSpacing: 0.2,
-                }}
-              >
-                −{Math.round((potential / product.preis) * 100)}%
-              </Text>
-            </View>
-          ) : null}
-        </View>
+        <ImageWithShimmer
+          source={{ uri: getProductImage(product) ?? undefined }}
+          style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
+          resizeMode="contain"
+        />
         <View style={{ flex: 1, minWidth: 0 }}>
           {(() => {
             // Prefer marke (Markenname + Markenlogo) über hersteller
@@ -1479,8 +1442,21 @@ function BrandCard({
               {formatEur((product?.preis || 0) * (item.anzahl ?? 1))}
             </Text>
           </View>
-          {/* Ersparnis möglich liegt jetzt als schräges Banner oben
-              links auf dem Produktbild — siehe ImageWrapper. */}
+          {potential > 0 && product?.preis > 0 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
+              <MaterialCommunityIcons name="tag-outline" size={11} color={brand.primary} />
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.semibold,
+                  fontSize: 10,
+                  color: brand.primary,
+                }}
+              >
+                Ersparnis möglich: {Math.round((potential / product.preis) * 100)}%
+              </Text>
+            </View>
+          ) : null}
         </View>
       </Pressable>
       <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
@@ -1628,16 +1604,53 @@ function BrandCard({
                     </Text>
                   </View>
                 ) : null}
-                <ImageWithShimmer
-                  source={{ uri: getProductImage(alt) ?? undefined }}
-                  style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 8,
-                    backgroundColor: '#ffffff',
-                  }}
-                  resizeMode="contain"
-                />
+                {/* Image-Wrapper mit absolutem Spar-Banner oben links —
+                    zeigt den potentiellen Discount % wenn der User
+                    diese Alternative wählt. */}
+                <View style={{ position: 'relative' }}>
+                  <ImageWithShimmer
+                    source={{ uri: getProductImage(alt) ?? undefined }}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 8,
+                      backgroundColor: '#ffffff',
+                    }}
+                    resizeMode="contain"
+                  />
+                  {sd.savingsPercent > 0 ? (
+                    <View
+                      pointerEvents="none"
+                      style={{
+                        position: 'absolute',
+                        top: -5,
+                        left: -8,
+                        backgroundColor: brand.primary,
+                        paddingHorizontal: 5,
+                        paddingVertical: 1.5,
+                        borderRadius: 4,
+                        transform: [{ rotate: '-14deg' }],
+                        shadowColor: '#000',
+                        shadowOpacity: 0.18,
+                        shadowOffset: { width: 0, height: 1 },
+                        shadowRadius: 2,
+                        elevation: 3,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontFamily,
+                          fontWeight: fontWeight.extraBold,
+                          fontSize: 9,
+                          color: '#fff',
+                          letterSpacing: 0.2,
+                        }}
+                      >
+                        −{sd.savingsPercent}%
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   {/* Zeile 1: Name + Preis (gleiche Baseline) */}
                   <View
@@ -1698,16 +1711,7 @@ function BrandCard({
                       {alt.discounter?.name || 'Unbekannt'}
                       {alt.discounter?.land ? ` (${alt.discounter.land})` : ''}
                     </Text>
-                    <Text
-                      style={{
-                        fontFamily,
-                        fontWeight: fontWeight.semibold,
-                        fontSize: 10,
-                        color: theme.textMuted,
-                      }}
-                    >
-                      −{sd.savingsPercent}%
-                    </Text>
+                    {/* −X% liegt jetzt als Banner auf dem Image-Sticker. */}
                   </View>
                 </View>
                 <Pressable
@@ -1772,6 +1776,14 @@ function NoNameCard({
   const p = item.product;
   const isFav = favoriteMarketId && p?.discounter?.id === favoriteMarketId;
   const savings = item.savings || 0;
+  // Gespart-% berechnen (relativ zum Brand-Originalpreis):
+  // savings / (preis + savings) × 100. Wir kennen den Brand-Preis
+  // nicht direkt, aber savings + noname_preis = brand_preis.
+  const nonamePreis = p?.preis ?? 0;
+  const savingsPercent =
+    savings > 0 && nonamePreis + savings > 0
+      ? Math.round((savings / (nonamePreis + savings)) * 100)
+      : 0;
 
   return (
     <View
@@ -1786,11 +1798,48 @@ function NoNameCard({
       }}
     >
       <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 }}>
-      <ImageWithShimmer
-        source={{ uri: getProductImage(p) ?? undefined }}
-        style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
-        resizeMode="contain"
-      />
+      {/* Image-Wrapper mit absolutem Spar-Banner oben links —
+          zeigt das % was bei diesem NoName-Kauf vs. dem
+          Brand-Original gespart wird. */}
+      <View style={{ position: 'relative' }}>
+        <ImageWithShimmer
+          source={{ uri: getProductImage(p) ?? undefined }}
+          style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
+          resizeMode="contain"
+        />
+        {savingsPercent > 0 ? (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              top: -4,
+              left: -8,
+              backgroundColor: brand.primary,
+              paddingHorizontal: 6,
+              paddingVertical: 2,
+              borderRadius: 4,
+              transform: [{ rotate: '-14deg' }],
+              shadowColor: '#000',
+              shadowOpacity: 0.18,
+              shadowOffset: { width: 0, height: 1 },
+              shadowRadius: 2,
+              elevation: 3,
+            }}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 10,
+                color: '#fff',
+                letterSpacing: 0.2,
+              }}
+            >
+              −{savingsPercent}%
+            </Text>
+          </View>
+        ) : null}
+      </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         {p?.handelsmarke?.bezeichnung ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 1 }}>
@@ -1882,21 +1931,7 @@ function NoNameCard({
             {formatEur((p?.preis || 0) * (item.anzahl ?? 1))}
           </Text>
         </View>
-        {savings > 0 ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
-            <MaterialCommunityIcons name="check-circle-outline" size={11} color={brand.primary} />
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.semibold,
-                fontSize: 10,
-                color: brand.primary,
-              }}
-            >
-              Gespart: {formatEur(savings * (item.anzahl ?? 1))}
-            </Text>
-          </View>
-        ) : null}
+        {/* Gespart-% liegt jetzt als Banner auf dem Image-Sticker. */}
       </View>
       </View>
       <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
