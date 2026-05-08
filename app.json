@@ -112,7 +112,8 @@
           "userTrackingUsageDescription": "Diese App verwendet Werbung zur Finanzierung. Ihre Daten werden anonymisiert verarbeitet."
         }
       ],
-      "react-native-document-scanner-plugin"
+      "react-native-document-scanner-plugin",
+      "react-native-bottom-tabs"
     ],
     "experiments": {
       "typedRoutes": true
