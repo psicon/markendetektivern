@@ -4,26 +4,11 @@ import { Keyboard, KeyboardAvoidingView, Platform, Text, TouchableOpacity, View 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/HapticTab';
-import { NativeTabs } from '@/components/NativeTabs';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
-
-// ─── Native-Tabs Feature-Flag ────────────────────────────────────────
-// Wenn true: react-native-bottom-tabs (Callstack) → native UITabBar
-// auf iOS mit Liquid-Glass, native BottomNavigationView auf Android
-// mit Material 3.
-// Wenn false: Custom JS-Implementation mit raised "Stöbern"-Button,
-// abgerundete Ecken, Custom Shadow.
-//
-// Rollback einfach durch Flag-Flip. Native-Module sind installiert
-// und im app.json plugins-Array — kein Schaden wenn false.
-//
-// VORAUSSETZUNG für true: neuer Native-Build (expo prebuild +
-// build) damit das native Modul gelinkt wird. Bis dahin → false.
-const USE_NATIVE_TABS = true;
 
 function CustomTabBarButton({ children, onPress, accessibilityState }: any) {
   const colorScheme = useColorScheme();
@@ -132,57 +117,8 @@ export default function TabLayout() {
     );
   }
 
-  // ─── Native Bottom Tabs (Plattform-Native UITabBar / BottomNavigation) ─
-  if (USE_NATIVE_TABS) {
-    const colors = Colors[colorScheme ?? 'light'];
-    return (
-      <NativeTabs
-        screenOptions={{
-          // Lazy bleibt erhalten — wichtig für Stöbern-Tab Mount-
-          // Performance. freezeOnBlur ebenfalls (siehe original
-          // Begründung weiter unten beim JS-Tabs-Path).
-          lazy: true,
-          freezeOnBlur: true,
-          headerShown: false,
-          // Plattform-Native Tinting — auf iOS adaptive zur Liquid-
-          // Glass-Tab-Bar, auf Android Material 3 dynamic-color-fähig.
-          tabBarActiveTintColor: colors.tabIconSelected,
-          tabBarInactiveTintColor: colors.tabIconDefault,
-        }}
-      >
-        <NativeTabs.Screen
-          name="index"
-          options={{
-            title: 'Home',
-            // SF-Symbol auf iOS (native Glyph, theme-/scale-aware),
-            // Material drawable auf Android.
-            tabBarIcon: () => ({ sfSymbol: 'house.fill' }),
-          }}
-        />
-        <NativeTabs.Screen
-          name="explore"
-          options={{
-            title: 'Stöbern',
-            // Dedektiv-Lupe — closest SF-Symbol-Match. Brand-spezifisch
-            // muss später ggf. via require'd PNG asset ersetzt werden
-            // wenn der Custom-Iconlook gewollt ist.
-            tabBarIcon: () => ({ sfSymbol: 'magnifyingglass' }),
-          }}
-        />
-        <NativeTabs.Screen
-          name="rewards"
-          options={{
-            title: 'Rewards',
-            tabBarIcon: () => ({ sfSymbol: 'trophy.fill' }),
-          }}
-        />
-      </NativeTabs>
-    );
-  }
-
-  // ─── Custom JS Tab-Bar (alter Stand) ─────────────────────────────
   return (
-    <KeyboardAvoidingView
+    <KeyboardAvoidingView 
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
