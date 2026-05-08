@@ -1359,11 +1359,48 @@ function BrandCard({
           opacity: pressed && canExpand ? 0.7 : 1,
         })}
       >
-        <ImageWithShimmer
-          source={{ uri: getProductImage(product) ?? undefined }}
-          style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
-          resizeMode="contain"
-        />
+        {/* Image-Wrapper mit absolutem Spar-Banner oben links.
+            overflow:visible damit das Banner leicht aus der
+            Image-Box rausragt für den "Sticker"-Effekt. */}
+        <View style={{ position: 'relative' }}>
+          <ImageWithShimmer
+            source={{ uri: getProductImage(product) ?? undefined }}
+            style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
+            resizeMode="contain"
+          />
+          {potential > 0 && product?.preis > 0 ? (
+            <View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                top: -4,
+                left: -8,
+                backgroundColor: brand.primary,
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                borderRadius: 4,
+                transform: [{ rotate: '-14deg' }],
+                shadowColor: '#000',
+                shadowOpacity: 0.18,
+                shadowOffset: { width: 0, height: 1 },
+                shadowRadius: 2,
+                elevation: 3,
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 10,
+                  color: '#fff',
+                  letterSpacing: 0.2,
+                }}
+              >
+                −{Math.round((potential / product.preis) * 100)}%
+              </Text>
+            </View>
+          ) : null}
+        </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           {(() => {
             // Prefer marke (Markenname + Markenlogo) über hersteller
@@ -1442,21 +1479,8 @@ function BrandCard({
               {formatEur((product?.preis || 0) * (item.anzahl ?? 1))}
             </Text>
           </View>
-          {potential > 0 && product?.preis > 0 ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
-              <MaterialCommunityIcons name="tag-outline" size={11} color={brand.primary} />
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.semibold,
-                  fontSize: 10,
-                  color: brand.primary,
-                }}
-              >
-                Ersparnis möglich: {Math.round((potential / product.preis) * 100)}%
-              </Text>
-            </View>
-          ) : null}
+          {/* Ersparnis möglich liegt jetzt als schräges Banner oben
+              links auf dem Produktbild — siehe ImageWrapper. */}
         </View>
       </Pressable>
       <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
