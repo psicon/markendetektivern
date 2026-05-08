@@ -994,13 +994,12 @@ function BrandCard({
         onPress={canExpand ? onToggleExpand : undefined}
         disabled={!canExpand}
         style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 10,
           padding: 10,
           opacity: pressed && canExpand ? 0.7 : 1,
         })}
       >
+        {/* Top row: image + content (Name nutzt volle Breite-Image) */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
         <ImageWithShimmer
           source={{ uri: getProductImage(product) ?? undefined }}
           style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
@@ -1109,8 +1108,20 @@ function BrandCard({
             </View>
           ) : null}
         </View>
+        </View>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        {/* Bottom action row: Quantity-Pill + Gekauft-Button rechts.
+            Name oben nutzt jetzt die volle Card-Breite (minus Image)
+            ohne Konkurrenz mit den Action-Buttons. */}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: 6,
+            marginTop: 8,
+          }}
+        >
           {canExpand ? (
             <View
               style={{
@@ -1378,11 +1389,9 @@ function NoNameCard({
         borderWidth: 1,
         borderColor: theme.border,
         padding: 10,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
       }}
     >
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
       <ImageWithShimmer
         source={{ uri: getProductImage(p) ?? undefined }}
         style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
@@ -1480,15 +1489,27 @@ function NoNameCard({
           </Text>
         </View>
       </View>
-      <RowActions
-        onCheck={onCheck}
-        onDelete={onDelete}
-        loadingCheck={loadingCheck}
-        loadingDelete={loadingDelete}
-        anzahl={item.anzahl ?? 1}
-        onIncrement={onIncrement}
-        onDecrement={onDecrement}
-      />
+      </View>
+
+      {/* Bottom action row: Quantity-Pill + Gekauft-Button rechts. */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          marginTop: 8,
+        }}
+      >
+        <RowActions
+          onCheck={onCheck}
+          onDelete={onDelete}
+          loadingCheck={loadingCheck}
+          loadingDelete={loadingDelete}
+          anzahl={item.anzahl ?? 1}
+          onIncrement={onIncrement}
+          onDecrement={onDecrement}
+        />
+      </View>
     </View>
   );
 }
@@ -1524,11 +1545,9 @@ function CustomCard({
         borderWidth: 1,
         borderColor: theme.border,
         padding: 10,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
       }}
     >
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
       <View
         style={{
           width: 62,
@@ -1627,12 +1646,24 @@ function CustomCard({
           </Text>
         )}
       </View>
-      <RowActions
-        onCheck={onCheck}
-        onDelete={onDelete}
-        loadingCheck={loadingCheck}
-        loadingDelete={loadingDelete}
-      />
+      </View>
+
+      {/* Bottom action row: Gekauft-Button rechts (Custom-Items haben kein anzahl-Konzept) */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          marginTop: 8,
+        }}
+      >
+        <RowActions
+          onCheck={onCheck}
+          onDelete={onDelete}
+          loadingCheck={loadingCheck}
+          loadingDelete={loadingDelete}
+        />
+      </View>
     </View>
   );
 }
