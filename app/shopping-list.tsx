@@ -38,6 +38,7 @@ import React, {
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Platform,
   Pressable,
   RefreshControl,
@@ -3354,12 +3355,57 @@ export default function ShoppingListScreen() {
     const items =
       variant === 'brand' ? filteredBrand : variant === 'noname' ? filteredNoName : filteredAll;
     const isEmpty = items.length === 0;
+    const allowExpand = variant === 'brand';
     return (
       <View key={variant} style={{ flex: 1 }}>
-        <ScrollView
+        {/* FlatList statt ScrollView+map → Virtualization. Bei vielen
+            Items werden nur sichtbare Cards (+windowSize) gemountet,
+            nicht alle gleichzeitig. initialNumToRender:6 = sofort
+            zeigen die ersten 6 Cards, Rest lädt beim Scrollen.
+            removeClippedSubviews offboardet komplett offscreen Cards. */}
+        <FlatList
+          data={items}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => renderItem(item, { allowExpand })}
+          ListHeaderComponent={
+            <>
+              {!isPremium ? (
+                <View style={{ marginHorizontal: 16, marginTop: 6, marginBottom: 4 }}>
+                  <BannerAd style={{ marginHorizontal: 0 }} />
+                </View>
+              ) : null}
+              {!isEmpty ? (
+                <SummaryBanner
+                  variant={variant}
+                  potential={totalPotentialSavings}
+                  earned={totalActualSavings}
+                />
+              ) : null}
+            </>
+          }
+          ListFooterComponent={
+            !isEmpty ? (
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 11,
+                  color: theme.textMuted,
+                  textAlign: 'center',
+                  paddingVertical: 12,
+                }}
+              >
+                Tipp: Nach rechts wischen = gekauft · Nach links wischen = löschen
+              </Text>
+            ) : null
+          }
+          ListEmptyComponent={
+            <EmptyState variant={variant} onAdd={() => setShowCustomItemModal(true)} />
+          }
           contentContainerStyle={{
             paddingTop: chromeHeight + SEG_BAR_HEIGHT,
             paddingBottom: 140,
+            paddingHorizontal: isEmpty ? 0 : 16,
           }}
           contentInsetAdjustmentBehavior="never"
           refreshControl={
@@ -3375,45 +3421,16 @@ export default function ShoppingListScreen() {
           }
           showsVerticalScrollIndicator={false}
           scrollIndicatorInsets={{ top: chromeHeight + SEG_BAR_HEIGHT }}
-          // Nur die aktive PagerView-Page claimt iOS-Status-Bar-Tap-
-          // Scroll-to-Top — sonst deaktiviert iOS das Feature weil
-          // mehrere ScrollViews auf scrollsToTop=true (Default) wären.
           scrollsToTop={activeTab === variant}
-        >
-          {!isPremium ? (
-            <View style={{ marginHorizontal: 16, marginTop: 6, marginBottom: 4 }}>
-              <BannerAd style={{ marginHorizontal: 0 }} />
-            </View>
-          ) : null}
-
-          {!isEmpty ? (
-            <SummaryBanner
-              variant={variant}
-              potential={totalPotentialSavings}
-              earned={totalActualSavings}
-            />
-          ) : null}
-
-          {isEmpty ? (
-            <EmptyState variant={variant} onAdd={() => setShowCustomItemModal(true)} />
-          ) : (
-            <View style={{ paddingHorizontal: 16, paddingTop: 4 }}>
-              {items.map((item) => renderItem(item, { allowExpand: variant === 'brand' }))}
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.medium,
-                  fontSize: 11,
-                  color: theme.textMuted,
-                  textAlign: 'center',
-                  paddingVertical: 12,
-                }}
-              >
-                Tipp: Nach rechts wischen = gekauft · Nach links wischen = löschen
-              </Text>
-            </View>
-          )}
-        </ScrollView>
+          // ─── Performance / Virtualization ────────────────────────
+          initialNumToRender={6}
+          maxToRenderPerBatch={4}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS === 'android'}
+          // Memo: bei häufigen Re-Renders werden inactive items
+          // weniger gemountet/unmountet.
+          updateCellsBatchingPeriod={50}
+        />
       </View>
     );
   };
