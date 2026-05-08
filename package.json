@@ -67,7 +67,7 @@
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-native": "0.79.5",
-    "react-native-bottom-tabs": "^1.2.0",
+    "react-native-bottom-tabs": "0.9.2",
     "react-native-confetti-cannon": "^1.5.2",
     "react-native-document-scanner-plugin": "^2.0.4",
     "react-native-gesture-handler": "~2.24.0",
