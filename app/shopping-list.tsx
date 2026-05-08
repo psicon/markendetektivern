@@ -1416,6 +1416,9 @@ function BrandCard({
               fontSize: 14,
               color: theme.text,
               lineHeight: 18,
+              // 2 Zeilen ZWINGEND (auch bei kurzem Text) damit alle
+              // Cards exakt gleich hoch sind und nicht variieren.
+              minHeight: 36,
             }}
           >
             {item.name || product?.name || 'Unbekanntes Produkt'}
@@ -1869,22 +1872,47 @@ function NoNameCard({
         ) : null}
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
-        {p?.handelsmarke?.bezeichnung ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 1 }}>
-            <Text
-              numberOfLines={1}
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold,
-                fontSize: 11,
-                color: brand.primary,
-                letterSpacing: 0.1,
-              }}
-            >
-              {p.handelsmarke.bezeichnung}
-            </Text>
+        {/* Eyebrow-Row: Discounter (Markt) zuerst, dann Handelsmarke
+            in EINER Zeile. Spart eine Row → Card kompakter. */}
+        {p?.handelsmarke?.bezeichnung || p?.discounter?.name ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 2, flexWrap: 'wrap' }}>
+            {p?.discounter?.bild ? (
+              <ImageWithShimmer
+                source={{ uri: p.discounter.bild }}
+                style={{ width: 14, height: 14, borderRadius: 3 }}
+              />
+            ) : null}
+            {p?.discounter?.name ? (
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 11,
+                  color: theme.textMuted,
+                  flexShrink: 1,
+                }}
+              >
+                {p.discounter.name}
+                {p?.discounter?.land ? ` (${p.discounter.land})` : ''}
+              </Text>
+            ) : null}
+            {p?.handelsmarke?.bezeichnung ? (
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.bold,
+                  fontSize: 11,
+                  color: brand.primary,
+                  letterSpacing: 0.1,
+                }}
+              >
+                {p.handelsmarke.bezeichnung}
+              </Text>
+            ) : null}
             {isFav ? (
-              <MaterialCommunityIcons name="heart" size={10} color={brand.error} />
+              <MaterialCommunityIcons name="heart" size={11} color={brand.error} />
             ) : null}
           </View>
         ) : null}
@@ -1896,37 +1924,12 @@ function NoNameCard({
             fontSize: 14,
             color: theme.text,
             lineHeight: 18,
+            // 2 Zeilen ZWINGEND damit Cards alle gleich hoch sind.
+            minHeight: 36,
           }}
         >
           {p?.name || p?.produktName || 'Unbekanntes Produkt'}
         </Text>
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 4,
-            marginTop: 3,
-          }}
-        >
-          {p?.discounter?.bild ? (
-            <ImageWithShimmer
-              source={{ uri: p.discounter.bild }}
-              style={{ width: 12, height: 12, borderRadius: 2 }}
-            />
-          ) : null}
-          <Text
-            numberOfLines={1}
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 10,
-              color: theme.textMuted,
-            }}
-          >
-            {p?.discounter?.name || 'Unbekannt'}
-            {p?.discounter?.land ? ` (${p.discounter.land})` : ''}
-          </Text>
-        </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
           {(() => {
             const pack = formatPack(
@@ -2072,6 +2075,8 @@ function CustomCard({
             fontSize: 14,
             color: theme.text,
             lineHeight: 18,
+            // 2 Zeilen ZWINGEND damit alle Cards gleich hoch sind.
+            minHeight: 36,
           }}
         >
           {item.name || 'Freitext-Eintrag'}
