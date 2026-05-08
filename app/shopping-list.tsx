@@ -1329,10 +1329,12 @@ function BrandCard({
         overflow: 'hidden',
       }}
     >
-      {/* Card-Row: Pressable für Tap-to-Expand + Chevron + Pill +
-          EdgeCheckButton sind alles Siblings einer alignItems:stretch
-          Row, damit der EdgeCheckButton volle Card-Höhe füllt
-          (vorher hatte er nur Content-Höhe minus Padding). */}
+      {/* Action-Top-Section: Body-Row + Footer als linke Spalte
+          (flex:1), EdgeCheckButton als rechte Spalte (full Höhe
+          beider zusammen). So füllt der Edge-Strip die komplette
+          Card-Höhe ohne durch den Footer abgeschnitten zu werden. */}
+      <View style={{ flexDirection: 'row', alignItems: 'stretch' }}>
+      <View style={{ flex: 1 }}>
       <View style={{ flexDirection: 'row', alignItems: 'stretch' }}>
       <Pressable
         onPress={canExpand ? onToggleExpand : undefined}
@@ -1454,8 +1456,7 @@ function BrandCard({
           onDecrement={onDecrement}
         />
       </View>
-      <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
-      </View>
+      </View>{/* /Body-Row */}
       {/* Footer "Alternativen anzeigen" — kein Hintergrund, keine
           Linie. Sitzt nah an der Body-Row, einfach als kleiner
           Tap-Hint mit Chevron-Icon. */}
@@ -1490,6 +1491,9 @@ function BrandCard({
           />
         </Pressable>
       ) : null}
+      </View>{/* /Linke Spalte (Body+Footer) */}
+      <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
+      </View>{/* /Action-Top-Section */}
 
       {/* Expanded NoName-Alternatives */}
       {allowExpand && expanded && hasAlts ? (
