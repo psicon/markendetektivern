@@ -1075,7 +1075,6 @@ function CompactQuantityPill({
         borderRadius: 19,
         paddingHorizontal: 2,
         height: 38,
-        marginRight: 8,
       }}
     >
       <Pressable
@@ -1437,27 +1436,29 @@ function BrandCard({
           ) : null}
         </View>
       </Pressable>
-      {/* Chevron als eigene Pressable-Affordanz vor der Pill — links
-          neben Quantity-Chooser, vertikal mittig in der Card. */}
-      {canExpand ? (
-        <Pressable
-          onPress={onToggleExpand}
-          hitSlop={6}
-          style={({ pressed }) => ({
-            width: 32,
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: pressed ? 0.6 : 1,
-          })}
-        >
-          <MaterialCommunityIcons
-            name={expanded ? 'chevron-up' : 'chevron-down'}
-            size={24}
-            color={theme.textMuted}
-          />
-        </Pressable>
-      ) : null}
-      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+      {/* Pill + Chevron-untereinander Wrapper — Chevron sitzt direkt
+          ÜBER der Pill (nicht mehr daneben), damit es klar als
+          "expand"-Indikator für die Card lesbar ist und nicht
+          visuell mit den +/− verschmilzt. */}
+      <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
+        {canExpand ? (
+          <Pressable
+            onPress={onToggleExpand}
+            hitSlop={8}
+            style={({ pressed }) => ({
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingVertical: 2,
+              opacity: pressed ? 0.5 : 1,
+            })}
+          >
+            <MaterialCommunityIcons
+              name={expanded ? 'chevron-up' : 'chevron-down'}
+              size={20}
+              color={theme.textMuted}
+            />
+          </Pressable>
+        ) : null}
         <CompactQuantityPill
           anzahl={item.anzahl ?? 1}
           onIncrement={onIncrement}
@@ -1808,7 +1809,7 @@ function NoNameCard({
         </View>
       </View>
       </View>
-      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
         <CompactQuantityPill
           anzahl={item.anzahl ?? 1}
           onIncrement={onIncrement}
