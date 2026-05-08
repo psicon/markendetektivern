@@ -1060,10 +1060,10 @@ function CompactQuantityPill({
 }) {
   const { brand, theme } = useTokens();
   if (!onIncrement || !onDecrement) return null;
-  // Sizes: Buttons 32×32 (vorher 26), Icons 17 (vorher 14), Container
-  // height 38 (vorher 32). Image im Card ist 62 hoch → Card-Row-Höhe
-  // bleibt unverändert image-driven, kein Layout-Bruch.
-  // hitSlop 8 → effektive Tap-Area 48 px (Material-Tap-Target-Standard).
+  // Sizes nach Chevron-Entfernung etwas vergrößert: Buttons 36×36
+  // (vorher 32), Icons 18 (vorher 17), Container-Height 44 (vorher
+  // 38). Image im Card ist 62 hoch → Pill 44 < 62, Card-Row-Höhe
+  // bleibt unverändert image-driven.
   return (
     <View
       style={{
@@ -1072,18 +1072,18 @@ function CompactQuantityPill({
         backgroundColor: theme.surface,
         borderWidth: 1,
         borderColor: theme.border,
-        borderRadius: 19,
-        paddingHorizontal: 2,
-        height: 38,
+        borderRadius: 22,
+        paddingHorizontal: 3,
+        height: 44,
       }}
     >
       <Pressable
         onPress={onDecrement}
         hitSlop={8}
         style={({ pressed }) => ({
-          width: 32,
-          height: 32,
-          borderRadius: 16,
+          width: 36,
+          height: 36,
+          borderRadius: 18,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: pressed
@@ -1095,7 +1095,7 @@ function CompactQuantityPill({
       >
         <MaterialCommunityIcons
           name={anzahl <= 1 ? 'trash-can-outline' : 'minus'}
-          size={17}
+          size={18}
           color={anzahl <= 1 ? '#dc2626' : theme.text}
         />
       </Pressable>
@@ -1103,9 +1103,9 @@ function CompactQuantityPill({
         style={{
           fontFamily,
           fontWeight: fontWeight.extraBold,
-          fontSize: 15,
+          fontSize: 16,
           color: theme.text,
-          minWidth: 18,
+          minWidth: 22,
           textAlign: 'center',
           letterSpacing: -0.2,
         }}
@@ -1116,15 +1116,15 @@ function CompactQuantityPill({
         onPress={onIncrement}
         hitSlop={8}
         style={({ pressed }) => ({
-          width: 32,
-          height: 32,
-          borderRadius: 16,
+          width: 36,
+          height: 36,
+          borderRadius: 18,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: pressed ? brand.primaryContainer ?? theme.surfaceAlt : brand.primary,
         })}
       >
-        <MaterialCommunityIcons name="plus" size={17} color="#fff" />
+        <MaterialCommunityIcons name="plus" size={18} color="#fff" />
       </Pressable>
     </View>
   );
@@ -1436,29 +1436,7 @@ function BrandCard({
           ) : null}
         </View>
       </Pressable>
-      {/* Pill + Chevron-untereinander Wrapper — Chevron sitzt direkt
-          ÜBER der Pill (nicht mehr daneben), damit es klar als
-          "expand"-Indikator für die Card lesbar ist und nicht
-          visuell mit den +/− verschmilzt. */}
       <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
-        {canExpand ? (
-          <Pressable
-            onPress={onToggleExpand}
-            hitSlop={8}
-            style={({ pressed }) => ({
-              alignItems: 'center',
-              justifyContent: 'center',
-              paddingVertical: 2,
-              opacity: pressed ? 0.5 : 1,
-            })}
-          >
-            <MaterialCommunityIcons
-              name={expanded ? 'chevron-up' : 'chevron-down'}
-              size={20}
-              color={theme.textMuted}
-            />
-          </Pressable>
-        ) : null}
         <CompactQuantityPill
           anzahl={item.anzahl ?? 1}
           onIncrement={onIncrement}
@@ -1467,6 +1445,41 @@ function BrandCard({
       </View>
       <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
       </View>
+      {/* Footer "Alternativen anzeigen" — vollbreiter Tap-Handler
+          unter der Body-Row, nur bei canExpand. Ersetzt den Chevron
+          (der hier visuell deplaziert wirkte). */}
+      {canExpand ? (
+        <Pressable
+          onPress={onToggleExpand}
+          style={({ pressed }) => ({
+            borderTopWidth: 1,
+            borderTopColor: theme.border,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            paddingVertical: 8,
+            opacity: pressed ? 0.55 : 1,
+          })}
+        >
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.semibold,
+              fontSize: 12,
+              color: brand.primary,
+              letterSpacing: 0.1,
+            }}
+          >
+            {expanded ? 'Alternativen ausblenden' : 'Alternativen anzeigen'}
+          </Text>
+          <MaterialCommunityIcons
+            name={expanded ? 'chevron-up' : 'chevron-down'}
+            size={14}
+            color={brand.primary}
+          />
+        </Pressable>
+      ) : null}
 
       {/* Expanded NoName-Alternatives */}
       {allowExpand && expanded && hasAlts ? (
