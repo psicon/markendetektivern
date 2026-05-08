@@ -474,6 +474,12 @@ export default function ProductComparisonScreen() {
       return { ...prev, [productId]: expanded };
     });
   }, []);
+  // Counter um alle MorphingCartButtons zu kollabieren (Scroll, Tap
+  // auf andere Action-Buttons). Inkrement → Pill collapse.
+  const [pillCollapseSignal, setPillCollapseSignal] = useState(0);
+  const collapseAllPills = useCallback(() => {
+    setPillCollapseSignal((n) => n + 1);
+  }, []);
   // NEU: welche Produkt-Pill ist gerade offen (overlay) + Anchor-Position
   const [openPill, setOpenPill] = useState<{
     productId: string;
@@ -675,17 +681,17 @@ export default function ProductComparisonScreen() {
   // ihn via runOnJS aufrufen kann ohne Closure-Staleness.
   const closePillRef = useRef<() => void>(() => {});
   closePillRef.current = closePill;
-  const lastScrollPillCloseY = useSharedValue(0);
+  const collapseAllPillsRef = useRef<() => void>(() => {});
+  collapseAllPillsRef.current = collapseAllPills;
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => {
       scrollY.value = e.contentOffset.y;
-      // Schließe QuantityPill wenn User > 30 px scrollt (kleine
-      // Bewegungen ignorieren damit Pill nicht bei Inertia closet).
-      const dy = Math.abs(e.contentOffset.y - lastScrollPillCloseY.value);
-      if (dy > 30) {
-        lastScrollPillCloseY.value = e.contentOffset.y;
-        runOnJS(closePillRef.current)();
-      }
+    },
+    onBeginDrag: () => {
+      // User fängt an zu scrollen → alle expanded Pills sofort
+      // schließen (vorher: erst nach 30 px Scroll).
+      runOnJS(closePillRef.current)();
+      runOnJS(collapseAllPillsRef.current)();
     },
   });
 
@@ -1455,7 +1461,10 @@ export default function ProductComparisonScreen() {
                   <ActionButton
                     icon={favMap[mp.id] ? 'heart' : 'heart-outline'}
                     iconColor={favMap[mp.id] ? '#e53935' : theme.text}
-                    onPress={() => onToggleFav(mp.id, 'markenprodukt', mp)}
+                    onPress={() => {
+                      collapseAllPills();
+                      onToggleFav(mp.id, 'markenprodukt', mp);
+                    }}
                   />
                 </View>
                 <View
@@ -1474,6 +1483,7 @@ export default function ProductComparisonScreen() {
                       onIncrement={() => onIncrementCart(mp.id, 'markenprodukt', mp)}
                       onDecrement={() => onDecrementCart(mp.id, 'markenprodukt')}
                       onExpansionChange={(exp) => setPillExpanded(mp.id, exp)}
+                      collapseSignal={pillCollapseSignal}
                     />
                   </View>
                 </View>
@@ -1490,7 +1500,10 @@ export default function ProductComparisonScreen() {
                         ? ((mp as any).averageRatingOverall as number).toFixed(1)
                         : undefined
                     }
-                    onPress={() => onOpenRatings(mp.id, mp.name ?? 'Produkt', true)}
+                    onPress={() => {
+                      collapseAllPills();
+                      onOpenRatings(mp.id, mp.name ?? 'Produkt', true);
+                    }}
                   />
                 </View>
               </View>
@@ -1937,7 +1950,10 @@ export default function ProductComparisonScreen() {
                         <ActionButton
                           icon={favMap[nn.id] ? 'heart' : 'heart-outline'}
                           iconColor={favMap[nn.id] ? '#e53935' : theme.text}
-                          onPress={() => onToggleFav(nn.id, 'noname', nn)}
+                          onPress={() => {
+                            collapseAllPills();
+                            onToggleFav(nn.id, 'noname', nn);
+                          }}
                         />
                         <View
                           ref={(el) => { if (nn.id) cartButtonRefs.current.set(nn.id, el); }}
@@ -1952,6 +1968,7 @@ export default function ProductComparisonScreen() {
                             onIncrement={() => onIncrementCart(nn.id, 'noname', nn)}
                             onDecrement={() => onDecrementCart(nn.id, 'noname')}
                             onExpansionChange={(exp) => setPillExpanded(nn.id, exp)}
+                            collapseSignal={pillCollapseSignal}
                           />
                         </View>
                         <ActionButton
@@ -1962,7 +1979,10 @@ export default function ProductComparisonScreen() {
                               ? ((nn as any).averageRatingOverall as number).toFixed(1)
                               : undefined
                           }
-                          onPress={() => onOpenRatings(nn.id, (nn as any).name ?? 'Produkt', false)}
+                          onPress={() => {
+                            collapseAllPills();
+                            onOpenRatings(nn.id, (nn as any).name ?? 'Produkt', false);
+                          }}
                         />
                       </View>
                     </View>

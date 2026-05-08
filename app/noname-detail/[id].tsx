@@ -14,6 +14,7 @@ import Animated, {
   Easing,
   Extrapolation,
   interpolate,
+  runOnJS,
   useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
@@ -276,9 +277,23 @@ export default function NoNameDetailScreen() {
   const [ratingsLoading, setRatingsLoading] = useState(false);
 
   const scrollY = useSharedValue(0);
+  // Collapse-Signal-Counter für die MorphingCartButton-Pill: jeder
+  // Increment kollabiert die expanded Pill (z.B. bei Scroll, bei Tap
+  // auf heart oder star). Verwendet einen Counter statt boolean
+  // damit auch bei zwei aufeinanderfolgenden Scrolls die Pill jedes-
+  // mal closed wird (boolean toggle würde zwischen true/false
+  // wechseln statt forced collapse).
+  const [pillCollapseSignal, setPillCollapseSignal] = useState(0);
+  const collapseCartPill = useCallback(() => {
+    setPillCollapseSignal((n) => n + 1);
+  }, []);
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => {
       scrollY.value = e.contentOffset.y;
+    },
+    onBeginDrag: () => {
+      // Pill schließen wenn User anfängt zu scrollen.
+      runOnJS(collapseCartPill)();
     },
   });
 
@@ -1042,7 +1057,10 @@ export default function NoNameDetailScreen() {
                   <ActionButton
                     icon={isFav ? 'heart' : 'heart-outline'}
                     iconColor={isFav ? '#e53935' : theme.text}
-                    onPress={onFavPress}
+                    onPress={() => {
+                      collapseCartPill();
+                      onFavPress();
+                    }}
                   />
                 </View>
                 <View
@@ -1066,6 +1084,7 @@ export default function NoNameDetailScreen() {
                     onIncrement={onIncrementFromPill}
                     onDecrement={onDecrementFromPill}
                     onExpansionChange={setCartPillExpanded}
+                    collapseSignal={pillCollapseSignal}
                   />
                 </View>
                 <View
@@ -1077,7 +1096,10 @@ export default function NoNameDetailScreen() {
                     icon="star"
                     iconColor="#f5b301"
                     subLabel={rating}
-                    onPress={onRatingsPress}
+                    onPress={() => {
+                      collapseCartPill();
+                      onRatingsPress();
+                    }}
                   />
                 </View>
               </View>

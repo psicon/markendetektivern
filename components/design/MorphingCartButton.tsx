@@ -56,6 +56,10 @@ interface MorphingCartButtonProps {
    *  das um zIndex/elevation auf seinem Wrapper-View zu setzen
    *  (sonst rendert star/rating ActionButton über das +). */
   onExpansionChange?: (expanded: boolean) => void;
+  /** Signal-Counter: wenn dieser Wert sich ändert, kollabiert die
+   *  Pill. Parent nutzt das um z.B. bei Scroll oder Tap auf andere
+   *  Elemente die Pill explizit zu schließen. */
+  collapseSignal?: number;
 }
 
 export function MorphingCartButton({
@@ -65,6 +69,7 @@ export function MorphingCartButton({
   onDecrement,
   loading,
   onExpansionChange,
+  collapseSignal,
 }: MorphingCartButtonProps) {
   const { theme, brand, shadows } = useTokens();
   const inCart = anzahl > 0;
@@ -90,24 +95,33 @@ export function MorphingCartButton({
     };
   }, [expanded, t, restartAutoTimer, onExpansionChange]);
 
-  // Auto-Expand wenn anzahl 0 → >0 wechselt (initialer Add).
-  // Auto-Collapse wenn anzahl auf 0 fällt (Item entfernt).
+  // Auto-Collapse wenn anzahl auf 0 fällt (Item entfernt via Trash).
+  // KEIN Auto-Expand bei Prop-Change mehr — sonst würde die Pill
+  // beim Page-Mount jedesmal aus- und einfahren wenn Firestore
+  // den initial anzahl-Wert nachlädt (User-Bug). Expansion läuft
+  // nur über handleTap = aktive User-Aktion.
   useEffect(() => {
-    if (prevAnzahl.current === 0 && anzahl > 0 && !expanded) {
-      setExpanded(true);
-    }
     if (anzahl === 0 && expanded) {
       setExpanded(false);
     }
     prevAnzahl.current = anzahl;
   }, [anzahl, expanded]);
 
+  // Collapse via Signal vom Parent (Scroll, Tap auf andere Elemente).
+  useEffect(() => {
+    if (collapseSignal === undefined) return;
+    if (expanded) setExpanded(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapseSignal]);
+
   const handleTap = () => {
     if (loading) return;
     if (anzahl === 0) {
       // Initialer Add — Parent macht Firestore-Call + FlyToCart.
-      // Auto-Expand kommt via useEffect sobald anzahl prop > 0 wird.
+      // Wir expandieren SOFORT (nicht via Prop-Change-useEffect, weil
+      // das auch beim Datenlade-Update feuern würde).
       onAddToCart();
+      setExpanded(true);
       return;
     }
     if (!expanded) setExpanded(true);
