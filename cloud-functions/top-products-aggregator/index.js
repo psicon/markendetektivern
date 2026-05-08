@@ -297,7 +297,15 @@ async function enrichProducts(items) {
           id: it.id,
           type: it.type,
           name: product.name ?? 'Produkt',
+          // Legacy + Cleaned Image-URLs mitschreiben — der Client
+          // (getProductImage helper) bevorzugt bildClean wenn
+          // verfügbar, fällt sonst auf bild zurück. Ohne diese
+          // Felder zog der Client immer die alte bild-URL und
+          // umging die Image-Cleanup-Pipeline.
           bild: product.bild ?? null,
+          bildClean: product.bildClean ?? null,
+          bildCleanPng: product.bildCleanPng ?? null,
+          bildCleanHq: product.bildCleanHq ?? null,
           preis: typeof product.preis === 'number' ? product.preis : null,
           stufe: parseInt(String(product.stufe ?? '')) || 0,
           // Handelsmarke (NoName) — Eyebrow + kleines Logo
