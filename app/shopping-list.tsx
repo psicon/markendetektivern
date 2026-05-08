@@ -3036,7 +3036,13 @@ export default function ShoppingListScreen() {
       0,
     );
     const totalProducts = dbProducts.reduce((s, item) => s + (item.anzahl ?? 1), 0);
-    const totalCount = dbProducts.length + customItems.length + dbBrandItems.length;
+    // totalCount für die Loader-Bar (Σ anzahl über alle Targets),
+    // damit die "X von Y verarbeitet"-Anzeige im Loader korrekt
+    // skaliert mit der gekauften Menge statt nur unique products.
+    const totalCount =
+      dbProducts.reduce((s, item) => s + (item.anzahl ?? 1), 0) +
+      customItems.reduce((s, item) => s + (item.anzahl ?? 1), 0) +
+      dbBrandItems.reduce((s, item) => s + (item.anzahl ?? 1), 0);
 
     setPurchaseLoaderState({
       visible: true,
@@ -3220,20 +3226,30 @@ export default function ShoppingListScreen() {
           : brandProducts;
 
     if (targets.length === 0) return;
-    const dbCount = targets.filter((t) => !t.isCustom && t.kind === 'noname').length;
-    const customCount = targets.filter((t) => t.isCustom).length;
-    const brandCount = targets.filter((t) => !t.isCustom && t.kind === 'brand').length;
-    const totalSavings = targets.reduce((s, t) => s + (t.savings || 0), 0);
+    // Anzahl-aware: jedes Produkt wird mit seiner anzahl multipliziert,
+    // damit die Confirmation-Message dem User korrekt sagt wieviele
+    // Items er tatsächlich als gekauft markiert (nicht wieviele
+    // unique products).
+    const sumAnzahl = (arr: EnrichedItem[]) =>
+      arr.reduce((s, t) => s + (t.anzahl ?? 1), 0);
+    const dbCount = sumAnzahl(targets.filter((t) => !t.isCustom && t.kind === 'noname'));
+    const customCount = sumAnzahl(targets.filter((t) => t.isCustom));
+    const brandCount = sumAnzahl(targets.filter((t) => !t.isCustom && t.kind === 'brand'));
+    const targetsTotal = sumAnzahl(targets);
+    const totalSavings = targets.reduce(
+      (s, t) => s + (t.savings || 0) * (t.anzahl ?? 1),
+      0,
+    );
 
     let message = '';
     if (dbCount > 0 && customCount > 0 && brandCount > 0) {
-      message = `Möchtest du alle ${targets.length} Produkte (${brandCount} Marken, ${dbCount} NoNames, ${customCount} Freitext) als erledigt markieren? Du sparst dabei ${formatEur(totalSavings)}.`;
+      message = `Möchtest du alle ${targetsTotal} Produkte (${brandCount} Marken, ${dbCount} NoNames, ${customCount} Freitext) als erledigt markieren? Du sparst dabei ${formatEur(totalSavings)}.`;
     } else if (dbCount > 0 && customCount > 0) {
-      message = `Möchtest du alle ${targets.length} Produkte als erledigt markieren? (${dbCount} NoNames für ${formatEur(totalSavings)} Ersparnis + ${customCount} Freitext-Einträge)`;
+      message = `Möchtest du alle ${targetsTotal} Produkte als erledigt markieren? (${dbCount} NoNames für ${formatEur(totalSavings)} Ersparnis + ${customCount} Freitext-Einträge)`;
     } else if (dbCount > 0) {
       message = `Möchtest du alle ${dbCount} NoName-Produkte als gekauft markieren und ${formatEur(totalSavings)} zu deiner Ersparnis hinzufügen?`;
     } else if (brandCount > 0 && customCount > 0) {
-      message = `Möchtest du alle ${targets.length} Einträge (${brandCount} Marken + ${customCount} Freitext) als erledigt markieren?`;
+      message = `Möchtest du alle ${targetsTotal} Einträge (${brandCount} Marken + ${customCount} Freitext) als erledigt markieren?`;
     } else if (brandCount > 0) {
       message = `Möchtest du alle ${brandCount} Markenprodukte als gekauft markieren?`;
     } else {
