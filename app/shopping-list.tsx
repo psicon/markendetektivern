@@ -1324,10 +1324,12 @@ function BrandCard({
 
   return (
     <Animated.View
-      // layout={LinearTransition} animiert die Card-Höhe automatisch
-      // wenn die Alternatives-Sektion mountet/unmountet → smoothes
-      // Aufklappen statt Layout-Sprung.
-      layout={LinearTransition.springify().damping(20).stiffness(200)}
+      // Timing-basiert (kein Spring) damit Card-Höhe und Content-Fade
+      // synchron laufen. Spring mit damping 20 / stiffness 200 war
+      // underdamped und schwingte 1.5+ s nach — passte nicht zum
+      // 220 ms FadeIn. 240 ms timing-basiert mit Material-Standard-
+      // Easing fühlt sich snappy + abgestimmt an.
+      layout={LinearTransition.duration(240).easing(Easing.out(Easing.cubic))}
       style={{
         backgroundColor: theme.surface,
         borderRadius: 14,
@@ -1506,12 +1508,19 @@ function BrandCard({
       </View>{/* /Action-Top-Section */}
 
       {/* Expanded NoName-Alternatives — animiertes Ein-/Ausblenden
-          via FadeIn/FadeOut. Card-Höhe morpht automatisch durch
-          das LinearTransition-Layout am Card-Outer. */}
+          via FadeIn/FadeOut. Card-Höhe morpht parallel via
+          LinearTransition am Card-Outer (240 ms cubic-out).
+          Timings:
+          - FadeIn 200 ms, leicht KÜRZER als Layout 240 ms → Content
+            fadet ein während Card noch wächst, kommt damit "an"
+            statt zu spät zu erscheinen.
+          - FadeOut 140 ms, deutlich kürzer → Content ist sauber weg
+            bevor Card fertig schrumpft, kein "leerer Bereich der
+            verschwindet"-Effekt. */}
       {allowExpand && expanded && hasAlts ? (
         <Animated.View
-          entering={FadeIn.duration(220)}
-          exiting={FadeOut.duration(160)}
+          entering={FadeIn.duration(200)}
+          exiting={FadeOut.duration(140)}
           style={{
             backgroundColor: theme.surfaceAlt,
             paddingHorizontal: 10,
