@@ -1081,6 +1081,10 @@ function CompactQuantityPill({
 }) {
   const { brand, theme } = useTokens();
   if (!onIncrement || !onDecrement) return null;
+  // Schlanker: Buttons 30×30 (vorher 36), Icons 17, Container-Height
+  // 38, paddingHorizontal 2, minWidth 18 für N. Spart ~22 px Breite
+  // → mehr Platz für lange Produktnamen. Tap-Area mit hitSlop 10
+  // bleibt 50 px (über Material 48-px-Standard).
   return (
     <View
       style={{
@@ -1089,18 +1093,18 @@ function CompactQuantityPill({
         backgroundColor: theme.surface,
         borderWidth: 1,
         borderColor: theme.border,
-        borderRadius: 22,
-        paddingHorizontal: 3,
-        height: 44,
+        borderRadius: 19,
+        paddingHorizontal: 2,
+        height: 38,
       }}
     >
       <Pressable
         onPress={onDecrement}
-        hitSlop={8}
+        hitSlop={10}
         style={({ pressed }) => ({
-          width: 36,
-          height: 36,
-          borderRadius: 18,
+          width: 30,
+          height: 30,
+          borderRadius: 15,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: pressed
@@ -1112,7 +1116,7 @@ function CompactQuantityPill({
       >
         <MaterialCommunityIcons
           name={anzahl <= 1 ? 'trash-can-outline' : 'minus'}
-          size={18}
+          size={17}
           color={anzahl <= 1 ? '#dc2626' : theme.text}
         />
       </Pressable>
@@ -1120,9 +1124,9 @@ function CompactQuantityPill({
         style={{
           fontFamily,
           fontWeight: fontWeight.extraBold,
-          fontSize: 16,
+          fontSize: 15,
           color: theme.text,
-          minWidth: 22,
+          minWidth: 18,
           textAlign: 'center',
           letterSpacing: -0.2,
         }}
@@ -1131,17 +1135,17 @@ function CompactQuantityPill({
       </Text>
       <Pressable
         onPress={onIncrement}
-        hitSlop={8}
+        hitSlop={10}
         style={({ pressed }) => ({
-          width: 36,
-          height: 36,
-          borderRadius: 18,
+          width: 30,
+          height: 30,
+          borderRadius: 15,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: pressed ? brand.primaryContainer ?? theme.surfaceAlt : brand.primary,
         })}
       >
-        <MaterialCommunityIcons name="plus" size={18} color="#fff" />
+        <MaterialCommunityIcons name="plus" size={17} color="#fff" />
       </Pressable>
     </View>
   );
@@ -1354,15 +1358,28 @@ function BrandCard({
         style={({ pressed }) => ({
           flex: 1,
           minWidth: 0,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
           padding: 10,
           opacity: pressed && canExpand ? 0.7 : 1,
         })}
       >
-        {/* Header-Zeile: Marken-Chip auf voller Body-Breite. */}
-        {(() => {
-          const brandLogo: any = (product as any)?.marke ?? (product as any)?.hersteller;
-          if (!brandLogo?.name) return null;
-          return (
+        <ImageWithShimmer
+          source={{ uri: getProductImage(product) ?? undefined }}
+          style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
+          resizeMode="contain"
+        />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          {(() => {
+            // Prefer marke (Markenname + Markenlogo) über hersteller
+            // (Manufacturer-Daten). Beispiel: "Coca-Cola" statt "The
+            // Coca-Cola Company". Nur wenn keine marke-Doc vorhanden
+            // ist (kein herstellerref-Chain), fällt der Chip auf
+            // hersteller zurück.
+            const brandLogo: any = (product as any)?.marke ?? (product as any)?.hersteller;
+            if (!brandLogo?.name) return null;
+            return (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 2 }}>
               {brandLogo?.bild ? (
                 <ImageWithShimmer
@@ -1385,32 +1402,21 @@ function BrandCard({
                 {brandLogo.name}
               </Text>
             </View>
-          );
-        })()}
-        {/* Produktname auf voller Body-Breite (über image+pack/preis-
-            Row). Spannt jetzt ~264 px statt vorher ~96 — lange Namen
-            ohne Truncation. */}
-        <Text
-          numberOfLines={2}
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 14,
-            color: theme.text,
-            lineHeight: 18,
-            marginBottom: 6,
-          }}
-        >
-          {item.name || product?.name || 'Unbekanntes Produkt'}
-        </Text>
-        {/* Bottom-Row: Image links, pack/preis rechts daneben. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <ImageWithShimmer
-            source={{ uri: getProductImage(product) ?? undefined }}
-            style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
-            resizeMode="contain"
-          />
-          <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            );
+          })()}
+          <Text
+            numberOfLines={2}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 14,
+              color: theme.text,
+              lineHeight: 18,
+            }}
+          >
+            {item.name || product?.name || 'Unbekanntes Produkt'}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
             {(() => {
               const pack = formatPack(
                 (product as any)?.packSize,
@@ -1442,10 +1448,12 @@ function BrandCard({
               {formatEur((product?.preis || 0) * (item.anzahl ?? 1))}
             </Text>
           </View>
+          {/* "Ersparnis möglich"-Zeile entfernt — der Footer-Button
+              "Alternativen" zusammen mit den −X% Bannern auf den
+              Alt-Cards kommuniziert das schon klarer. Card-Höhe
+              wird dadurch um eine Row geringer. */}
         </View>
       </Pressable>
-      {/* Pill-Spalte: vertikal mittig in der gesamten Card-Body-Höhe
-          (= Höhe vom EdgeCheckButton-Strip). */}
       <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
         <CompactQuantityPill
           anzahl={item.anzahl ?? 1}
@@ -1796,10 +1804,52 @@ function NoNameCard({
         overflow: 'hidden',
       }}
     >
-      <View style={{ flex: 1, minWidth: 0, padding: 10 }}>
-        {/* Header: Handelsmarke-Chip auf voller Body-Breite. */}
+      <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 }}>
+      {/* Image-Wrapper mit absolutem Spar-Banner oben links —
+          zeigt das % was bei diesem NoName-Kauf vs. dem
+          Brand-Original gespart wird. */}
+      <View style={{ position: 'relative' }}>
+        <ImageWithShimmer
+          source={{ uri: getProductImage(p) ?? undefined }}
+          style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
+          resizeMode="contain"
+        />
+        {savingsPercent > 0 ? (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              top: -4,
+              left: -8,
+              backgroundColor: brand.primary,
+              paddingHorizontal: 6,
+              paddingVertical: 2,
+              borderRadius: 4,
+              transform: [{ rotate: '-14deg' }],
+              shadowColor: '#000',
+              shadowOpacity: 0.18,
+              shadowOffset: { width: 0, height: 1 },
+              shadowRadius: 2,
+              elevation: 3,
+            }}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 10,
+                color: '#fff',
+                letterSpacing: 0.2,
+              }}
+            >
+              −{savingsPercent}%
+            </Text>
+          </View>
+        ) : null}
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
         {p?.handelsmarke?.bezeichnung ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 1 }}>
             <Text
               numberOfLines={1}
               style={{
@@ -1817,7 +1867,6 @@ function NoNameCard({
             ) : null}
           </View>
         ) : null}
-        {/* Produktname auf voller Body-Breite (über image+pack/preis). */}
         <Text
           numberOfLines={2}
           style={{
@@ -1826,111 +1875,72 @@ function NoNameCard({
             fontSize: 14,
             color: theme.text,
             lineHeight: 18,
-            marginBottom: 6,
           }}
         >
           {p?.name || p?.produktName || 'Unbekanntes Produkt'}
         </Text>
-        {/* Bottom-Row: Image (mit Spar-Banner) + Discounter + pack/preis. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={{ position: 'relative' }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 4,
+            marginTop: 3,
+          }}
+        >
+          {p?.discounter?.bild ? (
             <ImageWithShimmer
-              source={{ uri: getProductImage(p) ?? undefined }}
-              style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
-              resizeMode="contain"
+              source={{ uri: p.discounter.bild }}
+              style={{ width: 12, height: 12, borderRadius: 2 }}
             />
-            {savingsPercent > 0 ? (
-              <View
-                pointerEvents="none"
-                style={{
-                  position: 'absolute',
-                  top: -4,
-                  left: -8,
-                  backgroundColor: brand.primary,
-                  paddingHorizontal: 6,
-                  paddingVertical: 2,
-                  borderRadius: 4,
-                  transform: [{ rotate: '-14deg' }],
-                  shadowColor: '#000',
-                  shadowOpacity: 0.18,
-                  shadowOffset: { width: 0, height: 1 },
-                  shadowRadius: 2,
-                  elevation: 3,
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.extraBold,
-                    fontSize: 10,
-                    color: '#fff',
-                    letterSpacing: 0.2,
-                  }}
-                >
-                  −{savingsPercent}%
-                </Text>
-              </View>
-            ) : null}
-          </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              {p?.discounter?.bild ? (
-                <ImageWithShimmer
-                  source={{ uri: p.discounter.bild }}
-                  style={{ width: 12, height: 12, borderRadius: 2 }}
-                />
-              ) : null}
+          ) : null}
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 10,
+              color: theme.textMuted,
+            }}
+          >
+            {p?.discounter?.name || 'Unbekannt'}
+            {p?.discounter?.land ? ` (${p.discounter.land})` : ''}
+          </Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+          {(() => {
+            const pack = formatPack(
+              (p as any)?.packSize,
+              (p as any)?.packTypInfo?.typKurz ?? (p as any)?.packTypInfo?.typ,
+              p?.preis,
+            );
+            return pack ? (
               <Text
-                numberOfLines={1}
                 style={{
                   fontFamily,
                   fontWeight: fontWeight.medium,
-                  fontSize: 10,
+                  fontSize: 11,
                   color: theme.textMuted,
-                  flexShrink: 1,
                 }}
+                numberOfLines={1}
               >
-                {p?.discounter?.name || 'Unbekannt'}
-                {p?.discounter?.land ? ` (${p.discounter.land})` : ''}
+                {pack}
               </Text>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
-              {(() => {
-                const pack = formatPack(
-                  (p as any)?.packSize,
-                  (p as any)?.packTypInfo?.typKurz ?? (p as any)?.packTypInfo?.typ,
-                  p?.preis,
-                );
-                return pack ? (
-                  <Text
-                    style={{
-                      fontFamily,
-                      fontWeight: fontWeight.medium,
-                      fontSize: 11,
-                      color: theme.textMuted,
-                    }}
-                    numberOfLines={1}
-                  >
-                    {pack}
-                  </Text>
-                ) : null;
-              })()}
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.extraBold,
-                  fontSize: 13,
-                  color: theme.text,
-                }}
-              >
-                {formatEur((p?.preis || 0) * (item.anzahl ?? 1))}
-              </Text>
-            </View>
-          </View>
+            ) : null;
+          })()}
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 13,
+              color: theme.text,
+            }}
+          >
+            {formatEur((p?.preis || 0) * (item.anzahl ?? 1))}
+          </Text>
         </View>
+        {/* Gespart-% liegt jetzt als Banner auf dem Image-Sticker. */}
       </View>
-      {/* Pill-Spalte: vertikal mittig in der gesamten Card-Höhe
-          (= Höhe vom EdgeCheckButton-Strip). */}
+      </View>
       <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
         <CompactQuantityPill
           anzahl={item.anzahl ?? 1}
