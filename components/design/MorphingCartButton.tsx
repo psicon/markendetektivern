@@ -1,26 +1,16 @@
 // MorphingCartButton — vereint Cart-Action + Quantity-Pill in EIN
-// Element. Layout-Slot bleibt fest 48×48 in der Action-Row. Beim
-// Expand poppen DREI Elemente in Bewegung:
-//   • Center-Button: cart-check Icon + Badge → fadet aus, Anzahl
-//     erscheint groß zentriert IM Button.
-//   • − bzw. Trash-Icon: pops nach LINKS aus dem Button raus
-//     (translateX SIDE_OFFSET → 0, scale 0.4 → 1, mit Spring-Bounce).
-//   • + Icon: pops nach RECHTS aus dem Button raus (mirror).
+// connected Pill-Element. Im Idle ist es ein 48×48 brand.primary
+// Cart-Button mit cart-check Icon + Badge. Beim Tap fährt der Button
+// SYMMETRISCH zu einer einzigen 140×48 weißen Pill aus (links und
+// rechts gleichmäßig vom Slot-Zentrum), genau im Stil der bisherigen
+// floating QuantityPill: weißer surface bg, theme.border, − links,
+// Anzahl mittig, + rechts (brand.primary 36×36 Round-Button).
 //
-// Idle (anzahl=0): cart-plus Icon, surface bg, theme.border. Tap →
-// onAddToCart() (Parent macht Firestore-Add + FlyToCart). Sobald
-// anzahl prop sich auf >0 aktualisiert, auto-expand → Pill öffnet
-// sich automatisch nach erstem Add (User-Wunsch).
-//
-// Idle (anzahl>0): cart-check Icon weiß, brand.primary bg, weißes
-// Anzahl-Badge oben-rechts. Tap → expandiert.
-//
-// Auto-Collapse: 3 s nach letzter Interaktion → side-Buttons
-// retracten zurück Richtung Center, fadeen aus.
-//
-// Side-Button-Overlap: Im expanded Zustand überlagern − und +
-// die surrounding heart/star ActionButtons. Z-Index erhöht damit
-// sie on top rendern. Auto-Collapse stellt den Zustand wieder her.
+// Wichtig: ES IST EIN PILL, kein 3-getrenntes-Element. Die − / N / +
+// sitzen flexbox-artig innerhalb der gleichen Pill-Surface mit
+// space-between Layout. Der Pill-Outer animiert width/left/bgColor/
+// borderColor in einem Schritt → gleicher visueller Effekt wie das
+// Original-Pill, nur dass es aus dem Cart-Button "rauswächst".
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -29,9 +19,9 @@ import Animated, {
   Easing,
   Extrapolation,
   interpolate,
+  interpolateColor,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 
@@ -39,23 +29,22 @@ import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 
 const SLOT_SIZE = 48;
-const SIDE_BTN_SIZE = 40;
-// Wie weit die seitlichen Buttons rauspoppen — gemessen vom inneren
-// Slot-Rand. 46 = 40 SIDE_BTN_SIZE + 6 Gap.
-const SIDE_OFFSET = 46;
+const EXPANDED_W = 140;
+const SIDE_GROW = (EXPANDED_W - SLOT_SIZE) / 2; // 46 px je Seite
 const AUTO_COLLAPSE_MS = 3000;
-const CENTER_FADE_MS = 220;
+const MORPH_MS = 280;
 
 interface MorphingCartButtonProps {
   /** anzahl > 0 → in-cart-Modus mit cart-check + Badge. =0 → cart-plus
    *  Icon, surface bg. */
   anzahl: number;
   /** Tap wenn anzahl=0. Parent macht den initialen Firestore-Add +
-   *  FlyToCart-Anim. Nach Update auf anzahl>0 auto-expand-Pill. */
+   *  FlyToCart-Anim. Sobald anzahl prop sich auf >0 aktualisiert,
+   *  auto-expand-Pill. */
   onAddToCart: () => void;
   /** Tap auf + im Pill. */
   onIncrement: () => void;
-  /** Tap auf − im Pill. Bei anzahl=1 wird − zum Trash-Icon → Parent
+  /** Tap auf − im Pill. Bei anzahl=1 wird − zum Trash → Parent
    *  entfernt das Item. */
   onDecrement: () => void;
   /** Spinner statt Icon zeigen während pending Firestore-Action. */
@@ -72,11 +61,7 @@ export function MorphingCartButton({
   const { theme, brand, shadows } = useTokens();
   const inCart = anzahl > 0;
   const [expanded, setExpanded] = useState(false);
-  // Center cross-fade Progress (idle-content ↔ Anzahl-Number).
   const t = useSharedValue(0);
-  // Side-Buttons Spring-Pop Progress. Eigener SharedValue damit
-  // wir Spring statt Timing nutzen können → bouncy "Pop"-Feel.
-  const sideT = useSharedValue(0);
   const autoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevAnzahl = useRef(anzahl);
 
@@ -85,27 +70,19 @@ export function MorphingCartButton({
     autoTimer.current = setTimeout(() => setExpanded(false), AUTO_COLLAPSE_MS);
   }, []);
 
-  // Animationen synchron zum expanded-State
   useEffect(() => {
     t.value = withTiming(expanded ? 1 : 0, {
-      duration: CENTER_FADE_MS,
+      duration: MORPH_MS,
       easing: Easing.bezier(0.4, 0, 0.2, 1),
-    });
-    sideT.value = withSpring(expanded ? 1 : 0, {
-      damping: 14,
-      stiffness: 220,
-      mass: 0.7,
-      overshootClamping: false,
     });
     if (expanded) restartAutoTimer();
     return () => {
       if (autoTimer.current) clearTimeout(autoTimer.current);
     };
-  }, [expanded, t, sideT, restartAutoTimer]);
+  }, [expanded, t, restartAutoTimer]);
 
-  // Auto-Expand wenn anzahl von 0 → >0 wechselt (= initialer Add
-  // durch onAddToCart). Auto-Collapse wenn anzahl auf 0 fällt
-  // (= User hat über − bis zum Trash dekrementiert).
+  // Auto-Expand wenn anzahl 0 → >0 wechselt (initialer Add).
+  // Auto-Collapse wenn anzahl auf 0 fällt (Item entfernt).
   useEffect(() => {
     if (prevAnzahl.current === 0 && anzahl > 0 && !expanded) {
       setExpanded(true);
@@ -138,36 +115,36 @@ export function MorphingCartButton({
 
   // ─── Animated Styles ───────────────────────────────────────────
 
-  // Idle-Layer (cart icon + badge): full opacity wenn nicht expanded.
-  const idleStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(t.value, [0, 0.5], [1, 0], Extrapolation.CLAMP),
+  // Pill-Outer: width/left/bg-color/border-color animieren in EINEM
+  // verbundenen Layer → "der Button fährt aus zur Pill".
+  const pillOuterStyle = useAnimatedStyle(() => ({
+    width: interpolate(t.value, [0, 1], [SLOT_SIZE, EXPANDED_W], Extrapolation.CLAMP),
+    left: interpolate(t.value, [0, 1], [0, -SIDE_GROW], Extrapolation.CLAMP),
+    backgroundColor: interpolateColor(
+      t.value,
+      [0, 1],
+      [inCart ? brand.primary : theme.surface, theme.surface],
+    ),
+    borderColor: interpolateColor(
+      t.value,
+      [0, 1],
+      [inCart ? brand.primary : theme.border, theme.border],
+    ),
   }));
 
-  // Expanded-Center (große Anzahl-Zahl): fadet ein wenn expanded.
-  const numberStyle = useAnimatedStyle(() => ({
+  // Idle-Content (Cart-Icon + Badge): fadet aus beim Expand. Bleibt
+  // dank symmetrischem Grow zentriert auf der ursprünglichen Cart-
+  // Button-Position.
+  const idleStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(t.value, [0, 0.45], [1, 0], Extrapolation.CLAMP),
+  }));
+
+  // Expanded-Content (− N +): fadet ein, leichte scale-up von 0.85→1
+  // damit es "frisch erscheint".
+  const pillContentStyle = useAnimatedStyle(() => ({
     opacity: interpolate(t.value, [0.5, 1], [0, 1], Extrapolation.CLAMP),
     transform: [
-      { scale: interpolate(t.value, [0.5, 1], [0.6, 1], Extrapolation.CLAMP) },
-    ],
-  }));
-
-  // − Button: startet überlagert mit Center (translateX +SIDE_OFFSET),
-  // popt nach links zur Endposition (translateX 0).
-  const minusStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(sideT.value, [0, 0.4, 1], [0, 0.4, 1], Extrapolation.CLAMP),
-    transform: [
-      { translateX: interpolate(sideT.value, [0, 1], [SIDE_OFFSET, 0], Extrapolation.CLAMP) },
-      { scale: interpolate(sideT.value, [0, 1], [0.4, 1], Extrapolation.CLAMP) },
-    ],
-  }));
-
-  // + Button: startet überlagert mit Center (translateX -SIDE_OFFSET),
-  // popt nach rechts zur Endposition.
-  const plusStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(sideT.value, [0, 0.4, 1], [0, 0.4, 1], Extrapolation.CLAMP),
-    transform: [
-      { translateX: interpolate(sideT.value, [0, 1], [-SIDE_OFFSET, 0], Extrapolation.CLAMP) },
-      { scale: interpolate(sideT.value, [0, 1], [0.4, 1], Extrapolation.CLAMP) },
+      { scale: interpolate(t.value, [0.5, 1], [0.85, 1], Extrapolation.CLAMP) },
     ],
   }));
 
@@ -176,32 +153,32 @@ export function MorphingCartButton({
       style={{
         width: SLOT_SIZE,
         height: SLOT_SIZE,
-        // Z-Index hochziehen wenn expanded damit die seitlichen Pop-
-        // Buttons über die surrounding heart/star ActionButtons rendern.
-        zIndex: expanded ? 10 : 1,
-        elevation: expanded ? 10 : 2,
+        // Hoher z-index/elevation wenn expanded — sonst werden die
+        // ausgefahrenen Pill-Ränder von surrounding heart/star
+        // ActionButtons überdeckt (siehe User-Bug "+ nicht sichtbar").
+        zIndex: expanded ? 100 : 1,
+        elevation: expanded ? 24 : 2,
       }}
     >
-      {/* Center-Button (Layout-Slot) */}
-      <Pressable
-        onPress={handleTap}
-        disabled={loading}
-        style={({ pressed }) => ({
-          width: SLOT_SIZE,
-          height: SLOT_SIZE,
-          borderRadius: 14,
-          backgroundColor: inCart ? brand.primary : theme.surface,
-          borderWidth: inCart ? 0 : 1,
-          borderColor: theme.border,
-          alignItems: 'center',
-          justifyContent: 'center',
-          opacity: pressed ? 0.85 : 1,
-          ...shadows.sm,
-        })}
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            top: 0,
+            height: SLOT_SIZE,
+            borderRadius: 14,
+            borderWidth: 1,
+            overflow: 'hidden',
+            ...shadows.sm,
+          },
+          pillOuterStyle,
+        ]}
       >
-        {/* Idle-Content: Cart-Icon + (bei inCart) Badge */}
+        {/* Idle-Layer: Cart-Icon + (bei inCart) Badge. Pressable
+            füllt die ganze Pill-Outer in idle (kein Tap-Konflikt
+            mit − / + weil die im idle opacity 0 sind). */}
         <Animated.View
-          pointerEvents="none"
+          pointerEvents={expanded ? 'none' : 'auto'}
           style={[
             {
               position: 'absolute',
@@ -215,49 +192,65 @@ export function MorphingCartButton({
             idleStyle,
           ]}
         >
-          {loading ? (
-            <ActivityIndicator size="small" color={inCart ? '#fff' : brand.primary} />
-          ) : (
-            <MaterialCommunityIcons
-              name={inCart ? 'cart-check' : 'cart-plus'}
-              size={22}
-              color={inCart ? '#fff' : theme.text}
-            />
-          )}
-          {inCart && anzahl > 0 ? (
-            <View
-              style={{
-                position: 'absolute',
-                top: 4,
-                right: 4,
-                minWidth: 18,
-                height: 18,
-                borderRadius: 9,
-                backgroundColor: '#fff',
-                paddingHorizontal: 4,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 1.5,
-                borderColor: brand.primary,
-              }}
-            >
-              <Text
+          <Pressable
+            onPress={handleTap}
+            disabled={loading}
+            style={({ pressed }) => ({
+              width: '100%',
+              height: '100%',
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            {loading ? (
+              <ActivityIndicator size="small" color={inCart ? '#fff' : brand.primary} />
+            ) : (
+              <MaterialCommunityIcons
+                name={inCart ? 'cart-check' : 'cart-plus'}
+                size={22}
+                color={inCart ? '#fff' : theme.text}
+              />
+            )}
+            {inCart && anzahl > 0 ? (
+              <View
                 style={{
-                  fontFamily,
-                  fontWeight: fontWeight.extraBold,
-                  fontSize: 10,
-                  color: brand.primary,
+                  position: 'absolute',
+                  top: 4,
+                  right: 4,
+                  minWidth: 18,
+                  height: 18,
+                  borderRadius: 9,
+                  backgroundColor: '#fff',
+                  paddingHorizontal: 4,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: 1.5,
+                  borderColor: brand.primary,
                 }}
               >
-                {anzahl}
-              </Text>
-            </View>
-          ) : null}
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 10,
+                    color: brand.primary,
+                  }}
+                >
+                  {anzahl}
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
         </Animated.View>
 
-        {/* Expanded-Content: große Anzahl im Button-Zentrum */}
+        {/* Expanded-Layer: connected Pill-Inhalt − [N] +.
+            Layout: row mit space-between, paddingHorizontal:4. In
+            idle (Pill 48 wide) sind die drei Elemente cramped, aber
+            opacity 0 → unsichtbar. In expanded (140 wide) sind sie
+            schön verteilt. */}
         <Animated.View
-          pointerEvents="none"
+          pointerEvents={expanded ? 'auto' : 'none'}
           style={[
             {
               position: 'absolute',
@@ -265,96 +258,69 @@ export function MorphingCartButton({
               left: 0,
               right: 0,
               bottom: 0,
+              flexDirection: 'row',
               alignItems: 'center',
-              justifyContent: 'center',
+              justifyContent: 'space-between',
+              paddingHorizontal: 4,
             },
-            numberStyle,
+            pillContentStyle,
           ]}
         >
+          {/* − Button (oder Trash bei anzahl=1) */}
+          <Pressable
+            onPress={handleDecrement}
+            hitSlop={6}
+            style={({ pressed }) => ({
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: pressed
+                ? anzahl <= 1
+                  ? '#fee2e2'
+                  : theme.surfaceAlt
+                : 'transparent',
+            })}
+          >
+            <MaterialCommunityIcons
+              name={anzahl <= 1 ? 'trash-can-outline' : 'minus'}
+              size={18}
+              color={anzahl <= 1 ? '#dc2626' : theme.text}
+            />
+          </Pressable>
+
+          {/* Anzahl (Pill-Mitte) */}
           <Text
             style={{
               fontFamily,
               fontWeight: fontWeight.extraBold,
-              fontSize: 22,
-              color: '#fff',
-              letterSpacing: -0.4,
+              fontSize: 16,
+              color: theme.text,
+              minWidth: 24,
+              textAlign: 'center',
+              letterSpacing: -0.2,
             }}
           >
             {Math.max(1, anzahl)}
           </Text>
+
+          {/* + Button (brand.primary, weißes Plus) */}
+          <Pressable
+            onPress={handleIncrement}
+            hitSlop={6}
+            style={({ pressed }) => ({
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: pressed ? brand.primaryContainer ?? brand.primary : brand.primary,
+            })}
+          >
+            <MaterialCommunityIcons name="plus" size={18} color="#fff" />
+          </Pressable>
         </Animated.View>
-      </Pressable>
-
-      {/* − Pop-Out (links) */}
-      <Animated.View
-        pointerEvents={expanded ? 'auto' : 'none'}
-        style={[
-          {
-            position: 'absolute',
-            top: (SLOT_SIZE - SIDE_BTN_SIZE) / 2,
-            left: -SIDE_OFFSET,
-            width: SIDE_BTN_SIZE,
-            height: SIDE_BTN_SIZE,
-          },
-          minusStyle,
-        ]}
-      >
-        <Pressable
-          onPress={handleDecrement}
-          hitSlop={6}
-          style={({ pressed }) => ({
-            width: SIDE_BTN_SIZE,
-            height: SIDE_BTN_SIZE,
-            borderRadius: SIDE_BTN_SIZE / 2,
-            backgroundColor: pressed
-              ? anzahl <= 1
-                ? '#fee2e2'
-                : theme.surfaceAlt
-              : theme.surface,
-            borderWidth: 1,
-            borderColor: theme.border,
-            alignItems: 'center',
-            justifyContent: 'center',
-            ...shadows.sm,
-          })}
-        >
-          <MaterialCommunityIcons
-            name={anzahl <= 1 ? 'trash-can-outline' : 'minus'}
-            size={18}
-            color={anzahl <= 1 ? '#dc2626' : theme.text}
-          />
-        </Pressable>
-      </Animated.View>
-
-      {/* + Pop-Out (rechts) */}
-      <Animated.View
-        pointerEvents={expanded ? 'auto' : 'none'}
-        style={[
-          {
-            position: 'absolute',
-            top: (SLOT_SIZE - SIDE_BTN_SIZE) / 2,
-            right: -SIDE_OFFSET,
-            width: SIDE_BTN_SIZE,
-            height: SIDE_BTN_SIZE,
-          },
-          plusStyle,
-        ]}
-      >
-        <Pressable
-          onPress={handleIncrement}
-          hitSlop={6}
-          style={({ pressed }) => ({
-            width: SIDE_BTN_SIZE,
-            height: SIDE_BTN_SIZE,
-            borderRadius: SIDE_BTN_SIZE / 2,
-            backgroundColor: pressed ? brand.primaryContainer ?? brand.primary : brand.primary,
-            alignItems: 'center',
-            justifyContent: 'center',
-            ...shadows.sm,
-          })}
-        >
-          <MaterialCommunityIcons name="plus" size={18} color="#fff" />
-        </Pressable>
       </Animated.View>
     </View>
   );
