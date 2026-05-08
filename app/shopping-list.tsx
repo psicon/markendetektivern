@@ -120,6 +120,12 @@ type EnrichedItem = {
   alternatives?: any[];
   bestAlternative?: any;
   potentialSavings?: number;
+  /** Prozent-Wert aus der gleichen calculateSavings-Berechnung wie
+   *  potentialSavings (eur). Verwendung: BrandCard "Ersparnis möglich:
+   *  X%" Display zeigt dieselbe Zahl wie der Alt-Banner "−X%" auf
+   *  der besten Alternative — vorher wurden zwei verschiedene Formeln
+   *  verwendet (eur/preis × 100 vs. per-pack-unit normalized). */
+  potentialSavingsPercent?: number;
   // noname items
   savings?: number;
   // custom items
@@ -1442,7 +1448,7 @@ function BrandCard({
               {formatEur((product?.preis || 0) * (item.anzahl ?? 1))}
             </Text>
           </View>
-          {potential > 0 && product?.preis > 0 ? (
+          {potential > 0 && (item.potentialSavingsPercent ?? 0) > 0 ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
               <MaterialCommunityIcons name="tag-outline" size={11} color={brand.primary} />
               <Text
@@ -1453,7 +1459,7 @@ function BrandCard({
                   color: brand.primary,
                 }}
               >
-                Ersparnis möglich: {Math.round((potential / product.preis) * 100)}%
+                Ersparnis möglich: {item.potentialSavingsPercent}%
               </Text>
             </View>
           ) : null}
@@ -1711,7 +1717,21 @@ function BrandCard({
                       {alt.discounter?.name || 'Unbekannt'}
                       {alt.discounter?.land ? ` (${alt.discounter.land})` : ''}
                     </Text>
-                    {/* −X% liegt jetzt als Banner auf dem Image-Sticker. */}
+                    {/* Absoluter Spar-Betrag in € — den Banner zeigt
+                        nur das %, hier kommt der konkrete Euro-Wert. */}
+                    {sd.savingsEur > 0 ? (
+                      <Text
+                        style={{
+                          fontFamily,
+                          fontWeight: fontWeight.extraBold,
+                          fontSize: 10,
+                          color: brand.primary,
+                          letterSpacing: 0.1,
+                        }}
+                      >
+                        {`spar ${formatEur(sd.savingsEur)}`}
+                      </Text>
+                    ) : null}
                   </View>
                 </View>
                 <Pressable
@@ -2273,10 +2293,12 @@ export default function ShoppingListScreen() {
 
               let bestAlternative: any = null;
               let maxSavings = 0;
+              let maxSavingsPercent = 0;
               for (const alt of alternatives) {
                 const sd = getSavingsData(productData, alt);
                 if (sd.savingsEur > maxSavings) {
                   maxSavings = sd.savingsEur;
+                  maxSavingsPercent = sd.savingsPercent;
                   bestAlternative = alt;
                 }
               }
@@ -2308,6 +2330,7 @@ export default function ShoppingListScreen() {
                   alternatives,
                   bestAlternative,
                   potentialSavings: maxSavings,
+                  potentialSavingsPercent: maxSavingsPercent,
                   anzahl: ((item as any).anzahl ?? 1) as number,
                   // Journey-Tracking-Daten aus dem cart-doc übernehmen,
                   // damit der Remove-Fast-Path keinen zusätzlichen
