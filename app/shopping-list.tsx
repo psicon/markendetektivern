@@ -1019,10 +1019,10 @@ function ShoppingRowWithBoughtAnim({
 // ═══════════════════════════════════════════════════════════════════
 function EdgeCheckButton({ onPress, loading }: { onPress: () => void; loading?: boolean }) {
   const { brand, theme } = useTokens();
-  // Action-Zone-Pattern: leichte bg-Tönung (theme.surfaceAlt) statt
-  // borderLeft-Hairline. Liest sich softer und macht den Strip
-  // visuell zur "Action-Zone" ohne die Card mit einer Linie zu
-  // zerschneiden.
+  // Sehr subtler horizontaler Verlauf von links (transparent / Card-bg)
+  // → rechts (minimal grau). Kein hard-edge, fadet weich in den
+  // rechten Card-Rand. Wenn pressed: kompakte surfaceAlt-Fläche
+  // für spürbares Tap-Feedback.
   return (
     <Pressable
       onPress={onPress}
@@ -1030,18 +1030,27 @@ function EdgeCheckButton({ onPress, loading }: { onPress: () => void; loading?: 
       hitSlop={4}
       style={({ pressed }) => ({
         alignSelf: 'stretch',
-        width: 48,
-        backgroundColor: pressed ? theme.border : theme.surfaceAlt,
-        alignItems: 'center',
-        justifyContent: 'center',
+        width: 56,
         opacity: loading ? 0.7 : 1,
+        backgroundColor: pressed ? theme.surfaceAlt : 'transparent',
       })}
     >
-      {loading ? (
-        <ActivityIndicator size="small" color={brand.primary} />
-      ) : (
-        <MaterialCommunityIcons name="check-bold" size={20} color={brand.primary} />
-      )}
+      <LinearGradient
+        colors={['rgba(0,0,0,0.0)', 'rgba(0,0,0,0.045)']}
+        start={{ x: 0, y: 0.5 }}
+        end={{ x: 1, y: 0.5 }}
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {loading ? (
+          <ActivityIndicator size="small" color={brand.primary} />
+        ) : (
+          <MaterialCommunityIcons name="check-bold" size={22} color={brand.primary} />
+        )}
+      </LinearGradient>
     </Pressable>
   );
 }
@@ -1447,21 +1456,20 @@ function BrandCard({
       </View>
       <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
       </View>
-      {/* Footer "Alternativen anzeigen" — Action-Zone-Pattern:
-          theme.surfaceAlt-Tönung statt borderTop-Hairline.
-          Konsistent mit EdgeCheckButton-bg → die Card hat nur ZWEI
-          visuelle Systeme: weißer Content + getönte Action-Zonen
-          (Edge-rechts + Footer-unten). */}
+      {/* Footer "Alternativen anzeigen" — kein Hintergrund, keine
+          Linie. Sitzt nah an der Body-Row, einfach als kleiner
+          Tap-Hint mit Chevron-Icon. */}
       {canExpand ? (
         <Pressable
           onPress={onToggleExpand}
           style={({ pressed }) => ({
-            backgroundColor: pressed ? theme.border : theme.surfaceAlt,
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'center',
             gap: 6,
-            paddingVertical: 10,
+            paddingTop: 4,
+            paddingBottom: 8,
+            opacity: pressed ? 0.55 : 1,
           })}
         >
           <Text
