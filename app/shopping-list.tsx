@@ -1453,7 +1453,7 @@ function BrandCard({
                   color: brand.primary,
                 }}
               >
-                Ersparnis möglich: {formatEur(potential * (item.anzahl ?? 1))}
+                Ersparnis möglich: {Math.round((potential / product.preis) * 100)}%
               </Text>
             </View>
           ) : null}
@@ -1747,7 +1747,6 @@ function NoNameCard({
   const { theme, brand } = useTokens();
   const p = item.product;
   const isFav = favoriteMarketId && p?.discounter?.id === favoriteMarketId;
-  const savings = item.savings || 0;
 
   return (
     <View
@@ -1858,21 +1857,6 @@ function NoNameCard({
             {formatEur((p?.preis || 0) * (item.anzahl ?? 1))}
           </Text>
         </View>
-        {savings > 0 ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
-            <MaterialCommunityIcons name="check-circle-outline" size={11} color={brand.primary} />
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.semibold,
-                fontSize: 10,
-                color: brand.primary,
-              }}
-            >
-              Gespart: {formatEur(savings * (item.anzahl ?? 1))}
-            </Text>
-          </View>
-        ) : null}
       </View>
       </View>
       <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
@@ -2632,13 +2616,18 @@ export default function ShoppingListScreen() {
     );
   };
 
-  const handleMarkAsPurchased = async (itemId: string, savings?: number) => {
+  const handleMarkAsPurchased = async (itemId: string, unitSavings?: number) => {
     if (!user?.uid) return;
     setLoadingItems((prev) => new Set(prev).add(itemId));
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       const matched = [...brandProducts, ...noNameProducts].find((it) => it.id === itemId);
       const isCustomItem = !!matched?.isCustom;
+      // Anzahl-aware Savings: gekaufte Menge × per-unit Savings.
+      // Wirkt auf User-Stats (lifetime-savings counter), Achievement-
+      // Tracking (totalSavings) und Toast-Anzeige.
+      const anz = matched?.anzahl ?? 1;
+      const totalSavings = (unitSavings || 0) * anz;
 
       if (isCustomItem) {
         // Fast-Path: custom-items haben kein Journey-Tracking → minimaler Payload.
@@ -2660,17 +2649,17 @@ export default function ShoppingListScreen() {
         // Writes auf den UI-Thread. → fire-and-forget, der Write
         // landet trotzdem zuverlässig (Firestore-SDK queued+retried).
         updateUserStats(user.uid, {
-          savingsToAdd: savings || 0,
-          productsToAdd: 1,
+          savingsToAdd: totalSavings,
+          productsToAdd: anz,
         }).catch((e) => console.warn('[mark-purchased] updateUserStats bg-fail:', e));
         achievementService
           .trackAction(user.uid, 'complete_shopping', {
-            productCount: 1,
-            totalSavings: savings || 0,
+            productCount: anz,
+            totalSavings,
           })
           .catch((error) => console.error('Achievement complete_shopping error:', error));
-        if (savings && savings > 0) {
-          showPurchasedToast(`Gekauft! Du hast ${formatEur(savings)} gespart - super gemacht!`);
+        if (totalSavings > 0) {
+          showPurchasedToast(`Gekauft! Du hast ${formatEur(totalSavings)} gespart - super gemacht!`);
         } else {
           showPurchasedToast(TOAST_MESSAGES.SHOPPING.purchasedSimple);
         }
@@ -2688,7 +2677,7 @@ export default function ShoppingListScreen() {
         } else {
           setBrandProducts((prev) => prev.filter((i) => i.id !== itemId));
         }
-      } else if (savings && savings > 0) {
+      } else if (unitSavings && unitSavings > 0) {
         setNoNameProducts((prev) => prev.filter((i) => i.id !== itemId));
       } else {
         setBrandProducts((prev) => prev.filter((i) => i.id !== itemId));
@@ -2905,7 +2894,14 @@ export default function ShoppingListScreen() {
     const customItems = targets.filter((item) => item.isCustom);
     const dbBrandItems = targets.filter((item) => !item.isCustom && item.kind === 'brand');
 
-    const totalSavings = dbProducts.reduce((s, item) => s + (item.savings || 0), 0);
+    // Anzahl-aware: total savings = Σ (per-unit-savings × anzahl)
+    // damit User-Stats / Achievements korrekt mit der gekauften Menge
+    // skaliert. Vorher: nur Σ unit-savings (Bug bei anzahl > 1).
+    const totalSavings = dbProducts.reduce(
+      (s, item) => s + (item.savings || 0) * (item.anzahl ?? 1),
+      0,
+    );
+    const totalProducts = dbProducts.reduce((s, item) => s + (item.anzahl ?? 1), 0);
     const totalCount = dbProducts.length + customItems.length + dbBrandItems.length;
 
     setPurchaseLoaderState({
@@ -2993,7 +2989,7 @@ export default function ShoppingListScreen() {
         processedItems: Math.floor(totalCount * 0.7),
       }));
 
-      const productsToAdd = dbProducts.length;
+      const productsToAdd = totalProducts; // anzahl-aware Summe (vorher: dbProducts.length)
       if (totalSavings > 0 || productsToAdd > 0) {
         // Fire-and-forget: schreibt auf user-doc parallel zu den
         // gerade ausgeführten cart-Updates. Awaiten würde den
