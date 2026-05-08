@@ -24,6 +24,19 @@ Diese Regel gilt für jede zukünftige Erinnerungs-Aufforderung.
 Wenn unklar ist, wo das hin soll, lieber unter ein neues Heading
 am Ende von CLAUDE.md legen als gar nicht.
 
+## Builds & deploys — niemals automatisch triggern
+
+**Regel**: niemals einen `eas build` oder `eas submit` aus eigener
+Initiative starten. Nur wenn der User explizit darum bittet
+("build", "neuer build", "test build", "TestFlight", "Play Store",
+"submit", "deployen", "rollout" etc.). Default für ein Code-
+Change: committen, fertig — nicht builden.
+
+Grund: Builds kosten Zeit (15–25 min) + EAS-Quota + bumpen
+Versionsnummern (autoIncrement). User muss kontrollieren wann das
+passiert. Wenn unsicher ob ein Build gewollt ist → fragen, nicht
+einfach machen.
+
 ## Builds & deploys — ALWAYS via EAS, NEVER local
 
 **Beide Plattformen** werden über EAS Build gebaut, nicht lokal.

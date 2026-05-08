@@ -803,6 +803,120 @@ function EmptyState({
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// EdgeCheckButton — Gekauft-Button als vertikaler Strip am rechten
+// Card-Rand. 48 px breit, volle Card-Höhe, brand.primary bg.
+// Spart die ~60 px die der inline-Check-Button vorher in der Row
+// belegte → mehr Platz für den Produktnamen.
+// ═══════════════════════════════════════════════════════════════════
+function EdgeCheckButton({ onPress, loading }: { onPress: () => void; loading?: boolean }) {
+  const { brand } = useTokens();
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={loading}
+      hitSlop={4}
+      style={({ pressed }) => ({
+        alignSelf: 'stretch', // füllt full card height
+        width: 48,
+        backgroundColor: brand.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: pressed || loading ? 0.7 : 1,
+      })}
+    >
+      {loading ? (
+        <ActivityIndicator size="small" color="#fff" />
+      ) : (
+        <MaterialCommunityIcons name="check-bold" size={22} color="#fff" />
+      )}
+    </Pressable>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CompactQuantityPill — kompaktes − N + Pill (~70 px breit) für die
+// inline-Position rechts im Card-Row vor dem EdgeCheckButton.
+// Gleicher Look wie die alte RowActions-Pill, nur kompakter.
+// ═══════════════════════════════════════════════════════════════════
+function CompactQuantityPill({
+  anzahl,
+  onIncrement,
+  onDecrement,
+}: {
+  anzahl: number;
+  onIncrement?: () => void;
+  onDecrement?: () => void;
+}) {
+  const { brand, theme } = useTokens();
+  if (!onIncrement || !onDecrement) return null;
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: theme.surface,
+        borderWidth: 1,
+        borderColor: theme.border,
+        borderRadius: 16,
+        paddingHorizontal: 1,
+        height: 32,
+        marginRight: 8,
+      }}
+    >
+      <Pressable
+        onPress={onDecrement}
+        hitSlop={6}
+        style={({ pressed }) => ({
+          width: 26,
+          height: 26,
+          borderRadius: 13,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: pressed
+            ? anzahl <= 1
+              ? '#fee2e2'
+              : theme.surfaceAlt
+            : 'transparent',
+        })}
+      >
+        <MaterialCommunityIcons
+          name={anzahl <= 1 ? 'trash-can-outline' : 'minus'}
+          size={14}
+          color={anzahl <= 1 ? '#dc2626' : theme.text}
+        />
+      </Pressable>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 13,
+          color: theme.text,
+          minWidth: 16,
+          textAlign: 'center',
+          letterSpacing: -0.2,
+        }}
+      >
+        {anzahl}
+      </Text>
+      <Pressable
+        onPress={onIncrement}
+        hitSlop={6}
+        style={({ pressed }) => ({
+          width: 26,
+          height: 26,
+          borderRadius: 13,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: pressed ? brand.primaryContainer ?? theme.surfaceAlt : brand.primary,
+        })}
+      >
+        <MaterialCommunityIcons name="plus" size={14} color="#fff" />
+      </Pressable>
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Inline action buttons (Check + Trash) — used inside cards
 // ═══════════════════════════════════════════════════════════════════
 function RowActions({
@@ -994,23 +1108,33 @@ function BrandCard({
         onPress={canExpand ? onToggleExpand : undefined}
         disabled={!canExpand}
         style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
           padding: 10,
+          paddingRight: 0, // edge-check-strip füllt rechts
           opacity: pressed && canExpand ? 0.7 : 1,
         })}
       >
-        {/* Top row: image + content (Name nutzt volle Breite-Image) */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
         <ImageWithShimmer
           source={{ uri: getProductImage(product) ?? undefined }}
           style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
           resizeMode="contain"
         />
         <View style={{ flex: 1, minWidth: 0 }}>
-          {product?.hersteller?.name ? (
+          {(() => {
+            // Prefer marke (Markenname + Markenlogo) über hersteller
+            // (Manufacturer-Daten). Beispiel: "Coca-Cola" statt "The
+            // Coca-Cola Company". Nur wenn keine marke-Doc vorhanden
+            // ist (kein herstellerref-Chain), fällt der Chip auf
+            // hersteller zurück.
+            const brandLogo: any = (product as any)?.marke ?? (product as any)?.hersteller;
+            if (!brandLogo?.name) return null;
+            return (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 1 }}>
-              {product?.hersteller?.bild ? (
+              {brandLogo?.bild ? (
                 <ImageWithShimmer
-                  source={{ uri: product.hersteller.bild }}
+                  source={{ uri: brandLogo.bild }}
                   style={{ width: 12, height: 12, borderRadius: 2 }}
                 />
               ) : null}
@@ -1025,7 +1149,7 @@ function BrandCard({
                   flexShrink: 1,
                 }}
               >
-                {product.hersteller.name}
+                {brandLogo.name}
               </Text>
               {infos && onInfoPress ? (
                 <Pressable
@@ -1047,7 +1171,8 @@ function BrandCard({
                 </Pressable>
               ) : null}
             </View>
-          ) : null}
+            );
+          })()}
           <Text
             numberOfLines={2}
             style={{
@@ -1105,50 +1230,23 @@ function BrandCard({
               >
                 Ersparnis möglich: {Math.round((potential / product.preis) * 100)}%
               </Text>
+              {canExpand ? (
+                <MaterialCommunityIcons
+                  name={expanded ? 'chevron-up' : 'chevron-down'}
+                  size={14}
+                  color={theme.textMuted}
+                  style={{ marginLeft: 2 }}
+                />
+              ) : null}
             </View>
           ) : null}
         </View>
-        </View>
-
-        {/* Bottom action row: Quantity-Pill + Gekauft-Button rechts.
-            Name oben nutzt jetzt die volle Card-Breite (minus Image)
-            ohne Konkurrenz mit den Action-Buttons. */}
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'flex-end',
-            gap: 6,
-            marginTop: 8,
-          }}
-        >
-          {canExpand ? (
-            <View
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 14,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <MaterialCommunityIcons
-                name={expanded ? 'chevron-up' : 'chevron-down'}
-                size={20}
-                color={theme.textMuted}
-              />
-            </View>
-          ) : null}
-          <RowActions
-            onCheck={onCheck}
-            onDelete={onDelete}
-            loadingCheck={loadingCheck}
-            loadingDelete={loadingDelete}
-            anzahl={item.anzahl ?? 1}
-            onIncrement={onIncrement}
-            onDecrement={onDecrement}
-          />
-        </View>
+        <CompactQuantityPill
+          anzahl={item.anzahl ?? 1}
+          onIncrement={onIncrement}
+          onDecrement={onDecrement}
+        />
+        <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
       </Pressable>
 
       {/* Expanded NoName-Alternatives */}
@@ -1388,10 +1486,14 @@ function NoNameCard({
         borderRadius: 14,
         borderWidth: 1,
         borderColor: theme.border,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
         padding: 10,
+        paddingRight: 0, // edge-check-strip füllt rechts
+        overflow: 'hidden',
       }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
       <ImageWithShimmer
         source={{ uri: getProductImage(p) ?? undefined }}
         style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
@@ -1489,27 +1591,12 @@ function NoNameCard({
           </Text>
         </View>
       </View>
-      </View>
-
-      {/* Bottom action row: Quantity-Pill + Gekauft-Button rechts. */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-          marginTop: 8,
-        }}
-      >
-        <RowActions
-          onCheck={onCheck}
-          onDelete={onDelete}
-          loadingCheck={loadingCheck}
-          loadingDelete={loadingDelete}
-          anzahl={item.anzahl ?? 1}
-          onIncrement={onIncrement}
-          onDecrement={onDecrement}
-        />
-      </View>
+      <CompactQuantityPill
+        anzahl={item.anzahl ?? 1}
+        onIncrement={onIncrement}
+        onDecrement={onDecrement}
+      />
+      <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
     </View>
   );
 }
@@ -1544,10 +1631,14 @@ function CustomCard({
         borderRadius: 14,
         borderWidth: 1,
         borderColor: theme.border,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
         padding: 10,
+        paddingRight: 0,
+        overflow: 'hidden',
       }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
       <View
         style={{
           width: 62,
@@ -1646,24 +1737,7 @@ function CustomCard({
           </Text>
         )}
       </View>
-      </View>
-
-      {/* Bottom action row: Gekauft-Button rechts (Custom-Items haben kein anzahl-Konzept) */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-          marginTop: 8,
-        }}
-      >
-        <RowActions
-          onCheck={onCheck}
-          onDelete={onDelete}
-          loadingCheck={loadingCheck}
-          loadingDelete={loadingDelete}
-        />
-      </View>
+      <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
     </View>
   );
 }
