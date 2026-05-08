@@ -15,6 +15,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
+import * as Application from 'expo-application';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useNavigation } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -109,8 +110,15 @@ export default function ProfileScreen() {
   }, [navigation]);
 
   useEffect(() => {
-    const v = Constants.expoConfig?.version || '1.0.0';
-    const b = Constants.expoConfig?.ios?.buildNumber || '0';
+    // Aus dem nativen Binary lesen (expo-application), NICHT aus
+    // Constants.expoConfig. expoConfig kommt aus app.json zur
+    // JS-Bundle-Build-Zeit — bei EAS-Builds mit autoIncrement
+    // weicht die Nummer dort von der wirklich installierten Build-
+    // Nummer ab. nativeApplicationVersion / nativeBuildVersion
+    // lesen direkt aus Info.plist (iOS) bzw. PackageInfo (Android),
+    // also exakt das was im Store/TestFlight gelandet ist.
+    const v = Application.nativeApplicationVersion ?? Constants.expoConfig?.version ?? '1.0.0';
+    const b = Application.nativeBuildVersion ?? '0';
     setAppVersion(`${v}.${b}`);
   }, []);
 
