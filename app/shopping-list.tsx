@@ -1060,6 +1060,10 @@ function CompactQuantityPill({
 }) {
   const { brand, theme } = useTokens();
   if (!onIncrement || !onDecrement) return null;
+  // Sizes: Buttons 32×32 (vorher 26), Icons 17 (vorher 14), Container
+  // height 38 (vorher 32). Image im Card ist 62 hoch → Card-Row-Höhe
+  // bleibt unverändert image-driven, kein Layout-Bruch.
+  // hitSlop 8 → effektive Tap-Area 48 px (Material-Tap-Target-Standard).
   return (
     <View
       style={{
@@ -1068,19 +1072,19 @@ function CompactQuantityPill({
         backgroundColor: theme.surface,
         borderWidth: 1,
         borderColor: theme.border,
-        borderRadius: 16,
-        paddingHorizontal: 1,
-        height: 32,
+        borderRadius: 19,
+        paddingHorizontal: 2,
+        height: 38,
         marginRight: 8,
       }}
     >
       <Pressable
         onPress={onDecrement}
-        hitSlop={6}
+        hitSlop={8}
         style={({ pressed }) => ({
-          width: 26,
-          height: 26,
-          borderRadius: 13,
+          width: 32,
+          height: 32,
+          borderRadius: 16,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: pressed
@@ -1092,7 +1096,7 @@ function CompactQuantityPill({
       >
         <MaterialCommunityIcons
           name={anzahl <= 1 ? 'trash-can-outline' : 'minus'}
-          size={14}
+          size={17}
           color={anzahl <= 1 ? '#dc2626' : theme.text}
         />
       </Pressable>
@@ -1100,9 +1104,9 @@ function CompactQuantityPill({
         style={{
           fontFamily,
           fontWeight: fontWeight.extraBold,
-          fontSize: 13,
+          fontSize: 15,
           color: theme.text,
-          minWidth: 16,
+          minWidth: 18,
           textAlign: 'center',
           letterSpacing: -0.2,
         }}
@@ -1111,17 +1115,17 @@ function CompactQuantityPill({
       </Text>
       <Pressable
         onPress={onIncrement}
-        hitSlop={6}
+        hitSlop={8}
         style={({ pressed }) => ({
-          width: 26,
-          height: 26,
-          borderRadius: 13,
+          width: 32,
+          height: 32,
+          borderRadius: 16,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: pressed ? brand.primaryContainer ?? theme.surfaceAlt : brand.primary,
         })}
       >
-        <MaterialCommunityIcons name="plus" size={14} color="#fff" />
+        <MaterialCommunityIcons name="plus" size={17} color="#fff" />
       </Pressable>
     </View>
   );
