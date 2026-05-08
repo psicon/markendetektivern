@@ -409,10 +409,12 @@ export default function ProductComparisonScreen() {
   const tabPagerRef = useRef<PagerView | null>(null);
   const [tabHeights, setTabHeights] = useState<{ ingredients?: number; nutrition?: number }>({});
   const onTabChange = (next: Tab) => {
+    collapseAllPills();
     setTab(next);
     tabPagerRef.current?.setPage(next === 'ingredients' ? 0 : 1);
   };
   const onTabPagerSelected = (e: { nativeEvent: { position: number } }) => {
+    collapseAllPills();
     const next: Tab = e.nativeEvent.position === 0 ? 'ingredients' : 'nutrition';
     setTab((prev) => (prev === next ? prev : next));
   };
@@ -1300,7 +1302,10 @@ export default function ProductComparisonScreen() {
           >
             {getProductImage(mp as any, 'png') ? (
               <Pressable
-                onPress={() => openZoom(mp)}
+                onPress={() => {
+                  collapseAllPills();
+                  openZoom(mp);
+                }}
                 accessibilityRole="imagebutton"
                 accessibilityLabel="Bild vergrößern"
                 style={{ width: '100%', height: '100%' }}
@@ -1358,9 +1363,10 @@ export default function ProductComparisonScreen() {
                   : 'Zu dieser Marke sind aktuell keine Zusatz-Informationen hinterlegt.');
               return (
                 <Pressable
-                  onPress={() =>
-                    setInfoSheet({ title: brandName, body: sheetBody })
-                  }
+                  onPress={() => {
+                    collapseAllPills();
+                    setInfoSheet({ title: brandName, body: sheetBody });
+                  }}
                   style={({ pressed }) => ({
                     position: 'absolute',
                     left: 12,
@@ -1663,6 +1669,7 @@ export default function ProductComparisonScreen() {
                 paddingBottom: 4,
               }}
               onMomentumScrollEnd={onCarouselMomentumEnd}
+              onScrollBeginDrag={collapseAllPills}
               // decelerationRate="fast" (already set) lands the snap
               // quickly; no per-frame scroll event needed.
             >
@@ -1689,6 +1696,7 @@ export default function ProductComparisonScreen() {
                   <Pressable
                     key={nn.id}
                     onPress={() => {
+                      collapseAllPills();
                       setPickedId(nn.id);
                       carouselRef.current?.scrollTo({
                         x: i * snapStep,
@@ -1775,6 +1783,7 @@ export default function ProductComparisonScreen() {
                               // level "set picked" tap → opens zoom
                               // for THIS NoName's HQ image.
                               e.stopPropagation?.();
+                              collapseAllPills();
                               openZoom(nn as any);
                             }}
                             accessibilityRole="imagebutton"

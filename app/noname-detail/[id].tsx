@@ -165,10 +165,12 @@ export default function NoNameDetailScreen() {
     nutrition?: number;
   }>({});
   const onTabChange = (next: Tab) => {
+    collapseCartPill();
     setTab(next);
     tabPagerRef.current?.setPage(next === 'ingredients' ? 0 : 1);
   };
   const onTabPagerSelected = (e: { nativeEvent: { position: number } }) => {
+    collapseCartPill();
     const next: Tab = e.nativeEvent.position === 0 ? 'ingredients' : 'nutrition';
     setTab((prev) => (prev === next ? prev : next));
   };
