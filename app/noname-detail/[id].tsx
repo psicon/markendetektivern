@@ -28,6 +28,7 @@ import { FadingImage } from '@/components/design/FadingImage';
 import { CounterBadge } from '@/components/design/CounterBadge';
 import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
 import { QuantityPill } from '@/components/design/QuantityPill';
+import { MorphingCartButton } from '@/components/design/MorphingCartButton';
 import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
 import { getProductImage } from '@/lib/utils/productImage';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
@@ -1048,12 +1049,11 @@ export default function NoNameDetailScreen() {
                   onLayout={cartAnchor.onLayout}
                   collapsable={false}
                 >
-                  <ActionButton
-                    icon={inCart ? 'cart-check' : 'cart-plus'}
-                    iconColor={inCart ? '#fff' : theme.text}
-                    bg={inCart ? brand.primary : undefined}
-                    onPress={onCartPress}
-                    badge={cartAnzahl || 0}
+                  <MorphingCartButton
+                    anzahl={cartAnzahl}
+                    onAddToCart={onCartPress}
+                    onIncrement={onIncrementFromPill}
+                    onDecrement={onDecrementFromPill}
                   />
                 </View>
                 <View
@@ -1650,41 +1650,8 @@ export default function NoNameDetailScreen() {
           top of the FAB visually. */}
       <FlyToCart ref={flyRef} />
 
-      {/* QuantityPill (NEU 2026-05-07): floating bottom-center overlay
-          nach Cart-Add. Schließt bei Tap außerhalb. */}
-      {/* Pill blockt nichts. Schließt via Auto-Timer + Scroll +
-          Re-Click auf Cart-Button. */}
-      {pillOpen && pillAnchor && (() => {
-        const PILL_HEIGHT = 44;
-        const GAP = 10;
-        const PILL_WIDTH_EST = 124;
-        const screenWidth = require('react-native').Dimensions.get('window').width;
-        let pillTop = pillAnchor.y - PILL_HEIGHT - GAP;
-        if (pillTop < insets.top + 8) {
-          pillTop = pillAnchor.y + pillAnchor.h + GAP;
-        }
-        let pillLeft = pillAnchor.x + pillAnchor.w / 2 - PILL_WIDTH_EST / 2;
-        pillLeft = Math.max(8, Math.min(screenWidth - PILL_WIDTH_EST - 8, pillLeft));
-        return (
-          <View
-            pointerEvents="box-none"
-            style={{ position: 'absolute', left: pillLeft, top: pillTop }}
-          >
-            <QuantityPill
-              visible={pillVisible}
-              anzahl={Math.max(1, cartAnzahl)}
-              onIncrement={() => {
-                armPillAutoClose();
-                onIncrementFromPill();
-              }}
-              onDecrement={() => {
-                armPillAutoClose();
-                onDecrementFromPill();
-              }}
-            />
-          </View>
-        );
-      })()}
+      {/* (Floating QuantityPill entfernt — MorphingCartButton hat
+          jetzt die Pill-Funktionalität in-place am Cart-Button selbst.) */}
 
       {/* ProductDetail-Walkthrough — Welcome-Card + Spotlights.
           CoachmarkScrollProvider gibt der SpotlightOverlay-Engine

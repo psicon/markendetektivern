@@ -36,6 +36,7 @@ import { FilterSheet } from '@/components/design/FilterSheet';
 import { CounterBadge } from '@/components/design/CounterBadge';
 import { FlyToCart, type FlyToCartHandle } from '@/components/design/FlyToCart';
 import { QuantityPill } from '@/components/design/QuantityPill';
+import { MorphingCartButton } from '@/components/design/MorphingCartButton';
 import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
 import { ImageZoomModal, type SourceRect } from '@/components/design/ImageZoomModal';
 import { getProductImage } from '@/lib/utils/productImage';
@@ -1453,12 +1454,11 @@ export default function ProductComparisonScreen() {
                   collapsable={false}
                 >
                   <View ref={(el) => { if (mp?.id) cartButtonRefs.current.set(mp.id, el); }}>
-                    <ActionButton
-                      icon={cartMap[mp.id] ? 'cart-check' : 'cart-plus'}
-                      iconColor={cartMap[mp.id] ? '#fff' : theme.text}
-                      bg={cartMap[mp.id] ? brand.primary : undefined}
-                      onPress={() => onToggleCart(mp.id, 'markenprodukt', mp)}
-                      badge={cartAnzahlMap[mp.id] || 0}
+                    <MorphingCartButton
+                      anzahl={cartAnzahlMap[mp.id] || 0}
+                      onAddToCart={() => onToggleCart(mp.id, 'markenprodukt', mp)}
+                      onIncrement={() => onIncrementCart(mp.id, 'markenprodukt')}
+                      onDecrement={() => onDecrementCart(mp.id, 'markenprodukt')}
                     />
                   </View>
                 </View>
@@ -1925,12 +1925,11 @@ export default function ProductComparisonScreen() {
                           onPress={() => onToggleFav(nn.id, 'noname', nn)}
                         />
                         <View ref={(el) => { if (nn.id) cartButtonRefs.current.set(nn.id, el); }}>
-                          <ActionButton
-                            icon={cartMap[nn.id] ? 'cart-check' : 'cart-plus'}
-                            iconColor={cartMap[nn.id] ? '#fff' : theme.text}
-                            bg={cartMap[nn.id] ? brand.primary : undefined}
-                            onPress={() => onToggleCart(nn.id, 'noname', nn)}
-                            badge={cartAnzahlMap[nn.id] || 0}
+                          <MorphingCartButton
+                            anzahl={cartAnzahlMap[nn.id] || 0}
+                            onAddToCart={() => onToggleCart(nn.id, 'noname', nn)}
+                            onIncrement={() => onIncrementCart(nn.id, 'noname')}
+                            onDecrement={() => onDecrementCart(nn.id, 'noname')}
                           />
                         </View>
                         <ActionButton
@@ -2474,61 +2473,8 @@ export default function ProductComparisonScreen() {
           it sits visually on top of the FAB at landing time. */}
       <FlyToCart ref={flyRef} />
 
-      {/* QuantityPill (NEU 2026-05-07): floating overlay anchored am
-          Cart-Button. Blockt KEINE anderen Touches (kein Backdrop).
-          Schließt automatisch:
-          - bei Scroll (scroll-handler unten)
-          - nach 4s ohne Pill-Interaktion (Auto-Timer)
-          - beim Tap auf einen anderen Cart-Button (neuer setOpenPill)
-          - bei Navigation away (component unmount). */}
-      {openPill && (() => {
-        // Pill am Cart-Button positionieren — Top des Buttons minus
-        // Pill-Höhe (44 + 8 Abstand). Pill ist 116-150 px breit, also
-        // horizontal über der Mitte des Buttons zentrieren.
-        const PILL_HEIGHT = 44;
-        const GAP_ABOVE_BUTTON = 10;
-        const PILL_WIDTH_EST = 124;
-        const screenWidth = require('react-native').Dimensions.get('window').width;
-        let pillTop = openPill.y - PILL_HEIGHT - GAP_ABOVE_BUTTON;
-        if (pillTop < insets.top + 8) {
-          // Wenn nicht genug Platz oben → unter den Button setzen
-          pillTop = openPill.y + openPill.h + GAP_ABOVE_BUTTON;
-        }
-        let pillLeft = openPill.x + openPill.w / 2 - PILL_WIDTH_EST / 2;
-        pillLeft = Math.max(8, Math.min(screenWidth - PILL_WIDTH_EST - 8, pillLeft));
-        return (
-          <View
-            pointerEvents="box-none"
-            style={{
-              position: 'absolute',
-              left: pillLeft,
-              top: pillTop,
-            }}
-          >
-            <QuantityPill
-              visible={pillVisible}
-              anzahl={cartAnzahlMap[openPillProductId!] ?? 1}
-              onIncrement={() => {
-                armPillAutoClose(); // Timer re-armen bei Interaktion
-                const pid = openPillProductId;
-                if (!pid) return;
-                const isMain = mp?.id === pid;
-                const productData = isMain ? mp : (nonames.find((n) => n.id === pid) ?? null);
-                const productType: 'markenprodukt' | 'noname' = isMain ? 'markenprodukt' : 'noname';
-                if (productData) onIncrementCart(pid, productType, productData);
-              }}
-              onDecrement={() => {
-                armPillAutoClose();
-                const pid = openPillProductId;
-                if (!pid) return;
-                const isMain = mp?.id === pid;
-                const productType: 'markenprodukt' | 'noname' = isMain ? 'markenprodukt' : 'noname';
-                onDecrementCart(pid, productType);
-              }}
-            />
-          </View>
-        );
-      })()}
+      {/* (Floating QuantityPill entfernt — MorphingCartButton
+          übernimmt die Quantity-Pill in-place am Cart-Button selbst.) */}
 
       {/* ProductDetail-Walkthrough — Welcome-Card + Spotlights.
           Gleiche Tour-Key 'product-detail' wie noname-detail.
