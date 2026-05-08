@@ -1029,18 +1029,18 @@ function ShoppingRowWithBoughtAnim({
 // ═══════════════════════════════════════════════════════════════════
 function EdgeCheckButton({ onPress, loading }: { onPress: () => void; loading?: boolean }) {
   const { brand, theme } = useTokens();
-  // Sehr subtler horizontaler Verlauf von links (transparent / Card-bg)
-  // → rechts (minimal grau). Kein hard-edge, fadet weich in den
-  // rechten Card-Rand. Wenn pressed: kompakte surfaceAlt-Fläche
-  // für spürbares Tap-Feedback.
+  // Schlanker (56 → 44 wide) — gibt mehr horizontalen Platz für
+  // den Produktnamen. Subtler Gradient von transparent links →
+  // ~5% grau rechts bleibt für den weichen Übergang. hitSlop 6
+  // erweitert die Tap-Area auf 56 effektive px.
   return (
     <Pressable
       onPress={onPress}
       disabled={loading}
-      hitSlop={4}
+      hitSlop={6}
       style={({ pressed }) => ({
         alignSelf: 'stretch',
-        width: 56,
+        width: 44,
         opacity: loading ? 0.7 : 1,
         backgroundColor: pressed ? theme.surfaceAlt : 'transparent',
       })}
@@ -1081,10 +1081,10 @@ function CompactQuantityPill({
 }) {
   const { brand, theme } = useTokens();
   if (!onIncrement || !onDecrement) return null;
-  // Sizes nach Chevron-Entfernung etwas vergrößert: Buttons 36×36
-  // (vorher 32), Icons 18 (vorher 17), Container-Height 44 (vorher
-  // 38). Image im Card ist 62 hoch → Pill 44 < 62, Card-Row-Höhe
-  // bleibt unverändert image-driven.
+  // Schlanker: Buttons 30×30 (vorher 36), Icons 17, Container-Height
+  // 38, paddingHorizontal 2, minWidth 18 für N. Spart ~22 px Breite
+  // → mehr Platz für lange Produktnamen. Tap-Area mit hitSlop 10
+  // bleibt 50 px (über Material 48-px-Standard).
   return (
     <View
       style={{
@@ -1093,18 +1093,18 @@ function CompactQuantityPill({
         backgroundColor: theme.surface,
         borderWidth: 1,
         borderColor: theme.border,
-        borderRadius: 22,
-        paddingHorizontal: 3,
-        height: 44,
+        borderRadius: 19,
+        paddingHorizontal: 2,
+        height: 38,
       }}
     >
       <Pressable
         onPress={onDecrement}
-        hitSlop={8}
+        hitSlop={10}
         style={({ pressed }) => ({
-          width: 36,
-          height: 36,
-          borderRadius: 18,
+          width: 30,
+          height: 30,
+          borderRadius: 15,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: pressed
@@ -1116,7 +1116,7 @@ function CompactQuantityPill({
       >
         <MaterialCommunityIcons
           name={anzahl <= 1 ? 'trash-can-outline' : 'minus'}
-          size={18}
+          size={17}
           color={anzahl <= 1 ? '#dc2626' : theme.text}
         />
       </Pressable>
@@ -1124,9 +1124,9 @@ function CompactQuantityPill({
         style={{
           fontFamily,
           fontWeight: fontWeight.extraBold,
-          fontSize: 16,
+          fontSize: 15,
           color: theme.text,
-          minWidth: 22,
+          minWidth: 18,
           textAlign: 'center',
           letterSpacing: -0.2,
         }}
@@ -1135,17 +1135,17 @@ function CompactQuantityPill({
       </Text>
       <Pressable
         onPress={onIncrement}
-        hitSlop={8}
+        hitSlop={10}
         style={({ pressed }) => ({
-          width: 36,
-          height: 36,
-          borderRadius: 18,
+          width: 30,
+          height: 30,
+          borderRadius: 15,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: pressed ? brand.primaryContainer ?? theme.surfaceAlt : brand.primary,
         })}
       >
-        <MaterialCommunityIcons name="plus" size={18} color="#fff" />
+        <MaterialCommunityIcons name="plus" size={17} color="#fff" />
       </Pressable>
     </View>
   );
@@ -1462,11 +1462,9 @@ function BrandCard({
         />
       </View>
       </View>{/* /Body-Row */}
-      {/* Footer "Alternativen anzeigen" — kein Hintergrund, keine
-          Linie. Sitzt in der linken Spalte (X-56 wide), aber mit
-          paddingLeft:56 wird der Content-Bereich nach rechts
-          geshiftet → Text+Chevron landen exakt auf Card-Mitte
-          statt nur auf Mitte-der-linken-Spalte. */}
+      {/* Footer "Alternativen" — paddingLeft kompensiert die
+          EdgeCheckButton-Breite rechts → Text+Chevron landen exakt
+          auf Card-Mitte statt auf Mitte-der-linken-Spalte. */}
       {canExpand ? (
         <Pressable
           onPress={onToggleExpand}
@@ -1477,7 +1475,7 @@ function BrandCard({
             gap: 6,
             paddingTop: 4,
             paddingBottom: 8,
-            paddingLeft: 56,
+            paddingLeft: 44,
             opacity: pressed ? 0.55 : 1,
           })}
         >
