@@ -978,6 +978,258 @@ function EmptyState({
   );
 }
 
+// ─── Feature-Flag: Morphing-Quantity-Button ─────────────────────────
+// Wenn true: ein einziger Button am rechten Card-Rand der zwischen
+// Idle (Cart-Check-Icon + Anzahl-Badge) und Expanded (Pill mit
+// −/N/+) morpht. Tap-to-bought via SWIPE-LEFT (kein Inline-Tap mehr).
+// Wenn false: getrennte CompactQuantityPill (inline) + EdgeCheckButton
+// (Edge-Tap-to-bought) — der bisherige Stand.
+//
+// Rollback: dieses Flag auf false setzen, alle bisherigen Komponenten
+// bleiben im File und funktionieren wie vorher.
+const USE_MORPH_BUTTON = true;
+
+// ═══════════════════════════════════════════════════════════════════
+// MorphingQuantityButton — vereint Cart-Check + Quantity-Pill in
+// ein Element am rechten Card-Rand.
+//
+// Idle: 48 px breit, volle Card-Höhe, brand.primary bg, weißes
+//       cart-check Icon + kleines Badge mit anzahl.
+// Tap:  expandiert nach LINKS auf 120 px Breite via absolute-
+//       Positioning (kein Layout-Shift in der Row), Inhalt cross-
+//       fade — Cart-Icon raus, [−][N][+] rein.
+// Tap auf − oder +: löst onIncrement/onDecrement aus, restartet
+//       3 s Idle-Timer.
+// Auto-Collapse: nach 3 s ohne Interaktion zurück zu Idle, smooth
+//       wie der Expand.
+//
+// Mark-as-bought: NUR über Swipe-links (kein Tap mehr im Morph-
+// Modus).
+// ═══════════════════════════════════════════════════════════════════
+function MorphingQuantityButton({
+  anzahl,
+  onIncrement,
+  onDecrement,
+  loading,
+}: {
+  anzahl: number;
+  onIncrement?: () => void;
+  onDecrement?: () => void;
+  loading?: boolean;
+}) {
+  const { brand } = useTokens();
+  const [expanded, setExpanded] = useState(false);
+  const t = useSharedValue(0);
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const restartIdleTimer = useCallback(() => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(() => setExpanded(false), 3000);
+  }, []);
+
+  useEffect(() => {
+    t.value = withTiming(expanded ? 1 : 0, {
+      duration: 300,
+      easing: Easing.bezier(0.4, 0, 0.2, 1),
+    });
+    if (expanded) restartIdleTimer();
+    return () => {
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+    };
+  }, [expanded, t, restartIdleTimer]);
+
+  const handleTapIdle = () => {
+    if (!expanded) setExpanded(true);
+  };
+  const handleDecrement = () => {
+    onDecrement?.();
+    restartIdleTimer();
+  };
+  const handleIncrement = () => {
+    onIncrement?.();
+    restartIdleTimer();
+  };
+
+  // Animated styles. Width 48→120, anchored RIGHT (right:0 fix,
+  // width grows leftward → erweitert in den Content-Bereich).
+  // overflow:hidden auf einem darunterliegenden Wrapper damit kein
+  // Inhalt jenseits der Card-Border-Radius rausragt.
+  const stripStyle = useAnimatedStyle(() => ({
+    width: interpolate(t.value, [0, 1], [48, 120], Extrapolation.CLAMP),
+  }));
+
+  const idleContentStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(t.value, [0, 0.4], [1, 0], Extrapolation.CLAMP),
+    transform: [
+      { scale: interpolate(t.value, [0, 0.4], [1, 0.7], Extrapolation.CLAMP) },
+    ],
+  }));
+
+  const expandedContentStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(t.value, [0.5, 1], [0, 1], Extrapolation.CLAMP),
+    transform: [
+      { scale: interpolate(t.value, [0.5, 1], [0.85, 1], Extrapolation.CLAMP) },
+    ],
+  }));
+
+  return (
+    // Layout-Slot bleibt 48-wide, der visuell expandierende Strip
+    // ist position:absolute right:0 → erweitert nach links ohne
+    // Layout-Recalc.
+    <View style={{ width: 48, alignSelf: 'stretch' }}>
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            right: 0,
+            backgroundColor: brand.primary,
+            overflow: 'hidden',
+          },
+          stripStyle,
+        ]}
+      >
+        {/* Idle layer */}
+        <Animated.View
+          pointerEvents={expanded ? 'none' : 'auto'}
+          style={[
+            {
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              alignItems: 'center',
+              justifyContent: 'center',
+            },
+            idleContentStyle,
+          ]}
+        >
+          <Pressable
+            onPress={handleTapIdle}
+            disabled={loading}
+            hitSlop={4}
+            style={({ pressed }) => ({
+              width: 48,
+              height: '100%',
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed || loading ? 0.7 : 1,
+            })}
+          >
+            {loading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <View>
+                <MaterialCommunityIcons name="cart-check" size={22} color="#fff" />
+                {anzahl > 0 ? (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: -7,
+                      right: -10,
+                      minWidth: 18,
+                      height: 18,
+                      borderRadius: 9,
+                      backgroundColor: '#fff',
+                      paddingHorizontal: 4,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderWidth: 1.5,
+                      borderColor: brand.primary,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.extraBold,
+                        fontSize: 10,
+                        color: brand.primary,
+                      }}
+                    >
+                      {anzahl}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            )}
+          </Pressable>
+        </Animated.View>
+
+        {/* Expanded layer: − N + */}
+        <Animated.View
+          pointerEvents={expanded ? 'auto' : 'none'}
+          style={[
+            {
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingHorizontal: 8,
+            },
+            expandedContentStyle,
+          ]}
+        >
+          <Pressable
+            onPress={handleDecrement}
+            hitSlop={6}
+            style={({ pressed }) => ({
+              width: 32,
+              height: 32,
+              borderRadius: 16,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: pressed
+                ? anzahl <= 1
+                  ? 'rgba(220,38,38,0.55)'
+                  : 'rgba(255,255,255,0.32)'
+                : 'rgba(255,255,255,0.18)',
+            })}
+          >
+            <MaterialCommunityIcons
+              name={anzahl <= 1 ? 'trash-can-outline' : 'minus'}
+              size={16}
+              color="#fff"
+            />
+          </Pressable>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 16,
+              color: '#fff',
+              minWidth: 24,
+              textAlign: 'center',
+              letterSpacing: -0.2,
+            }}
+          >
+            {anzahl}
+          </Text>
+          <Pressable
+            onPress={handleIncrement}
+            hitSlop={6}
+            style={({ pressed }) => ({
+              width: 32,
+              height: 32,
+              borderRadius: 16,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: pressed ? 'rgba(255,255,255,0.32)' : 'rgba(255,255,255,0.18)',
+            })}
+          >
+            <MaterialCommunityIcons name="plus" size={16} color="#fff" />
+          </Pressable>
+        </Animated.View>
+      </Animated.View>
+    </View>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // ShoppingRowWithBoughtAnim — kleiner Wrapper der jedem Item-Row
 // einen eigenen SwipeRow-Ref + `playBought()`-Trigger gibt. Damit
@@ -1453,14 +1705,25 @@ function BrandCard({
           />
         </Pressable>
       ) : null}
-      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-        <CompactQuantityPill
+      {USE_MORPH_BUTTON ? (
+        <MorphingQuantityButton
           anzahl={item.anzahl ?? 1}
           onIncrement={onIncrement}
           onDecrement={onDecrement}
+          loading={loadingCheck}
         />
-      </View>
-      <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
+      ) : (
+        <>
+          <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+            <CompactQuantityPill
+              anzahl={item.anzahl ?? 1}
+              onIncrement={onIncrement}
+              onDecrement={onDecrement}
+            />
+          </View>
+          <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
+        </>
+      )}
       </View>
 
       {/* Expanded NoName-Alternatives */}
@@ -1804,14 +2067,25 @@ function NoNameCard({
         </View>
       </View>
       </View>
-      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-        <CompactQuantityPill
+      {USE_MORPH_BUTTON ? (
+        <MorphingQuantityButton
           anzahl={item.anzahl ?? 1}
           onIncrement={onIncrement}
           onDecrement={onDecrement}
+          loading={loadingCheck}
         />
-      </View>
-      <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
+      ) : (
+        <>
+          <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+            <CompactQuantityPill
+              anzahl={item.anzahl ?? 1}
+              onIncrement={onIncrement}
+              onDecrement={onDecrement}
+            />
+          </View>
+          <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
+        </>
+      )}
     </View>
   );
 }
