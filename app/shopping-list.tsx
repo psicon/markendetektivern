@@ -1318,10 +1318,10 @@ function BrandCard({
         overflow: 'hidden',
       }}
     >
-      {/* Card-Row: Pressable für Tap-to-Expand + Chevron + Pill +
-          EdgeCheckButton sind alles Siblings einer alignItems:stretch
-          Row, damit der EdgeCheckButton volle Card-Höhe füllt
-          (vorher hatte er nur Content-Höhe minus Padding). */}
+      {/* Card-Row (Rewe-inspiriert): linke Spalte = Image + Pill
+          stacked, rechte Spalte = Content (volle Breite für Name).
+          EdgeCheckButton bleibt als Strip rechts. Footer "Alter-
+          nativen anzeigen" kommt darunter, nur bei canExpand. */}
       <View style={{ flexDirection: 'row', alignItems: 'stretch' }}>
       <Pressable
         onPress={canExpand ? onToggleExpand : undefined}
@@ -1330,17 +1330,26 @@ function BrandCard({
           flex: 1,
           minWidth: 0,
           flexDirection: 'row',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           gap: 10,
-          padding: 10,
+          paddingVertical: 8,
+          paddingLeft: 10,
           opacity: pressed && canExpand ? 0.7 : 1,
         })}
       >
-        <ImageWithShimmer
-          source={{ uri: getProductImage(product) ?? undefined }}
-          style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
-          resizeMode="contain"
-        />
+        {/* Linke Spalte: Image (62) + Pill (38) untereinander, Gap 4. */}
+        <View style={{ alignItems: 'center', gap: 4 }}>
+          <ImageWithShimmer
+            source={{ uri: getProductImage(product) ?? undefined }}
+            style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
+            resizeMode="contain"
+          />
+          <CompactQuantityPill
+            anzahl={item.anzahl ?? 1}
+            onIncrement={onIncrement}
+            onDecrement={onDecrement}
+          />
+        </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           {(() => {
             // Prefer marke (Markenname + Markenlogo) über hersteller
@@ -1436,37 +1445,42 @@ function BrandCard({
           ) : null}
         </View>
       </Pressable>
-      {/* Pill + Chevron-untereinander Wrapper — Chevron sitzt direkt
-          ÜBER der Pill (nicht mehr daneben), damit es klar als
-          "expand"-Indikator für die Card lesbar ist und nicht
-          visuell mit den +/− verschmilzt. */}
-      <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
-        {canExpand ? (
-          <Pressable
-            onPress={onToggleExpand}
-            hitSlop={8}
-            style={({ pressed }) => ({
-              alignItems: 'center',
-              justifyContent: 'center',
-              paddingVertical: 2,
-              opacity: pressed ? 0.5 : 1,
-            })}
-          >
-            <MaterialCommunityIcons
-              name={expanded ? 'chevron-up' : 'chevron-down'}
-              size={20}
-              color={theme.textMuted}
-            />
-          </Pressable>
-        ) : null}
-        <CompactQuantityPill
-          anzahl={item.anzahl ?? 1}
-          onIncrement={onIncrement}
-          onDecrement={onDecrement}
-        />
-      </View>
       <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
       </View>
+      {/* Footer "Alternativen anzeigen" — vollbreiter Tap-Handler,
+          nur bei canExpand. Border-Top als Trennung zur Body-Row. */}
+      {canExpand ? (
+        <Pressable
+          onPress={onToggleExpand}
+          style={({ pressed }) => ({
+            borderTopWidth: 1,
+            borderTopColor: theme.border,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            paddingVertical: 8,
+            opacity: pressed ? 0.55 : 1,
+          })}
+        >
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.semibold,
+              fontSize: 12,
+              color: brand.primary,
+              letterSpacing: 0.1,
+            }}
+          >
+            {expanded ? 'Alternativen ausblenden' : 'Alternativen anzeigen'}
+          </Text>
+          <MaterialCommunityIcons
+            name={expanded ? 'chevron-up' : 'chevron-down'}
+            size={14}
+            color={brand.primary}
+          />
+        </Pressable>
+      ) : null}
 
       {/* Expanded NoName-Alternatives */}
       {allowExpand && expanded && hasAlts ? (
@@ -1710,12 +1724,30 @@ function NoNameCard({
         overflow: 'hidden',
       }}
     >
-      <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 }}>
-      <ImageWithShimmer
-        source={{ uri: getProductImage(p) ?? undefined }}
-        style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
-        resizeMode="contain"
-      />
+      <View
+        style={{
+          flex: 1,
+          minWidth: 0,
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: 10,
+          paddingVertical: 8,
+          paddingLeft: 10,
+        }}
+      >
+      {/* Linke Spalte: Image + Pill stacked (Rewe-Pattern). */}
+      <View style={{ alignItems: 'center', gap: 4 }}>
+        <ImageWithShimmer
+          source={{ uri: getProductImage(p) ?? undefined }}
+          style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
+          resizeMode="contain"
+        />
+        <CompactQuantityPill
+          anzahl={item.anzahl ?? 1}
+          onIncrement={onIncrement}
+          onDecrement={onDecrement}
+        />
+      </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         {p?.handelsmarke?.bezeichnung ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 1 }}>
@@ -1809,13 +1841,6 @@ function NoNameCard({
         </View>
       </View>
       </View>
-      <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
-        <CompactQuantityPill
-          anzahl={item.anzahl ?? 1}
-          onIncrement={onIncrement}
-          onDecrement={onDecrement}
-        />
-      </View>
       <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
     </View>
   );
@@ -1856,7 +1881,17 @@ function CustomCard({
         overflow: 'hidden',
       }}
     >
-      <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 }}>
+      <View
+        style={{
+          flex: 1,
+          minWidth: 0,
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: 10,
+          paddingVertical: 8,
+          paddingLeft: 10,
+        }}
+      >
       <View
         style={{
           width: 62,
