@@ -49,7 +49,9 @@ export const themeDark: typeof themeLight = {
   text: '#e8eced',
   textSub: '#8a9699',
   textMuted: '#5c6769',
-  primary: '#14b39a',
+  // Primary konsistent zum Light-Theme — immer das Brand-Petrol
+  // #0d8575, kein helleres Mint im Dark-Modus (User-Vorgabe).
+  primary: '#0d8575',
   primaryContainer: '#0d3530',
   onPrimary: '#ffffff',
   accent: '#ff8a3d',

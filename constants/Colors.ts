@@ -4,7 +4,9 @@
  */
 
 const tintColorLight = '#0d8575';
-const tintColorDark = '#42a968';
+// Im Dark-Theme das gleiche Brand-Petrol verwenden statt eines
+// helleren Mint — konsistente Brand-Farbe in beiden Modi (User-Vorgabe).
+const tintColorDark = '#0d8575';
 
 export const Colors = {
   light: {
@@ -29,8 +31,9 @@ export const Colors = {
     icon: '#FFFFFF',
     tabIconDefault: '#FFFFFF',
     tabIconSelected: tintColorDark,
-    primary: '#42a968',
-    secondary: '#0d8575',
+    // Brand-Konsistenz: primary = Petrol in beiden Modi
+    primary: '#0d8575',
+    secondary: '#42a968',
     success: '#42a968',
     warning: '#ff9500',
     error: '#ff453a',
