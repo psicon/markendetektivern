@@ -1104,15 +1104,21 @@ function BrandCard({
         overflow: 'hidden',
       }}
     >
+      {/* Card-Row: Pressable für Tap-to-Expand + Chevron + Pill +
+          EdgeCheckButton sind alles Siblings einer alignItems:stretch
+          Row, damit der EdgeCheckButton volle Card-Höhe füllt
+          (vorher hatte er nur Content-Höhe minus Padding). */}
+      <View style={{ flexDirection: 'row', alignItems: 'stretch' }}>
       <Pressable
         onPress={canExpand ? onToggleExpand : undefined}
         disabled={!canExpand}
         style={({ pressed }) => ({
+          flex: 1,
+          minWidth: 0,
           flexDirection: 'row',
           alignItems: 'center',
           gap: 10,
           padding: 10,
-          paddingRight: 0, // edge-check-strip füllt rechts
           opacity: pressed && canExpand ? 0.7 : 1,
         })}
       >
@@ -1131,11 +1137,12 @@ function BrandCard({
             const brandLogo: any = (product as any)?.marke ?? (product as any)?.hersteller;
             if (!brandLogo?.name) return null;
             return (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 2 }}>
               {brandLogo?.bild ? (
                 <ImageWithShimmer
                   source={{ uri: brandLogo.bild }}
-                  style={{ width: 12, height: 12, borderRadius: 2 }}
+                  style={{ width: 16, height: 16, borderRadius: 3 }}
+                  resizeMode="contain"
                 />
               ) : null}
               <Text
@@ -1151,25 +1158,6 @@ function BrandCard({
               >
                 {brandLogo.name}
               </Text>
-              {infos && onInfoPress ? (
-                <Pressable
-                  onPress={(e) => {
-                    e.stopPropagation?.();
-                    onInfoPress();
-                  }}
-                  hitSlop={8}
-                  style={({ pressed }) => ({
-                    padding: 1,
-                    opacity: pressed ? 0.6 : 1,
-                  })}
-                >
-                  <MaterialCommunityIcons
-                    name="information-outline"
-                    size={13}
-                    color={brand.primary}
-                  />
-                </Pressable>
-              ) : null}
             </View>
             );
           })()}
@@ -1230,24 +1218,39 @@ function BrandCard({
               >
                 Ersparnis möglich: {Math.round((potential / product.preis) * 100)}%
               </Text>
-              {canExpand ? (
-                <MaterialCommunityIcons
-                  name={expanded ? 'chevron-up' : 'chevron-down'}
-                  size={14}
-                  color={theme.textMuted}
-                  style={{ marginLeft: 2 }}
-                />
-              ) : null}
             </View>
           ) : null}
         </View>
+      </Pressable>
+      {/* Chevron als eigene Pressable-Affordanz vor der Pill — links
+          neben Quantity-Chooser, vertikal mittig in der Card. */}
+      {canExpand ? (
+        <Pressable
+          onPress={onToggleExpand}
+          hitSlop={6}
+          style={({ pressed }) => ({
+            width: 32,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed ? 0.6 : 1,
+          })}
+        >
+          <MaterialCommunityIcons
+            name={expanded ? 'chevron-up' : 'chevron-down'}
+            size={24}
+            color={theme.textMuted}
+          />
+        </Pressable>
+      ) : null}
+      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
         <CompactQuantityPill
           anzahl={item.anzahl ?? 1}
           onIncrement={onIncrement}
           onDecrement={onDecrement}
         />
-        <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
-      </Pressable>
+      </View>
+      <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
+      </View>
 
       {/* Expanded NoName-Alternatives */}
       {allowExpand && expanded && hasAlts ? (
@@ -1487,13 +1490,11 @@ function NoNameCard({
         borderWidth: 1,
         borderColor: theme.border,
         flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-        padding: 10,
-        paddingRight: 0, // edge-check-strip füllt rechts
+        alignItems: 'stretch',
         overflow: 'hidden',
       }}
     >
+      <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 }}>
       <ImageWithShimmer
         source={{ uri: getProductImage(p) ?? undefined }}
         style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
@@ -1591,11 +1592,14 @@ function NoNameCard({
           </Text>
         </View>
       </View>
-      <CompactQuantityPill
-        anzahl={item.anzahl ?? 1}
-        onIncrement={onIncrement}
-        onDecrement={onDecrement}
-      />
+      </View>
+      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <CompactQuantityPill
+          anzahl={item.anzahl ?? 1}
+          onIncrement={onIncrement}
+          onDecrement={onDecrement}
+        />
+      </View>
       <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
     </View>
   );
@@ -1632,13 +1636,11 @@ function CustomCard({
         borderWidth: 1,
         borderColor: theme.border,
         flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-        padding: 10,
-        paddingRight: 0,
+        alignItems: 'stretch',
         overflow: 'hidden',
       }}
     >
+      <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 }}>
       <View
         style={{
           width: 62,
@@ -1736,6 +1738,7 @@ function CustomCard({
             Freitext-Eintrag
           </Text>
         )}
+      </View>
       </View>
       <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
     </View>
