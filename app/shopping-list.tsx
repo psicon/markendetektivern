@@ -1458,8 +1458,10 @@ function BrandCard({
       </View>
       </View>{/* /Body-Row */}
       {/* Footer "Alternativen anzeigen" — kein Hintergrund, keine
-          Linie. Sitzt nah an der Body-Row, einfach als kleiner
-          Tap-Hint mit Chevron-Icon. */}
+          Linie. Sitzt in der linken Spalte (X-56 wide), aber mit
+          paddingLeft:56 wird der Content-Bereich nach rechts
+          geshiftet → Text+Chevron landen exakt auf Card-Mitte
+          statt nur auf Mitte-der-linken-Spalte. */}
       {canExpand ? (
         <Pressable
           onPress={onToggleExpand}
@@ -1470,6 +1472,7 @@ function BrandCard({
             gap: 6,
             paddingTop: 4,
             paddingBottom: 8,
+            paddingLeft: 56,
             opacity: pressed ? 0.55 : 1,
           })}
         >
