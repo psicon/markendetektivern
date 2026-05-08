@@ -354,8 +354,8 @@ function Chrome({ title, onBack, right, bottom }: ChromeProps) {
 
 // ═══════════════════════════════════════════════════════════════════
 // SwipeRow — Pan-Gesture wraps a row.
-//   • Rechts wischen ≥ THRESH px → onSwipeBought, fling rechts raus
-//   • Links wischen  ≤ -THRESH    → onSwipeDelete, fling links raus
+//   • Rechts wischen ≥ THRESH px → onSwipeDelete, fling rechts raus
+//   • Links wischen  ≤ -THRESH    → onSwipeBought, fling links raus
 //   • Backgrounds zeigen unter dem Row die Aktion
 // ═══════════════════════════════════════════════════════════════════
 const SWIPE_THRESH = 90;
@@ -443,10 +443,9 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
     .onEnd((e) => {
       const dx = e.translationX;
       if (dx >= SWIPE_THRESH) {
+        // Rechts wischen → DELETE.
         // Fling foreground off (fast) and collapse the WHOLE row in
         // parallel — height + margin + opacity all to 0 over ~260 ms.
-        // Action callback fires WHILE collapse is running so the API
-        // round-trip overlaps with the visual cleanup, not after it.
         tx.value = withTiming(SWIPE_FLING_OFFSCREEN, {
           duration: SWIPE_FLING_DURATION,
           easing: Easing.in(Easing.cubic),
@@ -455,11 +454,12 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
           1,
           { duration: COLLAPSE_DURATION, easing: Easing.in(Easing.cubic) },
           (done) => {
-            if (done) runOnJS(triggerBought)();
+            if (done) runOnJS(triggerDelete)();
           },
         );
         runOnJS(enterCollapse)();
       } else if (dx <= -SWIPE_THRESH) {
+        // Links wischen → BOUGHT (gekauft markieren).
         tx.value = withTiming(-SWIPE_FLING_OFFSCREEN, {
           duration: SWIPE_FLING_DURATION,
           easing: Easing.in(Easing.cubic),
@@ -468,7 +468,7 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
           1,
           { duration: COLLAPSE_DURATION, easing: Easing.in(Easing.cubic) },
           (done) => {
-            if (done) runOnJS(triggerDelete)();
+            if (done) runOnJS(triggerBought)();
           },
         );
         runOnJS(enterCollapse)();
@@ -481,10 +481,11 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
   const fgStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: tx.value }],
   }));
-  const boughtBgStyle = useAnimatedStyle(() => ({
+  // Drag rechts → Delete-BG sichtbar; Drag links → Bought-BG sichtbar.
+  const deleteBgStyle = useAnimatedStyle(() => ({
     opacity: tx.value > 8 ? 1 : 0,
   }));
-  const deleteBgStyle = useAnimatedStyle(() => ({
+  const boughtBgStyle = useAnimatedStyle(() => ({
     opacity: tx.value < -8 ? 1 : 0,
   }));
 
@@ -540,35 +541,8 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
           overflow: 'hidden',
         }}
       >
-        <Animated.View
-          style={[
-            {
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              top: 0,
-              bottom: 0,
-              backgroundColor: brand.primary,
-              flexDirection: 'row',
-              alignItems: 'center',
-              paddingLeft: 18,
-              gap: 10,
-            },
-            boughtBgStyle,
-          ]}
-        >
-          <MaterialCommunityIcons name="check-circle" size={26} color="#fff" />
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              color: '#fff',
-              fontSize: 14,
-            }}
-          >
-            Als gekauft markieren
-          </Text>
-        </Animated.View>
+        {/* Delete-BG: zeigt sich beim Rechts-Wischen, Icon+Label
+            sitzen links (= Seite, von der gezogen wird). */}
         <Animated.View
           style={[
             {
@@ -580,13 +554,13 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
               backgroundColor: brand.error,
               flexDirection: 'row',
               alignItems: 'center',
-              justifyContent: 'flex-end',
-              paddingRight: 18,
+              paddingLeft: 18,
               gap: 10,
             },
             deleteBgStyle,
           ]}
         >
+          <MaterialCommunityIcons name="trash-can-outline" size={26} color="#fff" />
           <Text
             style={{
               fontFamily,
@@ -597,7 +571,38 @@ function SwipeRow({ children, onSwipeBought, onSwipeDelete, disabled }: SwipeRow
           >
             Löschen
           </Text>
-          <MaterialCommunityIcons name="trash-can-outline" size={26} color="#fff" />
+        </Animated.View>
+        {/* Bought-BG: zeigt sich beim Links-Wischen, Icon+Label
+            sitzen rechts. */}
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              backgroundColor: brand.primary,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              paddingRight: 18,
+              gap: 10,
+            },
+            boughtBgStyle,
+          ]}
+        >
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              color: '#fff',
+              fontSize: 14,
+            }}
+          >
+            Als gekauft markieren
+          </Text>
+          <MaterialCommunityIcons name="check-circle" size={26} color="#fff" />
         </Animated.View>
       </View>
 
@@ -809,7 +814,7 @@ function EmptyState({
 // belegte → mehr Platz für den Produktnamen.
 // ═══════════════════════════════════════════════════════════════════
 function EdgeCheckButton({ onPress, loading }: { onPress: () => void; loading?: boolean }) {
-  const { brand } = useTokens();
+  const { brand, theme } = useTokens();
   return (
     <Pressable
       onPress={onPress}
@@ -818,16 +823,18 @@ function EdgeCheckButton({ onPress, loading }: { onPress: () => void; loading?: 
       style={({ pressed }) => ({
         alignSelf: 'stretch', // füllt full card height
         width: 48,
-        backgroundColor: brand.primary,
+        backgroundColor: pressed ? theme.surfaceAlt : theme.background,
+        borderLeftWidth: 1,
+        borderLeftColor: theme.border,
         alignItems: 'center',
         justifyContent: 'center',
-        opacity: pressed || loading ? 0.7 : 1,
+        opacity: loading ? 0.7 : 1,
       })}
     >
       {loading ? (
-        <ActivityIndicator size="small" color="#fff" />
+        <ActivityIndicator size="small" color={brand.primary} />
       ) : (
-        <MaterialCommunityIcons name="check-bold" size={22} color="#fff" />
+        <MaterialCommunityIcons name="check-bold" size={20} color={brand.primary} />
       )}
     </Pressable>
   );
