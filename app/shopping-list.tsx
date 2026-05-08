@@ -1400,56 +1400,41 @@ function BrandCard({
           >
             {item.name || product?.name || 'Unbekanntes Produkt'}
           </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-            {(() => {
-              const pack = formatPack(
-                (product as any)?.packSize,
-                (product as any)?.packTypInfo?.typKurz ?? (product as any)?.packTypInfo?.typ,
-                product?.preis,
-              );
-              return pack ? (
-                <Text
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.medium,
-                    fontSize: 11,
-                    color: theme.textMuted,
-                  }}
-                  numberOfLines={1}
-                >
-                  {pack}
-                </Text>
-              ) : null;
-            })()}
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 13,
-                color: theme.text,
-              }}
-            >
-              {formatEur(product?.preis || 0)}
-            </Text>
-          </View>
-          {potential > 0 && product?.preis > 0 ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
-              <MaterialCommunityIcons name="tag-outline" size={11} color={brand.primary} />
+          {(() => {
+            const pack = formatPack(
+              (product as any)?.packSize,
+              (product as any)?.packTypInfo?.typKurz ?? (product as any)?.packTypInfo?.typ,
+              product?.preis,
+            );
+            return pack ? (
               <Text
                 style={{
                   fontFamily,
-                  fontWeight: fontWeight.semibold,
-                  fontSize: 10,
-                  color: brand.primary,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 11,
+                  color: theme.textMuted,
+                  marginTop: 3,
                 }}
+                numberOfLines={1}
               >
-                Ersparnis möglich: {Math.round((potential / product.preis) * 100)}%
+                {pack}
               </Text>
-            </View>
-          ) : null}
+            ) : null;
+          })()}
         </View>
       </Pressable>
-      <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
+      <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8, gap: 6 }}>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 14,
+            color: theme.text,
+            letterSpacing: -0.2,
+          }}
+        >
+          {formatEur(product?.preis || 0)}
+        </Text>
         <CompactQuantityPill
           anzahl={item.anzahl ?? 1}
           onIncrement={onIncrement}
@@ -1457,42 +1442,54 @@ function BrandCard({
         />
       </View>
       </View>{/* /Body-Row */}
-      {/* Footer "Alternativen anzeigen" — kein Hintergrund, keine
-          Linie. Sitzt in der linken Spalte (X-56 wide), aber mit
-          paddingLeft:56 wird der Content-Bereich nach rechts
-          geshiftet → Text+Chevron landen exakt auf Card-Mitte
-          statt nur auf Mitte-der-linken-Spalte. */}
+      {/* Footer-Sektion (canExpand): zwei zentrierte Zeilen.
+          paddingLeft:56 kompensiert die EdgeCheckButton-Breite
+          rechts → Texte landen optisch auf Card-Mitte. */}
       {canExpand ? (
-        <Pressable
-          onPress={onToggleExpand}
-          style={({ pressed }) => ({
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-            paddingTop: 4,
-            paddingBottom: 8,
-            paddingLeft: 56,
-            opacity: pressed ? 0.55 : 1,
-          })}
-        >
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.semibold,
-              fontSize: 12,
-              color: brand.primary,
-              letterSpacing: 0.1,
-            }}
+        <View style={{ paddingLeft: 56, paddingBottom: 8, paddingTop: 2 }}>
+          {potential > 0 && product?.preis > 0 ? (
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.semibold,
+                fontSize: 10,
+                color: brand.primary,
+                textAlign: 'center',
+                letterSpacing: 0.2,
+              }}
+            >
+              Ersparnis möglich: {Math.round((potential / product.preis) * 100)}%
+            </Text>
+          ) : null}
+          <Pressable
+            onPress={onToggleExpand}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              paddingTop: 2,
+              opacity: pressed ? 0.55 : 1,
+            })}
           >
-            {expanded ? 'Alternativen ausblenden' : 'Alternativen anzeigen'}
-          </Text>
-          <MaterialCommunityIcons
-            name={expanded ? 'chevron-up' : 'chevron-down'}
-            size={14}
-            color={brand.primary}
-          />
-        </Pressable>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.semibold,
+                fontSize: 12,
+                color: brand.primary,
+                letterSpacing: 0.1,
+              }}
+            >
+              {expanded ? 'Alternativen ausblenden' : 'Alternativen anzeigen'}
+            </Text>
+            <MaterialCommunityIcons
+              name={expanded ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color={brand.primary}
+            />
+          </Pressable>
+        </View>
       ) : null}
       </View>{/* /Linke Spalte (Body+Footer) */}
       <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
@@ -1747,22 +1744,56 @@ function NoNameCard({
         resizeMode="contain"
       />
       <View style={{ flex: 1, minWidth: 0 }}>
-        {p?.handelsmarke?.bezeichnung ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 1 }}>
-            <Text
-              numberOfLines={1}
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold,
-                fontSize: 11,
-                color: brand.primary,
-                letterSpacing: 0.1,
-              }}
-            >
-              {p.handelsmarke.bezeichnung}
-            </Text>
+        {/* Eyebrow-Row: Handelsmarke + Discounter-Logo + Discounter-
+            Name in EINER Zeile (vorher waren das zwei). Reduziert
+            die Card-Höhe und führt die Identifikations-Info zusammen. */}
+        {p?.handelsmarke?.bezeichnung || p?.discounter?.name ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 5,
+              marginBottom: 2,
+              flexWrap: 'wrap',
+            }}
+          >
+            {p?.handelsmarke?.bezeichnung ? (
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.bold,
+                  fontSize: 11,
+                  color: brand.primary,
+                  letterSpacing: 0.1,
+                }}
+              >
+                {p.handelsmarke.bezeichnung}
+              </Text>
+            ) : null}
+            {p?.discounter?.bild ? (
+              <ImageWithShimmer
+                source={{ uri: p.discounter.bild }}
+                style={{ width: 14, height: 14, borderRadius: 3 }}
+              />
+            ) : null}
+            {p?.discounter?.name ? (
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 11,
+                  color: theme.textMuted,
+                  flexShrink: 1,
+                }}
+              >
+                {p.discounter.name}
+                {p?.discounter?.land ? ` (${p.discounter.land})` : ''}
+              </Text>
+            ) : null}
             {isFav ? (
-              <MaterialCommunityIcons name="heart" size={10} color={brand.error} />
+              <MaterialCommunityIcons name="heart" size={11} color={brand.error} />
             ) : null}
           </View>
         ) : null}
@@ -1778,68 +1809,41 @@ function NoNameCard({
         >
           {p?.name || p?.produktName || 'Unbekanntes Produkt'}
         </Text>
-        <View
+        {(() => {
+          const pack = formatPack(
+            (p as any)?.packSize,
+            (p as any)?.packTypInfo?.typKurz ?? (p as any)?.packTypInfo?.typ,
+            p?.preis,
+          );
+          return pack ? (
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 11,
+                color: theme.textMuted,
+                marginTop: 3,
+              }}
+              numberOfLines={1}
+            >
+              {pack}
+            </Text>
+          ) : null;
+        })()}
+      </View>
+      </View>
+      <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8, gap: 6 }}>
+        <Text
           style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 4,
-            marginTop: 3,
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 14,
+            color: theme.text,
+            letterSpacing: -0.2,
           }}
         >
-          {p?.discounter?.bild ? (
-            <ImageWithShimmer
-              source={{ uri: p.discounter.bild }}
-              style={{ width: 12, height: 12, borderRadius: 2 }}
-            />
-          ) : null}
-          <Text
-            numberOfLines={1}
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 10,
-              color: theme.textMuted,
-            }}
-          >
-            {p?.discounter?.name || 'Unbekannt'}
-            {p?.discounter?.land ? ` (${p.discounter.land})` : ''}
-          </Text>
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-          {(() => {
-            const pack = formatPack(
-              (p as any)?.packSize,
-              (p as any)?.packTypInfo?.typKurz ?? (p as any)?.packTypInfo?.typ,
-              p?.preis,
-            );
-            return pack ? (
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.medium,
-                  fontSize: 11,
-                  color: theme.textMuted,
-                }}
-                numberOfLines={1}
-              >
-                {pack}
-              </Text>
-            ) : null;
-          })()}
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 13,
-              color: theme.text,
-            }}
-          >
-            {formatEur(p?.preis || 0)}
-          </Text>
-        </View>
-      </View>
-      </View>
-      <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
+          {formatEur(p?.preis || 0)}
+        </Text>
         <CompactQuantityPill
           anzahl={item.anzahl ?? 1}
           onIncrement={onIncrement}
