@@ -31,6 +31,7 @@ import React, {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -1438,7 +1439,7 @@ function BrandCard({
                 color: theme.text,
               }}
             >
-              {formatEur(product?.preis || 0)}
+              {formatEur((product?.preis || 0) * (item.anzahl ?? 1))}
             </Text>
           </View>
           {potential > 0 && product?.preis > 0 ? (
@@ -1452,7 +1453,7 @@ function BrandCard({
                   color: brand.primary,
                 }}
               >
-                Ersparnis möglich: {Math.round((potential / product.preis) * 100)}%
+                Ersparnis möglich: {formatEur(potential * (item.anzahl ?? 1))}
               </Text>
             </View>
           ) : null}
@@ -1854,9 +1855,24 @@ function NoNameCard({
               color: theme.text,
             }}
           >
-            {formatEur(p?.preis || 0)}
+            {formatEur((p?.preis || 0) * (item.anzahl ?? 1))}
           </Text>
         </View>
+        {savings > 0 ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
+            <MaterialCommunityIcons name="check-circle-outline" size={11} color={brand.primary} />
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.semibold,
+                fontSize: 10,
+                color: brand.primary,
+              }}
+            >
+              Gespart: {formatEur(savings * (item.anzahl ?? 1))}
+            </Text>
+          </View>
+        ) : null}
       </View>
       </View>
       <View style={{ alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
@@ -2047,13 +2063,34 @@ export default function ShoppingListScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [brandProducts, setBrandProducts] = useState<EnrichedItem[]>([]);
   const [noNameProducts, setNoNameProducts] = useState<EnrichedItem[]>([]);
+  // Anzahl-aware abgeleitete Totals (vorher useState mit manuellen
+  // Setter-Calls in jedem Handler). Erspart sync-Bugs wie "Pill +1
+  // ändert anzahl, aber Total bleibt gleich".
+  const totalPotentialSavings = useMemo(
+    () =>
+      brandProducts.reduce(
+        (sum, it) => sum + (it.potentialSavings ?? 0) * (it.anzahl ?? 1),
+        0,
+      ),
+    [brandProducts],
+  );
+  const totalActualSavings = useMemo(
+    () =>
+      noNameProducts.reduce(
+        (sum, it) => sum + (it.savings ?? 0) * (it.anzahl ?? 1),
+        0,
+      ),
+    [noNameProducts],
+  );
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
   // Marken-Info-Sheet — getriggered vom (i)-Icon im Hersteller-Chip
   // einer BrandCard. null = zu, Object = sichtbar.
   const [infoSheet, setInfoSheet] = useState<{ title: string; body: string } | null>(null);
   const [selectedConversions, setSelectedConversions] = useState<ProductToConvert[]>([]);
-  const [totalPotentialSavings, setTotalPotentialSavings] = useState(0);
-  const [totalActualSavings, setTotalActualSavings] = useState(0);
+  // Totals werden aus brandProducts/noNameProducts ABGELEITET (per
+  // useMemo) — anzahl-aware Multiplikation. Damit bleiben sie
+  // automatisch synchron bei +/− Quantity-Changes ohne separate
+  // Setter-Calls in den Handlern.
 
   // ─── Filter ────────────────────────────────────────────────────
   const [showFilter, setShowFilter] = useState(false);
@@ -2302,15 +2339,12 @@ export default function ShoppingListScreen() {
 
       const brandItems: EnrichedItem[] = [...customBrandItems];
       const noNameItems: EnrichedItem[] = [...customNoNameItems];
-      let potential = 0;
-      let actual = 0;
       const newSelected: ProductToConvert[] = [];
 
       for (const result of processedItems) {
         if (!result) continue;
         if (result.kind === 'brand') {
           brandItems.push(result.enriched);
-          potential += result.potentialSavings;
           if (
             result.bestAlternative &&
             result.enriched.markenProduktRef
@@ -2323,15 +2357,13 @@ export default function ShoppingListScreen() {
           }
         } else {
           noNameItems.push(result.enriched);
-          actual += result.savings;
         }
       }
 
       setSelectedConversions(newSelected);
       setBrandProducts(brandItems);
       setNoNameProducts(noNameItems);
-      setTotalPotentialSavings(potential);
-      setTotalActualSavings(actual);
+      // Totals werden via useMemo derived → keine Setter nötig.
     } catch (error: any) {
       console.error('Error loading shopping cart:', error);
       showInfoToast(
@@ -2658,7 +2690,6 @@ export default function ShoppingListScreen() {
         }
       } else if (savings && savings > 0) {
         setNoNameProducts((prev) => prev.filter((i) => i.id !== itemId));
-        setTotalActualSavings((prev) => Math.max(0, prev - savings));
       } else {
         setBrandProducts((prev) => prev.filter((i) => i.id !== itemId));
       }
@@ -2699,15 +2730,10 @@ export default function ShoppingListScreen() {
         : undefined;
       await FirestoreService.removeFromShoppingCart(user.uid, itemId, payload);
       showInfoToast(TOAST_MESSAGES.SHOPPING.removedFromCart, 'ERROR');
-      // Optimistic update
+      // Optimistic update — Totals werden automatisch via useMemo
+      // aus brandProducts/noNameProducts neu derived.
       setBrandProducts((prev) => prev.filter((i) => i.id !== itemId));
-      setNoNameProducts((prev) => {
-        const removed = prev.find((i) => i.id === itemId);
-        if (removed) {
-          setTotalActualSavings((s) => Math.max(0, s - (removed.savings || 0)));
-        }
-        return prev.filter((i) => i.id !== itemId);
-      });
+      setNoNameProducts((prev) => prev.filter((i) => i.id !== itemId));
       setSelectedConversions((prev) => prev.filter((c) => c.einkaufswagenRef !== itemId));
     } catch (error) {
       console.error('Error removing from cart:', error);
@@ -2984,7 +3010,7 @@ export default function ShoppingListScreen() {
       const removedIds = new Set(targets.map((t) => t.id));
       setNoNameProducts((prev) => prev.filter((i) => !removedIds.has(i.id)));
       setBrandProducts((prev) => prev.filter((i) => !removedIds.has(i.id)));
-      setTotalActualSavings((prev) => Math.max(0, prev - totalSavings));
+      // totalActualSavings wird via useMemo aus noNameProducts derived.
 
       if (productsToAdd > 0) {
         setPurchaseLoaderState((prev) => ({
