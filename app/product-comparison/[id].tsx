@@ -2516,8 +2516,8 @@ export default function ProductComparisonScreen() {
       />
 
       {/* Schwebender Einkaufszettel-FAB. Detail-Seite ohne Tab-Bar
-          → nur safe-area-bottom + 20 px Atemraum. */}
-      <FloatingShoppingListButton bottomOffset={insets.bottom + 20} />
+          → nur safe-area-bottom + 8 px (war +20, FAB hing zu hoch). */}
+      <FloatingShoppingListButton bottomOffset={insets.bottom + 8} />
 
       {/* Fly-to-cart overlay — clones the tapped product image and
           animates it into the floating cart button. Mounted last so

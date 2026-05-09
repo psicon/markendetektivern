@@ -639,16 +639,19 @@ export default function HomeScreen() {
   const schnellzugriff = useMemo(() => [
     { icon: 'receipt' as const, label: 'Kassenbon\nscannen', background: '#0d8575', dark: true as const,  onPress: onScanBon },
     { icon: 'camera-plus-outline'  as const, label: 'Produkte\neinreichen', background: '#5b4f9c', dark: true as const,  onPress: () => safePush('/achievements' as any) },
+    // Cart-Glyph (gefüllt) — entspricht dem `cart.fill` der alten
+    // Homepage und matcht den schwebenden Einkaufszettel-FAB rechts
+    // unten, sodass Schnellzugriff + FAB visuell verbunden sind.
+    // Sitzt zwischen "Produkte einreichen" und "Deine Favoriten" —
+    // Action-orientierte Cards (Bon, Produkt, Einkaufsliste) gehören
+    // visuell zusammen, gefolgt von Browse-Cards (Favoriten, Umfragen).
+    { icon: 'cart'                 as const, label: 'Einkaufs-\nliste',    background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/shopping-list' as any) },
     // Theme-aware bg statt hardcoded `#dde2e4` (das war im Dark-Modus
     // mit weißem text unlesbar). theme.surfaceAlt ist hellgrau im
     // Light-Modus und dunkelgrau im Dark-Modus → theme.text liest
     // sich in beiden Modi korrekt.
     { icon: 'heart-outline'        as const, label: 'Deine\nFavoriten',    background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/favorites' as any) },
     { icon: 'poll'                 as const, label: 'Umfragen',            background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/achievements' as any) },
-    // Cart-Glyph (gefüllt) — entspricht dem `cart.fill` der alten
-    // Homepage und matcht den schwebenden Einkaufszettel-FAB rechts
-    // unten, sodass Schnellzugriff + FAB visuell verbunden sind.
-    { icon: 'cart'                 as const, label: 'Einkaufs-\nliste',    background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/shopping-list' as any) },
   ], [onScanBon, theme.surfaceAlt]);
 
   return (

@@ -1678,8 +1678,10 @@ export default function NoNameDetailScreen() {
       ) : null}
 
       {/* Schwebender Einkaufszettel-FAB. Detail-Seiten haben keine
-          Tab-Bar darunter, also nur safe-area-bottom + 20 px. */}
-      <FloatingShoppingListButton bottomOffset={insets.bottom + 20} />
+          Tab-Bar darunter, also nur safe-area-bottom + 8 px (vorher
+          +20 → wirkte zu hoch, jetzt klebt der FAB tighter an der
+          Home-Indicator-Bar). */}
+      <FloatingShoppingListButton bottomOffset={insets.bottom + 8} />
 
       {/* Fly-to-cart overlay — clones the hero image and animates it
           into the floating cart button. Mounted last so it sits on
