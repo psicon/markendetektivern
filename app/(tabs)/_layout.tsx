@@ -19,6 +19,7 @@ import Animated, {
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
+  withSequence,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
@@ -48,10 +49,10 @@ const USE_FLYING_TABS = true;
 // der Indicator drüber ist + slidet das Icon leicht nach oben (mehr
 // Headroom im Kreis). Beim Verlassen kommt das Label per Translate-
 // Y-Animation zurück.
-const PILL_HEIGHT = 64;
-const PILL_MARGIN_X = 20;
-const INDICATOR_SIZE = 50;
-const INDICATOR_PAD = 7; // (PILL_HEIGHT - INDICATOR_SIZE) / 2
+const PILL_HEIGHT = 62;
+const PILL_MARGIN_X = 36;
+const INDICATOR_SIZE = 46;
+const INDICATOR_PAD = 8; // (PILL_HEIGHT - INDICATOR_SIZE) / 2
 
 function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const colorScheme = useColorScheme();
@@ -60,18 +61,35 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
 
-  // Reanimated state — folgt state.index per Spring. mass/damping
-  // bewusst weich, damit die Bewegung "swooshy" wirkt aber nicht
-  // floppy nachschwingt.
+  // Reanimated state — folgt state.index per Spring mit leichtem
+  // Overshoot. damping 13 + stiffness 220 + mass 0.7 gibt einen
+  // Wobble von ~10-15% über das Ziel hinaus, schwingt 1× zurück
+  // und settled. Fühlt sich "boingy" an, ohne floppy zu sein.
   const activeIndex = useSharedValue(state.index);
+
+  // Indicator-Scale-Pulse — bei jedem Tab-Wechsel macht die Pille
+  // ein "boop": shrinkt kurz auf 0.92, springt mit Overshoot
+  // zurück auf 1.0. Das ist das eigentliche "Wobble"-Gefühl
+  // zusätzlich zum Translate.
+  const indicatorScale = useSharedValue(1);
+
   useEffect(() => {
     activeIndex.value = withSpring(state.index, {
-      damping: 18,
-      stiffness: 180,
-      mass: 0.55,
+      damping: 13,
+      stiffness: 220,
+      mass: 0.7,
       overshootClamping: false,
     });
-  }, [state.index, activeIndex]);
+    indicatorScale.value = withSequence(
+      withTiming(0.92, { duration: 90 }),
+      withSpring(1, {
+        damping: 9,
+        stiffness: 230,
+        mass: 0.5,
+        overshootClamping: false,
+      }),
+    );
+  }, [state.index, activeIndex, indicatorScale]);
 
   // Keyboard-Hide — Tab-Bar fadet weg + slidet runter wenn die
   // Tastatur kommt, kein hartes display:none-Springen.
@@ -100,13 +118,17 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const tabWidth = tabCount > 0 ? innerWidth / tabCount : 0;
 
   // Indicator-X = (activeIndex * tabWidth) + (tabWidth - indicatorSize) / 2
+  // + scale-Pulse für den "boop" beim Tab-Wechsel.
   const indicatorStyle = useAnimatedStyle(() => {
     if (tabWidth === 0) return { opacity: 0 };
     const x =
       activeIndex.value * tabWidth + (tabWidth - INDICATOR_SIZE) / 2;
     return {
       opacity: 1,
-      transform: [{ translateX: x }],
+      transform: [
+        { translateX: x },
+        { scale: indicatorScale.value },
+      ],
     };
   });
 
@@ -250,34 +272,39 @@ function FlyingTab({
   );
 
   const labelStyle = useAnimatedStyle(() => {
+    // Label fadet schnell raus (0.5 Distance schon unsichtbar) und
+    // schiebt sich beim Erscheinen leicht von unten nach oben rein.
     const opacity = interpolate(
       distance.value,
-      [0, 0.6, 1],
+      [0, 0.5, 1],
       [0, 0, 1],
       Extrapolation.CLAMP,
     );
     const translateY = interpolate(
       distance.value,
       [0, 1],
-      [6, 0],
+      [4, 0],
       Extrapolation.CLAMP,
     );
     return { opacity, transform: [{ translateY }] };
   });
 
   const iconStyle = useAnimatedStyle(() => {
-    // aktives Icon rutscht leicht nach oben damit es im Kreis-Zentrum
-    // sitzt (sonst wirkt es wegen des fehlenden Labels zu tief)
+    // Inaktives Icon: oberhalb der Mitte (Platz für Label drunter).
+    // Aktives Icon: rutscht runter zur Pill-Mitte = Indicator-Kreis-
+    // Mitte und zoomed deutlich rein (1.30) — das ist das gewünschte
+    // "zoomed"-Gefühl. translateY 12 verschiebt das Icon von y=20
+    // (inactive top) nach y=32 (Pill-Center, Circle-Center).
     const translateY = interpolate(
       distance.value,
       [0, 1],
-      [-6, 4],
+      [12, 0],
       Extrapolation.CLAMP,
     );
     const scale = interpolate(
       distance.value,
       [0, 1],
-      [1.05, 1],
+      [1.3, 1],
       Extrapolation.CLAMP,
     );
     return { transform: [{ translateY }, { scale }] };
@@ -295,20 +322,37 @@ function FlyingTab({
       }}
       style={{
         flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
         height: '100%',
+        position: 'relative',
       }}
     >
-      <Animated.View style={iconStyle}>
+      {/* Icon — absolut positioniert oben (top 8), shifted nach unten
+          + scaled wenn aktiv (per iconStyle). */}
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 8,
+            alignItems: 'center',
+          },
+          iconStyle,
+        ]}
+      >
         {renderTabIcon(routeName, iconColor, isFocused)}
       </Animated.View>
+      {/* Label — absolut positioniert unten (bottom 7), fadet aus
+          wenn aktiv. */}
       <Animated.Text
         numberOfLines={1}
         style={[
           {
             position: 'absolute',
-            bottom: 8,
+            bottom: 7,
+            left: 0,
+            right: 0,
+            textAlign: 'center',
             fontSize: 10,
             fontFamily: 'Nunito_600SemiBold',
             color: colors.tabIconDefault,
