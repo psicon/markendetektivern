@@ -93,6 +93,15 @@ function GlassBackdrop({
   pillBottom: number;
   animatedStyle: ReturnType<typeof useAnimatedStyle>;
 }) {
+  // ANDROID-TEST: GlassBackdrop komplett aus. MaskedView + BlurView-
+  // Combo (mit experimentalBlurMethod) hat im logcat
+  // `EGLConsumer is not attached to an OpenGL ES context` Warnings
+  // produziert + Surface-Stops. Wir prüfen ob die Surface-Disruption
+  // ohne diesen Effekt aufhört.
+  if (Platform.OS === 'android') {
+    return null;
+  }
+
   const tint = colorScheme === 'dark' ? 'dark' : 'light';
   // Backdrop-Höhe = von der Pillen-Mitte bis zum Screen-Boden.
   // pillBottom (= 35 px) + PILL_HEIGHT/2 (= 29 px) ≈ 64 px Höhe auf
