@@ -41,6 +41,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { EdgeGlow } from './EdgeGlow';
 
 const TAB_BAR_HEIGHT_IOS = 90;
 const TAB_BAR_HEIGHT_ANDROID_BASE = 62;
@@ -109,10 +110,21 @@ export function AchievementUnlockBanner({
 
   // Haptic-Feedback wird VOR dem Spring-Entry ausgelöst — der
   // taktile Impuls korreliert dann zeitlich mit dem visuellen
-  // Auftauchen.
+  // Auftauchen. Sequenz für stärkeren "Achievement-Punch":
+  //   1. Heavy-Impact sofort (= satter Bass-Schlag)
+  //   2. Success-Notification ~120 ms später (= bestätigender Triller)
+  // Das fühlt sich deutlich celebratorischer an als ein einzelnes
+  // soft notify, ohne aufdringlich zu sein.
   const triggerHaptic = useCallback(() => {
     try {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      setTimeout(() => {
+        try {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch {
+          // schluck — Haptic-Bonus, kein Pflichtfeature.
+        }
+      }, 120);
     } catch {
       // Haptic API nicht verfügbar (z.B. Web-Build, älteres Android) →
       // schluck stillschweigend, ist eh nur ein Bonus.
@@ -210,6 +222,11 @@ export function AchievementUnlockBanner({
       pointerEvents="box-none"
       style={[StyleSheet.absoluteFillObject, { zIndex: 9998 }]}
     >
+      {/* Tier-getinted Edge-Glow rund um den Screen — fadet synchron
+          mit dem Banner ein/aus. zIndex 9990 < Banner 9998, damit der
+          Banner-Card über dem Glow sitzt. */}
+      <EdgeGlow visible={visible} tint={data.tint} />
+
       <Animated.View
         pointerEvents="box-none"
         style={[
