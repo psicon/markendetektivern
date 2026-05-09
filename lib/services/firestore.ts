@@ -1079,7 +1079,11 @@ export class FirestoreService {
         try {
           const data = typeof lastDoc?.data === 'function' ? lastDoc.data() : null;
           cursorValue = data?.name;
-        } catch {
+        } catch (e) {
+          // Fallback auf undefined cursor (= startet Pagination von vorne).
+          // Logging weil dieser Pfad nicht erwartet ist — wenn er trotzdem
+          // hits, wollen wir es wissen.
+          console.warn('FirestoreService.getMarkenPaginated: cursor extraction failed', e);
           cursorValue = undefined;
         }
         q = query(
@@ -2078,13 +2082,20 @@ export class FirestoreService {
       (cached as any).mainProduct?.kategorieId !== undefined;
     if (cached !== undefined && cachedSchemaOk) {
       // Replay both staged-load callbacks synchronously so callers
-      // that rely on them keep working with the cached path.
+      // that rely on them keep working with the cached path. Wir
+      // schlucken Throws aus dem Callback NICHT mehr stumm — wenn
+      // ein UI-Consumer in seinem Callback-Handler explodiert, soll
+      // das im Log auftauchen, sonst maskieren wir UI-Bugs.
       if (cached) {
         if (callbacks?.onMainBasic) {
-          try { callbacks.onMainBasic(cached.mainProduct); } catch {}
+          try { callbacks.onMainBasic(cached.mainProduct); } catch (e) {
+            console.error('FirestoreService.getProductWithDetails: onMainBasic callback threw', e);
+          }
         }
         if (callbacks?.onMainResolved) {
-          try { callbacks.onMainResolved(cached.mainProduct); } catch {}
+          try { callbacks.onMainResolved(cached.mainProduct); } catch (e) {
+            console.error('FirestoreService.getProductWithDetails: onMainResolved callback threw', e);
+          }
         }
       }
       return cached;
@@ -2983,7 +2994,15 @@ export class FirestoreService {
                   bildCleanPng: p?.bildCleanPng ?? null,
                   bildCleanHq: p?.bildCleanHq ?? null,
                 };
-              } catch {
+              } catch (e) {
+                // Per-Item-Failure soll die Top-Products-Liste NICHT
+                // crashen — wir liefern das Item ohne bildClean-Felder
+                // zurück (Fallback auf Legacy-`bild`-URL). Aber wir
+                // wollen wissen wenn das passiert.
+                console.warn(
+                  `FirestoreService.getTopProducts: bildClean enrichment failed for ${collectionPath}/${item.id}`,
+                  e,
+                );
                 return item;
               }
             }),
