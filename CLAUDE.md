@@ -216,11 +216,6 @@ design files use the former and almost none of the latter.
 **Open (legacy design):**
 - ⏳ `app/markets/*`, `app/onboarding/*`, `app/auth/*`
 
-**Obsolete (delete or stub):**
-- ❌ `app/leaderboard.tsx` — replaced by the Bestenliste tab on
-  `(tabs)/rewards.tsx`. Internal route still exists; nothing
-  in the new design points to it.
-
 When marking a screen done, MOVE it from "Open" to "Done" in this
 table. If a previously-redesigned screen gets touched and
 regresses, move it back. Don't trust memory across sessions.
