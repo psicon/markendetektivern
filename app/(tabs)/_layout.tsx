@@ -64,7 +64,7 @@ const PILL_MARGIN_X = 50;
 // auch nicht im Token-System.
 const PILL_RADIUS = 18;
 const RAISED_SIZE = 56;
-const RAISED_LIFT = 21; // wie weit ragt der mittlere Button über die Pille hinaus
+const RAISED_LIFT = 23; // wie weit ragt der mittlere Button über die Pille hinaus
 
 // ─── Liquid-Glass-Backdrop ───────────────────────────────────────────
 // EINE BlurView mit voller Intensität, MaskedView mit vertikalem
@@ -496,7 +496,7 @@ function RaisedMiddleTab({
         numberOfLines={1}
         style={{
           position: 'absolute',
-          bottom: 7,
+          bottom: 9,
           fontSize: 10,
           fontFamily: 'Nunito_600SemiBold',
           color: isFocused ? colors.primary : colors.tabIconDefault,
