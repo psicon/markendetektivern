@@ -5,6 +5,10 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import {
+  showInfoToast,
+  showRetryableErrorToast,
+} from '@/lib/services/ui/toast';
 import { isExpoGo } from '@/lib/utils/platform';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
@@ -45,7 +49,7 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!formData.email || !formData.password) {
-      Alert.alert('Fehler', 'Bitte fülle alle Felder aus.');
+      showInfoToast('Bitte fülle alle Felder aus.', 'error', colorScheme ?? 'light');
       return;
     }
 
@@ -55,60 +59,55 @@ export default function LoginScreen() {
       await signIn(formData.email, formData.password);
       router.replace('/(tabs)');
     } catch (error: any) {
-      // Verhindere React Error Logs in Production
       if (__DEV__) {
         console.error('Login error:', error);
       }
-      
-      let errorMessage = 'Ein Fehler ist aufgetreten. Bitte versuche es erneut.';
-      let errorTitle = 'Anmeldung fehlgeschlagen';
-      
-      // Detaillierte Firebase Auth Error Codes
+
+      // Network-Fail → retry-toast (User kann sofort erneut tappen,
+      // statt Alert wegklicken + Submit-Button erneut treffen).
+      // Andere Fehler → info-toast (kein Retry sinnvoll, User muss
+      // Eingaben anpassen). Das ist die UX-Item-U2-Logik:
+      // Retry für transient errors, Info für deterministische Errors.
+      const isTransient = error.code === 'auth/network-request-failed';
+      let errorMessage =
+        'Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.';
+
       switch (error.code) {
         case 'auth/user-not-found':
-          errorTitle = 'Account nicht gefunden';
-          errorMessage = 'Es wurde kein Account mit dieser E-Mail-Adresse gefunden. Bitte überprüfe deine E-Mail-Adresse oder registriere dich.';
+          errorMessage =
+            'Account nicht gefunden. Bitte überprüfe deine E-Mail oder registriere dich.';
           break;
         case 'auth/wrong-password':
-          errorTitle = 'Falsches Passwort';
-          errorMessage = 'Das eingegebene Passwort ist falsch. Bitte versuche es erneut oder setze dein Passwort zurück.';
+          errorMessage =
+            'Falsches Passwort. Bitte erneut versuchen oder Passwort zurücksetzen.';
           break;
         case 'auth/invalid-email':
-          errorTitle = 'Ungültige E-Mail';
-          errorMessage = 'Die eingegebene E-Mail-Adresse ist ungültig. Bitte überprüfe das Format.';
+          errorMessage = 'Ungültige E-Mail-Adresse.';
           break;
         case 'auth/user-disabled':
-          errorTitle = 'Account deaktiviert';
-          errorMessage = 'Dieser Account wurde deaktiviert. Bitte kontaktiere den Support.';
+          errorMessage = 'Account deaktiviert. Bitte Support kontaktieren.';
           break;
         case 'auth/too-many-requests':
-          errorTitle = 'Zu viele Versuche';
-          errorMessage = 'Zu viele fehlgeschlagene Anmeldeversuche. Bitte warte einige Minuten und versuche es erneut.';
+          errorMessage =
+            'Zu viele Versuche. Bitte einige Minuten warten und erneut probieren.';
           break;
         case 'auth/network-request-failed':
-          errorTitle = 'Netzwerkfehler';
-          errorMessage = 'Keine Internetverbindung. Bitte überprüfe deine Verbindung und versuche es erneut.';
+          errorMessage =
+            'Keine Internetverbindung. Bitte Verbindung prüfen.';
           break;
         case 'auth/invalid-credential':
-          errorTitle = 'Anmeldedaten ungültig';
-          errorMessage = 'Die E-Mail-Adresse oder das Passwort ist falsch. Bitte überprüfe deine Eingaben.';
-          break;
-        default:
-          // Unbekannter Fehler - zeige generische Nachricht
-          errorTitle = 'Anmeldung fehlgeschlagen';
-          errorMessage = 'Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.';
-          if (__DEV__) {
-            errorMessage += `\n\nFehlercode: ${error.code}`;
-          }
+          errorMessage =
+            'E-Mail oder Passwort ist falsch. Bitte Eingaben prüfen.';
           break;
       }
-      
-      Alert.alert(errorTitle, errorMessage, [
-        {
-          text: 'OK',
-          style: 'default'
-        }
-      ]);
+
+      if (isTransient) {
+        showRetryableErrorToast(errorMessage, () => {
+          void handleLogin();
+        }, { colorScheme: colorScheme ?? 'light' });
+      } else {
+        showInfoToast(errorMessage, 'error', colorScheme ?? 'light');
+      }
     } finally {
       setLoading(false);
     }
@@ -130,7 +129,15 @@ export default function LoginScreen() {
       router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Google Sign-In error:', error);
-      Alert.alert('Google Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
+      // SSO-Failures sind oft transient (Token expired, Connectivity)
+      // → retry-toast lohnt sich.
+      showRetryableErrorToast(
+        `Google-Anmeldung fehlgeschlagen: ${error.message || 'Bitte erneut versuchen.'}`,
+        () => {
+          void handleGoogleSignIn();
+        },
+        { colorScheme: colorScheme ?? 'light' },
+      );
     } finally {
       setLoading(false);
     }
@@ -141,6 +148,8 @@ export default function LoginScreen() {
       setLoading(true);
       // Check if running in Expo Go
       if (isExpoGo()) {
+        // Dev-Hinweis bleibt als Alert, weil's eine User-Anweisung
+        // ist die explizit gelesen werden soll (Build-Type-Switch).
         Alert.alert(
           'Nicht verfügbar in Expo Go',
           'Apple Sign-In funktioniert nur in der TestFlight oder App Store Version. Bitte nutze Email/Passwort für die Entwicklung.',
@@ -152,7 +161,13 @@ export default function LoginScreen() {
       router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Apple Sign-In error:', error);
-      Alert.alert('Apple Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
+      showRetryableErrorToast(
+        `Apple-Anmeldung fehlgeschlagen: ${error.message || 'Bitte erneut versuchen.'}`,
+        () => {
+          void handleAppleSignIn();
+        },
+        { colorScheme: colorScheme ?? 'light' },
+      );
     } finally {
       setLoading(false);
     }

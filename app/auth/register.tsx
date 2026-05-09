@@ -7,6 +7,10 @@ import { MarketSelector } from '@/components/ui/MarketSelector';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import {
+  showInfoToast,
+  showRetryableErrorToast,
+} from '@/lib/services/ui/toast';
 import { Discounter, FirestoreDocument } from '@/lib/types/firestore';
 import { isExpoGo } from '@/lib/utils/platform';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -145,17 +149,29 @@ export default function RegisterScreen() {
     
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors);
-      Alert.alert('Pflichtfelder', 'Bitte fülle alle Pflichtfelder aus und akzeptiere die Nutzungsbedingungen.');
+      showInfoToast(
+        'Bitte fülle alle Pflichtfelder aus und akzeptiere die Nutzungsbedingungen.',
+        'error',
+        colorScheme ?? 'light',
+      );
       return;
     }
-    
+
     if (formData.password !== formData.confirmPassword) {
-      Alert.alert('Fehler', 'Die Passwörter stimmen nicht überein.');
+      showInfoToast(
+        'Die Passwörter stimmen nicht überein.',
+        'error',
+        colorScheme ?? 'light',
+      );
       return;
     }
 
     if (formData.password.length < 6) {
-      Alert.alert('Passwort zu kurz', 'Das Passwort muss mindestens 6 Zeichen lang sein.');
+      showInfoToast(
+        'Das Passwort muss mindestens 6 Zeichen lang sein.',
+        'error',
+        colorScheme ?? 'light',
+      );
       return;
     }
 
@@ -181,45 +197,40 @@ export default function RegisterScreen() {
       if (__DEV__) {
         console.error('Registration error:', error);
       }
-      
-      let errorMessage = 'Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.';
-      let errorTitle = 'Registrierung fehlgeschlagen';
-      
-      // Detaillierte Firebase Auth Error Codes
+
+      // Network = retry-toast, alles andere = info-toast (User
+      // muss Eingabe ändern, kein blanker Retry).
+      const isTransient = error.code === 'auth/network-request-failed';
+      let errorMessage =
+        'Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.';
       switch (error.code) {
         case 'auth/email-already-in-use':
-          errorTitle = 'E-Mail bereits vergeben';
-          errorMessage = 'Diese E-Mail-Adresse wird bereits verwendet. Bitte verwende eine andere E-Mail-Adresse oder melde dich mit dem bestehenden Account an.';
+          errorMessage =
+            'Diese E-Mail-Adresse wird bereits verwendet. Bitte andere E-Mail oder beim bestehenden Account anmelden.';
           break;
         case 'auth/weak-password':
-          errorTitle = 'Passwort zu schwach';
-          errorMessage = 'Das Passwort muss mindestens 6 Zeichen lang sein. Bitte wähle ein stärkeres Passwort.';
+          errorMessage =
+            'Passwort zu schwach. Bitte ein stärkeres mit mindestens 6 Zeichen wählen.';
           break;
         case 'auth/invalid-email':
-          errorTitle = 'Ungültige E-Mail';
-          errorMessage = 'Die eingegebene E-Mail-Adresse ist ungültig. Bitte überprüfe das Format.';
+          errorMessage = 'Ungültige E-Mail-Adresse.';
           break;
         case 'auth/operation-not-allowed':
-          errorTitle = 'Registrierung deaktiviert';
-          errorMessage = 'Die Registrierung ist derzeit deaktiviert. Bitte kontaktiere den Support.';
+          errorMessage =
+            'Registrierung derzeit deaktiviert. Bitte Support kontaktieren.';
           break;
         case 'auth/network-request-failed':
-          errorTitle = 'Netzwerkfehler';
-          errorMessage = 'Keine Internetverbindung. Bitte überprüfe deine Verbindung und versuche es erneut.';
-          break;
-        default:
-          if (__DEV__) {
-            errorMessage += `\n\nFehlercode: ${error.code}`;
-          }
+          errorMessage = 'Keine Internetverbindung. Bitte Verbindung prüfen.';
           break;
       }
-      
-      Alert.alert(errorTitle, errorMessage, [
-        {
-          text: 'OK',
-          style: 'default'
-        }
-      ]);
+
+      if (isTransient) {
+        showRetryableErrorToast(errorMessage, () => {
+          void handleRegister();
+        }, { colorScheme: colorScheme ?? 'light' });
+      } else {
+        showInfoToast(errorMessage, 'error', colorScheme ?? 'light');
+      }
     } finally {
       setLoading(false);
     }
@@ -232,7 +243,13 @@ export default function RegisterScreen() {
       router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Google Sign-In error:', error);
-      Alert.alert('Google Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
+      showRetryableErrorToast(
+        `Google-Anmeldung fehlgeschlagen: ${error.message || 'Bitte erneut versuchen.'}`,
+        () => {
+          void handleGoogleSignIn();
+        },
+        { colorScheme: colorScheme ?? 'light' },
+      );
     } finally {
       setLoading(false);
     }
@@ -243,6 +260,8 @@ export default function RegisterScreen() {
       setLoading(true);
       // Check if running in Expo Go
       if (isExpoGo()) {
+        // Dev-Hinweis bleibt als Alert (Build-Type-Switch erforderlich,
+        // User muss explizit lesen + bestätigen).
         Alert.alert(
           'Nicht verfügbar in Expo Go',
           'Apple Sign-In funktioniert nur in der TestFlight oder App Store Version. Bitte nutze Email/Passwort für die Entwicklung.',
@@ -254,7 +273,13 @@ export default function RegisterScreen() {
       router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Apple Sign-In error:', error);
-      Alert.alert('Apple Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
+      showRetryableErrorToast(
+        `Apple-Anmeldung fehlgeschlagen: ${error.message || 'Bitte erneut versuchen.'}`,
+        () => {
+          void handleAppleSignIn();
+        },
+        { colorScheme: colorScheme ?? 'light' },
+      );
     } finally {
       setLoading(false);
     }
