@@ -70,7 +70,7 @@
       ],
       "package": "de.markendetektive",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 1154
+      "versionCode": 1155
     },
     "web": {
       "bundler": "metro",
