@@ -3351,6 +3351,32 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - Yoga
+  - react-native-skia (2.6.2):
+    - DoubleConversion
+    - glog
+    - hermes-engine
+    - RCT-Folly (= 2024.11.18.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React
+    - React-callinvoker
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - Yoga
   - react-native-slider (4.5.6):
     - DoubleConversion
     - glog
@@ -4464,6 +4490,7 @@ DEPENDENCIES:
   - react-native-maps (from `../node_modules/react-native-maps`)
   - react-native-pager-view (from `../node_modules/react-native-pager-view`)
   - react-native-safe-area-context (from `../node_modules/react-native-safe-area-context`)
+  - "react-native-skia (from `../node_modules/@shopify/react-native-skia`)"
   - "react-native-slider (from `../node_modules/@react-native-community/slider`)"
   - react-native-webview (from `../node_modules/react-native-webview`)
   - React-NativeModulesApple (from `../node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)
@@ -4733,6 +4760,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-pager-view"
   react-native-safe-area-context:
     :path: "../node_modules/react-native-safe-area-context"
+  react-native-skia:
+    :path: "../node_modules/@shopify/react-native-skia"
   react-native-slider:
     :path: "../node_modules/@react-native-community/slider"
   react-native-webview:
@@ -4966,6 +4995,7 @@ SPEC CHECKSUMS:
   react-native-maps: ee1e65647460c3d41e778071be5eda10e3da6225
   react-native-pager-view: e0a6e9be6bf1d8ee1fdbaeab5c6a118ac13cefee
   react-native-safe-area-context: 6cec90ce53951d3b52dc73e873323a4a7662fc0c
+  react-native-skia: d49895200848407907a2f30f7e8e44b2d00b0933
   react-native-slider: 2ceb3abcc54e14ea0591aa54e8f550f2976820e8
   react-native-webview: 02c782d78f1a20bcb739f4556d936f84e4ca4f5c
   React-NativeModulesApple: d2b9bd7d55dfd864e56c76592777ad32e8ab1f3d
