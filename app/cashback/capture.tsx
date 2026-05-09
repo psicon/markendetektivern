@@ -169,19 +169,13 @@ export default function CashbackCaptureScreen() {
     [],
   );
 
-  // On mount: User-Wunsch (2026-05-09): Doc-Scanner explizit AUS,
-  // weil:
-  //   1. Auto-Shutter feuert zu früh, bevor User den Bon sauber
-  //      positioniert hat (Apple's VNDocumentCameraVC + Google's
-  //      ML-Kit haben das hardgekodet, kein Config zum Abschalten).
-  //   2. Auto-Continue scannt weiter auch nach 1 Foto (maxNumDocuments
-  //      ist Android-only, iOS lässt unbegrenzt zu).
-  // → wir nutzen IMMER den expo-camera-Fallback (manueller Shutter,
-  // 1 Foto, fertig). Der Code-Pfad existiert eh schon weil er als
-  // Fallback für Devices ohne Doc-Scanner-Modul gebraucht wird.
+  // On mount: just probe for the native scanner so we know which UI
+  // to render. We do NOT auto-launch — that bites the navigation
+  // animation (capture page slides in from rewards while the native
+  // modal opens, leading to a confusing reveal on cancel).
   useEffect(() => {
     if (scannerState !== 'unknown') return;
-    setScannerState('unavailable');
+    setScannerState(isDocumentScannerLinked() ? 'available' : 'unavailable');
   }, [scannerState]);
 
   const launchScannerAgain = useCallback(async () => {
