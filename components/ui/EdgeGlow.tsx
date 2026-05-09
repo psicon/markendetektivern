@@ -51,6 +51,10 @@ interface EdgeGlowProps {
   visible: boolean;
   /** Hex color string (z.B. '#0d8575' oder '#FF2D55'). */
   tint: string;
+  /** Optionaler zweiter Hex-Color für die Shimmer-Welle. Wenn nicht
+   *  gesetzt, wird automatisch eine aufgehellte Variante der primary
+   *  generiert. Bei Level-Ups: die Color des VORHERIGEN Levels. */
+  secondaryTint?: string;
 }
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -94,16 +98,17 @@ function lighten(hex: string, ratio: number): string {
 // inner-side des verblurten Strokes ist im sichtbaren Bereich → pure
 // Halo, keine sichtbare Border-Linie.
 //
-// User-Wunsch v6.2: "nicht weiter reinreichend (eher weniger) sondern
-// die farbe intensiver (weniger blur)". Kürzere Reichweite, schärfere
-// Kante, kräftigere Color-Intensität direkt am Display-Rand.
+// User-Wunsch v6.3: "secondary stärker sichtbar machen, animation
+// stärker (schöner umlauf - fließen)". Rotation deutlich schneller
+// + Gradient-Pattern verteilt secondary auf 2 Bands statt 1 Peak →
+// User sieht ständig Bewegung von beiden Farben.
 const OUTSET = 14;
 const STROKE_WIDTH = 38;
 const BLUR_RADIUS = 18;
 const CORNER_R = 58;
-const ROTATION_MS = 8000;
+const ROTATION_MS = 4500; // war 8000 — fast doppelt so schnell
 
-export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
+export function EdgeGlow({ visible, tint, secondaryTint }: EdgeGlowProps) {
   const visibility = useSharedValue(0);
   const angle = useSharedValue(0);
   const breath = useSharedValue(0.85);
@@ -179,18 +184,19 @@ export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
   // Kontrast). Stops in alternierender Reihenfolge → 2 sichtbare
   // bright bands die beim Rotieren wandern.
   const primary = tint;
-  // Sekundärton heller (55 % white) als Shimmer-Akzent. Soll
-  // nur kurz aufblitzen, NICHT die primäre Farbe verwässern.
-  const secondary = lighten(tint, 0.55);
+  // Sekundärton: explizite secondaryTint Prop wenn gesetzt (z.B.
+  // Color des vorherigen Levels), sonst aufgehellte primary als
+  // Fallback. Bei einer expliziten secondaryTint ist der Kontrast
+  // viel höher — chromatischer Color-Shift statt Helligkeits-Shift.
+  const secondary = secondaryTint ?? lighten(tint, 0.55);
 
-  // Gradient-Stops biased zugunsten primary:
-  //   primary holds 0-35% → blends to secondary at 50% → blends back
-  //   to primary 65-100%. Sekundärton ist nur ein KURZER Highlight
-  //   in der Mitte, der beim Rotieren als Shimmer durchwandert.
-  //   Die Tier-Color ist die Hauptmusik — die zweite Farbe ist
-  //   das Glanzlicht.
-  const colors = [primary, primary, secondary, primary, primary];
-  const positions = [0, 0.35, 0.5, 0.65, 1];
+  // Gradient-Stops mit ZWEI Sekundär-Bands statt einem Peak:
+  //   primary @ 0%, secondary @ 25%, primary @ 50%, secondary @ 75%,
+  //   primary @ 100%. Beim Rotieren laufen 2 Sekundär-Wellen um den
+  //   Halo → Sekundärton ist permanent sichtbar (nicht nur als kurzer
+  //   Blitz). Primary bleibt trotzdem dominant weil sie 3 Stops hält.
+  const colors = [primary, secondary, primary, secondary, primary];
+  const positions = [0, 0.25, 0.5, 0.75, 1];
 
   return (
     <Animated.View

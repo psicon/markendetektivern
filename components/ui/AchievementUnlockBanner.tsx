@@ -67,6 +67,12 @@ export type BannerData = {
   lottie: any;
   /** Tier-Farbe — bestimmt Stripe + Gradient-Tönung. */
   tint: string;
+  /** Optionaler Sekundär-Tint für den EdgeGlow. Wenn gesetzt, wird
+   *  diese Farbe als zweite Color-Welle im Halo verwendet (z.B. die
+   *  Color des VORHERIGEN Levels für ein satisfying "Übergang"-
+   *  Gefühl). Wenn nicht gesetzt: EdgeGlow nutzt eine aufgehellte
+   *  Variante des primary-Tints als Shimmer-Akzent. */
+  secondaryTint?: string;
   /** Optional: Tap aufs Body. */
   onTap?: () => void;
 };
@@ -225,7 +231,11 @@ export function AchievementUnlockBanner({
       {/* Tier-getinted Edge-Glow rund um den Screen — fadet synchron
           mit dem Banner ein/aus. zIndex 9990 < Banner 9998, damit der
           Banner-Card über dem Glow sitzt. */}
-      <EdgeGlow visible={visible} tint={data.tint} />
+      <EdgeGlow
+        visible={visible}
+        tint={data.tint}
+        secondaryTint={data.secondaryTint}
+      />
 
       <Animated.View
         pointerEvents="box-none"

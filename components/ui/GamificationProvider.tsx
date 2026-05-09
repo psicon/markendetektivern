@@ -119,6 +119,15 @@ export function bannerDataFromLevelUp(
   const levelName = levelInfo?.name;
   const levelDescription = levelInfo?.description;
 
+  // Sekundär-Tint für den EdgeGlow: Color des VORHERIGEN Levels.
+  // Effekt: der Halo zeigt sichtbar BEIDE Farben — die alte (vom
+  // letzten Level, das man gerade verlassen hat) und die neue (vom
+  // erreichten Level). Visueller "Übergang" der das Level-Up unter-
+  // streicht. Fallback wenn kein vorheriges Level (z.B. Level 1):
+  // undefined → EdgeGlow nutzt aufgehellte primary als Shimmer.
+  const prevLevelInfo = allLevels.find((l) => l.id === newLevel - 1);
+  const secondaryTint = prevLevelInfo?.color;
+
   // Title: "Level X erreicht – Levelname" wenn Name vorhanden,
   // sonst nur "Level X erreicht" (Catalog noch nicht geladen).
   // Em-Dash (–, U+2013) zwischen Level-Number und Name — bessere
@@ -146,6 +155,7 @@ export function bannerDataFromLevelUp(
       }
     })(),
     tint,
+    secondaryTint,
     onTap: () => {
       try {
         router.push('/achievements' as any);
