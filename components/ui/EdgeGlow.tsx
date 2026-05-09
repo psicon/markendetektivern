@@ -94,14 +94,13 @@ function lighten(hex: string, ratio: number): string {
 // inner-side des verblurten Strokes ist im sichtbaren Bereich → pure
 // Halo, keine sichtbare Border-Linie.
 //
-// User-Wunsch v6.1: "n bisschen intensiver" — also Stroke breiter,
-// Blur größer, Outset weiter raus damit die Halo-Strahlung breiter
-// in den Screen leuchtet. Sekundärton chromatischer (weniger
-// White-Mix → kräftiger sichtbar).
-const OUTSET = 22;
-const STROKE_WIDTH = 44;
-const BLUR_RADIUS = 38;
-const CORNER_R = 60;
+// User-Wunsch v6.2: "nicht weiter reinreichend (eher weniger) sondern
+// die farbe intensiver (weniger blur)". Kürzere Reichweite, schärfere
+// Kante, kräftigere Color-Intensität direkt am Display-Rand.
+const OUTSET = 14;
+const STROKE_WIDTH = 38;
+const BLUR_RADIUS = 18;
+const CORNER_R = 58;
 const ROTATION_MS = 8000;
 
 export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
@@ -180,9 +179,18 @@ export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
   // Kontrast). Stops in alternierender Reihenfolge → 2 sichtbare
   // bright bands die beim Rotieren wandern.
   const primary = tint;
-  // Sekundärton von 45 % → 28 % white-mix: kräftiger, mehr Chroma.
-  const secondary = lighten(tint, 0.28);
-  const colors = [primary, secondary, primary, secondary, primary];
+  // Sekundärton heller (55 % white) als Shimmer-Akzent. Soll
+  // nur kurz aufblitzen, NICHT die primäre Farbe verwässern.
+  const secondary = lighten(tint, 0.55);
+
+  // Gradient-Stops biased zugunsten primary:
+  //   primary holds 0-35% → blends to secondary at 50% → blends back
+  //   to primary 65-100%. Sekundärton ist nur ein KURZER Highlight
+  //   in der Mitte, der beim Rotieren als Shimmer durchwandert.
+  //   Die Tier-Color ist die Hauptmusik — die zweite Farbe ist
+  //   das Glanzlicht.
+  const colors = [primary, primary, secondary, primary, primary];
+  const positions = [0, 0.35, 0.5, 0.65, 1];
 
   return (
     <Animated.View
@@ -207,7 +215,7 @@ export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
             start={start}
             end={end}
             colors={colors}
-            positions={[0, 0.25, 0.5, 0.75, 1]}
+            positions={positions}
           />
           {/* BlurMask 'normal' verblurt die Stroke-Outline radial.
               Ergebnis: weicher Halo statt scharfe Kontur. */}
