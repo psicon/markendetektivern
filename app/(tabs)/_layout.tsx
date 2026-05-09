@@ -52,6 +52,11 @@ const USE_FLYING_TABS = true;
 // pulst zusätzlich seine Border (cardBackground → brand secondary).
 const PILL_HEIGHT = 58;
 const PILL_MARGIN_X = 50;
+// borderRadius bewusst NICHT PILL_HEIGHT / 2 (= full capsule). Cards
+// und Buttons im Rest der App nutzen 18–25 (rounded rectangle, nicht
+// capsule). Eine perfekte Pille brach mit dem Rest visuell. 22 wirkt
+// noch weich, aber passt zum CD-Pattern.
+const PILL_RADIUS = 22;
 const RAISED_SIZE = 56;
 const RAISED_LIFT = 18; // wie weit ragt der mittlere Button über die Pille hinaus
 
@@ -109,10 +114,13 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           position: 'absolute',
           left: PILL_MARGIN_X,
           right: PILL_MARGIN_X,
-          bottom: Math.max(insets.bottom, 8) + 6,
+          // Pille tiefer als vorher (war insets.bottom + 6, hing zu
+          // nah am Einkaufszettel-FAB). Jetzt klebt sie näher an der
+          // Home-Indicator-Bar / Screen-Bottom-Edge.
+          bottom: Math.max(insets.bottom - 2, 4),
           height: PILL_HEIGHT,
           backgroundColor: colors.cardBackground,
-          borderRadius: PILL_HEIGHT / 2,
+          borderRadius: PILL_RADIUS,
           flexDirection: 'row',
           alignItems: 'center',
           // soft shadow wie ein floating element
