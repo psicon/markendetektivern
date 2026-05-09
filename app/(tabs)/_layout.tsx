@@ -5,7 +5,6 @@ import React, { useEffect, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
-  LayoutChangeEvent,
   Platform,
   Pressable,
   Text,
@@ -15,9 +14,7 @@ import {
 import Animated, {
   Extrapolation,
   interpolate,
-  type SharedValue,
   useAnimatedStyle,
-  useDerivedValue,
   useSharedValue,
   withSequence,
   withSpring,
@@ -42,54 +39,27 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 // vollständig erhalten — kein Schaden.
 const USE_FLYING_TABS = true;
 
-// ─── Floating-Pill Tab-Bar ───────────────────────────────────────────
+// ─── Floating-Pill Tab-Bar mit raised Stöbern-Button ────────────────
 // Container = floating Pill (white/dark surface, soft shadow, große
-// Border-Radius). Indicator = Brand-Primary-Kreis der per Spring
-// zwischen den Tab-Slots animiert. Pro Tab fadet das Label aus wenn
-// der Indicator drüber ist + slidet das Icon leicht nach oben (mehr
-// Headroom im Kreis). Beim Verlassen kommt das Label per Translate-
-// Y-Animation zurück.
-const PILL_HEIGHT = 62;
-const PILL_MARGIN_X = 36;
-const INDICATOR_SIZE = 46;
-const INDICATOR_PAD = 8; // (PILL_HEIGHT - INDICATOR_SIZE) / 2
+// Border-Radius). Mittlerer Tab (Stöbern) ist ein permanent raised
+// Brand-Primary-Kreis der über die Pille hinausragt — wie unsere
+// alte Navigation, nur eben über einer schwebenden Pille statt einer
+// flachen Bottom-Bar. Side-Tabs (Home, Rewards) sind flache Tabs
+// mit Icon oben + Label unten.
+//
+// Animation: jedes Tab macht beim Aktivieren einen Scale-Wobble
+// (squash + spring back mit Overshoot). Der raised Stöbern-Button
+// pulst zusätzlich seine Border (cardBackground → brand secondary).
+const PILL_HEIGHT = 58;
+const PILL_MARGIN_X = 50;
+const RAISED_SIZE = 56;
+const RAISED_LIFT = 18; // wie weit ragt der mittlere Button über die Pille hinaus
 
 function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
-  const [containerWidth, setContainerWidth] = useState(0);
-
-  // Reanimated state — folgt state.index per Spring mit leichtem
-  // Overshoot. damping 13 + stiffness 220 + mass 0.7 gibt einen
-  // Wobble von ~10-15% über das Ziel hinaus, schwingt 1× zurück
-  // und settled. Fühlt sich "boingy" an, ohne floppy zu sein.
-  const activeIndex = useSharedValue(state.index);
-
-  // Indicator-Scale-Pulse — bei jedem Tab-Wechsel macht die Pille
-  // ein "boop": shrinkt kurz auf 0.92, springt mit Overshoot
-  // zurück auf 1.0. Das ist das eigentliche "Wobble"-Gefühl
-  // zusätzlich zum Translate.
-  const indicatorScale = useSharedValue(1);
-
-  useEffect(() => {
-    activeIndex.value = withSpring(state.index, {
-      damping: 13,
-      stiffness: 220,
-      mass: 0.7,
-      overshootClamping: false,
-    });
-    indicatorScale.value = withSequence(
-      withTiming(0.92, { duration: 90 }),
-      withSpring(1, {
-        damping: 9,
-        stiffness: 230,
-        mass: 0.5,
-        overshootClamping: false,
-      }),
-    );
-  }, [state.index, activeIndex, indicatorScale]);
 
   // Keyboard-Hide — Tab-Bar fadet weg + slidet runter wenn die
   // Tastatur kommt, kein hartes display:none-Springen.
@@ -112,25 +82,6 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       hideSub.remove();
     };
   }, [keyboardOpacity]);
-
-  const tabCount = state.routes.length;
-  const innerWidth = containerWidth; // wir setzen indicator relativ zum container
-  const tabWidth = tabCount > 0 ? innerWidth / tabCount : 0;
-
-  // Indicator-X = (activeIndex * tabWidth) + (tabWidth - indicatorSize) / 2
-  // + scale-Pulse für den "boop" beim Tab-Wechsel.
-  const indicatorStyle = useAnimatedStyle(() => {
-    if (tabWidth === 0) return { opacity: 0 };
-    const x =
-      activeIndex.value * tabWidth + (tabWidth - INDICATOR_SIZE) / 2;
-    return {
-      opacity: 1,
-      transform: [
-        { translateX: x },
-        { scale: indicatorScale.value },
-      ],
-    };
-  });
 
   const containerAnimStyle = useAnimatedStyle(() => ({
     opacity: keyboardOpacity.value,
@@ -164,7 +115,6 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           borderRadius: PILL_HEIGHT / 2,
           flexDirection: 'row',
           alignItems: 'center',
-          paddingHorizontal: INDICATOR_PAD,
           // soft shadow wie ein floating element
           shadowColor: '#000',
           shadowOffset: { width: 0, height: 8 },
@@ -175,36 +125,13 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           // Hintergrund — sonst verschwindet die Pille fast ganz
           borderWidth: colorScheme === 'dark' ? 1 : 0,
           borderColor: 'rgba(255,255,255,0.06)',
+          // overflow visible damit der raised Stöbern-Button + sein
+          // Shadow nicht abgeschnitten werden
+          overflow: 'visible',
         },
         containerAnimStyle,
       ]}
-      onLayout={(e: LayoutChangeEvent) => {
-        // innerer Bereich = Container-Width minus padding-Horizontal links+rechts
-        setContainerWidth(e.nativeEvent.layout.width - INDICATOR_PAD * 2);
-      }}
     >
-      {/* Animierter Brand-Primary-Indicator-Kreis */}
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          {
-            position: 'absolute',
-            top: INDICATOR_PAD,
-            left: INDICATOR_PAD,
-            width: INDICATOR_SIZE,
-            height: INDICATOR_SIZE,
-            borderRadius: INDICATOR_SIZE / 2,
-            backgroundColor: colors.primary,
-            shadowColor: colors.primary,
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.35,
-            shadowRadius: 8,
-            elevation: 6,
-          },
-          indicatorStyle,
-        ]}
-      />
-
       {state.routes.map((route, index) => {
         const { options } = descriptors[route.key];
         const isFocused = state.index === index;
@@ -223,18 +150,30 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             if (Platform.OS === 'ios') {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             }
-            // navigate without params/merge for tabs (default behaviour)
             navigation.navigate(route.name as never);
           }
         };
 
+        // Stöbern (route name 'explore') ist immer der raised
+        // mittlere Button — egal ob fokussiert oder nicht.
+        if (route.name === 'explore') {
+          return (
+            <RaisedMiddleTab
+              key={route.key}
+              label={label}
+              isFocused={isFocused}
+              colors={colors}
+              colorScheme={colorScheme ?? 'light'}
+              onPress={onPress}
+            />
+          );
+        }
+
         return (
-          <FlyingTab
+          <FlatSideTab
             key={route.key}
             routeName={route.name}
             label={label}
-            index={index}
-            activeIndex={activeIndex}
             isFocused={isFocused}
             colors={colors}
             onPress={onPress}
@@ -245,72 +184,47 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   );
 }
 
-interface FlyingTabProps {
+// ─── Flat Side-Tab (Home, Rewards) ──────────────────────────────────
+// Icon oben + Label unten. Beim Aktivieren: kurzer Squash-Spring
+// (Wobble) auf den ganzen Inhalt. Icon-Color shiftet von textMuted
+// auf brand primary. Label-Color analog.
+interface FlatSideTabProps {
   routeName: string;
   label: string;
-  index: number;
-  activeIndex: SharedValue<number>;
   isFocused: boolean;
   colors: (typeof Colors)['light'];
   onPress: () => void;
 }
 
-function FlyingTab({
+function FlatSideTab({
   routeName,
   label,
-  index,
-  activeIndex,
   isFocused,
   colors,
   onPress,
-}: FlyingTabProps) {
-  // Distance vom aktiven Tab — 0 = aktiv, 1+ = entfernt. Wird für
-  // Label-Opacity + Icon-Translate-Y benutzt damit das aktive Tab
-  // nur das Icon zeigt und das Label sanft rein-/rausfaded.
-  const distance = useDerivedValue(() =>
-    Math.abs(activeIndex.value - index),
-  );
+}: FlatSideTabProps) {
+  const wobble = useSharedValue(1);
 
-  const labelStyle = useAnimatedStyle(() => {
-    // Label fadet schnell raus (0.5 Distance schon unsichtbar) und
-    // schiebt sich beim Erscheinen leicht von unten nach oben rein.
-    const opacity = interpolate(
-      distance.value,
-      [0, 0.5, 1],
-      [0, 0, 1],
-      Extrapolation.CLAMP,
-    );
-    const translateY = interpolate(
-      distance.value,
-      [0, 1],
-      [4, 0],
-      Extrapolation.CLAMP,
-    );
-    return { opacity, transform: [{ translateY }] };
-  });
+  // wenn dieses Tab BECOMES focused → squash + spring back
+  useEffect(() => {
+    if (isFocused) {
+      wobble.value = withSequence(
+        withTiming(0.88, { duration: 90 }),
+        withSpring(1, {
+          damping: 9,
+          stiffness: 230,
+          mass: 0.5,
+          overshootClamping: false,
+        }),
+      );
+    }
+  }, [isFocused, wobble]);
 
-  const iconStyle = useAnimatedStyle(() => {
-    // Inaktives Icon: oberhalb der Mitte (Platz für Label drunter).
-    // Aktives Icon: rutscht runter zur Pill-Mitte = Indicator-Kreis-
-    // Mitte und zoomed deutlich rein (1.30) — das ist das gewünschte
-    // "zoomed"-Gefühl. translateY 12 verschiebt das Icon von y=20
-    // (inactive top) nach y=32 (Pill-Center, Circle-Center).
-    const translateY = interpolate(
-      distance.value,
-      [0, 1],
-      [12, 0],
-      Extrapolation.CLAMP,
-    );
-    const scale = interpolate(
-      distance.value,
-      [0, 1],
-      [1.3, 1],
-      Extrapolation.CLAMP,
-    );
-    return { transform: [{ translateY }, { scale }] };
-  });
+  const wobbleStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: wobble.value }],
+  }));
 
-  const iconColor = isFocused ? '#ffffff' : colors.text;
+  const accent = isFocused ? colors.primary : colors.tabIconDefault;
 
   return (
     <Pressable
@@ -326,43 +240,133 @@ function FlyingTab({
         position: 'relative',
       }}
     >
-      {/* Icon — absolut positioniert oben (top 8), shifted nach unten
-          + scaled wenn aktiv (per iconStyle). */}
       <Animated.View
         style={[
           {
             position: 'absolute',
             left: 0,
             right: 0,
-            top: 8,
+            top: 0,
+            bottom: 0,
             alignItems: 'center',
+            justifyContent: 'center',
           },
-          iconStyle,
+          wobbleStyle,
         ]}
       >
-        {renderTabIcon(routeName, iconColor, isFocused)}
+        {renderTabIcon(routeName, accent, isFocused)}
+        <Text
+          numberOfLines={1}
+          style={{
+            marginTop: 3,
+            fontSize: 10,
+            fontFamily: 'Nunito_600SemiBold',
+            color: accent,
+            letterSpacing: 0.2,
+          }}
+        >
+          {label}
+        </Text>
       </Animated.View>
-      {/* Label — absolut positioniert unten (bottom 7), fadet aus
-          wenn aktiv. */}
-      <Animated.Text
-        numberOfLines={1}
+    </Pressable>
+  );
+}
+
+// ─── Raised Middle-Tab (Stöbern) ────────────────────────────────────
+// Permanent über die Pille hinausragender Brand-Primary-Kreis mit
+// weißem CustomIcon (Markendetektive-Glyph). Border = cardBackground
+// (matcht die Pille → wirkt wie ein "Knopf in der Pille"), wird beim
+// Aktivieren auf brand secondary umgefärbt + macht Wobble-Pulse.
+// Stöbern-Label sitzt unter dem raised Button im Pill-Bereich.
+interface RaisedMiddleTabProps {
+  label: string;
+  isFocused: boolean;
+  colors: (typeof Colors)['light'];
+  colorScheme: 'light' | 'dark';
+  onPress: () => void;
+}
+
+function RaisedMiddleTab({
+  label,
+  isFocused,
+  colors,
+  colorScheme,
+  onPress,
+}: RaisedMiddleTabProps) {
+  const wobble = useSharedValue(1);
+
+  useEffect(() => {
+    if (isFocused) {
+      wobble.value = withSequence(
+        withTiming(0.92, { duration: 90 }),
+        withSpring(1, {
+          damping: 8,
+          stiffness: 240,
+          mass: 0.5,
+          overshootClamping: false,
+        }),
+      );
+    }
+  }, [isFocused, wobble]);
+
+  const wobbleStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: wobble.value }],
+  }));
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        flex: 1,
+        height: '100%',
+        position: 'relative',
+        alignItems: 'center',
+      }}
+    >
+      {/* Raised Brand-Button — ragt RAISED_LIFT px über die Pille hinaus */}
+      <Animated.View
         style={[
           {
             position: 'absolute',
-            bottom: 7,
-            left: 0,
-            right: 0,
-            textAlign: 'center',
-            fontSize: 10,
-            fontFamily: 'Nunito_600SemiBold',
-            color: colors.tabIconDefault,
-            letterSpacing: 0.2,
+            top: -RAISED_LIFT,
+            width: RAISED_SIZE,
+            height: RAISED_SIZE,
+            borderRadius: RAISED_SIZE / 2,
+            backgroundColor: colors.primary,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 3,
+            borderColor: isFocused
+              ? colors.secondary
+              : colors.cardBackground,
+            // Brand-getintete Schlagschatten — markiert den Button als
+            // "premium/lifted" und matcht die alte Navigation
+            shadowColor: colors.primary,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: colorScheme === 'dark' ? 0.45 : 0.32,
+            shadowRadius: 10,
+            elevation: 8,
           },
-          labelStyle,
+          wobbleStyle,
         ]}
       >
+        <CustomIcon name="iconBlack" size={30} color="#ffffff" />
+      </Animated.View>
+      {/* Stöbern-Label unten in der Pille — direkt unter dem raised
+          Button. Color shiftet auf primary wenn aktiv. */}
+      <Text
+        numberOfLines={1}
+        style={{
+          position: 'absolute',
+          bottom: 7,
+          fontSize: 10,
+          fontFamily: 'Nunito_600SemiBold',
+          color: isFocused ? colors.primary : colors.tabIconDefault,
+          letterSpacing: 0.2,
+        }}
+      >
         {label}
-      </Animated.Text>
+      </Text>
     </Pressable>
   );
 }
