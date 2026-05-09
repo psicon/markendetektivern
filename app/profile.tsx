@@ -164,6 +164,15 @@ export default function ProfileScreen() {
   const displayName = userProfile?.display_name || user?.displayName || 'Detektiv';
   const realName = (userProfile as any)?.real_name || '';
   const email = userProfile?.email || user?.email || '';
+
+  // Debug-Section-Gate. Im DEV-Build immer sichtbar. In Production-
+  // Builds (TestFlight + Play-Internal) nur für ein spezifisches
+  // Whitelist-Email — sodass der Owner auf seinem Live-Device die
+  // Debug-Tools ohne Sonder-Build verwenden kann, normale Tester
+  // die Section aber nicht zu Gesicht kriegen.
+  const DEBUG_WHITELIST = ['patrickvfbfan@web.de'];
+  const showDebugSection =
+    __DEV__ || (email && DEBUG_WHITELIST.includes(email.toLowerCase()));
   const photoUrl = (userProfile as any)?.photo_url || user?.photoURL || null;
   const totalSavings = Number(userProfile?.totalSavings ?? 0);
   const productsSaved = Number((userProfile as any)?.productsSaved ?? 0);
@@ -1406,8 +1415,9 @@ export default function ProfileScreen() {
           )}
         </View>
 
-        {/* DEV-only debug actions */}
-        {__DEV__ ? (
+        {/* Debug-Section: __DEV__-Build ODER Whitelist-Email
+            (siehe showDebugSection oben). */}
+        {showDebugSection ? (
           <View style={{ paddingHorizontal: 20, paddingTop: 24 }}>
             <Text
               style={{
