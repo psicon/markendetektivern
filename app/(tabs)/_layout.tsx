@@ -52,11 +52,14 @@ const USE_FLYING_TABS = true;
 // pulst zusätzlich seine Border (cardBackground → brand secondary).
 const PILL_HEIGHT = 58;
 const PILL_MARGIN_X = 50;
-// borderRadius bewusst NICHT PILL_HEIGHT / 2 (= full capsule). Cards
-// und Buttons im Rest der App nutzen 18–25 (rounded rectangle, nicht
-// capsule). Eine perfekte Pille brach mit dem Rest visuell. 22 wirkt
-// noch weich, aber passt zum CD-Pattern.
-const PILL_RADIUS = 22;
+// borderRadius MATCHT radii.xl (= 18) aus dem Design-Tokens-System
+// (`constants/tokens/radii.ts`). Das ist der "prominent container /
+// hero card"-Tier — derselbe Wert den der MorphingCartButton (FAB
+// direkt über uns), die Hero-Cards, MorphingHeader und QuantityPill
+// nutzen. Vorher 22 (irgendwo zwischen den Tiers, nirgendwo sonst
+// gebraucht — wirkte als Stilbruch). Vorvorher full capsule (= 29),
+// auch nicht im Token-System.
+const PILL_RADIUS = 18;
 const RAISED_SIZE = 56;
 const RAISED_LIFT = 18; // wie weit ragt der mittlere Button über die Pille hinaus
 

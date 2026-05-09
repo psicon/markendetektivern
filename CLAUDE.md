@@ -713,6 +713,50 @@ marginBottom: 10
 - Sheet content: `paddingBottom: 8` inside FilterSheet (safe-area
   is owned by FilterSheet itself)
 
+### Border radii — pick from the token system, do NOT improvise
+
+The radii live in `constants/tokens/radii.ts`:
+
+```
+xs:   4    // tiny chips, dots
+sm:   8    // small badges, sticker labels
+md:   12   // chips, segmented-tab pills, ScopeCard
+lg:   16   // small surface cards (use 14 = lg-2 for QuickAccessCards)
+xl:   18   // prominent containers — hero cards, MorphingCartButton,
+            //                       MorphingHeader, RatingsSheet,
+            //                       Floating-Pill Tab-Bar
+2xl:  25   // legacy bottom-sheet / old tab-bar curve
+full: 9999 // true circle (only buttons / status dots)
+```
+
+**Pick rules:**
+
+- **Card-level container?** → `radii.xl` (18). That's hero cards,
+  MorphingCartButton, the floating tab pill — anything that's a
+  prominent surface holding other things. ONE value across the app
+  so neighbouring elements (e.g. cart FAB next to tab pill) match.
+- **Smaller surface card** (Schnellzugriff, AchievementCard horizontal
+  scroll cards)? → `radii.lg - 2 = 14`. The QuickAccessCard precedent
+  is canonical.
+- **Pills / chips / badges (selectors, segmented tabs, hero pills)?**
+  → `radii.md` (12) or smaller. Inputs use 11 (search-input pattern,
+  see "Search input → ONE shared style").
+- **Round buttons** (FABs, raised middle tab button, icon-circle
+  avatars)? → `radii.full` (or width/2). Buttons are a separate
+  category from containers and are allowed to be perfectly round
+  even when they sit inside a non-round container.
+- **NEVER** use a one-off radius like 22 or 20 just because it
+  "looks right". If none of the tokens match, raise a question
+  instead of improvising — drift accumulates fast and breaks the
+  visual system across screens.
+
+**Why this rule exists:** when the floating tab pill was first
+built it used full capsule (PILL_HEIGHT/2 = 29), then an arbitrary
+22, both wrong. The cart FAB right next to it uses `radii.xl` =
+18. Inconsistent radii on adjacent prominent surfaces read as
+"unfinished design", not "intentional variation". Lock to the
+token tier, neighbours will match automatically.
+
 ### Number formatting
 
 - pts: `Number.toLocaleString('de-DE')` — German thousand separators
