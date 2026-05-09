@@ -219,6 +219,12 @@ const TAB_BAR_HEIGHT = 64;
 // Search+filter rail height: 10 (top pad) + 38 (search) + 10 (gap) + 36 (chip row) + 10 (bottom pad).
 const SEARCH_FILTER_HEIGHT = 104;
 
+// ─── Chrome-Hairline Feature-Flag ───────────────────────────────────
+// Kontrolliert die 1-px-Trennlinie am unteren Rand des fixierten
+// Headers (unter Filter + Sortieren-Chips). User-Test ohne Linie.
+// Zurück auf `true` flippen → Linie erscheint wieder unverändert.
+const SHOW_CHROME_HAIRLINE = false;
+
 // Ähnlichkeitsstufen — Titel + Kurzbeschreibung für den Filter-Row.
 // Die volle, mehrzeilige Erklärung lebt in
 // `components/ui/SimilarityStagesModal.tsx` (Profil → Ähnlichkeits-
@@ -3130,22 +3136,25 @@ export default function ExploreScreen() {
 
       {/* Hairline separator at the very bottom of the chrome — follows
           the shrinking blur so it sits right below whatever chrome is
-          currently visible. */}
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          {
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            height: 1,
-            backgroundColor: theme.border,
-            zIndex: 12,
-          },
-          chromeBorderAnimStyle,
-        ]}
-      />
+          currently visible.
+          Toggle via SHOW_CHROME_HAIRLINE-Flag oben am Modul. */}
+      {SHOW_CHROME_HAIRLINE ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            {
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              height: 1,
+              backgroundColor: theme.border,
+              zIndex: 12,
+            },
+            chromeBorderAnimStyle,
+          ]}
+        />
+      ) : null}
 
       {/* ─── Filter sheets ────────────────────────────────────────────
           Rendered conditionally — only the open sheet's JSX subtree is
