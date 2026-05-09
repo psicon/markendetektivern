@@ -1,31 +1,40 @@
-// EdgeGlow — Siri-style fließender Edge-Glow in der Tier-Color.
+// EdgeGlow — Siri-style fließender Multi-Color-Halo um den Screen.
 // Wird vom AchievementUnlockBanner mitgemounted und synchron ein-
 // und ausgeblendet.
 //
-// V3 (post-Feedback): "wie siris modern glow effekt".
+// V4 (post-Feedback "super hässlich mit kante usw"):
+// Komplett neu gebaut mit react-native-svg statt LinearGradient-Mask.
+// Apple's Siri-Halo ist ein WEICHER ROUNDED-BORDER mit Multi-Color-
+// Gradient. Wir replizieren das mit STACKED SVG-Rects:
 //
-// Technik:
-//   • MaskedView mit einer Edge-Frame-Mask (4 LinearGradients an
-//     den Kanten, transparent in der Mitte) — definiert WO der
-//     Glow sichtbar ist (= nur am Rand).
-//   • Hinter der Mask: ein langsam rotierender LinearGradient mit
-//     einem soften Tint-Bar (transparent → tint → transparent).
-//     Die Bar wandert beim Rotieren um den Screen → Tint-Color
-//     "fließt" sichtbar von Ecke zu Ecke.
-//   • Breath-Pulse zusätzlich auf der Container-Opacity damit der
-//     Glow nicht starr läuft sondern atmet.
+//   • Drei (oder mehr) konzentrische rounded Rects, alle mit dem
+//     gleichen Multi-Color-Gradient als Stroke.
+//   • Outer Rect: dickster Stroke, niedrigste Opacity → weiter
+//     diffuser "Aura"-Schein.
+//   • Inner Rects: dünner, höhere Opacity → schärferer Kern-Glow.
+//   • Stack erzeugt einen Soft-Blur-Eindruck OHNE echten Gauss-
+//     Filter (der in RN-SVG nicht überall zuverlässig läuft).
+//   • Gradient-Stops rotieren kontinuierlich (animierte x1/x2/y1/y2)
+//     → Tier-Color "fließt" um den Screen wie bei Siri.
 //
-// Animationen (alle Reanimated 3, UI-Thread):
-//   • Rotation: 360° in 8 s linear, endlos
-//   • Breath: 0.85 ↔ 1.0 in 2.8 s sine-ease, endlos
+// Color-Pairing:
+//   • Primary = data.tint (Level/Achievement-Color, prominent).
+//   • Secondary = aufgehellter Mix der Primary mit Weiß
+//     (~30-40 % weiß-Anteil) → genug Kontrast, aber gleiche Farbfamilie.
+//   Beide werden im Gradient als Stops gemixt.
+//
+// Animationen (Reanimated 3, UI-Thread):
 //   • Visibility-Fade: 700 ms in / 500 ms out
+//   • Gradient-Sweep: rotate-Angle 0 → 360 in 8 s linear, endlos.
+//     Implementiert als animierte Rotation auf einem Wrapper-View
+//     (SVG kennt keine direkte Animated-Gradient-Stops in
+//     react-native-svg ohne Reanimated-Adapter).
+//   • Breath-Pulse: opacity 0.85 ↔ 1.0 in 2.8 s sine, endlos.
 //
 // pointerEvents='none' überall.
 
-import MaskedView from '@react-native-masked-view/masked-view';
-import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect } from 'react';
-import { Dimensions, StyleSheet, View } from 'react-native';
+import React, { useEffect, useMemo } from 'react';
+import { Dimensions, StyleSheet } from 'react-native';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -35,6 +44,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 interface EdgeGlowProps {
   visible: boolean;
@@ -44,7 +54,7 @@ interface EdgeGlowProps {
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
-function hexToRgba(hex: string, alpha: number): string {
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const h = hex.replace('#', '').trim();
   const expanded =
     h.length === 3
@@ -54,12 +64,33 @@ function hexToRgba(hex: string, alpha: number): string {
           .join('')
       : h;
   const num = parseInt(expanded, 16);
-  if (Number.isNaN(num)) return `rgba(0,0,0,${alpha})`;
-  const r = (num >> 16) & 255;
-  const g = (num >> 8) & 255;
-  const b = num & 255;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  if (Number.isNaN(num)) return { r: 0, g: 0, b: 0 };
+  return {
+    r: (num >> 16) & 255,
+    g: (num >> 8) & 255,
+    b: num & 255,
+  };
 }
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const t = (n: number) => Math.max(0, Math.min(255, Math.round(n)))
+    .toString(16)
+    .padStart(2, '0');
+  return `#${t(r)}${t(g)}${t(b)}`;
+}
+
+/** Mix tint with white at given ratio (0 = pure tint, 1 = white). */
+function lighten(hex: string, ratio: number): string {
+  const { r, g, b } = hexToRgb(hex);
+  return rgbToHex(
+    r + (255 - r) * ratio,
+    g + (255 - g) * ratio,
+    b + (255 - b) * ratio,
+  );
+}
+
+const AnimatedRect = Animated.createAnimatedComponent(Rect);
+void AnimatedRect; // currently we animate the wrapper, keep ref for future svg-prop animations
 
 export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
   const visibility = useSharedValue(0);
@@ -72,14 +103,11 @@ export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
         duration: 700,
         easing: Easing.out(Easing.cubic),
       });
-      // Endlos rotieren — 8 s pro Umdrehung. Linear damit die
-      // Bewegung gleichmäßig fließt, kein Beat.
       rotation.value = withRepeat(
         withTiming(360, { duration: 8000, easing: Easing.linear }),
         -1,
         false,
       );
-      // Atem-Pulse zusätzlich auf der Container-Opacity.
       breath.value = withRepeat(
         withSequence(
           withTiming(1.0, {
@@ -112,15 +140,39 @@ export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
     transform: [{ rotate: `${rotation.value}deg` }],
   }));
 
-  // Tint mit verschiedenen Alphas — die "Bar" hat ihre Mitte als
-  // hellsten Punkt, fadet zu beiden Seiten weg. Peak bei 0.45 damit
-  // der Glow präsent aber nicht erschlagend wirkt.
-  const fadeStops: [string, string, string, string, string] = [
-    hexToRgba(tint, 0),
-    hexToRgba(tint, 0.25),
-    hexToRgba(tint, 0.45),
-    hexToRgba(tint, 0.25),
-    hexToRgba(tint, 0),
+  // Color-Stops: tint als prominente Farbe, lightened als
+  // Sekundärton mit Kontrast aber im gleichen Farbfamilie. Der
+  // Gradient läuft tint → light → tint → light → tint damit beim
+  // Rotieren mehrere "bright bands" sichtbar sind.
+  const stops = useMemo(() => {
+    const primary = tint;
+    const secondary = lighten(tint, 0.45);
+    return [
+      { offset: '0%', color: primary, opacity: '0.95' },
+      { offset: '25%', color: secondary, opacity: '0.85' },
+      { offset: '50%', color: primary, opacity: '0.95' },
+      { offset: '75%', color: secondary, opacity: '0.85' },
+      { offset: '100%', color: primary, opacity: '0.95' },
+    ];
+  }, [tint]);
+
+  // SVG-Frame-Größe: 30 px überall ÜBER den Screen hinaus damit
+  // der Stroke die Display-Edge erreicht ohne dass der Inner-Border
+  // Lücken hat. Wir geben dem SVG-Wrapper diese Größe und
+  // positionieren ihn entsprechend.
+  const overflow = 30;
+  const svgW = SCREEN_W + overflow * 2;
+  const svgH = SCREEN_H + overflow * 2;
+  const cornerRadius = 64;
+
+  // Stacked Rects — jede Layer hat eine eigene Stroke-Width + Opacity-
+  // Dämpfung. Outer = breit + low opacity (Aura), Inner = schmal +
+  // höhere Opacity (Kern).
+  const layers = [
+    { strokeWidth: 64, opacity: 0.18 },
+    { strokeWidth: 40, opacity: 0.32 },
+    { strokeWidth: 22, opacity: 0.55 },
+    { strokeWidth: 8, opacity: 0.85 },
   ];
 
   return (
@@ -132,85 +184,51 @@ export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
         { zIndex: 9990 },
       ]}
     >
-      <MaskedView
-        style={{ flex: 1 }}
-        maskElement={
-          // Edge-Frame-Mask: schwarz an den Kanten, transparent in
-          // der Mitte. Schwarz = sichtbar nach Mask-Anwendung,
-          // transparent = unsichtbar. Bottom etwas kleiner damit
-          // der Glow weit unter der Banner-Pille endet.
-          <View style={{ flex: 1, backgroundColor: 'transparent' }}>
-            <LinearGradient
-              colors={['black', 'transparent']}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                height: '22%',
-              }}
-            />
-            <LinearGradient
-              colors={['transparent', 'black']}
-              style={{
-                position: 'absolute',
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: '16%',
-              }}
-            />
-            <LinearGradient
-              colors={['black', 'transparent']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={{
-                position: 'absolute',
-                top: 0,
-                bottom: 0,
-                left: 0,
-                width: 100,
-              }}
-            />
-            <LinearGradient
-              colors={['transparent', 'black']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={{
-                position: 'absolute',
-                top: 0,
-                bottom: 0,
-                right: 0,
-                width: 100,
-              }}
-            />
-          </View>
-        }
+      {/* Wrapper rotiert — dadurch sieht der Gradient-Stroke aus als
+          würde die Color-Bar um den Screen fließen. */}
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            left: -overflow,
+            top: -overflow,
+            width: svgW,
+            height: svgH,
+          },
+          rotatingStyle,
+        ]}
       >
-        {/* Rotierender Gradient-Wrapper. Die View ist deutlich
-            GRÖSSER als der Screen damit beim Rotieren keine Ecken
-            sichtbar werden. */}
-        <Animated.View
-          style={[
-            {
-              position: 'absolute',
-              left: -SCREEN_W * 0.5,
-              right: -SCREEN_W * 0.5,
-              top: -SCREEN_H * 0.5,
-              bottom: -SCREEN_H * 0.5,
-            },
-            rotatingStyle,
-          ]}
-        >
-          <LinearGradient
-            colors={fadeStops}
-            locations={[0, 0.3, 0.5, 0.7, 1]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={{ flex: 1 }}
-          />
-        </Animated.View>
-      </MaskedView>
+        <Svg width={svgW} height={svgH}>
+          <Defs>
+            <LinearGradient id="edgeGlowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              {stops.map((s) => (
+                <Stop
+                  key={s.offset}
+                  offset={s.offset}
+                  stopColor={s.color}
+                  stopOpacity={s.opacity}
+                />
+              ))}
+            </LinearGradient>
+          </Defs>
+          {layers.map((layer, idx) => (
+            <Rect
+              key={idx}
+              x={layer.strokeWidth / 2}
+              y={layer.strokeWidth / 2}
+              width={svgW - layer.strokeWidth}
+              height={svgH - layer.strokeWidth}
+              rx={cornerRadius}
+              ry={cornerRadius}
+              fill="none"
+              stroke="url(#edgeGlowGrad)"
+              strokeWidth={layer.strokeWidth}
+              strokeOpacity={layer.opacity}
+            />
+          ))}
+        </Svg>
+      </Animated.View>
     </Animated.View>
   );
 }
+
