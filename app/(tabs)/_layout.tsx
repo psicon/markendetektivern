@@ -275,12 +275,15 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           route.name;
 
         const onPress = () => {
-          // Haptic IMMER feuern — auch wenn das schon-fokussierte Tab
-          // angetippt wird. Tactile feedback ist Bestätigung des Taps,
-          // nicht der Navigation.
-          if (Platform.OS === 'ios') {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          }
+          // Haptic IMMER feuern — auf iOS UND Android (expo-haptics
+          // mappt impactAsync auf HapticFeedbackConstants.KEYBOARD_TAP
+          // auf Android-Devices die Haptik unterstützen). Tactile
+          // feedback ist Bestätigung des Taps, nicht der Navigation.
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
+            () => {
+              // Devices ohne Haptik-Hardware → silent fail.
+            },
+          );
           const event = navigation.emit({
             type: 'tabPress',
             target: route.key,

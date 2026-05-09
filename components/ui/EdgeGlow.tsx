@@ -35,7 +35,7 @@ import {
   vec,
 } from '@shopify/react-native-skia';
 import React, { useEffect } from 'react';
-import { Dimensions, StyleSheet } from 'react-native';
+import { Dimensions, StyleSheet, useColorScheme } from 'react-native';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -93,6 +93,12 @@ function lighten(hex: string, ratio: number): string {
   );
 }
 
+/** Mix tint with black at given ratio (0 = pure tint, 1 = black). */
+function darken(hex: string, ratio: number): string {
+  const { r, g, b } = hexToRgb(hex);
+  return rgbToHex(r * (1 - ratio), g * (1 - ratio), b * (1 - ratio));
+}
+
 // Wieviel die RoundedRect AUSSERHALB des Screens beginnt — so wird
 // die Mitte des Strokes ausserhalb des Screens projiziert, nur die
 // inner-side des verblurten Strokes ist im sichtbaren Bereich → pure
@@ -109,6 +115,13 @@ const CORNER_R = 58;
 const ROTATION_MS = 4500; // war 8000 — fast doppelt so schnell
 
 export function EdgeGlow({ visible, tint, secondaryTint }: EdgeGlowProps) {
+  // Light-Mode Adjustment: viele Tier-Colors (gold, hellgrün, etc.)
+  // verschwinden auf weißem Hintergrund. Dunkeln im Light-Mode primary
+  // + secondary leicht ab → Glow bleibt sichtbar gegen weißen
+  // Screen-Bg, ohne im Dark-Mode zu düster zu wirken.
+  const colorScheme = useColorScheme();
+  const isLight = colorScheme !== 'dark';
+
   const visibility = useSharedValue(0);
   const angle = useSharedValue(0);
   const breath = useSharedValue(0.85);
@@ -183,12 +196,16 @@ export function EdgeGlow({ visible, tint, secondaryTint }: EdgeGlowProps) {
   // (lightened, 45 % weiß-Anteil — gleiche Farbfamilie, genug
   // Kontrast). Stops in alternierender Reihenfolge → 2 sichtbare
   // bright bands die beim Rotieren wandern.
-  const primary = tint;
+  // Im Light-Mode beide Farben minimal abdunkeln, damit der Glow
+  // gegen den weißen Screen-Bg sichtbar bleibt. Dark-Mode lassen
+  // wir unverändert (helle Farben strahlen dort schon stark).
+  const primary = isLight ? darken(tint, 0.18) : tint;
   // Sekundärton: explizite secondaryTint Prop wenn gesetzt (z.B.
   // Color des vorherigen Levels), sonst aufgehellte primary als
   // Fallback. Bei einer expliziten secondaryTint ist der Kontrast
   // viel höher — chromatischer Color-Shift statt Helligkeits-Shift.
-  const secondary = secondaryTint ?? lighten(tint, 0.55);
+  const rawSecondary = secondaryTint ?? lighten(tint, 0.55);
+  const secondary = isLight ? darken(rawSecondary, 0.12) : rawSecondary;
 
   // Gradient-Stops mit ZWEI Sekundär-Bands statt einem Peak:
   //   primary @ 0%, secondary @ 25%, primary @ 50%, secondary @ 75%,
