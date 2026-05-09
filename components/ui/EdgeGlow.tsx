@@ -1,37 +1,31 @@
-// EdgeGlow — sanfter Tier-getinted Vignette-Effekt um die 4 Screen-
-// Kanten herum. Wird vom AchievementUnlockBanner mitgemounted und
-// synchron ein-/ausgeblendet — celebriert Achievement/Level-Ups
-// nicht nur lokal im Banner, sondern lässt den ganzen Screen kurz
-// in der Tier-Color "atmen".
+// EdgeGlow — Siri-style fließender Edge-Glow in der Tier-Color.
+// Wird vom AchievementUnlockBanner mitgemounted und synchron ein-
+// und ausgeblendet.
 //
-// V2 (post-Feedback): subtiler, mit Pulsation, garantiert NICHT die
-// Banner-Card überlagernd. Der bottom-Streifen ist kurz genug damit
-// er weit unter der Banner-Pille endet.
+// V3 (post-Feedback): "wie siris modern glow effekt".
 //
-// Implementation:
-//   • 4 LinearGradients (top, bottom, left, right), je vom Rand
-//     ins Innere fading. Ecken bekommen Doppel-Coverage durch das
-//     Overlap von vertikalem + horizontalem Gradient → Vignette-
-//     Eindruck.
-//   • Alphas BEWUSST niedrig (0.18 / 0.20 / 0.12) damit der Glow
-//     "atmet" statt zu schreien. Vorher 0.32-0.38 — User hat das
-//     als zu prominent empfunden.
-//   • Bottom-Höhe nur 16 % — endet bei ~135 px auf einem 850 px
-//     Screen, deutlich unterhalb der Banner-Pille (sitzt bei
-//     ~200 px from bottom).
+// Technik:
+//   • MaskedView mit einer Edge-Frame-Mask (4 LinearGradients an
+//     den Kanten, transparent in der Mitte) — definiert WO der
+//     Glow sichtbar ist (= nur am Rand).
+//   • Hinter der Mask: ein langsam rotierender LinearGradient mit
+//     einem soften Tint-Bar (transparent → tint → transparent).
+//     Die Bar wandert beim Rotieren um den Screen → Tint-Color
+//     "fließt" sichtbar von Ecke zu Ecke.
+//   • Breath-Pulse zusätzlich auf der Container-Opacity damit der
+//     Glow nicht starr läuft sondern atmet.
 //
-// Animation (Reanimated 3):
-//   • Visibility-Fade: 700 ms ease-out (in) / 500 ms ease-in (out)
-//   • Pulse: kontinuierliches Atmen 0.7 → 1.0 → 0.7 mit 2400 ms
-//     Cycle, sine-easing → fließendes Pulsieren typisch für Apps
-//     (Snapchat-Notify, iOS-Reminders, Discord-Pings).
-//   • Final opacity = visibility * pulse.
+// Animationen (alle Reanimated 3, UI-Thread):
+//   • Rotation: 360° in 8 s linear, endlos
+//   • Breath: 0.85 ↔ 1.0 in 2.8 s sine-ease, endlos
+//   • Visibility-Fade: 700 ms in / 500 ms out
 //
-// pointerEvents='none' — schluckt nie Touches.
+// pointerEvents='none' überall.
 
+import MaskedView from '@react-native-masked-view/masked-view';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect } from 'react';
-import { StyleSheet } from 'react-native';
+import { Dimensions, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -47,6 +41,8 @@ interface EdgeGlowProps {
   /** Hex color string (z.B. '#0d8575' oder '#FF2D55'). */
   tint: string;
 }
+
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
 function hexToRgba(hex: string, alpha: number): string {
   const h = hex.replace('#', '').trim();
@@ -66,31 +62,32 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
-  // Visibility ist ein 0→1 Faktor der Master-Opacity.
   const visibility = useSharedValue(0);
-  // Pulse läuft kontinuierlich zwischen 0.70 und 1.0 — multipliziert
-  // mit visibility ergibt das die finale Display-Opacity.
-  const pulse = useSharedValue(0.7);
+  const rotation = useSharedValue(0);
+  const breath = useSharedValue(0.85);
 
   useEffect(() => {
     if (visible) {
-      // Fade-in: weich, ease-out — typisches "schwebt rein"-Feel.
       visibility.value = withTiming(1, {
         duration: 700,
         easing: Easing.out(Easing.cubic),
       });
-      // Pulse-Loop starten — sine-ähnliche Wave durch
-      // withRepeat(withSequence(...)). 1200 ms hoch, 1200 ms runter
-      // = 2400 ms Cycle. Reverse: false damit jeder Step seinen
-      // eigenen Easing-Curve hat (ease-in-out an beiden Enden).
-      pulse.value = withRepeat(
+      // Endlos rotieren — 8 s pro Umdrehung. Linear damit die
+      // Bewegung gleichmäßig fließt, kein Beat.
+      rotation.value = withRepeat(
+        withTiming(360, { duration: 8000, easing: Easing.linear }),
+        -1,
+        false,
+      );
+      // Atem-Pulse zusätzlich auf der Container-Opacity.
+      breath.value = withRepeat(
         withSequence(
           withTiming(1.0, {
-            duration: 1200,
+            duration: 1400,
             easing: Easing.inOut(Easing.sin),
           }),
-          withTiming(0.7, {
-            duration: 1200,
+          withTiming(0.85, {
+            duration: 1400,
             easing: Easing.inOut(Easing.sin),
           }),
         ),
@@ -98,82 +95,122 @@ export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
         false,
       );
     } else {
-      // Fade-out: weicher als Entry damit nicht abrupt.
       visibility.value = withTiming(0, {
         duration: 500,
         easing: Easing.in(Easing.cubic),
       });
-      // Pulse-Loop sauber abbrechen sonst läuft er dauerhaft auf
-      // dem UI-Thread weiter auch wenn EdgeGlow schon unsichtbar ist.
-      cancelAnimation(pulse);
+      cancelAnimation(rotation);
+      cancelAnimation(breath);
     }
-  }, [visible, visibility, pulse]);
+  }, [visible, visibility, rotation, breath]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: visibility.value * pulse.value,
+  const containerStyle = useAnimatedStyle(() => ({
+    opacity: visibility.value * breath.value,
   }));
 
-  // Niedrige Alphas — der Glow soll atmen, nicht schreien.
-  const topColor = hexToRgba(tint, 0.18);
-  const bottomColor = hexToRgba(tint, 0.2);
-  const sideColor = hexToRgba(tint, 0.12);
+  const rotatingStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
+
+  // Tint mit verschiedenen Alphas — die "Bar" hat ihre Mitte als
+  // hellsten Punkt, fadet zu beiden Seiten weg. Peak bei 0.45 damit
+  // der Glow präsent aber nicht erschlagend wirkt.
+  const fadeStops: [string, string, string, string, string] = [
+    hexToRgba(tint, 0),
+    hexToRgba(tint, 0.25),
+    hexToRgba(tint, 0.45),
+    hexToRgba(tint, 0.25),
+    hexToRgba(tint, 0),
+  ];
 
   return (
     <Animated.View
       pointerEvents="none"
       style={[
         StyleSheet.absoluteFillObject,
-        animatedStyle,
+        containerStyle,
         { zIndex: 9990 },
       ]}
     >
-      <LinearGradient
-        colors={[topColor, 'transparent']}
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: '20%',
-        }}
-      />
-      {/* Bottom NIEDRIGER damit garantiert unterhalb der Banner-Pille:
-          16 % von 850 px ≈ 136 px. Banner-Pille sitzt bei ~200 px
-          from bottom. → keine Überlappung. */}
-      <LinearGradient
-        colors={['transparent', bottomColor]}
-        style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: '16%',
-        }}
-      />
-      <LinearGradient
-        colors={[sideColor, 'transparent']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={{
-          position: 'absolute',
-          top: 0,
-          bottom: 0,
-          left: 0,
-          width: 90,
-        }}
-      />
-      <LinearGradient
-        colors={['transparent', sideColor]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={{
-          position: 'absolute',
-          top: 0,
-          bottom: 0,
-          right: 0,
-          width: 90,
-        }}
-      />
+      <MaskedView
+        style={{ flex: 1 }}
+        maskElement={
+          // Edge-Frame-Mask: schwarz an den Kanten, transparent in
+          // der Mitte. Schwarz = sichtbar nach Mask-Anwendung,
+          // transparent = unsichtbar. Bottom etwas kleiner damit
+          // der Glow weit unter der Banner-Pille endet.
+          <View style={{ flex: 1, backgroundColor: 'transparent' }}>
+            <LinearGradient
+              colors={['black', 'transparent']}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: '22%',
+              }}
+            />
+            <LinearGradient
+              colors={['transparent', 'black']}
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: '16%',
+              }}
+            />
+            <LinearGradient
+              colors={['black', 'transparent']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={{
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: 0,
+                width: 100,
+              }}
+            />
+            <LinearGradient
+              colors={['transparent', 'black']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={{
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                right: 0,
+                width: 100,
+              }}
+            />
+          </View>
+        }
+      >
+        {/* Rotierender Gradient-Wrapper. Die View ist deutlich
+            GRÖSSER als der Screen damit beim Rotieren keine Ecken
+            sichtbar werden. */}
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              left: -SCREEN_W * 0.5,
+              right: -SCREEN_W * 0.5,
+              top: -SCREEN_H * 0.5,
+              bottom: -SCREEN_H * 0.5,
+            },
+            rotatingStyle,
+          ]}
+        >
+          <LinearGradient
+            colors={fadeStops}
+            locations={[0, 0.3, 0.5, 0.7, 1]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={{ flex: 1 }}
+          />
+        </Animated.View>
+      </MaskedView>
     </Animated.View>
   );
 }
