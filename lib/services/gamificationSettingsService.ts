@@ -153,41 +153,18 @@ export const gamificationSettingsService = new GamificationSettingsService();
 
 import type { Achievement } from '@/lib/types/achievements';
 
-export type AchievementTier = 'subtle' | 'major';
-
-// Action-Trigger die explizit als "subtle" zählen — typischerweise
-// "erste Aktion"-Achievements und niedrigschwellige Streak-Tage.
-const SUBTLE_ACTIONS = new Set([
-  'first_action_any',
-]);
-
-// Punkte-Schwelle: Achievements mit ≤ diesem Wert gelten generell
-// als "subtle". 10 Punkte ist der Sweet-Spot — alles drüber sind
-// Meilensteine, alles drunter sind Trivial-Belohnungen die nicht
-// die volle Show verdient haben.
-const SUBTLE_POINTS_THRESHOLD = 10;
-
-/**
- * Heuristische Tier-Zuordnung. Reihenfolge der Checks (erste Match
- * gewinnt):
- *   1. Action ist explizit als 'subtle' getaggt → subtle
- *   2. Daily-Streak mit Tag ≤ 2 → subtle (frischer Start, nicht
- *      heroisch)
- *   3. Punkte ≤ 10 → subtle
- *   4. Sonst → major
- */
-export function getAchievementTier(achievement: Achievement): AchievementTier {
-  if (SUBTLE_ACTIONS.has(achievement.trigger.action as string)) {
-    return 'subtle';
-  }
-  if (
-    achievement.trigger.action === 'daily_streak' &&
-    achievement.trigger.target <= 2
-  ) {
-    return 'subtle';
-  }
-  if (typeof achievement.points === 'number' && achievement.points <= SUBTLE_POINTS_THRESHOLD) {
-    return 'subtle';
-  }
-  return 'major';
+// HISTORY: Es gab mal ein Tier-System (subtle vs. major) das niedrige
+// Achievements/Level-Ups in einen Banner und große in ein Konfetti-
+// Modal geroutet hat. User-Feedback: die Konfetti-Modals waren
+// inkonsistent mit dem Banner-Stil und wirkten "alt". Wir haben
+// das Tier-System komplett entfernt — JEDER Achievement-Unlock und
+// JEDES Level-Up läuft jetzt einheitlich durch den
+// AchievementUnlockBanner. Die Funktion bleibt als deprecated stub
+// für externe Importe (falls noch welche existieren) und für
+// zukünftige Erweiterungen falls wir mal wieder differenzieren.
+export type AchievementTier = 'subtle';
+/** @deprecated Tier-System abgeschafft — alle Celebrations sind jetzt
+ *  Banner. Funktion returnt fix 'subtle' für Backward-Compat. */
+export function getAchievementTier(_achievement: Achievement): AchievementTier {
+  return 'subtle';
 }

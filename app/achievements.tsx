@@ -42,9 +42,12 @@ import { DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { FilterSheet } from '@/components/design/FilterSheet';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { AchievementsSkeleton } from '@/components/design/Skeletons';
-import AchievementUnlockOverlay from '@/components/ui/AchievementUnlockOverlay';
+import {
+  bannerDataFromAchievement,
+  bannerDataFromLevelUp,
+  useGamification,
+} from '@/components/ui/GamificationProvider';
 import { IconSymbol } from '@/components/ui/IconSymbol';
-import LevelUpOverlay from '@/components/ui/LevelUpOverlay';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -56,7 +59,6 @@ import {
   levelGradient,
   mdiForLevelIcon,
 } from '@/lib/utils/levelIcon';
-import { overlayManager } from '@/lib/services/overlayManager';
 import type { Achievement, Level } from '@/lib/types/achievements';
 
 // ────────────────────────────────────────────────────────────────────
@@ -159,15 +161,11 @@ export default function AchievementsScreen() {
   const [levelsLoading, setLevelsLoading] = useState(true);
   const [showInfo, setShowInfo] = useState(false);
 
-  const [showLevelUp, setShowLevelUp] = useState(false);
-  const [levelUpData, setLevelUpData] = useState<{
-    newLevel: number;
-    oldLevel: number;
-  } | null>(null);
-  const [showAchUnlock, setShowAchUnlock] = useState<{
-    visible: boolean;
-    achievement: ProgressedAchievement | null;
-  }>({ visible: false, achievement: null });
+  // Catalog-Preview-Banner: tap auf einen Level- oder Achievement-Card
+  // zeigt den GLEICHEN Celebration-Banner wie der Auto-Trigger via
+  // GamificationProvider. Vorher gab's hier ein Konfetti-Modal —
+  // entfernt zugunsten visueller Konsistenz mit der Auto-Path.
+  const { showBanner } = useGamification();
 
   // Hide the native stack header — we render our own chrome below
   // (BlurView/tinted) so the screen visually matches the Rewards
@@ -345,13 +343,9 @@ export default function AchievementsScreen() {
                 onPress={() => {
                   if (level.id > currentLevel) return;
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  overlayManager.showOverlay(() => {
-                    setLevelUpData({
-                      newLevel: level.id,
-                      oldLevel: Math.max(0, level.id - 1),
-                    });
-                    setShowLevelUp(true);
-                  });
+                  showBanner(
+                    bannerDataFromLevelUp(level.id, Math.max(0, level.id - 1)),
+                  );
                 }}
               />
             ))}
@@ -394,9 +388,7 @@ export default function AchievementsScreen() {
                   onPress={() => {
                     if (!a.isCompleted) return;
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    overlayManager.showOverlay(() => {
-                      setShowAchUnlock({ visible: true, achievement: a });
-                    });
+                    showBanner(bannerDataFromAchievement(a));
                   }}
                 />
               ))}
@@ -572,27 +564,9 @@ export default function AchievementsScreen() {
         <InfoSheetContent />
       </FilterSheet>
 
-      {/* Overlays */}
-      {showLevelUp && levelUpData ? (
-        <LevelUpOverlay
-          visible={showLevelUp}
-          newLevel={levelUpData.newLevel}
-          oldLevel={levelUpData.oldLevel}
-          onClose={() => {
-            setShowLevelUp(false);
-            setLevelUpData(null);
-          }}
-        />
-      ) : null}
-      {showAchUnlock.visible && showAchUnlock.achievement ? (
-        <AchievementUnlockOverlay
-          visible={showAchUnlock.visible}
-          achievement={showAchUnlock.achievement}
-          onClose={() =>
-            setShowAchUnlock({ visible: false, achievement: null })
-          }
-        />
-      ) : null}
+      {/* Catalog-Preview-Banner wird VOM GamificationProvider gemounted
+          (er hängt direkt unter der App-Root). Hier rendern wir nichts
+          mehr — die showBanner-API oben in den onPress-Handlern reicht. */}
     </View>
   );
 }

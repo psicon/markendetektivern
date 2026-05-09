@@ -77,7 +77,6 @@ import { Crossfade, Shimmer } from '@/components/design/Skeletons';
 import { AddCustomItemModal } from '@/components/ui/AddCustomItemModal';
 import BatchActionLoader from '@/components/ui/BatchActionLoader';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
-import { LevelUpOverlay } from '@/components/ui/LevelUpOverlay';
 import { TOAST_MESSAGES } from '@/constants/ToastMessages';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { getProductImage } from '@/lib/utils/productImage';
@@ -2236,13 +2235,9 @@ export default function ShoppingListScreen() {
     currentItem: string;
   }>({ visible: false, processedItems: 0, totalItems: 0, currentItem: '' });
 
-  // Level-up overlay (currently driven via gamification provider, but we
-  // keep the legacy hook here for safety).
-  const [showLevelUpOverlay, setShowLevelUpOverlay] = useState(false);
-  const [levelUpData] = useState<{ newLevel: number; oldLevel: number }>({
-    newLevel: 1,
-    oldLevel: 1,
-  });
+  // Level-Up wird zentral via GamificationProvider durchs Banner
+  // angezeigt — kein lokaler State mehr (war eh nie wirklich befeuert,
+  // setShowLevelUpOverlay wurde nirgends aufgerufen).
 
   // ─── Hide native stack header (we render DetailHeader) ─────────
   useLayoutEffect(() => {
@@ -3817,14 +3812,6 @@ export default function ShoppingListScreen() {
         currentItem={purchaseLoaderState.currentItem}
         totalItems={purchaseLoaderState.totalItems}
         processedItems={purchaseLoaderState.processedItems}
-      />
-
-      {/* Level-up overlay */}
-      <LevelUpOverlay
-        visible={showLevelUpOverlay}
-        newLevel={levelUpData.newLevel}
-        oldLevel={levelUpData.oldLevel}
-        onClose={() => setShowLevelUpOverlay(false)}
       />
 
       {/* Custom item modal */}
