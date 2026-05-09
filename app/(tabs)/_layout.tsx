@@ -1,6 +1,27 @@
+import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import * as Haptics from 'expo-haptics';
 import { Tabs, useRouter, useSegments } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Keyboard, KeyboardAvoidingView, Platform, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Keyboard,
+  KeyboardAvoidingView,
+  LayoutChangeEvent,
+  Platform,
+  Pressable,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import Animated, {
+  Extrapolation,
+  interpolate,
+  type SharedValue,
+  useAnimatedStyle,
+  useDerivedValue,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/HapticTab';
@@ -10,19 +31,339 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 
+// ─── Flying-Tabs Feature-Flag ────────────────────────────────────────
+// Wenn true: Custom Floating-Pill Tab-Bar mit Reanimated-3-Indicator
+// (animierter Brand-Primary-Kreis fliegt zwischen den Tabs, aktive Tab
+// versteckt sein Label, inaktive zeigen Icon + Label).
+// Wenn false: Alte Custom-JS-Tab-Bar mit raised Stöbern-Button.
+//
+// Rollback einfach durch Flag-Flip auf false. Alte Implementation bleibt
+// vollständig erhalten — kein Schaden.
+const USE_FLYING_TABS = true;
+
+// ─── Floating-Pill Tab-Bar ───────────────────────────────────────────
+// Container = floating Pill (white/dark surface, soft shadow, große
+// Border-Radius). Indicator = Brand-Primary-Kreis der per Spring
+// zwischen den Tab-Slots animiert. Pro Tab fadet das Label aus wenn
+// der Indicator drüber ist + slidet das Icon leicht nach oben (mehr
+// Headroom im Kreis). Beim Verlassen kommt das Label per Translate-
+// Y-Animation zurück.
+const PILL_HEIGHT = 64;
+const PILL_MARGIN_X = 20;
+const INDICATOR_SIZE = 50;
+const INDICATOR_PAD = 7; // (PILL_HEIGHT - INDICATOR_SIZE) / 2
+
+function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme ?? 'light'];
+  const insets = useSafeAreaInsets();
+  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  // Reanimated state — folgt state.index per Spring. mass/damping
+  // bewusst weich, damit die Bewegung "swooshy" wirkt aber nicht
+  // floppy nachschwingt.
+  const activeIndex = useSharedValue(state.index);
+  useEffect(() => {
+    activeIndex.value = withSpring(state.index, {
+      damping: 18,
+      stiffness: 180,
+      mass: 0.55,
+      overshootClamping: false,
+    });
+  }, [state.index, activeIndex]);
+
+  // Keyboard-Hide — Tab-Bar fadet weg + slidet runter wenn die
+  // Tastatur kommt, kein hartes display:none-Springen.
+  const keyboardOpacity = useSharedValue(1);
+  useEffect(() => {
+    const showEvent =
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent =
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => {
+      setKeyboardVisible(true);
+      keyboardOpacity.value = withTiming(0, { duration: 180 });
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardVisible(false);
+      keyboardOpacity.value = withTiming(1, { duration: 220 });
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [keyboardOpacity]);
+
+  const tabCount = state.routes.length;
+  const innerWidth = containerWidth; // wir setzen indicator relativ zum container
+  const tabWidth = tabCount > 0 ? innerWidth / tabCount : 0;
+
+  // Indicator-X = (activeIndex * tabWidth) + (tabWidth - indicatorSize) / 2
+  const indicatorStyle = useAnimatedStyle(() => {
+    if (tabWidth === 0) return { opacity: 0 };
+    const x =
+      activeIndex.value * tabWidth + (tabWidth - INDICATOR_SIZE) / 2;
+    return {
+      opacity: 1,
+      transform: [{ translateX: x }],
+    };
+  });
+
+  const containerAnimStyle = useAnimatedStyle(() => ({
+    opacity: keyboardOpacity.value,
+    transform: [
+      {
+        translateY: interpolate(
+          keyboardOpacity.value,
+          [0, 1],
+          [40, 0],
+          Extrapolation.CLAMP,
+        ),
+      },
+    ],
+  }));
+
+  // pointerEvents auf 'none' wenn Keyboard zu — sonst klaut die
+  // unsichtbare Pille Touches während Eingabefeldern
+  const pointerEvents = isKeyboardVisible ? 'none' : 'auto';
+
+  return (
+    <Animated.View
+      pointerEvents={pointerEvents}
+      style={[
+        {
+          position: 'absolute',
+          left: PILL_MARGIN_X,
+          right: PILL_MARGIN_X,
+          bottom: Math.max(insets.bottom, 8) + 6,
+          height: PILL_HEIGHT,
+          backgroundColor: colors.cardBackground,
+          borderRadius: PILL_HEIGHT / 2,
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: INDICATOR_PAD,
+          // soft shadow wie ein floating element
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: colorScheme === 'dark' ? 0.4 : 0.12,
+          shadowRadius: 18,
+          elevation: 14,
+          // dezente Border im Dark-Mode für Kontrast gegen schwarzen
+          // Hintergrund — sonst verschwindet die Pille fast ganz
+          borderWidth: colorScheme === 'dark' ? 1 : 0,
+          borderColor: 'rgba(255,255,255,0.06)',
+        },
+        containerAnimStyle,
+      ]}
+      onLayout={(e: LayoutChangeEvent) => {
+        // innerer Bereich = Container-Width minus padding-Horizontal links+rechts
+        setContainerWidth(e.nativeEvent.layout.width - INDICATOR_PAD * 2);
+      }}
+    >
+      {/* Animierter Brand-Primary-Indicator-Kreis */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            top: INDICATOR_PAD,
+            left: INDICATOR_PAD,
+            width: INDICATOR_SIZE,
+            height: INDICATOR_SIZE,
+            borderRadius: INDICATOR_SIZE / 2,
+            backgroundColor: colors.primary,
+            shadowColor: colors.primary,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.35,
+            shadowRadius: 8,
+            elevation: 6,
+          },
+          indicatorStyle,
+        ]}
+      />
+
+      {state.routes.map((route, index) => {
+        const { options } = descriptors[route.key];
+        const isFocused = state.index === index;
+        const label =
+          (options.tabBarLabel as string | undefined) ??
+          options.title ??
+          route.name;
+
+        const onPress = () => {
+          const event = navigation.emit({
+            type: 'tabPress',
+            target: route.key,
+            canPreventDefault: true,
+          });
+          if (!isFocused && !event.defaultPrevented) {
+            if (Platform.OS === 'ios') {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            }
+            // navigate without params/merge for tabs (default behaviour)
+            navigation.navigate(route.name as never);
+          }
+        };
+
+        return (
+          <FlyingTab
+            key={route.key}
+            routeName={route.name}
+            label={label}
+            index={index}
+            activeIndex={activeIndex}
+            isFocused={isFocused}
+            colors={colors}
+            onPress={onPress}
+          />
+        );
+      })}
+    </Animated.View>
+  );
+}
+
+interface FlyingTabProps {
+  routeName: string;
+  label: string;
+  index: number;
+  activeIndex: SharedValue<number>;
+  isFocused: boolean;
+  colors: (typeof Colors)['light'];
+  onPress: () => void;
+}
+
+function FlyingTab({
+  routeName,
+  label,
+  index,
+  activeIndex,
+  isFocused,
+  colors,
+  onPress,
+}: FlyingTabProps) {
+  // Distance vom aktiven Tab — 0 = aktiv, 1+ = entfernt. Wird für
+  // Label-Opacity + Icon-Translate-Y benutzt damit das aktive Tab
+  // nur das Icon zeigt und das Label sanft rein-/rausfaded.
+  const distance = useDerivedValue(() =>
+    Math.abs(activeIndex.value - index),
+  );
+
+  const labelStyle = useAnimatedStyle(() => {
+    const opacity = interpolate(
+      distance.value,
+      [0, 0.6, 1],
+      [0, 0, 1],
+      Extrapolation.CLAMP,
+    );
+    const translateY = interpolate(
+      distance.value,
+      [0, 1],
+      [6, 0],
+      Extrapolation.CLAMP,
+    );
+    return { opacity, transform: [{ translateY }] };
+  });
+
+  const iconStyle = useAnimatedStyle(() => {
+    // aktives Icon rutscht leicht nach oben damit es im Kreis-Zentrum
+    // sitzt (sonst wirkt es wegen des fehlenden Labels zu tief)
+    const translateY = interpolate(
+      distance.value,
+      [0, 1],
+      [-6, 4],
+      Extrapolation.CLAMP,
+    );
+    const scale = interpolate(
+      distance.value,
+      [0, 1],
+      [1.05, 1],
+      Extrapolation.CLAMP,
+    );
+    return { transform: [{ translateY }, { scale }] };
+  });
+
+  const iconColor = isFocused ? '#ffffff' : colors.text;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      android_ripple={{
+        color: 'rgba(0,0,0,0.05)',
+        borderless: true,
+        radius: 32,
+      }}
+      style={{
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+      }}
+    >
+      <Animated.View style={iconStyle}>
+        {renderTabIcon(routeName, iconColor, isFocused)}
+      </Animated.View>
+      <Animated.Text
+        numberOfLines={1}
+        style={[
+          {
+            position: 'absolute',
+            bottom: 8,
+            fontSize: 10,
+            fontFamily: 'Nunito_600SemiBold',
+            color: colors.tabIconDefault,
+            letterSpacing: 0.2,
+          },
+          labelStyle,
+        ]}
+      >
+        {label}
+      </Animated.Text>
+    </Pressable>
+  );
+}
+
+function renderTabIcon(
+  routeName: string,
+  color: string,
+  focused: boolean,
+): React.ReactElement {
+  if (routeName === 'index') {
+    return <IconSymbol size={24} name="house.fill" color={color} />;
+  }
+  if (routeName === 'explore') {
+    // Custom Brand-Glyph (Markendetektive-Logo) — bewusst behalten,
+    // weil das die markenspezifische Stöbern-Identität ist.
+    return <CustomIcon name="iconBlack" size={26} color={color} />;
+  }
+  if (routeName === 'rewards') {
+    return (
+      <IconSymbol
+        size={24}
+        name={focused ? 'trophy.fill' : 'trophy'}
+        color={color}
+      />
+    );
+  }
+  return <IconSymbol size={24} name="house.fill" color={color} />;
+}
+
+// ─── Legacy Custom-JS Tab-Bar (raised Stöbern-Button) ────────────────
+// Bleibt für USE_FLYING_TABS=false stehen als Rollback.
 function CustomTabBarButton({ children, onPress, accessibilityState }: any) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const segments = useSegments();
   const selected = segments[1] === 'explore';
-  const insets = useSafeAreaInsets();
-  
+
   return (
-    <View style={{
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'flex-start',
-    }}>
+    <View
+      style={{
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+      }}
+    >
       <TouchableOpacity
         style={{
           top: Platform.OS === 'ios' ? -36 : -24,
@@ -42,18 +383,20 @@ function CustomTabBarButton({ children, onPress, accessibilityState }: any) {
         }}
         onPress={onPress}
       >
-        <CustomIcon 
-          name="iconBlack" 
-          size={Platform.OS === 'ios' ? 42 : 36} 
+        <CustomIcon
+          name="iconBlack"
+          size={Platform.OS === 'ios' ? 42 : 36}
           color="white"
         />
       </TouchableOpacity>
-      <Text style={{
-        marginTop: Platform.OS === 'ios' ? -33 : -20,
-        fontSize: 11,
-        fontFamily: 'Nunito_500Medium',
-        color: selected ? colors.primary : colors.tabIconDefault,
-      }}>
+      <Text
+        style={{
+          marginTop: Platform.OS === 'ios' ? -33 : -20,
+          fontSize: 11,
+          fontFamily: 'Nunito_500Medium',
+          color: selected ? colors.primary : colors.tabIconDefault,
+        }}
+      >
         Stöbern
       </Text>
     </View>
@@ -68,6 +411,7 @@ export default function TabLayout() {
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
 
   // Tab Bar ausblenden wenn Keyboard sichtbar (iOS + Android)
+  // (nur für Legacy-Path — der FlyingTabBar managed das selbst)
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
@@ -117,8 +461,35 @@ export default function TabLayout() {
     );
   }
 
+  // ─── Flying-Pill Tab-Bar ────────────────────────────────────────────
+  if (USE_FLYING_TABS) {
+    return (
+      <Tabs
+        tabBar={(props) => <FlyingTabBar {...props} />}
+        screenOptions={{
+          // Lazy + freezeOnBlur — gleiche Begründung wie im Legacy-
+          // Path (Stöbern-Subtree friert beim Tab-Wechsel ein,
+          // useEffects der inaktiven Tabs feuern erst beim Mount).
+          lazy: true,
+          freezeOnBlur: true,
+          headerShown: false,
+          // tabBarStyle wird vom custom tabBar-Renderer ignoriert,
+          // aber expo-router reserviert immer noch Platz dafür wenn
+          // wir es nicht explizit verstecken. Wir setzen es display:
+          // 'none' damit kein Phantom-Spacing entsteht.
+          tabBarStyle: { display: 'none' },
+        }}
+      >
+        <Tabs.Screen name="index" options={{ title: 'Home' }} />
+        <Tabs.Screen name="explore" options={{ title: 'Stöbern' }} />
+        <Tabs.Screen name="rewards" options={{ title: 'Rewards' }} />
+      </Tabs>
+    );
+  }
+
+  // ─── Legacy Custom JS Tab-Bar (raised Stöbern-Button) ───────────────
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
@@ -126,38 +497,7 @@ export default function TabLayout() {
     >
       <Tabs
         screenOptions={{
-        // Lazy mount — nur Home rendert beim App-Start. Stöbern und
-        // Rewards mounten erst beim ersten Tap des jeweiligen Tabs.
-        //
-        // Hintergrund: `lazy: false` warmte zwar den JSX-Tree
-        // vor (kürzerer Tab-Switch-Lag beim ersten Tap), feuerte
-        // aber AUCH alle useEffects der inaktiven Tabs sofort —
-        // das waren ~1.000+ zusätzliche Firestore-Reads pro Cold-
-        // Start für User die andere Tabs nie besuchten. Plus: Home
-        // konkurrierte beim Mount mit Stöbern/Rewards um Firestore-
-        // Reads und JS-Thread-Zeit.
-        //
-        // Mit `lazy: true` rendert Home schnell, andere Tabs lazy.
-        // Skeletons in jeder Section federn den ~100-200ms-JSX-
-        // Mount-Lag beim ersten Stöbern-Tap visuell ab — der User
-        // sieht sofort Shimmer, dann Daten.
         lazy: true,
-        // freezeOnBlur — wenn ein Tab den Focus verliert, friert
-        // React Navigation seinen kompletten Subtree ein: keine
-        // Renders, keine useEffect-Trigger, keine reaktive Arbeit.
-        // State und Scroll-Position bleiben erhalten — beim erneuten
-        // Focus läuft alles ab dem Punkt weiter wo es war.
-        // Kritisch für unser Stöbern-Problem: nach Aufruf bleibt der
-        // Stöbern-Tab mounted, sein React-Tree (PagerView + 3 LegendLists
-        // + 30 Cards) muss bei JEDEM Re-Render von AuthContext /
-        // AnalyticsProvider durchgewalked werden — auch wenn er
-        // unsichtbar ist. Das ist die "App lahmt nach Stöbern"-
-        // Ursache. Mit `freezeOnBlur: true` wird Stöbern's Subtree
-        // bei Tab-Wechsel sofort eingefroren — Reconciliation-Cost
-        // weg, Cards-State bleibt erhalten.
-        // Background-Work (Firestore-Listener, Timer, etc.) der NICHT
-        // im React-Tree hängt, läuft weiter — Journey-Tracking,
-        // Achievement-Service, Analytics bleiben unangetastet.
         freezeOnBlur: true,
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tabIconSelected,
         tabBarInactiveTintColor: Colors[colorScheme ?? 'light'].tabIconDefault,
@@ -184,7 +524,7 @@ export default function TabLayout() {
             shadowOffset: { width: 0, height: -4 },
             shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.15,
             shadowRadius: 12,
-            display: isKeyboardVisible ? 'none' : 'flex', // Tab Bar ausblenden bei Keyboard
+            display: isKeyboardVisible ? 'none' : 'flex',
           },
           android: {
             position: 'absolute',
@@ -200,7 +540,7 @@ export default function TabLayout() {
             paddingTop: 8,
             paddingBottom: Math.max(insets.bottom, 8),
             elevation: 0,
-            display: isKeyboardVisible ? 'none' : 'flex', // Tab Bar auch auf Android ausblenden
+            display: isKeyboardVisible ? 'none' : 'flex',
           },
         }),
         tabBarLabelStyle: {
