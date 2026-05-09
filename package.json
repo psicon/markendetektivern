@@ -36,7 +36,7 @@
     "@react-navigation/bottom-tabs": "^7.3.10",
     "@react-navigation/elements": "^2.3.8",
     "@react-navigation/native": "^7.1.6",
-    "@shopify/react-native-skia": "2.2.0",
+    "@shopify/react-native-skia": "2.6.2",
     "algoliasearch": "^5.35.0",
     "bon-edge-detector": "file:./modules/bon-edge-detector",
     "expo": "~53.0.23",
