@@ -69,6 +69,7 @@ import {
   showFavoriteAddedToast,
   showFavoriteRemovedToast,
   showInfoToast,
+  showRetryableErrorToast,
 } from '@/lib/services/ui/toast';
 import type {
   MarkenProduktWithDetails,
@@ -865,18 +866,23 @@ export default function ProductComparisonScreen() {
     productData: any,
   ) => {
     // Optimistic toggle.
-    setFavMap((prev) => ({ ...prev, [productId]: !prev[productId] }));
+    const optimisticNext = !favMap[productId];
+    setFavMap((prev) => ({ ...prev, [productId]: optimisticNext }));
     try {
       const now = await toggleFavorite(productId, productType, productData);
-      // Server-Truth sync: falls favMap stale war (Produkt war eigentlich
-      // schon gefavt obwohl Map das nicht wusste), setzen wir hier den
-      // echten Wert. So bleibt UI + Toast konsistent.
       setFavMap((prev) => ({ ...prev, [productId]: now }));
       if (now) showFavoriteAddedToast(productData?.name ?? 'Produkt');
       else showFavoriteRemovedToast(productData?.name ?? 'Produkt');
-    } catch {
-      // Bei Fehler: optimistisches Toggle revert.
-      setFavMap((prev) => ({ ...prev, [productId]: !prev[productId] }));
+    } catch (e) {
+      // Bei Fehler: optimistisches Toggle revert + Retry-Toast.
+      console.error('Favorite toggle failed:', e);
+      setFavMap((prev) => ({ ...prev, [productId]: !optimisticNext }));
+      showRetryableErrorToast(
+        optimisticNext
+          ? 'Favorit konnte nicht gespeichert werden.'
+          : 'Favorit konnte nicht entfernt werden.',
+        () => onToggleFav(productId, productType, productData),
+      );
     }
   });
 
@@ -955,10 +961,13 @@ export default function ProductComparisonScreen() {
         { price: productData?.preis ?? 0, savings: 0 },
       );
     } catch (e) {
-      // Bei Fehler: anzahl revert
+      console.error('Cart toggle failed:', e);
       setCartAnzahlMap((prev) => ({ ...prev, [productId]: prevAnzahl }));
       setCartMap((prev) => ({ ...prev, [productId]: prevAnzahl > 0 }));
-      showInfoToast('Fehler — bitte erneut versuchen');
+      showRetryableErrorToast(
+        'Konnte nicht zum Einkaufszettel hinzufügen.',
+        () => onToggleCart(productId, productType, productData),
+      );
     }
   });
 
@@ -1004,8 +1013,14 @@ export default function ProductComparisonScreen() {
         { price: productData?.preis ?? 0, savings: 0 },
       );
     } catch (e) {
+      console.error('Cart increment failed:', e);
       setCartAnzahlMap((prev) => ({ ...prev, [productId]: prevAnzahl }));
-      showInfoToast('Fehler — bitte erneut versuchen');
+      showRetryableErrorToast(
+        'Anzahl konnte nicht aktualisiert werden.',
+        () => {
+          void onIncrementCart(productId, productType, productData);
+        },
+      );
     }
   };
 
@@ -1050,9 +1065,15 @@ export default function ProductComparisonScreen() {
         showInfoToast('🗑️ Aus Einkaufsliste entfernt', 'ERROR');
       }
     } catch (e) {
+      console.error('Cart decrement failed:', e);
       setCartAnzahlMap((prev) => ({ ...prev, [productId]: prevAnzahl }));
       setCartMap((prev) => ({ ...prev, [productId]: prevAnzahl > 0 }));
-      showInfoToast('Fehler — bitte erneut versuchen');
+      showRetryableErrorToast(
+        'Anzahl konnte nicht aktualisiert werden.',
+        () => {
+          void onDecrementCart(productId, productType);
+        },
+      );
     }
   };
 

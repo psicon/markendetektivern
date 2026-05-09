@@ -62,6 +62,7 @@ import {
   showFavoriteAddedToast,
   showFavoriteRemovedToast,
   showInfoToast,
+  showRetryableErrorToast,
 } from '@/lib/services/ui/toast';
 import type { ProductWithDetails } from '@/lib/types/firestore';
 
@@ -594,9 +595,16 @@ export default function NoNameDetailScreen() {
       setIsFav(now);
       if (now) showFavoriteAddedToast(p.name ?? 'Produkt');
       else showFavoriteRemovedToast(p.name ?? 'Produkt');
-    } catch {
-      // Bei Fehler: optimistisches Toggle revert.
+    } catch (e) {
+      // Bei Fehler: optimistisches Toggle revert + Retry-Toast.
+      console.error('Favorite toggle failed:', e);
       setIsFav(!optimisticNext);
+      showRetryableErrorToast(
+        optimisticNext
+          ? 'Favorit konnte nicht gespeichert werden.'
+          : 'Favorit konnte nicht entfernt werden.',
+        () => onFavPress(),
+      );
     }
   });
   // NEU (2026-05-07): Cart-Tap-Logik:
@@ -659,11 +667,14 @@ export default function NoNameDetailScreen() {
         { screenName: 'noname-detail' },
         { price: p.preis ?? 0, savings: 0 },
       );
-    } catch {
-      // Bei Fehler: revert
+    } catch (e) {
+      console.error('Cart add failed:', e);
       setCartAnzahl(prev);
       setInCart(prev > 0);
-      showInfoToast('Fehler — bitte erneut versuchen');
+      showRetryableErrorToast(
+        'Konnte nicht zum Einkaufszettel hinzufügen.',
+        () => onCartPress(),
+      );
     }
   });
 
@@ -696,9 +707,15 @@ export default function NoNameDetailScreen() {
         { screenName: 'noname-detail' },
         { price: p.preis ?? 0, savings: 0 },
       );
-    } catch {
+    } catch (e) {
+      console.error('Cart increment failed:', e);
       setCartAnzahl(prev);
-      showInfoToast('Fehler — bitte erneut versuchen');
+      showRetryableErrorToast(
+        'Anzahl konnte nicht aktualisiert werden.',
+        () => {
+          void onIncrementFromPill();
+        },
+      );
     }
   };
 
@@ -726,10 +743,16 @@ export default function NoNameDetailScreen() {
           : undefined,
       );
       if (next === 0) showInfoToast('🗑️ Aus Einkaufsliste entfernt', 'ERROR');
-    } catch {
+    } catch (e) {
+      console.error('Cart decrement failed:', e);
       setCartAnzahl(prev);
       setInCart(prev > 0);
-      showInfoToast('Fehler — bitte erneut versuchen');
+      showRetryableErrorToast(
+        'Anzahl konnte nicht aktualisiert werden.',
+        () => {
+          void onDecrementFromPill();
+        },
+      );
     }
   };
   const [existingRating, setExistingRating] = useState<Rating | null>(null);

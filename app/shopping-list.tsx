@@ -95,6 +95,7 @@ import {
   showConvertSuccessToast,
   showInfoToast,
   showPurchasedToast,
+  showRetryableErrorToast,
 } from '@/lib/services/ui/toast';
 import { updateUserStats } from '@/lib/services/userProfile';
 import {
@@ -2831,7 +2832,12 @@ export default function ShoppingListScreen() {
       }
     } catch (error) {
       console.error('Error marking as purchased:', error);
-      showInfoToast(TOAST_MESSAGES.SHOPPING.purchaseError, 'error');
+      showRetryableErrorToast(
+        TOAST_MESSAGES.SHOPPING.purchaseError,
+        () => {
+          void handleMarkAsPurchased(itemId, unitSavings);
+        },
+      );
     } finally {
       setLoadingItems((prev) => {
         const n = new Set(prev);
@@ -2882,7 +2888,12 @@ export default function ShoppingListScreen() {
       setSelectedConversions((prev) => prev.filter((c) => c.einkaufswagenRef !== itemId));
     } catch (error) {
       console.error('Error removing from cart:', error);
-      showInfoToast(TOAST_MESSAGES.SHOPPING.removeError, 'error');
+      showRetryableErrorToast(
+        TOAST_MESSAGES.SHOPPING.removeError,
+        () => {
+          void handleRemoveFromCart(itemId);
+        },
+      );
     } finally {
       setDeletingItems((prev) => {
         const n = new Set(prev);

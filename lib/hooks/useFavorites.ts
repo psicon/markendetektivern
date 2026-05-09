@@ -116,45 +116,43 @@ export function useFavorites() {
   }, [user]);
 
   const toggleFavorite = useCallback(async (
-    productId: string, 
+    productId: string,
     productType: 'markenprodukt' | 'noname',
     productData?: any
   ) => {
     if (!user) return false;
 
-    try {
-      const isNowFavorite = await favoritesService.toggleFavorite(user.uid, productId, productType, productData);
-      
-      if (isNowFavorite) {
-        // 🚀 PERFORMANCE: Achievement Non-Blocking nur beim Hinzufügen
-        achievementService.trackAction(user.uid, 'save_product', {
-          productId,
-          productType
-        }).catch(error => {
-          console.error('❌ Save Product Achievement Tracking Fehler:', error);
-        });
-        
-        // 🎯 Track zu Journey
-        const productName = productData?.name || productData?.produktName || 'Unbekanntes Produkt';
-        const journeyProductType = productType === 'markenprodukt' ? 'brand' : 'noname';
-        
-        // Preis-Info extrahieren
-        const priceInfo = {
-          price: productData?.preis || productData?.price || 0,
-          savings: productData?.ersparnis || productData?.savings || 0
-        };
-        
-        // Importiere und nutze journeyTrackingService direkt
-        const journeyTrackingService = (await import('../services/journeyTrackingService')).default;
-        journeyTrackingService.trackAddToFavorites(productId, productName, journeyProductType, user.uid, priceInfo);
-      }
-      
-      console.log(`✅ Toggled favorite: ${productId} - now: ${isNowFavorite}`);
-      return isNowFavorite;
-    } catch (err) {
-      console.error(`❌ Error toggling favorite:`, err);
-      return false;
+    // Errors RETHROWEN damit der Caller (Detail-Page mit Optimistic
+    // UI) den Fehler-Toast zeigen kann. Vorher haben wir hier silent
+    // 'false' returnt — das hat den Optimistic-Revert-Path getötet
+    // (Caller sah keinen Fehler, glaubte das Toggle wäre erfolgreich
+    // und der Heart blieb in der falschen Position bei Network-Fail).
+    const isNowFavorite = await favoritesService.toggleFavorite(user.uid, productId, productType, productData);
+
+    if (isNowFavorite) {
+      // 🚀 PERFORMANCE: Achievement Non-Blocking nur beim Hinzufügen
+      achievementService.trackAction(user.uid, 'save_product', {
+        productId,
+        productType
+      }).catch(error => {
+        console.error('❌ Save Product Achievement Tracking Fehler:', error);
+      });
+
+      // 🎯 Track zu Journey
+      const productName = productData?.name || productData?.produktName || 'Unbekanntes Produkt';
+      const journeyProductType = productType === 'markenprodukt' ? 'brand' : 'noname';
+
+      const priceInfo = {
+        price: productData?.preis || productData?.price || 0,
+        savings: productData?.ersparnis || productData?.savings || 0
+      };
+
+      const journeyTrackingService = (await import('../services/journeyTrackingService')).default;
+      journeyTrackingService.trackAddToFavorites(productId, productName, journeyProductType, user.uid, priceInfo);
     }
+
+    console.log(`✅ Toggled favorite: ${productId} - now: ${isNowFavorite}`);
+    return isNowFavorite;
   }, [user]);
 
   const isFavorite = useCallback(async (
@@ -234,25 +232,20 @@ export function useFavoriteStatus(productId: string, productType: 'markenprodukt
   const toggle = async (productData?: any) => {
     if (!user) return false;
 
-    try {
-      const isNowFavorite = await favoritesService.toggleFavorite(user.uid, productId, productType, productData);
-      setIsFav(isNowFavorite);
-      
-      if (isNowFavorite) {
-        // 🚀 PERFORMANCE: Achievement Non-Blocking
-        achievementService.trackAction(user.uid, 'save_product', {
-          productId,
-          productType
-        }).catch(error => {
-          console.error('❌ Save Product Achievement Tracking Fehler:', error);
-        });
-      }
-      
-      return isNowFavorite;
-    } catch (error) {
-      console.error('Error toggling favorite:', error);
-      return false;
+    // Errors RETHROWEN — Caller managed Optimistic-UI + Toast.
+    const isNowFavorite = await favoritesService.toggleFavorite(user.uid, productId, productType, productData);
+    setIsFav(isNowFavorite);
+
+    if (isNowFavorite) {
+      achievementService.trackAction(user.uid, 'save_product', {
+        productId,
+        productType
+      }).catch(error => {
+        console.error('❌ Save Product Achievement Tracking Fehler:', error);
+      });
     }
+
+    return isNowFavorite;
   };
 
   return {
