@@ -52,6 +52,7 @@ import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
+import { useShoppingCartCount } from '@/lib/hooks/useShoppingCartCount';
 import { achievementService } from '@/lib/services/achievementService';
 import { AlgoliaService } from '@/lib/services/algolia';
 import { FirestoreService } from '@/lib/services/firestore';
@@ -73,6 +74,9 @@ export default function HomeScreen() {
   const { isPremium, refreshPremiumStatus } = useRevenueCat();
   const analytics = useAnalytics();
   const cashback = useCashbackUserState();
+  // Live cart-count für das Einkaufsliste-Schnellzugriff-Card-Badge.
+  // Shared mit FloatingShoppingListButton — gleicher Listener-Wert.
+  const { count: cartCount } = useShoppingCartCount();
 
   // Tap target for "Kassenbon scannen" — same flow as Belohnungen tab.
   // Routes through the consent gate first; if consent is already
@@ -757,6 +761,10 @@ export default function HomeScreen() {
                 background={item.background}
                 dark={item.dark}
                 onPress={item.onPress}
+                // Nur die Einkaufsliste-Card zeigt einen Live-Count
+                // — das Cart-Icon ist der Anker. Andere Cards
+                // bleiben badge-frei.
+                count={item.icon === 'cart' ? cartCount : undefined}
               />
             ))}
           </Animated.ScrollView>

@@ -24,24 +24,14 @@
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
-import {
-  collection,
-  doc,
-  onSnapshot,
-  query,
-  where,
-} from '@react-native-firebase/firestore';
-import React, { useEffect, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import React from 'react';
+import { Pressable, View } from 'react-native';
 
 import { CounterBadge } from '@/components/design/CounterBadge';
 import { Shimmer } from '@/components/design/Skeletons';
-import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
-import { db } from '@/lib/firebase';
-import { useAuth } from '@/lib/contexts/AuthContext';
+import { useShoppingCartCount } from '@/lib/hooks/useShoppingCartCount';
 
 type Props = {
   /** Pixels from the bottom edge of the screen. Default 100 (tab-page). */
@@ -55,53 +45,12 @@ export function FloatingShoppingListButton({
   rightOffset = 20,
 }: Props) {
   const { brand: brandTokens, shadows } = useTokens();
-  const { user } = useAuth();
 
-  // Live-Counter — onSnapshot über die `einkaufswagen`-Subcollection
-  // des Users, gefiltert auf `gekauft == false`. Listener bleibt aktiv
-  // solange die Komponente gemounted ist; löst sich beim User-Wechsel
-  // (uid in Dependency) und beim Unmount sauber wieder.
-  //
-  // `loading` steuert zusätzlich, ob die Counter-Pill als Shimmer-
-  // Skeleton angezeigt wird (initial Render, vor erstem Snapshot)
-  // oder mit der echten Zahl. Sobald der erste Snapshot da ist, gilt
-  // loading=false dauerhaft. Bei User-Wechsel resetten wir wieder auf
-  // loading=true, damit die nächste Liste auch wieder mit Shimmer
-  // anfängt statt mit dem letzten Stand.
-  const [count, setCount] = useState<number>(0);
-  const [loading, setLoading] = useState<boolean>(true);
-  useEffect(() => {
-    if (!user?.uid) {
-      setCount(0);
-      // Ohne User gibt es nichts zu laden — Skeleton aus, Pill bleibt
-      // ohnehin versteckt (count === 0).
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    const userRef = doc(db, 'users', user.uid);
-    const q = query(
-      collection(userRef, 'einkaufswagen'),
-      where('gekauft', '==', false),
-    );
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setCount(snap.size);
-        setLoading(false);
-      },
-      (err) => {
-        // Fehler still wegloggen — Counter ist Komfort, der FAB
-        // funktioniert auch ohne. Loading auf false damit das
-        // Skeleton nicht ewig flimmert.
-        console.warn('FloatingShoppingListButton: snapshot error', err);
-        setLoading(false);
-      },
-    );
-    return () => {
-      unsub();
-    };
-  }, [user?.uid]);
+  // Live-Counter via shared hook — siehe lib/hooks/useShoppingCartCount.
+  // Während des initialen Loads zeigen wir einen Shimmer-Skeleton in
+  // derselben Pill-Form, damit die Pill nicht später blinkend
+  // reinpoppt.
+  const { count, loading } = useShoppingCartCount();
 
   const onPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
