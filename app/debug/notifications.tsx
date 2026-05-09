@@ -216,22 +216,15 @@ export default function NotificationsDebugScreen() {
           />
           <DebugButton
             label="Cart Added"
-            sub="showCartAddedToast — green, mit Action-Chip"
+            sub="showCartAddedToast — green, ohne Action-Chip"
             tint="#047857"
-            onPress={() =>
-              showCartAddedToast(
-                'Bio-Hafermilch hinzugefügt',
-                () => router.push('/shopping-list'),
-              )
-            }
+            onPress={() => showCartAddedToast('Bio-Hafermilch hinzugefügt')}
           />
           <DebugButton
             label="Already In Cart"
-            sub="showAlreadyInCartToast — info, mit Action-Chip"
+            sub="showAlreadyInCartToast — info, ohne Action-Chip"
             tint="#374151"
-            onPress={() =>
-              showAlreadyInCartToast(() => router.push('/shopping-list'))
-            }
+            onPress={() => showAlreadyInCartToast()}
           />
           <DebugButton
             label="Purchased"
@@ -283,16 +276,21 @@ export default function NotificationsDebugScreen() {
           />
           <DebugButton
             label="Rating Success"
-            sub="showRatingToast(msg, 'success')"
+            sub="showRatingToast — ⭐-Emoji, lila"
             tint="#6d28d9"
-            onPress={() => showRatingToast('Bewertung gespeichert ✓', 'success')}
+            onPress={() =>
+              showRatingToast('⭐ Deine Bewertung wurde gespeichert!', 'success')
+            }
           />
           <DebugButton
             label="Rating Error"
-            sub="showRatingToast(msg, 'error')"
+            sub="showRatingToast — ❌-Emoji, rot"
             tint="#b91c1c"
             onPress={() =>
-              showRatingToast('Bewertung konnte nicht gespeichert werden', 'error')
+              showRatingToast(
+                '❌ Bewertung konnte nicht gespeichert werden',
+                'error',
+              )
             }
           />
           <DebugButton

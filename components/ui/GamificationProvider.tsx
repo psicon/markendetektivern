@@ -2,9 +2,10 @@ import { router } from 'expo-router';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import {
+  achievementService,
   setAchievementUnlockHandler,
   setLevelUpHandler,
-  setPointsEarnedHandler
+  setPointsEarnedHandler,
 } from '@/lib/services/achievementService';
 import { CoachmarkService } from '@/lib/services/coachmarkService';
 import { gamificationSettingsService } from '@/lib/services/gamificationSettingsService';
@@ -29,9 +30,26 @@ import { AppRatingModal } from './AppRatingModal';
 // Lottie-Mapping spiegelt `lottieFor` aus app/achievements.tsx —
 // gleiche Animation pro Action damit der visuelle Eindruck zwischen
 // Detail-Page und Banner konsistent ist.
-function lottieForAchievementAction(action: string | undefined): any {
+//
+// Reihenfolge der Auflösung:
+//   1. Per-Achievement-ID-Override (für Spezialfälle wo die Action
+//      generisch ist aber das Achievement eine eigene Identität
+//      braucht — z.B. "Treu bleiben" ist daily_streak aber soll
+//      die Loyalty-Heart-Lottie zeigen, nicht streak-fire).
+//   2. Per-Action-Mapping als Fallback.
+function lottieForAchievement(achievement: Achievement): any {
   try {
-    switch (action) {
+    // Per-ID-Overrides — nur wo die Action-basierte Logik nicht
+    // passt. Erweitern wenn weitere Achievements eigene Lottie
+    // brauchen.
+    switch (achievement.id) {
+      case 'UcO5xJgps0kUIg8V32li': // "Treu bleiben" — 30-Tage-Streak,
+        // Heart-Theme statt streak-fire (semantisch Loyalty, nicht
+        // Combustion).
+        return require('@/assets/lottie/favorites2.json');
+    }
+
+    switch (achievement.trigger?.action) {
       case 'first_action_any':
         return require('@/assets/lottie/rocket.json');
       case 'daily_streak':
@@ -69,7 +87,7 @@ export function bannerDataFromAchievement(achievement: Achievement): BannerData 
     title: achievement.name,
     subtitle: achievement.description,
     points: achievement.points,
-    lottie: lottieForAchievementAction(achievement.trigger?.action as string),
+    lottie: lottieForAchievement(achievement),
     // Tier-Farbe: bevorzugt achievement.color (Firestore-konfiguriert),
     // sonst gold als Fallback ("Erfolg/Belohnung"-Konnotation).
     tint: (achievement.color as string) || '#F0A030',
@@ -94,18 +112,21 @@ export function bannerDataFromLevelUp(
   const subtitle = unlockedCategory
     ? `Neue Kategorie verfügbar: ${unlockedCategory.name}`
     : `Du bist jetzt auf Level ${newLevel}`;
-  // Old-level-Var (oldLevel) bleibt im Signature für API-Kompatibilität
-  // mit dem achievementService-Callback, wird im Banner aber nicht
-  // mehr separat dargestellt (vorher gab's einen "Level X → Y"-
-  // Vergleich im Modal — der ist mit dem Banner-Compact-Layout
-  // weggefallen).
   void oldLevel;
+
+  // Level-spezifische Brand-Color aus dem Catalog ziehen — sonst
+  // hätten alle Level-Banner denselben Tint, was visuell langweilig
+  // wirkt. Sync-Variante damit die Banner-Daten ohne await gebaut
+  // werden können (Catalog ist nach App-Start schon geladen).
+  // Fallback: gold falls Catalog noch leer ist (race-condition beim
+  // ersten Banner direkt nach Cold-Start).
+  const allLevels = achievementService.getAllLevelsSync();
+  const levelInfo = allLevels.find((l) => l.id === newLevel);
+  const tint = levelInfo?.color || '#F0A030';
+
   return {
     title: `Level ${newLevel} erreicht`,
     subtitle,
-    // Trophy-Lottie für Level-Ups, ist allgemeiner als ein
-    // konkretes Action-Lottie. confetti.json würde auch passen,
-    // aber 'lvlup.json' wenn vorhanden.
     lottie: (() => {
       try {
         return require('@/assets/lottie/lvlup.json');
@@ -113,7 +134,7 @@ export function bannerDataFromLevelUp(
         return require('@/assets/lottie/confetti.json');
       }
     })(),
-    tint: '#F0A030',
+    tint,
     onTap: () => {
       try {
         router.push('/achievements' as any);

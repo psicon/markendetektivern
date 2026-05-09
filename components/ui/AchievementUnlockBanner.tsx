@@ -260,19 +260,10 @@ export function AchievementUnlockBanner({
                   borderRadius: 18,
                 }}
               >
-                {/* Linker Accent-Stripe — solid in der Tier-Farbe.
-                    Macht den Banner unverkennbar als Celebration. */}
-                <View
-                  pointerEvents="none"
-                  style={{
-                    position: 'absolute',
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: 4,
-                    backgroundColor: data.tint,
-                  }}
-                />
+                {/* (Linker Accent-Stripe entfernt — User-Feedback: die
+                    vertikale Linie wirkte hart/abrupt, der Tier-Tint
+                    läuft eh schon über den Gradient. Kein Bedarf für
+                    eine zusätzliche Solid-Kante.) */}
 
                 {/* Lottie-Slot — 72×72, ohne Background-Circle damit
                     die Animation freier wirkt. Tönung kommt vom
