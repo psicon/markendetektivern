@@ -93,10 +93,15 @@ function lighten(hex: string, ratio: number): string {
 // die Mitte des Strokes ausserhalb des Screens projiziert, nur die
 // inner-side des verblurten Strokes ist im sichtbaren Bereich → pure
 // Halo, keine sichtbare Border-Linie.
-const OUTSET = 16;
-const STROKE_WIDTH = 28;
-const BLUR_RADIUS = 26;
-const CORNER_R = 56;
+//
+// User-Wunsch v6.1: "n bisschen intensiver" — also Stroke breiter,
+// Blur größer, Outset weiter raus damit die Halo-Strahlung breiter
+// in den Screen leuchtet. Sekundärton chromatischer (weniger
+// White-Mix → kräftiger sichtbar).
+const OUTSET = 22;
+const STROKE_WIDTH = 44;
+const BLUR_RADIUS = 38;
+const CORNER_R = 60;
 const ROTATION_MS = 8000;
 
 export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
@@ -125,7 +130,9 @@ export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
             duration: 1500,
             easing: Easing.inOut(Easing.sin),
           }),
-          withTiming(0.7, {
+          // 0.82 statt 0.7 als Minimum — der Glow bleibt im Tal des
+          // Atem-Pulses kräftiger sichtbar, weniger "verschwindend".
+          withTiming(0.82, {
             duration: 1500,
             easing: Easing.inOut(Easing.sin),
           }),
@@ -173,7 +180,8 @@ export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
   // Kontrast). Stops in alternierender Reihenfolge → 2 sichtbare
   // bright bands die beim Rotieren wandern.
   const primary = tint;
-  const secondary = lighten(tint, 0.45);
+  // Sekundärton von 45 % → 28 % white-mix: kräftiger, mehr Chroma.
+  const secondary = lighten(tint, 0.28);
   const colors = [primary, secondary, primary, secondary, primary];
 
   return (
