@@ -197,10 +197,22 @@ export default function NotificationsDebugScreen() {
         <SectionTitle title="Toasts" />
         <View style={{ paddingHorizontal: 20 }}>
           <DebugButton
-            label="Punkte (+50)"
-            sub="showPointsToast — gold gradient, bottom"
+            label="Punkte +5 · Produkt gescannt"
+            sub="showPointsToast — gold, bottom"
             tint="#b45309"
-            onPress={() => showPointsToast('Du hast scaniert!', 50)}
+            onPress={() => showPointsToast('📸 Produkt gescannt', 5)}
+          />
+          <DebugButton
+            label="Punkte +10 · Favorit gespeichert"
+            sub="showPointsToast"
+            tint="#b45309"
+            onPress={() => showPointsToast('💖 Favorit gespeichert', 10)}
+          />
+          <DebugButton
+            label="Punkte +50 · Spar-Meilenstein"
+            sub="showPointsToast"
+            tint="#b45309"
+            onPress={() => showPointsToast('💸 Spar-Meilenstein', 50)}
           />
           <DebugButton
             label="Streak (3 Tage)"
