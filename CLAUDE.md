@@ -752,6 +752,105 @@ built it used full capsule (PILL_HEIGHT/2 = 29), then an arbitrary
 "unfinished design", not "intentional variation". Lock to the
 token tier, neighbours will match automatically.
 
+### Toasts → ONE library, one helper-set
+
+ALL toasts go through `lib/services/ui/toast.tsx` (built on
+`@backpackapp-io/react-native-toast`). It renders a compact
+iOS-Dynamic-Island-style pastel pill — pointed-island-style,
+auto-width, NOT in-your-face. Every action that mutates state
+(add to cart, favorite, mark purchased, delete, error, etc.)
+should produce a toast so the user gets confirmation.
+
+**Helper picker:**
+
+| Use case | Helper |
+|---|---|
+| Reward feedback (Punkte) | `showPointsToast(msg, points, scheme)` |
+| Streak day milestone | `showStreakToast(days, bonus, scheme)` |
+| Add to cart | `showCartAddedToast(msg, onOpenCart, scheme)` |
+| Already in cart (info) | `showAlreadyInCartToast(onOpenCart, scheme)` |
+| Cart purchased / removed | `showPurchasedToast(msg, scheme)` |
+| Convert success | `showConvertSuccessToast(savings, scheme)` |
+| Bulk convert | `showBulkConvertSuccessToast(savings, scheme)` |
+| Bulk purchased | `showBulkPurchasedToast(db, custom, savings, scheme)` |
+| Favorite add/remove | `showFavoriteAdded/RemovedToast(name, scheme)` |
+| Rating success/error | `showRatingToast(msg, type, scheme)` |
+| Generic info / error | `showInfoToast(msg, type, scheme)` |
+| **Network-fail with retry** | `showRetryableErrorToast(msg, onRetry, opts)` |
+
+**Position auto-routing:** POINTS, STREAK, ANTI_ABUSE land at the
+BOTTOM (near the gamification "score zone"). Everything else lands
+at the TOP. Don't fight this — it's intentional.
+
+**Don't:**
+- Roll your own toast/snackbar component. Always use the helpers.
+- Use `Alert.alert` for non-critical confirmations — that's a
+  blocking native modal, the toast is non-blocking.
+- Show a toast for every render or every Firestore-listener
+  update. Toasts confirm USER ACTIONS, not data changes.
+
+**Network-error pattern (U2 from the audit):** any async call in
+the critical path (receipt scan, login, withdraw, submit) wraps:
+
+```ts
+try { await someApiCall() }
+catch (e) {
+  console.error('uploadReceipt failed', e);
+  showRetryableErrorToast(
+    'Bon konnte nicht hochgeladen werden — Verbindung prüfen.',
+    () => someApiCall(),
+  );
+}
+```
+
+The action-pill stays for 8 seconds (long) until the user taps or
+swipes. Standard errors WITHOUT retry use `showInfoToast(msg,
+'error')` instead — short, no action.
+
+### Celebrations → ONE banner, no confetti modal
+
+Achievement-Unlocks and Level-Ups go through ONE component:
+`components/ui/AchievementUnlockBanner.tsx`. Slide-up from above
+the tab bar, Lottie 72×72 left, title + subtitle middle, optional
+points-pill right, gradient-tinted backdrop in the achievement's
+tier color. Auto-dismiss after 7 s, swipe-down or tap-body to
+dismiss earlier.
+
+There used to be a "tier" system that routed major events to a
+big confetti modal (`LevelUpOverlay` / `AchievementUnlockOverlay`).
+That's GONE — visually inconsistent, JS-thread Animated.Value,
+ugly. Don't reintroduce it.
+
+**Auto-trigger** (achievement earned / level reached): the
+`GamificationProvider` listens to `achievementService` callbacks
+and calls the banner internally — pages don't need to do anything.
+
+**Manual trigger** (catalog preview taps, e.g. "tap a level/
+achievement card to see what it would feel like"): use the context:
+
+```tsx
+import {
+  bannerDataFromAchievement,
+  bannerDataFromLevelUp,
+  useGamification,
+} from '@/components/ui/GamificationProvider';
+
+const { showBanner } = useGamification();
+// onPress level card:
+showBanner(bannerDataFromLevelUp(level.id, prev));
+// onPress achievement card:
+showBanner(bannerDataFromAchievement(a));
+```
+
+`bannerDataFromX` helpers handle the lottie selection + tint color
++ tap-target navigation. Don't construct `BannerData` by hand
+unless you're adding a new celebration source.
+
+**Never** build a one-off "celebration modal" inline in a screen.
+If a new celebration source appears (e.g. cashback payout), add a
+new `bannerDataFromPayout` helper and route through the same
+banner. ONE celebration component app-wide.
+
 ### Number formatting
 
 - pts: `Number.toLocaleString('de-DE')` — German thousand separators

@@ -280,6 +280,40 @@ export function showInfoToast(
   showToast(message, category, { colorScheme });
 }
 
+// ─── Retry-Error-Toast ────────────────────────────────────────
+//
+// Standardpattern für Network-Fail im kritischen Pfad: Toast mit
+// User-friendly Message + "Wiederholen"-Action-Chip. User-Wunsch
+// aus dem UX-Audit (U2): "Kassenbon-Scan, Login, Receipt-Submit
+// bei Network-Fail keine Fehlermeldung". Mit dieser Funktion
+// lässt sich überall ein konsistenter Retry-Toast feuern.
+//
+// Beispiel:
+//   try { await uploadReceipt(...); }
+//   catch {
+//     showRetryableErrorToast(
+//       'Bon konnte nicht hochgeladen werden — Verbindung prüfen.',
+//       () => uploadReceipt(...),
+//     );
+//   }
+//
+// Die Action-Pille bleibt bis User tappt oder Toast manuell wegswiped
+// (durationMs: 8000 = lang). Standard-Errors ohne Retry sollten
+// stattdessen `showInfoToast(msg, 'error')` nutzen.
+export function showRetryableErrorToast(
+  message: string,
+  onRetry: () => void,
+  options?: { actionLabel?: string; colorScheme?: 'light' | 'dark' },
+) {
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+  showToast(message, 'ERROR', {
+    actionLabel: options?.actionLabel ?? 'Wiederholen',
+    onActionPress: onRetry,
+    colorScheme: options?.colorScheme,
+    durationMs: 8000,
+  });
+}
+
 export function showPurchasedToast(
   message: string,
   colorScheme?: 'light' | 'dark',
