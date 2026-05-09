@@ -407,7 +407,11 @@ const SWIPE_FLING_DURATION = 200;
 const COLLAPSE_DURATION = 260;
 // Bought-Animation Timing (Strike + Pop-Out)
 const BOUGHT_STRIKE_DURATION = 220;   // Stiftstrich zieht durch
-const BOUGHT_HOLD_DURATION = 90;      // kurz die fertig-gestrichene Zeile sehen
+// User-Feedback: 'verschwindet minimal zu schnell 400-500ms länger
+// anzeigen wär cool'. Hold von 90 → 540 ms (+450 ms) — die fertig-
+// gestrichene Zeile bleibt jetzt deutlich länger stehen damit der
+// User den Strike-Effekt würdigen kann bevor sie raus-poppt.
+const BOUGHT_HOLD_DURATION = 540;     // gestrichene Zeile sehen
 const BOUGHT_POP_DURATION = 260;      // scale + fade + collapse
 const BOUGHT_TOTAL = BOUGHT_STRIKE_DURATION + BOUGHT_HOLD_DURATION + BOUGHT_POP_DURATION;
 
