@@ -1935,19 +1935,25 @@ export class FirestoreService {
       
       if (herstellerOrMarke) {
         // Feld zeigt auf: herstellerOrMarke.name || herstellerOrMarke.herstellername
-        
+
         // Prüfe ob es eine Marke ist (hat herstellerref) oder ein Hersteller (hat herstellername)
         if (herstellerOrMarke.herstellerref) {
-          // Das ist eine MARKE
+          // Das ist eine MARKE — Hersteller-Doc + Brand-Liste BEIDE
+          // unabhängig von marke.herstellerref. Vorher sequenziell
+          // (~200 ms zusammen), jetzt parallel (~100 ms).
           marke = herstellerOrMarke;
-          hersteller = await this.getDocumentByReference<any>(marke.herstellerref);
-          brands = skipBrandsQuery ? [] : await this.getMarkenByHersteller(marke.herstellerref);
-          // MARKE gefunden
+          const [herstellerDoc, brandsList] = await Promise.all([
+            this.getDocumentByReference<any>(marke.herstellerref),
+            skipBrandsQuery
+              ? Promise.resolve([])
+              : this.getMarkenByHersteller(marke.herstellerref),
+          ]);
+          hersteller = herstellerDoc;
+          brands = brandsList;
         } else if (herstellerOrMarke.herstellername) {
           // Das ist direkt ein HERSTELLER
           hersteller = herstellerOrMarke;
           brands = skipBrandsQuery ? [] : await this.getMarkenByHersteller(productData.hersteller);
-          // HERSTELLER gefunden
         }
       }
       
@@ -2162,26 +2168,34 @@ export class FirestoreService {
     clickedWasNoName: boolean;
   } | null> {
     try {
-      const stepTimes: Record<string, number> = {};
       const totalStartTime = Date.now();
 
-      // Get the brand product (skip related products and brands query for performance)
-      let lastTime = Date.now();
-      const brandProduct = await this.getMarkenProduktWithDetails(
+      // 🚀 PARALLEL: Brand product details UND Alternatives gleichzeitig
+      // anfeuern. Beide brauchen NUR `brandProductId` als Input — keine
+      // Dependency zwischen ihnen. Vorher sequenziell (~250 ms zusammen),
+      // jetzt parallel (~150 ms).
+      //
+      // Wir können trotzdem onMainResolved feuern sobald brandProduct
+      // fertig ist (egal ob alternatives schon da sind oder nicht) —
+      // dazu erst den Brand-Promise awaiten, dann den Rest.
+      const brandProductPromise = this.getMarkenProduktWithDetails(
         brandProductId,
         true,
         true,
         callbacks?.onMainBasic,
       );
-      stepTimes['1_getBrandProduct'] = Date.now() - lastTime;
-      lastTime = Date.now();
+      const relatedPromise = this.findNoNameProductsByBrandId(brandProductId);
+
+      const brandProduct = await brandProductPromise;
       if (!brandProduct) {
         console.error('❌ Brand product not found:', brandProductId);
+        // relatedPromise läuft noch im Hintergrund — egal, wir
+        // returnen null. Resolve floats away, kein Memory-Leak.
         return null;
       }
 
       // Brand product fully resolved — caller can fill in Hersteller
-      // chip, pack info, etc. before the noname carousel finishes.
+      // chip, pack info, etc. SOFORT, bevor wir auf alternatives warten.
       if (callbacks?.onMainResolved) {
         try {
           callbacks.onMainResolved(brandProduct);
@@ -2190,22 +2204,18 @@ export class FirestoreService {
         }
       }
 
-      // Find all NoName products that link to this brand product
-      const relatedNoNameProducts = await this.findNoNameProductsByBrandId(brandProductId);
-      stepTimes['2_findNoNameProducts'] = Date.now() - lastTime;
-      
-      console.log(`⏱️ BRAND CLICKED Performance:`);
-      Object.entries(stepTimes).forEach(([step, time]) => {
-        console.log(`  ${step}: ${time}ms`);
-      });
-      console.log(`  TOTAL: ${Date.now() - totalStartTime}ms`);
-      console.log(`  Found ${relatedNoNameProducts.length} NoName alternatives`);
-      
+      const relatedNoNameProducts = await relatedPromise;
+
+      console.log(
+        `⏱️ BRAND CLICKED parallel total: ${Date.now() - totalStartTime}ms ` +
+          `(${relatedNoNameProducts.length} alternatives)`,
+      );
+
       return {
         mainProduct: brandProduct,
         relatedNoNameProducts,
         clickedProductId: brandProductId,
-        clickedWasNoName: false
+        clickedWasNoName: false,
       };
     } catch (error) {
       console.error('Error in getBrandProductComparison:', error);
@@ -2230,45 +2240,45 @@ export class FirestoreService {
     clickedWasNoName: boolean;
   } | null> {
     try {
-      const stepTimes: Record<string, number> = {};
       const totalStartTime = Date.now();
-      let lastTime = Date.now();
-      
-      // 🚀 PERFORMANCE FIX: Single Firebase call with parallel reference extraction
+
+      // Step 1: rawProductDoc ist die einzige unvermeidbare Sequential-
+      // Gate (wir brauchen markenProdukt-Ref bevor wir alle anderen
+      // Calls anstoßen können).
       const rawProductDoc = await getDoc(doc(db, 'produkte', noNameProductId));
-      stepTimes['1_getRawProduct'] = Date.now() - lastTime;
-      lastTime = Date.now();
       if (!rawProductDoc.exists()) {
         console.error('❌ NoName product not found:', noNameProductId);
         return null;
       }
-      
       const rawData = rawProductDoc.data();
-      // Found NoName product
-      
+
       // Extract brand product ID from reference
       const originalMarkenProduktRef = rawData.markenProdukt;
       if (!originalMarkenProduktRef || !originalMarkenProduktRef.id) {
         console.error('❌ NoName product has no valid markenProdukt reference');
         return null;
       }
-      
       const markenProduktId = originalMarkenProduktRef.id;
-      // Extracted brand product ID
-      
-      // 🚀 PARALLEL: Load NoName product details + Brand product simultaneously
-      const [noNameProduct, brandProduct] = await Promise.all([
-        this.populateProductReferences(rawData, noNameProductId),
-        this.getMarkenProduktWithDetails(
-          markenProduktId,
-          true,
-          true,
-          callbacks?.onMainBasic,
-        ) // skip both for max performance!
-      ]);
-      stepTimes['2_loadBothProducts'] = Date.now() - lastTime;
-      lastTime = Date.now();
 
+      // 🚀 3-WAY PARALLEL: NoName-Refs + Brand-Product + Alternatives.
+      // Alle drei brauchen nur Inputs die wir oben bereits haben. Vorher
+      // war Alternatives nach Step 2 sequenziell (~ +150 ms), jetzt
+      // läuft es daneben.
+      // onMainResolved feuern wir SOFORT wenn brandProduct fertig ist,
+      // ohne auf die anderen zu warten — deshalb individual awaits
+      // statt Promise.all.
+      const noNamePromise = this.populateProductReferences(rawData, noNameProductId);
+      const brandPromise = this.getMarkenProduktWithDetails(
+        markenProduktId,
+        true,
+        true,
+        callbacks?.onMainBasic,
+      );
+      const alternativesPromise = this.findNoNameProductsByBrandReference(
+        originalMarkenProduktRef,
+      );
+
+      const brandProduct = await brandPromise;
       if (brandProduct && callbacks?.onMainResolved) {
         try {
           callbacks.onMainResolved(brandProduct);
@@ -2277,28 +2287,26 @@ export class FirestoreService {
         }
       }
 
+      const [noNameProduct, relatedNoNameProducts] = await Promise.all([
+        noNamePromise,
+        alternativesPromise,
+      ]);
+
       if (!noNameProduct || !brandProduct) {
         console.error('❌ Failed to load product details');
         return null;
       }
-      
-      // Found products, now find alternatives
-      
-      const relatedNoNameProducts = await this.findNoNameProductsByBrandReference(originalMarkenProduktRef);
-      stepTimes['3_findAlternatives'] = Date.now() - lastTime;
-      
-      console.log(`⏱️ NONAME CLICKED Performance:`);
-      Object.entries(stepTimes).forEach(([step, time]) => {
-        console.log(`  ${step}: ${time}ms`);
-      });
-      console.log(`  TOTAL: ${Date.now() - totalStartTime}ms`);
-      console.log(`  Found ${relatedNoNameProducts.length} NoName alternatives`);
-      
+
+      console.log(
+        `⏱️ NONAME CLICKED parallel total: ${Date.now() - totalStartTime}ms ` +
+          `(${relatedNoNameProducts.length} alternatives)`,
+      );
+
       return {
         mainProduct: brandProduct,
         relatedNoNameProducts,
         clickedProductId: noNameProductId,
-        clickedWasNoName: true
+        clickedWasNoName: true,
       };
     } catch (error) {
       console.error('Error in getNoNameProductComparison:', error);
