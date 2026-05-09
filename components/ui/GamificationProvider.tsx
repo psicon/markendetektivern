@@ -106,26 +106,37 @@ export function bannerDataFromLevelUp(
   oldLevel: number,
   unlockedCategory?: { id: string; name: string; imageUrl: string },
 ): BannerData {
-  // Subtitle: bei Kategorie-Unlock ist DAS die Headline-News
-  // (handlungsrelevant — User kann jetzt die Kategorie stöbern).
-  // Sonst nur "Du bist jetzt auf Level X".
-  const subtitle = unlockedCategory
-    ? `Neue Kategorie verfügbar: ${unlockedCategory.name}`
-    : `Du bist jetzt auf Level ${newLevel}`;
   void oldLevel;
 
-  // Level-spezifische Brand-Color aus dem Catalog ziehen — sonst
-  // hätten alle Level-Banner denselben Tint, was visuell langweilig
-  // wirkt. Sync-Variante damit die Banner-Daten ohne await gebaut
-  // werden können (Catalog ist nach App-Start schon geladen).
-  // Fallback: gold falls Catalog noch leer ist (race-condition beim
-  // ersten Banner direkt nach Cold-Start).
+  // Level-Daten aus dem Catalog ziehen — Color, Name, Description.
+  // Sync-Variante damit die Banner-Daten ohne await gebaut werden
+  // können (Catalog ist nach App-Start schon geladen). Fallback
+  // wenn Catalog noch leer (race-condition beim ersten Banner direkt
+  // nach Cold-Start).
   const allLevels = achievementService.getAllLevelsSync();
   const levelInfo = allLevels.find((l) => l.id === newLevel);
   const tint = levelInfo?.color || '#F0A030';
+  const levelName = levelInfo?.name;
+  const levelDescription = levelInfo?.description;
+
+  // Title: "Level X erreicht – Levelname" wenn Name vorhanden,
+  // sonst nur "Level X erreicht" (Catalog noch nicht geladen).
+  // Em-Dash (–, U+2013) zwischen Level-Number und Name — bessere
+  // Typografie als Bindestrich.
+  const title = levelName
+    ? `Level ${newLevel} erreicht – ${levelName}`
+    : `Level ${newLevel} erreicht`;
+
+  // Subtitle:
+  //   1. Kategorie-Unlock (höchste Priorität — handlungsrelevant)
+  //   2. Level-Description aus dem Catalog
+  //   3. Fallback "Du bist jetzt auf Level X"
+  const subtitle = unlockedCategory
+    ? `Neue Kategorie verfügbar: ${unlockedCategory.name}`
+    : levelDescription || `Du bist jetzt auf Level ${newLevel}`;
 
   return {
-    title: `Level ${newLevel} erreicht`,
+    title,
     subtitle,
     lottie: (() => {
       try {
