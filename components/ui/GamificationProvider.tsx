@@ -156,6 +156,8 @@ export function bannerDataFromLevelUp(
     })(),
     tint,
     secondaryTint,
+    // Level-Up = das große Spektakel: Banner + Haptik + EdgeGlow.
+    withGlow: true,
     onTap: () => {
       try {
         router.push('/achievements' as any);

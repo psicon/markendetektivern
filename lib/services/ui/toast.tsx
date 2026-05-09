@@ -100,9 +100,9 @@ const StandardToast: React.FC<{
   // Saturated icon + text colour = same hue family as the pill bg,
   // but darker. Reads like a "stamp" on the chip.
   const textColor = accent;
-  // Soft 1-px border in the accent at low alpha so the pill has
-  // definition without an outline-shouting effect.
-  const borderColor = accent + '33'; // ~20% alpha
+  // Border entfernt (User-Wish v6.5) — die Pill identifiziert sich
+  // jetzt nur über bg-Gradient + Icon-Color, kein zusätzlicher
+  // Outline.
 
   return (
     <View style={styles.shell}>
@@ -110,7 +110,7 @@ const StandardToast: React.FC<{
         colors={bg}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={[styles.pill, { borderColor }]}
+        style={styles.pill}
       >
         <View style={styles.inner}>
           {emoji ? (
@@ -433,14 +433,16 @@ const styles = StyleSheet.create({
   },
   // Pill — auto-width, max-width 90% of the screen so very long
   // messages still fit without going edge-to-edge.
+  // Border entfernt (User-Wish v6.5) — saubere randlose Pill, nur
+  // bg-Gradient definiert die Form. Soft shadow bleibt für
+  // Definition gegen den Hintergrund.
   pill: {
     maxWidth: SCREEN_WIDTH * 0.9,
     borderRadius: 999,
-    borderWidth: 1,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.10,
+    shadowOpacity: 0.1,
     shadowRadius: 10,
     elevation: 4,
   },

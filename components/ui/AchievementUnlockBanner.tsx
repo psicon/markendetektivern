@@ -71,6 +71,13 @@ export type BannerData = {
    *  Gefühl). Wenn nicht gesetzt: EdgeGlow nutzt eine aufgehellte
    *  Variante des primary-Tints als Shimmer-Akzent. */
   secondaryTint?: string;
+  /** Wenn true, wird der vollständige EdgeGlow (Skia-Halo um den
+   *  Screen) zusätzlich zum Banner angezeigt. Default false.
+   *  Pattern: NUR Level-Ups bekommen den vollen Glow — Achievements
+   *  laufen mit Banner + Haptik (subtiler), damit der Effekt für
+   *  die seltenen Major-Events reserviert bleibt und nicht durch
+   *  Inflation abstumpft. */
+  withGlow?: boolean;
   /** Optional: Tap aufs Body. */
   onTap?: () => void;
 };
@@ -232,12 +239,16 @@ export function AchievementUnlockBanner({
     >
       {/* Tier-getinted Edge-Glow rund um den Screen — fadet synchron
           mit dem Banner ein/aus. zIndex 9990 < Banner 9998, damit der
-          Banner-Card über dem Glow sitzt. */}
-      <EdgeGlow
-        visible={visible}
-        tint={data.tint}
-        secondaryTint={data.secondaryTint}
-      />
+          Banner-Card über dem Glow sitzt.
+          NUR rendern wenn data.withGlow === true (typisch Level-Ups).
+          Achievements bekommen kein Glow → vermeidet Inflation. */}
+      {data.withGlow ? (
+        <EdgeGlow
+          visible={visible}
+          tint={data.tint}
+          secondaryTint={data.secondaryTint}
+        />
+      ) : null}
 
       <Animated.View
         pointerEvents="box-none"
