@@ -4,23 +4,28 @@
 // nicht nur lokal im Banner, sondern lässt den ganzen Screen kurz
 // in der Tier-Color "atmen".
 //
+// V2 (post-Feedback): subtiler, mit Pulsation, garantiert NICHT die
+// Banner-Card überlagernd. Der bottom-Streifen ist kurz genug damit
+// er weit unter der Banner-Pille endet.
+//
 // Implementation:
 //   • 4 LinearGradients (top, bottom, left, right), je vom Rand
-//     ins Innere fading. Die ECKEN bekommen Doppel-Coverage (top +
-//     left → starke Top-Left-Glow), was den Vignette-Eindruck
-//     ergibt ohne dass wir einen echten Radial-Gradient brauchen
-//     (RN/expo-linear-gradient supportet nur lineare).
-//   • Bottom etwas stärker (0.38 alpha) als top (0.32) weil der
-//     Banner dort sitzt und der Glow sich visuell mit ihm verbindet.
-//   • Seitenstreifen schlanker (0.22 alpha, 110 px breit) damit
-//     der zentrale Content noch sichtbar bleibt — wir wollen einen
-//     RAHMEN-Effekt, kein Vollbild-Tint.
+//     ins Innere fading. Ecken bekommen Doppel-Coverage durch das
+//     Overlap von vertikalem + horizontalem Gradient → Vignette-
+//     Eindruck.
+//   • Alphas BEWUSST niedrig (0.18 / 0.20 / 0.12) damit der Glow
+//     "atmet" statt zu schreien. Vorher 0.32-0.38 — User hat das
+//     als zu prominent empfunden.
+//   • Bottom-Höhe nur 16 % — endet bei ~135 px auf einem 850 px
+//     Screen, deutlich unterhalb der Banner-Pille (sitzt bei
+//     ~200 px from bottom).
 //
 // Animation (Reanimated 3):
-//   • Fade-in: 600 ms ease-out
-//   • Fade-out: 400 ms ease-in
-// Synchron zum Banner — wenn Banner sichtbar/unsichtbar wird, fadet
-// der Glow mit.
+//   • Visibility-Fade: 700 ms ease-out (in) / 500 ms ease-in (out)
+//   • Pulse: kontinuierliches Atmen 0.7 → 1.0 → 0.7 mit 2400 ms
+//     Cycle, sine-easing → fließendes Pulsieren typisch für Apps
+//     (Snapchat-Notify, iOS-Reminders, Discord-Pings).
+//   • Final opacity = visibility * pulse.
 //
 // pointerEvents='none' — schluckt nie Touches.
 
@@ -29,8 +34,11 @@ import React, { useEffect } from 'react';
 import { StyleSheet } from 'react-native';
 import Animated, {
   Easing,
+  cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
+  withRepeat,
+  withSequence,
   withTiming,
 } from 'react-native-reanimated';
 
@@ -42,7 +50,6 @@ interface EdgeGlowProps {
 
 function hexToRgba(hex: string, alpha: number): string {
   const h = hex.replace('#', '').trim();
-  // Robust gegen 3-stellige Shortcuts (#fff) — expand to 6.
   const expanded =
     h.length === 3
       ? h
@@ -59,20 +66,57 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
-  const opacity = useSharedValue(0);
+  // Visibility ist ein 0→1 Faktor der Master-Opacity.
+  const visibility = useSharedValue(0);
+  // Pulse läuft kontinuierlich zwischen 0.70 und 1.0 — multipliziert
+  // mit visibility ergibt das die finale Display-Opacity.
+  const pulse = useSharedValue(0.7);
 
   useEffect(() => {
-    opacity.value = withTiming(visible ? 1 : 0, {
-      duration: visible ? 600 : 400,
-      easing: visible ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
-    });
-  }, [visible, opacity]);
+    if (visible) {
+      // Fade-in: weich, ease-out — typisches "schwebt rein"-Feel.
+      visibility.value = withTiming(1, {
+        duration: 700,
+        easing: Easing.out(Easing.cubic),
+      });
+      // Pulse-Loop starten — sine-ähnliche Wave durch
+      // withRepeat(withSequence(...)). 1200 ms hoch, 1200 ms runter
+      // = 2400 ms Cycle. Reverse: false damit jeder Step seinen
+      // eigenen Easing-Curve hat (ease-in-out an beiden Enden).
+      pulse.value = withRepeat(
+        withSequence(
+          withTiming(1.0, {
+            duration: 1200,
+            easing: Easing.inOut(Easing.sin),
+          }),
+          withTiming(0.7, {
+            duration: 1200,
+            easing: Easing.inOut(Easing.sin),
+          }),
+        ),
+        -1,
+        false,
+      );
+    } else {
+      // Fade-out: weicher als Entry damit nicht abrupt.
+      visibility.value = withTiming(0, {
+        duration: 500,
+        easing: Easing.in(Easing.cubic),
+      });
+      // Pulse-Loop sauber abbrechen sonst läuft er dauerhaft auf
+      // dem UI-Thread weiter auch wenn EdgeGlow schon unsichtbar ist.
+      cancelAnimation(pulse);
+    }
+  }, [visible, visibility, pulse]);
 
-  const animatedStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: visibility.value * pulse.value,
+  }));
 
-  const topColor = hexToRgba(tint, 0.32);
-  const bottomColor = hexToRgba(tint, 0.38);
-  const sideColor = hexToRgba(tint, 0.22);
+  // Niedrige Alphas — der Glow soll atmen, nicht schreien.
+  const topColor = hexToRgba(tint, 0.18);
+  const bottomColor = hexToRgba(tint, 0.2);
+  const sideColor = hexToRgba(tint, 0.12);
 
   return (
     <Animated.View
@@ -90,9 +134,12 @@ export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
           top: 0,
           left: 0,
           right: 0,
-          height: '24%',
+          height: '20%',
         }}
       />
+      {/* Bottom NIEDRIGER damit garantiert unterhalb der Banner-Pille:
+          16 % von 850 px ≈ 136 px. Banner-Pille sitzt bei ~200 px
+          from bottom. → keine Überlappung. */}
       <LinearGradient
         colors={['transparent', bottomColor]}
         style={{
@@ -100,7 +147,7 @@ export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
           bottom: 0,
           left: 0,
           right: 0,
-          height: '32%',
+          height: '16%',
         }}
       />
       <LinearGradient
@@ -112,7 +159,7 @@ export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
           top: 0,
           bottom: 0,
           left: 0,
-          width: 110,
+          width: 90,
         }}
       />
       <LinearGradient
@@ -124,7 +171,7 @@ export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
           top: 0,
           bottom: 0,
           right: 0,
-          width: 110,
+          width: 90,
         }}
       />
     </Animated.View>
