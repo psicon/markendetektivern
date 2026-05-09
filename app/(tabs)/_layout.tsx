@@ -93,13 +93,37 @@ function GlassBackdrop({
   pillBottom: number;
   animatedStyle: ReturnType<typeof useAnimatedStyle>;
 }) {
-  // ANDROID-TEST: GlassBackdrop komplett aus. MaskedView + BlurView-
-  // Combo (mit experimentalBlurMethod) hat im logcat
-  // `EGLConsumer is not attached to an OpenGL ES context` Warnings
-  // produziert + Surface-Stops. Wir prüfen ob die Surface-Disruption
-  // ohne diesen Effekt aufhört.
+  // Android: KEIN MaskedView + KEIN BlurView mit experimentalBlurMethod
+  // (verursachte Surface-Stops). Stattdessen: 2 gestackte
+  // LinearGradients für eine sanfte Tab-Pille-Aura. Subtiler aber
+  // robust und kein TurboModule-Konflikt mit Android's GL-Lifecycle.
   if (Platform.OS === 'android') {
-    return null;
+    const totalH = pillBottom + PILL_HEIGHT / 2;
+    const tintBg =
+      colorScheme === 'dark'
+        ? 'rgba(255,255,255,0.08)'
+        : 'rgba(0,0,0,0.06)';
+    return (
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: totalH,
+          },
+          animatedStyle,
+        ]}
+      >
+        <LinearGradient
+          colors={['transparent', tintBg]}
+          locations={[0, 1]}
+          style={{ flex: 1 }}
+        />
+      </Animated.View>
+    );
   }
 
   const tint = colorScheme === 'dark' ? 'dark' : 'light';

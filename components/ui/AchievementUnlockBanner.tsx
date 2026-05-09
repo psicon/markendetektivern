@@ -24,11 +24,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import LottieView from 'lottie-react-native';
 import React, { useCallback, useEffect, useRef } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import {
-  Gesture,
-  GestureDetector,
-  GestureHandlerRootView,
-} from 'react-native-gesture-handler';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
   runOnJS,
@@ -233,7 +229,7 @@ export function AchievementUnlockBanner({
   const gradientRight = theme.surface;
 
   return (
-    <GestureHandlerRootView
+    <View
       pointerEvents="box-none"
       style={[StyleSheet.absoluteFillObject, { zIndex: 9998 }]}
     >
@@ -386,6 +382,6 @@ export function AchievementUnlockBanner({
           </Animated.View>
         </GestureDetector>
       </Animated.View>
-    </GestureHandlerRootView>
+    </View>
   );
 }
