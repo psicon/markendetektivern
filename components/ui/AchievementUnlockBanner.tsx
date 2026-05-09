@@ -212,9 +212,11 @@ export function AchievementUnlockBanner({
     Platform.OS === 'ios'
       ? TAB_BAR_HEIGHT_IOS
       : TAB_BAR_HEIGHT_ANDROID_BASE + Math.max(0, insets.bottom);
-  // Reduzierter Bottom-Whitespace (User-Feedback v6.4): Banner sitzt
-  // dichter über der Tab-Bar (war +12, jetzt +2).
-  const bottomOffset = tabBarH + 2;
+  // User-Feedback v6.5: "card weiter runter". Banner sitzt jetzt
+  // tiefer und greift in den Tab-Bar-Bereich rein (oben am Pill,
+  // ~15-20 px Overlap). Wirkt wie eine Notification die direkt auf
+  // der Tab-Pille andockt.
+  const bottomOffset = tabBarH - 16;
 
   // Gradient-Stops: links sat-getintet (~28% opacity), rechts
   // theme.surface (= weiß). Der Übergang läuft horizontal über
@@ -242,11 +244,11 @@ export function AchievementUnlockBanner({
         style={[
           {
             position: 'absolute',
-            // User-Feedback v6.4: über 100 % Breite — keine Side-
-            // Margins mehr (war je 12 px). Banner geht von Edge zu
-            // Edge.
-            left: 0,
-            right: 0,
+            // v6.5: zurück zu Side-Margins (Card-Look). 12 px je
+            // Seite damit der Banner als schwebende Card wirkt,
+            // nicht als Edge-to-Edge Toast-Bar.
+            left: 12,
+            right: 12,
             bottom: bottomOffset,
           },
           containerStyle,
@@ -260,10 +262,9 @@ export function AchievementUnlockBanner({
               accessibilityLabel={data.title}
               style={({ pressed }) => ({
                 opacity: pressed ? 0.94 : 1,
-                // borderRadius 0 — full-width Banner soll wie eine
-                // Toast-Bar wirken die direkt über der Tab-Bar
-                // andockt, nicht wie eine schwebende Card.
-                borderRadius: 0,
+                // v6.5: zurück zu Rounded-Card. 18 = radii.xl, matcht
+                // die Tab-Pille + Cart-FAB.
+                borderRadius: 18,
                 overflow: 'hidden',
                 // SOLID surface BACKDROP — sonst durchsichtig auf dem
                 // Screen-Inhalt (siehe User-Bug-Screenshot wo
