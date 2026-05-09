@@ -46,10 +46,8 @@ import { EdgeGlow } from './EdgeGlow';
 const TAB_BAR_HEIGHT_IOS = 90;
 const TAB_BAR_HEIGHT_ANDROID_BASE = 62;
 const HIDDEN_OFFSET = 200;
-// Erhöht von 5 → 7 s. User-Feedback: 5 s sind zu knapp um die
-// Lottie zu würdigen + den Text zu lesen + zu entscheiden ob man
-// zur Errungenschaften-Seite tippen will.
-const AUTO_DISMISS_MS = 7000;
+// 6 s — 1 s kürzer als vorher (war 7 s). User-Feedback v6.4.
+const AUTO_DISMISS_MS = 6000;
 const BANNER_HEIGHT = 96;
 const LOTTIE_SIZE = 72;
 
@@ -214,7 +212,9 @@ export function AchievementUnlockBanner({
     Platform.OS === 'ios'
       ? TAB_BAR_HEIGHT_IOS
       : TAB_BAR_HEIGHT_ANDROID_BASE + Math.max(0, insets.bottom);
-  const bottomOffset = tabBarH + 12;
+  // Reduzierter Bottom-Whitespace (User-Feedback v6.4): Banner sitzt
+  // dichter über der Tab-Bar (war +12, jetzt +2).
+  const bottomOffset = tabBarH + 2;
 
   // Gradient-Stops: links sat-getintet (~28% opacity), rechts
   // theme.surface (= weiß). Der Übergang läuft horizontal über
@@ -242,8 +242,11 @@ export function AchievementUnlockBanner({
         style={[
           {
             position: 'absolute',
-            left: 12,
-            right: 12,
+            // User-Feedback v6.4: über 100 % Breite — keine Side-
+            // Margins mehr (war je 12 px). Banner geht von Edge zu
+            // Edge.
+            left: 0,
+            right: 0,
             bottom: bottomOffset,
           },
           containerStyle,
@@ -257,7 +260,10 @@ export function AchievementUnlockBanner({
               accessibilityLabel={data.title}
               style={({ pressed }) => ({
                 opacity: pressed ? 0.94 : 1,
-                borderRadius: 18,
+                // borderRadius 0 — full-width Banner soll wie eine
+                // Toast-Bar wirken die direkt über der Tab-Bar
+                // andockt, nicht wie eine schwebende Card.
+                borderRadius: 0,
                 overflow: 'hidden',
                 // SOLID surface BACKDROP — sonst durchsichtig auf dem
                 // Screen-Inhalt (siehe User-Bug-Screenshot wo
@@ -269,7 +275,9 @@ export function AchievementUnlockBanner({
                 ...(shadows.lg as object),
               })}
             >
-              {/* Gradient-Backdrop füllt die ganze Karte */}
+              {/* Gradient-Backdrop füllt die ganze Karte. Border
+                  entfernt (User-Wunsch v6.4) — keine Linie mehr um
+                  den Banner. */}
               <LinearGradient
                 colors={[gradientLeft, gradientMid, gradientRight]}
                 start={{ x: 0, y: 0 }}
@@ -282,9 +290,6 @@ export function AchievementUnlockBanner({
                   paddingRight: 14,
                   paddingVertical: 12,
                   minHeight: BANNER_HEIGHT,
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                  borderRadius: 18,
                 }}
               >
                 {/* (Linker Accent-Stripe entfernt — User-Feedback: die
