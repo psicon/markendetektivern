@@ -127,12 +127,43 @@ function GlassBackdrop({
           />
         }
       >
-        <BlurView
-          intensity={70}
-          tint={tint}
-          experimentalBlurMethod="dimezisBlurView"
-          style={{ flex: 1 }}
-        />
+        <View style={{ flex: 1 }}>
+          {/* Echter Blur (intensity 50 — vorher 70 war zu stark, der
+              Inhalt war zu unkenntlich). */}
+          <BlurView
+            intensity={50}
+            tint={tint}
+            experimentalBlurMethod="dimezisBlurView"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+            }}
+          />
+          {/* Tint-Overlay für Kontrast zur Pille:
+              - Light-Mode → leichtes Schwarz (12 %) → Backdrop wird
+                dunkler, Pille hebt sich stärker ab
+              - Dark-Mode → leichtes Weiß (10 %) → Backdrop wird
+                heller, Pille (cardBackground = #1c1c1e) hebt sich
+                gegen die aufgehellte Frost-Schicht ab
+              Beide Werte bewusst niedrig damit der Blur durchschimmert
+              und nicht zu einer einfachen Color-Layer wird. */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor:
+                colorScheme === 'dark'
+                  ? 'rgba(255,255,255,0.10)'
+                  : 'rgba(0,0,0,0.12)',
+            }}
+          />
+        </View>
       </MaskedView>
     </Animated.View>
   );
