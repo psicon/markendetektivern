@@ -5,8 +5,13 @@
 // Homepage (rounded square, primary green, gefüllter Cart-Glyph), aber
 // in das neue Design-System getunt:
 //   • brand.primary BG mit `shadows.lg`
-//   • 56×56, borderRadius 16
-//   • MaterialCommunityIcons "cart" (entspricht dem alten cart.fill)
+//   • 56×56 (square, identisch zur raised Stöbern-Tab-Mitte —
+//     gleiche Höhe, gleiche Breite, gleiche Icon-Größe 30, sodass
+//     beide Buttons als visuelles Paar wahrgenommen werden)
+//   • borderRadius 18 (radii.xl — match Cart-FAB-Sizing-Rule:
+//     prominent Container → 18, siehe CLAUDE.md "Border radii")
+//   • MaterialCommunityIcons "cart" Size 30 (entspricht dem alten
+//     cart.fill, gleiche visuelle Größe wie Stöbern's iconBlack-30)
 //   • Light-Haptic beim Drücken
 //   • Pressed-State: nur die BG-Farbe wird dunkler (brand.primaryDark)
 //     + minimaler Scale-Down — KEIN Opacity-Tween auf dem ganzen Button,
@@ -119,7 +124,7 @@ export function FloatingShoppingListButton({
         right: rightOffset,
         width: 56,
         height: 56,
-        borderRadius: 16,
+        borderRadius: 18,
         // Nur die Farbe ändert sich beim Drücken — Icon und Counter
         // bleiben volle Opacity (sieht sauberer aus als ein
         // durchsichtiger Button).
@@ -131,7 +136,7 @@ export function FloatingShoppingListButton({
         ...shadows.lg,
       })}
     >
-      <MaterialCommunityIcons name="cart" size={24} color="#fff" />
+      <MaterialCommunityIcons name="cart" size={30} color="#fff" />
 
       {/* Counter-Pill oben rechts.
           - Während des initialen Loads: Shimmer-Skeleton in derselben
