@@ -37,6 +37,48 @@ Versionsnummern (autoIncrement). User muss kontrollieren wann das
 passiert. Wenn unsicher ob ein Build gewollt ist → fragen, nicht
 einfach machen.
 
+## Android: APK aufs Device — Workflow
+
+Wenn der User „aufs Device packen", „APK installieren" o.ä. sagt:
+**NICHT `adb install` ausführen, NICHT `eas build:run`** — das endet
+oft in Signatur-Mismatches oder Play-Protect-Blocks. Stattdessen:
+
+1. Aktuellsten EAS-Android-Build holen:
+   ```bash
+   eas build:list --platform android --limit 1 --json
+   ```
+   → die `applicationArchiveUrl` rauskopieren.
+
+2. Datei in `~/Downloads` mit Versions-/Build-Naming packen:
+   ```bash
+   curl -L -o ~/Downloads/markendetektive-<version>-<build>.aab "<url>"
+   ```
+   Beispiel: `markendetektive-5.0.7-1155.aab`
+
+3. Wenn's eine `.aab` ist (production-Profil): mit `bundletool` zu
+   universal-APK konvertieren:
+   ```bash
+   cd ~/Downloads
+   bundletool build-apks --bundle=<file>.aab --output=<file>.apks --mode=universal
+   unzip -o -q <file>.apks -d <build-dir>
+   cp <build-dir>/universal.apk <file>.apk
+   ```
+   (`internal`-Profil baut direkt APK, kein bundletool nötig)
+
+4. APK auf den Device-Download-Ordner pushen:
+   ```bash
+   adb push ~/Downloads/<file>.apk /sdcard/Download/
+   ```
+
+5. **Fertig.** User installiert manuell vom Device aus dem Download-
+   Ordner. Das umgeht Play-Protect-Restrictions, Signatur-Mismatches,
+   und MIUI-Sicherheits-Blocks.
+
+**Niemals stattdessen `adb install` direkt feuern** — das hat zwei
+mal in Folge mit `INSTALL_FAILED_USER_RESTRICTED` geendet. User
+will's manuell installieren, weil das auf seinem Device der
+zuverlässige Weg ist.
+
 ## Builds & deploys — ALWAYS via EAS, NEVER local
 
 **Beide Plattformen** werden über EAS Build gebaut, nicht lokal.
