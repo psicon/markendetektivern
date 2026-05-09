@@ -117,10 +117,11 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           position: 'absolute',
           left: PILL_MARGIN_X,
           right: PILL_MARGIN_X,
-          // Pille tiefer als vorher (war insets.bottom + 6, hing zu
-          // nah am Einkaufszettel-FAB). Jetzt klebt sie näher an der
-          // Home-Indicator-Bar / Screen-Bottom-Edge.
-          bottom: Math.max(insets.bottom - 2, 4),
+          // Pille minimal angehoben (war Math.max(insets.bottom - 2, 4)).
+          // Jetzt +3 px luftiger zur Screen-Bottom-Edge (User-Wunsch
+          // nach Entfernen des Home-FABs — die Pille darf wieder
+          // etwas mehr atmen).
+          bottom: Math.max(insets.bottom + 1, 7),
           height: PILL_HEIGHT,
           backgroundColor: colors.cardBackground,
           borderRadius: PILL_RADIUS,

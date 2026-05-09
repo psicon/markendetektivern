@@ -26,7 +26,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BannerAd } from '@/components/ads/BannerAd';
 import { HomeWalkthrough } from '@/components/coachmarks/HomeWalkthrough';
 import { DetectiveMark } from '@/components/design/DetectiveMark';
-import { FloatingShoppingListButton } from '@/components/design/FloatingShoppingListButton';
 import {
   MorphingHeader,
   MORPHING_HEADER_ROW_HEIGHT,
@@ -1200,18 +1199,13 @@ export default function HomeScreen() {
 
       </Animated.ScrollView>
 
-      {/* Schwebender Einkaufszettel-FAB — gleicher Style wie auf
-          der alten Home, aber mit den neuen Theme-Tokens. Liegt
-          über dem Tab-Bar (90 px iOS / 62 + safe-bottom Android),
-          deshalb bottomOffset 100.
-
-          Ausgeblendet während die Coachmark-Tour läuft, weil der
-          FAB sonst die rechte Seite des Spotlight-Targets überlagert
-          (das Spotlight zielt auf die erste Karte aus "Für dich
-          enttarnt", die FAB liegt visuell darauf). */}
-      {homeCoachmark.visible ? null : (
-        <FloatingShoppingListButton bottomOffset={100} />
-      )}
+      {/* Einkaufszettel-FAB auf Home BEWUSST entfernt: die
+          Schnellzugriff-Einkaufsliste-Card mit Live-Count-Badge
+          ist jetzt der Cart-Anker auf der Startseite — ein
+          zusätzlicher FAB unten rechts wäre redundant. Auf
+          Detail-/Comparison-Seiten bleibt der FAB unverändert
+          erhalten, weil dort die Schnellzugriff-Card nicht
+          existiert. */}
 
       <SearchBottomSheet
         visible={showSearchSheet}
