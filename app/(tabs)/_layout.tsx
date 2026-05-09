@@ -1,3 +1,4 @@
+import MaskedView from '@react-native-masked-view/masked-view';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
@@ -66,26 +67,37 @@ const RAISED_SIZE = 56;
 const RAISED_LIFT = 18; // wie weit ragt der mittlere Button über die Pille hinaus
 
 // ─── Liquid-Glass-Backdrop ───────────────────────────────────────────
-// Mehrere gestackte BlurViews approximieren das iOS-26-Liquid-Glass-
-// Verhalten (gradient blur intensity) — top: leicht, bottom: stark.
-// Jede zusätzliche BlurView-Schicht erhöht den effektiven Blur in
-// dem Bereich, den sie abdeckt → kumulative Wirkung erzeugt den
-// Gradient. Wir lassen die obere Layer dünn beginnen damit der Top-
-// Cutoff weich ist, statt einer harten "Hier-fängt-Blur-an"-Kante.
+// EINE BlurView mit voller Intensität, MaskedView mit vertikalem
+// LinearGradient als Maske → echter weicher Verlauf von TRANSPARENT
+// (oben, Mitte der Pille) zu OPAK (unten, Screen-Edge). Genau wie
+// das iOS-Liquid-Glass: keine Banding-Kanten, kein hartes Anfang/Ende.
+//
+// Höhe: nur von der Pillen-Mitte bis zum Screen-Boden. Über der Pille
+// passiert nichts mehr (kein "Sichere dir Cashback"-Text wird mehr
+// geblurt — das war zu hoch).
+//
+// Mask:
+//   • 0 % von oben → opacity 0 (Blur unsichtbar, Content scharf)
+//   • 35 % von oben → leicht eingefadet
+//   • 100 % unten   → voll opak (Blur maximal sichtbar)
 //
 // pointerEvents='none' überall — der Backdrop schluckt nie Touches.
-const BACKDROP_TOP_OFFSET = 36; // Wieviel über die Pille hinaus blurren
 function GlassBackdrop({
   colorScheme,
-  insetBottom,
+  pillBottom,
   animatedStyle,
 }: {
   colorScheme: 'light' | 'dark';
-  insetBottom: number;
+  /** bottom-Wert der Pille (von Screen-Edge), damit wir die obere
+   *  Backdrop-Kante exakt auf die Pillen-Mitte legen können. */
+  pillBottom: number;
   animatedStyle: ReturnType<typeof useAnimatedStyle>;
 }) {
   const tint = colorScheme === 'dark' ? 'dark' : 'light';
-  const totalH = PILL_HEIGHT + insetBottom + BACKDROP_TOP_OFFSET + 24;
+  // Backdrop-Höhe = von der Pillen-Mitte bis zum Screen-Boden.
+  // pillBottom (= 35 px) + PILL_HEIGHT/2 (= 29 px) ≈ 64 px Höhe auf
+  // iPhone. Das ist genau die untere Hälfte der Pille + safe-area.
+  const totalH = pillBottom + PILL_HEIGHT / 2;
 
   return (
     <Animated.View
@@ -101,71 +113,27 @@ function GlassBackdrop({
         animatedStyle,
       ]}
     >
-      {/* Layer 1: ganz oben dünn — sanftes Anfangs-Fog. Deckt die
-          gesamte Backdrop-Höhe, intensität super low damit die obere
-          Cutoff-Kante kaum sichtbar ist. */}
-      <BlurView
-        intensity={8}
-        tint={tint}
-        // Android braucht das experimentalBlurMethod-Flag damit echtes
-        // Blur statt nur Color-Tint passiert (DimezisBlurView).
-        experimentalBlurMethod="dimezisBlurView"
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-        }}
-      />
-      {/* Layer 2: ab oberen 30% ein kräftigerer Layer — der mittlere
-          Bereich (rund um die Pille) wird spürbar foggy. */}
-      <BlurView
-        intensity={18}
-        tint={tint}
-        experimentalBlurMethod="dimezisBlurView"
-        style={{
-          position: 'absolute',
-          top: totalH * 0.3,
-          left: 0,
-          right: 0,
-          bottom: 0,
-        }}
-      />
-      {/* Layer 3: ab oberen 65% ein weiterer Layer — die untere
-          Hälfte (zwischen Pille und Screen-Edge) wird am stärksten
-          geblurt. Kumulativ landet dort intensity ~46. */}
-      <BlurView
-        intensity={20}
-        tint={tint}
-        experimentalBlurMethod="dimezisBlurView"
-        style={{
-          position: 'absolute',
-          top: totalH * 0.65,
-          left: 0,
-          right: 0,
-          bottom: 0,
-        }}
-      />
-      {/* Subtler Tint-Gradient von transparent oben → leicht solid
-          unten. Verstärkt den "wird-zum-Boden-hin-dichter"-Eindruck
-          OHNE die Blur-Schichten visuell zu erschlagen — die Opacity
-          bleibt niedrig damit der Blur noch durchschaut wird. */}
-      <LinearGradient
-        colors={
-          colorScheme === 'dark'
-            ? ['rgba(0,0,0,0)', 'rgba(0,0,0,0.18)']
-            : ['rgba(255,255,255,0)', 'rgba(255,255,255,0.22)']
+      <MaskedView
+        style={{ flex: 1 }}
+        maskElement={
+          <LinearGradient
+            // Von TRANSPARENT (oben — Pillen-Mitte) zu OPAK (unten
+            // — Screen-Edge). Das ist die Mask: wo die Maske
+            // schwarz ist, ist der maskierte Inhalt sichtbar. Wo
+            // transparent, unsichtbar.
+            colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.6)', 'rgba(0,0,0,1)']}
+            locations={[0, 0.45, 1]}
+            style={{ flex: 1 }}
+          />
         }
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-        }}
-        pointerEvents="none"
-      />
+      >
+        <BlurView
+          intensity={70}
+          tint={tint}
+          experimentalBlurMethod="dimezisBlurView"
+          style={{ flex: 1 }}
+        />
+      </MaskedView>
     </Animated.View>
   );
 }
@@ -216,14 +184,20 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   // unsichtbare Pille Touches während Eingabefeldern
   const pointerEvents = isKeyboardVisible ? 'none' : 'auto';
 
+  // Pill-Bottom-Wert (in px from screen edge) — exakt derselbe Wert
+  // wie unten am Animated.View — wir reichen ihn an den GlassBackdrop
+  // damit dort die Backdrop-Höhe = pillBottom + PILL_HEIGHT/2 berechnet
+  // werden kann (Backdrop endet auf der Pillen-Mitte).
+  const pillBottom = Math.max(insets.bottom + 1, 7);
+
   return (
     <>
-      {/* Liquid-Glass-Backdrop hinter der Pille — gradient blur, top
-          leicht, bottom stark. Fade'd analog zur Pille mit dem
-          Keyboard. */}
+      {/* Liquid-Glass-Backdrop hinter der Pille — Single BlurView mit
+          MaskedView-Gradient (transparent oben, opak unten). Fade't
+          mit der Pille analog beim Keyboard. */}
       <GlassBackdrop
         colorScheme={colorScheme ?? 'light'}
-        insetBottom={insets.bottom}
+        pillBottom={pillBottom}
         animatedStyle={containerAnimStyle}
       />
       <Animated.View
@@ -236,8 +210,9 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           // Pille minimal angehoben (war Math.max(insets.bottom - 2, 4)).
           // Jetzt +3 px luftiger zur Screen-Bottom-Edge (User-Wunsch
           // nach Entfernen des Home-FABs — die Pille darf wieder
-          // etwas mehr atmen).
-          bottom: Math.max(insets.bottom + 1, 7),
+          // etwas mehr atmen). Wert wird oben als pillBottom berechnet
+          // und an den GlassBackdrop weitergereicht.
+          bottom: pillBottom,
           height: PILL_HEIGHT,
           backgroundColor: colors.cardBackground,
           borderRadius: PILL_RADIUS,

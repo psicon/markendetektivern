@@ -1603,9 +1603,14 @@ PODS:
   - Firebase/Messaging (12.10.0):
     - Firebase/CoreOnly
     - FirebaseMessaging (~> 12.10.0)
+  - Firebase/RemoteConfig (12.10.0):
+    - Firebase/CoreOnly
+    - FirebaseRemoteConfig (~> 12.10.0)
   - Firebase/Storage (12.10.0):
     - Firebase/CoreOnly
     - FirebaseStorage (~> 12.10.0)
+  - FirebaseABTesting (12.10.0):
+    - FirebaseCore (~> 12.10.0)
   - FirebaseAnalytics/Core (12.10.0):
     - FirebaseCore (~> 12.10.0)
     - FirebaseInstallations (~> 12.10.0)
@@ -1686,6 +1691,14 @@ PODS:
     - GoogleUtilities/Reachability (~> 8.1)
     - GoogleUtilities/UserDefaults (~> 8.1)
     - nanopb (~> 3.30910.0)
+  - FirebaseRemoteConfig (12.10.0):
+    - FirebaseABTesting (~> 12.10.0)
+    - FirebaseCore (~> 12.10.0)
+    - FirebaseInstallations (~> 12.10.0)
+    - FirebaseRemoteConfigInterop (~> 12.10.0)
+    - FirebaseSharedSwift (~> 12.10.0)
+    - GoogleUtilities/Environment (~> 8.1)
+    - "GoogleUtilities/NSData+zlib (~> 8.1)"
   - FirebaseRemoteConfigInterop (12.10.0)
   - FirebaseSessions (12.10.0):
     - FirebaseCore (~> 12.10.0)
@@ -3763,6 +3776,30 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - Yoga
+  - RNCMaskedView (0.3.2):
+    - DoubleConversion
+    - glog
+    - hermes-engine
+    - RCT-Folly (= 2024.11.18.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - Yoga
   - RNDateTimePicker (8.4.1):
     - DoubleConversion
     - glog
@@ -3922,6 +3959,32 @@ PODS:
     - DoubleConversion
     - Firebase/Messaging (= 12.10.0)
     - FirebaseCoreExtension
+    - glog
+    - hermes-engine
+    - RCT-Folly (= 2024.11.18.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - RNFBApp
+    - Yoga
+  - RNFBRemoteConfig (23.8.8):
+    - DoubleConversion
+    - Firebase/RemoteConfig (= 12.10.0)
     - glog
     - hermes-engine
     - RCT-Folly (= 2024.11.18.00)
@@ -4436,6 +4499,7 @@ DEPENDENCIES:
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - "RNAppleAuthentication (from `../node_modules/@invertase/react-native-apple-authentication`)"
   - "RNCAsyncStorage (from `../node_modules/@react-native-async-storage/async-storage`)"
+  - "RNCMaskedView (from `../node_modules/@react-native-masked-view/masked-view`)"
   - "RNDateTimePicker (from `../node_modules/@react-native-community/datetimepicker`)"
   - "RNFBAnalytics (from `../node_modules/@react-native-firebase/analytics`)"
   - "RNFBApp (from `../node_modules/@react-native-firebase/app`)"
@@ -4443,6 +4507,7 @@ DEPENDENCIES:
   - "RNFBCrashlytics (from `../node_modules/@react-native-firebase/crashlytics`)"
   - "RNFBFirestore (from `../node_modules/@react-native-firebase/firestore`)"
   - "RNFBMessaging (from `../node_modules/@react-native-firebase/messaging`)"
+  - "RNFBRemoteConfig (from `../node_modules/@react-native-firebase/remote-config`)"
   - "RNFBStorage (from `../node_modules/@react-native-firebase/storage`)"
   - RNGestureHandler (from `../node_modules/react-native-gesture-handler`)
   - RNGoogleMobileAds (from `../node_modules/react-native-google-mobile-ads`)
@@ -4462,6 +4527,7 @@ SPEC REPOS:
     - AppCheckCore
     - BoringSSL-GRPC
     - Firebase
+    - FirebaseABTesting
     - FirebaseAnalytics
     - FirebaseAppCheckInterop
     - FirebaseAuth
@@ -4474,6 +4540,7 @@ SPEC REPOS:
     - FirebaseFirestoreInternal
     - FirebaseInstallations
     - FirebaseMessaging
+    - FirebaseRemoteConfig
     - FirebaseRemoteConfigInterop
     - FirebaseSessions
     - FirebaseSharedSwift
@@ -4736,6 +4803,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/@invertase/react-native-apple-authentication"
   RNCAsyncStorage:
     :path: "../node_modules/@react-native-async-storage/async-storage"
+  RNCMaskedView:
+    :path: "../node_modules/@react-native-masked-view/masked-view"
   RNDateTimePicker:
     :path: "../node_modules/@react-native-community/datetimepicker"
   RNFBAnalytics:
@@ -4750,6 +4819,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/@react-native-firebase/firestore"
   RNFBMessaging:
     :path: "../node_modules/@react-native-firebase/messaging"
+  RNFBRemoteConfig:
+    :path: "../node_modules/@react-native-firebase/remote-config"
   RNFBStorage:
     :path: "../node_modules/@react-native-firebase/storage"
   RNGestureHandler:
@@ -4819,6 +4890,7 @@ SPEC CHECKSUMS:
   fast_float: 06eeec4fe712a76acc9376682e4808b05ce978b6
   FBLazyVector: d2a9cd223302b6c9aa4aa34c1a775e9db609eb52
   Firebase: 99f203d3a114c6ba591f3b32263a9626e450af65
+  FirebaseABTesting: fae111fe5476bd9e249968d0c85cd036385404ba
   FirebaseAnalytics: ef2970f65f3a2807e8f47a49cf3b8719d53e9fce
   FirebaseAppCheckInterop: 2480ab50a070a6bc02e26e62733874361f017a11
   FirebaseAuth: 7109e33998bbd96f983dc02b97289b535f6f4141
@@ -4831,6 +4903,7 @@ SPEC CHECKSUMS:
   FirebaseFirestoreInternal: a5120d3aea03c837ff9937c90e8a95f81e6a0706
   FirebaseInstallations: 047343aa91fd6a1ebfa3eb374ddecf36a8aaddfd
   FirebaseMessaging: ed18fb50634e6e85b5d3e77e628c21e2c928cc53
+  FirebaseRemoteConfig: 684a4427fc0ce308cdb63f7b400e353809285b4e
   FirebaseRemoteConfigInterop: a169873f4093b241eb5e27a4fbad91af36d64b8d
   FirebaseSessions: dba7635960740ad77cc2f3387d90ff22a7942f82
   FirebaseSharedSwift: 3d1e448b7202e36821a492941c84592d1308ea14
@@ -4931,6 +5004,7 @@ SPEC CHECKSUMS:
   RevenueCatUI: 463259f28fde50889177947de9ae8f2c00da596b
   RNAppleAuthentication: b2d8b5ccba86b5b1e55a1a2e858f7ac6d8a21816
   RNCAsyncStorage: e25fda4679876e5204c4c502d297757ec1f17ced
+  RNCMaskedView: 16e6917a83e0696d3b5edd69f940c2e1fb377a66
   RNDateTimePicker: 9d94d39bcece53d0dfdb64e18b409d9005529191
   RNFBAnalytics: 1f77c21c24e4cff97c4c1505339a7f3ed5faf5c8
   RNFBApp: e4b9386d103a6f0fc1006e97a9a5e2a813caefb5
@@ -4938,6 +5012,7 @@ SPEC CHECKSUMS:
   RNFBCrashlytics: 879bfbd6e020f0ca26daf7b4c34119bec1a7644e
   RNFBFirestore: dedbb9128474890a4be90d8fc1e9bdac186e3ab7
   RNFBMessaging: 1ccbdb89f7d15f4ac9bce3ba5e8e67b49718baee
+  RNFBRemoteConfig: 3455755b0a2dc90974504d81bb10f013ec2dbe64
   RNFBStorage: c957be7824804d44800398c273e4eab31f4e9f3b
   RNGestureHandler: 85b0463dbfed54eaba4360e31c0aa1a0fe83a6a6
   RNGoogleMobileAds: 321e7d9cc85ce2628dd1a3b710e4396d9b171b44
