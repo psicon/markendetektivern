@@ -1467,6 +1467,13 @@ export default function ProfileScreen() {
                 label="Bons zurücksetzen"
                 sub="Löscht alle lokalen Bon-Einträge (cashback_status)"
                 onPress={onResetCashbackBons}
+              />
+              <MenuRow
+                icon="bell-ring-outline"
+                color="#0d8575"
+                label="Toast / Banner Tester"
+                sub="Jeden Toast und jedes Achievement / Level-Banner einzeln triggern"
+                onPress={() => router.push('/debug/notifications' as any)}
                 last
               />
             </MenuCard>
