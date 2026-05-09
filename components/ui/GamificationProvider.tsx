@@ -13,12 +13,21 @@ import { ratingPromptService } from '@/lib/services/ratingPrompt';
 import { RATING_POLL_INTERVAL_MS } from '@/lib/perfFlags';
 import { showPointsToast, showStreakToast as showStreakToastNew } from '@/lib/services/ui/toast';
 import { Achievement } from '@/lib/types/achievements';
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import {
-  AchievementUnlockBanner,
-  type BannerData,
-} from './AchievementUnlockBanner';
+import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { type BannerData } from './AchievementUnlockBanner';
 import { AppRatingModal } from './AppRatingModal';
+
+// AchievementUnlockBanner LAZY laden — sein Modul importiert
+// transitiv @shopify/react-native-skia (durch EdgeGlow) und das ist
+// auf manchen Android-Devices (Mediatek + Memory-Pressure) ein
+// spürbarer Startup-Cost. Lazy heißt: Skia-Module wird erst geladen
+// wenn ein Banner WIRKLICH gezeigt werden soll, nicht bereits beim
+// App-Start.
+const AchievementUnlockBanner = lazy(() =>
+  import('./AchievementUnlockBanner').then((m) => ({
+    default: m.AchievementUnlockBanner,
+  })),
+);
 
 // ─── Banner-Data-Builder ─────────────────────────────────────────
 //
@@ -440,19 +449,33 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     }
   }, []);
 
+  // Context-Value memoisiert — sonst wird auf JEDEM Provider-Render
+  // ein neues Object erstellt → alle useGamification()-Consumer
+  // re-rendern unnötig. showBanner ist via useCallback eh stable.
+  const ctxValue = useMemo(() => ({ showBanner }), [showBanner]);
+
   return (
-    <GamificationContext.Provider value={{ showBanner }}>
+    <GamificationContext.Provider value={ctxValue}>
       {children}
 
-      {/* Einheitlicher Celebration-Banner — sowohl für Achievement-
-          Unlocks als auch Level-Ups. Sitzt knapp über der Tab-Bar,
-          auto-dismisst nach 7 s, swipe-down zum sofortigen Schließen,
-          Tap aufs Body navigiert zur Errungenschaften-Seite. */}
-      <AchievementUnlockBanner
-        visible={!!bannerData}
-        data={bannerData}
-        onDismiss={() => setBannerData(null)}
-      />
+      {/* Banner LAZY und nur conditional gemountet:
+          - Wenn bannerData null ist → keine Komponente mounted, KEIN
+            Skia-Import, KEIN EdgeGlow-Bootstrap.
+          - Erst wenn ein echter Banner getriggert wird, lädt React
+            das Modul (Suspense-fallback null während des Imports).
+          - Beim Dismiss (setBannerData(null)) bleibt das Modul im
+            Memory-Cache, ist also schon warm beim nächsten Banner.
+          Effekt: App-Cold-Start wird leichter, Mid-Memory-Pressure
+          weniger Risiko dass das Skia-Init JS-Thread blockiert. */}
+      {bannerData ? (
+        <Suspense fallback={null}>
+          <AchievementUnlockBanner
+            visible
+            data={bannerData}
+            onDismiss={() => setBannerData(null)}
+          />
+        </Suspense>
+      ) : null}
 
       {/* App Rating Modal — Nach Level-Up via ratingPromptService. */}
       <AppRatingModal
