@@ -610,6 +610,25 @@ export default function ProfileScreen() {
       ],
     );
 
+  /**
+   * Test-Helper: Onboarding-Flags resetten UND direkt zum Onboarding
+   * navigieren (ohne App-Restart). Schneller dev-loop für UI-Tests
+   * + State-Resets — User-Wunsch ('mach das onboarding im debug
+   * bereich direkt aufrufbar damit ich besser testen kann').
+   */
+  const onJumpToOnboardingDev = async () => {
+    try {
+      const { OnboardingService } = await import(
+        '@/lib/services/onboardingService'
+      );
+      await OnboardingService.resetOnboarding();
+      router.replace('/onboarding');
+    } catch (err) {
+      console.error('❌ Jump-to-onboarding failed:', err);
+      Alert.alert('Fehler', 'Onboarding konnte nicht geöffnet werden.');
+    }
+  };
+
   const onConsentForceShow = async () => {
     try {
       const { consentService } = await import(
@@ -1434,11 +1453,19 @@ export default function ProfileScreen() {
             </Text>
             <MenuCard>
               <MenuRow
+                icon="rocket-launch-outline"
+                color="#0d8575"
+                label="Onboarding direkt öffnen"
+                sub="Resettet die Flags + springt sofort rein (kein App-Restart)"
+                onPress={onJumpToOnboardingDev}
+                first
+              />
+              <MenuRow
                 icon="restore"
                 color="#dc2626"
                 label="Onboarding zurücksetzen"
+                sub="Setzt nur die Flags zurück — beim nächsten App-Start erscheint Onboarding"
                 onPress={onResetOnboardingDev}
-                first
               />
               <MenuRow
                 icon="shield-key-outline"
