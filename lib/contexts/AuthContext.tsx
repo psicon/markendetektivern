@@ -1,18 +1,38 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import { createUserWithEmailAndPassword, onAuthStateChanged, signInAnonymously, signInWithEmailAndPassword, signOut, updateProfile, User } from '@react-native-firebase/auth';
+import {
+  createUserWithEmailAndPassword,
+  EmailAuthProvider,
+  FirebaseAuthTypes,
+  linkWithCredential,
+  onAuthStateChanged,
+  signInAnonymously,
+  signInWithCredential,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+  User,
+} from '@react-native-firebase/auth';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Alert, InteractionManager } from 'react-native';
 import { PERF } from '../perfFlags';
 import { auth } from '../firebase';
 import achievementService, { setProfileRefreshCallback } from '../services/achievementService';
-import { isAppleAuthAvailable, signInWithApple, signOutApple } from '../services/auth/appleAuth';
-import { signInWithGoogle, signOutGoogle } from '../services/auth/googleAuth';
+import {
+  buildAppleDisplayName,
+  getAppleCredential,
+  isAppleAuthAvailable,
+  signOutApple,
+} from '../services/auth/appleAuth';
+import {
+  getGoogleCredential,
+  signOutGoogle,
+} from '../services/auth/googleAuth';
 import { createUserProfile, getUserProfile, UserProfile } from '../services/userProfile';
 import { scheduleRegionGuess } from '../services/regionGuess';
 import { FirestoreService } from '../services/firestore';
 import { doc, setDoc } from '@react-native-firebase/firestore';
 import { db } from '../firebase';
-import { InteractionManager } from 'react-native';
 
 interface AdditionalProfileData {
   realName?: string;
@@ -320,11 +340,87 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [refreshUserProfile]);
 
+  // ─── Anon-Linking helpers ───────────────────────────────────────────
+  //
+  // Wenn der aktuelle User anonym ist und sich später mit einem
+  // Provider (Apple/Google/Email) anmeldet, MÜSSEN wir
+  // linkWithCredential nehmen statt signInWithCredential — sonst
+  // entsteht ein neuer Account und alle Daten der anonymen Session
+  // (Favoriten, Punkte, Käufe, Onboarding-Antworten) gehen verloren.
+  //
+  // Edge-case: Provider-Account gehört bereits einer anderen UID
+  // (User hat sich z.B. früher mal angemeldet, dann Anon-Session auf
+  // dem gleichen Device gestartet). Firebase wirft dann
+  // `auth/credential-already-in-use`. Wir fragen den User per
+  // Confirm-Dialog ob er zum bestehenden Account wechseln will
+  // (Daten-Verlust akzeptiert) — falls ja, fallback auf normalen
+  // signInWithCredential. Falls nein, Anmeldung abbrechen.
+
+  /**
+   * Show a destructive confirm-Dialog wenn die Anon-Daten gegen
+   * einen existierenden Provider-Account getauscht würden.
+   * Returns true wenn der User wechseln will, false sonst.
+   */
+  const confirmAccountSwitch = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      Alert.alert(
+        'Du hast bereits ein Konto',
+        'Mit diesem Konto bist du anderswo schon angemeldet. Wenn du wechselst, ' +
+          'gehen die Daten der aktuellen anonymen Sitzung verloren ' +
+          '(z.B. Favoriten, Punkte, Käufe, Einkaufszettel).\n\nMöchtest du wechseln?',
+        [
+          { text: 'Abbrechen', style: 'cancel', onPress: () => resolve(false) },
+          {
+            text: 'Konto wechseln',
+            style: 'destructive',
+            onPress: () => resolve(true),
+          },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) },
+      );
+    });
+  };
+
+  /**
+   * Zentrale Auth-Logik: bei anonymem User → linkWithCredential
+   * (UID + Daten bleiben), sonst signInWithCredential (normaler
+   * Login). Bei `credential-already-in-use` wird der User gefragt
+   * ob er zum bestehenden Account wechseln will.
+   */
+  const linkOrSignIn = async (
+    credential: FirebaseAuthTypes.AuthCredential,
+  ): Promise<FirebaseAuthTypes.UserCredential> => {
+    const currentUser = auth.currentUser;
+    if (currentUser?.isAnonymous) {
+      try {
+        return await linkWithCredential(currentUser, credential);
+      } catch (e: any) {
+        if (e?.code === 'auth/credential-already-in-use') {
+          const confirmed = await confirmAccountSwitch();
+          if (!confirmed) {
+            const err: any = new Error('Anmeldung abgebrochen');
+            err.code = 'auth/cancelled';
+            throw err;
+          }
+          // Fallback: drop anon, sign in with the existing account.
+          return await signInWithCredential(auth, credential);
+        }
+        throw e;
+      }
+    }
+    return await signInWithCredential(auth, credential);
+  };
+
   const signIn = async (email: string, password: string) => {
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      // Email/Password-Login auf existierende Accounts. Wenn der
+      // User anonym ist und sich mit Email einloggen will (statt
+      // signUp), nehmen wir die Email-Credential und leiten durch
+      // linkOrSignIn — so wird auch hier bei Anon-State korrekt
+      // geupgraded oder (bei credential-already-in-use) gefragt.
+      const credential = EmailAuthProvider.credential(email, password);
+      await linkOrSignIn(credential);
     } catch (error) {
-      // Verhindere React Error Logs in Production
       if (__DEV__) {
         console.error('Sign in error:', error);
       }
@@ -332,37 +428,71 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signUp = async (email: string, password: string, displayName: string, additionalData?: AdditionalProfileData) => {
+  const signUp = async (
+    email: string,
+    password: string,
+    displayName: string,
+    additionalData?: AdditionalProfileData,
+  ) => {
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      
-      // Update display name in Firebase Auth
-      if (userCredential.user) {
-        await updateProfile(userCredential.user, {
-          displayName: displayName
-        });
+      const currentUser = auth.currentUser;
+      let userCredential: FirebaseAuthTypes.UserCredential;
 
-        // Save additional profile data to Firestore
+      if (currentUser?.isAnonymous) {
+        // Anon → upgrade zu Email/Password-Account, UID + Daten
+        // bleiben erhalten.
+        const credential = EmailAuthProvider.credential(email, password);
+        try {
+          userCredential = await linkWithCredential(currentUser, credential);
+        } catch (e: any) {
+          if (e?.code === 'auth/email-already-in-use') {
+            // Email gehört schon einem anderen Account → User hat zwei
+            // Optionen: bestehenden Account einloggen (Daten weg) oder
+            // andere Email nehmen.
+            const confirmed = await confirmAccountSwitch();
+            if (!confirmed) {
+              const err: any = new Error('Registrierung abgebrochen');
+              err.code = 'auth/cancelled';
+              throw err;
+            }
+            userCredential = await signInWithEmailAndPassword(auth, email, password);
+          } else {
+            throw e;
+          }
+        }
+      } else {
+        userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      }
+
+      // DisplayName + zusätzliche Profil-Daten setzen.
+      if (userCredential.user) {
+        await updateProfile(userCredential.user, { displayName });
+
         if (additionalData) {
-          const { doc, setDoc, serverTimestamp } = await import('@react-native-firebase/firestore');
-          const { db } = await import('../firebase');
-          
-          await setDoc(doc(db, 'users', userCredential.user.uid), {
-            display_name: displayName,
-            real_name: additionalData.realName || '',
-            email: email,
-            birthDate: additionalData.birthDate || null,
-            gender: additionalData.gender || '',
-            location: additionalData.location || '',
-            photo_url: '',
-            created_time: serverTimestamp(),
-            lastLoginAt: serverTimestamp(),
-            totalSavings: 0,
-          }, { merge: true });
+          const { serverTimestamp } = await import('@react-native-firebase/firestore');
+          await setDoc(
+            doc(db, 'users', userCredential.user.uid),
+            {
+              display_name: displayName,
+              real_name: additionalData.realName || '',
+              email,
+              birthDate: additionalData.birthDate || null,
+              gender: additionalData.gender || '',
+              location: additionalData.location || '',
+              photo_url: '',
+              // created_time NICHT überschreiben wenn der User vorher
+              // anonym war — der existiert dann schon mit serverTimestamp
+              // aus der Anon-Phase. Beim merge:true ohne created_time
+              // bleibt der bestehende Wert erhalten.
+              ...(currentUser?.isAnonymous ? {} : { created_time: serverTimestamp() }),
+              lastLoginAt: serverTimestamp(),
+              totalSavings: 0,
+            },
+            { merge: true },
+          );
         }
       }
     } catch (error) {
-      // Verhindere React Error Logs in Production
       if (__DEV__) {
         console.error('Sign up error:', error);
       }
@@ -372,10 +502,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const handleSignInWithGoogle = async () => {
     try {
-      await signInWithGoogle();
-      // User will be automatically set via onAuthStateChanged
-    } catch (error) {
-      // Verhindere React Error Logs in Production
+      const credential = await getGoogleCredential();
+      if (!credential) {
+        // User hat das Google-Sheet abgebrochen. Kein Fehler.
+        return;
+      }
+      const userCredential = await linkOrSignIn(credential);
+      console.log(
+        '✅ Google Sign-In:',
+        userCredential.user.email,
+        userCredential.additionalUserInfo?.isNewUser ? '(neu)' : '(bestehend)',
+      );
+    } catch (error: any) {
+      if (error?.code === 'auth/cancelled') return; // User cancel = kein Fehler
       if (__DEV__) {
         console.error('Google Sign-In error:', error);
       }
@@ -385,10 +524,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const handleSignInWithApple = async () => {
     try {
-      await signInWithApple();
-      // User will be automatically set via onAuthStateChanged
-    } catch (error) {
-      // Verhindere React Error Logs in Production
+      const bundle = await getAppleCredential();
+      if (!bundle) {
+        // User hat die Apple-Sheet abgebrochen.
+        return;
+      }
+      const userCredential = await linkOrSignIn(bundle.credential);
+
+      // Apple gibt fullName + email NUR beim aller-ersten Sign-In durch.
+      // Wenn das ein neuer User ist (oder das Anon-Linking gerade
+      // erstellt einen "neuen" Provider-User), legen wir das
+      // Firestore-Profil mit den Apple-Daten an.
+      const isNewUser = userCredential.additionalUserInfo?.isNewUser;
+      if (isNewUser && userCredential.user) {
+        const displayName = buildAppleDisplayName(bundle.fullName);
+        await createUserProfile(userCredential.user, {
+          realName: displayName,
+          email: bundle.email || userCredential.user.email || '',
+        });
+        console.log(`✅ Apple Sign-In: NEUER USER → Profil angelegt (${userCredential.user.email})`);
+      } else {
+        console.log('✅ Apple Sign-In: bestehender User');
+      }
+    } catch (error: any) {
+      if (error?.code === 'auth/cancelled') return;
       if (__DEV__) {
         console.error('Apple Sign-In error:', error);
       }
