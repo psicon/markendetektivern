@@ -24,6 +24,121 @@ Diese Regel gilt für jede zukünftige Erinnerungs-Aufforderung.
 Wenn unklar ist, wo das hin soll, lieber unter ein neues Heading
 am Ende von CLAUDE.md legen als gar nicht.
 
+## Meta-Regel: Sichere Learnings aus Fehlern → SOFORT in CLAUDE.md
+
+Komplement zur "merk dir das"-Regel oben:
+- "merk dir das" = User-getriggert (explizit)
+- "sichere Learnings" = Selbst-getriggert (implizit aus Fehlern)
+
+Wenn aus einem Fehler in einer Session eine **klare, übertragbare
+Erkenntnis** entsteht — nicht "der User mag X anders" (das ist
+Preference), sondern "ich verstehe jetzt warum Pattern Y nicht
+funktioniert / Pattern Z besser ist" — dann **sofort** in CLAUDE.md
+festhalten. Im selben Commit wie der Fix, nicht "im nächsten Turn".
+
+Trigger sind z.B.:
+- Eine technische Limitierung verstanden, die ich vorher nicht
+  gesehen habe (z.B. "Skia BackdropBlur sampled keinen RN-Content
+  unter dem Canvas")
+- Ein Pattern hat reproduzierbar gefailt (z.B. "BlurView mit
+  experimentalBlurMethod=dimezisBlurView → Android Surface-Stops")
+- Eine Architekturentscheidung wurde durch zwei Fehler + User-
+  Korrektur final klar (zweimal in eine Falle gelaufen reicht)
+- Ein Workflow ist nach mehreren Anläufen jetzt robust (z.B.
+  "APK aufs Device: nicht `adb install`, sondern Push in
+  Download-Ordner")
+
+Format: konkret + actionable. **"Tu Y, nicht Z, weil W"**. Nicht
+"Vorsicht bei X", nicht "manchmal hilft Y". Bei Unsicherheit ob's
+ein Learning oder bloß ein Preference-Punkt ist → eher reinsetzen,
+mit `[verifiziert <Datum>]`-Marker, im Zweifelsfall später streichen.
+
+Was **NICHT** triggern soll:
+- "User hat mir gesagt mach Z" — das ist eine Anweisung, kein
+  Learning
+- "Ich war heute langsam mit X" — das ist Performance, kein
+  technisches Learning
+- "Vielleicht wäre Y besser" — Spekulation, nicht "sicher gelernt"
+
+## Meta-Regel: User-Wortlaut zweimal lesen, nicht "vereinfachen"
+
+Wenn der User sagt **"selbes Aussehen, aber X"** oder **"behalte
+Y, ändere nur Z"**, dann heißt das: **alles bleibt wie es ist
+außer X/Z**. Nicht eigene Schlussfolgerungen ziehen wie "naja,
+ohne Pille macht der raised Button keinen Sinn → wegnehmen".
+Solche "interpretierenden Vereinfachungen" zwingen den User in
+einen Cancel-Loop und kosten ihn Nerven.
+
+Wenn unklar ist ob ein Detail mitumfasst ist → **fragen, nicht
+raten**. Eine kurze Rückfrage ("soll der raised Button bleiben
+oder mit weg?") ist billiger als ein Cancel + Re-Implementation.
+
+Auch bei *Vergleichen*: "warum ist X auf Home anders als auf
+Stöbern?" heißt nicht zwingend "mach beide wie Stöbern" — kann
+auch "mach beide wie Home" heißen. Bei Unsicherheit fragen oder
+beide Optionen explizit anbieten.
+
+## Forbidden Patterns — bekanntes Nicht-funktioniert-Wissen
+
+Dinge, die in dieser Codebasis **nicht funktionieren** und nicht
+neu probiert werden sollten. Jeder Eintrag steht hier weil es
+mindestens einmal teuer war.
+
+### `BlurView` mit `experimentalBlurMethod="dimezisBlurView"` auf Android
+
+Verboten in neuem Code. Triggert reproduzierbar Surface-Stops /
+Grey-Screens auf Android (Fabric/Bridgeless). Hat im Mai 2026 eine
+halbe Session gekostet bis das eindeutig durch A/B-Test isoliert
+war (Skia war unschuldig, dimezisBlurView war Cause).
+
+Wenn ein Android-Blur-Look gewünscht ist → **getintete View mit
+0.92 Alpha** verwenden (siehe Header-Pattern unten). Das ist kein
+echter Blur, schimmert aber durch und wirkt "fast-blurred".
+
+### Skia `BackdropBlur` zum Blurren von RN-Content
+
+`@shopify/react-native-skia` 2.6.x: `BackdropBlur` sampled NUR
+Skia-Canvas-internen Content (`SkCanvas::saveLayer` mit
+kBackdrop-Flag), **NICHT** die RN-Views unter dem Canvas. Versuch
+nicht das als BlurView-Ersatz zu nutzen — der Backdrop bleibt
+leer / Effekt unsichtbar.
+
+Skia ist nur sinnvoll wenn der Backdrop-Source auch im Skia-Canvas
+gezeichnet ist (z.B. Card-Hintergrund hinter einer Card-internen
+Highlight-Fläche). Für "blur was hinter der Tab-Bar ist" → iOS
+BlurView (UIVisualEffectView) auf iOS, getintete View auf Android.
+
+### Boot-Pfad: keine künstlichen Delays
+
+`await new Promise(resolve => setTimeout(resolve, X))` oder
+äquivalent in **`app/_layout.tsx`, `app/index.tsx`, FontLoader**
+ist verboten. Nativer expo-splash-screen covered den echten Boot
+korrekt (preventAutoHideAsync + hideAsync nach Fonts+Images
+ready). Jeder zusätzliche sleep zeigt sich auf Android als
+Whitescreen, weil das Custom-`<SplashScreen>`-Overlay nur via
+`Platform.OS === 'ios'` mountet.
+
+Wenn etwas "deferred" passieren soll → `InteractionManager.
+runAfterInteractions(...)` (siehe Reference-Data-Prewarm in
+`app/_layout.tsx`).
+
+### `await import('react-native')`
+
+Lazy-import von `react-native` triggert Metro's metroImportAll →
+enumeriert alle RN-Exports → triggert PushNotificationIOS lazy
+getter → `new NativeEventEmitter(null)` crash. **Statisch importieren
+am File-Top.** Lazy-imports von *anderen* Packages (`expo-haptics`,
+internal services) sind ok — nur `react-native` selbst ist
+poisoned.
+
+### `initializeFirestore` mit `persistentLocalCache`
+
+Web-only API (IndexedDB-backed). Auf React Native triggert das
+PushNotificationIOS-Crash via `new NativeEventEmitter()`. Nutze
+`getFirestore(app)` (in-memory cache only, default). Die manuellen
+TTL-Caches in `services/firestore.ts` plus inflight-promise-dedup
+liefern die Revisit-Speed.
+
 ## Builds & deploys — niemals automatisch triggern
 
 **Regel**: niemals einen `eas build` oder `eas submit` aus eigener
@@ -306,6 +421,49 @@ any future page with tab-style selectors):
 - Back button: 40×40 round Pressable, `arrow-left` icon (24 px),
   `theme.text` colour. Title: extraBold 20 px (DetailHeader) or 26 px
   (tab title like "Belohnungen") — `letterSpacing: -0.2 to -0.4`.
+- **Keine Hairline am Bottom-Edge des Headers.** Der Visual-Cut
+  zwischen Header und Content ist durch das Material selbst
+  (BlurView iOS / tinted View Android) gegeben. Eine zusätzliche
+  `theme.border`-Linie wirkt als grauer Bruch beim Scrollen — hat
+  ein User-Bug-Report im Mai 2026 explizit angesprochen. Wenn ein
+  Schatten-Hint gewünscht ist, dann nur in der Form, dass der
+  Header eine Material-Schicht IST, nicht als separate Linie drauf.
+
+### Tab-Bar — per-Platform Pattern (NICHT vereinheitlichen)
+
+Die Tab-Bar (`app/(tabs)/_layout.tsx`, `FlyingTabBar`) hat
+**bewusst zwei verschiedene Umsetzungen** je Plattform. Nicht
+"vereinheitlichen" — die Trade-offs sind absichtlich verschieden.
+
+**iOS — floating Pill:**
+- `position: 'absolute'`, `left: PILL_MARGIN_X (50)`, `right: PILL_MARGIN_X`,
+  `bottom: pillBottom (~insets.bottom + 1)`
+- `borderRadius: PILL_RADIUS (18)` an allen vier Ecken
+- Höhe `PILL_HEIGHT (58)`
+- Raised Stöbern-Mittel-Button bricht oben aus (`top: -RAISED_LIFT (22)`)
+- `<GlassBackdrop>` hinter der Pille — MaskedView + BlurView
+  (intensity 50, dimezisBlurView OK auf iOS) mit vertikalem Gradient
+  (transparent oben → opak unten), Höhe = `pillBottom + PILL_HEIGHT/2`
+
+**Android — full-width Bottom-Bar:**
+- `position: 'absolute'`, `left: 0`, `right: 0`, `bottom: 0`
+- `borderTopLeftRadius: PILL_RADIUS`, `borderTopRightRadius: PILL_RADIUS`,
+  Bottom-Corners flat (= 0)
+- Höhe = `PILL_HEIGHT + insets.bottom`, `paddingBottom: insets.bottom`
+  (Tabs sitzen oben, Gesture-Bar bleibt safe)
+- `paddingHorizontal: 24` — Home/Rewards minimal nach innen, kleben
+  nicht an der Edge (Konsistenz mit iOS-Atmung)
+- **Raised Stöbern-Button BLEIBT** — bricht aus dem Top-Edge der Bar
+  raus, gleicher RaisedMiddleTab wie auf iOS
+- **Kein GlassBackdrop** — Bar ist solid `cardBackground`, full-width,
+  bottom-flush. Kein Blur nötig.
+- `elevation: 14` (Material-Lift), kein iOS-Shadow
+
+**Warum verschieden:** iOS hat homogene Geräte-Landschaft (predictable
+safe-area, gleiche Gesture-Bar-Höhe). Auf Android variieren OEM-Skins
+(MIUI, Samsung One UI, Pixel-Stock-Gestures) so stark, dass eine
+floating Pille auf manchen Devices verloren wirkt oder zu nah am
+Gesture-Bar liegt. Full-width + bottom-flush ist platform-konventionell.
 
 ### Search input → ONE shared style across the app
 
