@@ -1,21 +1,12 @@
 // EdgeGlow.android.tsx — Android-Variante OHNE Skia / MaskedView.
 //
-// Skia + MaskedView haben TurboModules die in Android's GL-Lifecycle
-// hooken und Surface-Stops auslösen (siehe logcat
-// `EGLConsumer is not attached to an OpenGL ES context`). Wir bauen
-// den Glow stattdessen mit pure `expo-linear-gradient` — ein einziger
-// Native-Module-Pfad der robust ist.
+// V2: Glow um ALLE 4 Bildschirmkanten (vorher nur Bottom). 4 Edge-
+// Gradients (top/bottom/left/right) + 4 Corner-Diagonalen die die
+// L-Transitions zwischen den Edges weichzeichnen.
 //
-// Kompromiss: kein rotierender Color-Sweep wie auf iOS, dafür aber
-// ein sauberes pulsierendes 2-Farb-Gradient-Glow am unteren
-// Bildschirmrand. Tier-Color prominent, Sekundär-Tint als kurzer
-// Akzent.
-//
-// Tech:
-//   • 2 LinearGradients stacked: bottom-edge (full Tier-Color) +
-//     side-corners (Tier-Color zu transparent)
-//   • Reanimated-3 fade-in / fade-out + breath-pulse
-//   • pointerEvents='none' überall
+// Kein rotierender Sweep, kein Skia, kein MaskedView — nur
+// expo-linear-gradient-Stacks. Robust auf Android, kein
+// GL-Lifecycle-Hook, kein Surface-Stop-Risiko.
 
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect } from 'react';
@@ -65,21 +56,19 @@ function rgbToHex(r: number, g: number, b: number): string {
   return `#${t(r)}${t(g)}${t(b)}`;
 }
 
-function lighten(hex: string, ratio: number): string {
-  const { r, g, b } = hexToRgb(hex);
-  return rgbToHex(
-    r + (255 - r) * ratio,
-    g + (255 - g) * ratio,
-    b + (255 - b) * ratio,
-  );
-}
-
 function darken(hex: string, ratio: number): string {
   const { r, g, b } = hexToRgb(hex);
   return rgbToHex(r * (1 - ratio), g * (1 - ratio), b * (1 - ratio));
 }
 
-export function EdgeGlow({ visible, tint, secondaryTint }: EdgeGlowProps) {
+// Wie weit der Glow von jeder Kante nach innen reicht (in % der
+// jeweiligen Achse). Niedrige Werte = enger Glow direkt an der Kante.
+const EDGE_DEPTH_PCT = 12;
+// Alpha am stärksten — am Display-Rand. Fadet zu transparent
+// nach innen.
+const EDGE_ALPHA = 0.32;
+
+export function EdgeGlow({ visible, tint }: EdgeGlowProps) {
   const colorScheme = useColorScheme();
   const isLight = colorScheme !== 'dark';
 
@@ -98,7 +87,7 @@ export function EdgeGlow({ visible, tint, secondaryTint }: EdgeGlowProps) {
             duration: 1500,
             easing: Easing.inOut(Easing.sin),
           }),
-          withTiming(0.7, {
+          withTiming(0.75, {
             duration: 1500,
             easing: Easing.inOut(Easing.sin),
           }),
@@ -119,11 +108,16 @@ export function EdgeGlow({ visible, tint, secondaryTint }: EdgeGlowProps) {
     opacity: visibility.value * breath.value,
   }));
 
-  // Im Light-Mode minimal abdunkeln damit der Glow sichtbar ist gegen
-  // den weißen Bg.
-  const primary = isLight ? darken(tint, 0.18) : tint;
-  const rawSecondary = secondaryTint ?? lighten(tint, 0.55);
-  const secondary = isLight ? darken(rawSecondary, 0.12) : rawSecondary;
+  // Light-Mode: Tier-Color leicht abdunkeln damit Glow gegen weißen Bg
+  // sichtbar ist.
+  const c = isLight ? darken(tint, 0.18) : tint;
+  const edgeStrong = rgba(c, EDGE_ALPHA);
+  const edgeFade = rgba(c, 0);
+
+  // Strip-Stärke: 12% von Width für left/right, 12% von Height für
+  // top/bottom. Auf einem 1080×2400-Display: ~130 px breite Side-
+  // Streifen, ~290 px hohe Top/Bottom-Streifen.
+  const sidePct = `${EDGE_DEPTH_PCT}%`;
 
   return (
     <Animated.View
@@ -134,44 +128,107 @@ export function EdgeGlow({ visible, tint, secondaryTint }: EdgeGlowProps) {
         { zIndex: 9990 },
       ]}
     >
-      {/* Bottom-Edge — primary tint, fadet nach oben weg.
-          Hauptglow-Quelle, ~22 % der Screen-Höhe. */}
+      {/* TOP edge — tint oben → transparent unten */}
       <LinearGradient
-        colors={['transparent', rgba(primary, 0.45)]}
+        colors={[edgeStrong, edgeFade]}
+        locations={[0, 1]}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: sidePct,
+        }}
+      />
+      {/* BOTTOM edge — transparent oben → tint unten */}
+      <LinearGradient
+        colors={[edgeFade, edgeStrong]}
         locations={[0, 1]}
         style={{
           position: 'absolute',
           bottom: 0,
           left: 0,
           right: 0,
-          height: '22%',
+          height: sidePct,
         }}
       />
-      {/* Bottom-Left Corner — secondary tint Diagonal-Glow.
-          Erzeugt asymmetrische 2-Farb-Akzentuierung. */}
+      {/* LEFT edge — tint links → transparent rechts */}
       <LinearGradient
-        colors={['transparent', rgba(secondary, 0.35)]}
+        colors={[edgeStrong, edgeFade]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={{
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          left: 0,
+          width: sidePct,
+        }}
+      />
+      {/* RIGHT edge — transparent links → tint rechts */}
+      <LinearGradient
+        colors={[edgeFade, edgeStrong]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={{
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          right: 0,
+          width: sidePct,
+        }}
+      />
+      {/* Die 4 Edges erzeugen an den Ecken eine L-förmige Aufdoppelung
+          (Top + Side overlappen). Damit das nicht hart wirkt, blenden
+          wir 4 Diagonal-Gradients an den Ecken ein die VON außen nach
+          innen fadet — sie weichen die L-Kante visuell auf.
+          Alpha hier doppelt so hoch (0.55) damit die Diagonale
+          dominanter ist als das Add der zwei senkrechten Edges. */}
+      <LinearGradient
+        colors={[rgba(c, 0.55), edgeFade]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '40%',
+          height: '20%',
+        }}
+      />
+      <LinearGradient
+        colors={[rgba(c, 0.55), edgeFade]}
+        start={{ x: 1, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          width: '40%',
+          height: '20%',
+        }}
+      />
+      <LinearGradient
+        colors={[edgeFade, rgba(c, 0.55)]}
         start={{ x: 1, y: 0 }}
         end={{ x: 0, y: 1 }}
         style={{
           position: 'absolute',
           bottom: 0,
           left: 0,
-          width: '60%',
+          width: '40%',
           height: '20%',
         }}
       />
-      {/* Bottom-Right Corner — primary tint Diagonal-Glow.
-          Spiegelt den Sekundär-Glow auf der gegenüberliegenden Seite. */}
       <LinearGradient
-        colors={['transparent', rgba(primary, 0.35)]}
+        colors={[edgeFade, rgba(c, 0.55)]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={{
           position: 'absolute',
           bottom: 0,
           right: 0,
-          width: '60%',
+          width: '40%',
           height: '20%',
         }}
       />
