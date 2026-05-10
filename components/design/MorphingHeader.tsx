@@ -218,18 +218,19 @@ export function MorphingHeader({
     );
   }
 
-  // Android: solid theme.bg statt 92%-Transparenz. Vorher schimmerte
-  // Content beim Scrollen durch (8 % Alpha) → wirkte "leicht blurred",
-  // inkonsistent zu Stöbern's Header (theme.bg solid). User-Feedback:
-  // "warum ist der header bei android auf der startseite minimal
-  // blurred aber bei stöbern nicht". Jetzt einheitlich solid.
+  // Android: 92 % opake getintete View — content schimmert mit 8 %
+  // Alpha durch, was den weichen "fast-blurred" Look gibt. Stöbern
+  // matcht das exakt (siehe app/(tabs)/explore.tsx Android-Branch).
   return (
     <View
       style={[
         styles.container,
         {
           paddingTop: insetTop,
-          backgroundColor: theme.bg,
+          backgroundColor:
+            scheme === 'dark'
+              ? 'rgba(15,18,20,0.92)'
+              : 'rgba(245,247,248,0.92)',
         },
       ]}
     >

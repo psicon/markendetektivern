@@ -3059,7 +3059,13 @@ export default function ExploreScreen() {
               top: 0,
               left: 0,
               right: 0,
-              backgroundColor: theme.bg,
+              // 92 % opake getintete View — Content schimmert mit
+              // 8 % Alpha durch, gleicher "fast-blurred" Look wie
+              // MorphingHeader auf Home (Konsistenz auf Android).
+              backgroundColor:
+                scheme === 'dark'
+                  ? 'rgba(15,18,20,0.92)'
+                  : 'rgba(245,247,248,0.92)',
               zIndex: 9,
             },
             androidChromeAnimStyle,
