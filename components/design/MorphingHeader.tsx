@@ -73,13 +73,6 @@ export function MorphingHeader({
     };
   });
 
-  const shadowStyle = useAnimatedStyle(() => {
-    const t = interpolate(scrollY.value, [30, 85], [0, 1], Extrapolation.CLAMP);
-    return {
-      opacity: t,
-    };
-  });
-
   // Scanner button in the header rises up from the direction of the big
   // search bar (which sits below the hero and contains the primary scan
   // icon). Direction matters — coming from BELOW tells the user's eye
@@ -205,17 +198,11 @@ export function MorphingHeader({
         </Pressable>
       </View>
 
-      {/* Subtle shadow that appears once scrolled past the morph threshold. */}
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          styles.shadowLine,
-          shadowStyle,
-          {
-            backgroundColor: theme.border,
-          },
-        ]}
-      />
+      {/* Vorher hier: animierte Hairline (theme.border) am Bottom-Edge
+          des Headers — fadete bei scrollY > 30 ein. Entfernt nach User-
+          Feedback ("leichter grey border unten am header"). Der
+          Visual-Cut zwischen Header und Content ist ohnehin durch das
+          Material (BlurView iOS / solid theme.bg Android) gegeben. */}
     </>
   );
 
@@ -231,16 +218,18 @@ export function MorphingHeader({
     );
   }
 
+  // Android: solid theme.bg statt 92%-Transparenz. Vorher schimmerte
+  // Content beim Scrollen durch (8 % Alpha) → wirkte "leicht blurred",
+  // inkonsistent zu Stöbern's Header (theme.bg solid). User-Feedback:
+  // "warum ist der header bei android auf der startseite minimal
+  // blurred aber bei stöbern nicht". Jetzt einheitlich solid.
   return (
     <View
       style={[
         styles.container,
         {
           paddingTop: insetTop,
-          backgroundColor:
-            scheme === 'dark'
-              ? 'rgba(15,18,20,0.92)'
-              : 'rgba(245,247,248,0.92)',
+          backgroundColor: theme.bg,
         },
       ]}
     >
@@ -307,12 +296,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-  },
-  shadowLine: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: StyleSheet.hairlineWidth,
   },
 });

@@ -257,14 +257,19 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   // werden kann (Backdrop endet auf der Pillen-Mitte).
   const pillBottom = Math.max(insets.bottom + 1, 7);
 
-  // ─── ANDROID: full-width Bottom-Bar ────────────────────────────────
-  // Auf Android KEIN floating-pill — auf vielen Geräten/OEM-Skins (MIUI,
-  // Samsung One UI, Stock-Pixel mit unterschiedlichen Gesture-Bars)
-  // sieht die schwebende Pille uneinheitlich aus. Stattdessen:
-  // System-Standard — full-width, am Bottom-Rand abschließend, mit
-  // Safe-Area-Padding für die Gesture-Bar. Drei flache Tabs gleicher
-  // Breite, kein raised Mittelbutton (passt visuell nur in eine Pille).
-  // KEINE GlassBackdrop nötig — die Bar selbst hat solid Card-Background.
+  // ─── ANDROID: full-width Bottom-Bar (gleiche Optik wie iOS-Pille) ──
+  // Auf Android sieht die schwebende Pille bei verschiedenen OEM-Skins
+  // (MIUI, Samsung One UI, Pixel-Gesture-Bar mit verschiedenen Heights)
+  // uneinheitlich aus. Lösung: gleiche visuelle Sprache wie iOS, aber:
+  //   • full-width bis zum Screen-Edge (left/right: 0, bottom: 0)
+  //   • Top-Corners rounded (PILL_RADIUS), Bottom-Corners flat
+  //   • Höhe = PILL_HEIGHT + insets.bottom, paddingBottom = insets.bottom
+  //     → Tab-Inhalte sitzen oben, Gesture-Bar bleibt safe
+  //   • paddingHorizontal: 24 → Home/Rewards minimal nach innen, damit
+  //     sie nicht ganz an der Edge kleben (Konsistenz mit iOS-Atmung)
+  //   • Raised Stöbern-Button BLEIBT — bricht aus dem Top-Edge der Bar
+  //     raus wie auf iOS aus der Pille
+  // Kein GlassBackdrop — die Bar ist solid und touched den Bottom-Edge.
   if (Platform.OS === 'android') {
     return (
       <Animated.View
@@ -277,17 +282,20 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             bottom: 0,
             height: PILL_HEIGHT + insets.bottom,
             paddingBottom: insets.bottom,
+            paddingHorizontal: 24,
             backgroundColor: colors.cardBackground,
+            borderTopLeftRadius: PILL_RADIUS,
+            borderTopRightRadius: PILL_RADIUS,
             flexDirection: 'row',
             alignItems: 'center',
-            // dünne Top-Border zur visuellen Trennung vom Content
-            borderTopWidth: StyleSheet.hairlineWidth,
-            borderTopColor:
-              colorScheme === 'dark'
-                ? 'rgba(255,255,255,0.10)'
-                : 'rgba(0,0,0,0.08)',
-            // dezenter elevation-Lift (kein iOS-Pill-Schatten)
-            elevation: 12,
+            // dünner Top-Highlight im Dark-Mode für Kontrast
+            borderTopWidth: colorScheme === 'dark' ? 1 : 0,
+            borderTopColor: 'rgba(255,255,255,0.06)',
+            // Material-Elevation lift (cast subtle upward shadow)
+            elevation: 14,
+            // overflow visible damit raised Stöbern-Button + dessen
+            // Schatten nicht abgeschnitten werden
+            overflow: 'visible',
           },
           containerAnimStyle,
         ]}
@@ -314,10 +322,19 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             }
           };
 
-          // Android: alle drei Tabs als FlatSideTab — kein raised
-          // Stöbern-Button (würde auf einer flachen Bar visuell
-          // schweben). Stöbern ist nur durch das CustomIcon
-          // unterscheidbar (das renderTabIcon korrekt liefert).
+          if (route.name === 'explore') {
+            return (
+              <RaisedMiddleTab
+                key={route.key}
+                label={label}
+                isFocused={isFocused}
+                colors={colors}
+                colorScheme={colorScheme ?? 'light'}
+                onPress={onPress}
+              />
+            );
+          }
+
           return (
             <FlatSideTab
               key={route.key}
