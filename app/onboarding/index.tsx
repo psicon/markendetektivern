@@ -34,14 +34,37 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { remoteConfigService } from '@/lib/services/remoteConfigService';
+import { detectCountry, type DachCountry } from '@/lib/utils/country';
 
 const { width } = Dimensions.get('window');
+
+// Total = 7 sichtbare Schritte (Hero + 6 Frage-Steps).
+// Step 1 ist der Hero — ohne ProgressBar. Step 7 ist Loading (kurz),
+// Step 8 ist der Climax. Wir zeigen "X von 6" auf dem ProgressBar.
+const TOTAL_STEPS = 8;
 
 const COUNTRIES = [
   { code: 'DE', name: 'Deutschland', flag: '🇩🇪' },
   { code: 'AT', name: 'Österreich', flag: '🇦🇹' },
   { code: 'CH', name: 'Schweiz', flag: '🇨🇭' },
 ] as const;
+
+// Gender-Optionen — identisch zu app/edit-profile.tsx GENDER_OPTIONS-
+// Set damit das User-Doc-Feld konsistent ist (Edit-Profile + Onboarding
+// schreiben die gleichen Strings).
+const GENDER_OPTIONS = [
+  { id: 'männlich', name: 'Männlich' },
+  { id: 'weiblich', name: 'Weiblich' },
+  { id: 'nonbinary', name: 'Non-binär' },
+  { id: 'anderes', name: 'Anderes' },
+] as const;
+
+// Alters-Range für den Slider — Onboarding sammelt Integer-Alter
+// (Dashboard-friendly), Edit-Profile pflegt birthDate für genauere
+// Auswertung später.
+const AGE_MIN = 16;
+const AGE_MAX = 80;
+const AGE_DEFAULT = 30;
 
 const ACQUISITION_SOURCES = [
   { id: 'instagram', name: 'Instagram', icon: '📸' },
@@ -77,7 +100,10 @@ export default function OnboardingScreen() {
   const [loadingStatus, setLoadingStatus] = useState('');
   const [premiumStatusChecked, setPremiumStatusChecked] = useState(false);
   const [isPremiumUser, setIsPremiumUser] = useState(false);
-  const [country, setCountry] = useState<'DE' | 'AT' | 'CH'>('DE');
+  // Country aus Device-Locale vorbelegt (DE/AT/CH, fallback DE).
+  // User kann's auf Step 2 (Märkte) per Country-Pill ändern falls
+  // Detection daneben liegt.
+  const [country, setCountry] = useState<DachCountry>(() => detectCountry());
   const [markets, setMarkets] = useState<any[]>([]);
   const [selectedMarkets, setSelectedMarkets] = useState<any[]>([]);
   const [marketOther, setMarketOther] = useState('');
@@ -86,6 +112,13 @@ export default function OnboardingScreen() {
   const [budget, setBudget] = useState(100);
   const [priorities, setPriorities] = useState<string[]>([]);
   const [prioritiesOther, setPrioritiesOther] = useState('');
+  // Demographics (NEU in Step 5). 'skipped' bedeutet User hat
+  // den Step explizit übersprungen — wird in Firestore vermerkt
+  // damit wir Skip-Rates auswerten können.
+  const [age, setAge] = useState<number>(AGE_DEFAULT);
+  const [ageSkipped, setAgeSkipped] = useState(false);
+  const [gender, setGender] = useState<string>('');
+  const [genderOther, setGenderOther] = useState('');
   const [loadingProgress] = useState(new Animated.Value(0));
   const [loadingMessage, setLoadingMessage] = useState('🕵️ Die MarkenDetektive beginnen ihre Recherche...');
   const [slideAnimation] = useState(new Animated.Value(1)); // Für Slide-Animationen
@@ -247,53 +280,77 @@ export default function OnboardingScreen() {
     }
   };
 
-  // Tracking-Funktion (nur beim Weiterklicken aufgerufen)
+  // Tracking-Funktion (nur beim Weiterklicken aufgerufen).
+  //
+  // Step-Reihenfolge (post-redesign):
+  //   1 = Hero (kein Tracking — User hat noch nichts beantwortet)
+  //   2 = Märkte           (favoriteMarkets, primaryMarket)
+  //   3 = Wocheneinkauf €  (weeklyBudgetEur)
+  //   4 = Prioritäten      (priorities)
+  //   5 = Alter+Geschlecht (age, gender, ageSkipped)
+  //   6 = Wie gehört       (acquisitionSource)
+  //   7 = Loading          (kein eigenes Tracking)
+  //   8 = Climax           (kein Tracking — completeOnboarding regelt das)
+  //
+  // country wird IMMER mitgesendet weil's aus Device-Locale stammt
+  // (auch wenn User auf Step 2 noch nicht aktiv geändert hat).
   const trackCurrentStep = async () => {
-    // Nur tracken wenn nicht Step 1 (Hero)
+    // Nur tracken wenn der User mindestens einen Step abgeschlossen hat.
     if (currentStep <= 1) return;
-    
+
     try {
       const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
       const { db, auth } = await import('@/lib/firebase');
-      
+
       const userId = auth.currentUser?.uid || 'anonymous';
-      
-      // Sammle aktuelle Daten
+
       const stepData: any = {
         userId,
         sessionId,
         currentStep,
         status: 'in_progress',
         lastUpdateTime: serverTimestamp(),
-        version: 'v1',
-        platform: 'mobile'
+        country, // immer aus Locale-Detection oder User-Override
+        version: 'v2', // schema-version geupgraded (age+gender, no auth-step)
+        platform: 'mobile',
       };
-      
-      // Nur beim ersten echten Step startTime setzen
+
+      // startTime beim ersten echten Step (= 2 = Märkte).
       if (currentStep === 2) {
         stepData.startTime = serverTimestamp();
       }
-      
-      // Füge Step-spezifische Daten hinzu
-      if (currentStep >= 2) stepData.country = country;
-      if (currentStep >= 3 && selectedMarkets.length > 0) {
+
+      // Schritt-akkumulative Daten — alles was bis hierhin
+      // beantwortet wurde wird mitgesendet.
+      if (currentStep >= 2 && selectedMarkets.length > 0) {
         stepData.favoriteMarkets = selectedMarkets.map(m => m.name);
         stepData.primaryMarket = selectedMarkets[0]?.name;
         if (marketOther) stepData.marketOther = marketOther;
       }
-      if (currentStep >= 4 && acquisitionSource) {
-        stepData.acquisitionSource = acquisitionSource;
-        if (acquisitionOther) stepData.acquisitionOther = acquisitionOther;
-      }
-      if (currentStep >= 5) stepData.weeklyBudgetEur = budget;
-      if (currentStep >= 6 && priorities.length > 0) {
+      if (currentStep >= 3) stepData.weeklyBudgetEur = budget;
+      if (currentStep >= 4 && priorities.length > 0) {
         stepData.priorities = priorities;
         if (prioritiesOther) stepData.prioritiesOther = prioritiesOther;
       }
-      
-      // Speichere in Firestore mit eindeutiger Session-ID
+      if (currentStep >= 5) {
+        // Demographics. ageSkipped=true → User hat den Step bewusst
+        // übersprungen, wir vermerken das (für Skip-Rate-Analyse).
+        if (ageSkipped) {
+          stepData.demographicsSkipped = true;
+        } else {
+          stepData.age = age;
+          if (gender) stepData.gender = gender;
+          if (gender === 'anderes' && genderOther.trim()) {
+            stepData.genderOther = genderOther.trim();
+          }
+        }
+      }
+      if (currentStep >= 6 && acquisitionSource) {
+        stepData.acquisitionSource = acquisitionSource;
+        if (acquisitionOther) stepData.acquisitionOther = acquisitionOther;
+      }
+
       await setDoc(doc(db, 'onboardingResultsV5', sessionId), stepData);
-      
       console.log('📊 Step tracking saved for step:', currentStep);
     } catch (error) {
       console.error('❌ Step tracking error:', error);
@@ -301,10 +358,29 @@ export default function OnboardingScreen() {
   };
 
   const nextStep = async () => {
-    if (currentStep < 9) {
+    if (currentStep < TOTAL_STEPS) {
+      // Auf "Los geht's"-Tap (Step 1 → 2): SOFORT anonyme UUID
+      // erzeugen falls noch keiner da ist. Damit hängen alle
+      // folgenden Onboarding-Antworten an einer stabilen UID
+      // (Step 0 "invisible UUID-Generierung" aus dem ClickUp-Task).
+      // Falls AuthContext schon einen Anon-User aufgesetzt hat
+      // (Auto-Anon-Login beim App-Boot), ist das ein No-op.
+      if (currentStep === 1) {
+        try {
+          const { auth } = await import('@/lib/firebase');
+          if (!auth.currentUser) {
+            await signInAnonymously();
+            console.log('✅ Anon-UUID auto-erzeugt am Onboarding-Start');
+          }
+        } catch (e) {
+          console.warn('⚠️ Anon-Auto-Login fehlgeschlagen:', e);
+          // Non-fatal — userId fällt auf "anonymous" zurück im Tracking
+        }
+      }
+
       // Tracking beim Weiterklicken (nicht bei jeder Auswahl)
       await trackCurrentStep();
-      
+
       // Spezielle Animation für Übergang von Hero (Step 1) zu Step 2
       if (currentStep === 1) {
         // Background fade out parallel zur Slide-Animation
@@ -318,10 +394,9 @@ export default function OnboardingScreen() {
             toValue: -width,
             duration: 400,
             useNativeDriver: true,
-          })
+          }),
         ]).start(() => {
           setCurrentStep(currentStep + 1);
-          // Neuer Step wird automatisch von rechts einsliden (useEffect)
         });
       } else {
         // Normale Slide-Animation für alle anderen Steps
@@ -334,6 +409,17 @@ export default function OnboardingScreen() {
         });
       }
     }
+  };
+
+  /**
+   * Step 5 (Alter+Geschlecht) explicit-skip:
+   * setzt ageSkipped=true und springt direkt zu Step 6.
+   * Im trackCurrentStep wird dadurch demographicsSkipped=true
+   * statt age/gender geschrieben.
+   */
+  const skipDemographicsStep = () => {
+    setAgeSkipped(true);
+    nextStep();
   };
 
   const previousStep = () => {
@@ -408,10 +494,10 @@ export default function OnboardingScreen() {
         lastUpdateTime: serverTimestamp(),
         completedAt: serverTimestamp(),
         // Behalte bereits gesammelte Daten
-        ...(country && { country }),
-        ...(selectedMarkets.length > 0 && { 
+        country, // immer aus Locale-Detection oder User-Override
+        ...(selectedMarkets.length > 0 && {
           favoriteMarkets: selectedMarkets.map(m => m.name),
-          primaryMarket: selectedMarkets[0]?.name 
+          primaryMarket: selectedMarkets[0]?.name,
         }),
         ...(marketOther && { marketOther }),
         ...(acquisitionSource && { acquisitionSource }),
@@ -419,8 +505,17 @@ export default function OnboardingScreen() {
         ...(budget && { weeklyBudgetEur: budget }),
         ...(priorities.length > 0 && { priorities }),
         ...(prioritiesOther && { prioritiesOther }),
-        version: 'v1',
-        platform: 'mobile'
+        // Demographics nur wenn der User Step 5 schon gesehen hat.
+        ...(currentStep > 5 && !ageSkipped && {
+          age,
+          ...(gender && { gender }),
+          ...(gender === 'anderes' && genderOther.trim() && {
+            genderOther: genderOther.trim(),
+          }),
+        }),
+        ...(currentStep > 5 && ageSkipped && { demographicsSkipped: true }),
+        version: 'v2',
+        platform: 'mobile',
       });
       
       console.log('📊 Abandon tracked at step:', currentStep);
@@ -449,9 +544,164 @@ export default function OnboardingScreen() {
     router.replace('/(tabs)');
   };
 
+  /**
+   * Climax-Path "Profil sichern & App starten":
+   * - Speichert Onboarding-Antworten (Firestore-Session + User-Doc-
+   *   Mirror) genau wie completeOnboarding.
+   * - Setzt pending_onboarding_paywall=1 statt die Paywall hier zu
+   *   triggern — die wird nach Auth + Tab-Bar-Mount gezeigt
+   *   (app/(tabs)/index.tsx liest das Flag).
+   * - Routet auf /auth/welcome — wenn der User dort Apple/Google/
+   *   Email wählt, linkt AuthContext.linkOrSignIn den Anon-Account
+   *   automatisch (Phase 1) → UID + alle Onboarding-Antworten
+   *   bleiben erhalten.
+   */
+  const completeOnboardingForAuth = async () => {
+    setIsLoading(true);
+    try {
+      // Daten persistieren — gleiche Logik wie completeOnboarding's
+      // Save-Phase (Firestore-Session + User-Doc-Mirror), aber ohne
+      // Paywall-Präsentation und ohne /(tabs)-Navigation.
+      await persistOnboardingResults();
+
+      // Paywall darf nach Auth-Erfolg auf /(tabs) triggern.
+      try {
+        const AsyncStorage = await import('@react-native-async-storage/async-storage');
+        await AsyncStorage.default.setItem('pending_onboarding_paywall', '1');
+      } catch (e) {
+        console.warn('⚠️ pending_onboarding_paywall set failed:', e);
+      }
+
+      router.replace('/auth/welcome');
+    } catch (error) {
+      console.error('❌ completeOnboardingForAuth error:', error);
+      Alert.alert('Fehler', 'Onboarding konnte nicht abgeschlossen werden');
+      router.replace('/(tabs)');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * Helper: persistiert Antworten in Firestore (Session-Doc) + ans
+   * users/{uid}-Doc als Mirror, plus AsyncStorage-Flag. Wird sowohl
+   * von completeOnboarding (Guest-Path) als auch von
+   * completeOnboardingForAuth (Auth-Path) benutzt.
+   *
+   * Kein Loading-Toggle, keine Navigation, keine Paywall — das
+   * regelt der Caller.
+   */
+  const persistOnboardingResults = async () => {
+    const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
+    const { db, auth: authMod } = await import('@/lib/firebase');
+
+    // Anon-UUID securen falls noch nicht vorhanden (idempotent).
+    if (!authMod.currentUser) {
+      await signInAnonymously();
+    }
+
+    const completionData: any = {
+      userId: authMod.currentUser?.uid || 'anonymous',
+      sessionId,
+      status: 'completed',
+      currentStep: TOTAL_STEPS,
+      lastUpdateTime: serverTimestamp(),
+      completedAt: serverTimestamp(),
+      country,
+      weeklyBudgetEur: budget,
+      priorities,
+      estimatedSavingsPercent: 35,
+      estimatedSavingsEurWeek: Math.round(budget * 0.35),
+      version: 'v2',
+      platform: 'mobile',
+    };
+
+    // Demographics
+    if (ageSkipped) {
+      completionData.demographicsSkipped = true;
+    } else {
+      completionData.age = age;
+      if (gender) completionData.gender = gender;
+      if (gender === 'anderes' && genderOther.trim()) {
+        completionData.genderOther = genderOther.trim();
+      }
+    }
+
+    // Optional fields
+    if (selectedMarkets.length > 0) {
+      completionData.favoriteMarkets = selectedMarkets.map(market => {
+        if (market.isOther) {
+          return { id: 'other', name: marketOther, isCustom: true };
+        }
+        return market;
+      });
+      completionData.primaryMarket = selectedMarkets[0];
+    }
+    if (acquisitionSource && acquisitionSource !== '') {
+      completionData.acquisitionSource = acquisitionSource;
+      if (acquisitionSource === 'sonstiges' && acquisitionOther.trim() !== '') {
+        completionData.acquisitionOther = acquisitionOther;
+      }
+    }
+    if (priorities.includes('anderes') && prioritiesOther.trim() !== '') {
+      completionData.prioritiesOther = prioritiesOther;
+    }
+
+    await setDoc(doc(db, 'onboardingResultsV5', sessionId), completionData);
+
+    // User-Doc Mirror (gleiche Felder wie unten in completeOnboarding).
+    try {
+      const uid = authMod.currentUser?.uid;
+      if (uid) {
+        const userPrefs: any = {
+          country,
+          weeklyBudgetEur: budget,
+          priorities,
+          onboardingCompletedAt: serverTimestamp(),
+        };
+        if (selectedMarkets.length > 0) {
+          userPrefs.favoriteMarkets = completionData.favoriteMarkets;
+          const primary = completionData.primaryMarket;
+          if (primary?.id) {
+            userPrefs.favoriteMarket = primary.id;
+            userPrefs.favoriteMarketName = primary.name ?? '';
+          }
+          userPrefs.primaryMarket = primary;
+        }
+        if (acquisitionSource) {
+          userPrefs.acquisitionSource = acquisitionSource;
+          if (acquisitionSource === 'sonstiges' && acquisitionOther.trim() !== '') {
+            userPrefs.acquisitionOther = acquisitionOther;
+          }
+        }
+        if (priorities.includes('anderes') && prioritiesOther.trim() !== '') {
+          userPrefs.prioritiesOther = prioritiesOther;
+        }
+        if (!ageSkipped) {
+          userPrefs.age = age;
+          if (gender) {
+            userPrefs.gender = gender === 'nonbinary' ? 'divers' : gender;
+            if (gender === 'anderes' && genderOther.trim() !== '') {
+              userPrefs.genderOther = genderOther.trim();
+            }
+          }
+        }
+        await setDoc(doc(db, 'users', uid), userPrefs, { merge: true });
+        console.log('✅ Onboarding answers mirrored to users/' + uid);
+      }
+    } catch (mirrorErr) {
+      console.warn('⚠️ Failed to mirror onboarding answers:', mirrorErr);
+    }
+
+    const AsyncStorage = await import('@react-native-async-storage/async-storage');
+    await AsyncStorage.default.setItem('onboarding_v1_completed', 'true');
+
+    console.log('✅ Onboarding completed with session:', sessionId);
+  };
+
   const completeOnboarding = async () => {
     setIsLoading(true);
-    
+
     try {
       await signInAnonymously();
       
@@ -463,7 +713,7 @@ export default function OnboardingScreen() {
         userId: auth.currentUser?.uid || 'anonymous',
         sessionId,
         status: 'completed',
-        currentStep: 9,
+        currentStep: TOTAL_STEPS, // = 8
         lastUpdateTime: serverTimestamp(),
         completedAt: serverTimestamp(),
         country,
@@ -471,9 +721,20 @@ export default function OnboardingScreen() {
         priorities,
         estimatedSavingsPercent: 35,
         estimatedSavingsEurWeek: Math.round(budget * 0.35),
-        version: 'v1',
-        platform: 'mobile'
+        version: 'v2',
+        platform: 'mobile',
       };
+
+      // Demographics: nur wenn nicht übersprungen.
+      if (ageSkipped) {
+        completionData.demographicsSkipped = true;
+      } else {
+        completionData.age = age;
+        if (gender) completionData.gender = gender;
+        if (gender === 'anderes' && genderOther.trim()) {
+          completionData.genderOther = genderOther.trim();
+        }
+      }
       
       // Nur definierte optionale Felder hinzufügen
       if (selectedMarkets.length > 0) {
@@ -560,6 +821,23 @@ export default function OnboardingScreen() {
           if (priorities.includes('anderes') && prioritiesOther.trim() !== '') {
             userPrefs.prioritiesOther = prioritiesOther;
           }
+
+          // Demographics ins User-Doc spiegeln (gleiche Felder wie
+          // app/edit-profile.tsx schreibt — gender als Text, plus
+          // ein Integer-age für Dashboard-Auswertung). birthDate
+          // bleibt leer; Edit-Profile kann das später feiner setzen.
+          if (!ageSkipped) {
+            userPrefs.age = age;
+            if (gender) {
+              // Edit-Profile schreibt 'männlich' / 'weiblich' / 'divers'.
+              // Wir mappen 'nonbinary' → 'divers' für Konsistenz mit
+              // dem Edit-Profile-Schema.
+              userPrefs.gender = gender === 'nonbinary' ? 'divers' : gender;
+              if (gender === 'anderes' && genderOther.trim() !== '') {
+                userPrefs.genderOther = genderOther.trim();
+              }
+            }
+          }
           // Merge so we don't clobber unrelated fields on the user
           // doc (level, points, displayName, photo_url, …).
           await setDoc(doc(db, 'users', uid), userPrefs, { merge: true });
@@ -644,13 +922,46 @@ export default function OnboardingScreen() {
     }
   };
 
+  // Progress läuft von Step 2 (Märkte = "1 von 6") bis Step 7 (Loading-
+  // Eintritt = "6 von 6"). Step 1 ist Hero (kein Progress) + Step 8 ist
+  // Climax (kein Progress mehr — Confetti spricht für sich).
+  const PROGRESS_DENOM = TOTAL_STEPS - 2; // = 6 sichtbare Frage-Schritte
   const renderProgressBar = () => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBar}>
-        <View style={[styles.progressFill, { width: ((currentStep - 1) / 8) * 100 + '%' }]} />
+        <View
+          style={[
+            styles.progressFill,
+            {
+              width:
+                Math.min(
+                  ((currentStep - 1) / PROGRESS_DENOM) * 100,
+                  100,
+                ) + '%',
+            },
+          ]}
+        />
       </View>
-      <Text style={styles.progressText}>{currentStep - 1} von 8</Text>
+      <Text style={styles.progressText}>
+        {Math.min(currentStep - 1, PROGRESS_DENOM)} von {PROGRESS_DENOM}
+      </Text>
     </View>
+  );
+
+  /**
+   * Compact "Schritt überspringen"-Pill oben rechts auf Steps wo
+   * Skip relevant ist (vor allem Step 5 Alter+Geschlecht — User-Wunsch
+   * "extrem wichtig hier!"). Nutzt existierendes Color-Schema.
+   */
+  const renderSkipPill = (label: string, onPress: () => void) => (
+    <TouchableOpacity
+      style={styles.skipPill}
+      onPress={onPress}
+      activeOpacity={0.7}
+      hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+    >
+      <Text style={styles.skipPillText}>{label}</Text>
+    </TouchableOpacity>
   );
 
   // Loading Screen
@@ -718,11 +1029,11 @@ export default function OnboardingScreen() {
                 <TouchableOpacity style={styles.heroPrimaryButton} onPress={nextStep}>
                   <Text style={styles.heroPrimaryButtonText}>Los geht's! 🚀</Text>
                 </TouchableOpacity>
-                
+
                 <TouchableOpacity style={styles.heroSecondaryButton} onPress={skipOnboarding}>
-                  <Text style={styles.heroSecondaryButtonText}>Später</Text>
+                  <Text style={styles.heroSecondaryButtonText}>Onboarding überspringen</Text>
                 </TouchableOpacity>
-                
+
                 <Text style={styles.heroBottomText}>Wir zeigen dir, wer dahinter steckt!</Text>
               </View>
             </Animated.View>
@@ -733,118 +1044,9 @@ export default function OnboardingScreen() {
     );
   }
 
-  // Step 2: Country + Auth
+  // Step 2: Märkte (vorher Step 3 — Land+Auth-Step ist weg, country
+  // kommt jetzt aus detectCountry() mit Pill-Override hier inline).
   if (currentStep === 2) {
-    return (
-      <>
-        <StatusBar hidden={false} />
-        <SafeAreaView style={styles.container}>
-          <Animated.View 
-            style={[
-              styles.content,
-              {
-                transform: [{
-                  translateX: slideAnimation, // Direkte Translation: width → 0
-                }],
-              }
-            ]}
-          >
-            {renderProgressBar()}
-            
-            <ScrollView 
-              style={styles.innerScrollView}
-              contentContainerStyle={styles.innerScrollContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              <View style={styles.mainContent}>
-                <Text style={styles.stepTitle}>Wähle dein Land</Text>
-              
-              <View style={styles.countryLayout}>
-              {/* Deutschland - Hauptauswahl (volle Breite) */}
-              <TouchableOpacity
-                style={[styles.countryMain, country === 'DE' && styles.optionSelected]}
-                onPress={() => setCountry('DE')}
-              >
-                <Text style={styles.countryMainFlag}>🇩🇪</Text>
-                <Text 
-                  style={[styles.countryMainText, country === 'DE' && styles.optionTextSelected]}
-                >
-                  Deutschland
-                </Text>
-                {country === 'DE' && <Text style={styles.checkmark}>✓</Text>}
-              </TouchableOpacity>
-              
-              {/* Schweiz & Österreich - Nebenauswahl (Schweiz links) */}
-              <View style={styles.countrySecondary}>
-                <TouchableOpacity
-                  style={[styles.countrySmall, country === 'CH' && styles.optionSelected]}
-                  onPress={() => setCountry('CH')}
-                >
-                  <Text style={styles.countrySmallFlag}>🇨🇭</Text>
-                  <Text 
-                    style={[styles.countrySmallText, country === 'CH' && styles.optionTextSelected]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.8}
-                  >
-                    Schweiz
-                  </Text>
-                  {country === 'CH' && <Text style={styles.checkmark}>✓</Text>}
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  style={[styles.countrySmall, country === 'AT' && styles.optionSelected]}
-                  onPress={() => setCountry('AT')}
-                >
-                  <Text style={styles.countrySmallFlag}>🇦🇹</Text>
-                  <Text 
-                    style={[styles.countrySmallText, country === 'AT' && styles.optionTextSelected]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.8}
-                  >
-                    Österreich
-                  </Text>
-                  {country === 'AT' && <Text style={styles.checkmark}>✓</Text>}
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-          </ScrollView>
-
-          <View style={styles.authSection}>
-            <Text style={styles.authTitle}>Wie möchtest du fortfahren?</Text>
-            <Text style={styles.authSubtitle}>
-            Erstelle ein Konto für das beste App-Erlebnis – oder starte direkt ohne Registrierung.
-            </Text>
-            
-            <View style={styles.buttonContainer}>
-              <OnboardingButton 
-                title="Ohne Account fortfahren" 
-                onPress={async () => {
-                  await signInAnonymously();
-                  nextStep();
-                }}
-                loading={isLoading}
-              />
-              <OnboardingButton 
-                title="Registrieren/Login" 
-                onPress={() => router.push('/auth/login')} 
-                variant="secondary" 
-              />
-              
-             
-            </View>
-          </View>
-        </Animated.View>
-      </SafeAreaView>
-      </>
-    );
-  }
-
-  // Step 3: Märkte
-  if (currentStep === 3) {
     return (
       <>
         <StatusBar hidden={false} />
@@ -864,6 +1066,27 @@ export default function OnboardingScreen() {
 
           <View style={styles.mainContent}>
             <Text style={styles.stepTitle}>Wo kaufst du am liebsten ein?</Text>
+             {/* Country-Toggle (Pills): wir haben das Land aus der
+                 Device-Locale vorbelegt (DE/AT/CH), aber falls's
+                 daneben liegt kann der User hier kompakt korrigieren.
+                 Die explizite Länderauswahl als eigener Step ist
+                 eingespart. */}
+             <View style={styles.countryToggleRow}>
+               {COUNTRIES.map(c => (
+                 <TouchableOpacity
+                   key={c.code}
+                   style={[
+                     styles.countryTogglePill,
+                     country === c.code && styles.countryTogglePillActive,
+                   ]}
+                   onPress={() => setCountry(c.code as DachCountry)}
+                   activeOpacity={0.7}
+                 >
+                   <Text style={styles.countryToggleFlag}>{c.flag}</Text>
+                   <Text style={styles.countryToggleText}>{c.name}</Text>
+                 </TouchableOpacity>
+               ))}
+             </View>
              <Text style={styles.counter}>{selectedMarkets.length}/3 ausgewählt</Text>
              {/* Hinweis dass der ERSTE ausgewählte Markt zum Lieblingsmarkt
                  wird. Sichtbar erst nachdem mindestens ein Markt
@@ -982,8 +1205,9 @@ export default function OnboardingScreen() {
     );
   }
 
-  // Step 4: Akquisition
-  if (currentStep === 4) {
+  // Step 6: Akquisition (vorher Step 4 — psychologisch ans Ende
+  // verschoben, weil's eine egoistische Frage des Unternehmens ist).
+  if (currentStep === 6) {
     return (
       <>
         <StatusBar hidden={false} />
@@ -1055,8 +1279,8 @@ export default function OnboardingScreen() {
     );
   }
 
-  // Step 5: Budget
-  if (currentStep === 5) {
+  // Step 3: Wocheneinkauf in € (vorher Step 5).
+  if (currentStep === 3) {
     return (
       <>
         <StatusBar hidden={false} />
@@ -1116,8 +1340,8 @@ export default function OnboardingScreen() {
     );
   }
 
-  // Step 6: Prioritäten
-  if (currentStep === 6) {
+  // Step 4: Prioritäten (vorher Step 6).
+  if (currentStep === 4) {
     return (
       <>
         <StatusBar hidden={false} />
@@ -1212,6 +1436,146 @@ export default function OnboardingScreen() {
           </View>
         </Animated.View>
       </SafeAreaView>
+      </>
+    );
+  }
+
+  // Step 5: Alter + Geschlecht (NEU im Redesign).
+  //
+  // Psychologie-Position: User hat bereits 3 Steps (Märkte/Budget/
+  // Prioritäten) ausgefüllt → Sunk-Cost-Fallacy macht ihn weniger
+  // abbruchfreudig. Plus: Wording verspricht direkten Mehrwert
+  // ("für maßgeschneiderte Alternativen / Vergleich mit deiner
+  // Zielgruppe") statt trockener Demographic-Abfrage.
+  //
+  // Der "Schritt überspringen"-Pill oben rechts ist EXTREM wichtig
+  // (User-Wunsch im ClickUp-Task) — wer sein Alter / Geschlecht
+  // nicht teilen will bleibt im Funnel ohne Bauchschmerzen.
+  if (currentStep === 5) {
+    return (
+      <>
+        <StatusBar hidden={false} />
+        <SafeAreaView style={styles.container}>
+          {renderSkipPill('Schritt überspringen', skipDemographicsStep)}
+          <Animated.View
+            style={[
+              styles.content,
+              {
+                transform: [{
+                  translateX: slideAnimation,
+                }],
+              },
+            ]}
+          >
+            {renderProgressBar()}
+
+            <ScrollView
+              style={styles.innerScrollView}
+              contentContainerStyle={styles.innerScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={styles.mainContent}>
+                <Text style={styles.stepTitle}>Wie alt bist du?</Text>
+                <Text style={styles.subtitle}>
+                  Für maßgeschneiderte Alternativen — vergleiche
+                  deine Favoriten mit Leuten aus deiner Zielgruppe.
+                </Text>
+
+                {/* Alter — Slider mit groß angezeigtem Wert (gleiches
+                    Pattern wie der Wocheneinkauf-Slider). Default 30,
+                    Range 16-80. */}
+                <View style={styles.ageDisplayContainer}>
+                  <Text style={styles.ageDisplay}>{age}</Text>
+                  <Text style={styles.ageDisplayLabel}>Jahre</Text>
+                </View>
+                <Slider
+                  style={styles.ageSlider}
+                  minimumValue={AGE_MIN}
+                  maximumValue={AGE_MAX}
+                  value={age}
+                  step={1}
+                  onValueChange={(v) => {
+                    setAge(Math.round(v));
+                    if (ageSkipped) setAgeSkipped(false);
+                  }}
+                  minimumTrackTintColor={Colors.light.tint}
+                  maximumTrackTintColor={
+                    colorScheme === 'dark'
+                      ? 'rgba(255,255,255,0.2)'
+                      : 'rgba(0,0,0,0.15)'
+                  }
+                  thumbTintColor={Colors.light.tint}
+                />
+                <View style={styles.ageSliderLabels}>
+                  <Text style={styles.ageSliderLabel}>{AGE_MIN}</Text>
+                  <Text style={styles.ageSliderLabel}>{AGE_MAX}+</Text>
+                </View>
+
+                {/* Geschlecht — 4 Pills mit Custom-Input bei "Anderes". */}
+                <Text
+                  style={[
+                    styles.stepTitle,
+                    { fontSize: 22, marginTop: 32, marginBottom: 12 },
+                  ]}
+                >
+                  Geschlecht
+                </Text>
+                <View style={styles.genderRow}>
+                  {GENDER_OPTIONS.map((opt) => {
+                    const active = gender === opt.id;
+                    return (
+                      <TouchableOpacity
+                        key={opt.id}
+                        style={[
+                          styles.genderPill,
+                          active && styles.genderPillActive,
+                        ]}
+                        onPress={() => {
+                          setGender(opt.id);
+                          if (ageSkipped) setAgeSkipped(false);
+                          if (opt.id !== 'anderes') setGenderOther('');
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Text
+                          style={[
+                            styles.genderPillText,
+                            active && styles.genderPillTextActive,
+                          ]}
+                        >
+                          {opt.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {gender === 'anderes' && (
+                  <TextInput
+                    style={styles.genderOtherInput}
+                    placeholder="Wie möchtest du dich beschreiben? (optional)"
+                    placeholderTextColor={
+                      colorScheme === 'dark'
+                        ? Colors.dark.text + '70'
+                        : Colors.light.text + '70'
+                    }
+                    value={genderOther}
+                    onChangeText={setGenderOther}
+                    maxLength={40}
+                  />
+                )}
+              </View>
+            </ScrollView>
+
+            <View style={styles.buttonContainer}>
+              {/* Weiter ist IMMER aktiv — Alter ist auf Default-30
+                  vorbelegt, Geschlecht ist optional. Wer's lieber
+                  nicht angibt nutzt entweder den Skip-Pill oben oder
+                  geht ohne Geschlechts-Auswahl weiter. */}
+              <OnboardingButton title="Weiter" onPress={nextStep} />
+            </View>
+          </Animated.View>
+        </SafeAreaView>
       </>
     );
   }
@@ -1345,8 +1709,44 @@ export default function OnboardingScreen() {
 
             </ScrollView>
 
-            <View style={styles.buttonContainer}>
-              <OnboardingButton title="Fantastisch! Weiter" onPress={nextStep} />
+            {/* ─── Climax-Auth-CTAs ──────────────────────────────────
+                Vorher: nur "Fantastisch! Weiter" → führte auf einen
+                separaten Step 9 mit "App starten"-Button. Der Step 9
+                ist eliminiert (User-Wunsch im ClickUp-Task).
+
+                Jetzt direkt auf der Climax-Seite: zwei CTAs.
+                Primary (groß, brand-grün): "Profil sichern & App
+                starten" → öffnet Auth-Sheet (login.tsx). Apple/
+                Google/Email-Login linkt automatisch via
+                linkOrSignIn (Phase 1) → die anonymen Onboarding-
+                Antworten + UID bleiben erhalten.
+                Secondary (dezenter Text-Link): "Als Gast
+                fortfahren" → speichert Onboarding (anon-User), ab
+                in die App. User kann später aus dem Profil heraus
+                ein Konto anlegen, Daten bleiben erhalten (Phase 1
+                liefert das mit). */}
+            <View style={[styles.buttonContainer, styles.climaxAuthSection]}>
+              <Text style={styles.climaxAuthHeadline}>
+                Sichere dein Sparpotenzial
+              </Text>
+              <Text style={styles.climaxAuthSubline}>
+                Erstelle ein Profil, damit deine Antworten + Punkte
+                geräteübergreifend bleiben.
+              </Text>
+              <OnboardingButton
+                title="Profil sichern & App starten"
+                onPress={completeOnboardingForAuth}
+                loading={isLoading}
+              />
+              <TouchableOpacity
+                style={styles.climaxGuestLink}
+                onPress={completeOnboarding}
+                disabled={isLoading}
+              >
+                <Text style={styles.climaxGuestLinkText}>
+                  Als Gast fortfahren
+                </Text>
+              </TouchableOpacity>
             </View>
           </Animated.View>
         </SafeAreaView>
@@ -1354,26 +1754,15 @@ export default function OnboardingScreen() {
     );
   }
 
-  // Step 9: Completion
+  // Fallback: sollte nie greifen (Step 1-8 decken alles ab) — bloß
+  // ein Safety-Net falls currentStep mal außerhalb der Range landet.
+  // Vorher war hier ein eigenständiger "App starten"-Step 9 — der ist
+  // ins Climax (Step 8) gewandert.
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        {renderProgressBar()}
-        
         <View style={styles.completionContent}>
-          <Text style={styles.completionIcon}>🎉</Text>
-          <Text style={styles.title}>Alles bereit!</Text>
-          <Text style={styles.subtitle}>
-          Los geht’s – entdecke, wie viel du beim nächsten Einkauf sparen kannst!
-                    </Text>
-        </View>
-
-        <View style={styles.buttonContainer}>
-          <OnboardingButton 
-            title="App starten" 
-            onPress={completeOnboarding}
-            loading={isLoading}
-          />
+          <ActivityIndicator size="large" color={Colors.light.tint} />
         </View>
       </View>
     </SafeAreaView>
@@ -1384,6 +1773,170 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colorScheme === 'dark' ? Colors.dark.background : '#f8f9fa',
+  },
+  // ─── Skip-Pill (oben rechts auf optionalen Steps) ──────────────────
+  skipPill: {
+    position: 'absolute',
+    top: 12,
+    right: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+    zIndex: 50,
+  },
+  skipPillText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_600SemiBold',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+    opacity: 0.6,
+    letterSpacing: 0.2,
+  },
+  // ─── Country-Toggle (kompakt auf Step 2 Märkte) ────────────────────
+  countryToggleRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+    justifyContent: 'center',
+  },
+  countryTogglePill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  countryTogglePillActive: {
+    backgroundColor: colorScheme === 'dark'
+      ? 'rgba(76,175,80,0.18)'
+      : 'rgba(76,175,80,0.10)',
+    borderColor: Colors.light.tint,
+  },
+  countryToggleFlag: {
+    fontSize: 16,
+  },
+  countryToggleText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_600SemiBold',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+  },
+  // ─── Demographics (Step 5: Alter + Geschlecht) ─────────────────────
+  ageDisplayContainer: {
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  ageDisplay: {
+    fontSize: 56,
+    fontFamily: 'Nunito_700Bold',
+    color: Colors.light.tint,
+    letterSpacing: -1,
+  },
+  ageDisplayLabel: {
+    fontSize: 14,
+    fontFamily: 'Nunito_500Medium',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+    opacity: 0.6,
+    marginTop: 4,
+  },
+  ageSlider: {
+    width: '100%',
+    height: 40,
+    marginTop: 8,
+  },
+  ageSliderLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 4,
+    paddingHorizontal: 4,
+  },
+  ageSliderLabel: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+    opacity: 0.5,
+  },
+  genderRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 24,
+  },
+  genderPill: {
+    flex: 1,
+    minWidth: '45%',
+    minHeight: 52,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : '#ffffff',
+    borderWidth: 1.5,
+    borderColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  genderPillActive: {
+    borderColor: Colors.light.tint,
+    backgroundColor: colorScheme === 'dark'
+      ? 'rgba(76,175,80,0.16)'
+      : 'rgba(76,175,80,0.08)',
+  },
+  genderPillText: {
+    fontSize: 14,
+    fontFamily: 'Nunito_600SemiBold',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+  },
+  genderPillTextActive: {
+    color: Colors.light.tint,
+    fontFamily: 'Nunito_700Bold',
+  },
+  genderOtherInput: {
+    marginTop: 14,
+    height: 48,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    fontSize: 14,
+    fontFamily: 'Nunito_500Medium',
+    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : '#ffffff',
+    borderWidth: 1,
+    borderColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+  },
+  // ─── Climax (Step 8) Auth-CTAs ─────────────────────────────────────
+  climaxAuthSection: {
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  climaxAuthHeadline: {
+    fontSize: 17,
+    fontFamily: 'Nunito_700Bold',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  climaxAuthSubline: {
+    fontSize: 13,
+    fontFamily: 'Nunito_400Regular',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+    opacity: 0.65,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  climaxGuestLink: {
+    marginTop: 14,
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  climaxGuestLinkText: {
+    fontSize: 13,
+    fontFamily: 'Nunito_500Medium',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+    opacity: 0.55,
+    textDecorationLine: 'underline',
   },
   scrollView: {
     flex: 1,
