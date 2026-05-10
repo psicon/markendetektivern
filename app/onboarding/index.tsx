@@ -2951,13 +2951,4 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     backgroundColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
     borderRadius: 3,
   },
-  completionContent: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  completionIcon: {
-    fontSize: 64,
-    marginBottom: 24,
-  },
 });
