@@ -125,8 +125,17 @@ export class AnonymousLocationService {
         return null;
       }
       
-    } catch (error) {
-      console.error('❌ IP-Location Fehler:', error);
+    } catch (error: any) {
+      // AbortError = wir haben den fetch selbst nach 5s abgebrochen
+      // (Timeout). Das ist erwartetes Verhalten, kein Fehler — und
+      // soll NICHT als console.error rauf damit LogBox keine rote
+      // Box zeigt + TestFlightLogger nichts als Error markiert.
+      // Echte Fehler (Network-Down, 500er) loggen wir weiterhin.
+      if (error?.name === 'AbortError') {
+        console.warn('⏱️ IP-Location Timeout — Fallback wird verwendet');
+      } else {
+        console.error('❌ IP-Location Fehler:', error);
+      }
       return null;
     }
   }

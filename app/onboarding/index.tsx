@@ -25,7 +25,7 @@ import {
   ViewStyle
 } from 'react-native';
 import ConfettiCannon from 'react-native-confetti-cannon';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { OnboardingButton } from '@/components/ui/OnboardingButton';
@@ -99,9 +99,10 @@ const PRIORITIES = [
 ];
 
 export default function OnboardingScreen() {
-  const { signInAnonymously } = useAuth();
+  const { signInAnonymously, refreshUserProfile: refreshAuthUserProfile } = useAuth();
   const { presentPaywallIfNeeded, presentPaywall, isPremium, refreshPremiumStatus } = useRevenueCat();
   const colorScheme = useColorScheme();
+  const insets = useSafeAreaInsets();
   
   // Dynamic styles based on color scheme - MUSS VOR useState sein!
   const styles = createStyles(colorScheme);
@@ -726,6 +727,18 @@ export default function OnboardingScreen() {
     const AsyncStorage = await import('@react-native-async-storage/async-storage');
     await AsyncStorage.default.setItem('onboarding_v1_completed', 'true');
 
+    // KRITISCH: AuthContext.userProfile refreshen sodass die
+    // frisch-gemirrorten Felder (favoriteMarket, age, gender,
+    // weeklyBudgetEur, …) sofort im UI auftauchen — auch bei
+    // anon-Usern. Ohne Refresh zeigt das Profil stale Daten weil
+    // AuthContext nur via onAuthStateChanged refresht (was bei
+    // schon-existierendem Anon-User nicht feuert).
+    try {
+      await refreshAuthUserProfile();
+    } catch (refreshErr) {
+      console.warn('⚠️ refreshUserProfile post-onboarding failed:', refreshErr);
+    }
+
     console.log('✅ Onboarding completed with session:', sessionId);
   };
 
@@ -880,8 +893,18 @@ export default function OnboardingScreen() {
       const AsyncStorage = await import('@react-native-async-storage/async-storage');
       await AsyncStorage.default.setItem('onboarding_v1_completed', 'true');
 
+      // KRITISCH: AuthContext.userProfile refreshen — siehe
+      // persistOnboardingResults für die ausführliche Begründung.
+      // Ohne diesen Refresh zeigt das Profil bei Anon-Usern stale
+      // Daten (kein favoriteMarket etc.).
+      try {
+        await refreshAuthUserProfile();
+      } catch (refreshErr) {
+        console.warn('⚠️ refreshUserProfile post-onboarding failed:', refreshErr);
+      }
+
       console.log('✅ Onboarding completed with session:', sessionId);
-      
+
       // Verwende bereits gecheckte Premium-Status wenn verfügbar
       let currentPremiumStatus = isPremiumUser;
       
@@ -979,13 +1002,18 @@ export default function OnboardingScreen() {
   );
 
   /**
-   * Compact "Schritt überspringen"-Pill oben rechts auf Steps wo
-   * Skip relevant ist (vor allem Step 5 Alter+Geschlecht — User-Wunsch
-   * "extrem wichtig hier!"). Nutzt existierendes Color-Schema.
+   * Compact Skip-Pill oben rechts. Wird auf Step 2 (Märkte —
+   * 'Onboarding überspringen' → direkt in die App) und Step 5
+   * (Alter+Geschlecht — 'Schritt überspringen' → demographics
+   * skip + zum nächsten Step) verwendet.
+   *
+   * Position respektiert insets.top damit die Pill nicht hinter
+   * dem Status-Bar / Dynamic-Island verschwindet (Bug auf
+   * iPhone 14 Pro+ den der User reportet hat).
    */
   const renderSkipPill = (label: string, onPress: () => void) => (
     <TouchableOpacity
-      style={styles.skipPill}
+      style={[styles.skipPill, { top: insets.top + 8 }]}
       onPress={onPress}
       activeOpacity={0.7}
       hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
@@ -1056,12 +1084,11 @@ export default function OnboardingScreen() {
            
 
               <View style={styles.heroButtonContainer}>
+                {/* Hero hat NUR den Primary-CTA. Skip-Option ist
+                    auf dem nächsten Step (Märkte) als dezente Pill
+                    oben rechts — so will's der ClickUp-Task. */}
                 <TouchableOpacity style={styles.heroPrimaryButton} onPress={nextStep}>
                   <Text style={styles.heroPrimaryButtonText}>Los geht's! 🚀</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.heroSecondaryButton} onPress={skipOnboarding}>
-                  <Text style={styles.heroSecondaryButtonText}>Onboarding überspringen</Text>
                 </TouchableOpacity>
 
                 <Text style={styles.heroBottomText}>Wir zeigen dir, wer dahinter steckt!</Text>
@@ -1081,7 +1108,8 @@ export default function OnboardingScreen() {
       <>
         <StatusBar hidden={false} />
         <SafeAreaView style={styles.container}>
-        <Animated.View 
+        {renderSkipPill('Onboarding überspringen', skipOnboarding)}
+        <Animated.View
           style={[
             styles.content,
             {
@@ -1598,11 +1626,16 @@ export default function OnboardingScreen() {
             </ScrollView>
 
             <View style={styles.buttonContainer}>
-              {/* Weiter ist IMMER aktiv — Alter ist auf Default-30
-                  vorbelegt, Geschlecht ist optional. Wer's lieber
-                  nicht angibt nutzt entweder den Skip-Pill oben oder
-                  geht ohne Geschlechts-Auswahl weiter. */}
-              <OnboardingButton title="Weiter" onPress={nextStep} />
+              {/* Weiter erst aktiv wenn Geschlecht gewählt wurde
+                  (User-Wunsch). Wer Demographics gar nicht teilen
+                  will → 'Schritt überspringen'-Pill oben rechts.
+                  Bei 'Anderes' zusätzlich genderOther optional —
+                  Custom-Text ist nice-to-have, nicht required. */}
+              <OnboardingButton
+                title="Weiter"
+                onPress={nextStep}
+                disabled={!gender}
+              />
             </View>
           </Animated.View>
         </SafeAreaView>
@@ -1805,9 +1838,9 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     backgroundColor: colorScheme === 'dark' ? Colors.dark.background : '#f8f9fa',
   },
   // ─── Skip-Pill (oben rechts auf optionalen Steps) ──────────────────
+  // top wird inline gesetzt via insets.top (renderSkipPill).
   skipPill: {
     position: 'absolute',
-    top: 12,
     right: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
