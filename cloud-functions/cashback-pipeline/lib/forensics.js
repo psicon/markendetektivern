@@ -33,6 +33,7 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const sharp = require('sharp');
 const exifr = require('exifr');
 const { logger } = require('firebase-functions');
@@ -215,9 +216,51 @@ function deriveForensicFlags(exif, uploadAtMs, maxBonAgeDays) {
   return flags;
 }
 
+/**
+ * Two content-based duplicate fingerprints — both derived from the
+ * parsed receipt fields, both designed to catch the case that *image*
+ * forensics can't see: when a user re-photographs the same receipt via
+ * a Document Scanner, the resulting bytes / dHash / EXIF timestamps all
+ * differ — but the OCR'd content is identical.
+ *
+ * `contentHash` (merchant + date + total) — used for **per-user dedup**.
+ *   Same user submitting the same bon twice. Statistically impossible
+ *   for one user to legitimately have two purchases at the same shop on
+ *   the same day with the same exact total, so a hard reject is safe.
+ *
+ * `transactionHash` (merchant + date + **time** + total) — used for
+ *   **cross-user dedup** (collusion / shared bons). With minute-precision
+ *   bonTime included, two different users physically cannot have the
+ *   same bon — checkout time of a single transaction is unique.
+ *   Returns null when bonTime wasn't extracted (we don't risk false
+ *   positives by cross-user-blocking just on date+total).
+ *
+ * Both return 16-char hex; null when any required input is missing.
+ */
+function computeContentHash(merchantId, bonDate, totalCents) {
+  if (!merchantId || typeof merchantId !== 'string') return null;
+  if (!bonDate || typeof bonDate !== 'string') return null;
+  if (!Number.isFinite(totalCents) || totalCents <= 0) return null;
+  const sig = `${merchantId.toLowerCase()}|${bonDate}|${totalCents}`;
+  return crypto.createHash('sha256').update(sig).digest('hex').slice(0, 16);
+}
+
+function computeTransactionHash(merchantId, bonDate, bonTime, totalCents) {
+  if (!merchantId || typeof merchantId !== 'string') return null;
+  if (!bonDate || typeof bonDate !== 'string') return null;
+  if (!bonTime || typeof bonTime !== 'string') return null;
+  if (!Number.isFinite(totalCents) || totalCents <= 0) return null;
+  // Normalize bonTime to HH:MM (in case OCR returned HH:MM:SS).
+  const normalizedTime = bonTime.slice(0, 5);
+  const sig = `${merchantId.toLowerCase()}|${bonDate}|${normalizedTime}|${totalCents}`;
+  return crypto.createHash('sha256').update(sig).digest('hex').slice(0, 16);
+}
+
 module.exports = {
   computeDHash,
   hammingDistance,
   readExifMeta,
   deriveForensicFlags,
+  computeContentHash,
+  computeTransactionHash,
 };

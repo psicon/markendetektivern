@@ -305,6 +305,10 @@ escalation_swapped = sum(
     1 for r in receipts if ((r.get("ocr") or {}).get("escalation") or {}).get("swapped")
 )
 
+# Duplicate detection (Layer 1.5 — content-based)
+dup_self = sum(1 for r in receipts if (r.get("duplicateOf") or {}).get("sameUser") is True)
+dup_cross = sum(1 for r in receipts if (r.get("duplicateOf") or {}).get("sameUser") is False)
+
 # Latency
 lat_total = [
     (r.get("ocr") or {}).get("latencyMs", 0)
@@ -349,6 +353,13 @@ if total > 0:
             f"⚠️ **Reject rate {rej_rate}%** — Capture/User-Onboarding-Problem?"
         )
 
+if dup_cross > 0:
+    gate_warnings.append(
+        f"🚨 **{dup_cross} cross-user duplicate(s)** — der gleiche Bon wurde von "
+        "verschiedenen Accounts eingereicht. Verdacht auf Collusion / Bon-Sharing. "
+        "Logs durchsuchen nach `cross-user-duplicate`."
+    )
+
 for w in gate_warnings:
     st.warning(w)
 
@@ -381,6 +392,20 @@ c5.markdown(
     f"<div class='stat-label'>Pending</div></div>",
     unsafe_allow_html=True,
 )
+
+# Duplicate-detection row (only shown if there are any in the timeframe)
+if dup_self + dup_cross > 0:
+    d1, d2 = st.columns(2)
+    d1.markdown(
+        f"<div class='stat-card'><div class='stat-num' style='color:#9a6700'>👤 {dup_self}</div>"
+        f"<div class='stat-label'>Self re-uploads (same user, same content)</div></div>",
+        unsafe_allow_html=True,
+    )
+    d2.markdown(
+        f"<div class='stat-card'><div class='stat-num' style='color:#cf222e'>🚨 {dup_cross}</div>"
+        f"<div class='stat-label'>Cross-user duplicates (collusion)</div></div>",
+        unsafe_allow_html=True,
+    )
 
 
 # Cost + Escalation row
@@ -575,6 +600,10 @@ def to_row(r: dict) -> dict:
         created_dt = created
     else:
         created_dt = None
+    dup = r.get("duplicateOf") or {}
+    dup_marker = ""
+    if dup:
+        dup_marker = "👤" if dup.get("sameUser") else "🚨"  # 🚨 = cross-user (collusion!)
     return {
         "id": r["_id"][:10],
         "_id_full": r["_id"],
@@ -589,6 +618,7 @@ def to_row(r: dict) -> dict:
         "Δ_eur": (recon.get("signedDeltaCents") / 100) if recon.get("signedDeltaCents") is not None else None,
         "esc_fired": "✓" if esc.get("fired") else "",
         "esc_won": "✓" if esc.get("swapped") else "",
+        "dup": dup_marker,
         "lat_ms": ocr.get("latencyMs"),
         "reject": r.get("rejectReason"),
     }
@@ -650,6 +680,7 @@ selection_event = st.dataframe(
         "Δ_eur": st.column_config.NumberColumn("Δ €", format="%.2f", width="small"),
         "esc_fired": st.column_config.TextColumn("Esc?", width="small"),
         "esc_won": st.column_config.TextColumn("Won?", width="small"),
+        "dup": st.column_config.TextColumn("Dup", width="small", help="👤 = same user re-upload · 🚨 = cross-user (collusion!)"),
         "lat_ms": st.column_config.NumberColumn("Lat ms", width="small"),
         "reject": st.column_config.TextColumn("Reject reason", width="large"),
     },

@@ -237,6 +237,16 @@ at payout is the hammer.
 
 - ✅ **dHash** (64-bit difference hash) computed server-side in `enqueueCashback` after Storage download. Stored as `capture.perceptualHashServer`. Duplicate detection runs in two passes: exact-match Firestore query, then Hamming-distance scan over the user's last 50 receipts (threshold ≤3 bits). Catches re-encoded JPEGs + small crops that sha256 misses.
 - ✅ **EXIF cross-check** via `exifr`: `DateTimeOriginal` (or `CreateDate`/`ModifyDate` fallback) compared to upload time. Hard-reject if older than `MAX_BON_AGE_DAYS` or future-dated by >6h. Soft-flag if gap > 1 day. Software tag matched against `EDITED_SOFTWARE_PATTERNS` (Photoshop, GIMP, Pixelmator, Affinity, Photopea, Paint.NET) → `forensicFlags.suspiciousSoftware`.
+
+### L1.5 — Content-based duplicate detection (server, post-OCR)
+
+The Document Scanner case kills naive image forensics: re-photographing the same physical bon produces different bytes / different dHash / different EXIF timestamps every time. So we add a parallel **content fingerprint** that hashes what the OCR actually read.
+
+- ✅ **`contentHash`** = `sha256(merchantId | bonDate | totalCents)[:16]` — used for **per-user** dedup. Statistically impossible for one user to have two purchases at the same shop on the same day with the same exact total → hard reject.
+- ✅ **`transactionHash`** = `sha256(merchantId | bonDate | bonTime | totalCents)[:16]` — used for **cross-user** dedup (collusion / shared bons). With minute-precision `bonTime` included, two different users physically cannot have the same bon (a single checkout transaction has a unique time). Returns `null` when `bonTime` wasn't extracted; in that case we don't risk false positives.
+- Both queried in `processCashback` after merchant resolution. Match against any prior receipt in a "live" status (`approved | review | matched | ocr_pending`) — rejected/superseded prior receipts don't block legitimate re-attempts.
+- Reject reasons: `duplicate_content_self` (per-user), `duplicate_content_cross_user` (cross-user). The latter is logged with both UIDs at warn level so Patrick can spot collusion patterns.
+- Privacy: the user-side mirror only carries `duplicate.sameUser` flag + own `priorReceiptId` — never reveals foreign UID.
 - ⏭️ pHash (DCT-based, more transform-robust than dHash). Add when we see false-negatives on dHash.
 - ⏭️ Bloom filter for cross-user dHash dedup (currently per-user only — tradeoff: privacy + cheaper. Cross-user lands when L4 device-graph clustering is built).
 - ⏭️ ELA (Error Level Analysis) for Photoshop signs.
@@ -545,7 +555,8 @@ Existing relevant code/projects (NOT in this repo):
 | 2.2 — CV-Hybrid OCR + DocAI escalation + asymmetric reconciliation | ✅ Done | this commit | Cloud Vision OCR → Gemini Flash text-parser as primary engine (lib/ocr_cvhybrid.js, lib/prompt_text.js). Replaces Gemini-direct image OCR. DocAI Expense Parser as escalation fallback when reconciliation fails (lib/ocr_docai.js, auto-skip when env vars unset). Reconciliation tolerance now asymmetric: ±200¢ undershoot (Pfand normal) / ±50¢ overshoot (suspicious) |
 | 3 — Catalog match | ⏭️ Pending | — | productId/brandId mapping per OCR'd item |
 | 4 — Per-user product index | ⏭️ Pending | — | journeys + purchased_products writes |
-| 4.5a — L1 image forensics | ✅ Done | this commit | server-trusted dHash + EXIF cross-check + near-duplicate scan in `enqueueCashback`. Library in `lib/forensics.js`, deps `sharp` + `exifr` |
+| 4.5a — L1 image forensics | ✅ Done | `63a8b3e` | server-trusted dHash + EXIF cross-check + near-duplicate scan in `enqueueCashback`. Library in `lib/forensics.js`, deps `sharp` + `exifr` |
+| 4.5a-2 — L1.5 content dedup | ✅ Done | this commit | contentHash (per-user) + transactionHash (cross-user, with bonTime) in `processCashback`. Catches Document-Scanner re-photos that defeat image forensics |
 | 4.5b — Trust + behavioural | ⏭️ Pending | — | trust_score model, device graph, IP rep |
 | 5 — AI Review (LLM-as-judge) | ⏭️ Pending | — | Gemini 2.5 Pro reviewer Cloud Function |
 | 6 — Tremendous payouts | ⏭️ Pending | — | needs Tremendous API key |

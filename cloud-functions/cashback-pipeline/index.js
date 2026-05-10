@@ -61,6 +61,8 @@ const {
   hammingDistance,
   readExifMeta,
   deriveForensicFlags,
+  computeContentHash,
+  computeTransactionHash,
 } = require('./lib/forensics');
 
 // OCR engine selection. Default = cv-hybrid (Cloud Vision + Gemini Flash
@@ -781,15 +783,99 @@ exports.processCashback = onMessagePublished(
         ocr.parsed.bonCountry,
       );
 
+      // 5b) Content-based duplicate detection (Layer 1.5).
+      //     Catches the case image-forensics can't see: same physical
+      //     bon re-photographed via Document Scanner produces different
+      //     bytes / dHash / EXIF — but the OCR'd content is identical.
+      //
+      //     Two layers:
+      //       - contentHash      (merchant + date + total)        per-user check
+      //       - transactionHash  (merchant + date + time + total) cross-user check
+      //
+      //     Only counts as a match against a prior receipt that is in
+      //     a "live" status (approved | review | matched | ocr_pending).
+      //     Rejected/superseded prior receipts don't block — a previously
+      //     rejected bon shouldn't lock out a legitimate re-attempt.
+      const contentHash = computeContentHash(
+        merchantInfo?.id,
+        ocr.parsed.bonDate,
+        ocr.parsed.totalCents,
+      );
+      const transactionHash = computeTransactionHash(
+        merchantInfo?.id,
+        ocr.parsed.bonDate,
+        ocr.parsed.bonTime,
+        ocr.parsed.totalCents,
+      );
+
+      const LIVE_STATUSES = new Set(['approved', 'review', 'matched', 'ocr_pending']);
+      let duplicateOf = null;
+
+      // Per-user check
+      if (contentHash) {
+        try {
+          const dupQ = await db.collection('receipts')
+            .where('userId', '==', uid)
+            .where('contentHash', '==', contentHash)
+            .limit(5).get();
+          for (const doc of dupQ.docs) {
+            if (doc.id === cashbackId) continue;
+            if (LIVE_STATUSES.has(doc.get('status'))) {
+              duplicateOf = {
+                receiptId: doc.id,
+                sameUser: true,
+                priorStatus: doc.get('status'),
+              };
+              break;
+            }
+          }
+        } catch (e) {
+          logger.warn('content-dedup-self-failed', { cashbackId, err: e.message });
+        }
+      }
+
+      // Cross-user check (only when bonTime present — see helper docstring)
+      if (!duplicateOf && transactionHash) {
+        try {
+          const dupQ = await db.collection('receipts')
+            .where('transactionHash', '==', transactionHash)
+            .limit(5).get();
+          for (const doc of dupQ.docs) {
+            if (doc.id === cashbackId) continue;
+            if (doc.get('userId') === uid) continue; // already covered above
+            if (LIVE_STATUSES.has(doc.get('status'))) {
+              duplicateOf = {
+                receiptId: doc.id,
+                sameUser: false,
+                priorStatus: doc.get('status'),
+              };
+              logger.warn('cross-user-duplicate', {
+                cashbackId,
+                uid,
+                otherUid: doc.get('userId'),
+                otherReceiptId: doc.id,
+                transactionHash,
+              });
+              break;
+            }
+          }
+        } catch (e) {
+          logger.warn('content-dedup-cross-failed', { cashbackId, err: e.message });
+        }
+      }
+
       // 6) Eligibility + tier (only computed if all gates pass)
       const eligibleItemCount = countEligibleItems(ocr.parsed);
       const cashbackCents =
-        merchantInfo && recon.ok && (ageDays == null || ageDays <= MAX_BON_AGE_DAYS)
+        merchantInfo
+        && recon.ok
+        && !duplicateOf
+        && (ageDays == null || ageDays <= MAX_BON_AGE_DAYS)
           ? tierFor(eligibleItemCount, config.tiers)
           : 0;
 
       // 7) Decide status (priority: not-a-receipt > unknown-merchant >
-      //                  too-old > recon > below-min)
+      //                  too-old > duplicate > recon > below-min)
       let status = 'matched';
       let rejectReason = null;
       if (!ocr.parsed.isReceipt) {
@@ -805,6 +891,11 @@ exports.processCashback = onMessagePublished(
         // Bon-Datum fehlt komplett → manuell prüfen
         status = 'review';
         rejectReason = 'no_bon_date';
+      } else if (duplicateOf) {
+        status = 'rejected';
+        rejectReason = duplicateOf.sameUser
+          ? 'duplicate_content_self'
+          : 'duplicate_content_cross_user';
       } else if (!recon.ok) {
         status = 'review';
         rejectReason = 'reconciliation_delta';
@@ -858,6 +949,11 @@ exports.processCashback = onMessagePublished(
             reconciliationDirection: recon.direction ?? null,
             ocrEngine: ocr.engine ?? null,
             escalation: escalation?.fired ? escalation : null,
+            // Mirror only carries minimal duplicate info — never the
+            // foreign user's id (privacy).
+            duplicate: duplicateOf
+              ? { sameUser: duplicateOf.sameUser, priorReceiptId: duplicateOf.sameUser ? duplicateOf.receiptId : null }
+              : null,
             rejectReason,
             updatedAt: now,
           },
@@ -895,6 +991,9 @@ exports.processCashback = onMessagePublished(
         bonDate: ocr.parsed.bonDate || null,
         bonTime: ocr.parsed.bonTime || null,
         bonTotalCents: ocr.parsed.totalCents ?? null,
+        contentHash: contentHash ?? null,
+        transactionHash: transactionHash ?? null,
+        duplicateOf: duplicateOf ?? null,
         items: Array.isArray(ocr.parsed.items)
           ? ocr.parsed.items.map((it) => ({
               raw: it.name,
@@ -945,6 +1044,8 @@ exports.processCashback = onMessagePublished(
         signedDeltaCents: recon.signedDeltaCents,
         direction: recon.direction,
         escalated: escalation?.fired ? escalation.swapped : false,
+        duplicateOfReceiptId: duplicateOf?.receiptId ?? null,
+        duplicateSameUser: duplicateOf?.sameUser ?? null,
       });
     } catch (err) {
       logger.error('process-failed', { cashbackId, err: err.message, stack: err.stack });
