@@ -18,27 +18,25 @@ export default function IndexScreen() {
   const determineInitialRoute = async () => {
     try {
       console.log('🚀 App starting - checking onboarding status...');
-      
-      // Kurze Verzögerung für bessere UX (Splash Screen Zeit)
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Remote Config SPÄTER initialisieren (nicht beim Start)
-      // remoteConfigService.initialize().catch(error => {
-      //   console.error('❌ Remote Config init failed:', error);
-      // });
-      
-            const hasPassedOnboarding = await OnboardingService.hasPassedOnboarding();
-            const isCompleted = await OnboardingService.isOnboardingCompleted();
-            const isSkipped = await OnboardingService.isOnboardingSkipped();
-            
-            console.log('📍 Onboarding Status:', { hasPassedOnboarding, isCompleted, isSkipped });
-            
-            if (hasPassedOnboarding) {
-              router.replace('/(tabs)');
-            } else {
-              router.replace('/onboarding');
-            }
-      
+
+      // Onboarding-Check direkt — KEINE künstliche Verzögerung mehr.
+      // Vorher: 1000 ms `await new Promise(setTimeout)` — das hat auf
+      // Android 1 s lang den "MarkenDetektive"-White-Screen gehalten,
+      // weil der Custom-Splash-Overlay nur auf iOS mountet. Native
+      // expo-splash-screen wird bereits in FontLoader korrekt
+      // gehidet sobald Fonts/Images ready sind — dieser sleep hier
+      // doppelt das nicht, er fügt nur Wartezeit drauf.
+      // hasPassedOnboarding() wrapped intern Promise.all() der beiden
+      // AsyncStorage-Reads, also ein einziger Round-Trip.
+      const hasPassedOnboarding = await OnboardingService.hasPassedOnboarding();
+      console.log('📍 Onboarding passed:', hasPassedOnboarding);
+
+      if (hasPassedOnboarding) {
+        router.replace('/(tabs)');
+      } else {
+        router.replace('/onboarding');
+      }
+
     } catch (error: any) {
       console.error('❌ Error determining initial route:', error);
       
