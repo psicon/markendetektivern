@@ -49,15 +49,27 @@ const COUNTRIES = [
   { code: 'CH', name: 'Schweiz', flag: '🇨🇭' },
 ] as const;
 
-// Gender-Optionen — identisch zu app/edit-profile.tsx GENDER_OPTIONS-
-// Set damit das User-Doc-Feld konsistent ist (Edit-Profile + Onboarding
-// schreiben die gleichen Strings).
+// Gender-Optionen — User-facing 4 Pills (Männlich/Weiblich/Non-binär/
+// Anderes). Storage: stable lowercase-ID. User-Doc-Mirror mapped die
+// IDs aufs aktuelle edit-profile-Schema (capitalized) damit Edit-
+// Profile-UI die richtige Pille als selektiert rendert.
 const GENDER_OPTIONS = [
   { id: 'männlich', name: 'Männlich' },
   { id: 'weiblich', name: 'Weiblich' },
   { id: 'nonbinary', name: 'Non-binär' },
   { id: 'anderes', name: 'Anderes' },
 ] as const;
+
+// Mapping ID → User-Doc-Wert (kompatibel mit edit-profile.tsx
+// GENDER_OPTIONS = ['Männlich', 'Weiblich', 'Divers']).
+// 'Anderes' ist NEU (edit-profile-UI rendert das noch nicht — aber
+// das Feld ist im User-Doc auswertbar fürs Dashboard).
+const GENDER_USERDOC_MAP: Record<string, string> = {
+  männlich: 'Männlich',
+  weiblich: 'Weiblich',
+  nonbinary: 'Divers',
+  anderes: 'Anderes',
+};
 
 // Alters-Range für den Slider — Onboarding sammelt Integer-Alter
 // (Dashboard-friendly), Edit-Profile pflegt birthDate für genauere
@@ -698,7 +710,7 @@ export default function OnboardingScreen() {
         if (!ageSkipped) {
           userPrefs.age = age;
           if (gender) {
-            userPrefs.gender = gender === 'nonbinary' ? 'divers' : gender;
+            userPrefs.gender = GENDER_USERDOC_MAP[gender] ?? gender;
             if (gender === 'anderes' && genderOther.trim() !== '') {
               userPrefs.genderOther = genderOther.trim();
             }
@@ -850,7 +862,7 @@ export default function OnboardingScreen() {
               // Edit-Profile schreibt 'männlich' / 'weiblich' / 'divers'.
               // Wir mappen 'nonbinary' → 'divers' für Konsistenz mit
               // dem Edit-Profile-Schema.
-              userPrefs.gender = gender === 'nonbinary' ? 'divers' : gender;
+              userPrefs.gender = GENDER_USERDOC_MAP[gender] ?? gender;
               if (gender === 'anderes' && genderOther.trim() !== '') {
                 userPrefs.genderOther = genderOther.trim();
               }
