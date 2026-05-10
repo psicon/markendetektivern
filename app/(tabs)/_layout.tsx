@@ -93,14 +93,40 @@ function GlassBackdrop({
   pillBottom: number;
   animatedStyle: ReturnType<typeof useAnimatedStyle>;
 }) {
-  // ANDROID-TEST (2026-05-10): Glass-Backdrop wieder für Android
-  // aktiviert um zu isolieren, ob Skia oder MaskedView+BlurView den
-  // Surface-Stop / Grey-Screen verursacht hat. Wir hatten beides
-  // gleichzeitig deaktiviert — wenn Android jetzt mit MaskedView +
-  // BlurView wieder Grey-Screens zeigt → MaskedView+BlurView sind
-  // Cause. Wenn nicht → war's allein Skia.
-  // EdgeGlow.android.tsx (LinearGradient-Stack) bleibt aktiv,
-  // Skia-EdgeGlow nur iOS.
+  // ANDROID (2026-05-10, bestätigt): MaskedView + BlurView mit
+  // `experimentalBlurMethod=dimezisBlurView` ist die alleinige
+  // Cause der Surface-Stops / Grey-Screens auf Android (Skia ist
+  // unschuldig). Wir nutzen für Android dauerhaft einen schlichten
+  // LinearGradient als Tab-Pillen-Aura — kein Real-Blur, aber
+  // robust und kein TurboModule-GL-Konflikt.
+  if (Platform.OS === 'android') {
+    const totalH = pillBottom + PILL_HEIGHT / 2;
+    const tintBg =
+      colorScheme === 'dark'
+        ? 'rgba(255,255,255,0.08)'
+        : 'rgba(0,0,0,0.06)';
+    return (
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: totalH,
+          },
+          animatedStyle,
+        ]}
+      >
+        <LinearGradient
+          colors={['transparent', tintBg]}
+          locations={[0, 1]}
+          style={{ flex: 1 }}
+        />
+      </Animated.View>
+    );
+  }
 
   const tint = colorScheme === 'dark' ? 'dark' : 'light';
   // Backdrop-Höhe = von der Pillen-Mitte bis zum Screen-Boden.
