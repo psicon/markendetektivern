@@ -294,7 +294,16 @@ export default function OnboardingScreen() {
   //
   // country wird IMMER mitgesendet weil's aus Device-Locale stammt
   // (auch wenn User auf Step 2 noch nicht aktiv geändert hat).
-  const trackCurrentStep = async () => {
+  //
+  // `overrideAgeSkipped`: explizites Flag für State-Race in
+  // skipDemographicsStep — setState ist async, der direkt danach
+  // gerufene nextStep-→-trackCurrentStep-Pfad liest sonst noch
+  // den alten ageSkipped-Wert aus dem Render-Closure.
+  // STRICT-true-Check: viele onPress-Handler reichen das React-
+  // Press-Event als 1. Arg durch (truthy-Object) — das würde sonst
+  // überall demographicsSkipped triggern.
+  const trackCurrentStep = async (overrideAgeSkipped?: boolean) => {
+    const effectiveAgeSkipped = overrideAgeSkipped === true ? true : ageSkipped;
     // Nur tracken wenn der User mindestens einen Step abgeschlossen hat.
     if (currentStep <= 1) return;
 
@@ -333,9 +342,10 @@ export default function OnboardingScreen() {
         if (prioritiesOther) stepData.prioritiesOther = prioritiesOther;
       }
       if (currentStep >= 5) {
-        // Demographics. ageSkipped=true → User hat den Step bewusst
-        // übersprungen, wir vermerken das (für Skip-Rate-Analyse).
-        if (ageSkipped) {
+        // Demographics. effectiveAgeSkipped=true → User hat den Step
+        // bewusst übersprungen, wir vermerken das (für Skip-Rate-
+        // Analyse).
+        if (effectiveAgeSkipped) {
           stepData.demographicsSkipped = true;
         } else {
           stepData.age = age;
@@ -357,7 +367,7 @@ export default function OnboardingScreen() {
     }
   };
 
-  const nextStep = async () => {
+  const nextStep = async (overrideAgeSkipped?: boolean) => {
     if (currentStep < TOTAL_STEPS) {
       // Auf "Los geht's"-Tap (Step 1 → 2): SOFORT anonyme UUID
       // erzeugen falls noch keiner da ist. Damit hängen alle
@@ -378,8 +388,14 @@ export default function OnboardingScreen() {
         }
       }
 
-      // Tracking beim Weiterklicken (nicht bei jeder Auswahl)
-      await trackCurrentStep();
+      // Tracking beim Weiterklicken (nicht bei jeder Auswahl).
+      // overrideAgeSkipped: aus skipDemographicsStep weitergegeben
+      // damit der State-Race (setAgeSkipped → nextStep im selben
+      // Tick) nicht zu falscher Tracking-Schreibung führt.
+      // STRICT-true-Check unten in trackCurrentStep filtert
+      // zugleich React-Press-Events raus die als overrideAgeSkipped
+      // durchgereicht würden (onPress={nextStep}-Pattern).
+      await trackCurrentStep(overrideAgeSkipped === true ? true : undefined);
 
       // Spezielle Animation für Übergang von Hero (Step 1) zu Step 2
       if (currentStep === 1) {
@@ -414,12 +430,14 @@ export default function OnboardingScreen() {
   /**
    * Step 5 (Alter+Geschlecht) explicit-skip:
    * setzt ageSkipped=true und springt direkt zu Step 6.
-   * Im trackCurrentStep wird dadurch demographicsSkipped=true
-   * statt age/gender geschrieben.
+   * `overrideAgeSkipped`-Parameter umgeht den setState-Race
+   * (siehe nextStep + trackCurrentStep) — sonst würde
+   * trackCurrentStep noch den alten ageSkipped=false-Wert lesen
+   * und age/gender statt demographicsSkipped schreiben.
    */
   const skipDemographicsStep = () => {
     setAgeSkipped(true);
-    nextStep();
+    nextStep(true);
   };
 
   const previousStep = () => {
