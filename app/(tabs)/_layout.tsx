@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  StyleSheet,
   Text,
   TouchableOpacity,
   View,
@@ -255,6 +256,82 @@ function FlyingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   // damit dort die Backdrop-Höhe = pillBottom + PILL_HEIGHT/2 berechnet
   // werden kann (Backdrop endet auf der Pillen-Mitte).
   const pillBottom = Math.max(insets.bottom + 1, 7);
+
+  // ─── ANDROID: full-width Bottom-Bar ────────────────────────────────
+  // Auf Android KEIN floating-pill — auf vielen Geräten/OEM-Skins (MIUI,
+  // Samsung One UI, Stock-Pixel mit unterschiedlichen Gesture-Bars)
+  // sieht die schwebende Pille uneinheitlich aus. Stattdessen:
+  // System-Standard — full-width, am Bottom-Rand abschließend, mit
+  // Safe-Area-Padding für die Gesture-Bar. Drei flache Tabs gleicher
+  // Breite, kein raised Mittelbutton (passt visuell nur in eine Pille).
+  // KEINE GlassBackdrop nötig — die Bar selbst hat solid Card-Background.
+  if (Platform.OS === 'android') {
+    return (
+      <Animated.View
+        pointerEvents={pointerEvents}
+        style={[
+          {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: PILL_HEIGHT + insets.bottom,
+            paddingBottom: insets.bottom,
+            backgroundColor: colors.cardBackground,
+            flexDirection: 'row',
+            alignItems: 'center',
+            // dünne Top-Border zur visuellen Trennung vom Content
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor:
+              colorScheme === 'dark'
+                ? 'rgba(255,255,255,0.10)'
+                : 'rgba(0,0,0,0.08)',
+            // dezenter elevation-Lift (kein iOS-Pill-Schatten)
+            elevation: 12,
+          },
+          containerAnimStyle,
+        ]}
+      >
+        {state.routes.map((route, index) => {
+          const { options } = descriptors[route.key];
+          const isFocused = state.index === index;
+          const label =
+            (options.tabBarLabel as string | undefined) ??
+            options.title ??
+            route.name;
+
+          const onPress = () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
+              () => {},
+            );
+            const event = navigation.emit({
+              type: 'tabPress',
+              target: route.key,
+              canPreventDefault: true,
+            });
+            if (!isFocused && !event.defaultPrevented) {
+              navigation.navigate(route.name as never);
+            }
+          };
+
+          // Android: alle drei Tabs als FlatSideTab — kein raised
+          // Stöbern-Button (würde auf einer flachen Bar visuell
+          // schweben). Stöbern ist nur durch das CustomIcon
+          // unterscheidbar (das renderTabIcon korrekt liefert).
+          return (
+            <FlatSideTab
+              key={route.key}
+              routeName={route.name}
+              label={label}
+              isFocused={isFocused}
+              colors={colors}
+              onPress={onPress}
+            />
+          );
+        })}
+      </Animated.View>
+    );
+  }
 
   return (
     <>
