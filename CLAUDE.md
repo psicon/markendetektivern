@@ -67,6 +67,17 @@ Recent-Sessions.
   Custom-`<SplashScreen>`-Overlay nur iOS mountet. Native splash
   covered den echten Boot. Deferred work → `InteractionManager.
   runAfterInteractions(...)`.
+- **KVC `setValue:forKey:` auf undokumentierte iOS-Properties.**
+  Im Mai 2026 versucht `VNDocumentCameraViewController.setValue(false,
+  forKey: "autoScansEnabled")` einzubauen um Apple's Auto-Shutter
+  abzuschalten. Resultat: harter Crash mit `NSUnknownKeyException` —
+  die Property ist nicht KVC-compliant deklariert. KVC ist NICHT
+  silent fallback, das war Wunschdenken. Apple's private/internal
+  Properties sind nicht via KVC erreichbar es sei denn die Klasse
+  opted explizit ein. Grundregel: kein KVC-Hack auf iOS-Properties
+  die nicht im public Header stehen. Wenn Auto-Shutter o.ä. wirklich
+  nötig wäre → eigener Camera-Stack mit `VNDetectRectanglesRequest`,
+  nicht KVC-Trickserei.
 
 ## Builds & deploys — niemals automatisch triggern
 
