@@ -1,18 +1,11 @@
+import MaskedView from '@react-native-masked-view/masked-view';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import {
-  BackdropBlur,
-  Canvas,
-  Fill,
-  LinearGradient as SkiaLinearGradient,
-  Mask,
-  Rect,
-  vec,
-} from '@shopify/react-native-skia';
+import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Tabs, useRouter, useSegments } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  Dimensions,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -100,31 +93,46 @@ function GlassBackdrop({
   pillBottom: number;
   animatedStyle: ReturnType<typeof useAnimatedStyle>;
 }) {
-  // SKIA-BASED Glass-Backdrop (2026-05-10, post-debug):
-  // Vorher: 2 verschiedene Implementations — iOS via MaskedView +
-  // BlurView (expo-blur), Android via LinearGradient-Tint
-  // (kein echter Blur). Grund: BlurView mit experimentalBlurMethod
-  // crashed Android-Surfaces (bestätigt durch grey-screen Test).
-  //
-  // Jetzt: EIN Pfad für beide Plattformen via Skia BackdropBlur.
-  // Skia GPU-Pipeline ist auf beiden Plattformen stabil
-  // (haben wir bei der EdgeGlow-Debug-Session geprüft) und liefert
-  // echtes Backdrop-Blur ohne den dimezisBlurView-Stress.
-  //
-  // Architektur:
-  //   • Skia-Canvas füllt die Backdrop-Höhe.
-  //   • <Mask mode="alpha" mask=<Rect with vertical LinearGradient>>
-  //     erzeugt den weichen Top-Fade (transparent oben, opak unten).
-  //   • <BackdropBlur blur={20}> blurt was hinter dem Canvas ist.
-  //   • <Fill color={tintOverlay}> setzt subtilen Kontrast-Tint
-  //     drüber (Light-Mode: leichtes Schwarz, Dark-Mode: weißer
-  //     Frost) damit die Tab-Pille sich besser absetzt.
+  // ANDROID (2026-05-10, bestätigt): MaskedView + BlurView mit
+  // `experimentalBlurMethod=dimezisBlurView` ist die alleinige
+  // Cause der Surface-Stops / Grey-Screens auf Android (Skia ist
+  // unschuldig). Wir nutzen für Android dauerhaft einen schlichten
+  // LinearGradient als Tab-Pillen-Aura — kein Real-Blur, aber
+  // robust und kein TurboModule-GL-Konflikt.
+  if (Platform.OS === 'android') {
+    const totalH = pillBottom + PILL_HEIGHT / 2;
+    const tintBg =
+      colorScheme === 'dark'
+        ? 'rgba(255,255,255,0.08)'
+        : 'rgba(0,0,0,0.06)';
+    return (
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: totalH,
+          },
+          animatedStyle,
+        ]}
+      >
+        <LinearGradient
+          colors={['transparent', tintBg]}
+          locations={[0, 1]}
+          style={{ flex: 1 }}
+        />
+      </Animated.View>
+    );
+  }
+
+  const tint = colorScheme === 'dark' ? 'dark' : 'light';
+  // Backdrop-Höhe = von der Pillen-Mitte bis zum Screen-Boden.
+  // pillBottom (= 35 px) + PILL_HEIGHT/2 (= 29 px) ≈ 64 px Höhe auf
+  // iPhone. Das ist genau die untere Hälfte der Pille + safe-area.
   const totalH = pillBottom + PILL_HEIGHT / 2;
-  const screenW = Dimensions.get('window').width;
-  const tintOverlay =
-    colorScheme === 'dark'
-      ? 'rgba(255,255,255,0.10)'
-      : 'rgba(0,0,0,0.12)';
 
   return (
     <Animated.View
@@ -140,25 +148,58 @@ function GlassBackdrop({
         animatedStyle,
       ]}
     >
-      <Canvas style={{ flex: 1 }}>
-        <Mask
-          mode="alpha"
-          mask={
-            <Rect x={0} y={0} width={screenW} height={totalH}>
-              <SkiaLinearGradient
-                start={vec(0, 0)}
-                end={vec(0, totalH)}
-                colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.6)', 'rgba(0,0,0,1)']}
-                positions={[0, 0.45, 1]}
-              />
-            </Rect>
-          }
-        >
-          <BackdropBlur blur={20}>
-            <Fill color={tintOverlay} />
-          </BackdropBlur>
-        </Mask>
-      </Canvas>
+      <MaskedView
+        style={{ flex: 1 }}
+        maskElement={
+          <LinearGradient
+            // Von TRANSPARENT (oben — Pillen-Mitte) zu OPAK (unten
+            // — Screen-Edge). Das ist die Mask: wo die Maske
+            // schwarz ist, ist der maskierte Inhalt sichtbar. Wo
+            // transparent, unsichtbar.
+            colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.6)', 'rgba(0,0,0,1)']}
+            locations={[0, 0.45, 1]}
+            style={{ flex: 1 }}
+          />
+        }
+      >
+        <View style={{ flex: 1 }}>
+          {/* Echter Blur (intensity 50 — vorher 70 war zu stark, der
+              Inhalt war zu unkenntlich). */}
+          <BlurView
+            intensity={50}
+            tint={tint}
+            experimentalBlurMethod="dimezisBlurView"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+            }}
+          />
+          {/* Tint-Overlay für Kontrast zur Pille:
+              - Light-Mode → leichtes Schwarz (12 %) → Backdrop wird
+                dunkler, Pille hebt sich stärker ab
+              - Dark-Mode → leichtes Weiß (10 %) → Backdrop wird
+                heller, Pille (cardBackground = #1c1c1e) hebt sich
+                gegen die aufgehellte Frost-Schicht ab
+              Beide Werte bewusst niedrig damit der Blur durchschimmert
+              und nicht zu einer einfachen Color-Layer wird. */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor:
+                colorScheme === 'dark'
+                  ? 'rgba(255,255,255,0.10)'
+                  : 'rgba(0,0,0,0.12)',
+            }}
+          />
+        </View>
+      </MaskedView>
     </Animated.View>
   );
 }
