@@ -26,118 +26,47 @@ am Ende von CLAUDE.md legen als gar nicht.
 
 ## Meta-Regel: Sichere Learnings aus Fehlern → SOFORT in CLAUDE.md
 
-Komplement zur "merk dir das"-Regel oben:
-- "merk dir das" = User-getriggert (explizit)
-- "sichere Learnings" = Selbst-getriggert (implizit aus Fehlern)
-
-Wenn aus einem Fehler in einer Session eine **klare, übertragbare
-Erkenntnis** entsteht — nicht "der User mag X anders" (das ist
-Preference), sondern "ich verstehe jetzt warum Pattern Y nicht
-funktioniert / Pattern Z besser ist" — dann **sofort** in CLAUDE.md
-festhalten. Im selben Commit wie der Fix, nicht "im nächsten Turn".
-
-Trigger sind z.B.:
-- Eine technische Limitierung verstanden, die ich vorher nicht
-  gesehen habe (z.B. "Skia BackdropBlur sampled keinen RN-Content
-  unter dem Canvas")
-- Ein Pattern hat reproduzierbar gefailt (z.B. "BlurView mit
-  experimentalBlurMethod=dimezisBlurView → Android Surface-Stops")
-- Eine Architekturentscheidung wurde durch zwei Fehler + User-
-  Korrektur final klar (zweimal in eine Falle gelaufen reicht)
-- Ein Workflow ist nach mehreren Anläufen jetzt robust (z.B.
-  "APK aufs Device: nicht `adb install`, sondern Push in
-  Download-Ordner")
-
-Format: konkret + actionable. **"Tu Y, nicht Z, weil W"**. Nicht
-"Vorsicht bei X", nicht "manchmal hilft Y". Bei Unsicherheit ob's
-ein Learning oder bloß ein Preference-Punkt ist → eher reinsetzen,
-mit `[verifiziert <Datum>]`-Marker, im Zweifelsfall später streichen.
-
-Was **NICHT** triggern soll:
-- "User hat mir gesagt mach Z" — das ist eine Anweisung, kein
-  Learning
-- "Ich war heute langsam mit X" — das ist Performance, kein
-  technisches Learning
-- "Vielleicht wäre Y besser" — Spekulation, nicht "sicher gelernt"
+Komplement zur "merk dir das"-Regel: User-getriggert vs. selbst-
+getriggert. Wenn aus einem Fehler eine **klare, übertragbare
+Erkenntnis** entsteht (technische Limitierung verstanden, Pattern
+hat reproduzierbar gefailt, Architektur-Entscheidung nach 2× in
+dieselbe Falle laufen) → sofort als "Forbidden Pattern" oder
+Design-Rule eintragen, im selben Commit wie der Fix. Format:
+"tu Y, nicht Z, weil W". NICHT für Preferences ("User mag X
+anders") oder Spekulation ("vielleicht wäre Y besser").
 
 ## Meta-Regel: User-Wortlaut zweimal lesen, nicht "vereinfachen"
 
-Wenn der User sagt **"selbes Aussehen, aber X"** oder **"behalte
-Y, ändere nur Z"**, dann heißt das: **alles bleibt wie es ist
-außer X/Z**. Nicht eigene Schlussfolgerungen ziehen wie "naja,
-ohne Pille macht der raised Button keinen Sinn → wegnehmen".
-Solche "interpretierenden Vereinfachungen" zwingen den User in
-einen Cancel-Loop und kosten ihn Nerven.
+"Selbes Aussehen, aber X" = alles bleibt, ändere NUR X. Keine
+eigene Interpretation ("naja, ohne Pille macht raised Button
+keinen Sinn → wegnehmen") — das endet in Cancel-Loops. Bei
+Unklarheit kurz fragen. Bei Vergleichen ("warum ist X auf Home
+anders als Stöbern?") **nicht** raten welche Seite gewinnt — beide
+Optionen anbieten oder fragen.
 
-Wenn unklar ist ob ein Detail mitumfasst ist → **fragen, nicht
-raten**. Eine kurze Rückfrage ("soll der raised Button bleiben
-oder mit weg?") ist billiger als ein Cancel + Re-Implementation.
+## Forbidden Patterns
 
-Auch bei *Vergleichen*: "warum ist X auf Home anders als auf
-Stöbern?" heißt nicht zwingend "mach beide wie Stöbern" — kann
-auch "mach beide wie Home" heißen. Bei Unsicherheit fragen oder
-beide Optionen explizit anbieten.
+Dinge die mindestens einmal teuer waren und nicht neu probiert
+werden sollten. Andere "Don't"-Regeln stehen verteilt im File
+(siehe `await import('react-native')`, `persistentLocalCache`,
+`USE_FLYING_TABS`-Legacy etc.) — hier nur die Learnings aus
+Recent-Sessions.
 
-## Forbidden Patterns — bekanntes Nicht-funktioniert-Wissen
-
-Dinge, die in dieser Codebasis **nicht funktionieren** und nicht
-neu probiert werden sollten. Jeder Eintrag steht hier weil es
-mindestens einmal teuer war.
-
-### `BlurView` mit `experimentalBlurMethod="dimezisBlurView"` auf Android
-
-Verboten in neuem Code. Triggert reproduzierbar Surface-Stops /
-Grey-Screens auf Android (Fabric/Bridgeless). Hat im Mai 2026 eine
-halbe Session gekostet bis das eindeutig durch A/B-Test isoliert
-war (Skia war unschuldig, dimezisBlurView war Cause).
-
-Wenn ein Android-Blur-Look gewünscht ist → **getintete View mit
-0.92 Alpha** verwenden (siehe Header-Pattern unten). Das ist kein
-echter Blur, schimmert aber durch und wirkt "fast-blurred".
-
-### Skia `BackdropBlur` zum Blurren von RN-Content
-
-`@shopify/react-native-skia` 2.6.x: `BackdropBlur` sampled NUR
-Skia-Canvas-internen Content (`SkCanvas::saveLayer` mit
-kBackdrop-Flag), **NICHT** die RN-Views unter dem Canvas. Versuch
-nicht das als BlurView-Ersatz zu nutzen — der Backdrop bleibt
-leer / Effekt unsichtbar.
-
-Skia ist nur sinnvoll wenn der Backdrop-Source auch im Skia-Canvas
-gezeichnet ist (z.B. Card-Hintergrund hinter einer Card-internen
-Highlight-Fläche). Für "blur was hinter der Tab-Bar ist" → iOS
-BlurView (UIVisualEffectView) auf iOS, getintete View auf Android.
-
-### Boot-Pfad: keine künstlichen Delays
-
-`await new Promise(resolve => setTimeout(resolve, X))` oder
-äquivalent in **`app/_layout.tsx`, `app/index.tsx`, FontLoader**
-ist verboten. Nativer expo-splash-screen covered den echten Boot
-korrekt (preventAutoHideAsync + hideAsync nach Fonts+Images
-ready). Jeder zusätzliche sleep zeigt sich auf Android als
-Whitescreen, weil das Custom-`<SplashScreen>`-Overlay nur via
-`Platform.OS === 'ios'` mountet.
-
-Wenn etwas "deferred" passieren soll → `InteractionManager.
-runAfterInteractions(...)` (siehe Reference-Data-Prewarm in
-`app/_layout.tsx`).
-
-### `await import('react-native')`
-
-Lazy-import von `react-native` triggert Metro's metroImportAll →
-enumeriert alle RN-Exports → triggert PushNotificationIOS lazy
-getter → `new NativeEventEmitter(null)` crash. **Statisch importieren
-am File-Top.** Lazy-imports von *anderen* Packages (`expo-haptics`,
-internal services) sind ok — nur `react-native` selbst ist
-poisoned.
-
-### `initializeFirestore` mit `persistentLocalCache`
-
-Web-only API (IndexedDB-backed). Auf React Native triggert das
-PushNotificationIOS-Crash via `new NativeEventEmitter()`. Nutze
-`getFirestore(app)` (in-memory cache only, default). Die manuellen
-TTL-Caches in `services/firestore.ts` plus inflight-promise-dedup
-liefern die Revisit-Speed.
+- **`BlurView` mit `experimentalBlurMethod="dimezisBlurView"` auf
+  Android.** Triggert Surface-Stops / Grey-Screens (Fabric).
+  Nur in iOS-Branches verwenden. Für Android-Blur-Look → tinted
+  View mit 0.92 Alpha (siehe Header-Pattern).
+- **Skia `BackdropBlur` als RN-Backdrop.**
+  `@shopify/react-native-skia` 2.6.x sampled nur Skia-Canvas-
+  internen Content (`saveLayer` mit kBackdrop-Flag), NICHT RN-
+  Views unter dem Canvas. Nicht als BlurView-Ersatz versuchen —
+  der Effekt bleibt unsichtbar.
+- **Boot-Pfad künstliche Delays.**
+  `await new Promise(setTimeout)` oder ähnlich in `app/_layout.tsx`,
+  `app/index.tsx`, `FontLoader` → Android-Whitescreen, weil
+  Custom-`<SplashScreen>`-Overlay nur iOS mountet. Native splash
+  covered den echten Boot. Deferred work → `InteractionManager.
+  runAfterInteractions(...)`.
 
 ## Builds & deploys — niemals automatisch triggern
 
