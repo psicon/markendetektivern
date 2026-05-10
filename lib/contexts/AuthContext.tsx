@@ -413,13 +413,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signIn = async (email: string, password: string) => {
     try {
-      // Email/Password-Login auf existierende Accounts. Wenn der
-      // User anonym ist und sich mit Email einloggen will (statt
-      // signUp), nehmen wir die Email-Credential und leiten durch
-      // linkOrSignIn — so wird auch hier bei Anon-State korrekt
-      // geupgraded oder (bei credential-already-in-use) gefragt.
-      const credential = EmailAuthProvider.credential(email, password);
-      await linkOrSignIn(credential);
+      // Login = "I HAVE this account, log me in". Das ist NICHT
+      // dasselbe wie linkWithCredential — letzteres würde einen
+      // NEUEN Email-Password-Identity am bestehenden Anon-User
+      // anhängen, statt zum existierenden Account zu wechseln.
+      //
+      // Korrektes Verhalten bei Anon-User der sich auf ein
+      // existierendes Konto einloggen will: warnen dass die
+      // Anon-Daten verloren gehen, dann signInWithEmailAndPassword.
+      const currentUser = auth.currentUser;
+      if (currentUser?.isAnonymous) {
+        const confirmed = await confirmAccountSwitch();
+        if (!confirmed) {
+          const err: any = new Error('Anmeldung abgebrochen');
+          err.code = 'auth/cancelled';
+          throw err;
+        }
+      }
+      await signInWithEmailAndPassword(auth, email, password);
     } catch (error) {
       if (__DEV__) {
         console.error('Sign in error:', error);
