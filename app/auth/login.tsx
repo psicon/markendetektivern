@@ -59,6 +59,12 @@ export default function LoginScreen() {
       await signIn(formData.email, formData.password);
       router.replace('/(tabs)');
     } catch (error: any) {
+      // Anon-User hat den 'Konto wechseln'-Confirm abgebrochen —
+      // kein Fehler, einfach Form offen lassen.
+      if (error?.code === 'auth/cancelled') {
+        return;
+      }
+
       if (__DEV__) {
         console.error('Login error:', error);
       }
@@ -128,9 +134,11 @@ export default function LoginScreen() {
       await signInWithGoogle();
       router.replace('/(tabs)');
     } catch (error: any) {
+      // User-Cancel (Sheet abgebrochen ODER Confirm-Dialog
+      // 'Konto wechseln' verneint) → kein Toast, Login-Screen
+      // bleibt sichtbar.
+      if (error?.code === 'auth/cancelled') return;
       console.error('Google Sign-In error:', error);
-      // SSO-Failures sind oft transient (Token expired, Connectivity)
-      // → retry-toast lohnt sich.
       showRetryableErrorToast(
         `Google-Anmeldung fehlgeschlagen: ${error.message || 'Bitte erneut versuchen.'}`,
         () => {
@@ -160,6 +168,7 @@ export default function LoginScreen() {
       await signInWithApple();
       router.replace('/(tabs)');
     } catch (error: any) {
+      if (error?.code === 'auth/cancelled') return;
       console.error('Apple Sign-In error:', error);
       showRetryableErrorToast(
         `Apple-Anmeldung fehlgeschlagen: ${error.message || 'Bitte erneut versuchen.'}`,

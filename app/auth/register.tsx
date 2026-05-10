@@ -194,6 +194,13 @@ export default function RegisterScreen() {
       
       router.replace('/(tabs)');
     } catch (error: any) {
+      // Anon-User hat den 'Konto wechseln'-Confirm abgebrochen
+      // (Email gehört bereits einem anderen Account) — kein Fehler,
+      // Form offen lassen.
+      if (error?.code === 'auth/cancelled') {
+        return;
+      }
+
       if (__DEV__) {
         console.error('Registration error:', error);
       }

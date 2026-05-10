@@ -49,6 +49,10 @@ export default function WelcomeScreen() {
       await signInWithGoogle();
       router.replace('/(tabs)');
     } catch (error: any) {
+      // User-Cancel des Confirm-Dialogs (anon→bereits-existierender
+      // Provider-Account, 'auth/cancelled' aus AuthContext) → kein
+      // Fehler-Alert, Welcome-Screen bleibt einfach stehen.
+      if (error?.code === 'auth/cancelled') return;
       console.error('Google Sign-In error:', error);
       Alert.alert('Google Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
     }
@@ -59,6 +63,7 @@ export default function WelcomeScreen() {
       await signInWithApple();
       router.replace('/(tabs)');
     } catch (error: any) {
+      if (error?.code === 'auth/cancelled') return;
       console.error('Apple Sign-In error:', error);
       Alert.alert('Apple Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
     }
