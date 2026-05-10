@@ -25,7 +25,7 @@ import {
   ViewStyle
 } from 'react-native';
 import ConfettiCannon from 'react-native-confetti-cannon';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { OnboardingButton } from '@/components/ui/OnboardingButton';
@@ -102,7 +102,6 @@ export default function OnboardingScreen() {
   const { signInAnonymously, refreshUserProfile: refreshAuthUserProfile } = useAuth();
   const { presentPaywallIfNeeded, presentPaywall, isPremium, refreshPremiumStatus } = useRevenueCat();
   const colorScheme = useColorScheme();
-  const insets = useSafeAreaInsets();
   
   // Dynamic styles based on color scheme - MUSS VOR useState sein!
   const styles = createStyles(colorScheme);
@@ -1002,24 +1001,27 @@ export default function OnboardingScreen() {
   );
 
   /**
-   * Compact Skip-Pill oben rechts. Wird auf Step 2 (Märkte —
-   * 'Onboarding überspringen' → direkt in die App) und Step 5
-   * (Alter+Geschlecht — 'Schritt überspringen' → demographics
-   * skip + zum nächsten Step) verwendet.
+   * Compact Skip-Pill — eigene Row, rechtsbündig, sitzt UNTER der
+   * ProgressBar.
+   * Wird auf Step 2 (Märkte — 'Onboarding überspringen' → direkt
+   * in die App) und Step 5 (Alter+Geschlecht — 'Schritt
+   * überspringen' → demographics skip + nächster Step) verwendet.
    *
-   * Position respektiert insets.top damit die Pill nicht hinter
-   * dem Status-Bar / Dynamic-Island verschwindet (Bug auf
-   * iPhone 14 Pro+ den der User reportet hat).
+   * Vorher: position absolute oben rechts → kollidierte mit
+   * Status-Bar / Dynamic-Island bzw. mit der ProgressBar-Row.
+   * Jetzt: normale Flow-Row, kein Z-index-Konflikt.
    */
   const renderSkipPill = (label: string, onPress: () => void) => (
-    <TouchableOpacity
-      style={[styles.skipPill, { top: insets.top + 8 }]}
-      onPress={onPress}
-      activeOpacity={0.7}
-      hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-    >
-      <Text style={styles.skipPillText}>{label}</Text>
-    </TouchableOpacity>
+    <View style={styles.skipPillRow}>
+      <TouchableOpacity
+        style={styles.skipPill}
+        onPress={onPress}
+        activeOpacity={0.7}
+        hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+      >
+        <Text style={styles.skipPillText}>{label}</Text>
+      </TouchableOpacity>
+    </View>
   );
 
   // Loading Screen
@@ -1108,7 +1110,6 @@ export default function OnboardingScreen() {
       <>
         <StatusBar hidden={false} />
         <SafeAreaView style={styles.container}>
-        {renderSkipPill('Onboarding überspringen', skipOnboarding)}
         <Animated.View
           style={[
             styles.content,
@@ -1120,7 +1121,8 @@ export default function OnboardingScreen() {
           ]}
         >
           {renderProgressBar()}
-          
+          {renderSkipPill('Onboarding überspringen', skipOnboarding)}
+
 
           <View style={styles.mainContent}>
             <Text style={styles.stepTitle}>Wo kaufst du am liebsten ein?</Text>
@@ -1514,7 +1516,6 @@ export default function OnboardingScreen() {
       <>
         <StatusBar hidden={false} />
         <SafeAreaView style={styles.container}>
-          {renderSkipPill('Schritt überspringen', skipDemographicsStep)}
           <Animated.View
             style={[
               styles.content,
@@ -1526,6 +1527,7 @@ export default function OnboardingScreen() {
             ]}
           >
             {renderProgressBar()}
+            {renderSkipPill('Schritt überspringen', skipDemographicsStep)}
 
             <ScrollView
               style={styles.innerScrollView}
@@ -1797,7 +1799,7 @@ export default function OnboardingScreen() {
                 geräteübergreifend bleiben.
               </Text>
               <OnboardingButton
-                title="Profil sichern & App starten"
+                title="👉  Profil sichern & App starten"
                 onPress={completeOnboardingForAuth}
                 loading={isLoading}
               />
@@ -1837,16 +1839,19 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     flex: 1,
     backgroundColor: colorScheme === 'dark' ? Colors.dark.background : '#f8f9fa',
   },
-  // ─── Skip-Pill (oben rechts auf optionalen Steps) ──────────────────
-  // top wird inline gesetzt via insets.top (renderSkipPill).
+  // ─── Skip-Pill (eigene Row unter der ProgressBar) ──────────────────
+  skipPillRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 4,
+    marginTop: -4, // näher an der ProgressBar (war 20 unten)
+    marginBottom: 8,
+  },
   skipPill: {
-    position: 'absolute',
-    right: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 14,
     backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
-    zIndex: 50,
   },
   skipPillText: {
     fontSize: 12,
