@@ -28,6 +28,13 @@ import {
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import RAnimated, {
+  useAnimatedStyle as useAnimatedStyleR,
+  useSharedValue as useSharedValueR,
+  withRepeat as withRepeatR,
+  withTiming as withTimingR,
+} from 'react-native-reanimated';
+
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { OnboardingButton } from '@/components/ui/OnboardingButton';
 import { Colors } from '@/constants/Colors';
@@ -72,28 +79,23 @@ const GENDER_USERDOC_MAP: Record<string, string> = {
   anderes: 'Anderes',
 };
 
-// Age-Buckets — 6 diskrete Pillen statt Slider. Psychologisch:
-// kein anchored Default (Slider mit 30 = "akzeptier ich einfach"),
-// jeder Bucket ist eine bewusste Entscheidung. Plus: Dashboard-
-// Auswertung trivial via group-by.
-//
-// Im User-Doc speichern wir BEIDES:
-//   • ageBucket (String) — für Bucket-Filter / -Group-by
-//   • age (Integer-Midpoint) — für Numerik (Durchschnitts-Alter,
-//     Quantile, etc.) UND als simple-name-compat zu edit-profile
-//     das auch ein Integer-age erwartet.
-const AGE_BUCKETS = [
-  { id: '16-24', label: '16-24', midpoint: 20 },
-  { id: '25-34', label: '25-34', midpoint: 30 },
-  { id: '35-44', label: '35-44', midpoint: 40 },
-  { id: '45-54', label: '45-54', midpoint: 50 },
-  { id: '55-64', label: '55-64', midpoint: 60 },
-  { id: '65+', label: '65+', midpoint: 70 },
-] as const;
+// Alter — Slider mit ageInteracted-Gate (User MUSS einmal touchen).
+// Default-Wert hat keinen Effekt auf die Daten weil bis zur ersten
+// Interaktion weder Display-Zahl noch Save-Schreibung passieren.
+// Damit kein Anchoring-Bias auf den Default mehr möglich.
+const AGE_MIN = 16;
+const AGE_MAX = 80;
+const AGE_DEFAULT = 30; // visuelle Thumb-Position bis User dran ist
 
-function ageMidpointForBucket(bucketId: string): number | null {
-  const bucket = AGE_BUCKETS.find((b) => b.id === bucketId);
-  return bucket?.midpoint ?? null;
+// Bucket-Mapping aus exaktem Alter — fürs Dashboard-Group-by.
+// User-Doc speichert dann BEIDE: age (Integer) + ageBucket (String).
+function ageBucketFromAge(age: number): string {
+  if (age <= 24) return '16-24';
+  if (age <= 34) return '25-34';
+  if (age <= 44) return '35-44';
+  if (age <= 54) return '45-54';
+  if (age <= 64) return '55-64';
+  return '65+';
 }
 
 const ACQUISITION_SOURCES = [
@@ -115,6 +117,46 @@ const PRIORITIES = [
   { id: 'marktnähe', name: 'Marktnähe', icon: '📍' },
   { id: 'anderes', name: 'Anderes', icon: '💭' },
 ];
+
+/**
+ * PulsingAgeHint — animierter "Wähle dein Alter"-Hint solange der
+ * User den Slider noch nicht berührt hat. Sanftes Opacity-Pulse via
+ * Reanimated 3 (worklet, UI-Thread). Sobald ageInteracted=true wird
+ * der Hint einfach unmounted (außerhalb dieser Komponente gehandelt).
+ */
+function PulsingAgeHint() {
+  const opacity = useSharedValueR(0.5);
+  React.useEffect(() => {
+    opacity.value = withRepeatR(
+      withTimingR(1, { duration: 900 }),
+      -1,
+      true,
+    );
+  }, [opacity]);
+  const animStyle = useAnimatedStyleR(() => ({ opacity: opacity.value }));
+  return (
+    <RAnimated.View style={[{ alignItems: 'center' }, animStyle]}>
+      <Text style={[styles_module_age_hint.line1]}>Wähle dein Alter</Text>
+      <Text style={[styles_module_age_hint.line2]}>Tippe oder ziehe den Regler</Text>
+    </RAnimated.View>
+  );
+}
+
+const styles_module_age_hint = StyleSheet.create({
+  line1: {
+    fontSize: 22,
+    fontFamily: 'Nunito_700Bold',
+    color: Colors.light.tint,
+    letterSpacing: -0.3,
+  },
+  line2: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+    color: Colors.light.text,
+    opacity: 0.55,
+    marginTop: 4,
+  },
+});
 
 export default function OnboardingScreen() {
   const { signInAnonymously, refreshUserProfile: refreshAuthUserProfile } = useAuth();
@@ -142,10 +184,13 @@ export default function OnboardingScreen() {
   const [budget, setBudget] = useState(100);
   const [priorities, setPriorities] = useState<string[]>([]);
   const [prioritiesOther, setPrioritiesOther] = useState('');
-  // Demographics (NEU in Step 5). 'skipped' bedeutet User hat
-  // den Step explizit übersprungen — wird in Firestore vermerkt
-  // damit wir Skip-Rates auswerten können.
-  const [ageBucket, setAgeBucket] = useState<string>('');
+  // Demographics (NEU in Step 5). 'skipped' = explizit übersprungen
+  // (Pill oben rechts), 'interacted' = User hat den Slider berührt
+  // (touch/drag). Nur bei interacted=true wird der age-Wert
+  // tatsächlich gespeichert — damit kein passives "Weiter" bei
+  // Default-30 zu Daten-Bias führt.
+  const [age, setAge] = useState<number>(AGE_DEFAULT);
+  const [ageInteracted, setAgeInteracted] = useState(false);
   const [ageSkipped, setAgeSkipped] = useState(false);
   const [gender, setGender] = useState<string>('');
   const [genderOther, setGenderOther] = useState('');
@@ -394,10 +439,11 @@ export default function OnboardingScreen() {
         if (effectiveAgeSkipped) {
           stepData.demographicsSkipped = true;
         } else {
-          if (ageBucket) {
-            stepData.ageBucket = ageBucket;
-            const mid = ageMidpointForBucket(ageBucket);
-            if (mid != null) stepData.age = mid;
+          // Nur schreiben wenn User den Slider aktiv berührt hat —
+          // sonst kein age-Wert (verhindert Default-30-Daten-Peak).
+          if (ageInteracted) {
+            stepData.age = age;
+            stepData.ageBucket = ageBucketFromAge(age);
           }
           if (gender) stepData.gender = gender;
           if (gender === 'anderes' && genderOther.trim()) {
@@ -575,13 +621,10 @@ export default function OnboardingScreen() {
         ...(priorities.length > 0 && { priorities }),
         ...(prioritiesOther && { prioritiesOther }),
         // Demographics nur wenn der User Step 5 schon gesehen hat.
+        // age + ageBucket nur wenn ageInteracted (User hat Slider
+        // bewusst berührt) — sonst kein Wert (kein Daten-Bias).
         ...(currentStep > 5 && !ageSkipped && {
-          ...(ageBucket && {
-            ageBucket,
-            ...(ageMidpointForBucket(ageBucket) != null && {
-              age: ageMidpointForBucket(ageBucket)!,
-            }),
-          }),
+          ...(ageInteracted && { age, ageBucket: ageBucketFromAge(age) }),
           ...(gender && { gender }),
           ...(gender === 'anderes' && genderOther.trim() && {
             genderOther: genderOther.trim(),
@@ -694,10 +737,9 @@ export default function OnboardingScreen() {
     if (ageSkipped) {
       completionData.demographicsSkipped = true;
     } else {
-      if (ageBucket) {
-        completionData.ageBucket = ageBucket;
-        const mid = ageMidpointForBucket(ageBucket);
-        if (mid != null) completionData.age = mid;
+      if (ageInteracted) {
+        completionData.age = age;
+        completionData.ageBucket = ageBucketFromAge(age);
       }
       if (gender) completionData.gender = gender;
       if (gender === 'anderes' && genderOther.trim()) {
@@ -762,10 +804,9 @@ export default function OnboardingScreen() {
           userPrefs.prioritiesOther = prioritiesOther;
         }
         if (!ageSkipped) {
-          if (ageBucket) {
-            userPrefs.ageBucket = ageBucket;
-            const mid = ageMidpointForBucket(ageBucket);
-            if (mid != null) userPrefs.age = mid;
+          if (ageInteracted) {
+            userPrefs.age = age;
+            userPrefs.ageBucket = ageBucketFromAge(age);
           }
           if (gender) {
             userPrefs.gender = GENDER_USERDOC_MAP[gender] ?? gender;
@@ -825,14 +866,13 @@ export default function OnboardingScreen() {
         platform: 'mobile',
       };
 
-      // Demographics: nur wenn nicht übersprungen.
+      // Demographics: nur wenn nicht übersprungen + User hat Slider berührt.
       if (ageSkipped) {
         completionData.demographicsSkipped = true;
       } else {
-        if (ageBucket) {
-          completionData.ageBucket = ageBucket;
-          const mid = ageMidpointForBucket(ageBucket);
-          if (mid != null) completionData.age = mid;
+        if (ageInteracted) {
+          completionData.age = age;
+          completionData.ageBucket = ageBucketFromAge(age);
         }
         if (gender) completionData.gender = gender;
         if (gender === 'anderes' && genderOther.trim()) {
@@ -935,13 +975,11 @@ export default function OnboardingScreen() {
           // ein Integer-age für Dashboard-Auswertung). birthDate
           // bleibt leer; Edit-Profile kann das später feiner setzen.
           if (!ageSkipped) {
-            // ageBucket (String '25-34') + age (Integer-Midpoint 30).
-            // Beide werden ins User-Doc gespiegelt — String fürs
-            // Bucket-Filter, Integer für Numerik/Avg/edit-profile-Compat.
-            if (ageBucket) {
-              userPrefs.ageBucket = ageBucket;
-              const mid = ageMidpointForBucket(ageBucket);
-              if (mid != null) userPrefs.age = mid;
+            // Slider-Wert + abgeleiteter Bucket — fürs Dashboard.
+            // Nur wenn User den Slider tatsächlich berührt hat.
+            if (ageInteracted) {
+              userPrefs.age = age;
+              userPrefs.ageBucket = ageBucketFromAge(age);
             }
             if (gender) {
               // Edit-Profile schreibt 'männlich' / 'weiblich' / 'divers'.
@@ -1666,37 +1704,51 @@ export default function OnboardingScreen() {
                   deine Favoriten mit Leuten aus deiner Zielgruppe.
                 </Text>
 
-                {/* Alter — 6 Bucket-Pills statt Slider. Pattern
-                    identisch zu Geschlecht. Kein vorausgewählter
-                    Default → User muss bewusst wählen, kein
-                    Anchoring-Bias auf 30. */}
-                <View style={[styles.genderRow, { marginTop: 16 }]}>
-                  {AGE_BUCKETS.map((b) => {
-                    const active = ageBucket === b.id;
-                    return (
-                      <TouchableOpacity
-                        key={b.id}
-                        style={[
-                          styles.genderPill,
-                          active && styles.genderPillActive,
-                        ]}
-                        onPress={() => {
-                          setAgeBucket(b.id);
-                          if (ageSkipped) setAgeSkipped(false);
-                        }}
-                        activeOpacity={0.8}
-                      >
-                        <Text
-                          style={[
-                            styles.genderPillText,
-                            active && styles.genderPillTextActive,
-                          ]}
-                        >
-                          {b.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
+                {/* Alter — Slider 16-80 mit ageInteracted-Gate.
+                    Bis User den Slider berührt, zeigt Display einen
+                    Hint ('Tippe oder ziehe…') der dezent pulsiert.
+                    Erst onSlidingStart/onValueChange flipped
+                    ageInteracted → echte Zahl wird angezeigt UND
+                    erst dann ins User-Doc geschrieben. Damit kein
+                    Default-30-Daten-Peak. */}
+                <View style={styles.ageDisplayContainer}>
+                  {ageInteracted ? (
+                    <>
+                      <Text style={styles.ageDisplay}>{age}</Text>
+                      <Text style={styles.ageDisplayLabel}>Jahre</Text>
+                    </>
+                  ) : (
+                    <PulsingAgeHint />
+                  )}
+                </View>
+                <Slider
+                  style={styles.ageSlider}
+                  minimumValue={AGE_MIN}
+                  maximumValue={AGE_MAX}
+                  value={age}
+                  step={1}
+                  onSlidingStart={() => {
+                    if (!ageInteracted) setAgeInteracted(true);
+                    if (ageSkipped) setAgeSkipped(false);
+                  }}
+                  onValueChange={(v) => {
+                    setAge(Math.round(v));
+                    if (!ageInteracted) setAgeInteracted(true);
+                    if (ageSkipped) setAgeSkipped(false);
+                  }}
+                  minimumTrackTintColor={
+                    ageInteracted ? Colors.light.tint : (colorScheme === 'dark' ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.2)')
+                  }
+                  maximumTrackTintColor={
+                    colorScheme === 'dark'
+                      ? 'rgba(255,255,255,0.2)'
+                      : 'rgba(0,0,0,0.15)'
+                  }
+                  thumbTintColor={ageInteracted ? Colors.light.tint : (colorScheme === 'dark' ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.3)')}
+                />
+                <View style={styles.ageSliderLabels}>
+                  <Text style={styles.ageSliderLabel}>{AGE_MIN}</Text>
+                  <Text style={styles.ageSliderLabel}>{AGE_MAX}+</Text>
                 </View>
 
                 {/* Geschlecht — 4 Pills mit Custom-Input bei "Anderes". */}
@@ -1756,15 +1808,16 @@ export default function OnboardingScreen() {
             </ScrollView>
 
             <View style={styles.buttonContainer}>
-              {/* Weiter aktiv wenn Alter UND Geschlecht gewählt
-                  sind. Wer Demographics gar nicht teilen will →
-                  'Schritt überspringen'-Pill oben rechts. Bei
-                  'Anderes' zusätzlich genderOther optional — Custom-
-                  Text ist nice-to-have, nicht required. */}
+              {/* Weiter aktiv wenn Alter-Slider BERÜHRT (ageInteracted)
+                  UND Geschlecht gewählt sind. Wer Demographics gar
+                  nicht teilen will → 'Schritt überspringen'-Pill
+                  oben rechts. Bei 'Anderes' zusätzlich genderOther
+                  optional — Custom-Text ist nice-to-have, nicht
+                  required. */}
               <OnboardingButton
                 title="Weiter"
                 onPress={nextStep}
-                disabled={!ageBucket || !gender}
+                disabled={!ageInteracted || !gender}
               />
             </View>
           </Animated.View>
@@ -2027,8 +2080,44 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
   },
   // ─── Demographics (Step 5: Alter + Geschlecht) ─────────────────────
-  // Alter ist jetzt Bucket-Pills (re-uses genderRow + genderPill styles).
-  // Vorher hier: Slider-Display + Slider + Label-Row.
+  // Alter: Slider mit ageInteracted-Gate. Bis User berührt, zeigt der
+  // Display-Bereich den PulsingAgeHint statt der Zahl.
+  ageDisplayContainer: {
+    alignItems: 'center',
+    marginVertical: 20,
+    minHeight: 76, // hält die Höhe konstant zwischen Hint + Zahl-State
+    justifyContent: 'center',
+  },
+  ageDisplay: {
+    fontSize: 56,
+    fontFamily: 'Nunito_700Bold',
+    color: Colors.light.tint,
+    letterSpacing: -1,
+  },
+  ageDisplayLabel: {
+    fontSize: 14,
+    fontFamily: 'Nunito_500Medium',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+    opacity: 0.6,
+    marginTop: 4,
+  },
+  ageSlider: {
+    width: '100%',
+    height: 40,
+    marginTop: 8,
+  },
+  ageSliderLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 4,
+    paddingHorizontal: 4,
+  },
+  ageSliderLabel: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
+    opacity: 0.5,
+  },
   genderRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
