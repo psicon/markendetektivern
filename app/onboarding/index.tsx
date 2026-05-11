@@ -2095,15 +2095,17 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
   ageDisplayContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    height: 64,
-    marginVertical: 10,
+    height: 70, // 64→70: mehr Platz für 'ascent' der Zahl, kein Clip oben
+    marginTop: 6, // 10→6: minimal näher am Slider drunter
+    marginBottom: 2,
   },
   ageDisplay: {
     fontSize: 44,
     fontFamily: 'Nunito_700Bold',
     color: Colors.light.tint,
     letterSpacing: -0.8,
-    lineHeight: 46,
+    lineHeight: 54, // 46→54: lineHeight muss ≥ 1.2× fontSize sein
+                    // sonst clipping bei Nunito_700Bold-Numerik
   },
   ageDisplayLabel: {
     fontSize: 12,
