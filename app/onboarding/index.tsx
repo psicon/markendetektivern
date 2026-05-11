@@ -14,6 +14,7 @@ import {
   FlatList,
   Image,
   ImageBackground,
+  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StatusBar,
@@ -1110,6 +1111,10 @@ export default function OnboardingScreen() {
       <>
         <StatusBar hidden={false} />
         <SafeAreaView style={styles.container}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
         <Animated.View
           style={[
             styles.content,
@@ -1250,16 +1255,17 @@ export default function OnboardingScreen() {
           </View>
 
           <View style={styles.buttonContainer}>
-            <OnboardingButton 
-              title="Weiter" 
+            <OnboardingButton
+              title="Weiter"
               onPress={nextStep}
               disabled={
-                selectedMarkets.length === 0 || 
+                selectedMarkets.length === 0 ||
                 (selectedMarkets.some(m => m.isOther) && marketOther.trim() === '')
               }
             />
           </View>
         </Animated.View>
+        </KeyboardAvoidingView>
       </SafeAreaView>
       </>
     );
@@ -1272,7 +1278,11 @@ export default function OnboardingScreen() {
       <>
         <StatusBar hidden={false} />
         <SafeAreaView style={styles.container}>
-        <Animated.View 
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+        <Animated.View
           style={[
             styles.content,
             {
@@ -1327,13 +1337,14 @@ export default function OnboardingScreen() {
           </View>
 
           <View style={styles.buttonContainer}>
-            <OnboardingButton 
-              title="Weiter" 
+            <OnboardingButton
+              title="Weiter"
               onPress={nextStep}
               disabled={acquisitionSource === 'sonstiges' && acquisitionOther.trim() === ''}
             />
           </View>
         </Animated.View>
+        </KeyboardAvoidingView>
       </SafeAreaView>
       </>
     );
@@ -1406,7 +1417,11 @@ export default function OnboardingScreen() {
       <>
         <StatusBar hidden={false} />
         <SafeAreaView style={styles.container}>
-        <Animated.View 
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+        <Animated.View
           style={[
             styles.content,
             {
@@ -1489,12 +1504,13 @@ export default function OnboardingScreen() {
               title="Weiter" 
               onPress={nextStep}
               disabled={
-                priorities.length === 0 || 
+                priorities.length === 0 ||
                 (priorities.includes('anderes') && prioritiesOther.trim() === '')
               }
             />
           </View>
         </Animated.View>
+        </KeyboardAvoidingView>
       </SafeAreaView>
       </>
     );
@@ -1516,6 +1532,10 @@ export default function OnboardingScreen() {
       <>
         <StatusBar hidden={false} />
         <SafeAreaView style={styles.container}>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
           <Animated.View
             style={[
               styles.content,
@@ -1640,6 +1660,7 @@ export default function OnboardingScreen() {
               />
             </View>
           </Animated.View>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </>
     );
@@ -1859,7 +1880,7 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     borderColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)',
   },
   skipPillText: {
-    fontSize: 12.5,
+    fontSize: 12,
     fontFamily: 'Nunito_600SemiBold',
     color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     opacity: 0.8,
