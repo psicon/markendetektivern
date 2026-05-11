@@ -35,6 +35,30 @@ Design-Rule eintragen, im selben Commit wie der Fix. Format:
 "tu Y, nicht Z, weil W". NICHT für Preferences ("User mag X
 anders") oder Spekulation ("vielleicht wäre Y besser").
 
+## Meta-Regel: ClickUp-Tasks immer kommentieren + 'In Review' setzen
+
+Wenn ich an einem ClickUp-Task arbeite (egal ob Bug, Feature,
+Bug-Fix, Refactor, etc.):
+
+1. **Kommentar im Task pflicht** — direkt nach dem Commit/Push,
+   im ClickUp-Task einen Comment hinterlassen mit:
+   - was kurz war das Problem
+   - was hab ich konkret geändert (Commit-Hash + Pfade)
+   - Edge-Cases / Begründungen / wichtige Trade-offs
+   Format: technisch + actionable, kein Marketing-Speech. Reader
+   ist der User oder ein Future-Me.
+
+2. **Status auf 'In Review' setzen** wenn ich überzeugt bin, dass
+   der Task aus meiner Sicht erledigt ist. Status-Wert: `in review`
+   (ClickUp-API normalisiert lowercase). NICHT auf 'done' / 'closed'
+   selbst setzen — das ist User-Entscheidung nach manueller Prüfung.
+
+3. **Wenn unsicher**: Comment hinterlassen + Status NICHT ändern.
+   Der User entscheidet dann ob's reicht.
+
+Tool: `mcp__…__clickup_create_task_comment` für 1, `clickup_update_task`
+mit `status: 'in review'` für 2.
+
 ## Meta-Regel: User-Wortlaut zweimal lesen, nicht "vereinfachen"
 
 "Selbes Aussehen, aber X" = alles bleibt, ändere NUR X. Keine
