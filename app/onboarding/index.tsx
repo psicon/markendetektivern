@@ -1178,6 +1178,12 @@ export default function OnboardingScreen() {
               numColumns={2}
               keyExtractor={(item) => item.id}
               showsVerticalScrollIndicator={false}
+              // iOS: scroll-content automatisch so anpassen dass das
+              // fokussierte TextInput überm Keyboard sichtbar bleibt.
+              // Plus keyboardShouldPersistTaps damit ein Tap auf eine
+              // Market-Tile nicht den Keyboard schließt + den Tap eats.
+              automaticallyAdjustKeyboardInsets
+              keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => {
                 const isSelected = selectedMarkets.some(m => m.id === item.id);
                 const isDisabled = !isSelected && selectedMarkets.length >= 3;
@@ -1248,6 +1254,12 @@ export default function OnboardingScreen() {
                   value={marketOther}
                   onChangeText={setMarketOther}
                   maxLength={50}
+                  // Auto-Focus: User hat 'Anderer' gewählt → wir mounten
+                  // jetzt erst diesen TextInput, Auto-Focus öffnet
+                  // sofort die Tastatur. iOS scrollt dann via
+                  // FlatList-automaticallyAdjustKeyboardInsets das
+                  // Input in den sichtbaren Bereich.
+                  autoFocus
                   placeholderTextColor={colorScheme === 'dark' ? Colors.dark.text + '80' : Colors.light.text + '80'}
                 />
               </View>
@@ -1330,6 +1342,7 @@ export default function OnboardingScreen() {
                   value={acquisitionOther}
                   onChangeText={setAcquisitionOther}
                   maxLength={50}
+                  autoFocus
                   placeholderTextColor={colorScheme === 'dark' ? Colors.dark.text + '80' : Colors.light.text + '80'}
                 />
               </View>
@@ -1444,6 +1457,8 @@ export default function OnboardingScreen() {
               numColumns={2}
               keyExtractor={(item) => item.id}
               showsVerticalScrollIndicator={false}
+              automaticallyAdjustKeyboardInsets
+              keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => {
                 const isSelected = priorities.includes(item.id);
                 const isDisabled = !isSelected && priorities.length >= 3;
@@ -1493,6 +1508,7 @@ export default function OnboardingScreen() {
                   value={prioritiesOther}
                   onChangeText={setPrioritiesOther}
                   maxLength={50}
+                  autoFocus
                   placeholderTextColor={colorScheme === 'dark' ? Colors.dark.text + '80' : Colors.light.text + '80'}
                 />
               </View>
@@ -1554,6 +1570,7 @@ export default function OnboardingScreen() {
               contentContainerStyle={styles.innerScrollContent}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
+              automaticallyAdjustKeyboardInsets
             >
               <View style={styles.mainContent}>
                 <Text style={styles.stepTitle}>Wie alt bist du?</Text>
@@ -1642,6 +1659,7 @@ export default function OnboardingScreen() {
                     value={genderOther}
                     onChangeText={setGenderOther}
                     maxLength={40}
+                    autoFocus
                   />
                 )}
               </View>
