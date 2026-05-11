@@ -72,12 +72,29 @@ const GENDER_USERDOC_MAP: Record<string, string> = {
   anderes: 'Anderes',
 };
 
-// Alters-Range für den Slider — Onboarding sammelt Integer-Alter
-// (Dashboard-friendly), Edit-Profile pflegt birthDate für genauere
-// Auswertung später.
-const AGE_MIN = 16;
-const AGE_MAX = 80;
-const AGE_DEFAULT = 30;
+// Age-Buckets — 6 diskrete Pillen statt Slider. Psychologisch:
+// kein anchored Default (Slider mit 30 = "akzeptier ich einfach"),
+// jeder Bucket ist eine bewusste Entscheidung. Plus: Dashboard-
+// Auswertung trivial via group-by.
+//
+// Im User-Doc speichern wir BEIDES:
+//   • ageBucket (String) — für Bucket-Filter / -Group-by
+//   • age (Integer-Midpoint) — für Numerik (Durchschnitts-Alter,
+//     Quantile, etc.) UND als simple-name-compat zu edit-profile
+//     das auch ein Integer-age erwartet.
+const AGE_BUCKETS = [
+  { id: '16-24', label: '16-24', midpoint: 20 },
+  { id: '25-34', label: '25-34', midpoint: 30 },
+  { id: '35-44', label: '35-44', midpoint: 40 },
+  { id: '45-54', label: '45-54', midpoint: 50 },
+  { id: '55-64', label: '55-64', midpoint: 60 },
+  { id: '65+', label: '65+', midpoint: 70 },
+] as const;
+
+function ageMidpointForBucket(bucketId: string): number | null {
+  const bucket = AGE_BUCKETS.find((b) => b.id === bucketId);
+  return bucket?.midpoint ?? null;
+}
 
 const ACQUISITION_SOURCES = [
   { id: 'instagram', name: 'Instagram', icon: '📸' },
@@ -128,7 +145,7 @@ export default function OnboardingScreen() {
   // Demographics (NEU in Step 5). 'skipped' bedeutet User hat
   // den Step explizit übersprungen — wird in Firestore vermerkt
   // damit wir Skip-Rates auswerten können.
-  const [age, setAge] = useState<number>(AGE_DEFAULT);
+  const [ageBucket, setAgeBucket] = useState<string>('');
   const [ageSkipped, setAgeSkipped] = useState(false);
   const [gender, setGender] = useState<string>('');
   const [genderOther, setGenderOther] = useState('');
@@ -377,7 +394,11 @@ export default function OnboardingScreen() {
         if (effectiveAgeSkipped) {
           stepData.demographicsSkipped = true;
         } else {
-          stepData.age = age;
+          if (ageBucket) {
+            stepData.ageBucket = ageBucket;
+            const mid = ageMidpointForBucket(ageBucket);
+            if (mid != null) stepData.age = mid;
+          }
           if (gender) stepData.gender = gender;
           if (gender === 'anderes' && genderOther.trim()) {
             stepData.genderOther = genderOther.trim();
@@ -555,7 +576,12 @@ export default function OnboardingScreen() {
         ...(prioritiesOther && { prioritiesOther }),
         // Demographics nur wenn der User Step 5 schon gesehen hat.
         ...(currentStep > 5 && !ageSkipped && {
-          age,
+          ...(ageBucket && {
+            ageBucket,
+            ...(ageMidpointForBucket(ageBucket) != null && {
+              age: ageMidpointForBucket(ageBucket)!,
+            }),
+          }),
           ...(gender && { gender }),
           ...(gender === 'anderes' && genderOther.trim() && {
             genderOther: genderOther.trim(),
@@ -668,7 +694,11 @@ export default function OnboardingScreen() {
     if (ageSkipped) {
       completionData.demographicsSkipped = true;
     } else {
-      completionData.age = age;
+      if (ageBucket) {
+        completionData.ageBucket = ageBucket;
+        const mid = ageMidpointForBucket(ageBucket);
+        if (mid != null) completionData.age = mid;
+      }
       if (gender) completionData.gender = gender;
       if (gender === 'anderes' && genderOther.trim()) {
         completionData.genderOther = genderOther.trim();
@@ -732,7 +762,11 @@ export default function OnboardingScreen() {
           userPrefs.prioritiesOther = prioritiesOther;
         }
         if (!ageSkipped) {
-          userPrefs.age = age;
+          if (ageBucket) {
+            userPrefs.ageBucket = ageBucket;
+            const mid = ageMidpointForBucket(ageBucket);
+            if (mid != null) userPrefs.age = mid;
+          }
           if (gender) {
             userPrefs.gender = GENDER_USERDOC_MAP[gender] ?? gender;
             if (gender === 'anderes' && genderOther.trim() !== '') {
@@ -795,7 +829,11 @@ export default function OnboardingScreen() {
       if (ageSkipped) {
         completionData.demographicsSkipped = true;
       } else {
-        completionData.age = age;
+        if (ageBucket) {
+          completionData.ageBucket = ageBucket;
+          const mid = ageMidpointForBucket(ageBucket);
+          if (mid != null) completionData.age = mid;
+        }
         if (gender) completionData.gender = gender;
         if (gender === 'anderes' && genderOther.trim()) {
           completionData.genderOther = genderOther.trim();
@@ -897,7 +935,14 @@ export default function OnboardingScreen() {
           // ein Integer-age für Dashboard-Auswertung). birthDate
           // bleibt leer; Edit-Profile kann das später feiner setzen.
           if (!ageSkipped) {
-            userPrefs.age = age;
+            // ageBucket (String '25-34') + age (Integer-Midpoint 30).
+            // Beide werden ins User-Doc gespiegelt — String fürs
+            // Bucket-Filter, Integer für Numerik/Avg/edit-profile-Compat.
+            if (ageBucket) {
+              userPrefs.ageBucket = ageBucket;
+              const mid = ageMidpointForBucket(ageBucket);
+              if (mid != null) userPrefs.age = mid;
+            }
             if (gender) {
               // Edit-Profile schreibt 'männlich' / 'weiblich' / 'divers'.
               // Wir mappen 'nonbinary' → 'divers' für Konsistenz mit
@@ -1621,34 +1666,37 @@ export default function OnboardingScreen() {
                   deine Favoriten mit Leuten aus deiner Zielgruppe.
                 </Text>
 
-                {/* Alter — Slider mit groß angezeigtem Wert (gleiches
-                    Pattern wie der Wocheneinkauf-Slider). Default 30,
-                    Range 16-80. */}
-                <View style={styles.ageDisplayContainer}>
-                  <Text style={styles.ageDisplay}>{age}</Text>
-                  <Text style={styles.ageDisplayLabel}>Jahre</Text>
-                </View>
-                <Slider
-                  style={styles.ageSlider}
-                  minimumValue={AGE_MIN}
-                  maximumValue={AGE_MAX}
-                  value={age}
-                  step={1}
-                  onValueChange={(v) => {
-                    setAge(Math.round(v));
-                    if (ageSkipped) setAgeSkipped(false);
-                  }}
-                  minimumTrackTintColor={Colors.light.tint}
-                  maximumTrackTintColor={
-                    colorScheme === 'dark'
-                      ? 'rgba(255,255,255,0.2)'
-                      : 'rgba(0,0,0,0.15)'
-                  }
-                  thumbTintColor={Colors.light.tint}
-                />
-                <View style={styles.ageSliderLabels}>
-                  <Text style={styles.ageSliderLabel}>{AGE_MIN}</Text>
-                  <Text style={styles.ageSliderLabel}>{AGE_MAX}+</Text>
+                {/* Alter — 6 Bucket-Pills statt Slider. Pattern
+                    identisch zu Geschlecht. Kein vorausgewählter
+                    Default → User muss bewusst wählen, kein
+                    Anchoring-Bias auf 30. */}
+                <View style={[styles.genderRow, { marginTop: 16 }]}>
+                  {AGE_BUCKETS.map((b) => {
+                    const active = ageBucket === b.id;
+                    return (
+                      <TouchableOpacity
+                        key={b.id}
+                        style={[
+                          styles.genderPill,
+                          active && styles.genderPillActive,
+                        ]}
+                        onPress={() => {
+                          setAgeBucket(b.id);
+                          if (ageSkipped) setAgeSkipped(false);
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Text
+                          style={[
+                            styles.genderPillText,
+                            active && styles.genderPillTextActive,
+                          ]}
+                        >
+                          {b.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
 
                 {/* Geschlecht — 4 Pills mit Custom-Input bei "Anderes". */}
@@ -1708,15 +1756,15 @@ export default function OnboardingScreen() {
             </ScrollView>
 
             <View style={styles.buttonContainer}>
-              {/* Weiter erst aktiv wenn Geschlecht gewählt wurde
-                  (User-Wunsch). Wer Demographics gar nicht teilen
-                  will → 'Schritt überspringen'-Pill oben rechts.
-                  Bei 'Anderes' zusätzlich genderOther optional —
-                  Custom-Text ist nice-to-have, nicht required. */}
+              {/* Weiter aktiv wenn Alter UND Geschlecht gewählt
+                  sind. Wer Demographics gar nicht teilen will →
+                  'Schritt überspringen'-Pill oben rechts. Bei
+                  'Anderes' zusätzlich genderOther optional — Custom-
+                  Text ist nice-to-have, nicht required. */}
               <OnboardingButton
                 title="Weiter"
                 onPress={nextStep}
-                disabled={!gender}
+                disabled={!ageBucket || !gender}
               />
             </View>
           </Animated.View>
@@ -1979,40 +2027,8 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
   },
   // ─── Demographics (Step 5: Alter + Geschlecht) ─────────────────────
-  ageDisplayContainer: {
-    alignItems: 'center',
-    marginVertical: 20,
-  },
-  ageDisplay: {
-    fontSize: 56,
-    fontFamily: 'Nunito_700Bold',
-    color: Colors.light.tint,
-    letterSpacing: -1,
-  },
-  ageDisplayLabel: {
-    fontSize: 14,
-    fontFamily: 'Nunito_500Medium',
-    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
-    opacity: 0.6,
-    marginTop: 4,
-  },
-  ageSlider: {
-    width: '100%',
-    height: 40,
-    marginTop: 8,
-  },
-  ageSliderLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 4,
-    paddingHorizontal: 4,
-  },
-  ageSliderLabel: {
-    fontSize: 12,
-    fontFamily: 'Nunito_500Medium',
-    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
-    opacity: 0.5,
-  },
+  // Alter ist jetzt Bucket-Pills (re-uses genderRow + genderPill styles).
+  // Vorher hier: Slider-Display + Slider + Label-Row.
   genderRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
