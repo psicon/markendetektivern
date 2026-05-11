@@ -138,6 +138,17 @@ export default function OnboardingScreen() {
   const [backgroundOpacity] = useState(new Animated.Value(1)); // Für Background Fade
   const [sessionId] = useState(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`); // Persistente Session-ID
   const confettiRef = useRef<ConfettiCannon>(null); // Für Konfetti-Effekt
+  const marketsListRef = useRef<FlatList<any>>(null); // Für scrollToEnd bei 'Anderer'
+
+  /**
+   * Liefert den ersten "echten" Markt aus selectedMarkets (kein
+   * `isOther`-Custom-Eintrag). Wird für primaryMarket /
+   * favoriteMarket-Zuweisung verwendet — das User-Doc-Schema
+   * erwartet eine echte Discounter-ID + -Namen. Wenn der User
+   * NUR "Anderer" gewählt hat → undefined (kein primary, kein
+   * Crash später in der App die favoriteMarket=ID erwartet).
+   */
+  const firstRealMarket = selectedMarkets.find((m) => !m.isOther);
 
   // Premium Check beim Onboarding Start
   useEffect(() => {
@@ -346,7 +357,12 @@ export default function OnboardingScreen() {
       // beantwortet wurde wird mitgesendet.
       if (currentStep >= 2 && selectedMarkets.length > 0) {
         stepData.favoriteMarkets = selectedMarkets.map(m => m.name);
-        stepData.primaryMarket = selectedMarkets[0]?.name;
+        // primaryMarket nur dann setzen wenn's einen ECHTEN Discounter
+        // in der Auswahl gibt — 'isOther'/Anderer ist kein gültiger
+        // Lieblingsmarkt (keine ID, kein Logo). Fallback: erster real.
+        if (firstRealMarket) {
+          stepData.primaryMarket = firstRealMarket.name;
+        }
         if (marketOther) stepData.marketOther = marketOther;
       }
       if (currentStep >= 3) stepData.weeklyBudgetEur = budget;
@@ -528,7 +544,8 @@ export default function OnboardingScreen() {
         country, // immer aus Locale-Detection oder User-Override
         ...(selectedMarkets.length > 0 && {
           favoriteMarkets: selectedMarkets.map(m => m.name),
-          primaryMarket: selectedMarkets[0]?.name,
+          // primaryMarket: nur echter Discounter, kein 'isOther'-Fake.
+          ...(firstRealMarket && { primaryMarket: firstRealMarket.name }),
         }),
         ...(marketOther && { marketOther }),
         ...(acquisitionSource && { acquisitionSource }),
@@ -666,7 +683,13 @@ export default function OnboardingScreen() {
         }
         return market;
       });
-      completionData.primaryMarket = selectedMarkets[0];
+      // primaryMarket: nur echter Discounter — kein 'other'-Fake, der
+      // hat keine echte ID und würde später z.B. das Favoriten-Heart
+      // im Markets-Screen leerlaufen lassen oder einen Crash bei
+      // Doc-Lookups triggern.
+      if (firstRealMarket) {
+        completionData.primaryMarket = firstRealMarket;
+      }
     }
     if (acquisitionSource && acquisitionSource !== '') {
       completionData.acquisitionSource = acquisitionSource;
@@ -787,8 +810,12 @@ export default function OnboardingScreen() {
           }
           return market;
         });
-        // Hauptmarkt (erster ausgewählter)
-        completionData.primaryMarket = selectedMarkets[0];
+        // Hauptmarkt: erster ECHTER Discounter (kein 'isOther'/'other').
+        // Wenn der User nur 'Anderer' gewählt hat → kein primaryMarket
+        // im Save (verhindert kaputte favoriteMarket-Refs in der App).
+        if (firstRealMarket) {
+          completionData.primaryMarket = firstRealMarket;
+        }
       }
       
       if (acquisitionSource && acquisitionSource !== '') {
@@ -1159,7 +1186,7 @@ export default function OnboardingScreen() {
                  Code unten setzt zusätzlich ein gold-Heart-Badge auf
                  selectedMarkets[0], sodass der Zusammenhang
                  "erster = Liebling" auch visuell verankert ist. */}
-             {selectedMarkets.length > 0 ? (
+             {firstRealMarket ? (
                <View style={styles.primaryMarketHintRow}>
                  <MaterialCommunityIcons
                    name="heart"
@@ -1174,6 +1201,7 @@ export default function OnboardingScreen() {
              ) : null}
 
             <FlatList
+              ref={marketsListRef}
               data={markets}
               numColumns={2}
               keyExtractor={(item) => item.id}
@@ -1187,11 +1215,15 @@ export default function OnboardingScreen() {
               renderItem={({ item }) => {
                 const isSelected = selectedMarkets.some(m => m.id === item.id);
                 const isDisabled = !isSelected && selectedMarkets.length >= 3;
-                // Lieblingsmarkt = der ERSTE im Array. Wenn der User
-                // den deselektiert und einen anderen wählt, wandert
-                // das Heart-Badge automatisch mit, weil
-                // selectedMarkets[0] sich ändert.
-                const isPrimary = isSelected && selectedMarkets[0]?.id === item.id;
+                // Lieblingsmarkt = ERSTER NICHT-isOther im Array.
+                // Wenn User zuerst "Anderer" und dann "Aldi" wählt,
+                // bekommt Aldi das Heart (firstRealMarket), nicht
+                // Anderer. Das verhindert kaputte favoriteMarket-
+                // Refs ('other'-ID hat kein echtes Discounter-Doc).
+                const isPrimary =
+                  isSelected &&
+                  !item.isOther &&
+                  firstRealMarket?.id === item.id;
 
                 return (
                   <TouchableOpacity
@@ -1208,6 +1240,16 @@ export default function OnboardingScreen() {
                         }
                       } else if (selectedMarkets.length < 3) {
                         setSelectedMarkets([...selectedMarkets, item]);
+                        // Wenn 'Anderer' frisch hinzugefügt wird:
+                        // FlatList nach unten scrollen damit das gleich
+                        // unter dem letzten Item erscheinende TextInput
+                        // im sichtbaren Bereich ist (sonst klebt's
+                        // unter der Liste off-screen).
+                        if (item.isOther) {
+                          setTimeout(() => {
+                            marketsListRef.current?.scrollToEnd({ animated: true });
+                          }, 50);
+                        }
                       }
                     }}
                     disabled={isDisabled}
