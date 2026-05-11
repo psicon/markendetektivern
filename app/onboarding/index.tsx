@@ -1719,7 +1719,9 @@ export default function OnboardingScreen() {
                 <View style={styles.ageDisplayContainer}>
                   {ageInteracted ? (
                     <>
-                      <Text style={styles.ageDisplay}>{age}</Text>
+                      <Text style={styles.ageDisplay}>
+                        {age >= AGE_MAX ? `${age}+` : age}
+                      </Text>
                       <Text style={styles.ageDisplayLabel}>Jahre</Text>
                     </>
                   ) : (
