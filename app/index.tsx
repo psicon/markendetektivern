@@ -1,9 +1,10 @@
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { Colors } from '@/constants/Colors';
 import { OnboardingService } from '@/lib/services/onboardingService';
+import { consentService } from '@/lib/services/consentService';
 
 /**
  * App Entry Point - Bestimmt initiale Route basierend auf Onboarding Status
@@ -17,17 +18,35 @@ export default function IndexScreen() {
 
   const determineInitialRoute = async () => {
     try {
-      console.log('🚀 App starting - checking onboarding status...');
+      console.log('🚀 App starting…');
 
-      // Onboarding-Check direkt — KEINE künstliche Verzögerung mehr.
-      // Vorher: 1000 ms `await new Promise(setTimeout)` — das hat auf
-      // Android 1 s lang den "MarkenDetektive"-White-Screen gehalten,
-      // weil der Custom-Splash-Overlay nur auf iOS mountet. Native
-      // expo-splash-screen wird bereits in FontLoader korrekt
-      // gehidet sobald Fonts/Images ready sind — dieser sleep hier
-      // doppelt das nicht, er fügt nur Wartezeit drauf.
-      // hasPassedOnboarding() wrapped intern Promise.all() der beiden
-      // AsyncStorage-Reads, also ein einziger Round-Trip.
+      // ─── Step 1: Consent FIRST (Android only) ────────────────────
+      // Google-UMP-Consent-Banner muss laut Datenschutz-Anforderung
+      // als ALLERERSTES kommen — vor Onboarding, vor Routing. Auf
+      // iOS ist UMP NOT_REQUIRED, der initialize-Call ist da ein
+      // No-Op und routet sofort weiter.
+      //
+      // Vorher lief Consent verteilt in 3 Stellen (waitForOnboarding
+      // AndInit, (tabs)/index.tsx useFocusEffect, interstitial
+      // AdService.initialize) — daraus entstand der bekannte
+      // Z-Order-Bug 'banner liegt hinter/über erstem onboarding'
+      // weil der UMP-Form async getriggert wurde während die
+      // Onboarding-View schon gerendert war. Jetzt: linear in der
+      // Boot-Sequenz, vor jedem Routing.
+      try {
+        const status = await consentService.initialize();
+        if (Platform.OS === 'android' && status === 'REQUIRED') {
+          console.log('🔒 Consent REQUIRED — zeige UMP-Form vor Routing');
+          await consentService.showConsentFormIfRequired();
+        }
+      } catch (e) {
+        console.warn('⚠️ Consent-Init/Show fehlgeschlagen, fahre fort:', e);
+        // Non-fatal: User soll nicht in der App stecken bleiben weil
+        // Google's SDK Probleme hat. Status wird ggf. später per
+        // Safety-Net-Pfad nochmal angeboten (s. (tabs)/index.tsx).
+      }
+
+      // ─── Step 2: Onboarding-Routing ──────────────────────────────
       const hasPassedOnboarding = await OnboardingService.hasPassedOnboarding();
       console.log('📍 Onboarding passed:', hasPassedOnboarding);
 

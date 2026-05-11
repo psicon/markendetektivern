@@ -193,7 +193,13 @@ export default function HomeScreen() {
   const [mostViewed, setMostViewed] = useState<TopRatedItem[]>([]);
   const [mostViewedLoading, setMostViewedLoading] = useState(true);
 
-  // ─── UMP consent (Android only) ─────────────────────────────────────────────
+  // ─── UMP consent SAFETY-NET (Android only) ──────────────────────────────────
+  // Primary-Pfad ist seit ClickUp 86c9qd5qu in app/index.tsx (vor
+  // dem Routing). Dieser useFocusEffect bleibt als reines Safety-Net
+  // für den seltenen Fall dass Consent während Session expired
+  // (Status wird auf REQUIRED zurückgesetzt nach Google-SDK-Reglen)
+  // → bei nächstem Home-Focus nochmal anbieten. Schluckt alle
+  // Fehler still, damit der User nie hier hängen bleibt.
   useFocusEffect(
     useCallback(() => {
       if (Platform.OS === 'ios') return;
@@ -202,8 +208,6 @@ export default function HomeScreen() {
         try {
           await new Promise(r => setTimeout(r, 1500));
           if (cancelled) return;
-          const { OnboardingService } = await import('@/lib/services/onboardingService');
-          if (!(await OnboardingService.hasPassedOnboarding())) return;
           const { consentService } = await import('@/lib/services/consentService');
           if (await consentService.hasConsent()) return;
           const status = await consentService.initialize();

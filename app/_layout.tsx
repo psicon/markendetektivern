@@ -244,16 +244,19 @@ export default function RootLayout() {
           rewardedAdService.initialize();
           adsInitializedRef.current = true;
         } else {
+          // Android: AdMob NACH Onboarding initialisieren. Consent wird
+          // jetzt ZENTRAL in app/index.tsx vor dem Routing erledigt
+          // (nicht mehr hier — vermeidet den Z-Order-Bug 'banner liegt
+          // hinter/über erstem onboarding'). Hier nur noch AdMob-Setup
+          // gated auf Onboarding-Completion.
           const waitForOnboardingAndInit = async () => {
             const { OnboardingService } = await import('@/lib/services/onboardingService');
-            const { consentService } = await import('@/lib/services/consentService');
-            
+
             while (!cancelled) {
               const hasPassedOnboarding = await OnboardingService.hasPassedOnboarding();
               if (hasPassedOnboarding) {
-                console.log('✅ Onboarding abgeschlossen - initialisiere Consent & Ads');
-                await consentService.initialize();
-                
+                console.log('✅ Onboarding abgeschlossen - initialisiere AdMob');
+
                 // Android braucht etwas Delay wegen dem Crash
                 setTimeout(async () => {
                   if (adsInitializedRef.current || cancelled) return;
@@ -265,12 +268,12 @@ export default function RootLayout() {
                 }, 2000);
                 return;
               }
-              
-              console.log('⏳ Onboarding nicht abgeschlossen - warte mit Consent/Ads...');
+
+              console.log('⏳ Onboarding nicht abgeschlossen - warte mit AdMob…');
               await new Promise(resolve => setTimeout(resolve, 2000));
             }
           };
-          
+
           waitForOnboardingAndInit();
         }
       } catch (error) {
