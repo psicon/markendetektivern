@@ -1728,8 +1728,13 @@ export default function OnboardingScreen() {
                     <PulsingAgeHint />
                   )}
                 </View>
+                {/* Slider: gleicher Stil + Haptik wie der Budget-
+                    Slider auf Step 3 (Wocheneinkauf). Brand-grüne
+                    Track-Color, Default-Thumb, Light-Haptik bei
+                    jedem Step-Wechsel (Delta-Check verhindert Haptik-
+                    Spam wenn der Wert sich nicht geändert hat). */}
                 <Slider
-                  style={styles.ageSlider}
+                  style={styles.slider}
                   minimumValue={AGE_MIN}
                   maximumValue={AGE_MAX}
                   value={age}
@@ -1739,23 +1744,26 @@ export default function OnboardingScreen() {
                     if (ageSkipped) setAgeSkipped(false);
                   }}
                   onValueChange={(v) => {
-                    setAge(Math.round(v));
+                    const rounded = Math.round(v);
+                    if (rounded !== age) {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setAge(rounded);
+                    }
                     if (!ageInteracted) setAgeInteracted(true);
                     if (ageSkipped) setAgeSkipped(false);
                   }}
                   minimumTrackTintColor={
-                    ageInteracted ? Colors.light.tint : (colorScheme === 'dark' ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.2)')
+                    colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint
                   }
                   maximumTrackTintColor={
                     colorScheme === 'dark'
-                      ? 'rgba(255,255,255,0.2)'
-                      : 'rgba(0,0,0,0.15)'
+                      ? Colors.dark.border
+                      : Colors.light.tabIconDefault
                   }
-                  thumbTintColor={ageInteracted ? Colors.light.tint : (colorScheme === 'dark' ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.3)')}
                 />
-                <View style={styles.ageSliderLabels}>
-                  <Text style={styles.ageSliderLabel}>{AGE_MIN}</Text>
-                  <Text style={styles.ageSliderLabel}>{AGE_MAX}+</Text>
+                <View style={styles.sliderLabels}>
+                  <Text style={styles.sliderLabel}>{AGE_MIN}</Text>
+                  <Text style={styles.sliderLabel}>{AGE_MAX}+</Text>
                 </View>
 
                 {/* Geschlecht — 4 Pills mit Custom-Input bei "Anderes". */}
@@ -2116,23 +2124,9 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     opacity: 0.6,
     marginTop: 2,
   },
-  ageSlider: {
-    width: '100%',
-    height: 36,
-    marginTop: 4,
-  },
-  ageSliderLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 2,
-    paddingHorizontal: 4,
-  },
-  ageSliderLabel: {
-    fontSize: 11,
-    fontFamily: 'Nunito_500Medium',
-    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
-    opacity: 0.5,
-  },
+  // ageSlider/ageSliderLabels Styles entfernt — Step 5 nutzt jetzt
+  // die gleichen styles.slider / styles.sliderLabels wie der
+  // Budget-Slider (Step 3) für konsistenten Look + Haptik.
   genderRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
