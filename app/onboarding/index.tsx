@@ -1840,24 +1840,29 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     backgroundColor: colorScheme === 'dark' ? Colors.dark.background : '#f8f9fa',
   },
   // ─── Skip-Pill (eigene Row unter der ProgressBar) ──────────────────
+  // Bewusst dezent gehalten — kein Brand-Tint, neutrale Surface.
+  // Aber jetzt minimal sichtbarer als vorher (User-Feedback: war
+  // zu "versteckt"): leicht stärkere bg + Border + Text-Opacity 0.8.
   skipPillRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     paddingHorizontal: 4,
-    marginTop: -4, // näher an der ProgressBar (war 20 unten)
+    marginTop: -4,
     marginBottom: 8,
   },
   skipPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     borderRadius: 14,
-    backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+    backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.07)',
+    borderWidth: 1,
+    borderColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)',
   },
   skipPillText: {
-    fontSize: 12,
+    fontSize: 12.5,
     fontFamily: 'Nunito_600SemiBold',
     color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
-    opacity: 0.6,
+    opacity: 0.8,
     letterSpacing: 0.2,
   },
   // ─── Country-Toggle (kompakt auf Step 2 Märkte) ────────────────────
