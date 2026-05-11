@@ -2761,32 +2761,70 @@ export default function ShoppingListScreen() {
 
   const handleMarkAsPurchased = async (itemId: string, unitSavings?: number) => {
     if (!user?.uid) return;
+
+    // ─── Pre-Capture für Optimistic-Removal + Revert ───────────────
+    // Item-Daten + Index in seiner Liste merken BEVOR wir den State
+    // ändern. Damit können wir bei Firestore-Fehler exakt an die
+    // alte Position revertieren statt nur ans Ende anzuhängen.
+    const inBrand = brandProducts.findIndex((i) => i.id === itemId);
+    const inNoName = noNameProducts.findIndex((i) => i.id === itemId);
+    const matched =
+      inBrand >= 0
+        ? brandProducts[inBrand]
+        : inNoName >= 0
+          ? noNameProducts[inNoName]
+          : null;
+    if (!matched) {
+      // Item ist nicht (mehr) in der Liste — z.B. weil schon entfernt.
+      // Defensiver Early-Exit, kein Crash.
+      return;
+    }
+
+    // Welche Liste ist betroffen — basierend auf item.kind (sauber)
+    // statt unitSavings-Heuristik (bug bei savings=0):
+    //   - 'brand' / 'custom-brand'  → brandProducts
+    //   - 'noname' / 'custom-noname' → noNameProducts
+    const targetIsNoName =
+      matched.kind === 'noname' || matched.kind === 'custom-noname';
+    const isCustomItem = !!matched.isCustom;
+    const anz = matched.anzahl ?? 1;
+    const totalSavings = (unitSavings || 0) * anz;
+
+    // ─── OPTIMISTIC LOCAL REMOVAL (vor Firestore-Write!) ───────────
+    // Bug-Fix für ClickUp 86c9qkn1w: vorher wurde erst NACH dem
+    // await markAsPurchased(...) entfernt. Bei langsamem Firestore-
+    // Write (>1480 ms) fired die SwipeRow-Safety-Net (2500 ms
+    // timeout) und reset'tete die Animation → Row poppte wieder auf
+    // bevor die finale Local-Removal griff. User musste refreshen.
+    //
+    // Jetzt: Local-Removal SOFORT → Row unmount'et sofort nach der
+    // Animation → kein Safety-Net-Trigger. Firestore-Write läuft
+    // im Hintergrund; bei Fehler revertieren wir.
+    if (targetIsNoName) {
+      setNoNameProducts((prev) => prev.filter((i) => i.id !== itemId));
+    } else {
+      setBrandProducts((prev) => prev.filter((i) => i.id !== itemId));
+    }
+
     setLoadingItems((prev) => new Set(prev).add(itemId));
+
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-      const matched = [...brandProducts, ...noNameProducts].find((it) => it.id === itemId);
-      const isCustomItem = !!matched?.isCustom;
-      // Anzahl-aware Savings: gekaufte Menge × per-unit Savings.
-      // Wirkt auf User-Stats (lifetime-savings counter), Achievement-
-      // Tracking (totalSavings) und Toast-Anzeige.
-      const anz = matched?.anzahl ?? 1;
-      const totalSavings = (unitSavings || 0) * anz;
 
       if (isCustomItem) {
-        // Fast-Path: custom-items haben kein Journey-Tracking → minimaler Payload.
         await FirestoreService.removeFromShoppingCart(user.uid, itemId, {
           productId: itemId,
-          productName: matched?.name ?? 'Custom item',
-          productType: matched?.customType === 'brand' ? 'brand' : 'noname',
+          productName: matched.name ?? 'Custom item',
+          productType: matched.customType === 'brand' ? 'brand' : 'noname',
           isCustomItem: true,
         });
       } else {
         await FirestoreService.markAsPurchased(user.uid, itemId);
       }
-      // Legacy-Dupes (cart-schema v1 auto-IDs für dasselbe Produkt) auch
-      // marken — sonst tauchen sie beim nächsten Refresh wieder auf.
-      // Fire-and-forget, blockiert UI nicht.
-      const legacyIds = matched?.legacyIds ?? [];
+      // Legacy-Dupes (cart-schema v1 auto-IDs für dasselbe Produkt)
+      // auch markieren — sonst tauchen sie beim nächsten Refresh
+      // wieder auf. Fire-and-forget.
+      const legacyIds = matched.legacyIds ?? [];
       for (const legacyId of legacyIds) {
         FirestoreService.markAsPurchasedWithoutTracking(user.uid, legacyId).catch((e) => {
           console.warn('[mark-purchased] legacy dupe fail:', legacyId, (e as Error)?.message);
@@ -2794,12 +2832,6 @@ export default function ShoppingListScreen() {
       }
 
       if (!isCustomItem) {
-        // updateUserStats schreibt auf den USER-doc, parallel zum
-        // gerade abgefeuerten cart-Write (gekauft:true). Auf Android
-        // serialisiert der native WriteStream alle User-Writes —
-        // wenn wir das hier awaiten, addiert sich die Latenz beider
-        // Writes auf den UI-Thread. → fire-and-forget, der Write
-        // landet trotzdem zuverlässig (Firestore-SDK queued+retried).
         updateUserStats(user.uid, {
           savingsToAdd: totalSavings,
           productsToAdd: anz,
@@ -2818,24 +2850,33 @@ export default function ShoppingListScreen() {
       } else {
         showInfoToast(TOAST_MESSAGES.SHOPPING.customItemPurchased, 'success');
       }
-
-      // Optimistic local removal
-      const customItem = [...brandProducts, ...noNameProducts].find(
-        (item) => item.id === itemId && item.isCustom,
-      );
-      if (customItem) {
-        if (customItem.customType === 'noname') {
-          setNoNameProducts((prev) => prev.filter((i) => i.id !== itemId));
-        } else {
-          setBrandProducts((prev) => prev.filter((i) => i.id !== itemId));
-        }
-      } else if (unitSavings && unitSavings > 0) {
-        setNoNameProducts((prev) => prev.filter((i) => i.id !== itemId));
-      } else {
-        setBrandProducts((prev) => prev.filter((i) => i.id !== itemId));
-      }
     } catch (error) {
       console.error('Error marking as purchased:', error);
+
+      // ─── REVERT: Item zurück an die alte Position ────────────────
+      // Optimistic Removal hat schon gegriffen, Firestore-Write
+      // failed → wir setzen den Item zurück (idealerweise an die
+      // gleiche Index-Position).
+      if (targetIsNoName) {
+        setNoNameProducts((prev) => {
+          // Doppel-Insert vermeiden (defensive — kann passieren wenn
+          // refresh dazwischen lief).
+          if (prev.some((i) => i.id === matched.id)) return prev;
+          const next = [...prev];
+          const insertAt = Math.min(inNoName, next.length);
+          next.splice(insertAt, 0, matched);
+          return next;
+        });
+      } else {
+        setBrandProducts((prev) => {
+          if (prev.some((i) => i.id === matched.id)) return prev;
+          const next = [...prev];
+          const insertAt = Math.min(inBrand, next.length);
+          next.splice(insertAt, 0, matched);
+          return next;
+        });
+      }
+
       showRetryableErrorToast(
         TOAST_MESSAGES.SHOPPING.purchaseError,
         () => {
