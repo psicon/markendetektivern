@@ -28,13 +28,6 @@ import {
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import RAnimated, {
-  useAnimatedStyle as useAnimatedStyleR,
-  useSharedValue as useSharedValueR,
-  withRepeat as withRepeatR,
-  withTiming as withTimingR,
-} from 'react-native-reanimated';
-
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { OnboardingButton } from '@/components/ui/OnboardingButton';
 import { Colors } from '@/constants/Colors';
@@ -119,42 +112,54 @@ const PRIORITIES = [
 ];
 
 /**
- * PulsingAgeHint — animierter "Wähle dein Alter"-Hint solange der
- * User den Slider noch nicht berührt hat. Sanftes Opacity-Pulse via
- * Reanimated 3 (worklet, UI-Thread). Sobald ageInteracted=true wird
- * der Hint einfach unmounted (außerhalb dieser Komponente gehandelt).
+ * PulsingAgeHint — "Wähle dein Alter"-Hint solange der User den
+ * Slider noch nicht berührt hat. Sanftes Opacity-Pulse (0.85↔1.0)
+ * via RN-Animated — bewusst kleine Range, damit's IMMER gut lesbar
+ * bleibt und nur subtil "wartet auf dich" signalisiert.
+ * Sobald ageInteracted=true wird der Hint außerhalb dieser
+ * Komponente unmounted (siehe Step-5-JSX).
  */
 function PulsingAgeHint() {
-  const opacity = useSharedValueR(0.5);
+  const opacity = React.useRef(new Animated.Value(0.85)).current;
   React.useEffect(() => {
-    opacity.value = withRepeatR(
-      withTimingR(1, { duration: 900 }),
-      -1,
-      true,
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.85,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+      ]),
     );
+    loop.start();
+    return () => loop.stop();
   }, [opacity]);
-  const animStyle = useAnimatedStyleR(() => ({ opacity: opacity.value }));
   return (
-    <RAnimated.View style={[{ alignItems: 'center' }, animStyle]}>
-      <Text style={[styles_module_age_hint.line1]}>Wähle dein Alter</Text>
-      <Text style={[styles_module_age_hint.line2]}>Tippe oder ziehe den Regler</Text>
-    </RAnimated.View>
+    <Animated.View style={{ alignItems: 'center', opacity }}>
+      <Text style={styles_module_age_hint.line1}>Wähle dein Alter</Text>
+      <Text style={styles_module_age_hint.line2}>Tippe oder ziehe den Regler</Text>
+    </Animated.View>
   );
 }
 
 const styles_module_age_hint = StyleSheet.create({
   line1: {
-    fontSize: 22,
+    fontSize: 18,
     fontFamily: 'Nunito_700Bold',
     color: Colors.light.tint,
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
   },
   line2: {
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: 'Nunito_500Medium',
     color: Colors.light.text,
-    opacity: 0.55,
-    marginTop: 4,
+    opacity: 0.65,
+    marginTop: 3,
   },
 });
 
@@ -1755,7 +1760,7 @@ export default function OnboardingScreen() {
                 <Text
                   style={[
                     styles.stepTitle,
-                    { fontSize: 22, marginTop: 32, marginBottom: 12 },
+                    { fontSize: 20, marginTop: 20, marginBottom: 10 },
                   ]}
                 >
                   Geschlecht
@@ -2082,38 +2087,44 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
   // ─── Demographics (Step 5: Alter + Geschlecht) ─────────────────────
   // Alter: Slider mit ageInteracted-Gate. Bis User berührt, zeigt der
   // Display-Bereich den PulsingAgeHint statt der Zahl.
+  // FIXED height (kein minHeight) damit beim Wechsel Hint → Zahl
+  // die Seite nicht runter hüpft. Beide States center-aligned in
+  // derselben Box.
+  // Kompakt für 5"-Displays: 60 px hoch reicht für 44-px-Zahl + 12-px-Label
+  // oder zweizeiligen Hint (18 + 11 = 29 px + gap).
   ageDisplayContainer: {
     alignItems: 'center',
-    marginVertical: 20,
-    minHeight: 76, // hält die Höhe konstant zwischen Hint + Zahl-State
     justifyContent: 'center',
+    height: 64,
+    marginVertical: 10,
   },
   ageDisplay: {
-    fontSize: 56,
+    fontSize: 44,
     fontFamily: 'Nunito_700Bold',
     color: Colors.light.tint,
-    letterSpacing: -1,
+    letterSpacing: -0.8,
+    lineHeight: 46,
   },
   ageDisplayLabel: {
-    fontSize: 14,
+    fontSize: 12,
     fontFamily: 'Nunito_500Medium',
     color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     opacity: 0.6,
-    marginTop: 4,
+    marginTop: 2,
   },
   ageSlider: {
     width: '100%',
-    height: 40,
-    marginTop: 8,
+    height: 36,
+    marginTop: 4,
   },
   ageSliderLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 4,
+    marginTop: 2,
     paddingHorizontal: 4,
   },
   ageSliderLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: 'Nunito_500Medium',
     color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
     opacity: 0.5,
@@ -2122,14 +2133,14 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
-    marginTop: 24,
+    marginTop: 4,
   },
   genderPill: {
     flex: 1,
     minWidth: '45%',
-    minHeight: 52,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    minHeight: 46,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
     borderRadius: 14,
     backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : '#ffffff',
     borderWidth: 1.5,
