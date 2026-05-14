@@ -38,7 +38,6 @@ import React, { useEffect } from 'react';
 import { Dimensions, StyleSheet, useColorScheme } from 'react-native';
 import Animated, {
   Easing,
-  cancelAnimation,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
@@ -158,12 +157,16 @@ export function EdgeGlow({ visible, tint, secondaryTint }: EdgeGlowProps) {
         false,
       );
     } else {
+      // Sanftes Ausblenden — Easing.OUT (statt .in) damit der Glow
+      // gleichmäßig dimmt statt 80 % lang hell zu bleiben und dann
+      // schlagartig zu verschwinden. Plus längere Duration (900 ms
+      // statt 500) und kein hartes cancelAnimation auf den breath/
+      // angle: die laufen einfach weiter und werden via visibility=0
+      // unsichtbar — die nächste useEffect-Iteration räumt sie auf.
       visibility.value = withTiming(0, {
-        duration: 500,
-        easing: Easing.in(Easing.cubic),
+        duration: 900,
+        easing: Easing.out(Easing.cubic),
       });
-      cancelAnimation(angle);
-      cancelAnimation(breath);
     }
   }, [visible, visibility, angle, breath]);
 
