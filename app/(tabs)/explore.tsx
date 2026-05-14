@@ -1317,11 +1317,26 @@ export default function ExploreScreen() {
     if (analytics?.trackFilterCleared) {
       analytics.trackFilterCleared();
     }
+    // Filter zurück auf Defaults
     setMarket('all');
     setHandels('all');
     setCat('all');
     setStufeSelection([]);
     setBrandId('all');
+    // Search auch beenden → Browse-Mode auf Firestore. Algolia ist
+    // explizit nur für die SUCHE da, sobald 'Zurücksetzen' gedrückt
+    // wird soll der User auf der unfiltered Firestore-Liste landen
+    // (User-Wunsch nach Round 4 finalize).
+    setSearchActiveQuery(null);
+    setSearchHitsEigen([]);
+    setSearchHitsMarken([]);
+    setSearchTotalEigen(0);
+    setSearchTotalMarken(0);
+    setSearchPageEigen(0);
+    setSearchPageMarken(0);
+    setSearchQueryIdEigen(undefined);
+    setSearchQueryIdMarken(undefined);
+    setQuery('');
   }, [analytics]);
 
   // 📊 Analytics — change-detection: when any filter state flips,
