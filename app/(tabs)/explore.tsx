@@ -1737,35 +1737,33 @@ export default function ExploreScreen() {
       hit: AlgoliaSearchResult,
       isNoName: boolean,
     ): Promise<AlgoliaSearchResult> => {
+      // IDs aus dem RAW Algolia-Hit extrahieren BEVOR irgendwas
+      // anderes passieren kann (auch bei Firestore-Fehler unten
+      // sind die _*Id-Felder dann mindestens da). Algolia speichert
+      // diese Refs als Path-Strings wie 'discounter/abc123' und
+      // 'kategorien/xyz' — extractIdFromAlgoliaRef nimmt das letzte
+      // Segment.
+      const baseRaw: any = hit as any;
+      const enrichedBase: any = {
+        ...hit,
+        id: hit.objectID,
+        _kategorieId: extractIdFromAlgoliaRef(baseRaw.kategorie),
+        ...(isNoName
+          ? {
+              _discounterId: extractIdFromAlgoliaRef(baseRaw.discounter),
+              _handelsmarkeId: extractIdFromAlgoliaRef(baseRaw.handelsmarke),
+            }
+          : {
+              // 'hersteller' auf markenProdukten zeigt aufs hersteller-
+              // Doc (= MARKE). Wir nennen die ID _markeId für Klarheit.
+              _markeId: extractIdFromAlgoliaRef(baseRaw.hersteller),
+            }),
+      };
+
       try {
         const fs: any = isNoName
           ? await FirestoreService.getProductWithDetails(hit.objectID)
           : await FirestoreService.getMarkenProduktWithDetails(hit.objectID);
-        // Always normalise the Algolia hit to LOOK LIKE a Firestore doc
-        // (i.e. the same `id` field downstream code reads). Without this,
-        // `openProduct(p)` would dereference `p.id` and get undefined,
-        // which then crashes navigation with "NoName product not found".
-        // IDs aus dem RAW Algolia-Hit extrahieren BEVOR die Enrich-
-        // ment die Objekt-Felder überschreibt. Diese _*Id-Felder
-        // sind die einzige zuverlässige Quelle für client-side-
-        // Filter — die Firestore-data()-Returns haben kein .id-Feld
-        // (getDocumentByReference returnt nur docSnap.data()).
-        const baseRaw: any = hit as any;
-        const enrichedBase: any = {
-          ...hit,
-          id: hit.objectID,
-          _kategorieId: extractIdFromAlgoliaRef(baseRaw.kategorie),
-          ...(isNoName
-            ? {
-                _discounterId: extractIdFromAlgoliaRef(baseRaw.discounter),
-                _handelsmarkeId: extractIdFromAlgoliaRef(baseRaw.handelsmarke),
-              }
-            : {
-                // 'hersteller' auf markenProdukten zeigt aufs hersteller-
-                // Doc (= MARKE). Wir nennen die ID _markeId für Klarheit.
-                _markeId: extractIdFromAlgoliaRef(baseRaw.hersteller),
-              }),
-        };
         if (!fs) return enrichedBase;
         const merged: any = enrichedBase;
         if (fs.bildClean) merged.bildClean = fs.bildClean;
@@ -1799,7 +1797,11 @@ export default function ExploreScreen() {
         }
         return merged;
       } catch {
-        return hit;
+        // Firestore-Fail → wir haben enrichedBase mit allen IDs
+        // + display-Basics (objectID, name, bild) aus dem Algolia-
+        // Hit. Reicht für Filter + Liste-Render. Display-Enrichment
+        // (bildClean, packTyp etc.) fehlt halt.
+        return enrichedBase;
       }
     },
     [],
