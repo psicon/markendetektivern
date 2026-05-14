@@ -1287,10 +1287,13 @@ export default function ExploreScreen() {
       );
     }
     setTab(k);
-    setMarket('all');
-    setHandels('all');
-    setStufeSelection([]);
-    setBrandId('all');
+    // Filter werden NICHT mehr beim Tab-Wechsel zurückgesetzt
+    // (User-Bug-Report: 'beim tabwechsel werden filter verloren').
+    // Filter sind ohnehin tab-spezifisch (market/handels nur Eigen,
+    // brandId nur Marken) und werden in den jeweiligen List-Filtern
+    // ignoriert wenn nicht relevant — Speichern über Tabs hinweg ist
+    // gewünscht. Konsistent mit dem Swipe-Pfad onPageSelected, der
+    // Filter eh nie resettete.
     // Reset destination list's scroll BEFORE PagerView animates the
     // swap — page isn't visible yet, so the scroll is invisible (no
     // popping). This is the right surface for "tap a tab → top",
@@ -1779,6 +1782,17 @@ export default function ExploreScreen() {
         if (fs.packTyp) merged.packTyp = fs.packTyp;
         if (!isNoName && fs.hersteller && typeof fs.hersteller === 'object') {
           merged.hersteller = fs.hersteller;
+        }
+        // KRITISCH: `fs.marke` IST das was der User in der Filter-
+        // Sheet als "Marke" wählt (Doc aus `hersteller`-Collection,
+        // hat `herstellerref` der auf den echten Manufacturer in
+        // `hersteller_new` zeigt). Ohne diese Zuweisung würde der
+        // client-side brandId-Filter NIEMALS matchen, weil
+        // merged.hersteller hier mit dem AUFGELÖSTEN Manufacturer
+        // überschrieben wird, dessen ID NICHT mit brandId
+        // (= Marke-ID aus `hersteller`-Coll) übereinstimmt.
+        if (!isNoName && fs.marke && typeof fs.marke === 'object') {
+          merged.marke = fs.marke;
         }
         if (
           isNoName &&
