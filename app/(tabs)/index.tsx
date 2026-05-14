@@ -1,6 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
@@ -68,6 +68,10 @@ export default function HomeScreen() {
   const { theme, shadows, brand } = useTokens();
   const colorScheme = useColorScheme();
   const legacyColors = Colors[colorScheme ?? 'light'];
+  // iOS-Status-Bar-Tap-Fix: nur der aktuell-fokussierte Tab darf
+  // scrollsToTop=true tragen, sonst hat iOS >1 aktive UIScrollViews
+  // (alle 3 Tabs bleiben gemountet) und blockt den Tap komplett.
+  const isFocused = useIsFocused();
 
   const { user, userProfile } = useAuth();
   const { isPremium, refreshPremiumStatus } = useRevenueCat();
@@ -678,6 +682,7 @@ export default function HomeScreen() {
         onScroll={scrollHandler}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
+        scrollsToTop={isFocused}
         // paddingBottom: Tab-Bar ist absolut positioniert (höhe 90 iOS /
         // 62 Android) und der FAB sitzt darüber bei bottom 100 — der
         // Content darf bis kurz vor die FAB-Unterkante laufen, weil

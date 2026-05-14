@@ -1,6 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BlurView } from 'expo-blur';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { safePush } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -280,6 +281,9 @@ export default function ExploreScreen() {
   const scheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  // iOS-Status-Bar-Tap-Fix: scrollsToTop nur wenn dieser Tab UND
+  // die jeweilige Sub-Page (alle/eigen/marken) aktiv ist.
+  const isFocused = useIsFocused();
 
   const params = useLocalSearchParams<{
     tab?: string;
@@ -2984,7 +2988,7 @@ export default function ExploreScreen() {
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
             overScrollMode="auto"
-            scrollsToTop={tab === 'alle'}
+            scrollsToTop={isFocused && tab === 'alle'}
             onEndReached={checkLoadMoreAlle}
             onEndReachedThreshold={2.5}
             contentContainerStyle={{
@@ -3048,7 +3052,7 @@ export default function ExploreScreen() {
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
             overScrollMode="auto"
-            scrollsToTop={tab === 'eigen'}
+            scrollsToTop={isFocused && tab === 'eigen'}
             onEndReached={checkLoadMoreEigen}
             onEndReachedThreshold={2.5}
             contentContainerStyle={{
@@ -3105,7 +3109,7 @@ export default function ExploreScreen() {
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
             overScrollMode="auto"
-            scrollsToTop={tab === 'marken'}
+            scrollsToTop={isFocused && tab === 'marken'}
             onEndReached={checkLoadMoreMarken}
             onEndReachedThreshold={2.5}
             contentContainerStyle={{

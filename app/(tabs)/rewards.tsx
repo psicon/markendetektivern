@@ -12,6 +12,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CoachmarkOverlay } from '@/components/coachmarks/CoachmarkOverlay';
@@ -111,6 +112,10 @@ export default function RewardsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
   const { user, userProfile } = useAuth();
+  // iOS-Status-Bar-Tap-Fix: scrollsToTop nur wenn dieser Tab
+  // gerade aktiv ist. Sonst hat iOS >1 aktive UIScrollViews (alle
+  // 3 Tabs bleiben gemountet) und blockt den Tap.
+  const isFocused = useIsFocused();
 
   // Per-Screen Coachmark.
   const rewardsCoachmark = useCoachmark('rewards');
@@ -214,6 +219,7 @@ export default function RewardsScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <ScrollView
+        scrollsToTop={isFocused}
         contentContainerStyle={{
           paddingTop: chromeHeight,
           paddingBottom: 120,
