@@ -981,44 +981,17 @@ export default function ExploreScreen() {
     } as any;
   }, [cat, brandId, sort]);
 
-  // ─── Algolia-Filter-Strings (server-side filtering in search mode) ──
+  // Hinweis: KEIN Algolia-Server-Side-Filtering. Algolia v5 errort
+  // hart auf Filtern für nicht-facet-konfigurierte Attribute → Catch
+  // returnt empty hits → "Keine Treffer" obwohl welche existieren.
+  // Wir filtern stattdessen client-seitig nach Enrichment — siehe
+  // filteredSearchEigen / filteredSearchMarken weiter unten. Algolia
+  // wird IMMER unfiltered abgefragt, Cache-Hit-Rate bleibt maximal.
   //
-  // Algolia v5 unterstützt `filters: 'attr:"value"'`-Strings — wir
-  // bauen die aus dem aktuellen Filter-State pro Index (NoName /
-  // Marken haben verschiedene Filter-Attribute). Anführungszeichen
-  // ums Value damit Doc-IDs mit Sonderzeichen/Bindestrichen sauber
-  // gehandelt werden.
-  //
-  // Wichtig: bei `'all'` → KEIN Filter eintragen. Sonst würde Algolia
-  // versuchen auf `discounter:"all"` zu filtern und 0 Treffer
-  // liefern. Filter-String ist `undefined` wenn keine Filter aktiv
-  // sind → Algolia macht eine normale Suche, Cache-Key bleibt
-  // "filterless" → Cache-Hit-Rate für unfiltered Searches bleibt
-  // unverändert.
-  //
-  // Cost-Hinweis: jede unique (query × filter-combo) ist ein
-  // separater Cache-Eintrag (TTL 24 h, Cap 200). Übliche User-Sessions
-  // produzieren 2-4 Combos, kein Cache-Thrashing.
-  const algoliaFilters = useMemo(() => {
-    const noNameTerms: string[] = [];
-    if (cat !== 'all') noNameTerms.push(`kategorie:"${cat}"`);
-    if (market !== 'all') noNameTerms.push(`discounter:"${market}"`);
-    if (handels !== 'all') noNameTerms.push(`handelsmarke:"${handels}"`);
-    if (stufeSelection.length > 0) {
-      // OR-Verknüpfung mehrerer Stufen via Algolia's klammer-OR-Syntax.
-      const stufeOr = stufeSelection.map((s) => `stufe:${s}`).join(' OR ');
-      noNameTerms.push(`(${stufeOr})`);
-    }
-
-    const markenTerms: string[] = [];
-    if (cat !== 'all') markenTerms.push(`kategorie:"${cat}"`);
-    if (brandId !== 'all') markenTerms.push(`hersteller:"${brandId}"`);
-
-    return {
-      noName: noNameTerms.length > 0 ? noNameTerms.join(' AND ') : undefined,
-      marken: markenTerms.length > 0 ? markenTerms.join(' AND ') : undefined,
-    };
-  }, [cat, market, handels, stufeSelection, brandId]);
+  // Falls die Filter mal restriktiv sind und die Algolia-Page-Size
+  // nur wenige Matches enthält: User scrollt → loadMoreSearch fetched
+  // die nächste Algolia-Page (ebenfalls unfiltered) → client-Filter
+  // pickt weitere Matches raus.
 
   // Client-side comparator — Firestore silently disables its own orderBy
   // when complex filters are active (see firestore.ts `hasComplexFilters`),
@@ -1780,6 +1753,14 @@ export default function ExploreScreen() {
         if (fs.packTypInfo) merged.packTypInfo = fs.packTypInfo;
         if (fs.packSize != null) merged.packSize = fs.packSize;
         if (fs.packTyp) merged.packTyp = fs.packTyp;
+        // KRITISCH: Algolia indiziert kategorie als irgendwas (Name-
+        // String? Path-String? Object? — unbekannt + variabel). Damit
+        // der client-side cat-Filter (getRefId(p.kategorie) === cat)
+        // zuverlässig matched, überschreiben wir mit dem Firestore-
+        // resolved Kategorie-Doc, das eine eindeutige .id hat.
+        if (fs.kategorie && typeof fs.kategorie === 'object') {
+          merged.kategorie = fs.kategorie;
+        }
         if (!isNoName && fs.hersteller && typeof fs.hersteller === 'object') {
           merged.hersteller = fs.hersteller;
         }
@@ -1842,7 +1823,7 @@ export default function ExploreScreen() {
         // that most search sessions fit on the first page; small
         // enough to keep the initial enrichment round-trip under
         // ~200 ms even on a cold cache.
-        const res = await AlgoliaService.searchAll(trimmed, 0, 40, algoliaFilters);
+        const res = await AlgoliaService.searchAll(trimmed, 0, 40);
         if (isStale()) return;
         const [eigen, marken] = await Promise.all([
           Promise.all(
@@ -1874,7 +1855,7 @@ export default function ExploreScreen() {
         if (!isStale()) setSearchLoading(false);
       }
     },
-    [tab, analytics, enrichWithFirestore, algoliaFilters],
+    [tab, analytics, enrichWithFirestore],
   );
 
   // Infinite-scroll loader for search mode. Per-side independent
@@ -1918,7 +1899,7 @@ export default function ExploreScreen() {
       if (!eigenDone) {
         const nextPage = searchPageEigen + 1;
         tasks.push(
-          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40, algoliaFilters).then(
+          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40).then(
             async (r) => ({
               kind: 'eigen',
               hits: await Promise.all(
@@ -1933,7 +1914,7 @@ export default function ExploreScreen() {
       if (!markenDone) {
         const nextPage = searchPageMarken + 1;
         tasks.push(
-          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40, algoliaFilters).then(
+          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40).then(
             async (r) => ({
               kind: 'marken',
               hits: await Promise.all(
@@ -1982,25 +1963,13 @@ export default function ExploreScreen() {
     searchPageEigen,
     searchPageMarken,
     enrichWithFirestore,
-    algoliaFilters,
   ]);
 
-  // Re-run-Effect: wenn der User Filter ändert WÄHREND er im
-  // Search-Mode ist (searchActiveQuery gesetzt), wird die Suche neu
-  // ausgeführt — mit den neuen Filtern an Algolia. 250 ms Debounce
-  // damit rapid filter-toggling (z.B. Markt → Kategorie schnell
-  // hintereinander) nur einen Algolia-Call statt zwei produziert.
-  // Cost-conscious: jede unique Filter-Combo wird gecached, also
-  // bei back-and-forth zwischen 2 Combos hat man ab dem 2. Tap
-  // Cache-Hits.
-  useEffect(() => {
-    if (!searchActiveQuery) return; // not in search mode
-    const handle = setTimeout(() => {
-      void runSearch(searchActiveQuery);
-    }, 250);
-    return () => clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [algoliaFilters.noName, algoliaFilters.marken]);
+  // Bei Filter-Change im Search-Mode brauchen wir KEINEN Algolia-
+  // Re-Run mehr — die client-side filteredSearchEigen/Marken
+  // reagieren auf die State-Änderung und re-filtern die schon
+  // geholten Hits direkt im Render. Kein neuer Algolia-Call =
+  // schneller + günstiger.
 
   const submitSearch = useCallback(() => {
     void runSearch(query);

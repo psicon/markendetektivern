@@ -50,14 +50,8 @@ type CacheEntry = { value: SearchAllResult; expiresAt: number };
 
 const searchCache = new Map<string, CacheEntry>();
 
-function searchCacheKey(
-  query: string,
-  page: number,
-  hitsPerPage: number,
-  noNameFilters?: string,
-  markenFilters?: string,
-) {
-  return `${query.trim().toLowerCase()}|${page}|${hitsPerPage}|n:${noNameFilters || ''}|m:${markenFilters || ''}`;
+function searchCacheKey(query: string, page: number, hitsPerPage: number) {
+  return `${query.trim().toLowerCase()}|${page}|${hitsPerPage}`;
 }
 
 function readSearchCache(key: string): SearchAllResult | null {
@@ -219,11 +213,10 @@ export class AlgoliaService {
   static async searchNoNameProducts(
     query: string,
     page: number = 0,
-    hitsPerPage: number = 20,
-    filters?: string
+    hitsPerPage: number = 20
   ): Promise<AlgoliaSearchResponse> {
     try {
-      console.log(`🔍 Algolia: Searching NoName products for "${query}"${filters ? ` (filters: ${filters})` : ''}`);
+      console.log(`🔍 Algolia: Searching NoName products for "${query}"`);
 
       // Algolia v5 syntax
       const result = await client.searchSingleIndex({
@@ -232,7 +225,6 @@ export class AlgoliaService {
         query,
         page,
         hitsPerPage,
-        ...(filters && { filters }),
           // `clickAnalytics: true` lässt Algolia ein opakes
           // `queryID` mit der Antwort zurückschicken. Das brauchen
           // wir später bei `trackClickAfterSearch`, um Klicks der
@@ -268,11 +260,10 @@ export class AlgoliaService {
   static async searchMarkenprodukte(
     query: string,
     page: number = 0,
-    hitsPerPage: number = 20,
-    filters?: string
+    hitsPerPage: number = 20
   ): Promise<AlgoliaSearchResponse> {
     try {
-      console.log(`🔍 Algolia: Searching Markenprodukte for "${query}"${filters ? ` (filters: ${filters})` : ''}`);
+      console.log(`🔍 Algolia: Searching Markenprodukte for "${query}"`);
 
       // Algolia v5 syntax
       const result = await client.searchSingleIndex({
@@ -281,7 +272,6 @@ export class AlgoliaService {
         query,
         page,
         hitsPerPage,
-        ...(filters && { filters }),
           // Siehe Kommentar in searchNoNameProducts — wir brauchen
           // den queryID auch hier, damit Klicks auf Markenprodukte
           // nach einer Suche getracked werden können.
@@ -314,30 +304,19 @@ export class AlgoliaService {
   static async searchAll(
     query: string,
     page: number = 0,
-    hitsPerPage: number = 20,
-    filters?: { noName?: string; marken?: string }
+    hitsPerPage: number = 20
   ): Promise<SearchAllResult> {
-    const noNameFilters = filters?.noName;
-    const markenFilters = filters?.marken;
-
     // 1. Cache hit → return synchronously without touching Algolia.
-    // Cache-Key inkludiert noName + marken Filter-Strings, damit
-    // unterschiedliche Filter-Kombis getrennte Einträge bekommen
-    // (sonst würde der erste Filter-Result für alle späteren
-    // Combos serviert — falscher Bug, schlimmer als ein paar
-    // Cache-Misses).
-    const cacheKey = searchCacheKey(query, page, hitsPerPage, noNameFilters, markenFilters);
+    const cacheKey = searchCacheKey(query, page, hitsPerPage);
     const cached = readSearchCache(cacheKey);
     if (cached) {
-      console.log(`💾 Algolia: cache HIT for "${query}" (p${page}${noNameFilters || markenFilters ? ', filters' : ''}) — saved one API call`);
+      console.log(`💾 Algolia: cache HIT for "${query}" (p${page}) — saved one API call`);
       return cached;
     }
 
-    // 2. Inflight dedup: wenn dieselbe Suche (+ filter-combo) schon
-    // unterwegs ist, hängen wir uns dran statt einen zweiten
-    // HTTP-Request zu feuern. Wichtig fürs Home→Stöbern-Pre-Fetch-
-    // Pattern: Home startet searchAll, kurz darauf startet Stöbern
-    // dieselbe Suche → zweiter Aufruf erbt die Promise.
+    // 2. Inflight dedup: wenn dieselbe Suche schon unterwegs ist,
+    // hängen wir uns dran statt einen zweiten HTTP-Request zu
+    // feuern.
     const inflight = inflightSearchAll.get(cacheKey);
     if (inflight) {
       console.log(`🔗 Algolia: inflight HIT for "${query}" — joining existing promise`);
@@ -347,11 +326,11 @@ export class AlgoliaService {
     const promise = (async (): Promise<SearchAllResult> => {
       try {
         const hitsPerIndex = Math.ceil(hitsPerPage / 2);
-        console.log(`🔍 Algolia: Searching products for "${query}" (page: ${page}, ${hitsPerIndex} per index${noNameFilters || markenFilters ? ', WITH filters' : ''})`);
+        console.log(`🔍 Algolia: Searching products for "${query}" (page: ${page}, ${hitsPerIndex} per index)`);
 
         const [noNameResults, markenproduktResults] = await Promise.all([
-          this.searchNoNameProducts(query, page, hitsPerIndex, noNameFilters),
-          this.searchMarkenprodukte(query, page, hitsPerIndex, markenFilters),
+          this.searchNoNameProducts(query, page, hitsPerIndex),
+          this.searchMarkenprodukte(query, page, hitsPerIndex),
         ]);
 
         const totalHits = noNameResults.nbHits + markenproduktResults.nbHits;
