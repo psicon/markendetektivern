@@ -981,6 +981,45 @@ export default function ExploreScreen() {
     } as any;
   }, [cat, brandId, sort]);
 
+  // ─── Algolia-Filter-Strings (server-side filtering in search mode) ──
+  //
+  // Algolia v5 unterstützt `filters: 'attr:"value"'`-Strings — wir
+  // bauen die aus dem aktuellen Filter-State pro Index (NoName /
+  // Marken haben verschiedene Filter-Attribute). Anführungszeichen
+  // ums Value damit Doc-IDs mit Sonderzeichen/Bindestrichen sauber
+  // gehandelt werden.
+  //
+  // Wichtig: bei `'all'` → KEIN Filter eintragen. Sonst würde Algolia
+  // versuchen auf `discounter:"all"` zu filtern und 0 Treffer
+  // liefern. Filter-String ist `undefined` wenn keine Filter aktiv
+  // sind → Algolia macht eine normale Suche, Cache-Key bleibt
+  // "filterless" → Cache-Hit-Rate für unfiltered Searches bleibt
+  // unverändert.
+  //
+  // Cost-Hinweis: jede unique (query × filter-combo) ist ein
+  // separater Cache-Eintrag (TTL 24 h, Cap 200). Übliche User-Sessions
+  // produzieren 2-4 Combos, kein Cache-Thrashing.
+  const algoliaFilters = useMemo(() => {
+    const noNameTerms: string[] = [];
+    if (cat !== 'all') noNameTerms.push(`kategorie:"${cat}"`);
+    if (market !== 'all') noNameTerms.push(`discounter:"${market}"`);
+    if (handels !== 'all') noNameTerms.push(`handelsmarke:"${handels}"`);
+    if (stufeSelection.length > 0) {
+      // OR-Verknüpfung mehrerer Stufen via Algolia's klammer-OR-Syntax.
+      const stufeOr = stufeSelection.map((s) => `stufe:${s}`).join(' OR ');
+      noNameTerms.push(`(${stufeOr})`);
+    }
+
+    const markenTerms: string[] = [];
+    if (cat !== 'all') markenTerms.push(`kategorie:"${cat}"`);
+    if (brandId !== 'all') markenTerms.push(`hersteller:"${brandId}"`);
+
+    return {
+      noName: noNameTerms.length > 0 ? noNameTerms.join(' AND ') : undefined,
+      marken: markenTerms.length > 0 ? markenTerms.join(' AND ') : undefined,
+    };
+  }, [cat, market, handels, stufeSelection, brandId]);
+
   // Client-side comparator — Firestore silently disables its own orderBy
   // when complex filters are active (see firestore.ts `hasComplexFilters`),
   // so we always re-sort here to guarantee the order matches the chip.
@@ -1035,6 +1074,14 @@ export default function ExploreScreen() {
         return;
       }
       if (!reset) nonameInflightRef.current = true;
+      // Seq-Snapshot beim Start. Wenn der User mid-flight die Filter
+      // ändert (oder den Tab wechselt), bumped reloadSeq → unsere
+      // alte Response gehört nicht mehr in den State. Drop sie statt
+      // OLD-Filter-Items an die NEUE-Filter-Liste anzuhängen.
+      // Fix für ClickUp 86c9pfa13 Bug-Teil 2 ('beim Weiterscrollen
+      // wird Filter ignoriert'): in-flight loadMore mit altem Filter
+      // wurde appended NACH dem reset mit neuem Filter → mixed Liste.
+      const startSeq = reloadSeq.current;
       try {
         setNonameLoading(true);
         const size = reset ? FIRST_PAGE_SIZE : PAGE_SIZE;
@@ -1043,6 +1090,11 @@ export default function ExploreScreen() {
           reset ? null : nonameLastDocRef.current,
           buildNonameFilters() as any,
         );
+        if (reloadSeq.current !== startSeq) {
+          // Filter haben sich während des Fetches geändert → Response
+          // ist stale, droppen.
+          return;
+        }
         setNonames((prev) => {
           const existing = reset ? new Set<string>() : new Set(prev.map((p) => p.id));
           const incoming = (res.products as any[]).filter((p) => !existing.has(p.id));
@@ -1126,6 +1178,9 @@ export default function ExploreScreen() {
         return;
       }
       if (!reset) markenInflightRef.current = true;
+      // Seq-Snapshot — siehe loadNonames für die Begründung.
+      // Drop stale Responses wenn der Filter mid-flight wechselt.
+      const startSeq = reloadSeq.current;
       try {
         setMarkenLoading(true);
         const size = reset ? FIRST_PAGE_SIZE : PAGE_SIZE;
@@ -1134,6 +1189,9 @@ export default function ExploreScreen() {
           reset ? null : markenLastDocRef.current,
           buildMarkenFilters() as any,
         );
+        if (reloadSeq.current !== startSeq) {
+          return;
+        }
         setMarkenprodukte((prev) => {
           const existing = reset ? new Set<string>() : new Set(prev.map((p) => p.id));
           const incoming = (res.products as any[]).filter((p) => !existing.has(p.id));
@@ -1770,7 +1828,7 @@ export default function ExploreScreen() {
         // that most search sessions fit on the first page; small
         // enough to keep the initial enrichment round-trip under
         // ~200 ms even on a cold cache.
-        const res = await AlgoliaService.searchAll(trimmed, 0, 40);
+        const res = await AlgoliaService.searchAll(trimmed, 0, 40, algoliaFilters);
         if (isStale()) return;
         const [eigen, marken] = await Promise.all([
           Promise.all(
@@ -1802,7 +1860,7 @@ export default function ExploreScreen() {
         if (!isStale()) setSearchLoading(false);
       }
     },
-    [tab, analytics, enrichWithFirestore],
+    [tab, analytics, enrichWithFirestore, algoliaFilters],
   );
 
   // Infinite-scroll loader for search mode. Per-side independent
@@ -1846,7 +1904,7 @@ export default function ExploreScreen() {
       if (!eigenDone) {
         const nextPage = searchPageEigen + 1;
         tasks.push(
-          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40).then(
+          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40, algoliaFilters).then(
             async (r) => ({
               kind: 'eigen',
               hits: await Promise.all(
@@ -1861,7 +1919,7 @@ export default function ExploreScreen() {
       if (!markenDone) {
         const nextPage = searchPageMarken + 1;
         tasks.push(
-          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40).then(
+          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40, algoliaFilters).then(
             async (r) => ({
               kind: 'marken',
               hits: await Promise.all(
@@ -1910,7 +1968,25 @@ export default function ExploreScreen() {
     searchPageEigen,
     searchPageMarken,
     enrichWithFirestore,
+    algoliaFilters,
   ]);
+
+  // Re-run-Effect: wenn der User Filter ändert WÄHREND er im
+  // Search-Mode ist (searchActiveQuery gesetzt), wird die Suche neu
+  // ausgeführt — mit den neuen Filtern an Algolia. 250 ms Debounce
+  // damit rapid filter-toggling (z.B. Markt → Kategorie schnell
+  // hintereinander) nur einen Algolia-Call statt zwei produziert.
+  // Cost-conscious: jede unique Filter-Combo wird gecached, also
+  // bei back-and-forth zwischen 2 Combos hat man ab dem 2. Tap
+  // Cache-Hits.
+  useEffect(() => {
+    if (!searchActiveQuery) return; // not in search mode
+    const handle = setTimeout(() => {
+      void runSearch(searchActiveQuery);
+    }, 250);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [algoliaFilters.noName, algoliaFilters.marken]);
 
   const submitSearch = useCallback(() => {
     void runSearch(query);
@@ -2064,6 +2140,17 @@ export default function ExploreScreen() {
     if (typeof ref === 'string') return ref.includes('/') ? ref.split('/').pop() ?? null : ref;
     if (ref.id) return String(ref.id);
     if (ref.objectID) return String(ref.objectID);
+    // Algolia liefert Reference-Attribute manchmal als path-strings
+    // ('/discounter/abc123') oder als Objects mit _path. Defensive:
+    // letztes Segment des Path nehmen.
+    if (typeof ref._path === 'string') {
+      const parts = ref._path.split('/');
+      return parts[parts.length - 1] || null;
+    }
+    if (typeof ref.path === 'string') {
+      const parts = ref.path.split('/');
+      return parts[parts.length - 1] || null;
+    }
     return null;
   };
 
