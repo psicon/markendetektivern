@@ -91,6 +91,23 @@ Recent-Sessions.
   Custom-`<SplashScreen>`-Overlay nur iOS mountet. Native splash
   covered den echten Boot. Deferred work → `InteractionManager.
   runAfterInteractions(...)`.
+- **Mehrere ScrollViews mit `scrollsToTop=true` gleichzeitig aktiv** —
+  iOS blockiert den Status-Bar-Tap (Batterie-Ecke = scroll-to-top)
+  KOMPLETT wenn >1 sichtbares UIScrollView den Default
+  `scrollsToTop=true` trägt. Kein Fallback, kein "erster gewinnt".
+  In einer Tab-App (`(tabs)/*.tsx`) sind nach dem ersten Besuch ALLE
+  Tab-Screens gemountet (Expo-Router lazy + freezeOnBlur ist nur
+  visuell pausiert) → jeder Root-ScrollView lebt im UIKit-Tree.
+  Lösung: pro Tab-Screen `useIsFocused()` aus `@react-navigation/
+  native` als Gate auf den Root-ScrollView: `scrollsToTop={isFocused}`.
+  Bei Tab-internen Sub-Pages (Stöbern's 3 PagerView-Listen) noch
+  `&& tab === 'X'` kombinieren. So ist garantiert genau EIN
+  UIScrollView aktiv.
+  Plus: für Listen-Wrapper wie `LegendList` zusätzlich
+  `renderScrollComponent={plainScrollComponent}` setzen damit iOS
+  das native UIScrollView (statt Animated.ScrollView) sauber
+  detect'tet — sonst greift `scrollsToTop` auf Lib-Ebene gar nicht.
+
 - **KVC `setValue:forKey:` auf undokumentierte iOS-Properties.**
   Im Mai 2026 versucht `VNDocumentCameraViewController.setValue(false,
   forKey: "autoScansEnabled")` einzubauen um Apple's Auto-Shutter
