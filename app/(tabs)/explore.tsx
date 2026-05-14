@@ -1745,33 +1745,41 @@ export default function ExploreScreen() {
         // (i.e. the same `id` field downstream code reads). Without this,
         // `openProduct(p)` would dereference `p.id` and get undefined,
         // which then crashes navigation with "NoName product not found".
-        if (!fs) return { ...hit, id: hit.objectID } as any;
-        const merged: any = { ...hit, id: hit.objectID };
+        // IDs aus dem RAW Algolia-Hit extrahieren BEVOR die Enrich-
+        // ment die Objekt-Felder überschreibt. Diese _*Id-Felder
+        // sind die einzige zuverlässige Quelle für client-side-
+        // Filter — die Firestore-data()-Returns haben kein .id-Feld
+        // (getDocumentByReference returnt nur docSnap.data()).
+        const baseRaw: any = hit as any;
+        const enrichedBase: any = {
+          ...hit,
+          id: hit.objectID,
+          _kategorieId: extractIdFromAlgoliaRef(baseRaw.kategorie),
+          ...(isNoName
+            ? {
+                _discounterId: extractIdFromAlgoliaRef(baseRaw.discounter),
+                _handelsmarkeId: extractIdFromAlgoliaRef(baseRaw.handelsmarke),
+              }
+            : {
+                // 'hersteller' auf markenProdukten zeigt aufs hersteller-
+                // Doc (= MARKE). Wir nennen die ID _markeId für Klarheit.
+                _markeId: extractIdFromAlgoliaRef(baseRaw.hersteller),
+              }),
+        };
+        if (!fs) return enrichedBase;
+        const merged: any = enrichedBase;
         if (fs.bildClean) merged.bildClean = fs.bildClean;
         if (fs.bildCleanPng) merged.bildCleanPng = fs.bildCleanPng;
         if (fs.bildCleanHq) merged.bildCleanHq = fs.bildCleanHq;
         if (fs.packTypInfo) merged.packTypInfo = fs.packTypInfo;
         if (fs.packSize != null) merged.packSize = fs.packSize;
         if (fs.packTyp) merged.packTyp = fs.packTyp;
-        // KRITISCH: Algolia indiziert kategorie als irgendwas (Name-
-        // String? Path-String? Object? — unbekannt + variabel). Damit
-        // der client-side cat-Filter (getRefId(p.kategorie) === cat)
-        // zuverlässig matched, überschreiben wir mit dem Firestore-
-        // resolved Kategorie-Doc, das eine eindeutige .id hat.
         if (fs.kategorie && typeof fs.kategorie === 'object') {
           merged.kategorie = fs.kategorie;
         }
         if (!isNoName && fs.hersteller && typeof fs.hersteller === 'object') {
           merged.hersteller = fs.hersteller;
         }
-        // KRITISCH: `fs.marke` IST das was der User in der Filter-
-        // Sheet als "Marke" wählt (Doc aus `hersteller`-Collection,
-        // hat `herstellerref` der auf den echten Manufacturer in
-        // `hersteller_new` zeigt). Ohne diese Zuweisung würde der
-        // client-side brandId-Filter NIEMALS matchen, weil
-        // merged.hersteller hier mit dem AUFGELÖSTEN Manufacturer
-        // überschrieben wird, dessen ID NICHT mit brandId
-        // (= Marke-ID aus `hersteller`-Coll) übereinstimmt.
         if (!isNoName && fs.marke && typeof fs.marke === 'object') {
           merged.marke = fs.marke;
         }
@@ -2123,9 +2131,10 @@ export default function ExploreScreen() {
     if (typeof ref === 'string') return ref.includes('/') ? ref.split('/').pop() ?? null : ref;
     if (ref.id) return String(ref.id);
     if (ref.objectID) return String(ref.objectID);
-    // Algolia liefert Reference-Attribute manchmal als path-strings
-    // ('/discounter/abc123') oder als Objects mit _path. Defensive:
-    // letztes Segment des Path nehmen.
+    // Algolia/Firestore-Indexer-Quirks: Refs landen je nach Sync-
+    // Tooling als Path-String ('discounter/abc'), Object mit
+    // .path / ._path String, oder Object mit ._path.segments-Array.
+    // Wir extrahieren immer das letzte Segment = die Doc-ID.
     if (typeof ref._path === 'string') {
       const parts = ref._path.split('/');
       return parts[parts.length - 1] || null;
@@ -2134,19 +2143,41 @@ export default function ExploreScreen() {
       const parts = ref.path.split('/');
       return parts[parts.length - 1] || null;
     }
+    if (ref._path && Array.isArray(ref._path.segments)) {
+      const segs = ref._path.segments;
+      return segs[segs.length - 1] || null;
+    }
     return null;
+  };
+
+  // Wenn String wie 'discounter/abc' → letztes Segment nehmen.
+  const extractIdFromAlgoliaRef = (ref: any): string | null => {
+    if (typeof ref === 'string' && ref.includes('/')) {
+      const parts = ref.split('/');
+      return parts[parts.length - 1] || null;
+    }
+    return getRefId(ref);
   };
 
   const filteredSearchEigen = useMemo<AlgoliaSearchResult[]>(() => {
     let items: any[] = searchHitsEigen as any;
     if (cat !== 'all') {
-      items = items.filter((p) => getRefId(p.kategorie) === cat);
+      // Primary: _kategorieId (aus Algolia-Raw extrahiert).
+      // Fallback: getRefId(p.kategorie) (für Hits die vor diesem
+      // Fix gecached wurden ODER falls _kategorieId null ist).
+      items = items.filter(
+        (p) => p._kategorieId === cat || getRefId(p.kategorie) === cat,
+      );
     }
     if (market !== 'all') {
-      items = items.filter((p) => getRefId(p.discounter) === market);
+      items = items.filter(
+        (p) => p._discounterId === market || getRefId(p.discounter) === market,
+      );
     }
     if (handels !== 'all') {
-      items = items.filter((p) => getRefId(p.handelsmarke) === handels);
+      items = items.filter(
+        (p) => p._handelsmarkeId === handels || getRefId(p.handelsmarke) === handels,
+      );
     }
     if (stufeSelection.length > 0) {
       items = items.filter((p) => {
@@ -2160,11 +2191,20 @@ export default function ExploreScreen() {
   const filteredSearchMarken = useMemo<AlgoliaSearchResult[]>(() => {
     let items: any[] = searchHitsMarken as any;
     if (cat !== 'all') {
-      items = items.filter((p) => getRefId(p.kategorie) === cat);
+      items = items.filter(
+        (p) => p._kategorieId === cat || getRefId(p.kategorie) === cat,
+      );
     }
     if (brandId !== 'all') {
+      // _markeId aus Algolia-Raw 'hersteller' (zeigt auf 'hersteller'-
+      // Coll = MARKE). brandId ist auch eine hersteller-Coll-Doc-ID.
+      // Fallback: getRefId(p.marke) für Hits mit Firestore-resolved
+      // Marke-Doc (das eine .id hat).
       items = items.filter(
-        (p) => getRefId(p.hersteller) === brandId || getRefId(p.marke) === brandId,
+        (p) =>
+          p._markeId === brandId ||
+          getRefId(p.marke) === brandId ||
+          getRefId(p.hersteller) === brandId,
       );
     }
     return items;
