@@ -1477,9 +1477,27 @@ class JourneyTrackingService {
       context
     }, userId);
 
-    // Persistiere zu Firestore
+    // BUGFIX (ClickUp 86c9pwcx5): trackJourneyAbandonment hat bisher
+    // nur persistJourneyToFirestore (debounced) aufgerufen. completedAt
+    // wurde NIE gesetzt — Journey blieb in Firestore als "offen"
+    // hängen. Jetzt: erst flushPendingPersist (alle pending Writes
+    // committen) → dann finalize (setzt completedAt + completionReason
+    // + finalStatus='abandoned'). currentJourney bleibt im Memory weil
+    // der User in der App-Session ja weiter aktiv sein kann (z.B.
+    // Filter cleared → kann gleich wieder Filter setzen → neue Journey
+    // wäre nicht gewünscht, aber dieselbe Journey hat dann completedAt
+    // gesetzt; ein späteres _persistJourneyToFirestoreImmediate würde
+    // das updaten. Falls das in der Praxis Probleme macht, hier
+    // currentJourney = null setzen).
     if (userId) {
-      this.persistJourneyToFirestore(userId);
+      const abandonedJourney = this.currentJourney;
+      this.flushPendingPersist(userId)
+        .catch((e) => console.warn('Journey flush before abandonment finalize failed', e))
+        .finally(() => {
+          this.finalizeJourneyInFirestore(userId, `abandoned:${reason}`, abandonedJourney).catch((e) =>
+            console.warn('Journey abandonment finalize failed', e),
+          );
+        });
     }
   }
 
@@ -1836,8 +1854,13 @@ class JourneyTrackingService {
     }
 
     try {
+      // BUGFIX (ClickUp 86c9pwcx5): lastUpdated MUSS bei jedem Write
+      // gesetzt werden (Schema-Konsistenz). Bisher hat finalize NUR
+      // completedAt geschrieben → das Doc wirkte beim Cloud-Function-
+      // Scan veraltet weil das letzte lastUpdated minutenalt war.
       const finalData = {
         completedAt: serverTimestamp(),
+        lastUpdated: serverTimestamp(),
         completionReason,
         journeyDurationMs: Date.now() - journeyToFinalize.startTime,
         finalStatus: journeyToFinalize.purchased ? 'purchased' :
@@ -2698,18 +2721,59 @@ class JourneyTrackingService {
 
   /**
    * Behandelt App-Background-Event (kritisch für Abbruch-Tracking)
+   *
+   * BUGFIX (ClickUp 86c9pwcx5): Vorher hat das NUR bei aktiven
+   * Filtern und NUR nach 5 Minuten Timeout etwas gemacht. Damit
+   * hat eine Journey ohne Filter NIE completedAt bekommen, und
+   * selbst mit Filtern war die 5-min Latenz so lang dass der
+   * setTimeout den App-Kill nicht überlebt hat (iOS killt
+   * Background-Apps idR. nach ~30 s wenn keine bg-task läuft).
+   *
+   * Neue Strategie (zweistufig):
+   * 1. SOFORT bei Background-Event: flushPendingPersist →
+   *    garantiert dass das letzte lastUpdated im Firestore steht
+   *    (selbst wenn die App jetzt gekillt wird).
+   * 2. Nach 30 s Background-Dauer (statt 5 min) → finalize:
+   *    setzt completedAt + completionReason='app_backgrounded' +
+   *    finalStatus. Wenn der User vorher zurückkommt, cancelt
+   *    onAppForeground den Timer.
+   *
+   * 30 s ist ein guter Kompromiss: kurz genug dass der Timer
+   * realistisch noch feuert bevor iOS die App killt (das passiert
+   * meist erst nach 1-3 min), und lang genug dass kurzes Tab-
+   * Switching (z.B. zur Banking-App) die Journey nicht abbricht.
    */
+  private static readonly BACKGROUND_FINALIZE_MS = 30 * 1000;
+
   onAppBackground(userId?: string): void {
-    if (this.currentJourney && this.currentJourney.filterMetrics?.totalActiveFilters > 0) {
-      // Starte 5-Minuten Timer für Background-Abbruch
-      this.backgroundTimeout = setTimeout(() => {
-        this.trackJourneyAbandonment('app_backgrounded', {
-          backgroundDurationMs: 5 * 60 * 1000,
-          activeFiltersCount: this.currentJourney?.filterMetrics?.totalActiveFilters,
-          productsViewedCount: this.currentJourney?.viewedProducts.length
-        }, userId);
-      }, 5 * 60 * 1000); // 5 Minuten
+    if (!this.currentJourney) return;
+    if (!userId) return;
+
+    // Stage 1: Sofort einen synchronen Flush des debounce-Writes
+    // anstoßen — damit lastUpdated/State im Firestore aktuell ist
+    // falls iOS uns gleich killt. Fehler ignorieren (best-effort).
+    this.flushPendingPersist(userId).catch((e) => {
+      console.warn('flushPendingPersist on background failed', e);
+    });
+
+    // Stage 2: Falls die App nicht innerhalb von 30 s zurückkommt,
+    // Journey als app_backgrounded finalisieren.
+    if (this.backgroundTimeout) {
+      clearTimeout(this.backgroundTimeout);
     }
+    this.backgroundTimeout = setTimeout(() => {
+      this.backgroundTimeout = null;
+      if (!this.currentJourney) return;
+      this.trackJourneyAbandonment(
+        'app_backgrounded',
+        {
+          backgroundDurationMs: JourneyTrackingService.BACKGROUND_FINALIZE_MS,
+          activeFiltersCount: this.currentJourney?.filterMetrics?.totalActiveFilters || 0,
+          productsViewedCount: this.currentJourney?.viewedProducts.length || 0,
+        },
+        userId,
+      );
+    }, JourneyTrackingService.BACKGROUND_FINALIZE_MS);
   }
 
   /**

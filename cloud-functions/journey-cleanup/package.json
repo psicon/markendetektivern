@@ -1,0 +1,14 @@
+{
+  "name": "journey-cleanup",
+  "version": "1.0.0",
+  "description": "Nightly cleanup that finalizes stale journeys (lastUpdated > 72h, completedAt missing).",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}

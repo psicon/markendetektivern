@@ -2,7 +2,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import Constants from 'expo-constants';
 import { useFocusEffect, usePathname } from 'expo-router';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
-import { InteractionManager, Platform } from 'react-native';
+import { AppState, AppStateStatus, InteractionManager, Platform } from 'react-native';
 // Version wird aus Constants gelesen, nicht aus package.json
 import { analyticsService } from '../services/analyticsService';
 import journeyTrackingService from '../services/journeyTrackingService';
@@ -337,21 +337,27 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
   }, [user?.uid]);
 
   // App-Lifecycle Events für Background-Tracking
+  //
+  // BUGFIX (ClickUp 86c9pwcx5): Vorher war das ein NOOP — nur ein
+  // console.log, der AppState.addEventListener wurde nie registriert.
+  // Damit feuerte onAppBackground NIE und Journeys hatten kein
+  // completedAt wenn der User die App schloss. Jetzt korrekt
+  // gewired via AppState.addEventListener (RN-API ab v0.65+ gibt
+  // ein Subscription-Objekt zurück, .remove() statt removeEventListener).
   useEffect(() => {
-    const handleAppStateChange = (nextAppState: string) => {
-      if (nextAppState === 'background') {
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
         journeyTrackingService.onAppBackground(user?.uid);
       } else if (nextAppState === 'active') {
         journeyTrackingService.onAppForeground();
       }
     };
 
-    // Note: In einer echten App würde hier AppState.addEventListener verwendet
-    // Für jetzt dokumentieren wir nur die Implementierung
-    console.log('📱 App lifecycle tracking configured for journey abandonment');
-    
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    console.log('📱 App lifecycle tracking wired for journey abandonment');
+
     return () => {
-      // Cleanup würde hier stehen
+      sub.remove();
     };
   }, [user?.uid]);
 
