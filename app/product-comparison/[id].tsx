@@ -60,6 +60,7 @@ import { useCoachmarkAnchor } from '@/hooks/useCoachmarkAnchor';
 import { useOpenFoodFallback } from '@/hooks/useOpenFoodFallback';
 import { useTokens } from '@/hooks/useTokens';
 import {
+  diffTier,
   extractEans,
   extractIngredients,
   extractNaehrwerte,
@@ -2385,29 +2386,29 @@ export default function ProductComparisonScreen() {
               />
             </View>
 
-            {/* PagerView height = the larger of the two pages' measured
-                heights. Falls back to a minHeight while we wait for the
-                first onLayout, so the screen doesn't jump from 0 → real
-                on first paint. */}
-            <PagerView
-              ref={tabPagerRef}
+            {/* Hidden Measurer (Bugfix 2026-05-16, "Tabelle unten
+                abgeschnitten"). PagerView begrenzt seine Pages auf
+                seine eigene Höhe — onLayout INSIDE der Pager returnt
+                die constrained Höhe, nicht die intrinsische → catch-
+                22, Pager bleibt bei min-height stecken.
+                Lösung: rendere die gleichen Komponenten OFFSCREEN ohne
+                Höhenbegrenzung, measure DEREN onLayout. Diese Werte
+                geben dem PagerView seine wirkliche Zielhöhe. Doppel-
+                render kostet ein paar ms, akzeptabel — typeface ist
+                memoized. */}
+            <View
               style={{
-                height: Math.max(
-                  tabHeights.ingredients ?? 0,
-                  tabHeights.nutrition ?? 0,
-                  280,
-                ),
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: -10000,
+                opacity: 0,
               }}
-              initialPage={0}
-              onPageSelected={onTabPagerSelected}
+              pointerEvents="none"
+              aria-hidden
             >
               <View
-                key="ingredients"
                 onLayout={(e) => {
-                  // PagerView on the new architecture occasionally fires
-                  // onLayout with a null nativeEvent.layout while it
-                  // recycles pages — guard so we don't crash on
-                  // `null.height`.
                   const h = e?.nativeEvent?.layout?.height;
                   if (typeof h !== 'number') return;
                   setTabHeights((prev) =>
@@ -2425,7 +2426,6 @@ export default function ProductComparisonScreen() {
                 />
               </View>
               <View
-                key="nutrition"
                 onLayout={(e) => {
                   const h = e?.nativeEvent?.layout?.height;
                   if (typeof h !== 'number') return;
@@ -2434,6 +2434,44 @@ export default function ProductComparisonScreen() {
                   );
                 }}
               >
+                <NutritionTable
+                  brandProduct={mp}
+                  noname={picked}
+                  theme={theme}
+                  primary={brand.primary}
+                  brandFallback={openFoodFallback.brand?.naehrwerte}
+                  nonameFallback={openFoodFallback.noname?.naehrwerte}
+                  fallbackLoading={openFoodFallback.loading}
+                />
+              </View>
+            </View>
+
+            {/* Visible PagerView — height kommt aus der Hidden-
+                Messung oben. Min 320 damit der erste Frame nicht
+                kollabiert; danach übernimmt die echte Messung. */}
+            <PagerView
+              ref={tabPagerRef}
+              style={{
+                height: Math.max(
+                  tabHeights.ingredients ?? 0,
+                  tabHeights.nutrition ?? 0,
+                  320,
+                ),
+              }}
+              initialPage={0}
+              onPageSelected={onTabPagerSelected}
+            >
+              <View key="ingredients">
+                <IngredientsMatch
+                  brandProduct={mp}
+                  noname={picked}
+                  theme={theme}
+                  brandFallback={openFoodFallback.brand?.zutaten}
+                  nonameFallback={openFoodFallback.noname?.zutaten}
+                  fallbackLoading={openFoodFallback.loading}
+                />
+              </View>
+              <View key="nutrition">
                 <NutritionTable
                   brandProduct={mp}
                   noname={picked}
@@ -2850,7 +2888,13 @@ function NutritionTable({
   nonameFallback?: NaehrwerteShape;
   fallbackLoading?: boolean;
 }) {
-  const rows: Array<[string, string, string]> = [];
+  type Row = {
+    label: string;
+    a: string;
+    b: string;
+    tier: 'none' | 'warn' | 'crit';
+  };
+  const rows: Row[] = [];
 
   // 1. Primary: Firestore (neues nutr_*-Schema bevorzugt, dann legacy).
   // 2. Fallback: OpenFoodFacts.
@@ -2865,13 +2909,26 @@ function NutritionTable({
   const brandUsedFallback = brandMergeResult.usedFallback;
   const nonameUsedFallback = nonameMergeResult.usedFallback;
 
-  const pushRow = (label: string, a: any, b: any, suffix = '') => {
-    const av = a == null || a === '' ? null : a;
-    const bv = b == null || b === '' ? null : b;
-    if (av == null && bv == null) return;
-    const fmt = (v: any) =>
-      v == null ? '—' : typeof v === 'number' ? `${v}${suffix}` : String(v);
-    rows.push([label, fmt(av), fmt(bv)]);
+  // Color-Coding per Zeile (User-Wunsch 2026-05-16):
+  //   crit (rot)   bei ≥ 10 % Abweichung zwischen Brand und Noname
+  //   warn (gelb)  bei  2 % ≤ Δ < 10 %
+  //   none         < 2 % oder ein Wert fehlt
+  // diffTier() in productNutrition.ts behandelt Typen sauber.
+  const pushRow = (
+    label: string,
+    a: number | undefined,
+    b: number | undefined,
+    suffix = '',
+  ) => {
+    if (a == null && b == null) return;
+    const fmt = (v: number | undefined) =>
+      v == null ? '—' : `${v}${suffix}`;
+    rows.push({
+      label,
+      a: fmt(a),
+      b: fmt(b),
+      tier: diffTier(a, b),
+    });
   };
 
   pushRow('Energie', brandMerged.brennwertKcal, nonameMerged.brennwertKcal, ' kcal');
@@ -2972,54 +3029,75 @@ function NutritionTable({
           Eigenmarke
         </Text>
       </View>
-      {rows.map(([label, a, b], i) => (
-        <View
-          key={label}
-          style={{
-            flexDirection: 'row',
-            paddingVertical: 10,
-            borderBottomWidth: i < rows.length - 1 ? 1 : 0,
-            borderBottomColor: theme.border,
-          }}
-        >
-          <Text
+      {rows.map(({ label, a, b, tier }, i) => {
+        // Color-Coding nach Diff-Stufe:
+        //   crit (≥10 %)  → kräftig roter Text + leichter roter Strip
+        //   warn (2-10 %) → orange/amber Text + leichter orange Strip
+        //   none          → unverändert (theme.text / brand.primary)
+        // Wir lassen die Header-Spalten-Farben (theme.text/primary)
+        // als Basis erhalten und überlagern nur bei diff. So bleibt
+        // die optische Hierarchie "Original vs Eigenmarke" sichtbar.
+        const rowBg =
+          tier === 'crit'
+            ? 'rgba(244, 67, 54, 0.08)'
+            : tier === 'warn'
+              ? 'rgba(255, 152, 0, 0.10)'
+              : 'transparent';
+        const diffColor =
+          tier === 'crit' ? '#d32f2f' : tier === 'warn' ? '#cc7700' : null;
+        return (
+          <View
+            key={label}
             style={{
-              flex: 1,
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 13,
-              color: theme.text,
+              flexDirection: 'row',
+              paddingVertical: 10,
+              paddingHorizontal: tier !== 'none' ? 8 : 0,
+              marginHorizontal: tier !== 'none' ? -8 : 0,
+              borderRadius: tier !== 'none' ? 6 : 0,
+              backgroundColor: rowBg,
+              borderBottomWidth: i < rows.length - 1 ? 1 : 0,
+              borderBottomColor: theme.border,
             }}
           >
-            {label}
-          </Text>
-          <Text
-            style={{
-              width: 80,
-              textAlign: 'right',
-              fontFamily,
-              fontWeight: fontWeight.bold,
-              fontSize: 13,
-              color: theme.text,
-            }}
-          >
-            {a}
-          </Text>
-          <Text
-            style={{
-              width: 80,
-              textAlign: 'right',
-              fontFamily,
-              fontWeight: fontWeight.bold,
-              fontSize: 13,
-              color: primary,
-              marginLeft: 6,
-            }}
-          >
-            {b}
-          </Text>
-        </View>
-      ))}
+            <Text
+              style={{
+                flex: 1,
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 13,
+                color: diffColor ?? theme.text,
+              }}
+            >
+              {label}
+            </Text>
+            <Text
+              style={{
+                width: 80,
+                textAlign: 'right',
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 13,
+                color: diffColor ?? theme.text,
+              }}
+            >
+              {a}
+            </Text>
+            <Text
+              style={{
+                width: 80,
+                textAlign: 'right',
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 13,
+                color: diffColor ?? primary,
+                marginLeft: 6,
+              }}
+            >
+              {b}
+            </Text>
+          </View>
+        );
+      })}
       {brandUsedFallback || nonameUsedFallback ? (
         <OpenFoodSourceCaption theme={theme} />
       ) : null}

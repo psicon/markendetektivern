@@ -199,6 +199,31 @@ export function hasNaehrwerte(product: any): boolean {
   return extractNaehrwerte(product) !== null;
 }
 
+/** Klassifiziert die prozentuale Abweichung zwischen zwei Werten in
+ *  drei Stufen — für UI-Color-Coding bei Naehrwert-Vergleichen:
+ *    'none' → identisch / unter 2 % Diff / einer von beiden fehlt
+ *    'warn' → 2 % ≤ Diff < 10 %  (gelb)
+ *    'crit' → ≥ 10 %             (rot)
+ *  Verwendet eine SYMMETRISCHE Diff-Definition (|a−b| / max(|a|,|b|))
+ *  — keine Seite wird privilegiert.
+ *
+ *  Achtet auf Typen: strings/null/undefined/NaN ergeben 'none' (keine
+ *  Färbung), nicht crash. Werte mit max=0 (beide null oder beide 0)
+ *  ergeben 'none'. */
+export function diffTier(
+  a: number | null | undefined,
+  b: number | null | undefined,
+): 'none' | 'warn' | 'crit' {
+  if (typeof a !== 'number' || typeof b !== 'number') return 'none';
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return 'none';
+  const max = Math.max(Math.abs(a), Math.abs(b));
+  if (max === 0) return 'none';
+  const pct = (Math.abs(a - b) / max) * 100;
+  if (pct >= 10) return 'crit';
+  if (pct >= 2) return 'warn';
+  return 'none';
+}
+
 /** Merge zweier NaehrwerteShape-Objekte. `primary` gewinnt, `fallback`
  *  füllt nur fehlende Felder. Returnt zusätzlich ein per-Feld-flag
  *  ob das Feld aus dem Fallback kam — für UI-Caption ("Quelle: …"). */
