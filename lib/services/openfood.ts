@@ -4,6 +4,8 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 export interface OpenFoodNutrition {
   energy_100g?: number;           // kJ pro 100g
@@ -54,9 +56,53 @@ export interface NaehrwerteShape {
 }
 
 class OpenFoodService {
-  private static readonly BASE_URL = 'https://world.openfoodfacts.org/api/v0/product';
+  // V2 API + ?fields= Filter:
+  //   • V2 ist die offiziell empfohlene API (V0 funktioniert noch aber
+  //     ist als legacy markiert).
+  //   • ?fields=… reduziert die Response auf die Felder die wir
+  //     brauchen — kleinere Payload, OFF rate-limited großzügiger.
+  // Siehe https://openfoodfacts.github.io/openfoodfacts-server/api/
+  private static readonly BASE_URL = 'https://world.openfoodfacts.org/api/v2/product';
+  private static readonly FIELDS = [
+    'code',
+    'product_name',
+    'brands',
+    'categories',
+    'ingredients_text_de',
+    'ingredients_text',
+    'nutriments',
+    'nutriscore_grade',
+    'ecoscore_grade',
+    'nova_group',
+    'image_url',
+    'image_front_url',
+    'quantity',
+    'allergens_tags',
+    'manufacturing_places',
+    'generic_name',
+  ].join(',');
+
+  // User-Agent ist KRITISCH: OpenFoodFacts rate-limited anonyme
+  // Requests (kein UA) aggressiv (429-Storm). Mit identifizierender
+  // UA bekommen wir die normalen ~100 req/min Quota.
+  // Format empfohlen: "AppName/Version (contact)"
+  private static readonly USER_AGENT = (() => {
+    const version =
+      Constants?.expoConfig?.version ?? Constants?.manifest?.version ?? '0.0.0';
+    return `MarkenDetektive/${version} (${Platform.OS}; contact: patrick@markendetektive.de)`;
+  })();
+
   private static readonly CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 Tage (AsyncStorage)
   private static readonly MEMORY_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 Stunden (Memory)
+  // Negative Results (Produkt nicht in OFF) cachen wir kürzer — falls
+  // OFF das Produkt später crowdsourcing-mäßig bekommt.
+  private static readonly NEGATIVE_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24h
+  // Rate-Limit-Backoff: wenn wir 429 sehen, blocken wir ALLE OpenFood-
+  // Requests für eine Weile. Das verhindert dass mehrere Screen-Mounts
+  // hintereinander den 429-Storm verstärken.
+  private static readonly RATE_LIMIT_BACKOFF_MS = 5 * 60 * 1000; // 5 min
+  private static rateLimitUntilMs = 0;
+
   private static memoryCache = new Map<string, { data: OpenFoodProduct, timestamp: number }>();
   // Inflight-Dedup — wenn dieselbe EAN parallel mehrfach angefragt
   // wird (Brand- und NoName-Effekte starten beim Mount ~simultan),
@@ -82,20 +128,35 @@ class OpenFoodService {
 
   private static async _fetchByEAN(ean: string): Promise<OpenFoodProduct | null> {
     try {
-      // 1. Prüfe Memory Cache (schnellst)
+      // 1. Prüfe Memory Cache (schnellst). Eine "found=false"-Antwort
+      //    wird KÜRZER gecached (24h) als ein gefundenes Produkt (Memory:
+      //    24h; AsyncStorage: 7d). Negative Caching MUSS — sonst feuern
+      //    wir bei jedem Screen-Mount erneut Network-Requests für EANs
+      //    die OFF nicht kennt und triggern 429.
       const memCached = this.memoryCache.get(ean);
-      if (memCached && (Date.now() - memCached.timestamp) < this.MEMORY_CACHE_DURATION) {
-        console.log(`⚡ OpenFood Memory Cache Hit für EAN: ${ean}`);
-        return memCached.data;
+      if (memCached) {
+        const ttl = memCached.data.found
+          ? this.MEMORY_CACHE_DURATION
+          : this.NEGATIVE_CACHE_DURATION;
+        if (Date.now() - memCached.timestamp < ttl) {
+          // Reduziertes Logging — nur bei found=true logging
+          if (memCached.data.found) {
+            console.log(`⚡ OpenFood Memory Cache Hit für EAN: ${ean}`);
+          }
+          return memCached.data;
+        }
       }
 
-      // 2. Prüfe AsyncStorage Cache (persistent)
+      // 2. Prüfe AsyncStorage Cache (persistent — auch negative Results)
       try {
         const storageCached = await AsyncStorage.getItem(`${this.STORAGE_PREFIX}${ean}`);
         if (storageCached) {
           const { data, timestamp } = JSON.parse(storageCached);
-          if (Date.now() - timestamp < this.CACHE_DURATION) {
-            console.log(`🗄️ OpenFood AsyncStorage Cache Hit für EAN: ${ean}`);
+          const ttl = data?.found ? this.CACHE_DURATION : this.NEGATIVE_CACHE_DURATION;
+          if (Date.now() - timestamp < ttl) {
+            if (data?.found) {
+              console.log(`🗄️ OpenFood AsyncStorage Cache Hit für EAN: ${ean}`);
+            }
             // In Memory Cache übertragen für schnelleren nächsten Zugriff
             this.memoryCache.set(ean, { data, timestamp });
             return data;
@@ -105,22 +166,56 @@ class OpenFoodService {
         console.warn('AsyncStorage read error:', storageError);
       }
 
+      // 3. Rate-Limit Backoff: wenn wir kürzlich 429 gesehen haben,
+      //    skip den Network-Hit komplett für RATE_LIMIT_BACKOFF_MS.
+      //    Returnt als "not found" — Consumer-Code rendert Empty-State,
+      //    keine sichtbaren Errors für User.
+      if (Date.now() < this.rateLimitUntilMs) {
+        const secsLeft = Math.ceil((this.rateLimitUntilMs - Date.now()) / 1000);
+        console.warn(
+          `⏸️ OpenFood rate-limited — skipping fetch für EAN ${ean} (${secsLeft}s backoff verbleibend)`,
+        );
+        return { code: ean, found: false };
+      }
+
       console.log(`🌍 Lade OpenFood Daten für EAN: ${ean}`);
-      
-      const response = await fetch(`${this.BASE_URL}/${ean}.json`);
-      
+
+      const url = `${this.BASE_URL}/${ean}.json?fields=${this.FIELDS}`;
+      const response = await fetch(url, {
+        headers: {
+          // User-Agent ist KRITISCH — siehe Konstanten-Kommentar oben.
+          // RN setzt manchmal keinen UA-Header by default → ohne den
+          // landen wir im strict-rate-limit-Bucket.
+          'User-Agent': this.USER_AGENT,
+          Accept: 'application/json',
+        },
+      });
+
+      // 429 → Rate-Limit-Backoff aktivieren + negative Antwort cachen
+      // damit folgende Requests nicht direkt erneut feuern.
+      if (response.status === 429) {
+        this.rateLimitUntilMs = Date.now() + this.RATE_LIMIT_BACKOFF_MS;
+        console.warn(
+          `⏸️ OpenFood 429 Rate-Limit — backoff für ${this.RATE_LIMIT_BACKOFF_MS / 1000}s aktiviert`,
+        );
+        const notFound: OpenFoodProduct = { code: ean, found: false };
+        this.cacheResult(ean, notFound);
+        return notFound;
+      }
+
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const result = await response.json();
-      
+
       if (result.status !== 1 || !result.product) {
         console.warn(`❌ OpenFood: Produkt nicht gefunden für EAN: ${ean}`);
-        return {
-          code: ean,
-          found: false
-        };
+        const notFound: OpenFoodProduct = { code: ean, found: false };
+        // Negative Result cachen — verhindert Re-Fetch-Storm bei
+        // EANs die OFF nicht kennt.
+        this.cacheResult(ean, notFound);
+        return notFound;
       }
 
       const product: OpenFoodProduct = {
@@ -155,19 +250,8 @@ class OpenFoodService {
         }
       });
 
-      // Cache speichern (Memory + AsyncStorage)
-      const cacheData = {
-        data: product,
-        timestamp: Date.now()
-      };
-      
-      this.memoryCache.set(ean, cacheData);
-      
-      // AsyncStorage Cache speichern (fire-and-forget, blockiert nicht)
-      AsyncStorage.setItem(
-        `${this.STORAGE_PREFIX}${ean}`, 
-        JSON.stringify(cacheData)
-      ).catch(err => console.warn('AsyncStorage write error:', err));
+      // Cache via shared helper.
+      this.cacheResult(ean, product);
 
       console.log(`✅ OpenFood Daten geladen für: ${product.product_name}`);
       return product;
@@ -176,6 +260,20 @@ class OpenFoodService {
       console.error(`❌ Fehler beim Laden von OpenFood Daten für EAN ${ean}:`, error);
       return null;
     }
+  }
+
+  /** Schreibt Memory + AsyncStorage Cache. Wird sowohl für gefundene
+   *  Produkte als auch für not-found-Antworten verwendet — letztere
+   *  mit kürzerer TTL (durch die NEGATIVE_CACHE_DURATION-Prüfung beim
+   *  Read). */
+  private static cacheResult(ean: string, data: OpenFoodProduct): void {
+    const cacheData = { data, timestamp: Date.now() };
+    this.memoryCache.set(ean, cacheData);
+    // AsyncStorage fire-and-forget — blockiert nicht.
+    AsyncStorage.setItem(
+      `${this.STORAGE_PREFIX}${ean}`,
+      JSON.stringify(cacheData),
+    ).catch((err) => console.warn('AsyncStorage write error:', err));
   }
 
   /**
