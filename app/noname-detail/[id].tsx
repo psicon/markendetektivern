@@ -21,7 +21,6 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import PagerView from 'react-native-pager-view';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { usePressLock } from '@/lib/hooks/usePressLock';
@@ -52,7 +51,17 @@ import { Crossfade, Shimmer } from '@/components/design/Skeletons';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useCoachmark } from '@/hooks/useCoachmark';
 import { useCoachmarkAnchor } from '@/hooks/useCoachmarkAnchor';
+import { useOpenFoodFallback } from '@/hooks/useOpenFoodFallback';
 import { useTokens } from '@/hooks/useTokens';
+import {
+  extractEans,
+  extractIngredients,
+  extractNaehrwerte,
+  hasIngredients,
+  hasNaehrwerte,
+  mergeNaehrwerte,
+  type NaehrwerteShape,
+} from '@/lib/utils/productNutrition';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import achievementService from '@/lib/services/achievementService';
@@ -153,27 +162,18 @@ export default function NoNameDetailScreen() {
   const ready = !!product;
 
   const [tab, setTab] = useState<Tab>('ingredients');
-  // SegmentedTabs + PagerView combo for tabs (project rule).
-  const tabPagerRef = useRef<PagerView | null>(null);
+  // SegmentedTabs nur — KEIN PagerView. Embedded-Tabs in einer
+  // parent-ScrollView dürfen den vertikalen Scroll nicht abfangen
+  // (siehe CLAUDE.md → "Tab switches" Ausnahme-Regel).
   // Hero image container ref + FlyToCart imperative handle. The
   // hero ref is measured at "add-to-cart" time (measureInWindow),
   // its rect feeds into FlyToCart.fly() which clones the image and
   // animates it into the floating shopping-list button bottom-right.
   const heroRef = useRef<View | null>(null);
   const flyRef = useRef<FlyToCartHandle | null>(null);
-  const [tabHeights, setTabHeights] = useState<{
-    ingredients?: number;
-    nutrition?: number;
-  }>({});
   const onTabChange = (next: Tab) => {
     collapseCartPill();
     setTab(next);
-    tabPagerRef.current?.setPage(next === 'ingredients' ? 0 : 1);
-  };
-  const onTabPagerSelected = (e: { nativeEvent: { position: number } }) => {
-    collapseCartPill();
-    const next: Tab = e.nativeEvent.position === 0 ? 'ingredients' : 'nutrition';
-    setTab((prev) => (prev === next ? prev : next));
   };
   const [isFav, setIsFav] = useState(false);
   // Sync isFav mit echtem Server-Status sobald die productId bekannt
@@ -567,6 +567,36 @@ export default function NoNameDetailScreen() {
   // weder Inhaltsstoffe (im Sinne von Zutaten) noch Nährwerte
   // sinnvoll — Tabs werden komplett ausgeblendet.
   const hideFoodTabs = isNonFoodCategory(categoryName);
+
+  // ─── OpenFoodFacts Fallback (ClickUp 86c9qg2y2 für Stufe 1/2) ──
+  // Wenn Firestore die zutaten/naehrwerte nicht hat, holen wir die
+  // per EAN von OpenFoodFacts. extractEans probiert alle bekannten
+  // EAN-Felder (EAN, EANs[], gtin, …) in Reihenfolge, der Service
+  // checkt sequentiell, 1. Treffer wins.
+  const productEans = extractEans(p);
+  const productHasZutaten = hasIngredients(p);
+  const productHasNaehrwerte = hasNaehrwerte(p);
+  const openFoodFallback = useOpenFoodFallback({
+    // Nutzen das brand-Slot — semantisch egal, wir haben nur EIN
+    // Produkt auf diesem Screen. Der noname-Slot bleibt null.
+    brand: p
+      ? {
+          eans: productEans,
+          hasZutaten: productHasZutaten,
+          hasNaehrwerte: productHasNaehrwerte,
+        }
+      : null,
+    noname: null,
+  });
+  // showTabsSection: nur rendern wenn IRGENDETWAS für Zutaten ODER
+  // Nährwerte vorhanden ist (Firestore ODER OpenFood). Während
+  // OpenFood lädt, NICHT optimistic zeigen — sonst pop-Bug wie in
+  // Stufe-3/4/5 vorher.
+  const hasAnyZutatenForP =
+    productHasZutaten || Boolean(openFoodFallback.brand?.zutaten);
+  const hasAnyNaehrwerteForP =
+    productHasNaehrwerte || Boolean(openFoodFallback.brand?.naehrwerte);
+  const showFoodTabsSection = hasAnyZutatenForP || hasAnyNaehrwerteForP;
 
   const packInfo = p
     ? formatPack(
@@ -1519,11 +1549,17 @@ export default function NoNameDetailScreen() {
               </View>
             ) : null}
 
-            {/* Tabs: Inhaltsstoffe / Nährwerte. Bei Non-Food-
-                Kategorien (Drogerie, Haushalt, Kosmetik, Tier, …)
-                ergeben Zutaten + Nährwerte keinen Sinn — Tabs +
-                PagerView werden komplett ausgeblendet. */}
-            {p && !hideFoodTabs ? (
+            {/* Tabs: Inhaltsstoffe / Nährwerte.
+                Visible nur wenn:
+                  • Produkt existiert
+                  • Kategorie ist food-relevant (Drogerie/Haushalt
+                    etc. → keine Tabs)
+                  • IRGENDETWAS (Firestore ODER OpenFood) hat Daten
+                    zu zeigen
+                ConditionalRender statt PagerView (siehe Stufe-3/4/5
+                Comparison-Screen + CLAUDE.md Ausnahme-Regel).
+                Vertical-Scroll bleibt erhalten. */}
+            {p && !hideFoodTabs && showFoodTabsSection ? (
               <>
                 <View style={{ marginHorizontal: 20, marginTop: 20 }}>
                   <SegmentedTabs
@@ -1535,53 +1571,16 @@ export default function NoNameDetailScreen() {
                     onChange={onTabChange}
                   />
                 </View>
-                <PagerView
-                  ref={tabPagerRef}
-                  style={{
-                    height: Math.max(
-                      tabHeights.ingredients ?? 0,
-                      tabHeights.nutrition ?? 0,
-                      220,
-                    ),
-                  }}
-                  initialPage={0}
-                  onPageSelected={onTabPagerSelected}
-                >
-                  <View
-                    key="ingredients"
-                    onLayout={(e) => {
-                      const h = e?.nativeEvent?.layout?.height;
-                      if (typeof h !== 'number') return;
-                      setTabHeights((prev) =>
-                        prev.ingredients === h ? prev : { ...prev, ingredients: h },
-                      );
-                    }}
-                  >
-                    <SingleInfoCard
-                      tab="ingredients"
-                      product={p}
-                      theme={theme}
-                      shadows={shadows}
-                    />
-                  </View>
-                  <View
-                    key="nutrition"
-                    onLayout={(e) => {
-                      const h = e?.nativeEvent?.layout?.height;
-                      if (typeof h !== 'number') return;
-                      setTabHeights((prev) =>
-                        prev.nutrition === h ? prev : { ...prev, nutrition: h },
-                      );
-                    }}
-                  >
-                    <SingleInfoCard
-                      tab="nutrition"
-                      product={p}
-                      theme={theme}
-                      shadows={shadows}
-                    />
-                  </View>
-                </PagerView>
+                <View>
+                  <SingleInfoCard
+                    tab={tab}
+                    product={p}
+                    theme={theme}
+                    shadows={shadows}
+                    fallbackZutaten={openFoodFallback.brand?.zutaten}
+                    fallbackNaehrwerte={openFoodFallback.brand?.naehrwerte}
+                  />
+                </View>
               </>
             ) : null}
 
@@ -1801,14 +1800,24 @@ function SingleInfoCard({
   product,
   theme,
   shadows,
+  fallbackZutaten,
+  fallbackNaehrwerte,
 }: {
   tab: Tab;
   product: any;
   theme: ReturnType<typeof useTokens>['theme'];
   shadows: ReturnType<typeof useTokens>['shadows'];
+  /** Optional OpenFood-Fallback. Wird verwendet wenn Firestore
+   *  keine eigenen Daten hat. */
+  fallbackZutaten?: string;
+  fallbackNaehrwerte?: NaehrwerteShape;
 }) {
   if (tab === 'ingredients') {
-    const zutaten = String(product.zutaten ?? product.moreInformation?.zutaten ?? '').trim();
+    // Priorität: neues nutr_*-Schema → legacy zutaten/moreInformation
+    // → OpenFood. extractIngredients kapselt die Source-Reihenfolge.
+    const zutatenFromProduct = extractIngredients(product);
+    const zutaten = zutatenFromProduct || fallbackZutaten || '';
+    const fromOpenFood = !zutatenFromProduct && Boolean(fallbackZutaten);
     return (
       <View style={{ marginHorizontal: 20, marginTop: 18 }}>
         {zutaten ? (
@@ -1831,6 +1840,7 @@ function SingleInfoCard({
             >
               {zutaten}
             </Text>
+            {fromOpenFood ? <OpenFoodSourceTag theme={theme} /> : null}
           </View>
         ) : (
           <View
@@ -1860,19 +1870,25 @@ function SingleInfoCard({
     );
   }
 
-  // Nutrition tab
-  const n = product.naehrwerte ?? product.moreInformation ?? {};
+  // Nutrition tab — neues nutr_*-Schema bevorzugt, legacy als
+  // Fallback, OpenFood als letzte Stufe (per-Feld-Merge).
+  const productNaehrwerte = extractNaehrwerte(product);
+  const { merged: n, usedFallback } = mergeNaehrwerte(
+    productNaehrwerte,
+    fallbackNaehrwerte ?? null,
+  );
   const rows: Array<[string, string]> = [];
   const pushRow = (label: string, value: any, suffix = '') => {
     if (value == null || value === '') return;
     rows.push([label, typeof value === 'number' ? `${value}${suffix}` : String(value)]);
   };
-  pushRow('Energie', n.brennwertKcal ?? n.energie, ' kcal');
+  pushRow('Energie', n.brennwertKcal, ' kcal');
   pushRow('Fett', n.fett, ' g');
-  pushRow('davon gesättigt', n.gesaettigteFettsaeuren ?? n.gesaettigt, ' g');
+  pushRow('davon gesättigt', n.gesaettigteFettsaeuren, ' g');
   pushRow('Kohlenhydrate', n.kohlenhydrate, ' g');
   pushRow('davon Zucker', n.zucker, ' g');
-  pushRow('Eiweiß', n.eiweiss ?? n.eiweis, ' g');
+  pushRow('Ballaststoffe', n.ballaststoffe, ' g');
+  pushRow('Eiweiß', n.eiweiss, ' g');
   pushRow('Salz', n.salz, ' g');
 
   if (rows.length === 0) {
@@ -1950,7 +1966,14 @@ function SingleInfoCard({
           </Text>
         </View>
       ))}
-      <View style={{ paddingVertical: 8 }}>
+      <View
+        style={{
+          paddingVertical: 8,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
         <Text
           style={{
             fontFamily,
@@ -1961,7 +1984,41 @@ function SingleInfoCard({
         >
           Angaben pro 100 g
         </Text>
+        {usedFallback ? <OpenFoodSourceTag theme={theme} /> : null}
       </View>
+    </View>
+  );
+}
+
+/** "Quelle: OpenFoodFacts"-Caption-Pille — wird unter Cards
+ *  angezeigt deren Werte (Zutaten oder Naehrwerte) als Fallback
+ *  aus OpenFood kommen. Transparenz fuer den User. */
+function OpenFoodSourceTag({
+  theme,
+}: {
+  theme: ReturnType<typeof useTokens>['theme'];
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 8,
+      }}
+    >
+      <MaterialCommunityIcons name="web" size={11} color={theme.textMuted} />
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 10,
+          color: theme.textMuted,
+          letterSpacing: 0.2,
+        }}
+      >
+        Quelle: OpenFoodFacts
+      </Text>
     </View>
   );
 }
