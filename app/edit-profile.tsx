@@ -14,11 +14,10 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useNavigation } from 'expo-router';
 import { updateProfile } from '@react-native-firebase/auth';
 import { doc, getDoc, serverTimestamp, updateDoc } from '@react-native-firebase/firestore';
-import { getDownloadURL, ref, uploadBytesResumable } from '@react-native-firebase/storage';
+import { getDownloadURL, putFile, ref } from '@react-native-firebase/storage';
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -26,6 +25,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  useColorScheme,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,6 +41,10 @@ import { LocationPicker } from '@/components/ui/LocationPicker';
 import { MarketSelector } from '@/components/ui/MarketSelector';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { db, storage } from '@/lib/firebase';
+import {
+  showInfoToast,
+  showRetryableErrorToast,
+} from '@/lib/services/ui/toast';
 import { Discounter, FirestoreDocument } from '@/lib/types/firestore';
 
 interface FormData {
@@ -74,6 +78,8 @@ export default function EditProfileScreen() {
   const insets = useSafeAreaInsets();
   const { theme, brand, shadows } = useTokens();
   const { user, refreshUserProfile } = useAuth();
+  const colorScheme = useColorScheme();
+  const scheme: 'light' | 'dark' = colorScheme === 'dark' ? 'dark' : 'light';
 
   // ─── Form state ──────────────────────────────────────────────────
   const [formData, setFormData] = useState<FormData>({
@@ -134,36 +140,57 @@ export default function EditProfileScreen() {
   }, [user?.uid]);
 
   // ─── Save ────────────────────────────────────────────────────────
+  //
+  // Performance-Fix (ClickUp 86c9qg50a): vorher 3 sequenzielle awaits
+  // (updateProfile → updateDoc → refreshUserProfile, wobei refresh
+  // intern 2 Firestore-Reads macht → 5 sequenzielle Roundtrips). Bei
+  // ~300 ms pro Roundtrip = ~1.5 s gefühlte Verzögerung + Alert.alert
+  // hat den Close zusätzlich verzögert.
+  //
+  // Jetzt:
+  //   • updateProfile + updateDoc PARALLEL via Promise.all (~−500 ms)
+  //   • refreshUserProfile fire-and-forget — UI braucht den Refresh
+  //     nicht abzuwarten, das formData ist authoritative.
+  //   • Toast statt Alert + sofort router.back() (optimistic close).
   const handleSave = async () => {
     if (!user) return;
     if (!formData.displayName.trim()) {
-      Alert.alert('Fehler', 'Anzeigename ist ein Pflichtfeld.');
+      showInfoToast('Anzeigename ist ein Pflichtfeld.', 'error', scheme);
       return;
     }
     setSaving(true);
     try {
-      await updateProfile(user, {
-        displayName: formData.displayName,
-        photoURL: formData.photoURL,
-      });
-      await updateDoc(doc(db, 'users', user.uid), {
-        display_name: formData.displayName,
-        real_name: formData.realName,
-        photo_url: formData.photoURL,
-        birthDate: formData.birthDate,
-        gender: formData.gender,
-        location: formData.location,
-        favoriteMarket: formData.favoriteMarket?.id || null,
-        favoriteMarketName: formData.favoriteMarket?.name || null,
-        updatedAt: serverTimestamp(),
-      });
-      await refreshUserProfile();
-      Alert.alert('Erfolg', 'Profil wurde aktualisiert', [
-        { text: 'OK', onPress: () => router.back() },
+      await Promise.all([
+        updateProfile(user, {
+          displayName: formData.displayName,
+          photoURL: formData.photoURL,
+        }),
+        updateDoc(doc(db, 'users', user.uid), {
+          display_name: formData.displayName,
+          real_name: formData.realName,
+          photo_url: formData.photoURL,
+          birthDate: formData.birthDate,
+          gender: formData.gender,
+          location: formData.location,
+          favoriteMarket: formData.favoriteMarket?.id || null,
+          favoriteMarketName: formData.favoriteMarket?.name || null,
+          updatedAt: serverTimestamp(),
+        }),
       ]);
+      // Refresh im Hintergrund — kein await. AuthContext fanned das
+      // dann an alle Consumer aus sobald der Refresh durchlaeuft.
+      refreshUserProfile().catch((e) =>
+        console.warn('EditProfile: post-save refresh failed', e),
+      );
+      showInfoToast('Profil aktualisiert', 'info', scheme);
+      router.back();
     } catch (e) {
       console.warn('EditProfile: save failed', e);
-      Alert.alert('Fehler', 'Profil konnte nicht aktualisiert werden');
+      showRetryableErrorToast(
+        'Profil konnte nicht gespeichert werden — Verbindung prüfen.',
+        () => handleSave(),
+        { colorScheme: scheme },
+      );
     } finally {
       setSaving(false);
     }
@@ -173,9 +200,10 @@ export default function EditProfileScreen() {
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        'Berechtigung erforderlich',
-        'Wir benötigen Zugriff auf deine Fotos, um dein Profilbild zu ändern.',
+      showInfoToast(
+        'Foto-Zugriff verweigert — bitte in den Einstellungen erlauben.',
+        'error',
+        scheme,
       );
       return;
     }
@@ -190,24 +218,37 @@ export default function EditProfileScreen() {
     }
   };
 
+  // BUGFIX (ClickUp 86c9qg50a): vorher `fetch(uri) → r.blob() →
+  // uploadBytesResumable(ref, blob)`. Dieses Pattern ist in
+  // RNFirebase v23 + Hermes/Bridgeless KAPUTT — Blob übers RN-Bridge
+  // ist unreliable, memory-hungry und failed auf größeren Bildern.
+  // Dieselbe Diagnose hatte schon `lib/services/cashbackUpload.ts`
+  // gestellt (siehe deren Migration-Kommentar). Lösung dort wie hier:
+  // putFile() mit lokalem file:// URI — RNFirebase streamt nativ
+  // vom Disk-Pfad direkt nach Storage, kein Blob-Roundtrip.
   const uploadImage = async (uri: string) => {
     if (!user) return;
     setUploading(true);
     try {
-      const response = await fetch(uri);
-      const blob = await response.blob();
       const storageRef = ref(storage, `profilePictures/${user.uid}`);
-      // L Migration: RNFirebase hat kein uploadBytes(), nur
-      // uploadBytesResumable(). Beide returnen ein awaitables Task —
-      // identisches Verhalten für simple await-Use-Case.
-      await uploadBytesResumable(storageRef, blob);
+      await putFile(storageRef, uri, { contentType: 'image/jpeg' });
       const downloadURL = await getDownloadURL(storageRef);
       setFormData((prev) => ({ ...prev, photoURL: downloadURL }));
+      // updateProfile parallel zum Refresh — beide unabhängig.
+      // Refresh fire-and-forget, sodass das Avatar-UI sofort den
+      // neuen photoURL anzeigt ohne auf den Profile-Reload zu warten.
       await updateProfile(user, { photoURL: downloadURL });
-      await refreshUserProfile();
+      refreshUserProfile().catch((e) =>
+        console.warn('EditProfile: post-upload refresh failed', e),
+      );
+      showInfoToast('Profilbild aktualisiert', 'info', scheme);
     } catch (e) {
       console.warn('EditProfile: upload failed', e);
-      Alert.alert('Fehler', 'Profilbild konnte nicht hochgeladen werden');
+      showRetryableErrorToast(
+        'Profilbild konnte nicht hochgeladen werden — Verbindung prüfen.',
+        () => uploadImage(uri),
+        { colorScheme: scheme },
+      );
     } finally {
       setUploading(false);
     }
