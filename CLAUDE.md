@@ -1101,6 +1101,55 @@ banner. ONE celebration component app-wide.
   scale. Index it with `.select()` at the daily-aggregator level
   or via per-user denormalised counters.
 
+### Nutrition / Zutaten Schema (reweapify-Format)
+
+Wir nutzen das **reweapify-Schema** als kanonisches Format für
+Nährwerte und Zutaten auf `produkte/*` und `markenProdukte/*`.
+Reweapify ist die Pipeline-Output-Collection von Rewes-API; wir
+übernehmen ihr Schema 1:1 damit kein Mapping nötig ist.
+
+```
+// Zutaten
+attr_ingredientStatement: string  // "Zucker, Glukosesirup, 15% VOLLMILCHPULVER…"
+ingredientsSource:        'manual' | 'rewe' | 'openfood' | 'scraper' | 'legacy'
+ingredientsUpdatedAt:     Timestamp
+
+// Nährwerte (per nutr_serving_size, default 100g)
+nutr_Energie_val:                          number   nutr_Energie_unit: 'kcal' | 'kJ'
+nutr_Fett_val:                             number   nutr_Fett_unit: 'g'
+nutr_FettdavongesttigteFettsuren_val:      number   _unit: 'g'   // sic — Tippfehler aus reweapify
+nutr_Kohlenhydrate_val:                    number   _unit: 'g'
+nutr_KohlenhydratedavonZucker_val:         number   _unit: 'g'
+nutr_Ballaststoffe_val:                    number   _unit: 'g'
+nutr_Eiwei_val:                            number   _unit: 'g'   // sic — Eiweiß ohne ß
+nutr_Salz_val:                             number   _unit: 'g'
+nutr_serving_size:                         number   nutr_serving_unit: 'g'
+nutritionSource:        'manual' | 'rewe' | 'openfood' | 'scraper' | 'legacy'
+nutritionUpdatedAt:     Timestamp
+```
+
+Trust-Hierarchie (höhere Source wird NIE überschrieben):
+1. `manual` — eigene Recherche / Bilder-Erkennung
+2. `rewe` — aus reweapify oder direkter Rewe-Pipeline
+3. (untrusted, newest wins:) `openfood`, `scraper`, `legacy`
+
+App-Reading: `lib/utils/productNutrition.ts` `extractIngredients()`/
+`extractNaehrwerte()` lesen beide Formate (legacy `naehrwerte: {}` +
+`zutaten: ""` + neues `nutr_*`/`attr_ingredientStatement`) — die
+Cloud Functions schreiben nur das neue Format. Sobald der Backfill
+einmal durchlief sind alle Produkte im neuen Format; die Legacy-
+Read-Pfade können später entfernt werden.
+
+History-Collections:
+- `nutritionhistory_produkte` / `nutritionhistory_markenProdukte`
+  — Watcher schreibt Snapshots wenn untrusted Sources Werte ändern
+- `pricehistory_produkte` / `pricehistory_markenProdukte` — Watcher
+  schreibt JEDE Preisänderung (keine Source-Exclusion)
+
+Cloud Functions: `cloud-functions/nutrition-history-watcher/`
+(onWrite-Trigger), `cloud-functions/nutrition-backfill/` (HTTPS-Trigger
+für one-shot reweapify→openfood→scraper Backfill).
+
 ## Other notes
 
 - TypeScript strict; `tsc --noEmit -p tsconfig.json` is the

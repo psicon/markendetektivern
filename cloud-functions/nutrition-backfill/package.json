@@ -1,0 +1,14 @@
+{
+  "name": "nutrition-backfill",
+  "version": "1.0.0",
+  "description": "Backfills nutrition + ingredients data on produkte / markenProdukte from external sources (reweapify, openfood, …). One-shot HTTPS trigger.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}

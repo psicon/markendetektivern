@@ -1,0 +1,14 @@
+{
+  "name": "nutrition-history-watcher",
+  "version": "1.0.0",
+  "description": "Firestore onWrite watcher: detects nutrition + price changes on produkte/markenProdukte and writes snapshots to nutritionhistory_* / pricehistory_*.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}
