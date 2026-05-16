@@ -5,16 +5,21 @@
  * wenn die Firestore-Produkt-Daten diese Felder nicht haben.
  *
  * Verwendung im product-comparison-Screen (Stufe 3/4/5) und im
- * noname-detail-Screen (Stufe 1/2). Der Hook ist klein, network-
- * konservativ (nur fetchen wenn wirklich nötig) und race-safe
- * (späterer `picked`-Wechsel verwirft veraltete Responses).
+ * noname-detail-Screen (Stufe 1/2). Network-konservativ: lädt NUR
+ * für das aktuell ausgewählte (`picked`) Produkt, nicht für alle
+ * Alternativen. Bei Picked-Switch wird die neue Alternative
+ * im Hintergrund nachgeladen — die vorherige Brand-Daten bleiben
+ * stabil sichtbar (kein Flash auf der Brand-Seite).
  *
- * Multi-EAN-Support (User-Vorgabe 2026-05-16): pro Produkt werden
- * ALLE bekannten EANs (`EANs[]`, `EAN`, `gtin`, …) sequentiell
- * probiert — 1. Treffer wins, keine weiteren Requests danach.
+ * Multi-EAN-Support: pro Produkt werden ALLE bekannten EANs
+ * (`EANs[]`, `EAN`, `gtin`, …) sequentiell probiert — 1. Treffer
+ * wins. Per-Slot-Key-Tracking verhindert stale-data-Flash: wenn
+ * picked wechselt, returnt der Hook für die Noname-Seite NULL bis
+ * die neue Fetch resolved (statt die alten OpenFood-Daten weiter
+ * anzuzeigen).
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import OpenFoodService, { type OpenFoodProduct } from '@/lib/services/openfood';
 import type { NaehrwerteShape } from '@/lib/utils/productNutrition';
@@ -46,6 +51,16 @@ interface UseOpenFoodFallbackReturn {
   loading: boolean;
 }
 
+/** Slot mit Key — Daten werden nur gerendert wenn key matched die
+ *  aktuelle EAN-Liste. Verhindert stale-data-Flash beim Switchen. */
+type Slot = { key: string; data: OpenFoodFallbackResult | null } | null;
+
+interface InternalState {
+  brand: Slot;
+  noname: Slot;
+  loading: boolean;
+}
+
 function buildFallback(
   input: OpenFoodFallbackProductInput | null | undefined,
   product: OpenFoodProduct | null,
@@ -73,34 +88,21 @@ export function useOpenFoodFallback(
   args: UseOpenFoodFallbackArgs,
 ): UseOpenFoodFallbackReturn {
   const { brand, noname } = args;
-  // Wir flatten die EAN-Liste in einen stabilen Key — sonst feuert die
-  // useEffect bei jedem Render neu (Array-Identität wechselt).
+  // EANs joined zu stabilem Key. Object-Identität wechselt bei jedem
+  // Render, primitive Keys nicht — deshalb sind das die useEffect-Deps.
   const brandKey = (brand?.eans ?? []).join(',');
   const nonameKey = (noname?.eans ?? []).join(',');
   const brandNeed = needsFetch(brand);
   const nonameNeed = needsFetch(noname);
 
-  const [state, setState] = useState<UseOpenFoodFallbackReturn>({
+  const [state, setState] = useState<InternalState>({
     brand: null,
     noname: null,
     loading: false,
   });
 
-  // Refs zum Tracken ob die Keys WIRKLICH geändert wurden (vs. nur
-  // brandNeed/nonameNeed-Flip). Wichtig fürs Stale-Data-Vermeiden:
-  // wenn picked auf ein anderes Noname switched, ist nonameKey neu,
-  // und wir müssen state.noname clearen — sonst zeigt die Page kurz
-  // die OLD-noname OpenFood-Daten beim NEW-noname-Switch. Brand
-  // bleibt erhalten wenn nur Noname switched (kein unnötiger Flash).
-  const prevBrandKey = useRef(brandKey);
-  const prevNonameKey = useRef(nonameKey);
-
   useEffect(() => {
-    const brandChanged = prevBrandKey.current !== brandKey;
-    const nonameChanged = prevNonameKey.current !== nonameKey;
-    prevBrandKey.current = brandKey;
-    prevNonameKey.current = nonameKey;
-
+    // Wenn keine Seite was braucht → state komplett resetten.
     if (!brandNeed && !nonameNeed) {
       setState({ brand: null, noname: null, loading: false });
       return;
@@ -108,8 +110,13 @@ export function useOpenFoodFallback(
 
     let alive = true;
     setState((prev) => ({
-      brand: brandChanged ? null : prev.brand,
-      noname: nonameChanged ? null : prev.noname,
+      // Brand-slot: nur wenn brandNeed (sonst kein OpenFood nötig)
+      // UND vorhandener slot zum aktuellen brandKey passt — sonst
+      // null (wird gleich nachgeladen).
+      brand:
+        brandNeed && prev.brand?.key === brandKey ? prev.brand : null,
+      noname:
+        nonameNeed && prev.noname?.key === nonameKey ? prev.noname : null,
       loading: true,
     }));
 
@@ -125,16 +132,24 @@ export function useOpenFoodFallback(
     Promise.all([brandPromise, nonamePromise])
       .then(([b, n]) => {
         if (!alive) return;
-        setState({
-          brand: buildFallback(brand, b),
-          noname: buildFallback(noname, n),
+        setState((prev) => ({
+          // Brand nur überschreiben wenn wir tatsächlich fetched
+          // haben (brandNeed=true). Sonst prev.brand behalten —
+          // das stabilisiert die Brand-Seite über Picked-Switches
+          // hinweg.
+          brand: brandNeed
+            ? { key: brandKey, data: buildFallback(brand, b) }
+            : prev.brand,
+          noname: nonameNeed
+            ? { key: nonameKey, data: buildFallback(noname, n) }
+            : prev.noname,
           loading: false,
-        });
+        }));
       })
       .catch((e) => {
         if (!alive) return;
         console.warn('useOpenFoodFallback: fetch failed', e);
-        setState({ brand: null, noname: null, loading: false });
+        setState((prev) => ({ ...prev, loading: false }));
       });
 
     return () => {
@@ -145,5 +160,15 @@ export function useOpenFoodFallback(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandKey, nonameKey, brandNeed, nonameNeed]);
 
-  return state;
+  // Per-Slot-Key-Check: state.brand/noname werden NUR rendered wenn
+  // ihr key zur aktuellen EAN-Liste passt. Bei Picked-Switch ist
+  // state.noname.key noch der alte → wir returnen null, das UI
+  // zeigt '—' / Shimmer statt stale-Data der vorherigen Alternative.
+  // Brand-Side bleibt stabil weil brandKey sich nicht ändert wenn
+  // nur picked wechselt.
+  const safeBrand =
+    state.brand && state.brand.key === brandKey ? state.brand.data : null;
+  const safeNoname =
+    state.noname && state.noname.key === nonameKey ? state.noname.data : null;
+  return { brand: safeBrand, noname: safeNoname, loading: state.loading };
 }
