@@ -906,9 +906,18 @@ export default function ProductComparisonScreen() {
   });
 
   // ─── showTabs Decision ──────────────────────────────────────────
-  // Nur rendern wenn IRGENDETWAS für die Inhaltsstoffe/Naehrwerte-
-  // Tabs vorhanden ist (Firestore ODER OpenFood, brand ODER noname).
-  // Während OpenFood lädt, optimistisch zeigen — sonst Flash-Hide.
+  // Simple Logik (User-Vorgabe 2026-05-16): "wenn was da → anzeigen,
+  // wenn nicht, eben nicht". KEIN optimistic "während-loading
+  // anzeigen" — das pop'te beim Empty-Pfad nachträglich wieder weg.
+  //
+  // Während OpenFood asynchron lädt: showTabsSection bleibt false
+  // SOFERN nicht schon Firestore-Daten da sind. Sobald OpenFood
+  // resolvet:
+  //   • mit Daten → tabs erscheinen (slide-in, kein pop)
+  //   • ohne Daten → tabs bleiben hidden (keine Flash-Sequenz)
+  //
+  // Wenn Brand Daten hat aber Picked nicht (oder umgekehrt) → tabs
+  // werden trotzdem gerendert, eine Seite zeigt '—' / leere Card.
   const hasAnyIngredients =
     brandHasZutaten ||
     nonameHasZutaten ||
@@ -919,8 +928,7 @@ export default function ProductComparisonScreen() {
     nonameHasNaehrwerte ||
     Boolean(openFoodFallback.brand?.naehrwerte) ||
     Boolean(openFoodFallback.noname?.naehrwerte);
-  const showTabsSection =
-    openFoodFallback.loading || hasAnyIngredients || hasAnyNaehrwerte;
+  const showTabsSection = hasAnyIngredients || hasAnyNaehrwerte;
 
   // ─── Handlers ─────────────────────────────────────────────────────────
   const onToggleFav = usePressLock(async (
