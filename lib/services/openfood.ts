@@ -211,14 +211,27 @@ class OpenFoodService {
         return { code: ean, found: false };
       }
 
+      // 404 (oder andere 4xx ≠ 429) = "EAN nicht in OpenFood-DB".
+      // Normaler Fall — kein Error, einfach als not-found cachen.
+      // Verhindert console.error-Lärm + Re-Fetch-Storm.
+      if (response.status === 404 || (response.status >= 400 && response.status < 500 && response.status !== 429)) {
+        console.log(`📭 OpenFood: EAN ${ean} not in DB (HTTP ${response.status})`);
+        const notFound: OpenFoodProduct = { code: ean, found: false };
+        this.cacheResult(ean, notFound);
+        return notFound;
+      }
+
       if (!response.ok) {
+        // 5xx → echter Server-Fehler. Werfen damit der catch-Block
+        // ihn loggt und nicht cached (transient, kann später wieder
+        // gehen).
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const result = await response.json();
 
       if (result.status !== 1 || !result.product) {
-        console.warn(`❌ OpenFood: Produkt nicht gefunden für EAN: ${ean}`);
+        console.log(`📭 OpenFood: EAN ${ean} not found (body status:${result.status})`);
         const notFound: OpenFoodProduct = { code: ean, found: false };
         // Negative Result cachen — verhindert Re-Fetch-Storm bei
         // EANs die OFF nicht kennt.
@@ -265,7 +278,10 @@ class OpenFoodService {
       return product;
 
     } catch (error) {
-      console.error(`❌ Fehler beim Laden von OpenFood Daten für EAN ${ean}:`, error);
+      // Nur als warn loggen, nicht error — sonst LogBox-Overlay
+      // beim User. Echte Server-Fehler (5xx) oder Network-Issues
+      // sind transient und kein UI-Problem.
+      console.warn(`⚠️ OpenFood transient error für EAN ${ean}:`, error);
       return null;
     }
   }

@@ -170,5 +170,22 @@ export function useOpenFoodFallback(
     state.brand && state.brand.key === brandKey ? state.brand.data : null;
   const safeNoname =
     state.noname && state.noname.key === nonameKey ? state.noname.data : null;
-  return { brand: safeBrand, noname: safeNoname, loading: state.loading };
+
+  // Loading umfasst auch das "wir-werden-gleich-fetchen"-Fenster
+  // ZWISCHEN dem Render mit neuem Picked und dem useEffect-Run der
+  // state.loading=true setzt. Ohne diese Berechnung sähe der Consumer
+  // einen Frame mit (loading=false, kein data) → Container würde
+  // unmounten + sofort wieder remounten → POP.
+  //
+  // Wir flaggen als loading sobald eine Seite eine Fetch braucht und
+  // der entsprechende Slot noch nicht (oder mit veraltetem Key)
+  // gefüllt ist. Effektiv: solange der Hook nicht bestätigt hat dass
+  // der aktuelle Key fertig verarbeitet wurde, sind wir "loading".
+  const brandPending =
+    brandNeed && (state.brand === null || state.brand.key !== brandKey);
+  const nonamePending =
+    nonameNeed && (state.noname === null || state.noname.key !== nonameKey);
+  const loading = state.loading || brandPending || nonamePending;
+
+  return { brand: safeBrand, noname: safeNoname, loading };
 }
