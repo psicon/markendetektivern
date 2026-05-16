@@ -57,6 +57,7 @@ import { StufenChips } from '@/components/design/StufenChips';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useCoachmark } from '@/hooks/useCoachmark';
 import { useCoachmarkAnchor } from '@/hooks/useCoachmarkAnchor';
+import { useOpenFoodFallback } from '@/hooks/useOpenFoodFallback';
 import { useTokens } from '@/hooks/useTokens';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -858,6 +859,35 @@ export default function ProductComparisonScreen() {
   // Stufe-Texte über getStufeInfo() — liefert Remote-Config-Copy wenn
   // gefetched, sonst den hardcoded STUFE_INFO-Fallback.
   const pickedInfo = getStufeInfo(pickedStufe);
+
+  // ─── OpenFoodFacts Fallback (ClickUp 86c9qg2y2) ─────────────────
+  // Wenn Firestore die zutaten/naehrwerte nicht hat, holen wir die
+  // per EAN von OpenFoodFacts. Network-konservativ: fetcht nur wenn
+  // Firestore-Daten wirklich fehlen UND eine EAN vorhanden ist.
+  // Race-safe: bei picked-Wechsel wirft der Hook intern alte
+  // Responses weg.
+  const brandEan = (mp as any)?.EAN || (mp as any)?.EANs?.[0] || null;
+  const pickedEan = (picked as any)?.EAN || (picked as any)?.EANs?.[0] || null;
+  const brandHasZutaten = Boolean(
+    String((mp as any)?.zutaten ?? (mp as any)?.moreInformation?.zutaten ?? '').trim(),
+  );
+  const brandHasNaehrwerte = Boolean(
+    (mp as any)?.naehrwerte || (mp as any)?.moreInformation,
+  );
+  const nonameHasZutaten = Boolean(
+    String((picked as any)?.zutaten ?? (picked as any)?.moreInformation?.zutaten ?? '').trim(),
+  );
+  const nonameHasNaehrwerte = Boolean(
+    (picked as any)?.naehrwerte || (picked as any)?.moreInformation,
+  );
+  const openFoodFallback = useOpenFoodFallback({
+    brand: mp
+      ? { ean: brandEan, hasZutaten: brandHasZutaten, hasNaehrwerte: brandHasNaehrwerte }
+      : null,
+    noname: picked
+      ? { ean: pickedEan, hasZutaten: nonameHasZutaten, hasNaehrwerte: nonameHasNaehrwerte }
+      : null,
+  });
 
   // ─── Handlers ─────────────────────────────────────────────────────────
   const onToggleFav = usePressLock(async (
@@ -2367,7 +2397,14 @@ export default function ProductComparisonScreen() {
                   );
                 }}
               >
-                <IngredientsMatch brandProduct={mp} noname={picked} theme={theme} />
+                <IngredientsMatch
+                  brandProduct={mp}
+                  noname={picked}
+                  theme={theme}
+                  brandFallback={openFoodFallback.brand?.zutaten}
+                  nonameFallback={openFoodFallback.noname?.zutaten}
+                  fallbackLoading={openFoodFallback.loading}
+                />
               </View>
               <View
                 key="nutrition"
@@ -2384,6 +2421,9 @@ export default function ProductComparisonScreen() {
                   noname={picked}
                   theme={theme}
                   primary={brand.primary}
+                  brandFallback={openFoodFallback.brand?.naehrwerte}
+                  nonameFallback={openFoodFallback.noname?.naehrwerte}
+                  fallbackLoading={openFoodFallback.loading}
                 />
               </View>
             </PagerView>
@@ -2645,17 +2685,34 @@ function IngredientsMatch({
   brandProduct,
   noname,
   theme,
+  brandFallback,
+  nonameFallback,
+  fallbackLoading,
 }: {
   brandProduct: MarkenProduktWithDetails;
   noname: ProductWithDetails | null;
   theme: ReturnType<typeof useTokens>['theme'];
+  /** OpenFoodFacts-Zutaten als Fallback wenn Firestore leer ist. */
+  brandFallback?: string;
+  nonameFallback?: string;
+  /** Wird angezeigt während OpenFood gefetcht wird (kein Empty-State
+   *  flashen). */
+  fallbackLoading?: boolean;
 }) {
-  const brandIngredients = String(
+  const brandFromFirestore = String(
     (brandProduct as any).zutaten ?? (brandProduct as any).moreInformation?.zutaten ?? '',
   ).trim();
-  const nonameIngredients = String(
+  const nonameFromFirestore = String(
     (noname as any)?.zutaten ?? (noname as any)?.moreInformation?.zutaten ?? '',
   ).trim();
+
+  // Priorität: Firestore vor OpenFood. Wenn Firestore leer und
+  // OpenFood-Fallback vorhanden → OpenFood + Caption "Quelle:
+  // OpenFoodFacts" anzeigen.
+  const brandIngredients = brandFromFirestore || brandFallback || '';
+  const brandFromOpenFood = !brandFromFirestore && Boolean(brandFallback);
+  const nonameIngredients = nonameFromFirestore || nonameFallback || '';
+  const nonameFromOpenFood = !nonameFromFirestore && Boolean(nonameFallback);
 
   return (
     <View style={{ marginHorizontal: 20, marginTop: 18 }}>
@@ -2692,6 +2749,7 @@ function IngredientsMatch({
           >
             {brandIngredients}
           </Text>
+          {brandFromOpenFood ? <OpenFoodSourceCaption theme={theme} /> : null}
         </View>
       ) : null}
       {nonameIngredients ? (
@@ -2726,6 +2784,7 @@ function IngredientsMatch({
           >
             {nonameIngredients}
           </Text>
+          {nonameFromOpenFood ? <OpenFoodSourceCaption theme={theme} /> : null}
         </View>
       ) : null}
       {!brandIngredients && !nonameIngredients ? (
@@ -2748,7 +2807,9 @@ function IngredientsMatch({
               textAlign: 'center',
             }}
           >
-            Für dieses Produkt sind noch keine Zutaten hinterlegt.
+            {fallbackLoading
+              ? 'Lade Zutaten von OpenFoodFacts …'
+              : 'Für dieses Produkt sind noch keine Zutaten hinterlegt.'}
           </Text>
         </View>
       ) : null}
@@ -2761,17 +2822,83 @@ function NutritionTable({
   noname,
   theme,
   primary,
+  brandFallback,
+  nonameFallback,
+  fallbackLoading,
 }: {
   brandProduct: MarkenProduktWithDetails;
   noname: ProductWithDetails | null;
   theme: ReturnType<typeof useTokens>['theme'];
   primary: string;
+  /** OpenFoodFacts-Naehrwerte als Fallback wenn Firestore leer ist.
+   *  Per-Feld-Merge: jeder fehlende Wert wird einzeln ergänzt. */
+  brandFallback?: Record<string, number | undefined>;
+  nonameFallback?: Record<string, number | undefined>;
+  fallbackLoading?: boolean;
 }) {
   const rows: Array<[string, string, string]> = [];
-  const brandN =
+  const brandFirestore =
     (brandProduct as any).naehrwerte ?? (brandProduct as any).moreInformation ?? {};
-  const nonameN =
+  const nonameFirestore =
     (noname as any)?.naehrwerte ?? (noname as any)?.moreInformation ?? {};
+  // Per-Feld-Merge: Firestore zuerst, OpenFood als Fallback. Wir
+  // tracken zusätzlich ob ein Wert aus dem Fallback kam → Caption.
+  const pick = (firestore: any, fallback: any) => {
+    if (firestore != null && firestore !== '') return { value: firestore, fromFallback: false };
+    if (fallback != null && fallback !== '') return { value: fallback, fromFallback: true };
+    return { value: null, fromFallback: false };
+  };
+  const brandN = brandFirestore;
+  const nonameN = nonameFirestore;
+  let brandUsedFallback = false;
+  let nonameUsedFallback = false;
+  const merged = (firestoreObj: any, fallbackObj: any, sideTrack: 'brand' | 'noname') => {
+    return {
+      brennwertKcal: (() => {
+        const r = pick(
+          firestoreObj?.brennwertKcal ?? firestoreObj?.energie,
+          fallbackObj?.brennwertKcal,
+        );
+        if (r.fromFallback) sideTrack === 'brand' ? (brandUsedFallback = true) : (nonameUsedFallback = true);
+        return r.value;
+      })(),
+      fett: (() => {
+        const r = pick(firestoreObj?.fett, fallbackObj?.fett);
+        if (r.fromFallback) sideTrack === 'brand' ? (brandUsedFallback = true) : (nonameUsedFallback = true);
+        return r.value;
+      })(),
+      gesaettigt: (() => {
+        const r = pick(
+          firestoreObj?.gesaettigteFettsaeuren ?? firestoreObj?.gesaettigt,
+          fallbackObj?.gesaettigteFettsaeuren,
+        );
+        if (r.fromFallback) sideTrack === 'brand' ? (brandUsedFallback = true) : (nonameUsedFallback = true);
+        return r.value;
+      })(),
+      kohlenhydrate: (() => {
+        const r = pick(firestoreObj?.kohlenhydrate, fallbackObj?.kohlenhydrate);
+        if (r.fromFallback) sideTrack === 'brand' ? (brandUsedFallback = true) : (nonameUsedFallback = true);
+        return r.value;
+      })(),
+      zucker: (() => {
+        const r = pick(firestoreObj?.zucker, fallbackObj?.zucker);
+        if (r.fromFallback) sideTrack === 'brand' ? (brandUsedFallback = true) : (nonameUsedFallback = true);
+        return r.value;
+      })(),
+      eiweiss: (() => {
+        const r = pick(firestoreObj?.eiweiss ?? firestoreObj?.eiweis, fallbackObj?.eiweiss);
+        if (r.fromFallback) sideTrack === 'brand' ? (brandUsedFallback = true) : (nonameUsedFallback = true);
+        return r.value;
+      })(),
+      salz: (() => {
+        const r = pick(firestoreObj?.salz, fallbackObj?.salz);
+        if (r.fromFallback) sideTrack === 'brand' ? (brandUsedFallback = true) : (nonameUsedFallback = true);
+        return r.value;
+      })(),
+    };
+  };
+  const brandMerged = merged(brandN, brandFallback, 'brand');
+  const nonameMerged = merged(nonameN, nonameFallback, 'noname');
 
   const pushRow = (label: string, a: any, b: any, suffix = '') => {
     const av = a == null || a === '' ? null : a;
@@ -2782,13 +2909,13 @@ function NutritionTable({
     rows.push([label, fmt(av), fmt(bv)]);
   };
 
-  pushRow('Energie', brandN.brennwertKcal ?? brandN.energie, nonameN.brennwertKcal ?? nonameN.energie, ' kcal');
-  pushRow('Fett', brandN.fett, nonameN.fett, ' g');
-  pushRow('davon gesättigt', brandN.gesaettigteFettsaeuren ?? brandN.gesaettigt, nonameN.gesaettigteFettsaeuren ?? nonameN.gesaettigt, ' g');
-  pushRow('Kohlenhydrate', brandN.kohlenhydrate, nonameN.kohlenhydrate, ' g');
-  pushRow('davon Zucker', brandN.zucker, nonameN.zucker, ' g');
-  pushRow('Eiweiß', brandN.eiweiss ?? brandN.eiweis, nonameN.eiweiss ?? nonameN.eiweis, ' g');
-  pushRow('Salz', brandN.salz, nonameN.salz, ' g');
+  pushRow('Energie', brandMerged.brennwertKcal, nonameMerged.brennwertKcal, ' kcal');
+  pushRow('Fett', brandMerged.fett, nonameMerged.fett, ' g');
+  pushRow('davon gesättigt', brandMerged.gesaettigt, nonameMerged.gesaettigt, ' g');
+  pushRow('Kohlenhydrate', brandMerged.kohlenhydrate, nonameMerged.kohlenhydrate, ' g');
+  pushRow('davon Zucker', brandMerged.zucker, nonameMerged.zucker, ' g');
+  pushRow('Eiweiß', brandMerged.eiweiss, nonameMerged.eiweiss, ' g');
+  pushRow('Salz', brandMerged.salz, nonameMerged.salz, ' g');
 
   if (rows.length === 0) {
     return (
@@ -2812,7 +2939,9 @@ function NutritionTable({
               textAlign: 'center',
             }}
           >
-            Keine Nährwertangaben verfügbar.
+            {fallbackLoading
+              ? 'Lade Nährwerte von OpenFoodFacts …'
+              : 'Keine Nährwertangaben verfügbar.'}
           </Text>
         </View>
       </View>
@@ -2925,6 +3054,43 @@ function NutritionTable({
           </Text>
         </View>
       ))}
+      {brandUsedFallback || nonameUsedFallback ? (
+        <OpenFoodSourceCaption theme={theme} />
+      ) : null}
+    </View>
+  );
+}
+
+/** Kleine Caption "Daten via OpenFoodFacts" — wird unter Cards
+ *  angezeigt deren Werte (Zutaten oder Nährwerte) als Fallback aus
+ *  OpenFood kommen. Transparenz fürs der User: nicht jede Daten-
+ *  zeile ist offiziell verifiziert. */
+function OpenFoodSourceCaption({
+  theme,
+}: {
+  theme: ReturnType<typeof useTokens>['theme'];
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 8,
+      }}
+    >
+      <MaterialCommunityIcons name="web" size={11} color={theme.textMuted} />
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 10,
+          color: theme.textMuted,
+          letterSpacing: 0.2,
+        }}
+      >
+        Quelle: OpenFoodFacts
+      </Text>
     </View>
   );
 }

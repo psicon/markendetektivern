@@ -38,17 +38,49 @@ export interface OpenFoodProduct {
   found: boolean;                 // Wurde das Produkt gefunden?
 }
 
+/** Firestore `naehrwerte`-Schema (per 100g). Stimmt mit den Keys
+ *  überein die `NutritionTable` im comparison-Screen erwartet. */
+export interface NaehrwerteShape {
+  brennwertKcal?: number;
+  energie?: number;
+  fett?: number;
+  gesaettigteFettsaeuren?: number;
+  gesaettigt?: number;
+  kohlenhydrate?: number;
+  zucker?: number;
+  eiweiss?: number;
+  eiweis?: number;
+  salz?: number;
+}
+
 class OpenFoodService {
   private static readonly BASE_URL = 'https://world.openfoodfacts.org/api/v0/product';
   private static readonly CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 Tage (AsyncStorage)
   private static readonly MEMORY_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 Stunden (Memory)
   private static memoryCache = new Map<string, { data: OpenFoodProduct, timestamp: number }>();
+  // Inflight-Dedup — wenn dieselbe EAN parallel mehrfach angefragt
+  // wird (Brand- und NoName-Effekte starten beim Mount ~simultan),
+  // teilt sich das selbe Promise. Verhindert doppelte Network-Hits.
+  private static inflight = new Map<string, Promise<OpenFoodProduct | null>>();
   private static readonly STORAGE_PREFIX = 'openfood_cache_';
 
   /**
    * Lädt Produktdaten von OpenFoodFacts API
    */
   static async getProductByEAN(ean: string): Promise<OpenFoodProduct | null> {
+    // Inflight-Dedup: wenn schon eine Anfrage für diese EAN läuft,
+    // returnen wir das gleiche Promise. Verhindert N×fetch wenn
+    // mehrere Components gleichzeitig anfragen.
+    const inflight = this.inflight.get(ean);
+    if (inflight) return inflight;
+    const promise = this._fetchByEAN(ean).finally(() => {
+      this.inflight.delete(ean);
+    });
+    this.inflight.set(ean, promise);
+    return promise;
+  }
+
+  private static async _fetchByEAN(ean: string): Promise<OpenFoodProduct | null> {
     try {
       // 1. Prüfe Memory Cache (schnellst)
       const memCached = this.memoryCache.get(ean);
@@ -242,10 +274,41 @@ class OpenFoodService {
   }
 
   /**
+   * Mapped OpenFood-`nutriments` (per 100g) auf unser Firestore-
+   * `naehrwerte`-Schema. Returnt nur Felder die OpenFood wirklich
+   * hatte (kein "0" für fehlende Werte). Verwendet von Stufe-3/4/5
+   * comparison-Screen + Stufe-1/2 noname-detail als Fallback wenn
+   * Firestore keine Nährwerte hat.
+   */
+  static toNaehrwerteShape(product?: OpenFoodProduct | null): NaehrwerteShape | null {
+    const n = product?.nutriments;
+    if (!n) return null;
+    const out: NaehrwerteShape = {};
+
+    if (typeof n['energy-kcal_100g'] === 'number') {
+      out.brennwertKcal = Math.round(n['energy-kcal_100g']);
+    } else if (typeof n.energy_100g === 'number') {
+      out.brennwertKcal = Math.round(n.energy_100g / 4.184);
+    }
+    if (typeof n.fat_100g === 'number') out.fett = n.fat_100g;
+    if (typeof n['saturated-fat_100g'] === 'number') {
+      out.gesaettigteFettsaeuren = n['saturated-fat_100g'];
+    }
+    if (typeof n.carbohydrates_100g === 'number') out.kohlenhydrate = n.carbohydrates_100g;
+    if (typeof n.sugars_100g === 'number') out.zucker = n.sugars_100g;
+    if (typeof n.proteins_100g === 'number') out.eiweiss = n.proteins_100g;
+    if (typeof n.salt_100g === 'number') out.salz = n.salt_100g;
+
+    // Wenn nichts ankommt — null statt leeres Object damit Aufrufer
+    // einfacher leere Returns prüfen können.
+    return Object.keys(out).length === 0 ? null : out;
+  }
+
+  /**
    * Cache löschen (für Testing/Debug)
    */
   static clearCache(): void {
-    this.cache.clear();
+    this.memoryCache.clear();
     console.log('🗑️ OpenFood Cache geleert');
   }
 }
