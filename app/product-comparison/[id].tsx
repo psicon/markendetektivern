@@ -884,32 +884,6 @@ export default function ProductComparisonScreen() {
   const nonameHasZutaten = hasIngredients(picked);
   const nonameHasNaehrwerte = hasNaehrwerte(picked);
 
-  // Dev-Diag (Babel transform-remove-console entfernt das im Release).
-  if (mp || picked) {
-    console.log('[Comparison-Screen Gates]', {
-      brandName: (mp as any)?.name ?? '(noch ladend)',
-      brandEans,
-      brandHasZutaten,
-      brandHasNaehrwerte,
-      pickedName: (picked as any)?.name ?? '(kein picked)',
-      pickedEans,
-      nonameHasZutaten,
-      nonameHasNaehrwerte,
-      openFoodLoading: openFoodFallback.loading,
-      openFoodBrandHit: Boolean(openFoodFallback.brand),
-      openFoodNonameHit: Boolean(openFoodFallback.noname),
-      showTabsSection:
-        brandHasZutaten ||
-        nonameHasZutaten ||
-        Boolean(openFoodFallback.brand?.zutaten) ||
-        Boolean(openFoodFallback.noname?.zutaten) ||
-        brandHasNaehrwerte ||
-        nonameHasNaehrwerte ||
-        Boolean(openFoodFallback.brand?.naehrwerte) ||
-        Boolean(openFoodFallback.noname?.naehrwerte),
-    });
-  }
-
   const openFoodFallback = useOpenFoodFallback({
     brand: mp
       ? { eans: brandEans, hasZutaten: brandHasZutaten, hasNaehrwerte: brandHasNaehrwerte }
@@ -943,6 +917,24 @@ export default function ProductComparisonScreen() {
     Boolean(openFoodFallback.brand?.naehrwerte) ||
     Boolean(openFoodFallback.noname?.naehrwerte);
   const showTabsSection = hasAnyIngredients || hasAnyNaehrwerte;
+
+  // Dev-Diag (Babel transform-remove-console entfernt das im Release).
+  if (mp || picked) {
+    console.log('[Comparison-Screen Gates]', {
+      brandName: (mp as any)?.name ?? '(noch ladend)',
+      brandEans,
+      brandHasZutaten,
+      brandHasNaehrwerte,
+      pickedName: (picked as any)?.name ?? '(kein picked)',
+      pickedEans,
+      nonameHasZutaten,
+      nonameHasNaehrwerte,
+      openFoodLoading: openFoodFallback.loading,
+      openFoodBrandHit: Boolean(openFoodFallback.brand),
+      openFoodNonameHit: Boolean(openFoodFallback.noname),
+      showTabsSection,
+    });
+  }
 
   // ─── Handlers ─────────────────────────────────────────────────────────
   const onToggleFav = usePressLock(async (
