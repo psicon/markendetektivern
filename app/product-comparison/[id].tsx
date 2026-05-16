@@ -866,20 +866,63 @@ export default function ProductComparisonScreen() {
   // Firestore-Daten wirklich fehlen UND eine EAN vorhanden ist.
   // Race-safe: bei picked-Wechsel wirft der Hook intern alte
   // Responses weg.
-  const brandEan = (mp as any)?.EAN || (mp as any)?.EANs?.[0] || null;
-  const pickedEan = (picked as any)?.EAN || (picked as any)?.EANs?.[0] || null;
-  const brandHasZutaten = Boolean(
-    String((mp as any)?.zutaten ?? (mp as any)?.moreInformation?.zutaten ?? '').trim(),
-  );
-  const brandHasNaehrwerte = Boolean(
-    (mp as any)?.naehrwerte || (mp as any)?.moreInformation,
-  );
-  const nonameHasZutaten = Boolean(
-    String((picked as any)?.zutaten ?? (picked as any)?.moreInformation?.zutaten ?? '').trim(),
-  );
-  const nonameHasNaehrwerte = Boolean(
-    (picked as any)?.naehrwerte || (picked as any)?.moreInformation,
-  );
+  //
+  // WICHTIG (Bugfix 2026-05-16): Wir prüfen hasNaehrwerte/hasZutaten
+  // VALUE-BASED, nicht EXISTENCE-BASED. moreInformation kann ein
+  // nicht-leeres Object sein (Hersteller-Info etc.) ohne dass es
+  // tatsächlich Nährwerte enthält. Naehrwerte können auch als
+  // { } leeres Object existieren. EAN kann unter `EAN`, `ean`, `gtin`
+  // oder `EANs[]` liegen.
+  const extractEan = (p: any): string | null => {
+    if (!p) return null;
+    const candidates = [p.EAN, p.ean, p.gtin, p.GTIN, p.EANs?.[0], p.eans?.[0]];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim().length >= 8) return c.trim();
+      if (typeof c === 'number' && String(c).length >= 8) return String(c);
+    }
+    return null;
+  };
+  const hasMeaningfulZutaten = (p: any): boolean => {
+    const z =
+      p?.zutaten ?? p?.ingredients ?? p?.moreInformation?.zutaten ?? '';
+    return typeof z === 'string' && z.trim().length > 0;
+  };
+  const hasMeaningfulNaehrwerte = (p: any): boolean => {
+    const n = p?.naehrwerte ?? p?.moreInformation ?? null;
+    if (!n || typeof n !== 'object') return false;
+    // Mindestens EIN bekanntes Nährwert-Feld muss gesetzt sein.
+    const keys = [
+      'brennwertKcal', 'energie', 'fett', 'gesaettigt',
+      'gesaettigteFettsaeuren', 'kohlenhydrate', 'zucker', 'eiweiss',
+      'eiweis', 'salz',
+    ];
+    for (const k of keys) {
+      const v = n[k];
+      if (v != null && v !== '' && !Number.isNaN(Number(v))) return true;
+    }
+    return false;
+  };
+  const brandEan = extractEan(mp);
+  const pickedEan = extractEan(picked);
+  const brandHasZutaten = hasMeaningfulZutaten(mp);
+  const brandHasNaehrwerte = hasMeaningfulNaehrwerte(mp);
+  const nonameHasZutaten = hasMeaningfulZutaten(picked);
+  const nonameHasNaehrwerte = hasMeaningfulNaehrwerte(picked);
+
+  // Dev-Diag (nicht in Prod): hilft beim Debuggen warum der Fallback
+  // (nicht) feuert. Babel transform-remove-console schluckt das in
+  // Release-Builds.
+  if (mp || picked) {
+    console.log('[OpenFood-Fallback gates]', {
+      brandEan,
+      brandHasZutaten,
+      brandHasNaehrwerte,
+      pickedEan,
+      nonameHasZutaten,
+      nonameHasNaehrwerte,
+    });
+  }
+
   const openFoodFallback = useOpenFoodFallback({
     brand: mp
       ? { ean: brandEan, hasZutaten: brandHasZutaten, hasNaehrwerte: brandHasNaehrwerte }
