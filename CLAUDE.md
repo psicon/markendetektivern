@@ -407,6 +407,25 @@ any future page with tab-style selectors):
 - **Reference implementation**: Stöbern (`app/(tabs)/explore.tsx`).
   Use the same `setPage` + shared scroll-handler pattern as a template.
 
+**Ausnahme: embedded Tabs INSIDE einer ScrollView.** PagerView
+greift vertikale Drags ab und blockiert den parent-ScrollView —
+auf Touch in der PagerView-Region kann die Page nicht mehr nach
+oben/unten gescrollt werden. Plus: PagerView constrained die
+Pages auf seine eigene Höhe, was bei dynamischem Content (z.B.
+unterschiedlich langer Zutaten-Text) zu abgeschnittenem Inhalt
+führt (catch-22 wenn die Höhe über onLayout der Pages bestimmt
+werden soll). Für solche embedded-Tabs (Beispiel:
+`product-comparison/[id].tsx` Inhaltsstoffe/Nährwerte) →
+conditional Render: `{tab === 'X' ? <PageA/> : <PageB/>}`. Tap
+auf SegmentedTabs switched. Kein nativer Swipe — aber die Tabs
+liegen meist nicht im primären User-Flow, dafür funktioniert
+Vertical-Scroll der Page einwandfrei.
+
+PagerView bleibt das richtige Werkzeug wenn die Tabs den ganzen
+Screen einnehmen UND die Pages SELBST scrollbare Listen sind
+(wie in Stöbern) — dort gibt's keinen Konflikt weil die Listen
+die Vertical-Touches behalten.
+
 ### Header chrome → `DetailHeader` (stack screens) or BlurView pattern (tab screens)
 
 - **Stack/detail screens** (`achievements`, `noname-detail/[id]`,

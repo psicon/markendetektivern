@@ -23,7 +23,6 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import PagerView from 'react-native-pager-view';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { usePressLock } from '@/lib/hooks/usePressLock';
@@ -418,17 +417,15 @@ export default function ProductComparisonScreen() {
   // mechanic. Because the section sits INSIDE the page's main
   // ScrollView, PagerView needs an explicit height; we measure each
   // tab's content via onLayout and use the larger of the two.
-  const tabPagerRef = useRef<PagerView | null>(null);
-  const [tabHeights, setTabHeights] = useState<{ ingredients?: number; nutrition?: number }>({});
+  // PagerView wurde entfernt (Bugfix 2026-05-16): PagerView captured
+  // vertikale Drags und blockierte den parent-ScrollView. Bei
+  // embedded-Tabs (im Gegensatz zu full-screen-Tabs in Stöbern)
+  // ist conditional Render mit Tap-Switch die richtige Wahl —
+  // Vertical-Scroll passt durch, Tab-Switch via Tap auf
+  // SegmentedTabs. Siehe CLAUDE.md "Embedded tabs inside ScrollView".
   const onTabChange = (next: Tab) => {
     collapseAllPills();
     setTab(next);
-    tabPagerRef.current?.setPage(next === 'ingredients' ? 0 : 1);
-  };
-  const onTabPagerSelected = (e: { nativeEvent: { position: number } }) => {
-    collapseAllPills();
-    const next: Tab = e.nativeEvent.position === 0 ? 'ingredients' : 'nutrition';
-    setTab((prev) => (prev === next ? prev : next));
   };
   const [carouselIdx, setCarouselIdx] = useState(0);
   const carouselRef = useRef<ScrollView | null>(null);
@@ -907,6 +904,23 @@ export default function ProductComparisonScreen() {
       ? { eans: pickedEans, hasZutaten: nonameHasZutaten, hasNaehrwerte: nonameHasNaehrwerte }
       : null,
   });
+
+  // ─── showTabs Decision ──────────────────────────────────────────
+  // Nur rendern wenn IRGENDETWAS für die Inhaltsstoffe/Naehrwerte-
+  // Tabs vorhanden ist (Firestore ODER OpenFood, brand ODER noname).
+  // Während OpenFood lädt, optimistisch zeigen — sonst Flash-Hide.
+  const hasAnyIngredients =
+    brandHasZutaten ||
+    nonameHasZutaten ||
+    Boolean(openFoodFallback.brand?.zutaten) ||
+    Boolean(openFoodFallback.noname?.zutaten);
+  const hasAnyNaehrwerte =
+    brandHasNaehrwerte ||
+    nonameHasNaehrwerte ||
+    Boolean(openFoodFallback.brand?.naehrwerte) ||
+    Boolean(openFoodFallback.noname?.naehrwerte);
+  const showTabsSection =
+    openFoodFallback.loading || hasAnyIngredients || hasAnyNaehrwerte;
 
   // ─── Handlers ─────────────────────────────────────────────────────────
   const onToggleFav = usePressLock(async (
@@ -2363,17 +2377,24 @@ export default function ProductComparisonScreen() {
         )}
 
         {/* ─── Tabs: Inhaltsstoffe / Nährwerte ─────────────────────
-            Inside the same bottom Crossfade — the tabs reveal in
-            the same wave as the carousel above so the eye sees one
-            top→bottom fade-in. Only mounted when `mp` is non-null
-            (IngredientsMatch / NutritionTable both require a non-
-            null brandProduct).
-            Bei Non-Food-Kategorien (Drogerie, Haushalt, Kosmetik,
-            Tier, …) macht weder "Inhaltsstoffe" (= Zutaten) noch
-            "Nährwerte" Sinn → Tabs werden ausgeblendet. */}
-        {mp && !isNonFoodCategory(
+            Nur sichtbar wenn:
+              • mp existiert
+              • Kategorie ist food-relevant (Drogerie/Haushalt etc.
+                machen Inhaltsstoffe/Nährwerte sinnlos)
+              • IRGENDEINE Datenquelle (Firestore ODER OpenFood) hat
+                etwas zu zeigen — sonst komplett ausblenden
+                (User-Vorgabe 2026-05-16: "wenn nichts verfügbar
+                dann alles ausblenden")
+
+            ConditionalRender statt PagerView (war ein Bug-Generator):
+            PagerView captured vertikale Drags und blockierte die
+            page-level ScrollView. Bei einer in einen ScrollView
+            embedded-Tab-Section ist Tap-Switch die richtige Wahl. */}
+        {mp &&
+        !isNonFoodCategory(
           (mp as any)?.kategorie?.bezeichnung ?? (mp as any)?.kategorie?.name ?? null,
-        ) ? (
+        ) &&
+        showTabsSection ? (
           <>
             <View style={{ marginHorizontal: 20, marginTop: 24 }}>
               <SegmentedTabs
@@ -2386,36 +2407,8 @@ export default function ProductComparisonScreen() {
               />
             </View>
 
-            {/* Hidden Measurer (Bugfix 2026-05-16, "Tabelle unten
-                abgeschnitten"). PagerView begrenzt seine Pages auf
-                seine eigene Höhe — onLayout INSIDE der Pager returnt
-                die constrained Höhe, nicht die intrinsische → catch-
-                22, Pager bleibt bei min-height stecken.
-                Lösung: rendere die gleichen Komponenten OFFSCREEN ohne
-                Höhenbegrenzung, measure DEREN onLayout. Diese Werte
-                geben dem PagerView seine wirkliche Zielhöhe. Doppel-
-                render kostet ein paar ms, akzeptabel — typeface ist
-                memoized. */}
-            <View
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                top: -10000,
-                opacity: 0,
-              }}
-              pointerEvents="none"
-              aria-hidden
-            >
-              <View
-                onLayout={(e) => {
-                  const h = e?.nativeEvent?.layout?.height;
-                  if (typeof h !== 'number') return;
-                  setTabHeights((prev) =>
-                    prev.ingredients === h ? prev : { ...prev, ingredients: h },
-                  );
-                }}
-              >
+            <View>
+              {tab === 'ingredients' ? (
                 <IngredientsMatch
                   brandProduct={mp}
                   noname={picked}
@@ -2424,16 +2417,7 @@ export default function ProductComparisonScreen() {
                   nonameFallback={openFoodFallback.noname?.zutaten}
                   fallbackLoading={openFoodFallback.loading}
                 />
-              </View>
-              <View
-                onLayout={(e) => {
-                  const h = e?.nativeEvent?.layout?.height;
-                  if (typeof h !== 'number') return;
-                  setTabHeights((prev) =>
-                    prev.nutrition === h ? prev : { ...prev, nutrition: h },
-                  );
-                }}
-              >
+              ) : (
                 <NutritionTable
                   brandProduct={mp}
                   noname={picked}
@@ -2443,46 +2427,8 @@ export default function ProductComparisonScreen() {
                   nonameFallback={openFoodFallback.noname?.naehrwerte}
                   fallbackLoading={openFoodFallback.loading}
                 />
-              </View>
+              )}
             </View>
-
-            {/* Visible PagerView — height kommt aus der Hidden-
-                Messung oben. Min 320 damit der erste Frame nicht
-                kollabiert; danach übernimmt die echte Messung. */}
-            <PagerView
-              ref={tabPagerRef}
-              style={{
-                height: Math.max(
-                  tabHeights.ingredients ?? 0,
-                  tabHeights.nutrition ?? 0,
-                  320,
-                ),
-              }}
-              initialPage={0}
-              onPageSelected={onTabPagerSelected}
-            >
-              <View key="ingredients">
-                <IngredientsMatch
-                  brandProduct={mp}
-                  noname={picked}
-                  theme={theme}
-                  brandFallback={openFoodFallback.brand?.zutaten}
-                  nonameFallback={openFoodFallback.noname?.zutaten}
-                  fallbackLoading={openFoodFallback.loading}
-                />
-              </View>
-              <View key="nutrition">
-                <NutritionTable
-                  brandProduct={mp}
-                  noname={picked}
-                  theme={theme}
-                  primary={brand.primary}
-                  brandFallback={openFoodFallback.brand?.naehrwerte}
-                  nonameFallback={openFoodFallback.noname?.naehrwerte}
-                  fallbackLoading={openFoodFallback.loading}
-                />
-              </View>
-            </PagerView>
           </>
         ) : null}
           </View>
