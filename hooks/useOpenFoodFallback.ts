@@ -9,34 +9,20 @@
  * konservativ (nur fetchen wenn wirklich nötig) und race-safe
  * (späterer `picked`-Wechsel verwirft veraltete Responses).
  *
- * API:
- *   useOpenFoodFallback({
- *     brand: { ean, hasZutaten, hasNaehrwerte },
- *     noname: { ean, hasZutaten, hasNaehrwerte },
- *   })
- *
- * Returnt:
- *   {
- *     brand:  { zutaten?: string, naehrwerte?: NaehrwerteShape } | null,
- *     noname: { zutaten?: string, naehrwerte?: NaehrwerteShape } | null,
- *     loading: boolean,
- *   }
- *
- * `null` bedeutet "OpenFood hat kein Produkt zu dieser EAN" oder
- * "kein Fallback nötig" (Firestore hat die Daten schon, EAN fehlt,
- * oder es wurde gar nicht gefetcht).
+ * Multi-EAN-Support (User-Vorgabe 2026-05-16): pro Produkt werden
+ * ALLE bekannten EANs (`EANs[]`, `EAN`, `gtin`, …) sequentiell
+ * probiert — 1. Treffer wins, keine weiteren Requests danach.
  */
 
 import { useEffect, useState } from 'react';
 
-import OpenFoodService, {
-  type NaehrwerteShape,
-  type OpenFoodProduct,
-} from '@/lib/services/openfood';
+import OpenFoodService, { type OpenFoodProduct } from '@/lib/services/openfood';
+import type { NaehrwerteShape } from '@/lib/utils/productNutrition';
 
 export interface OpenFoodFallbackProductInput {
-  /** EAN oder undefined wenn Produkt keine EAN hat. */
-  ean?: string | null;
+  /** Alle EAN-Kandidaten in Reihenfolge. Leere Strings / Nullen
+   *  werden ignoriert. */
+  eans: string[];
   /** True wenn Firestore-Zutaten bereits gesetzt sind — dann kein
    *  Fallback nötig. */
   hasZutaten: boolean;
@@ -79,7 +65,7 @@ function buildFallback(
 
 function needsFetch(input?: OpenFoodFallbackProductInput | null): boolean {
   if (!input) return false;
-  if (!input.ean) return false;
+  if (!input.eans || input.eans.length === 0) return false;
   return !input.hasZutaten || !input.hasNaehrwerte;
 }
 
@@ -87,8 +73,10 @@ export function useOpenFoodFallback(
   args: UseOpenFoodFallbackArgs,
 ): UseOpenFoodFallbackReturn {
   const { brand, noname } = args;
-  const brandEan = brand?.ean ?? null;
-  const nonameEan = noname?.ean ?? null;
+  // Wir flatten die EAN-Liste in einen stabilen Key — sonst feuert die
+  // useEffect bei jedem Render neu (Array-Identität wechselt).
+  const brandKey = (brand?.eans ?? []).join(',');
+  const nonameKey = (noname?.eans ?? []).join(',');
   const brandNeed = needsFetch(brand);
   const nonameNeed = needsFetch(noname);
 
@@ -99,7 +87,6 @@ export function useOpenFoodFallback(
   });
 
   useEffect(() => {
-    // Nichts zu tun.
     if (!brandNeed && !nonameNeed) {
       setState({ brand: null, noname: null, loading: false });
       return;
@@ -108,14 +95,13 @@ export function useOpenFoodFallback(
     let alive = true;
     setState((prev) => ({ ...prev, loading: true }));
 
-    // Parallel — beide EANs gleichzeitig fetchen. OpenFoodService
-    // hat Inflight-Dedup + 2-Tier-Cache, also kein Sorgen ums
-    // Round-Trip-Mehr-Volumen.
-    const brandPromise: Promise<OpenFoodProduct | null> = brandNeed && brandEan
-      ? OpenFoodService.getProductByEAN(brandEan)
+    // Multi-EAN: parallel pro Produkt (Brand + Noname zusammen), aber
+    // pro Produkt SEQUENTIELL durch die EAN-Liste — 1. Treffer wins.
+    const brandPromise: Promise<OpenFoodProduct | null> = brandNeed && brand?.eans?.length
+      ? OpenFoodService.getProductByFirstEAN(brand.eans)
       : Promise.resolve(null);
-    const nonamePromise: Promise<OpenFoodProduct | null> = nonameNeed && nonameEan
-      ? OpenFoodService.getProductByEAN(nonameEan)
+    const nonamePromise: Promise<OpenFoodProduct | null> = nonameNeed && noname?.eans?.length
+      ? OpenFoodService.getProductByFirstEAN(noname.eans)
       : Promise.resolve(null);
 
     Promise.all([brandPromise, nonamePromise])
@@ -136,11 +122,10 @@ export function useOpenFoodFallback(
     return () => {
       alive = false;
     };
-    // Dependencies bewusst auf primitive Werte — input-Objects können
-    // bei jedem Render neu sein (inline-Object), das würde sonst eine
-    // Endlos-Loop erzeugen.
+    // Deps bewusst auf primitive Werte. Object-Identität würde bei
+    // jedem Render einen neuen Run triggern.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [brandEan, nonameEan, brandNeed, nonameNeed]);
+  }, [brandKey, nonameKey, brandNeed, nonameNeed]);
 
   return state;
 }

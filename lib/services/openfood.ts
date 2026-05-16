@@ -277,7 +277,40 @@ class OpenFoodService {
   }
 
   /**
-   * Lädt Daten für mehrere EANs parallel
+   * Probiert mehrere EANs SEQUENTIELL (nicht parallel!) und returnt
+   * den ersten Treffer. Used für Produkte mit mehreren EANs/GTINs —
+   * z.B. weil ein Produkt unter unterschiedlichen Codes in Algolia
+   * indexed ist. User-Vorgabe: "bei 1. treffer anzeigen und nicht
+   * weiter ean prüfen".
+   *
+   * Sequentiell statt parallel weil:
+   *   1. Wir wollen rate-limit-conservative sein (Backoff ist global,
+   *      paralleler Storm würde nichts bringen)
+   *   2. Bei Cache-Hit für EAN-1 wird EAN-2 gar nicht erst gefetcht
+   *   3. Negative-Caches greifen: wenn alle EANs schon mal als
+   *      not-found gecached sind, kein einziger Network-Hit.
+   */
+  static async getProductByFirstEAN(
+    eans: string[],
+  ): Promise<OpenFoodProduct | null> {
+    if (!eans || eans.length === 0) return null;
+    for (const ean of eans) {
+      if (!ean) continue;
+      try {
+        const result = await this.getProductByEAN(ean);
+        if (result && result.found) {
+          return result;
+        }
+      } catch (e) {
+        console.warn(`getProductByFirstEAN: EAN ${ean} failed, trying next`, e);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Lädt Daten für mehrere EANs parallel (wird vom Legacy-Code noch
+   * genutzt; für neue Aufrufer ist getProductByFirstEAN besser).
    */
   static async getProductsByEANs(eans: string[]): Promise<Map<string, OpenFoodProduct | null>> {
     console.log(`🌍 Lade OpenFood Daten für ${eans.length} EANs parallel`);
