@@ -113,9 +113,14 @@ async function cleanupStale() {
       const startMs = tsToMillis(data.startTime) || lastUpdatedMs;
       const durationMs = Math.max(0, lastUpdatedMs - startMs);
 
+      // WICHTIG: lastUpdated NICHT anfassen — der leaderboard-
+      // aggregator (03:00) liest lastUpdated als "letzte aktive
+      // Stadt pro User". Würde diese Cleanup-Funktion lastUpdated
+      // auf "jetzt" pushen, würden 1000e stale Journeys plötzlich
+      // als "heute aktiv" gezählt → kaputte Geo-Stats. Doc-Update
+      // mit explizit nur den Finalize-Feldern.
       batch.update(d.ref, {
         completedAt: data.lastUpdated, // use last activity, not now
-        lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
         completionReason: 'stale_cleanup_72h',
         journeyDurationMs: durationMs,
         finalStatus: deriveFinalStatus(data),
@@ -165,6 +170,112 @@ exports.cleanupStaleJourneys = functions
   .onRun(async () => {
     await cleanupStale();
     return null;
+  });
+
+// ─── One-off recovery — restore lastUpdated for docs that the
+// initial buggy cleanup-run (commit a8ef58d) clobbered. Original
+// lastUpdated wurde dort als completedAt preserved → kopiere
+// completedAt zurück in lastUpdated bei allen Docs mit
+// completionReason='stale_cleanup_72h'. Idempotent: läuft nur
+// für Docs wo lastUpdated > completedAt (= wurde von Cleanup
+// nachtraeglich gepusht). Nach einmaligem Lauf können wir den
+// Code wieder entfernen.
+async function restoreStaleLastUpdated() {
+  const startedAt = Date.now();
+  // Der initiale Cleanup-Lauf lief zwischen 2026-05-16T08:18:25 und
+  // 08:19:10 (45s). Wir nutzen den bestehenden lastUpdated-collectionGroup-
+  // Index und filtern auf docs mit lastUpdated >= cleanup-start.
+  // completionReason='stale_cleanup_72h' Filter geschieht in-code.
+  const CLEANUP_START = new Date('2026-05-16T08:18:00Z');
+  console.log(
+    `journey-cleanup: RECOVERY — restoring lastUpdated for stale_cleanup_72h docs (touched >= ${CLEANUP_START.toISOString()})`,
+  );
+
+  let totalScanned = 0;
+  let totalRestored = 0;
+  let totalSkipped = 0;
+  let lastDoc = null;
+  let pageNum = 0;
+
+  while (true) {
+    pageNum += 1;
+    let q = db
+      .collectionGroup('journeys')
+      .where('lastUpdated', '>=', admin.firestore.Timestamp.fromDate(CLEANUP_START))
+      .select('lastUpdated', 'completedAt', 'completionReason')
+      .orderBy('lastUpdated', 'asc')
+      .limit(PAGE_SIZE);
+    if (lastDoc) q = q.startAfter(lastDoc);
+
+    const snap = await q.get();
+    if (snap.empty) break;
+
+    const batch = db.batch();
+    let writes = 0;
+
+    snap.forEach((d) => {
+      totalScanned += 1;
+      const data = d.data();
+      // Nur die vom Cleanup berührten Docs anfassen.
+      if (data.completionReason !== 'stale_cleanup_72h') {
+        totalSkipped += 1;
+        return;
+      }
+      const lastMs = tsToMillis(data.lastUpdated);
+      const compMs = tsToMillis(data.completedAt);
+      // Idempotenz: nur restoren wenn lastUpdated > completedAt
+      // (= clobbered von initialem Run). Bei späteren Runs ist
+      // lastUpdated bereits korrekt = completedAt.
+      if (!compMs || lastMs <= compMs) {
+        totalSkipped += 1;
+        return;
+      }
+      batch.update(d.ref, { lastUpdated: data.completedAt });
+      writes += 1;
+    });
+
+    if (writes > 0) {
+      await batch.commit();
+      totalRestored += writes;
+      console.log(
+        `journey-cleanup RECOVERY page ${pageNum}: scanned=${snap.size}, restored=${writes}, skipped=${snap.size - writes}`,
+      );
+    } else {
+      console.log(
+        `journey-cleanup RECOVERY page ${pageNum}: scanned=${snap.size}, none to restore`,
+      );
+    }
+
+    lastDoc = snap.docs[snap.docs.length - 1];
+    if (pageNum > 1000) {
+      console.warn('journey-cleanup RECOVERY: pageNum > 1000, breaking');
+      break;
+    }
+  }
+
+  const elapsedMs = Date.now() - startedAt;
+  console.log(
+    `journey-cleanup RECOVERY DONE — scanned=${totalScanned}, restored=${totalRestored}, skipped=${totalSkipped} in ${elapsedMs} ms`,
+  );
+  return { totalScanned, totalRestored, totalSkipped, elapsedMs };
+}
+
+exports.restoreStaleLastUpdatedManual = functions
+  .region('europe-west1')
+  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .https.onRequest(async (req, res) => {
+    const expected = functions.config()?.journeycleanup?.trigger_key;
+    if (!expected || req.query.key !== expected) {
+      res.status(401).send('Unauthorized');
+      return;
+    }
+    try {
+      const result = await restoreStaleLastUpdated();
+      res.status(200).json(result);
+    } catch (e) {
+      console.error('journey-cleanup RECOVERY failed:', e);
+      res.status(500).send(String(e?.message || e));
+    }
   });
 
 // ─── Manual trigger (HTTP) — for ad-hoc reruns / first deploy ──────────
