@@ -102,6 +102,11 @@ function ThemedApp() {
           getDocs(collection(db, 'handelsmarken')).catch(() => null),
           getDocs(collection(db, 'packungstypen')).catch(() => null),
         ]);
+        // One-shot: alte 429-polluted Negative-Cache-Einträge
+        // bereinigen. Idempotent (löscht nur was wirklich negativ
+        // cached ist, lässt positive Treffer in Ruhe).
+        const { default: OpenFoodService } = await import('@/lib/services/openfood');
+        OpenFoodService.purgeNegativeCacheOnce().catch(() => null);
         if (!cancelled) {
           console.log('🔥 Stöbern Reference-Data prewarmed');
         }

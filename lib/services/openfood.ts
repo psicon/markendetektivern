@@ -191,16 +191,21 @@ class OpenFoodService {
         },
       });
 
-      // 429 → Rate-Limit-Backoff aktivieren + negative Antwort cachen
-      // damit folgende Requests nicht direkt erneut feuern.
+      // 429 → Rate-Limit-Backoff aktivieren. Wichtig: KEIN Cache-
+      // Write hier — das Produkt existiert ja möglicherweise auf
+      // OpenFood, wir konnten gerade nur nicht abfragen. Wäre fatal
+      // wenn wir ein gültiges Produkt 24h als "found=false" cachen
+      // weil ein einziger Request 429'd hat. Stattdessen: in-memory
+      // Backoff-Window short-circuitet alle weiteren Requests bis
+      // RATE_LIMIT_BACKOFF_MS abgelaufen ist. Danach probieren wir
+      // wieder normal und cachen erst wenn wir eine echte Antwort
+      // (200 oder echtes not-found) sehen.
       if (response.status === 429) {
         this.rateLimitUntilMs = Date.now() + this.RATE_LIMIT_BACKOFF_MS;
         console.warn(
           `⏸️ OpenFood 429 Rate-Limit — backoff für ${this.RATE_LIMIT_BACKOFF_MS / 1000}s aktiviert`,
         );
-        const notFound: OpenFoodProduct = { code: ean, found: false };
-        this.cacheResult(ean, notFound);
-        return notFound;
+        return { code: ean, found: false };
       }
 
       if (!response.ok) {
@@ -440,7 +445,50 @@ class OpenFoodService {
    */
   static clearCache(): void {
     this.memoryCache.clear();
-    console.log('🗑️ OpenFood Cache geleert');
+    console.log('🗑️ OpenFood Memory Cache geleert');
+  }
+
+  /**
+   * Löscht alle negativen (not-found) Cache-Einträge im Memory- UND
+   * AsyncStorage. Wird einmalig beim App-Start aufgerufen, um
+   * Pollutions aus alten 429-Storm-Phasen zu beseitigen (in denen
+   * vorübergehende Rate-Limit-Antworten fälschlich als 24h-not-found
+   * cached wurden — siehe Commit-History). Positive Treffer bleiben
+   * erhalten.
+   */
+  static async purgeNegativeCacheOnce(): Promise<void> {
+    try {
+      // Memory: alle found=false rauslöschen.
+      for (const [k, v] of this.memoryCache) {
+        if (v.data && !v.data.found) this.memoryCache.delete(k);
+      }
+      // AsyncStorage: alle openfood_cache_* keys lesen, found=false löschen.
+      const allKeys = await AsyncStorage.getAllKeys();
+      const ourKeys = allKeys.filter((k) => k.startsWith(this.STORAGE_PREFIX));
+      if (ourKeys.length === 0) return;
+      const entries = await AsyncStorage.multiGet(ourKeys);
+      const toDelete: string[] = [];
+      for (const [key, raw] of entries) {
+        if (!raw) continue;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed?.data && !parsed.data.found) {
+            toDelete.push(key);
+          }
+        } catch {
+          // corrupt entry — auch löschen
+          toDelete.push(key);
+        }
+      }
+      if (toDelete.length > 0) {
+        await AsyncStorage.multiRemove(toDelete);
+        console.log(
+          `🧹 OpenFood: ${toDelete.length} stale negative Cache-Einträge gelöscht`,
+        );
+      }
+    } catch (e) {
+      console.warn('purgeNegativeCacheOnce failed:', e);
+    }
   }
 }
 

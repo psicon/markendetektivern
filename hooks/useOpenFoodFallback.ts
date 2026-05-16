@@ -14,7 +14,7 @@
  * probiert — 1. Treffer wins, keine weiteren Requests danach.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import OpenFoodService, { type OpenFoodProduct } from '@/lib/services/openfood';
 import type { NaehrwerteShape } from '@/lib/utils/productNutrition';
@@ -86,14 +86,32 @@ export function useOpenFoodFallback(
     loading: false,
   });
 
+  // Refs zum Tracken ob die Keys WIRKLICH geändert wurden (vs. nur
+  // brandNeed/nonameNeed-Flip). Wichtig fürs Stale-Data-Vermeiden:
+  // wenn picked auf ein anderes Noname switched, ist nonameKey neu,
+  // und wir müssen state.noname clearen — sonst zeigt die Page kurz
+  // die OLD-noname OpenFood-Daten beim NEW-noname-Switch. Brand
+  // bleibt erhalten wenn nur Noname switched (kein unnötiger Flash).
+  const prevBrandKey = useRef(brandKey);
+  const prevNonameKey = useRef(nonameKey);
+
   useEffect(() => {
+    const brandChanged = prevBrandKey.current !== brandKey;
+    const nonameChanged = prevNonameKey.current !== nonameKey;
+    prevBrandKey.current = brandKey;
+    prevNonameKey.current = nonameKey;
+
     if (!brandNeed && !nonameNeed) {
       setState({ brand: null, noname: null, loading: false });
       return;
     }
 
     let alive = true;
-    setState((prev) => ({ ...prev, loading: true }));
+    setState((prev) => ({
+      brand: brandChanged ? null : prev.brand,
+      noname: nonameChanged ? null : prev.noname,
+      loading: true,
+    }));
 
     // Multi-EAN: parallel pro Produkt (Brand + Noname zusammen), aber
     // pro Produkt SEQUENTIELL durch die EAN-Liste — 1. Treffer wins.
