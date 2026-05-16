@@ -98,9 +98,12 @@ class OpenFoodService {
   // OFF das Produkt später crowdsourcing-mäßig bekommt.
   private static readonly NEGATIVE_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24h
   // Rate-Limit-Backoff: wenn wir 429 sehen, blocken wir ALLE OpenFood-
-  // Requests für eine Weile. Das verhindert dass mehrere Screen-Mounts
-  // hintereinander den 429-Storm verstärken.
-  private static readonly RATE_LIMIT_BACKOFF_MS = 5 * 60 * 1000; // 5 min
+  // Requests für eine Weile. 30s — kurz genug dass ein einmaliges 429
+  // (z.B. weil ein Bulk-Fetch zu schnell kam) nicht ALLE anderen
+  // EANs derselben Page blockiert; lang genug dass ein echter Quota-
+  // Hit nicht sofort wieder hammered. Mit korrekt gesetztem User-Agent
+  // ist 429 ohnehin selten.
+  private static readonly RATE_LIMIT_BACKOFF_MS = 30 * 1000; // 30 s
   private static rateLimitUntilMs = 0;
 
   private static memoryCache = new Map<string, { data: OpenFoodProduct, timestamp: number }>();
@@ -298,18 +301,40 @@ class OpenFoodService {
   static async getProductByFirstEAN(
     eans: string[],
   ): Promise<OpenFoodProduct | null> {
-    if (!eans || eans.length === 0) return null;
+    if (!eans || eans.length === 0) {
+      console.log('[OpenFood iter] keine EANs übergeben → skip');
+      return null;
+    }
+    console.log(`[OpenFood iter] starte für ${eans.length} EAN(s): ${eans.join(', ')}`);
+    let i = 0;
     for (const ean of eans) {
-      if (!ean) continue;
+      i += 1;
+      if (!ean) {
+        console.log(`[OpenFood iter] ${i}/${eans.length}: empty EAN, skip`);
+        continue;
+      }
       try {
         const result = await this.getProductByEAN(ean);
         if (result && result.found) {
+          console.log(
+            `[OpenFood iter] ${i}/${eans.length}: ${ean} → ✅ HIT (${result.product_name ?? 'unbenannt'})`,
+          );
           return result;
+        } else {
+          console.log(
+            `[OpenFood iter] ${i}/${eans.length}: ${ean} → not found, weiter`,
+          );
         }
       } catch (e) {
-        console.warn(`getProductByFirstEAN: EAN ${ean} failed, trying next`, e);
+        console.warn(
+          `[OpenFood iter] ${i}/${eans.length}: ${ean} → Error, weiter`,
+          e,
+        );
       }
     }
+    console.log(
+      `[OpenFood iter] alle ${eans.length} EANs durchgeprüft, kein Treffer`,
+    );
     return null;
   }
 

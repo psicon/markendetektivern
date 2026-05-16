@@ -886,13 +886,27 @@ export default function ProductComparisonScreen() {
 
   // Dev-Diag (Babel transform-remove-console entfernt das im Release).
   if (mp || picked) {
-    console.log('[OpenFood-Fallback gates]', {
+    console.log('[Comparison-Screen Gates]', {
+      brandName: (mp as any)?.name ?? '(noch ladend)',
       brandEans,
       brandHasZutaten,
       brandHasNaehrwerte,
+      pickedName: (picked as any)?.name ?? '(kein picked)',
       pickedEans,
       nonameHasZutaten,
       nonameHasNaehrwerte,
+      openFoodLoading: openFoodFallback.loading,
+      openFoodBrandHit: Boolean(openFoodFallback.brand),
+      openFoodNonameHit: Boolean(openFoodFallback.noname),
+      showTabsSection:
+        brandHasZutaten ||
+        nonameHasZutaten ||
+        Boolean(openFoodFallback.brand?.zutaten) ||
+        Boolean(openFoodFallback.noname?.zutaten) ||
+        brandHasNaehrwerte ||
+        nonameHasNaehrwerte ||
+        Boolean(openFoodFallback.brand?.naehrwerte) ||
+        Boolean(openFoodFallback.noname?.naehrwerte),
     });
   }
 

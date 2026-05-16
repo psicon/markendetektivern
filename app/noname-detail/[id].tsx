@@ -598,6 +598,19 @@ export default function NoNameDetailScreen() {
     productHasNaehrwerte || Boolean(openFoodFallback.brand?.naehrwerte);
   const showFoodTabsSection = hasAnyZutatenForP || hasAnyNaehrwerteForP;
 
+  // Dev-Diag (Babel transform-remove-console entfernt das im Release).
+  if (p) {
+    console.log('[NoName-Detail Gates]', {
+      productName: (p as any)?.name ?? '(unbenannt)',
+      productEans,
+      productHasZutaten,
+      productHasNaehrwerte,
+      openFoodLoading: openFoodFallback.loading,
+      openFoodHit: Boolean(openFoodFallback.brand),
+      showFoodTabsSection,
+    });
+  }
+
   const packInfo = p
     ? formatPack(
         p.packSize,
