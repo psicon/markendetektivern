@@ -32,7 +32,7 @@ import {
   DetailHeader,
   DETAIL_HEADER_ROW_HEIGHT,
 } from '@/components/design/DetailHeader';
-import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { storage } from '@/lib/firebase';
@@ -447,10 +447,10 @@ export default function CashbackPendingScreen() {
           >
             <MaterialCommunityIcons name="information-outline" size={18} color="#b08800" />
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={{ color: theme.text, fontFamily: fontFamily.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
+              <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
                 Diesen Bon hattest du schon eingereicht
               </Text>
-              <Text style={{ color: theme.textSub, fontFamily: fontFamily.body, fontSize: 13, marginTop: 2, lineHeight: 18 }}>
+              <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 13, marginTop: 2, lineHeight: 18 }}>
                 Wir zeigen dir den ursprünglichen Eintrag — du wirst nicht doppelt belohnt, aber auch nicht doppelt belastet.
               </Text>
             </View>
@@ -491,7 +491,7 @@ export default function CashbackPendingScreen() {
             <Text
               style={{
                 color: theme.text,
-                fontFamily: fontFamily.heading,
+                fontFamily: fontFamilyVariants.heading,
                 fontWeight: fontWeight.bold as any,
                 fontSize: 20,
                 textAlign: 'center',
@@ -503,7 +503,7 @@ export default function CashbackPendingScreen() {
               <Text
                 style={{
                   color: primary,
-                  fontFamily: fontFamily.heading,
+                  fontFamily: fontFamilyVariants.heading,
                   fontWeight: fontWeight.extraBold as any,
                   fontSize: 38,
                   letterSpacing: -0.5,
@@ -515,7 +515,7 @@ export default function CashbackPendingScreen() {
             <Text
               style={{
                 color: theme.textSub,
-                fontFamily: fontFamily.body,
+                fontFamily: fontFamilyVariants.body,
                 fontSize: 14,
                 lineHeight: 20,
                 textAlign: 'center',
@@ -568,7 +568,7 @@ export default function CashbackPendingScreen() {
                 <Text
                   style={{
                     color: '#fff',
-                    fontFamily: fontFamily.body,
+                    fontFamily: fontFamilyVariants.body,
                     fontWeight: fontWeight.bold as any,
                     fontSize: 14,
                   }}
@@ -640,7 +640,7 @@ export default function CashbackPendingScreen() {
                 numberOfLines={2}
                 style={{
                   color: theme.text,
-                  fontFamily: fontFamily.heading,
+                  fontFamily: fontFamilyVariants.heading,
                   fontWeight: fontWeight.extraBold as any,
                   fontSize: 22,
                   letterSpacing: -0.3,
@@ -651,7 +651,7 @@ export default function CashbackPendingScreen() {
               {bonDate ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
                   <MaterialCommunityIcons name="calendar-outline" size={14} color={theme.textSub} />
-                  <Text style={{ color: theme.textSub, fontFamily: fontFamily.body, fontSize: 13 }}>
+                  <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 13 }}>
                     {bonDate}
                   </Text>
                 </View>
@@ -664,11 +664,11 @@ export default function CashbackPendingScreen() {
         {items.length > 0 && (state === 'approved' || state === 'rejected' || state === 'review') ? (
           <View style={{ marginHorizontal: 16, marginTop: 18 }}>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
-              <Text style={{ color: theme.textSub, fontFamily: fontFamily.body, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+              <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6 }}>
                 Erkannte Artikel ({items.length})
               </Text>
               {doc?.eligibleItemCount !== undefined ? (
-                <Text style={{ color: theme.textSub, fontFamily: fontFamily.body, fontSize: 12 }}>
+                <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 12 }}>
                   {doc.eligibleItemCount} zählen für Cashback
                 </Text>
               ) : null}
@@ -718,7 +718,7 @@ export default function CashbackPendingScreen() {
                         numberOfLines={2}
                         style={{
                           color: theme.text,
-                          fontFamily: fontFamily.body,
+                          fontFamily: fontFamilyVariants.body,
                           fontSize: 14,
                           fontWeight: fontWeight.medium as any,
                         }}
@@ -726,7 +726,7 @@ export default function CashbackPendingScreen() {
                         {it.name || '(unbekannt)'}
                       </Text>
                       {it.qty && it.qty !== 1 ? (
-                        <Text style={{ color: theme.textSub, fontFamily: fontFamily.body, fontSize: 12, marginTop: 2 }}>
+                        <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 12, marginTop: 2 }}>
                           Menge: {it.qty}
                         </Text>
                       ) : null}
@@ -734,7 +734,7 @@ export default function CashbackPendingScreen() {
                     <Text
                       style={{
                         color: theme.text,
-                        fontFamily: fontFamily.body,
+                        fontFamily: fontFamilyVariants.body,
                         fontWeight: fontWeight.bold as any,
                         fontSize: 14,
                       }}
@@ -759,10 +759,10 @@ export default function CashbackPendingScreen() {
                 }}
               >
                 <View style={{ width: 22 }} />
-                <Text style={{ flex: 1, color: theme.textSub, fontFamily: fontFamily.body, fontSize: 13, fontWeight: fontWeight.medium as any }}>
+                <Text style={{ flex: 1, color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 13, fontWeight: fontWeight.medium as any }}>
                   Σ Artikel
                 </Text>
-                <Text style={{ color: theme.text, fontFamily: fontFamily.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
+                <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
                   {formatCents(sumItemsCents)}
                 </Text>
               </View>
@@ -781,10 +781,10 @@ export default function CashbackPendingScreen() {
                   }}
                 >
                   <View style={{ width: 22 }} />
-                  <Text style={{ flex: 1, color: theme.text, fontFamily: fontFamily.body, fontSize: 14, fontWeight: fontWeight.bold as any }}>
+                  <Text style={{ flex: 1, color: theme.text, fontFamily: fontFamilyVariants.body, fontSize: 14, fontWeight: fontWeight.bold as any }}>
                     Bon-Endbetrag
                   </Text>
-                  <Text style={{ color: theme.text, fontFamily: fontFamily.heading, fontWeight: fontWeight.extraBold as any, fontSize: 16 }}>
+                  <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.heading, fontWeight: fontWeight.extraBold as any, fontSize: 16 }}>
                     {formatCents(total)}
                   </Text>
                 </View>
@@ -799,7 +799,7 @@ export default function CashbackPendingScreen() {
             <Text
               style={{
                 color: theme.textSub,
-                fontFamily: fontFamily.body,
+                fontFamily: fontFamilyVariants.body,
                 fontSize: 12,
                 textTransform: 'uppercase',
                 letterSpacing: 0.6,
@@ -841,10 +841,10 @@ export default function CashbackPendingScreen() {
             }}
           >
             <MaterialCommunityIcons name="link-off" size={42} color={warn} />
-            <Text style={{ color: theme.text, fontFamily: fontFamily.heading, fontWeight: fontWeight.bold as any, fontSize: 18 }}>
+            <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.heading, fontWeight: fontWeight.bold as any, fontSize: 18 }}>
               Eintrag nicht gefunden
             </Text>
-            <Text style={{ color: theme.textSub, fontFamily: fontFamily.body, fontSize: 13, textAlign: 'center' }}>
+            <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 13, textAlign: 'center' }}>
               Wir konnten diesen Bon-Eintrag nicht laden.
             </Text>
           </View>
@@ -881,7 +881,7 @@ export default function CashbackPendingScreen() {
             opacity: pressed ? 0.85 : 1,
           })}
         >
-          <Text style={{ color: primary, fontFamily: fontFamily.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
+          <Text style={{ color: primary, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
             Meine Bons
           </Text>
         </Pressable>
@@ -908,7 +908,7 @@ export default function CashbackPendingScreen() {
             size={16}
             color="#fff"
           />
-          <Text style={{ color: '#fff', fontFamily: fontFamily.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
+          <Text style={{ color: '#fff', fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
             {state === 'rejected' || state === 'not_found' ? 'Neuer Bon' : 'Fertig'}
           </Text>
         </Pressable>

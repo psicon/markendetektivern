@@ -28,7 +28,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 
-import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { createPendingMirror } from '@/lib/services/cashbackUpload';
@@ -187,7 +187,7 @@ export default function CashbackReviewScreen() {
           flex: 1,
           textAlign: 'center',
           color: '#fff',
-          fontFamily: fontFamily.heading,
+          fontFamily: fontFamilyVariants.heading,
           fontWeight: fontWeight.bold as any,
           fontSize: 16,
         },
@@ -213,7 +213,7 @@ export default function CashbackReviewScreen() {
         },
         sectionTitle: {
           color: theme.text,
-          fontFamily: fontFamily.body,
+          fontFamily: fontFamilyVariants.body,
           fontWeight: fontWeight.bold as any,
           fontSize: 14,
           marginBottom: 8,
@@ -240,13 +240,13 @@ export default function CashbackReviewScreen() {
         },
         checkLabel: {
           color: theme.text,
-          fontFamily: fontFamily.body,
+          fontFamily: fontFamilyVariants.body,
           fontWeight: fontWeight.bold as any,
           fontSize: 14,
         },
         checkSub: {
           color: theme.textSub,
-          fontFamily: fontFamily.body,
+          fontFamily: fontFamilyVariants.body,
           fontSize: 12,
           marginTop: 2,
         },
@@ -272,7 +272,7 @@ export default function CashbackReviewScreen() {
         },
         ctaPrimaryText: {
           color: looksReady ? '#fff' : theme.textMuted ?? '#888',
-          fontFamily: fontFamily.body,
+          fontFamily: fontFamilyVariants.body,
           fontWeight: fontWeight.bold as any,
         },
         ctaSecondary: {
@@ -281,7 +281,7 @@ export default function CashbackReviewScreen() {
         },
         ctaSecondaryText: {
           color: theme.primary ?? '#0d8575',
-          fontFamily: fontFamily.body,
+          fontFamily: fontFamilyVariants.body,
           fontWeight: fontWeight.bold as any,
         },
       }),
@@ -358,7 +358,7 @@ export default function CashbackReviewScreen() {
               }}
             >
               <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#d6603a" />
-              <Text style={{ color: '#d6603a', fontFamily: fontFamily.body, fontSize: 13, flex: 1, lineHeight: 18 }}>
+              <Text style={{ color: '#d6603a', fontFamily: fontFamilyVariants.body, fontSize: 13, flex: 1, lineHeight: 18 }}>
                 {submitError}
               </Text>
             </View>

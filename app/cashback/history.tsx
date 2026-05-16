@@ -27,7 +27,7 @@ import {
   DetailHeader,
   DETAIL_HEADER_ROW_HEIGHT,
 } from '@/components/design/DetailHeader';
-import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import {
@@ -208,7 +208,7 @@ export default function CashbackHistoryScreen() {
             numberOfLines={1}
             style={{
               color: theme.text,
-              fontFamily: fontFamily.body,
+              fontFamily: fontFamilyVariants.body,
               fontWeight: fontWeight.bold as any,
               fontSize: 15,
             }}
@@ -220,7 +220,7 @@ export default function CashbackHistoryScreen() {
               style={{
                 color: v.color,
                 backgroundColor: v.bg,
-                fontFamily: fontFamily.body,
+                fontFamily: fontFamilyVariants.body,
                 fontWeight: fontWeight.medium as any,
                 fontSize: 11,
                 paddingHorizontal: 8,
@@ -235,7 +235,7 @@ export default function CashbackHistoryScreen() {
               numberOfLines={1}
               style={{
                 color: theme.textSub,
-                fontFamily: fontFamily.body,
+                fontFamily: fontFamilyVariants.body,
                 fontSize: 12,
               }}
             >
@@ -251,7 +251,7 @@ export default function CashbackHistoryScreen() {
             <Text
               style={{
                 color: primary,
-                fontFamily: fontFamily.heading,
+                fontFamily: fontFamilyVariants.heading,
                 fontWeight: fontWeight.extraBold as any,
                 fontSize: 16,
                 letterSpacing: -0.2,
@@ -263,7 +263,7 @@ export default function CashbackHistoryScreen() {
             <Text
               style={{
                 color: theme.textMuted ?? theme.textSub,
-                fontFamily: fontFamily.body,
+                fontFamily: fontFamilyVariants.body,
                 fontSize: 13,
               }}
             >
@@ -315,7 +315,7 @@ export default function CashbackHistoryScreen() {
         <Text
           style={{
             color: theme.textSub,
-            fontFamily: fontFamily.body,
+            fontFamily: fontFamilyVariants.body,
             fontSize: 12,
             textTransform: 'uppercase',
             letterSpacing: 0.6,
@@ -326,7 +326,7 @@ export default function CashbackHistoryScreen() {
         <Text
           style={{
             color: theme.text,
-            fontFamily: fontFamily.heading,
+            fontFamily: fontFamilyVariants.heading,
             fontWeight: fontWeight.extraBold as any,
             fontSize: 24,
             letterSpacing: -0.4,
@@ -338,7 +338,7 @@ export default function CashbackHistoryScreen() {
         <Text
           style={{
             color: theme.textSub,
-            fontFamily: fontFamily.body,
+            fontFamily: fontFamilyVariants.body,
             fontSize: 12,
             marginTop: 2,
           }}
@@ -363,7 +363,7 @@ export default function CashbackHistoryScreen() {
         <Text
           style={{
             color: '#fff',
-            fontFamily: fontFamily.body,
+            fontFamily: fontFamilyVariants.body,
             fontWeight: fontWeight.bold as any,
             fontSize: 13,
           }}
@@ -393,7 +393,7 @@ export default function CashbackHistoryScreen() {
       <Text
         style={{
           color: theme.text,
-          fontFamily: fontFamily.body,
+          fontFamily: fontFamilyVariants.body,
           fontWeight: fontWeight.bold as any,
           fontSize: 16,
         }}
@@ -403,7 +403,7 @@ export default function CashbackHistoryScreen() {
       <Text
         style={{
           color: theme.textSub,
-          fontFamily: fontFamily.body,
+          fontFamily: fontFamilyVariants.body,
           fontSize: 13,
           textAlign: 'center',
           maxWidth: 260,
@@ -427,7 +427,7 @@ export default function CashbackHistoryScreen() {
         })}
       >
         <MaterialCommunityIcons name="camera-outline" size={16} color="#fff" />
-        <Text style={{ color: '#fff', fontFamily: fontFamily.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
+        <Text style={{ color: '#fff', fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
           Bon scannen
         </Text>
       </Pressable>

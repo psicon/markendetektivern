@@ -108,6 +108,31 @@ Recent-Sessions.
   das native UIScrollView (statt Animated.ScrollView) sauber
   detect'tet — sonst greift `scrollsToTop` auf Lib-Ebene gar nicht.
 
+- **Android + `fontFamily` + `fontWeight` mit custom fonts.**
+  React Native + Android wendet `fontWeight` NICHT auf custom Fonts
+  an. `{ fontFamily: 'Nunito', fontWeight: '700' }` schickt Android
+  auf die Suche nach einer Font NAMENS "Nunito", findet keine
+  (weil nur `Nunito_400Regular`, `Nunito_500Medium`,
+  `Nunito_600SemiBold`, `Nunito_700Bold` via
+  `@expo-google-fonts/nunito` geladen sind) und fällt KOMMENTARLOS
+  auf System-Default zurück. iOS dagegen resolvet das nativ
+  korrekt — der Bug bleibt also lokal auf Android. Auf iOS-Devices
+  sieht alles richtig aus, auf Android renderten dann ~440 Callsites
+  (alle die `{ fontFamily, fontWeight: fontWeight.X }` aus
+  `@/constants/tokens` nutzen) in System-Sans-Serif statt Nunito.
+  Lösung: `lib/utils/androidTextFontPatch.ts` als Side-effect-Import
+  in `app/_layout.tsx` ganz oben. Patcht `Text.render` und
+  `TextInput.render` auf Android — wenn `fontFamily === 'Nunito'`,
+  resolvet zur expliziten Nunito_XXX Variante gemäß fontWeight.
+  Separat: in `constants/tokens/typography.ts` gibt's
+  `fontFamilyVariants.{regular,medium,semibold,bold,heading,body}`
+  und `nunitoFont(weight)` für Code der direkt die explizite
+  Variante setzen will (SVG-Text, Skia-Text, andere Stellen die
+  nicht durchs Text-Render gehen). NIE wieder
+  `{ fontFamily: 'Nunito', fontWeight: X }` einführen ohne sich
+  sicher zu sein dass entweder der Patch greift ODER die explizite
+  Variante gesetzt ist.
+
 - **KVC `setValue:forKey:` auf undokumentierte iOS-Properties.**
   Im Mai 2026 versucht `VNDocumentCameraViewController.setValue(false,
   forKey: "autoScansEnabled")` einzubauen um Apple's Auto-Shutter

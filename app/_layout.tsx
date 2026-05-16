@@ -1,3 +1,10 @@
+// ─── Side-effect import: patcht Text.render & TextInput.render auf
+// Android damit `{ fontFamily: 'Nunito', fontWeight: X }` zu der
+// expliziten Nunito_XXX Family resolvt wird (Android wendet weight
+// nicht auf custom fonts an → ohne Patch fallen ~440 Callsites auf
+// System-Default). Muss VOR jedem Text-Render geladen sein, daher
+// erste Zeile. Siehe lib/utils/androidTextFontPatch.ts.
+import '@/lib/utils/androidTextFontPatch';
 import { Toasts } from '@backpackapp-io/react-native-toast';
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
 import Constants from 'expo-constants';

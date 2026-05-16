@@ -39,7 +39,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { fontFamily, fontWeight } from '@/constants/tokens';
+import { fontFamilyVariants, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { hasValidCashbackConsent } from '@/lib/services/cashbackService';
@@ -385,7 +385,7 @@ export default function CashbackCaptureScreen() {
             <Text
               style={{
                 color: theme.text ?? '#191c1d',
-                fontFamily: fontFamily.body,
+                fontFamily: fontFamilyVariants.body,
                 fontWeight: fontWeight.bold as any,
                 fontSize: 15,
               }}
@@ -510,12 +510,12 @@ const styles = StyleSheet.create({
   permLoading: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
   permGate: { flex: 1, backgroundColor: '#0a0a0a' },
   permCenter: { flex: 1, paddingHorizontal: 32, alignItems: 'center', justifyContent: 'center', gap: 14 },
-  permTitle: { color: '#fff', fontFamily: fontFamily.heading, fontWeight: fontWeight.bold as any, fontSize: 20, marginTop: 8 },
-  permBody: { color: 'rgba(255,255,255,0.78)', fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  permTitle: { color: '#fff', fontFamily: fontFamilyVariants.heading, fontWeight: fontWeight.bold as any, fontSize: 20, marginTop: 8 },
+  permBody: { color: 'rgba(255,255,255,0.78)', fontFamily: fontFamilyVariants.body, fontSize: 14, lineHeight: 20, textAlign: 'center' },
   primaryButton: { marginTop: 20, backgroundColor: '#0d8575', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14 },
-  primaryButtonText: { color: '#fff', fontFamily: fontFamily.body, fontWeight: fontWeight.bold as any },
+  primaryButtonText: { color: '#fff', fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any },
   secondaryButton: { marginTop: 6, paddingHorizontal: 24, paddingVertical: 12 },
-  secondaryButtonText: { color: 'rgba(255,255,255,0.78)', fontFamily: fontFamily.body, fontSize: 14 },
+  secondaryButtonText: { color: 'rgba(255,255,255,0.78)', fontFamily: fontFamilyVariants.body, fontSize: 14 },
   topBar: {
     position: 'absolute',
     top: 0,
@@ -529,8 +529,8 @@ const styles = StyleSheet.create({
   },
   iconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   titleBlock: { flex: 1, alignItems: 'center' },
-  title: { color: '#fff', fontFamily: fontFamily.heading, fontWeight: fontWeight.bold as any, fontSize: 16 },
-  subtitle: { color: 'rgba(255,255,255,0.78)', fontFamily: fontFamily.body, fontSize: 12, marginTop: 2 },
+  title: { color: '#fff', fontFamily: fontFamilyVariants.heading, fontWeight: fontWeight.bold as any, fontSize: 16 },
+  subtitle: { color: 'rgba(255,255,255,0.78)', fontFamily: fontFamilyVariants.body, fontSize: 12, marginTop: 2 },
   frameWrap: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
   frame: { width: FRAME_WIDTH, height: FRAME_HEIGHT },
   corner: { position: 'absolute', width: CORNER_LEN, height: CORNER_LEN, borderColor: '#ffd44b' },
@@ -548,7 +548,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 999,
   },
-  helperText: { color: '#fff', fontFamily: fontFamily.body, fontSize: 12 },
+  helperText: { color: '#fff', fontFamily: fontFamilyVariants.body, fontSize: 12 },
   bottomBar: {
     position: 'absolute',
     bottom: 0,
