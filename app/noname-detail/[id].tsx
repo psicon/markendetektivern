@@ -13,6 +13,8 @@ import {
 import Animated, {
   Easing,
   Extrapolation,
+  FadeIn,
+  FadeOut,
   interpolate,
   runOnJS,
   useAnimatedScrollHandler,
@@ -596,7 +598,11 @@ export default function NoNameDetailScreen() {
     productHasZutaten || Boolean(openFoodFallback.brand?.zutaten);
   const hasAnyNaehrwerteForP =
     productHasNaehrwerte || Boolean(openFoodFallback.brand?.naehrwerte);
-  const showFoodTabsSection = hasAnyZutatenForP || hasAnyNaehrwerteForP;
+  const hasAnyDataForP = hasAnyZutatenForP || hasAnyNaehrwerteForP;
+  // Container sichtbar während OpenFood lädt (zeigt Shimmer drin)
+  // ODER wenn Daten da sind. Final no-data → Container faded smooth
+  // weg via Reanimated FadeOut.
+  const showFoodTabsSection = openFoodFallback.loading || hasAnyDataForP;
 
   // Dev-Diag (Babel transform-remove-console entfernt das im Release).
   if (p) {
@@ -1573,7 +1579,10 @@ export default function NoNameDetailScreen() {
                 Comparison-Screen + CLAUDE.md Ausnahme-Regel).
                 Vertical-Scroll bleibt erhalten. */}
             {p && !hideFoodTabs && showFoodTabsSection ? (
-              <>
+              <Animated.View
+                entering={FadeIn.duration(280)}
+                exiting={FadeOut.duration(280)}
+              >
                 <View style={{ marginHorizontal: 20, marginTop: 20 }}>
                   <SegmentedTabs
                     tabs={[
@@ -1592,9 +1601,10 @@ export default function NoNameDetailScreen() {
                     shadows={shadows}
                     fallbackZutaten={openFoodFallback.brand?.zutaten}
                     fallbackNaehrwerte={openFoodFallback.brand?.naehrwerte}
+                    fallbackLoading={openFoodFallback.loading}
                   />
                 </View>
-              </>
+              </Animated.View>
             ) : null}
 
             {/* (Detektiv-Check-Zeile sitzt oberhalb der Tabs, siehe
@@ -1815,6 +1825,7 @@ function SingleInfoCard({
   shadows,
   fallbackZutaten,
   fallbackNaehrwerte,
+  fallbackLoading,
 }: {
   tab: Tab;
   product: any;
@@ -1824,6 +1835,8 @@ function SingleInfoCard({
    *  keine eigenen Daten hat. */
   fallbackZutaten?: string;
   fallbackNaehrwerte?: NaehrwerteShape;
+  /** Während OpenFood lädt und noch nichts da ist → Shimmer-Skeleton. */
+  fallbackLoading?: boolean;
 }) {
   if (tab === 'ingredients') {
     // Priorität: neues nutr_*-Schema → legacy zutaten/moreInformation
@@ -1831,6 +1844,27 @@ function SingleInfoCard({
     const zutatenFromProduct = extractIngredients(product);
     const zutaten = zutatenFromProduct || fallbackZutaten || '';
     const fromOpenFood = !zutatenFromProduct && Boolean(fallbackZutaten);
+
+    // Shimmer während Loading + noch nichts da.
+    if (fallbackLoading && !zutaten) {
+      return (
+        <View style={{ marginHorizontal: 20, marginTop: 18 }}>
+          <View
+            style={{
+              backgroundColor: theme.surface,
+              borderRadius: 14,
+              padding: 16,
+              ...shadows.sm,
+            }}
+          >
+            <Shimmer height={11} radius={3} style={{ marginBottom: 6 }} />
+            <Shimmer height={11} radius={3} style={{ marginBottom: 6 }} />
+            <Shimmer height={11} radius={3} style={{ marginBottom: 6 }} />
+            <Shimmer width="70%" height={11} radius={3} />
+          </View>
+        </View>
+      );
+    }
     return (
       <View style={{ marginHorizontal: 20, marginTop: 18 }}>
         {zutaten ? (
@@ -1903,6 +1937,40 @@ function SingleInfoCard({
   pushRow('Ballaststoffe', n.ballaststoffe, ' g');
   pushRow('Eiweiß', n.eiweiss, ' g');
   pushRow('Salz', n.salz, ' g');
+
+  // Shimmer-Skeleton während Loading + noch keine Daten.
+  if (fallbackLoading && rows.length === 0) {
+    return (
+      <View
+        style={{
+          marginHorizontal: 20,
+          marginTop: 18,
+          backgroundColor: theme.surface,
+          borderRadius: 14,
+          paddingHorizontal: 14,
+          paddingVertical: 4,
+          ...shadows.sm,
+        }}
+      >
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+          <View
+            key={i}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingVertical: 10,
+              borderBottomWidth: i < 7 ? 1 : 0,
+              borderBottomColor: theme.border,
+            }}
+          >
+            <Shimmer width={110} height={11} radius={3} />
+            <Shimmer width={56} height={11} radius={3} />
+          </View>
+        ))}
+      </View>
+    );
+  }
 
   if (rows.length === 0) {
     return (

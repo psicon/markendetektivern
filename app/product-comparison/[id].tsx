@@ -15,6 +15,8 @@ import {
 import Animated, {
   Easing,
   Extrapolation,
+  FadeIn,
+  FadeOut,
   interpolate,
   runOnJS,
   useAnimatedScrollHandler,
@@ -894,18 +896,17 @@ export default function ProductComparisonScreen() {
   });
 
   // ─── showTabs Decision ──────────────────────────────────────────
-  // Simple Logik (User-Vorgabe 2026-05-16): "wenn was da → anzeigen,
-  // wenn nicht, eben nicht". KEIN optimistic "während-loading
-  // anzeigen" — das pop'te beim Empty-Pfad nachträglich wieder weg.
+  // User-Vorgabe (2026-05-16, klargestellt):
+  //   "kann auch danach angezeigt werden (nicht aufpoppen lassen
+  //   sondern schöner shimmer loader)"
   //
-  // Während OpenFood asynchron lädt: showTabsSection bleibt false
-  // SOFERN nicht schon Firestore-Daten da sind. Sobald OpenFood
-  // resolvet:
-  //   • mit Daten → tabs erscheinen (slide-in, kein pop)
-  //   • ohne Daten → tabs bleiben hidden (keine Flash-Sequenz)
-  //
-  // Wenn Brand Daten hat aber Picked nicht (oder umgekehrt) → tabs
-  // werden trotzdem gerendert, eine Seite zeigt '—' / leere Card.
+  // Container ist sichtbar wenn:
+  //   • OpenFood gerade lädt (zeigt Shimmer-Skeleton drin)
+  //   • ODER Firestore/OpenFood haben tatsaechlich Daten
+  // → Beim Page-Open: sofort Shimmer-Container (kein Block der
+  //   Page). Wenn Daten kommen → Crossfade Skeleton zu Inhalt.
+  //   Wenn nichts gefunden wird → Container FadeOut (Reanimated
+  //   exiting={FadeOut}).
   const hasAnyIngredients =
     brandHasZutaten ||
     nonameHasZutaten ||
@@ -916,7 +917,8 @@ export default function ProductComparisonScreen() {
     nonameHasNaehrwerte ||
     Boolean(openFoodFallback.brand?.naehrwerte) ||
     Boolean(openFoodFallback.noname?.naehrwerte);
-  const showTabsSection = hasAnyIngredients || hasAnyNaehrwerte;
+  const hasAnyData = hasAnyIngredients || hasAnyNaehrwerte;
+  const showTabsSection = openFoodFallback.loading || hasAnyData;
 
   // Dev-Diag (Babel transform-remove-console entfernt das im Release).
   if (mp || picked) {
@@ -2409,7 +2411,14 @@ export default function ProductComparisonScreen() {
           (mp as any)?.kategorie?.bezeichnung ?? (mp as any)?.kategorie?.name ?? null,
         ) &&
         showTabsSection ? (
-          <>
+          <Animated.View
+            // FadeIn beim Mount (Daten / Shimmer erscheinen), FadeOut
+            // beim Unmount (kein Treffer nach Loading → smooth weg
+            // statt Snap-Pop). 280 ms ist genug damit's bewusst aber
+            // nicht traege ist.
+            entering={FadeIn.duration(280)}
+            exiting={FadeOut.duration(280)}
+          >
             <View style={{ marginHorizontal: 20, marginTop: 24 }}>
               <SegmentedTabs
                 tabs={[
@@ -2443,7 +2452,7 @@ export default function ProductComparisonScreen() {
                 />
               )}
             </View>
-          </>
+          </Animated.View>
         ) : null}
           </View>
         </Crossfade>
@@ -2726,6 +2735,41 @@ function IngredientsMatch({
   const nonameIngredients = nonameFromFirestore || nonameFallback || '';
   const nonameFromOpenFood = !nonameFromFirestore && Boolean(nonameFallback);
 
+  // Shimmer-Skeleton während OpenFood lädt und noch keine Daten da
+  // sind. Sobald Daten kommen, ersetzt der Skeleton sich selbst durch
+  // die echten Cards.
+  if (fallbackLoading && !brandIngredients && !nonameIngredients) {
+    return (
+      <View style={{ marginHorizontal: 20, marginTop: 18 }}>
+        <View
+          style={{
+            backgroundColor: theme.surface,
+            borderRadius: 14,
+            padding: 16,
+            marginBottom: 12,
+          }}
+        >
+          <Shimmer width={80} height={9} radius={3} style={{ marginBottom: 10 }} />
+          <Shimmer height={11} radius={3} style={{ marginBottom: 6 }} />
+          <Shimmer height={11} radius={3} style={{ marginBottom: 6 }} />
+          <Shimmer width="70%" height={11} radius={3} />
+        </View>
+        <View
+          style={{
+            backgroundColor: theme.surface,
+            borderRadius: 14,
+            padding: 16,
+          }}
+        >
+          <Shimmer width={80} height={9} radius={3} style={{ marginBottom: 10 }} />
+          <Shimmer height={11} radius={3} style={{ marginBottom: 6 }} />
+          <Shimmer height={11} radius={3} style={{ marginBottom: 6 }} />
+          <Shimmer width="60%" height={11} radius={3} />
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={{ marginHorizontal: 20, marginTop: 18 }}>
       {brandIngredients ? (
@@ -2899,6 +2943,42 @@ function NutritionTable({
   pushRow('Ballaststoffe', brandMerged.ballaststoffe, nonameMerged.ballaststoffe, ' g');
   pushRow('Eiweiß', brandMerged.eiweiss, nonameMerged.eiweiss, ' g');
   pushRow('Salz', brandMerged.salz, nonameMerged.salz, ' g');
+
+  // Shimmer-Skeleton während OpenFood lädt und noch keine Werte da
+  // sind. Mimic der gleichen Zeilen-Struktur damit der Wechsel auf
+  // echte Daten flüssig wirkt.
+  if (fallbackLoading && rows.length === 0) {
+    return (
+      <View
+        style={{
+          marginHorizontal: 20,
+          marginTop: 18,
+          backgroundColor: theme.surface,
+          borderRadius: 14,
+          paddingHorizontal: 14,
+          paddingVertical: 6,
+        }}
+      >
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+          <View
+            key={i}
+            style={{
+              flexDirection: 'row',
+              paddingVertical: 10,
+              borderBottomWidth: i < 7 ? 1 : 0,
+              borderBottomColor: theme.border,
+              alignItems: 'center',
+            }}
+          >
+            <Shimmer width={i === 0 ? 70 : 110} height={11} radius={3} style={{ flex: 1, marginRight: 12 }} />
+            <Shimmer width={56} height={11} radius={3} />
+            <View style={{ width: 6 }} />
+            <Shimmer width={56} height={11} radius={3} />
+          </View>
+        ))}
+      </View>
+    );
+  }
 
   if (rows.length === 0) {
     return (
