@@ -46,7 +46,13 @@ const db = admin.firestore();
 
 const REGION = 'europe-west1';
 const PAGE_SIZE = 500;
-const TRUSTED_SOURCES = new Set(['manual', 'rewe']);
+// Trusted-Sources werden NIE vom automatisierten Backfill überschrieben:
+//   - manual: eigene Recherche (z.B. Admin-Edit-Tool)
+//   - rewe:   reweapify-Pipeline (offizielle Rewe-API-Daten)
+//   - ocr:    Bilder-Erkennung von Produkt-Etiketten (User-eigene
+//             Bilder, Stufen-1/2-Scans, eigene Kassenbon-Photos)
+// scraper/openfood/legacy = untrusted, newer-wins.
+const TRUSTED_SOURCES = new Set(['manual', 'rewe', 'ocr']);
 
 const NUTR_FIELDS = [
   'Energie',

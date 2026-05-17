@@ -37,7 +37,11 @@ const db = admin.firestore();
 const REGION = 'europe-west1';
 
 // Quellen die "trusted" sind und keine History triggern (für Nutrition).
-const TRUSTED_SOURCES = new Set(['manual', 'rewe']);
+// Trusted-Sources triggern KEINE History (Audit-Trail nicht nötig):
+//   - manual: eigene Recherche
+//   - rewe:   reweapify-Pipeline
+//   - ocr:    Bilder-Erkennung von Produkt-Etiketten
+const TRUSTED_SOURCES = new Set(['manual', 'rewe', 'ocr']);
 
 // nutr_*-Feldnamen die wir auf Änderung prüfen. Sollten dem
 // reweapify-Schema entsprechen.

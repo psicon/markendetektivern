@@ -1111,7 +1111,7 @@ Reweapify ist die Pipeline-Output-Collection von Rewes-API; wir
 ```
 // Zutaten
 attr_ingredientStatement: string  // "Zucker, Glukosesirup, 15% VOLLMILCHPULVER…"
-ingredientsSource:        'manual' | 'rewe' | 'openfood' | 'scraper' | 'legacy'
+ingredientsSource:        'manual' | 'rewe' | 'ocr' | 'openfood' | 'scraper' | 'legacy'
 ingredientsUpdatedAt:     Timestamp
 
 // Nährwerte (per nutr_serving_size, default 100g)
@@ -1124,14 +1124,16 @@ nutr_Ballaststoffe_val:                    number   _unit: 'g'
 nutr_Eiwei_val:                            number   _unit: 'g'   // sic — Eiweiß ohne ß
 nutr_Salz_val:                             number   _unit: 'g'
 nutr_serving_size:                         number   nutr_serving_unit: 'g'
-nutritionSource:        'manual' | 'rewe' | 'openfood' | 'scraper' | 'legacy'
+nutritionSource:        'manual' | 'rewe' | 'ocr' | 'openfood' | 'scraper' | 'legacy'
 nutritionUpdatedAt:     Timestamp
 ```
 
 Trust-Hierarchie (höhere Source wird NIE überschrieben):
-1. `manual` — eigene Recherche / Bilder-Erkennung
-2. `rewe` — aus reweapify oder direkter Rewe-Pipeline
-3. (untrusted, newest wins:) `openfood`, `scraper`, `legacy`
+1. `manual` — eigene Recherche (Admin-UI / manuelle Edits)
+2. `rewe`   — aus reweapify oder direkter Rewe-Pipeline
+3. `ocr`    — Bilder-Erkennung von Produkt-Etiketten / Kassenbon-Photos
+4. (priority chain für untrusted, newest wins within source:)
+   reweapify-fill → scraper → openfood → legacy
 
 App-Reading: `lib/utils/productNutrition.ts` `extractIngredients()`/
 `extractNaehrwerte()` lesen beide Formate (legacy `naehrwerte: {}` +
