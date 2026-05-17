@@ -194,6 +194,73 @@ async function tryReweapify(eans) {
   };
 }
 
+// ─── Scraper Source-Adapter ───────────────────────────────────────
+
+/** Source-Adapter für die `nutritionscrape`-Collection — wird vom
+ *  separaten `cloud-functions/nutrition-scraper` Repo befuellt
+ *  (LLM-Extraction aus Discounter-Websites). Doc-ID == EAN. */
+async function tryScraper(eans) {
+  if (!eans || eans.length === 0) return null;
+  // Versuche jede EAN sequentiell — erstes vorhandenes Doc gewinnt.
+  for (const ean of eans) {
+    try {
+      const snap = await db.collection('nutritionscrape').doc(String(ean)).get();
+      if (!snap.exists) continue;
+      const data = snap.data();
+      if (!data) continue;
+
+      // Nutr-Fields aus dem Doc extrahieren
+      const nutrFields = {};
+      const NUTR_FIELDS = [
+        'Energie',
+        'Fett',
+        'FettdavongesttigteFettsuren',
+        'Kohlenhydrate',
+        'KohlenhydratedavonZucker',
+        'Ballaststoffe',
+        'Eiwei',
+        'Salz',
+      ];
+      let hasNutrition = false;
+      for (const f of NUTR_FIELDS) {
+        const v = data[`nutr_${f}_val`];
+        const u = data[`nutr_${f}_unit`];
+        if (typeof v === 'number') {
+          nutrFields[`nutr_${f}_val`] = v;
+          if (u) nutrFields[`nutr_${f}_unit`] = u;
+          hasNutrition = true;
+        }
+      }
+      if (typeof data.nutr_serving_size === 'number') {
+        nutrFields.nutr_serving_size = data.nutr_serving_size;
+      }
+      if (typeof data.nutr_serving_unit === 'string') {
+        nutrFields.nutr_serving_unit = data.nutr_serving_unit;
+      }
+
+      const ingredientStatement =
+        typeof data.attr_ingredientStatement === 'string' &&
+        data.attr_ingredientStatement.trim().length > 0
+          ? data.attr_ingredientStatement.trim()
+          : null;
+
+      if (!ingredientStatement && !hasNutrition) continue;
+
+      return {
+        source: 'scraper',
+        sourceTimestamp: data.scrapedAt ?? admin.firestore.Timestamp.now(),
+        hasIngredients: !!ingredientStatement,
+        ingredientStatement,
+        hasNutrition,
+        nutrFields,
+      };
+    } catch (e) {
+      console.warn(`tryScraper: EAN ${ean} lookup failed:`, e?.message);
+    }
+  }
+  return null;
+}
+
 // ─── OpenFood Source-Adapter ──────────────────────────────────────
 
 /** Source-Adapter für openfood. Iteriert alle EANs sequentiell
@@ -316,8 +383,40 @@ async function processProduct(docRef, product, dryRun) {
     }
   }
 
-  // (Source 3 — Scraper folgt im naechsten Sprint als separate
-  // tryScraper(eans) Funktion. Selbe Logik wie openfood.)
+  // ─── Source 3: scraper (nutritionscrape collection) ──────────
+  // Letzte Ressource fuer Produkte die weder reweapify noch openfood
+  // hatten. Selbe Logik wie openfood — newer-wins.
+  if (!ingredientsCovered || !nutritionCovered) {
+    const s = await tryScraper(eans);
+    if (s) {
+      if (!ingredientsCovered && s.hasIngredients) {
+        const cur = product.ingredientsSource;
+        const allowWrite =
+          cur !== 'scraper' ||
+          tsToMillis(s.sourceTimestamp) > tsToMillis(product.ingredientsUpdatedAt);
+        if (allowWrite) {
+          update.attr_ingredientStatement = s.ingredientStatement;
+          update.ingredientsSource = 'scraper';
+          update.ingredientsUpdatedAt = s.sourceTimestamp;
+          reasons.push('ingredients(scraper)');
+        }
+        ingredientsCovered = true;
+      }
+      if (!nutritionCovered && s.hasNutrition) {
+        const cur = product.nutritionSource;
+        const allowWrite =
+          cur !== 'scraper' ||
+          tsToMillis(s.sourceTimestamp) > tsToMillis(product.nutritionUpdatedAt);
+        if (allowWrite) {
+          Object.assign(update, s.nutrFields);
+          update.nutritionSource = 'scraper';
+          update.nutritionUpdatedAt = s.sourceTimestamp;
+          reasons.push('nutrition(scraper)');
+        }
+        nutritionCovered = true;
+      }
+    }
+  }
 
   if (Object.keys(update).length === 0) {
     // Wenn keine Source ueberhaupt was hatte → no_source_hit.
