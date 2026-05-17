@@ -1324,40 +1324,59 @@ export default function ProductComparisonScreen() {
             slot reserved für den morph title (rendered absolutely
             above).
             Markenname kommt von mp.marke.name (= "MARKEN" Collection
-            via hersteller-Ref, NICHT der echte Hersteller). User-
-            Klarstellung 2026-05-17.
+            via hersteller-Ref, NICHT der echte Hersteller).
             Skip wenn marke-Name "z - NoName" enthält (Platzhalter
             für NoName-Marken-Einträge). Style: gleiche Farbe wie
-            "Das Original", aber im Originalcase (nicht uppercase). */}
-        <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
+            "Das Original", aber im Originalcase (nicht uppercase).
+            mp.marke lädt async → "von X" wird mit Reanimated FadeIn
+            sanft eingeblendet (kein Pop nach dem Laden). */}
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingTop: 10,
+            paddingBottom: 10,
+            flexDirection: 'row',
+            alignItems: 'baseline',
+            flexWrap: 'nowrap',
+          }}
+        >
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.semibold,
+              fontSize: 11,
+              color: theme.textMuted,
+              letterSpacing: 1.2,
+              textTransform: 'uppercase',
+            }}
+            numberOfLines={1}
+          >
+            Das Original
+          </Text>
           {(() => {
-            const markeName: string =
-              (mp as any)?.marke?.name ?? '';
+            const markeName: string = (mp as any)?.marke?.name ?? '';
             const showMarke =
               markeName.trim().length > 0 && !markeName.includes('z - NoName');
+            if (!showMarke) return null;
             return (
-              <Text
+              <Animated.Text
+                entering={FadeIn.duration(280)}
+                numberOfLines={1}
                 style={{
                   fontFamily,
                   fontWeight: fontWeight.semibold,
                   fontSize: 11,
                   color: theme.textMuted,
-                  letterSpacing: 1.2,
+                  marginLeft: 4,
+                  flexShrink: 1,
                 }}
-                numberOfLines={1}
               >
-                <Text style={{ textTransform: 'uppercase' }}>Das Original</Text>
-                {showMarke ? (
-                  <Text style={{ letterSpacing: 0 }}>
-                    {' von '}
-                    {markeName}
-                  </Text>
-                ) : null}
-              </Text>
+                von {markeName}
+              </Animated.Text>
             );
           })()}
-          <View style={{ height: 28, marginTop: 2 }} />
         </View>
+        <View style={{ height: 28, marginTop: 2 }} />
 
         {/* ─── Hero — TOP wave (Crossfade, gated on `mainReady`)
             Skeleton mirrors the live hero exactly: same 240 px
