@@ -1320,39 +1320,42 @@ export default function ProductComparisonScreen() {
           onLayout={heroAnchor.onLayout}
           collapsable={false}
         >
-        {/* Title row: "Das Original [von BRAND]" eyebrow + 28 px slot
-            reserved for the morph title (rendered absolutely above).
-            Brand-Name kommt vom Hersteller-Reference des Markenprodukts.
-            Nur rendern wenn brandName existiert (sonst nur "Das
-            Original"). */}
+        {/* Title row: "Das Original [von Markenname]" eyebrow + 28 px
+            slot reserved für den morph title (rendered absolutely
+            above).
+            Markenname kommt von mp.marke.name (= "MARKEN" Collection
+            via hersteller-Ref, NICHT der echte Hersteller). User-
+            Klarstellung 2026-05-17.
+            Skip wenn marke-Name "z - NoName" enthält (Platzhalter
+            für NoName-Marken-Einträge). Style: gleiche Farbe wie
+            "Das Original", aber im Originalcase (nicht uppercase). */}
         <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.semibold,
-              fontSize: 11,
-              color: theme.textMuted,
-              letterSpacing: 1.2,
-              textTransform: 'uppercase',
-            }}
-            numberOfLines={1}
-          >
-            Das Original
-            {brandName ? (
+          {(() => {
+            const markeName: string =
+              (mp as any)?.marke?.name ?? '';
+            const showMarke =
+              markeName.trim().length > 0 && !markeName.includes('z - NoName');
+            return (
               <Text
                 style={{
                   fontFamily,
-                  fontWeight: fontWeight.bold,
+                  fontWeight: fontWeight.semibold,
                   fontSize: 11,
-                  color: theme.text,
+                  color: theme.textMuted,
                   letterSpacing: 1.2,
                 }}
+                numberOfLines={1}
               >
-                {' von '}
-                {brandName}
+                <Text style={{ textTransform: 'uppercase' }}>Das Original</Text>
+                {showMarke ? (
+                  <Text style={{ letterSpacing: 0 }}>
+                    {' von '}
+                    {markeName}
+                  </Text>
+                ) : null}
               </Text>
-            ) : null}
-          </Text>
+            );
+          })()}
           <View style={{ height: 28, marginTop: 2 }} />
         </View>
 
