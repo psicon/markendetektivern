@@ -72,6 +72,26 @@ function tsToMillis(t) {
   return 0;
 }
 
+/** Normalisiert eine reweapify-`scrapedAt` zu Firestore.Timestamp.
+ *  reweapify speichert das als ISO-String — wir wollen aber Timestamp
+ *  am Produkt für saubere Ordering/Query-Operationen. */
+function toFirestoreTs(value) {
+  if (!value) return null;
+  if (value instanceof admin.firestore.Timestamp) return value;
+  if (typeof value.toDate === 'function') {
+    return admin.firestore.Timestamp.fromDate(value.toDate());
+  }
+  if (typeof value === 'string') {
+    const ms = Date.parse(value);
+    if (!Number.isFinite(ms)) return null;
+    return admin.firestore.Timestamp.fromMillis(ms);
+  }
+  if (typeof value === 'number') {
+    return admin.firestore.Timestamp.fromMillis(value);
+  }
+  return null;
+}
+
 /** Sammelt alle EAN-Kandidaten aus einem Produkt-Doc in Reihenfolge.
  *  Filtert >= 8 Zeichen, dedupliziert. */
 function extractEans(product) {
@@ -162,7 +182,10 @@ async function tryReweapify(eans) {
   if (!bestDoc) return null;
   return {
     source: 'rewe', // semantisch — Rewe-Daten sind trusted
-    sourceTimestamp: bestDoc.scrapedAt ?? null,
+    // ISO-String → Firestore.Timestamp damit am Produkt sauber als
+    // Timestamp persistiert (nicht als String). Wichtig für orderBy
+    // und für die Diff-Logik beim nächsten Backfill-Run.
+    sourceTimestamp: toFirestoreTs(bestDoc.scrapedAt),
     hasIngredients: reweapifyHasIngredients(bestDoc),
     ingredientStatement: bestDoc.attr_ingredientStatement ?? null,
     hasNutrition: reweapifyHasNutrition(bestDoc),
