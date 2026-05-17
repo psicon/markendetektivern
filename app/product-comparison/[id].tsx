@@ -919,6 +919,20 @@ export default function ProductComparisonScreen() {
     Boolean(openFoodFallback.noname?.naehrwerte);
   const hasAnyData = hasAnyIngredients || hasAnyNaehrwerte;
   const showTabsSection = openFoodFallback.loading || hasAnyData;
+  // Per-Tab Visibility: SegmentedTabs nur wenn beide Tabs Daten
+  // haben (auf irgendeiner Seite — brand ODER picked). Bei single-
+  // tab → direkt Inhalt zeigen.
+  const showBothTabs = hasAnyIngredients && hasAnyNaehrwerte;
+
+  // Auto-switch: wenn der aktive Tab leer ist aber der andere Daten
+  // hat → auf den nicht-leeren wechseln.
+  useEffect(() => {
+    if (tab === 'ingredients' && !hasAnyIngredients && hasAnyNaehrwerte) {
+      setTab('nutrition');
+    } else if (tab === 'nutrition' && !hasAnyNaehrwerte && hasAnyIngredients) {
+      setTab('ingredients');
+    }
+  }, [tab, hasAnyIngredients, hasAnyNaehrwerte]);
 
   // Dev-Diag (Babel transform-remove-console entfernt das im Release).
   if (mp || picked) {
@@ -2419,16 +2433,20 @@ export default function ProductComparisonScreen() {
             entering={FadeIn.duration(280)}
             exiting={FadeOut.duration(280)}
           >
-            <View style={{ marginHorizontal: 20, marginTop: 24 }}>
-              <SegmentedTabs
-                tabs={[
-                  { key: 'ingredients', label: 'Inhaltsstoffe' },
-                  { key: 'nutrition', label: 'Nährwerte' },
-                ] as const}
-                value={tab}
-                onChange={onTabChange}
-              />
-            </View>
+            {/* SegmentedTabs nur wenn beide Tabs Daten haben.
+                Bei single-tab → direkt Content zeigen. */}
+            {showBothTabs ? (
+              <View style={{ marginHorizontal: 20, marginTop: 24 }}>
+                <SegmentedTabs
+                  tabs={[
+                    { key: 'ingredients', label: 'Inhaltsstoffe' },
+                    { key: 'nutrition', label: 'Nährwerte' },
+                  ] as const}
+                  value={tab}
+                  onChange={onTabChange}
+                />
+              </View>
+            ) : null}
 
             <View>
               {tab === 'ingredients' ? (

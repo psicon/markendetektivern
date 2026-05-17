@@ -603,6 +603,21 @@ export default function NoNameDetailScreen() {
   // ODER wenn Daten da sind. Final no-data → Container faded smooth
   // weg via Reanimated FadeOut.
   const showFoodTabsSection = openFoodFallback.loading || hasAnyDataForP;
+  // Per-Tab Visibility (User-Wunsch 2026-05-17): Tab-Pill nur zeigen
+  // wenn dessen Daten existieren. Wenn nur Naehrwerte gefunden →
+  // SegmentedTabs ausblenden, Naehrwerte-Inhalt direkt zeigen.
+  // Wenn nur Inhaltsstoffe → analog.
+  const showBothTabs = hasAnyZutatenForP && hasAnyNaehrwerteForP;
+
+  // Auto-switch: wenn der gerade aktive Tab leer ist aber der andere
+  // Daten hat → automatisch auf den nicht-leeren wechseln.
+  useEffect(() => {
+    if (tab === 'ingredients' && !hasAnyZutatenForP && hasAnyNaehrwerteForP) {
+      setTab('nutrition');
+    } else if (tab === 'nutrition' && !hasAnyNaehrwerteForP && hasAnyZutatenForP) {
+      setTab('ingredients');
+    }
+  }, [tab, hasAnyZutatenForP, hasAnyNaehrwerteForP]);
 
   // Dev-Diag (Babel transform-remove-console entfernt das im Release).
   if (p) {
@@ -1583,16 +1598,21 @@ export default function NoNameDetailScreen() {
                 entering={FadeIn.duration(280)}
                 exiting={FadeOut.duration(280)}
               >
-                <View style={{ marginHorizontal: 20, marginTop: 20 }}>
-                  <SegmentedTabs
-                    tabs={[
-                      { key: 'ingredients', label: 'Inhaltsstoffe' },
-                      { key: 'nutrition', label: 'Nährwerte' },
-                    ] as const}
-                    value={tab}
-                    onChange={onTabChange}
-                  />
-                </View>
+                {/* SegmentedTabs nur wenn beide Tabs Daten haben.
+                    Bei single-tab → direkt Inhalt zeigen, kein
+                    SegmentedTabs (Single-Segment-Pill ist ugly). */}
+                {showBothTabs ? (
+                  <View style={{ marginHorizontal: 20, marginTop: 20 }}>
+                    <SegmentedTabs
+                      tabs={[
+                        { key: 'ingredients', label: 'Inhaltsstoffe' },
+                        { key: 'nutrition', label: 'Nährwerte' },
+                      ] as const}
+                      value={tab}
+                      onChange={onTabChange}
+                    />
+                  </View>
+                ) : null}
                 <View>
                   <SingleInfoCard
                     tab={tab}
