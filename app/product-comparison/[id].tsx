@@ -1320,8 +1320,11 @@ export default function ProductComparisonScreen() {
           onLayout={heroAnchor.onLayout}
           collapsable={false}
         >
-        {/* Title row: "Das Original" eyebrow + 28 px slot reserved
-            for the morph title (rendered absolutely above). */}
+        {/* Title row: "Das Original [von BRAND]" eyebrow + 28 px slot
+            reserved for the morph title (rendered absolutely above).
+            Brand-Name kommt vom Hersteller-Reference des Markenprodukts.
+            Nur rendern wenn brandName existiert (sonst nur "Das
+            Original"). */}
         <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10 }}>
           <Text
             style={{
@@ -1332,8 +1335,23 @@ export default function ProductComparisonScreen() {
               letterSpacing: 1.2,
               textTransform: 'uppercase',
             }}
+            numberOfLines={1}
           >
             Das Original
+            {brandName ? (
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.bold,
+                  fontSize: 11,
+                  color: theme.text,
+                  letterSpacing: 1.2,
+                }}
+              >
+                {' von '}
+                {brandName}
+              </Text>
+            ) : null}
           </Text>
           <View style={{ height: 28, marginTop: 2 }} />
         </View>
