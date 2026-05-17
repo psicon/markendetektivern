@@ -193,6 +193,8 @@ async function tryReweapify(eans) {
     // Timestamp persistiert (nicht als String). Wichtig für orderBy
     // und für die Diff-Logik beim nächsten Backfill-Run.
     sourceTimestamp: toFirestoreTs(bestDoc.scrapedAt),
+    sourceUrl: bestDoc.url ?? null, // reweapify-Pipeline hat url-Feld
+    sourceShop: 'rewe.de',
     hasIngredients: reweapifyHasIngredients(bestDoc),
     ingredientStatement: bestDoc.attr_ingredientStatement ?? null,
     hasNutrition: reweapifyHasNutrition(bestDoc),
@@ -252,9 +254,20 @@ async function tryScraper(eans) {
 
       if (!ingredientStatement && !hasNutrition) continue;
 
+      // Shop-Name aus der URL extrahieren — Host-Mapping. Damit
+      // wir am Produkt sehen "Quelle: metro.de" o.ä.
+      let sourceShop = null;
+      try {
+        if (typeof data.scrapedUrl === 'string') {
+          sourceShop = new URL(data.scrapedUrl).host.replace(/^www\./, '');
+        }
+      } catch {}
+
       return {
         source: 'scraper',
         sourceTimestamp: data.scrapedAt ?? admin.firestore.Timestamp.now(),
+        sourceUrl: data.scrapedUrl ?? null,
+        sourceShop, // z.B. 'metro.de', 'codecheck.info'
         hasIngredients: !!ingredientStatement,
         ingredientStatement,
         hasNutrition,
@@ -284,6 +297,11 @@ async function tryOpenFood(eans) {
   return {
     source: 'openfood',
     sourceTimestamp: admin.firestore.Timestamp.fromMillis(tsMs),
+    // OpenFoodFacts hat eine deterministische Product-URL die wir
+    // ans Produkt schreiben damit transparent ist von wo die Daten
+    // kamen. Format: https://world.openfoodfacts.org/product/<ean>
+    sourceUrl: `https://world.openfoodfacts.org/product/${result.code}`,
+    sourceShop: 'openfoodfacts.org',
     hasIngredients: openfood.hasIngredients(result),
     ingredientStatement: openfood.extractIngredientStatement(result),
     hasNutrition: openfood.hasNutrition(result),
@@ -332,6 +350,8 @@ async function processProduct(docRef, product, dryRun) {
           update.attr_ingredientStatement = r.ingredientStatement;
           update.ingredientsSource = r.source;
           update.ingredientsUpdatedAt = r.sourceTimestamp;
+          if (r.sourceUrl) update.ingredientsSourceUrl = r.sourceUrl;
+          if (r.sourceShop) update.ingredientsSourceShop = r.sourceShop;
           reasons.push('ingredients(rewe)');
         }
         ingredientsCovered = true;
@@ -345,6 +365,8 @@ async function processProduct(docRef, product, dryRun) {
           Object.assign(update, r.nutrFields);
           update.nutritionSource = r.source;
           update.nutritionUpdatedAt = r.sourceTimestamp;
+          if (r.sourceUrl) update.nutritionSourceUrl = r.sourceUrl;
+          if (r.sourceShop) update.nutritionSourceShop = r.sourceShop;
           reasons.push('nutrition(rewe)');
         }
         nutritionCovered = true;
@@ -369,7 +391,11 @@ async function processProduct(docRef, product, dryRun) {
           update.attr_ingredientStatement = s.ingredientStatement;
           update.ingredientsSource = 'scraper';
           update.ingredientsUpdatedAt = s.sourceTimestamp;
-          reasons.push('ingredients(scraper)');
+          // Quelle-URL + Shop ans Produkt damit transparent ist
+          // von welchem Shop die Daten kamen (z.B. 'metro.de').
+          if (s.sourceUrl) update.ingredientsSourceUrl = s.sourceUrl;
+          if (s.sourceShop) update.ingredientsSourceShop = s.sourceShop;
+          reasons.push(`ingredients(scraper:${s.sourceShop || '?'})`);
         }
         ingredientsCovered = true;
       }
@@ -382,7 +408,9 @@ async function processProduct(docRef, product, dryRun) {
           Object.assign(update, s.nutrFields);
           update.nutritionSource = 'scraper';
           update.nutritionUpdatedAt = s.sourceTimestamp;
-          reasons.push('nutrition(scraper)');
+          if (s.sourceUrl) update.nutritionSourceUrl = s.sourceUrl;
+          if (s.sourceShop) update.nutritionSourceShop = s.sourceShop;
+          reasons.push(`nutrition(scraper:${s.sourceShop || '?'})`);
         }
         nutritionCovered = true;
       }
@@ -404,6 +432,8 @@ async function processProduct(docRef, product, dryRun) {
           update.attr_ingredientStatement = of.ingredientStatement;
           update.ingredientsSource = 'openfood';
           update.ingredientsUpdatedAt = of.sourceTimestamp;
+          if (of.sourceUrl) update.ingredientsSourceUrl = of.sourceUrl;
+          if (of.sourceShop) update.ingredientsSourceShop = of.sourceShop;
           reasons.push('ingredients(openfood)');
         }
         ingredientsCovered = true;
@@ -417,6 +447,8 @@ async function processProduct(docRef, product, dryRun) {
           Object.assign(update, of.nutrFields);
           update.nutritionSource = 'openfood';
           update.nutritionUpdatedAt = of.sourceTimestamp;
+          if (of.sourceUrl) update.nutritionSourceUrl = of.sourceUrl;
+          if (of.sourceShop) update.nutritionSourceShop = of.sourceShop;
           reasons.push('nutrition(openfood)');
         }
         nutritionCovered = true;
