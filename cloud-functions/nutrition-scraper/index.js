@@ -42,8 +42,10 @@ const db = admin.firestore();
 // .env.<project> oder Secret Manager gelesen.
 const TRIGGER_KEY = params.defineSecret('NUTRITION_SCRAPER_TRIGGER_KEY');
 const ANTHROPIC_API_KEY = params.defineSecret('ANTHROPIC_API_KEY');
-const GOOGLE_CSE_API_KEY = params.defineSecret('GOOGLE_CSE_API_KEY');
-const GOOGLE_CSE_ID = params.defineSecret('GOOGLE_CSE_ID');
+// Vertex AI Search (Nachfolger der deprecated Custom Search JSON API).
+// Optional — wenn nicht gesetzt, wird nur Direct-URL-Pfad genutzt.
+const VERTEX_AI_DATASTORE_ID = params.defineSecret('VERTEX_AI_SEARCH_DATASTORE_ID');
+const VERTEX_AI_LOCATION = params.defineSecret('VERTEX_AI_SEARCH_LOCATION');
 
 const REGION = 'europe-west1';
 const COMMON_OPTS = {
@@ -131,7 +133,7 @@ exports.scrapeSingleUrl = functions.onRequest(
 exports.scrapeEan = functions.onRequest(
   {
     ...COMMON_OPTS,
-    secrets: [TRIGGER_KEY, ANTHROPIC_API_KEY, GOOGLE_CSE_API_KEY, GOOGLE_CSE_ID],
+    secrets: [TRIGGER_KEY, ANTHROPIC_API_KEY, VERTEX_AI_DATASTORE_ID, VERTEX_AI_LOCATION],
   },
   async (req, res) => {
     if (!checkAuth(req, TRIGGER_KEY.value())) {
@@ -149,21 +151,23 @@ exports.scrapeEan = functions.onRequest(
     }
 
     try {
-      const cseKey = GOOGLE_CSE_API_KEY.value();
-      const cseId = GOOGLE_CSE_ID.value();
-      const urls = await resolveCandidates([String(ean)], {
-        product: productName ? { name: productName } : null,
-        googleCse: cseKey && cseId ? { apiKey: cseKey, cseId } : null,
+      const datastoreId = VERTEX_AI_DATASTORE_ID.value();
+      const location = VERTEX_AI_LOCATION.value() || 'global';
+      const candidates = await resolveCandidates([String(ean)], {
+        vertexAi: datastoreId
+          ? { dataStoreId: datastoreId, location }
+          : null,
       });
 
-      if (urls.length === 0) {
+      if (candidates.length === 0) {
         res.status(200).json({ result: 'no_urls' });
         return;
       }
 
-      // Versuche URLs sequentiell, 1. erfolgreicher Extract gewinnt.
-      for (const url of urls) {
-        const fetched = await fetchHtml(url);
+      // Versuche URLs sequentiell in Prio-Reihenfolge (codecheck →
+      // product-search → metro → ...). 1. erfolgreicher Extract wins.
+      for (const candidate of candidates) {
+        const fetched = await fetchHtml(candidate.url);
         if (!fetched) continue;
         const extracted = await extractFromHtml({
           html: fetched.html,
@@ -179,14 +183,15 @@ exports.scrapeEan = functions.onRequest(
         });
         res.status(200).json({
           result: 'ok',
-          triedUrls: urls.length,
+          triedUrls: candidates.length,
           successUrl: fetched.finalUrl,
+          successShop: candidate.shop,
           extracted,
           write: writeRes,
         });
         return;
       }
-      res.status(200).json({ result: 'all_failed', triedUrls: urls.length });
+      res.status(200).json({ result: 'all_failed', triedUrls: candidates.length });
     } catch (e) {
       console.error('[scrapeEan] error:', e);
       res.status(500).send(String(e?.message || e));
@@ -199,7 +204,7 @@ exports.scrapeBatch = functions.onRequest(
   {
     ...COMMON_OPTS,
     timeoutSeconds: 3600, // Gen 2 max 60min
-    secrets: [TRIGGER_KEY, ANTHROPIC_API_KEY, GOOGLE_CSE_API_KEY, GOOGLE_CSE_ID],
+    secrets: [TRIGGER_KEY, ANTHROPIC_API_KEY, VERTEX_AI_DATASTORE_ID, VERTEX_AI_LOCATION],
   },
   async (req, res) => {
     if (!checkAuth(req, TRIGGER_KEY.value())) {
@@ -252,9 +257,11 @@ exports.scrapeBatch = functions.onRequest(
       }
       docs = docs.slice(0, limit);
 
-      const cseKey = GOOGLE_CSE_API_KEY.value();
-      const cseId = GOOGLE_CSE_ID.value();
-      const cseCfg = cseKey && cseId ? { apiKey: cseKey, cseId } : null;
+      const datastoreId = VERTEX_AI_DATASTORE_ID.value();
+      const location = VERTEX_AI_LOCATION.value() || 'global';
+      const vertexCfg = datastoreId
+        ? { dataStoreId: datastoreId, location }
+        : null;
       const apiKey = ANTHROPIC_API_KEY.value();
 
       for (const d of docs) {
@@ -281,18 +288,17 @@ exports.scrapeBatch = functions.onRequest(
           continue;
         }
 
-        const urls = await resolveCandidates(eans, {
-          product,
-          googleCse: cseCfg,
+        const candidates = await resolveCandidates(eans, {
+          vertexAi: vertexCfg,
         });
-        if (urls.length === 0) {
+        if (candidates.length === 0) {
           stats.no_urls += 1;
           continue;
         }
 
         let success = false;
-        for (const url of urls) {
-          const fetched = await fetchHtml(url);
+        for (const candidate of candidates) {
+          const fetched = await fetchHtml(candidate.url);
           if (!fetched) continue;
           const extracted = await extractFromHtml({
             html: fetched.html,

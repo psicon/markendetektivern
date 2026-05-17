@@ -65,10 +65,9 @@ Params:
 - `limit`: max # zu verarbeiten (default 50)
 - `dryRun`: `1` → keine Writes / Resolver-Calls
 
-## Secrets (vor Deploy setzen)
+## Setup (User-Side)
 
-Gen-2-Functions nutzen `params.defineSecret()` mit dem
-Secret-Manager. Setze:
+### 1. Anthropic API Key + Trigger-Key
 
 ```bash
 echo -n "sk-ant-xxx" | gcloud secrets create ANTHROPIC_API_KEY \
@@ -76,24 +75,78 @@ echo -n "sk-ant-xxx" | gcloud secrets create ANTHROPIC_API_KEY \
 
 echo -n "$(openssl rand -hex 16)" | gcloud secrets create NUTRITION_SCRAPER_TRIGGER_KEY \
   --data-file=- --project markendetektive-895f7
+```
 
-# Optional: Google CSE für bessere URL-Resolution
-echo -n "AIza..." | gcloud secrets create GOOGLE_CSE_API_KEY \
+### 2. Vertex AI Search Setup
+
+Die Custom Search JSON API ist für Neukunden nicht mehr verfügbar.
+**Vertex AI Search** ist der empfohlene Nachfolger (bis 50 Domains).
+
+```bash
+# Discovery Engine API aktivieren
+gcloud services enable discoveryengine.googleapis.com \
+  --project markendetektive-895f7
+```
+
+**Im GCP Console** (https://console.cloud.google.com/gen-app-builder):
+
+1. **AI Applications** → **Apps** → **Create App**
+2. **Type**: `Search` (Generic)
+3. **Datastore**: erstelle einen neuen Web-Datastore
+   - Source: "Sites I provide"
+   - **Sites hinzufügen** (in dieser Priorität, einer pro Zeile):
+     ```
+     www.codecheck.info
+     www.product-search.net
+     www.metro.de
+     www.globus.de
+     www.mein-aldi.de
+     www.knuspr.de
+     www.mytime.de
+     www.liefershop.de
+     www.gurkerl.at
+     www.interspar.at
+     www.roksh.at
+     ```
+4. **Location**: `global` (empfohlen)
+5. Warten auf Indexing (~24h für Erst-Crawl)
+6. **Datastore-ID** notieren (steht auf der Datastore-Detail-Page)
+
+Secrets eintragen:
+
+```bash
+echo -n "<datastore-id>" | gcloud secrets create VERTEX_AI_SEARCH_DATASTORE_ID \
   --data-file=- --project markendetektive-895f7
-echo -n "abc:xyz" | gcloud secrets create GOOGLE_CSE_ID \
+
+echo -n "global" | gcloud secrets create VERTEX_AI_SEARCH_LOCATION \
   --data-file=- --project markendetektive-895f7
 ```
 
-Read-Access für die Function:
+### 3. IAM (Read-Access für Function)
 
 ```bash
 SERVICE_ACCOUNT="markendetektive-895f7@appspot.gserviceaccount.com"
-for SECRET in ANTHROPIC_API_KEY NUTRITION_SCRAPER_TRIGGER_KEY GOOGLE_CSE_API_KEY GOOGLE_CSE_ID; do
+
+# Secrets
+for SECRET in ANTHROPIC_API_KEY NUTRITION_SCRAPER_TRIGGER_KEY \
+              VERTEX_AI_SEARCH_DATASTORE_ID VERTEX_AI_SEARCH_LOCATION; do
   gcloud secrets add-iam-policy-binding $SECRET \
     --member=serviceAccount:$SERVICE_ACCOUNT \
     --role=roles/secretmanager.secretAccessor \
     --project markendetektive-895f7
 done
+
+# Discovery Engine (für Vertex AI Search-Calls)
+gcloud projects add-iam-policy-binding markendetektive-895f7 \
+  --member=serviceAccount:$SERVICE_ACCOUNT \
+  --role=roles/discoveryengine.viewer
+```
+
+### 4. Deploy
+
+```bash
+firebase deploy --only functions:nutrition-scraper \
+  --project markendetektive-895f7
 ```
 
 ## Kosten-Schätzung
@@ -112,16 +165,34 @@ Per Scrape (ein Produkt, single URL):
 Vs. site-spezifische Parser schreiben (50+ Sites, 50 Tage Dev):
 massive Ersparnis.
 
-## Sources (Resolver-Stufen)
+## Shop-Priorität (1. Treffer wins)
 
-1. **Codecheck.info** — deterministische `?q=<EAN>` URL.
-   Funktioniert für viele DE-Produkte. **Implementiert**.
-2. **Google CSE** — sucht `<EAN> Zutaten Nährwerte`. Erfordert
-   API-Key + CSE-ID. **Stub, ready-to-enable**.
-3. **Discounter URL-Patterns** — Aldi/Lidl/Penny/... Slug-Patterns.
-   Braucht Slug-Mapping (Algolia?). **TODO Sprint 4**.
-4. **Hersteller-Website** — wenn `product.hersteller.website` da
-   ist, dortige Suche/Produkt-Page. **TODO Sprint 4**.
+Konfiguriert in `src/domains.js`. **Suche IMMER nur per GTIN/EAN**,
+niemals per Produkt-Name (User-Vorgabe). Resolver geht in dieser
+Reihenfolge durch:
+
+| # | Shop | Direct-EAN-URL | Vertex AI Search |
+|---|---|:-:|:-:|
+| 1 | codecheck.info       | ✅ | ✅ |
+| 2 | product-search.net   | ✅ | ✅ |
+| 3 | metro.de             | – | ✅ |
+| 4 | globus.de            | – | ✅ |
+| 5 | mein-aldi.de         | – | ✅ |
+| 6 | knuspr.de            | – | ✅ |
+| 7 | mytime.de            | – | ✅ |
+| 8 | liefershop.de        | – | ✅ |
+| 9 | gurkerl.at           | – | ✅ |
+| 10 | interspar.at        | – | ✅ |
+| 11 | roksh.at            | – | ✅ |
+
+Pro EAN werden die URL-Kandidaten in dieser Reihenfolge probiert.
+Erster erfolgreich extrahierter Hit wins — alle weiteren werden
+ignoriert.
+
+Direct-URL-Pattern für codecheck + product-search.net laufen IMMER
+zuerst (keine API-Kosten, deterministisch). Wenn die nicht
+zünden, geht Vertex AI Search alle indexed Domains durch und
+gibt Treffer in Shop-Prio-Reihenfolge zurück.
 
 ## Schema von nutritionscrape-Doc
 
