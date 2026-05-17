@@ -2805,7 +2805,6 @@ function IngredientsMatch({
           >
             {brandIngredients}
           </Text>
-          {brandFromOpenFood ? <OpenFoodSourceCaption theme={theme} /> : null}
         </View>
       ) : null}
       {nonameIngredients ? (
@@ -2840,7 +2839,6 @@ function IngredientsMatch({
           >
             {nonameIngredients}
           </Text>
-          {nonameFromOpenFood ? <OpenFoodSourceCaption theme={theme} /> : null}
         </View>
       ) : null}
       {!brandIngredients && !nonameIngredients ? (
@@ -3138,43 +3136,6 @@ function NutritionTable({
           </View>
         );
       })}
-      {brandUsedFallback || nonameUsedFallback ? (
-        <OpenFoodSourceCaption theme={theme} />
-      ) : null}
-    </View>
-  );
-}
-
-/** Kleine Caption "Daten via OpenFoodFacts" — wird unter Cards
- *  angezeigt deren Werte (Zutaten oder Nährwerte) als Fallback aus
- *  OpenFood kommen. Transparenz fürs der User: nicht jede Daten-
- *  zeile ist offiziell verifiziert. */
-function OpenFoodSourceCaption({
-  theme,
-}: {
-  theme: ReturnType<typeof useTokens>['theme'];
-}) {
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        marginTop: 8,
-      }}
-    >
-      <MaterialCommunityIcons name="web" size={11} color={theme.textMuted} />
-      <Text
-        style={{
-          fontFamily,
-          fontWeight: fontWeight.medium,
-          fontSize: 10,
-          color: theme.textMuted,
-          letterSpacing: 0.2,
-        }}
-      >
-        Quelle: OpenFoodFacts
-      </Text>
     </View>
   );
 }

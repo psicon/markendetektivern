@@ -308,6 +308,8 @@ exports.backfillNutritionManual = functions
       return;
     }
 
+    // collection-param case-INsensitive akzeptieren, intern aber die
+    // exakten Firestore-Collection-Namen (case-sensitive!) benutzen.
     const collectionParam = String(req.query.collection || 'both').toLowerCase();
     const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : null;
     const dryRun = String(req.query.dryRun || '') === '1';
@@ -317,7 +319,11 @@ exports.backfillNutritionManual = functions
       if (collectionParam === 'produkte' || collectionParam === 'both') {
         results.produkte = await runBackfill('produkte', limit, dryRun);
       }
-      if (collectionParam === 'markenProdukte' || collectionParam === 'both') {
+      if (
+        collectionParam === 'markenprodukte' ||
+        collectionParam === 'markenProdukte'.toLowerCase() ||
+        collectionParam === 'both'
+      ) {
         results.markenProdukte = await runBackfill('markenProdukte', limit, dryRun);
       }
       res.status(200).json(results);

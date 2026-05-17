@@ -1887,7 +1887,6 @@ function SingleInfoCard({
             >
               {zutaten}
             </Text>
-            {fromOpenFood ? <OpenFoodSourceTag theme={theme} /> : null}
           </View>
         ) : (
           <View
@@ -2065,41 +2064,7 @@ function SingleInfoCard({
         >
           Angaben pro 100 g
         </Text>
-        {usedFallback ? <OpenFoodSourceTag theme={theme} /> : null}
       </View>
-    </View>
-  );
-}
-
-/** "Quelle: OpenFoodFacts"-Caption-Pille — wird unter Cards
- *  angezeigt deren Werte (Zutaten oder Naehrwerte) als Fallback
- *  aus OpenFood kommen. Transparenz fuer den User. */
-function OpenFoodSourceTag({
-  theme,
-}: {
-  theme: ReturnType<typeof useTokens>['theme'];
-}) {
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        marginTop: 8,
-      }}
-    >
-      <MaterialCommunityIcons name="web" size={11} color={theme.textMuted} />
-      <Text
-        style={{
-          fontFamily,
-          fontWeight: fontWeight.medium,
-          fontSize: 10,
-          color: theme.textMuted,
-          letterSpacing: 0.2,
-        }}
-      >
-        Quelle: OpenFoodFacts
-      </Text>
     </View>
   );
 }
