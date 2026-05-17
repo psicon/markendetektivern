@@ -2731,9 +2731,20 @@ function IngredientsMatch({
   const nonameFromFirestore = extractIngredients(noname);
 
   const brandIngredients = brandFromFirestore || brandFallback || '';
-  const brandFromOpenFood = !brandFromFirestore && Boolean(brandFallback);
   const nonameIngredients = nonameFromFirestore || nonameFallback || '';
-  const nonameFromOpenFood = !nonameFromFirestore && Boolean(nonameFallback);
+
+  // Quelle = OpenFoodFacts wenn entweder:
+  //   • Firestore-Daten kommen aber ingredientsSource === 'openfood'
+  //     (Backfill hat sie aus OpenFood geschrieben)
+  //   • Firestore-Daten fehlen UND runtime-Fallback hat sie geliefert
+  //     (per Definition aus OpenFood)
+  // Bei reweapify/manual/scraper/legacy → keine Caption.
+  const brandFromOpenFood = brandFromFirestore
+    ? (brandProduct as any)?.ingredientsSource === 'openfood'
+    : Boolean(brandFallback);
+  const nonameFromOpenFood = nonameFromFirestore
+    ? (noname as any)?.ingredientsSource === 'openfood'
+    : Boolean(nonameFallback);
 
   // Shimmer-Skeleton während OpenFood lädt und noch keine Daten da
   // sind. Sobald Daten kommen, ersetzt der Skeleton sich selbst durch
@@ -2805,6 +2816,7 @@ function IngredientsMatch({
           >
             {brandIngredients}
           </Text>
+          {brandFromOpenFood ? <OpenFoodSourceCaption theme={theme} /> : null}
         </View>
       ) : null}
       {nonameIngredients ? (
@@ -2839,6 +2851,7 @@ function IngredientsMatch({
           >
             {nonameIngredients}
           </Text>
+          {nonameFromOpenFood ? <OpenFoodSourceCaption theme={theme} /> : null}
         </View>
       ) : null}
       {!brandIngredients && !nonameIngredients ? (
@@ -2910,6 +2923,17 @@ function NutritionTable({
   const nonameMerged = nonameMergeResult.merged;
   const brandUsedFallback = brandMergeResult.usedFallback;
   const nonameUsedFallback = nonameMergeResult.usedFallback;
+
+  // Quelle = OpenFoodFacts:
+  //   • Firestore-Daten kommen aber nutritionSource === 'openfood'
+  //     (Backfill hat sie aus OpenFood geschrieben), ODER
+  //   • Wert wurde aus runtime-Fallback ergänzt (per Definition OpenFood).
+  // Bei rewe/manual/scraper → kein OpenFoodFacts-Tag.
+  const brandSourceIsOpenFood =
+    (brandProduct as any)?.nutritionSource === 'openfood' || brandUsedFallback;
+  const nonameSourceIsOpenFood =
+    (noname as any)?.nutritionSource === 'openfood' || nonameUsedFallback;
+  const showOpenFoodCaption = brandSourceIsOpenFood || nonameSourceIsOpenFood;
 
   // Color-Coding per Zeile (User-Wunsch 2026-05-16):
   //   crit (rot)   bei ≥ 10 % Abweichung zwischen Brand und Noname
@@ -3136,6 +3160,42 @@ function NutritionTable({
           </View>
         );
       })}
+      {showOpenFoodCaption ? <OpenFoodSourceCaption theme={theme} /> : null}
+    </View>
+  );
+}
+
+/** Caption "Quelle: OpenFoodFacts" — wird nur angezeigt wenn die
+ *  gerenderten Daten tatsächlich aus OpenFood kommen (entweder per
+ *  source='openfood' in Firestore ODER über den Runtime-Fallback).
+ *  Transparenz fürs Vertrauen — bei rewe/manual/scraper keine
+ *  Caption nötig. */
+function OpenFoodSourceCaption({
+  theme,
+}: {
+  theme: ReturnType<typeof useTokens>['theme'];
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 8,
+      }}
+    >
+      <MaterialCommunityIcons name="web" size={11} color={theme.textMuted} />
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 10,
+          color: theme.textMuted,
+          letterSpacing: 0.2,
+        }}
+      >
+        Quelle: OpenFoodFacts
+      </Text>
     </View>
   );
 }

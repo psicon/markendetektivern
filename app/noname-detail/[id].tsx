@@ -1843,7 +1843,12 @@ function SingleInfoCard({
     // → OpenFood. extractIngredients kapselt die Source-Reihenfolge.
     const zutatenFromProduct = extractIngredients(product);
     const zutaten = zutatenFromProduct || fallbackZutaten || '';
-    const fromOpenFood = !zutatenFromProduct && Boolean(fallbackZutaten);
+    // Quelle = OpenFoodFacts:
+    //   • Firestore-Daten kommen aber ingredientsSource === 'openfood', ODER
+    //   • Firestore leer → runtime-Fallback (per Definition OpenFood)
+    const fromOpenFood = zutatenFromProduct
+      ? product?.ingredientsSource === 'openfood'
+      : Boolean(fallbackZutaten);
 
     // Shimmer während Loading + noch nichts da.
     if (fallbackLoading && !zutaten) {
@@ -1887,6 +1892,7 @@ function SingleInfoCard({
             >
               {zutaten}
             </Text>
+            {fromOpenFood ? <OpenFoodSourceTag theme={theme} /> : null}
           </View>
         ) : (
           <View
@@ -1923,6 +1929,10 @@ function SingleInfoCard({
     productNaehrwerte,
     fallbackNaehrwerte ?? null,
   );
+  // Quelle = OpenFoodFacts wenn Firestore-Daten source='openfood'
+  // oder runtime-Fallback ergänzte fehlende Werte.
+  const nutritionFromOpenFood =
+    product?.nutritionSource === 'openfood' || usedFallback;
   const rows: Array<[string, string]> = [];
   const pushRow = (label: string, value: any, suffix = '') => {
     if (value == null || value === '') return;
@@ -2064,7 +2074,42 @@ function SingleInfoCard({
         >
           Angaben pro 100 g
         </Text>
+        {nutritionFromOpenFood ? <OpenFoodSourceTag theme={theme} /> : null}
       </View>
+    </View>
+  );
+}
+
+/** Caption "Quelle: OpenFoodFacts" — nur sichtbar wenn die
+ *  gerenderten Werte tatsächlich aus OpenFood kommen (source-Tag
+ *  am Produkt ODER runtime-Fallback). Bei rewe/manual/scraper →
+ *  keine Caption nötig. */
+function OpenFoodSourceTag({
+  theme,
+}: {
+  theme: ReturnType<typeof useTokens>['theme'];
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 8,
+      }}
+    >
+      <MaterialCommunityIcons name="web" size={11} color={theme.textMuted} />
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 10,
+          color: theme.textMuted,
+          letterSpacing: 0.2,
+        }}
+      >
+        Quelle: OpenFoodFacts
+      </Text>
     </View>
   );
 }
