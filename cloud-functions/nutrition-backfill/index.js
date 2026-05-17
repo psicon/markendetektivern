@@ -39,6 +39,7 @@
 
 const admin = require('firebase-admin');
 const functions = require('firebase-functions');
+const openfood = require('./openfood');
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -193,6 +194,30 @@ async function tryReweapify(eans) {
   };
 }
 
+// ─── OpenFood Source-Adapter ──────────────────────────────────────
+
+/** Source-Adapter für openfood. Iteriert alle EANs sequentiell
+ *  (1. Treffer wins). Returnt normalized Shape analog tryReweapify. */
+async function tryOpenFood(eans) {
+  if (!eans || eans.length === 0) return null;
+  const result = await openfood.getProductByFirstEAN(eans);
+  if (!result || !result.found) return null;
+
+  // last_modified_t ist UNIX seconds. Wenn fehlt → "now" als
+  // Fallback (kommt selten vor).
+  const tsMs = result.last_modified_t
+    ? result.last_modified_t * 1000
+    : Date.now();
+  return {
+    source: 'openfood',
+    sourceTimestamp: admin.firestore.Timestamp.fromMillis(tsMs),
+    hasIngredients: openfood.hasIngredients(result),
+    ingredientStatement: openfood.extractIngredientStatement(result),
+    hasNutrition: openfood.hasNutrition(result),
+    nutrFields: openfood.extractNutrFields(result),
+  };
+}
+
 // ─── Per-Produkt Logik ────────────────────────────────────────────
 
 async function processProduct(docRef, product, dryRun) {
@@ -209,43 +234,97 @@ async function processProduct(docRef, product, dryRun) {
     return { result: 'skip_all_trusted' };
   }
 
-  // Quellen probieren in Reihenfolge. Pro Quelle: ingredients +
-  // nutrition separat checken. Erstes Hit pro Feldgruppe wins.
-  // Sprint 1: nur reweapify. Später: openfood, sonstiges.
-  const candidate = await tryReweapify(eans);
-  if (!candidate) {
-    return { result: 'no_source_hit' };
-  }
-
   const update = {};
   const reasons = [];
+  let ingredientsCovered = ingTrusted;
+  let nutritionCovered = nutTrusted;
 
-  // Ingredients
-  if (!ingTrusted && candidate.hasIngredients) {
-    const currentTs = tsToMillis(product.ingredientsUpdatedAt);
-    const candidateTs = tsToMillis(candidate.sourceTimestamp);
-    if (candidateTs > currentTs) {
-      update.attr_ingredientStatement = candidate.ingredientStatement;
-      update.ingredientsSource = candidate.source;
-      update.ingredientsUpdatedAt = candidate.sourceTimestamp;
-      reasons.push('ingredients');
+  // ─── Source 1: reweapify ──────────────────────────────────
+  // Trusted-Quelle (Rewe). Wenn hier ein Treffer ist → wir
+  // schreiben source='rewe' und IGNORIEREN newer-wins-Check
+  // gegenueber niedriger-priorisierten Sources (openfood/scraper).
+  // Innerhalb von reweapify: nur überschreiben wenn candidate
+  // wirklich neuer als current.
+  if (!ingredientsCovered || !nutritionCovered) {
+    const r = await tryReweapify(eans);
+    if (r) {
+      // Ingredients
+      if (!ingredientsCovered && r.hasIngredients) {
+        const cur = product.ingredientsSource;
+        // Wenn current bereits 'rewe' → newer-wins. Sonst: rewe
+        // gewinnt automatisch (Priority over openfood/scraper/legacy).
+        const allowWrite =
+          cur !== 'rewe' || tsToMillis(r.sourceTimestamp) > tsToMillis(product.ingredientsUpdatedAt);
+        if (allowWrite) {
+          update.attr_ingredientStatement = r.ingredientStatement;
+          update.ingredientsSource = r.source;
+          update.ingredientsUpdatedAt = r.sourceTimestamp;
+          reasons.push('ingredients(rewe)');
+        }
+        ingredientsCovered = true;
+      }
+      // Nutrition
+      if (!nutritionCovered && r.hasNutrition) {
+        const cur = product.nutritionSource;
+        const allowWrite =
+          cur !== 'rewe' || tsToMillis(r.sourceTimestamp) > tsToMillis(product.nutritionUpdatedAt);
+        if (allowWrite) {
+          Object.assign(update, r.nutrFields);
+          update.nutritionSource = r.source;
+          update.nutritionUpdatedAt = r.sourceTimestamp;
+          reasons.push('nutrition(rewe)');
+        }
+        nutritionCovered = true;
+      }
     }
   }
 
-  // Nutrition
-  if (!nutTrusted && candidate.hasNutrition) {
-    const currentTs = tsToMillis(product.nutritionUpdatedAt);
-    const candidateTs = tsToMillis(candidate.sourceTimestamp);
-    if (candidateTs > currentTs) {
-      Object.assign(update, candidate.nutrFields);
-      update.nutritionSource = candidate.source;
-      update.nutritionUpdatedAt = candidate.sourceTimestamp;
-      reasons.push('nutrition');
+  // ─── Source 2: openfood ────────────────────────────────────
+  // Nur fuer Feldgruppen die von reweapify NICHT abgedeckt sind.
+  // Wenn current bereits 'openfood' und candidate nicht neuer →
+  // no_update_needed. Wenn current 'legacy' / null / 'scraper' →
+  // openfood ueberschreibt (gleiche oder hoehere Priority).
+  if (!ingredientsCovered || !nutritionCovered) {
+    const of = await tryOpenFood(eans);
+    if (of) {
+      if (!ingredientsCovered && of.hasIngredients) {
+        const cur = product.ingredientsSource;
+        const allowWrite =
+          cur !== 'openfood' ||
+          tsToMillis(of.sourceTimestamp) > tsToMillis(product.ingredientsUpdatedAt);
+        if (allowWrite) {
+          update.attr_ingredientStatement = of.ingredientStatement;
+          update.ingredientsSource = 'openfood';
+          update.ingredientsUpdatedAt = of.sourceTimestamp;
+          reasons.push('ingredients(openfood)');
+        }
+        ingredientsCovered = true;
+      }
+      if (!nutritionCovered && of.hasNutrition) {
+        const cur = product.nutritionSource;
+        const allowWrite =
+          cur !== 'openfood' ||
+          tsToMillis(of.sourceTimestamp) > tsToMillis(product.nutritionUpdatedAt);
+        if (allowWrite) {
+          Object.assign(update, of.nutrFields);
+          update.nutritionSource = 'openfood';
+          update.nutritionUpdatedAt = of.sourceTimestamp;
+          reasons.push('nutrition(openfood)');
+        }
+        nutritionCovered = true;
+      }
     }
   }
+
+  // (Source 3 — Scraper folgt im naechsten Sprint als separate
+  // tryScraper(eans) Funktion. Selbe Logik wie openfood.)
 
   if (Object.keys(update).length === 0) {
-    return { result: 'no_update_needed' };
+    // Wenn keine Source ueberhaupt was hatte → no_source_hit.
+    // Wenn was kam aber alles bereits aktueller im DB →
+    // no_update_needed (= alles iO).
+    const anyHitButOlder = reasons.length === 0;
+    return { result: anyHitButOlder ? 'no_source_hit' : 'no_update_needed' };
   }
 
   if (dryRun) {
