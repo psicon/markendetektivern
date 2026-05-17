@@ -739,3 +739,165 @@ exports.onNutritionScrapeWrite = functions
     );
     return null;
   });
+
+// ══ Scheduled Daily Backfill ══════════════════════════════════════
+//
+// Läuft nightly 02:30 Berlin durch alle produkte + markenProdukte
+// und pickt Updates auf (z.B. neue reweapify-Einträge, frische
+// nutritionscrape-Docs vom Scraper, neue OpenFood-Hits).
+//
+// Idempotent — trusted source skip ist schnell, untrusted sources
+// werden mit newer-wins gewertet, processProduct skippt sauber.
+// Bei rate-limit-cap auf openfood-Seite läuft der Scheduled-Job
+// gestaffelt: produkte zuerst, dann markenProdukte. CF Timeout
+// 540s — bei OpenFood-heavy Run reicht das normalerweise nicht für
+// ALLE 10k+ Docs, aber wir cappen pro Source intelligent
+// (in-memory Rate-Limit-Backoff stoppt OpenFood-Storm).
+// ══════════════════════════════════════════════════════════════════
+
+exports.scheduledBackfill = functions
+  .region(REGION)
+  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .pubsub.schedule('every day 02:30')
+  .timeZone('Europe/Berlin')
+  .onRun(async () => {
+    const startedAt = Date.now();
+    console.log('🕓 scheduled daily backfill starting');
+    const results = {};
+    try {
+      results.produkte = await runBackfill('produkte', null, false);
+    } catch (e) {
+      console.error('produkte backfill failed:', e);
+    }
+    try {
+      results.markenProdukte = await runBackfill('markenProdukte', null, false);
+    } catch (e) {
+      console.error('markenProdukte backfill failed:', e);
+    }
+    console.log(
+      `🕓 scheduled daily backfill done in ${Date.now() - startedAt}ms:`,
+      JSON.stringify(results),
+    );
+    return null;
+  });
+
+// ══ Source-URL/Shop Migration ═════════════════════════════════════
+//
+// One-Shot Migration für Produkte die VOR Commit 3413390 mit Source
+// 'rewe' oder 'openfood' geschrieben wurden — diese haben keine
+// sourceUrl/sourceShop Felder. Da wir die Werte aus der Source
+// ableiten können (rewe → 'rewe.de', openfood → openfoodfacts-URL),
+// schreiben wir die Felder nachträglich rein. Werte werden nicht
+// verändert, nur Metadaten angefügt.
+//
+// HTTPS-Trigger, idempotent (kann mehrfach laufen — nur Docs ohne
+// sourceShop werden angefasst).
+//
+// Trigger:
+//   curl "https://...cloudfunctions.net/migrateSourceUrls?key=<KEY>&collection=both"
+// ══════════════════════════════════════════════════════════════════
+
+async function migrateCollection(collectionName) {
+  const stats = { scanned: 0, migrated: 0, skipped: 0, error: 0 };
+  let lastDoc = null;
+  let pageNum = 0;
+  while (true) {
+    pageNum += 1;
+    let q = db.collection(collectionName).orderBy('__name__').limit(PAGE_SIZE);
+    if (lastDoc) q = q.startAfter(lastDoc);
+    const snap = await q.get();
+    if (snap.empty) break;
+
+    const batch = db.batch();
+    let batchWrites = 0;
+    snap.forEach((d) => {
+      stats.scanned += 1;
+      const x = d.data();
+      const update = {};
+
+      // Ingredients side
+      if (x.ingredientsSource && !x.ingredientsSourceShop) {
+        if (x.ingredientsSource === 'rewe') {
+          update.ingredientsSourceShop = 'rewe.de';
+        } else if (x.ingredientsSource === 'openfood') {
+          update.ingredientsSourceShop = 'openfoodfacts.org';
+          const ean = x.EAN || x.EANs?.[0];
+          if (ean) {
+            update.ingredientsSourceUrl = `https://world.openfoodfacts.org/product/${ean}`;
+          }
+        }
+      }
+
+      // Nutrition side
+      if (x.nutritionSource && !x.nutritionSourceShop) {
+        if (x.nutritionSource === 'rewe') {
+          update.nutritionSourceShop = 'rewe.de';
+        } else if (x.nutritionSource === 'openfood') {
+          update.nutritionSourceShop = 'openfoodfacts.org';
+          const ean = x.EAN || x.EANs?.[0];
+          if (ean) {
+            update.nutritionSourceUrl = `https://world.openfoodfacts.org/product/${ean}`;
+          }
+        }
+      }
+
+      if (Object.keys(update).length === 0) {
+        stats.skipped += 1;
+        return;
+      }
+      batch.update(d.ref, update);
+      batchWrites += 1;
+      stats.migrated += 1;
+    });
+
+    if (batchWrites > 0) {
+      try {
+        await batch.commit();
+      } catch (e) {
+        console.error(`migrate ${collectionName} page ${pageNum} batch failed:`, e);
+        stats.error += batchWrites;
+        stats.migrated -= batchWrites;
+      }
+    }
+
+    console.log(
+      `migrate ${collectionName} page ${pageNum}: scanned=${snap.size}, migrated=${batchWrites}`,
+    );
+
+    lastDoc = snap.docs[snap.docs.length - 1];
+    if (pageNum > 1000) break;
+  }
+  return stats;
+}
+
+exports.migrateSourceUrls = functions
+  .region(REGION)
+  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .https.onRequest(async (req, res) => {
+    const expected = functions.config()?.nutritionbackfill?.trigger_key;
+    if (!expected || req.query.key !== expected) {
+      res.status(401).send('Unauthorized');
+      return;
+    }
+    const collection = String(req.query.collection || 'both').toLowerCase();
+    const startedAt = Date.now();
+    try {
+      const result = {};
+      if (collection === 'produkte' || collection === 'both') {
+        result.produkte = await migrateCollection('produkte');
+      }
+      if (
+        collection === 'markenprodukte' ||
+        collection === 'both'
+      ) {
+        result.markenProdukte = await migrateCollection('markenProdukte');
+      }
+      res.status(200).json({
+        elapsedMs: Date.now() - startedAt,
+        ...result,
+      });
+    } catch (e) {
+      console.error('migrateSourceUrls failed:', e);
+      res.status(500).send(String(e?.message || e));
+    }
+  });
