@@ -346,46 +346,11 @@ async function processProduct(docRef, product, dryRun) {
     }
   }
 
-  // ─── Source 2: openfood ────────────────────────────────────
-  // Nur fuer Feldgruppen die von reweapify NICHT abgedeckt sind.
-  // Wenn current bereits 'openfood' und candidate nicht neuer →
-  // no_update_needed. Wenn current 'legacy' / null / 'scraper' →
-  // openfood ueberschreibt (gleiche oder hoehere Priority).
-  if (!ingredientsCovered || !nutritionCovered) {
-    const of = await tryOpenFood(eans);
-    if (of) {
-      if (!ingredientsCovered && of.hasIngredients) {
-        const cur = product.ingredientsSource;
-        const allowWrite =
-          cur !== 'openfood' ||
-          tsToMillis(of.sourceTimestamp) > tsToMillis(product.ingredientsUpdatedAt);
-        if (allowWrite) {
-          update.attr_ingredientStatement = of.ingredientStatement;
-          update.ingredientsSource = 'openfood';
-          update.ingredientsUpdatedAt = of.sourceTimestamp;
-          reasons.push('ingredients(openfood)');
-        }
-        ingredientsCovered = true;
-      }
-      if (!nutritionCovered && of.hasNutrition) {
-        const cur = product.nutritionSource;
-        const allowWrite =
-          cur !== 'openfood' ||
-          tsToMillis(of.sourceTimestamp) > tsToMillis(product.nutritionUpdatedAt);
-        if (allowWrite) {
-          Object.assign(update, of.nutrFields);
-          update.nutritionSource = 'openfood';
-          update.nutritionUpdatedAt = of.sourceTimestamp;
-          reasons.push('nutrition(openfood)');
-        }
-        nutritionCovered = true;
-      }
-    }
-  }
-
-  // ─── Source 3: scraper (nutritionscrape collection) ──────────
-  // Letzte Ressource fuer Produkte die weder reweapify noch openfood
-  // hatten. Selbe Logik wie openfood — newer-wins.
+  // ─── Source 2: scraper (nutritionscrape collection) ──────────
+  // User-Vorgabe 2026-05-17: scraper VOR openfood. Begründung:
+  // scraper hat shop-spezifische Daten von DE/AT-Märkten, die für
+  // unsere Discounter-Eigenmarken meist verlässlicher als crowd-
+  // sourced OpenFoodFacts sind.
   if (!ingredientsCovered || !nutritionCovered) {
     const s = await tryScraper(eans);
     if (s) {
@@ -412,6 +377,41 @@ async function processProduct(docRef, product, dryRun) {
           update.nutritionSource = 'scraper';
           update.nutritionUpdatedAt = s.sourceTimestamp;
           reasons.push('nutrition(scraper)');
+        }
+        nutritionCovered = true;
+      }
+    }
+  }
+
+  // ─── Source 3: openfood ────────────────────────────────────
+  // Letzte Ressource. Nur fuer Feldgruppen die weder reweapify
+  // noch scraper abgedeckt haben.
+  if (!ingredientsCovered || !nutritionCovered) {
+    const of = await tryOpenFood(eans);
+    if (of) {
+      if (!ingredientsCovered && of.hasIngredients) {
+        const cur = product.ingredientsSource;
+        const allowWrite =
+          cur !== 'openfood' ||
+          tsToMillis(of.sourceTimestamp) > tsToMillis(product.ingredientsUpdatedAt);
+        if (allowWrite) {
+          update.attr_ingredientStatement = of.ingredientStatement;
+          update.ingredientsSource = 'openfood';
+          update.ingredientsUpdatedAt = of.sourceTimestamp;
+          reasons.push('ingredients(openfood)');
+        }
+        ingredientsCovered = true;
+      }
+      if (!nutritionCovered && of.hasNutrition) {
+        const cur = product.nutritionSource;
+        const allowWrite =
+          cur !== 'openfood' ||
+          tsToMillis(of.sourceTimestamp) > tsToMillis(product.nutritionUpdatedAt);
+        if (allowWrite) {
+          Object.assign(update, of.nutrFields);
+          update.nutritionSource = 'openfood';
+          update.nutritionUpdatedAt = of.sourceTimestamp;
+          reasons.push('nutrition(openfood)');
         }
         nutritionCovered = true;
       }
@@ -532,4 +532,172 @@ exports.backfillNutritionManual = functions
       console.error('backfill failed:', e);
       res.status(500).send(String(e?.message || e));
     }
+  });
+
+// ══ Auto-Trigger für neue Produkte ════════════════════════════════
+//
+// User-Vorgabe 2026-05-17: Wenn neue produkte / markenProdukte ohne
+// nutrition data hinzugefügt werden, sollen alle Quellen automatisch
+// anspringen (reweapify → scraper → openfood, in dieser Reihenfolge).
+//
+// Implementation:
+//   • onCreate-Trigger auf produkte/* und markenProdukte/* — feuert
+//     processProduct() (reweapify + scraper-cache + openfood).
+//   • Wenn ALLE Quellen leer waren UND der Scraper-Service erreichbar
+//     ist → fire-and-forget HTTPS-POST an scraper.scrapeEan.
+//   • onWrite-Trigger auf nutritionscrape/* — sobald der Scraper was
+//     reinschreibt, läuft processProduct erneut für die produkte mit
+//     matching EAN.
+//
+// Trust-Protection greift wie üblich: manual/rewe-sourced Produkte
+// werden NICHT überschrieben.
+// ══════════════════════════════════════════════════════════════════
+
+const SCRAPER_REGION = REGION;
+const SCRAPER_PROJECT = process.env.GCLOUD_PROJECT || 'markendetektive-895f7';
+// Scraper-URL wird via env-Var konfiguriert beim Deploy.
+// Default ist convention-based (Gen 2 URLs).
+const SCRAPER_URL =
+  process.env.SCRAPER_SCRAPE_EAN_URL ||
+  `https://${SCRAPER_REGION}-${SCRAPER_PROJECT}.cloudfunctions.net/scrapeEan`;
+
+/** Feuert async HTTP-POST zum Scraper. Fire-and-forget — wir warten
+ *  NICHT auf das Ergebnis. Der Scraper schreibt in nutritionscrape,
+ *  was den onNutritionScrapeWrite-Trigger feuert. */
+async function fireScraperForEan(ean, productPath, productName) {
+  const triggerKey = functions.config()?.nutritionscraper?.trigger_key;
+  if (!triggerKey) {
+    console.warn(
+      '[auto-trigger] nutritionscraper.trigger_key not configured — skip scraper-fire',
+    );
+    return;
+  }
+  try {
+    const params = new URLSearchParams({
+      key: triggerKey,
+      ean: String(ean),
+      productPath: productPath || '',
+      productName: productName || '',
+    });
+    // Kein await — fire & forget. Scraper läuft eigene Function.
+    fetch(`${SCRAPER_URL}?${params.toString()}`, {
+      method: 'GET',
+      // 1-sek-timeout damit wir nicht aus Versehen warten.
+      signal: AbortSignal.timeout(1500),
+    }).catch(() => {
+      // Erwartet — wir wollen nicht warten. Fehler wird ignoriert.
+    });
+  } catch (e) {
+    console.warn('[auto-trigger] fireScraperForEan threw:', e?.message);
+  }
+}
+
+async function handleProductCreate(snap, context, collectionName) {
+  const product = snap.data();
+  if (!product) return null;
+  const docRef = snap.ref;
+
+  try {
+    const result = await processProduct(docRef, product, false);
+    console.log(
+      `[onCreate ${collectionName}/${snap.id}] processProduct → ${result.result}${
+        result.reasons ? ` (${result.reasons.join(',')})` : ''
+      }`,
+    );
+
+    // Wenn nichts gefunden wurde UND wir EANs haben → Scraper async
+    // feuern. Der Scraper macht den teuren LLM-Lookup im Hintergrund;
+    // sobald er was findet, triggert onNutritionScrapeWrite das
+    // erneute processProduct.
+    if (result.result === 'no_source_hit') {
+      const eans = extractEans(product);
+      if (eans.length > 0) {
+        const ean = eans[0]; // Scraper iteriert sowieso alle EANs intern
+        const productPath = `${collectionName}/${snap.id}`;
+        await fireScraperForEan(ean, productPath, product.name);
+        console.log(
+          `[onCreate ${collectionName}/${snap.id}] fired scraper for EAN ${ean}`,
+        );
+      }
+    }
+  } catch (e) {
+    console.error(`[onCreate ${collectionName}/${snap.id}] failed:`, e);
+  }
+  return null;
+}
+
+exports.onProdukteCreate = functions
+  .region(REGION)
+  .runWith({ memory: '256MB', timeoutSeconds: 60 })
+  .firestore.document('produkte/{productId}')
+  .onCreate((snap, ctx) => handleProductCreate(snap, ctx, 'produkte'));
+
+exports.onMarkenProdukteCreate = functions
+  .region(REGION)
+  .runWith({ memory: '256MB', timeoutSeconds: 60 })
+  .firestore.document('markenProdukte/{productId}')
+  .onCreate((snap, ctx) => handleProductCreate(snap, ctx, 'markenProdukte'));
+
+/** Wenn der Scraper ein Doc in nutritionscrape/<ean> schreibt,
+ *  suchen wir produkte + markenProdukte mit dieser EAN und feuern
+ *  processProduct, damit die Daten ans Produkt geschrieben werden
+ *  (durch tryScraper in der priority chain). */
+exports.onNutritionScrapeWrite = functions
+  .region(REGION)
+  .runWith({ memory: '256MB', timeoutSeconds: 60 })
+  .firestore.document('nutritionscrape/{ean}')
+  .onWrite(async (change, ctx) => {
+    if (!change.after.exists) return null; // Delete → ignore
+    const ean = ctx.params.ean;
+    if (!ean) return null;
+
+    // Find products with matching EAN in either collection.
+    // EAN kann in `EAN`, `gtin`, oder `EANs[]` stehen — wir prüfen
+    // alle Varianten. `array-contains` für arrays + equality für
+    // singles. Bis zu 6 Queries pro Collection (kombiniert via
+    // Promise.all).
+    const queries = [];
+    for (const col of ['produkte', 'markenProdukte']) {
+      for (const field of ['EAN', 'gtin']) {
+        queries.push(db.collection(col).where(field, '==', ean).limit(5).get());
+      }
+      queries.push(db.collection(col).where('EANs', 'array-contains', ean).limit(5).get());
+    }
+
+    let snaps;
+    try {
+      snaps = await Promise.all(queries);
+    } catch (e) {
+      console.error(`[onNutritionScrapeWrite ${ean}] queries failed:`, e);
+      return null;
+    }
+
+    const matched = new Map(); // path → { ref, data }
+    for (const snap of snaps) {
+      snap.forEach((d) => {
+        const path = d.ref.path;
+        if (!matched.has(path)) matched.set(path, { ref: d.ref, data: d.data() });
+      });
+    }
+
+    if (matched.size === 0) {
+      console.log(
+        `[onNutritionScrapeWrite ${ean}] kein produkt/markenProdukt matched`,
+      );
+      return null;
+    }
+
+    let updated = 0;
+    for (const { ref, data } of matched.values()) {
+      try {
+        const r = await processProduct(ref, data, false);
+        if (r.result === 'updated') updated += 1;
+      } catch (e) {
+        console.warn(`[onNutritionScrapeWrite ${ean}] processProduct on ${ref.path} failed:`, e);
+      }
+    }
+    console.log(
+      `[onNutritionScrapeWrite ${ean}] ${matched.size} matched, ${updated} updated`,
+    );
+    return null;
   });

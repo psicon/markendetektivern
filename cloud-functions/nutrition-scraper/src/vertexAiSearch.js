@@ -67,9 +67,9 @@ async function searchByEan({ ean, dataStoreId, location = 'global', pageSize = 1
   const body = {
     query: String(ean),
     pageSize,
-    // Spell-correct nicht nötig für EANs (numerisch)
-    spellCorrectionSpec: { mode: 'OFF' },
-    // Snippets damit wir bei Match-Quality entscheiden können
+    // Spell-correction nutzt MODE_UNSPECIFIED (Default) — für EANs
+    // (numerisch) sowieso egal. Frühere "OFF" Variante war kein
+    // gueltiger enum-Wert in v1alpha.
     contentSearchSpec: {
       snippetSpec: { returnSnippet: true },
     },
