@@ -9,10 +9,25 @@
  *   ist die Wahrscheinlichkeit eines Block niedrig.
  * - Timeout: 15s pro Request
  * - Max-Size: 2MB (gegen riesige Seiten / Trap-Pages)
+ *
+ * Für SPA-Shops (mein-aldi.de, lidl.de, rewe.de, etc. — alle mit
+ * requiresJS=true in domains.js) routet `fetchHtml` automatisch
+ * über Apify's `website-content-crawler` Actor. Apify rendert die
+ * Page mit Playwright/Chromium und gibt sauberes Markdown zurück
+ * (oder rohes HTML wenn das nicht reicht).
  */
 
+// Echter Chrome-User-Agent. Lernung 2026-05-17: viele Shops
+// (mytime, lidl, rewe, ...) servieren mit Bot-UA nur 380-byte
+// leeres SPA-Skelett, mit Chrome-UA aber 270k vollen HTML inkl.
+// lazy-loaded Tab-Inhalten (Zutaten/Nährwerte sind im DOM,
+// nur CSS-versteckt). Daher MUSS hier Chrome stehen.
+// Backup-Identifikation via accept-Header bleibt ein freundliches
+// "MarkenDetektive" damit Site-Owner uns nicht für Scraper-Spam halten.
 const USER_AGENT =
-  'MarkenDetektive-NutritionScraper/0.1 (+contact: patrick@markendetektive.de)';
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 ' +
+  '(+contact: patrick@markendetektive.de; MarkenDetektive-NutritionScraper/0.2)';
 
 const THROTTLE_PER_HOST_MS = 800;
 const FETCH_TIMEOUT_MS = 15000;
@@ -32,6 +47,9 @@ const ROBOTS_BYPASS_HOSTS = new Set([
   'codecheck.info',
   'www.product-search.net',
   'product-search.net',
+  'de.openfoodfacts.org',
+  'world.openfoodfacts.org',
+  'openfoodfacts.org',
 ]);
 
 function sleep(ms) {
@@ -107,13 +125,90 @@ async function isAllowedByRobots(url) {
   }
 }
 
+/** Apify-Render: holt eine SPA-Page via Playwright und gibt
+ *  Markdown zurück (Claude bekommt Markdown — kleiner Prompt,
+ *  weniger Tokens, gleicher Inhalt).
+ *
+ *  Apify-Token wird via Env oder Secret-Manager geleifert
+ *  (process.env.APIFY_API_TOKEN). Wenn nicht gesetzt → null. */
+async function fetchViaApify(url, { apifyToken } = {}) {
+  const token = apifyToken || process.env.APIFY_API_TOKEN;
+  if (!token) {
+    console.warn('[fetcher] Apify-Token fehlt, kann SPA nicht rendern:', url);
+    return null;
+  }
+  const apifyUrl =
+    `https://api.apify.com/v2/acts/apify~website-content-crawler/run-sync-get-dataset-items` +
+    `?token=${encodeURIComponent(token)}&timeout=90`;
+
+  let resp;
+  try {
+    resp = await fetch(apifyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        startUrls: [{ url }],
+        maxCrawlPages: 1,
+        maxCrawlDepth: 0,
+        crawlerType: 'playwright:adaptive',
+        saveMarkdown: true,
+        saveHtml: false,
+        removeCookieWarnings: true,
+        clickElementsCssSelector: '[aria-label*="kzeptieren" i], [aria-label*="ccept" i]',
+      }),
+      signal: AbortSignal.timeout(120000), // Apify selbst kann bis 90s
+    });
+  } catch (e) {
+    console.warn(`[fetcher/apify] fetch error for ${url}:`, e?.message);
+    return null;
+  }
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    console.warn(`[fetcher/apify] HTTP ${resp.status} for ${url}: ${txt.slice(0, 200)}`);
+    return null;
+  }
+
+  let data;
+  try {
+    data = await resp.json();
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(data) || data.length === 0) return null;
+  const item = data[0];
+  const md = item.markdown || item.text || '';
+  if (!md || md.length < 100) {
+    // Page leer oder Renderer hat nichts → null
+    return null;
+  }
+  // Markdown wird als "html" zurückgegeben — stripHtml ist no-op auf
+  // reinem Text + erkennt Keywords genauso. Marker fürs Logging.
+  return {
+    html: md,
+    status: item.crawl?.httpStatusCode || 200,
+    finalUrl: item.crawl?.loadedUrl || url,
+    via: 'apify',
+  };
+}
+
 /** Throttled fetch per host. Returnt { html, status, finalUrl } oder
- *  null bei Fehler / Block. */
-async function fetchHtml(url, { skipRobots = false } = {}) {
+ *  null bei Fehler / Block.
+ *
+ *  Wenn `requiresJS=true` → routet automatisch via Apify (SPA-Render).
+ *  Wenn direct-fetch leeren Content liefert (<1KB ODER ohne Zutaten/
+ *  Nährwerte-Keywords), wird AUTOMATISCH ein Apify-Retry versucht
+ *  (Apify-Fallback für unbekannte SPAs / Cloudflare-Blocks). */
+async function fetchHtml(url, { skipRobots = false, requiresJS = false, apifyToken } = {}) {
   const host = getHost(url);
   if (!host) {
     console.warn('[fetcher] invalid URL:', url);
     return null;
+  }
+
+  // Wenn der Shop explizit JS-Rendering braucht → direkt via Apify
+  if (requiresJS) {
+    return await fetchViaApify(url, { apifyToken });
   }
 
   if (!skipRobots) {
@@ -208,6 +303,19 @@ async function fetchHtml(url, { skipRobots = false } = {}) {
     offset += c.length;
   }
   const html = new TextDecoder('utf-8').decode(buf);
+
+  // Smart-Fallback: wenn Direct-Fetch verdächtig kurz ist UND keine
+  // relevanten Keywords drin → wahrscheinlich SPA/Cookie-Wall.
+  // Auto-Retry via Apify (rendert die Page mit JS).
+  const looksEmpty = html.length < 8000;
+  const looksSPA =
+    !/zutaten|nährwert|naehrwert|brennwert|inhaltsstoff/i.test(html);
+  if (looksEmpty && looksSPA && (apifyToken || process.env.APIFY_API_TOKEN)) {
+    console.log(`[fetcher] ${url} dünn (${html.length}b, kein Zutaten/Nährwerte-Keyword) → Apify-Retry`);
+    const apifyResult = await fetchViaApify(url, { apifyToken });
+    if (apifyResult) return apifyResult;
+  }
+
   return { html, status: resp.status, finalUrl: resp.url };
 }
 

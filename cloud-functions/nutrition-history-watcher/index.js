@@ -57,8 +57,10 @@ const NUTR_FIELDS = [
 ];
 
 /** Strict-equal-Vergleich der für Firestore-Felder reicht (string,
- *  number, null/undefined als gleich). Für Strings: trim + lower
- *  damit Whitespace-Diffs nicht als Change zählen. */
+ *  number, null/undefined als gleich). Für Strings: trim damit
+ *  Whitespace-Diffs nicht als Change zählen. Für Firestore-Timestamps:
+ *  per `.toMillis()` (Objekte sind NIE reference-gleich, daher hier
+ *  explizit). */
 function valuesDiffer(a, b) {
   // Beide null/undefined → gleich
   if (a == null && b == null) return false;
@@ -67,6 +69,15 @@ function valuesDiffer(a, b) {
   // Strings: normalisierter Vergleich
   if (typeof a === 'string' && typeof b === 'string') {
     return a.trim() !== b.trim();
+  }
+  // Firestore Timestamp: per .toMillis() vergleichen damit gleiche
+  // Zeit nicht als Diff gewertet wird (Object-Reference != !==).
+  if (typeof a?.toMillis === 'function' && typeof b?.toMillis === 'function') {
+    return a.toMillis() !== b.toMillis();
+  }
+  // Date objects analog
+  if (a instanceof Date && b instanceof Date) {
+    return a.getTime() !== b.getTime();
   }
   // Numbers: direkt
   return a !== b;
@@ -170,6 +181,8 @@ async function handleChange(change, context, collectionName) {
   // Jede preis-Änderung loggen, keine Source-Exclusion (Preise sind
   // Zeitreihen-Daten — komplette Historie wertvoll).
   const priceChanged = valuesDiffer(beforeData.preis, after.preis);
+  const preisDatumUnchanged = !valuesDiffer(beforeData.preisDatum, after.preisDatum);
+
   if (priceChanged && !isCreate) {
     const priceHistoryDoc = {
       productId: change.after.id,
@@ -204,6 +217,23 @@ async function handleChange(change, context, collectionName) {
       );
     } catch (e) {
       console.error(`Fehler beim Price-History-Write für ${change.after.ref.path}:`, e);
+    }
+
+    // BUGFIX 2026-05-18: wenn User nur `preis` ändert ohne `preisDatum`
+    // gleichzeitig manuell zu setzen → preisDatum auto-stempeln auf jetzt.
+    // Trigger-Schleife wird vermieden weil beim Folge-Write `priceChanged`
+    // dann false ist (preis unverändert).
+    if (preisDatumUnchanged) {
+      try {
+        await change.after.ref.update({
+          preisDatum: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(
+          `🕒 [${collectionName}/${change.after.id}] preisDatum auto-gesetzt (preis geändert ohne Datum)`,
+        );
+      } catch (e) {
+        console.error(`Fehler beim preisDatum-Auto-Update für ${change.after.ref.path}:`, e);
+      }
     }
   }
 }

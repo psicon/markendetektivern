@@ -252,7 +252,24 @@ async function tryScraper(eans) {
           ? data.attr_ingredientStatement.trim()
           : null;
 
-      if (!ingredientStatement && !hasNutrition) continue;
+      // 2026-05-19: skip nur wenn AUCH keine extra-attr_*-Felder da sind.
+      // Bei Nicht-Lebensmitteln (Müllbeutel, Drogerie, Tierfutter etc.)
+      // gibt's keine Zutaten/Nährwerte, aber attr_preis/attr_hersteller/
+      // attr_packageSize sind trotzdem wertvoll fürs Produkt-Doc.
+      // Vorher: hier wurde returned → ALLE Nicht-LM-Scrapes verloren.
+      const hasAnyExtra =
+        (typeof data.attr_preis === 'number' && data.attr_preis > 0) ||
+        (typeof data.attr_hersteller === 'string' && data.attr_hersteller.trim()) ||
+        (typeof data.attr_packageSize === 'number' && data.attr_packageSize > 0) ||
+        (typeof data.attr_nutri_score === 'string') ||
+        (typeof data.attr_eco_score === 'string') ||
+        (Array.isArray(data.attr_allergene) && data.attr_allergene.length > 0) ||
+        (data.attr_isVegan != null) ||
+        (data.attr_isVegetarisch != null) ||
+        (data.attr_isBio != null) ||
+        (typeof data.attr_herkunftsland === 'string' && data.attr_herkunftsland.trim());
+
+      if (!ingredientStatement && !hasNutrition && !hasAnyExtra) continue;
 
       // Shop-Name aus der URL extrahieren — Host-Mapping. Damit
       // wir am Produkt sehen "Quelle: metro.de" o.ä.
@@ -263,6 +280,69 @@ async function tryScraper(eans) {
         }
       } catch {}
 
+      // Zusätzliche `attr_*`-Felder aus Scrape übernehmen.
+      // Alle sind OPTIONAL und werden nur ans produkt-doc geschrieben
+      // wenn vorhanden + Validierung passt. Sie haben einen separaten
+      // Namespace und überschreiben NIE bestehende Felder wie
+      // `hersteller` oder `packSize` am Produkt — wir sind explizit
+      // attr_*-prefixed.
+      const extraFields = {};
+      // Preis (number, EUR)
+      if (typeof data.attr_preis === 'number' && data.attr_preis > 0) {
+        extraFields.attr_preis = data.attr_preis;
+      }
+      if (typeof data.attr_preisPackgroesse === 'string' && data.attr_preisPackgroesse.trim()) {
+        extraFields.attr_preisPackgroesse = data.attr_preisPackgroesse.trim();
+      }
+      if (typeof data.attr_preisPerKg === 'number' && data.attr_preisPerKg > 0) {
+        extraFields.attr_preisPerKg = data.attr_preisPerKg;
+      }
+      // Hersteller (NEU — nicht überschreiben existierendes `hersteller`!)
+      if (typeof data.attr_hersteller === 'string' && data.attr_hersteller.trim()) {
+        extraFields.attr_hersteller = data.attr_hersteller.trim();
+      }
+      // PackageSize (NEU — nicht überschreiben existierendes `packSize`!)
+      if (typeof data.attr_packageSize === 'number' && data.attr_packageSize > 0) {
+        extraFields.attr_packageSize = data.attr_packageSize;
+      }
+      if (typeof data.attr_packageUnit === 'string' && data.attr_packageUnit.trim()) {
+        extraFields.attr_packageUnit = data.attr_packageUnit.trim();
+      }
+      // Nutri-Score / Eco-Score (A-E/F)
+      if (typeof data.attr_nutri_score === 'string' && /^[A-F]$/i.test(data.attr_nutri_score)) {
+        extraFields.attr_nutri_score = data.attr_nutri_score.toUpperCase();
+      }
+      if (typeof data.attr_eco_score === 'string' && /^[A-F]$/i.test(data.attr_eco_score)) {
+        extraFields.attr_eco_score = data.attr_eco_score.toUpperCase();
+      }
+      // Allergene + Spuren als Arrays
+      if (Array.isArray(data.attr_allergene)) {
+        extraFields.attr_allergene = data.attr_allergene
+          .filter((s) => typeof s === 'string' && s.trim())
+          .map((s) => s.trim().toUpperCase());
+      }
+      if (Array.isArray(data.attr_spuren)) {
+        extraFields.attr_spuren = data.attr_spuren
+          .filter((s) => typeof s === 'string' && s.trim())
+          .map((s) => s.trim().toUpperCase());
+      }
+      // Booleans (nur wenn explizit gesetzt, nicht null behandeln als false)
+      if (data.attr_isVegan === true || data.attr_isVegan === false) {
+        extraFields.attr_isVegan = data.attr_isVegan;
+      }
+      if (data.attr_isVegetarisch === true || data.attr_isVegetarisch === false) {
+        extraFields.attr_isVegetarisch = data.attr_isVegetarisch;
+      }
+      if (data.attr_isBio === true || data.attr_isBio === false) {
+        extraFields.attr_isBio = data.attr_isBio;
+      }
+      if (typeof data.attr_biosiegel === 'string' && data.attr_biosiegel.trim()) {
+        extraFields.attr_biosiegel = data.attr_biosiegel.trim();
+      }
+      if (typeof data.attr_herkunftsland === 'string' && data.attr_herkunftsland.trim()) {
+        extraFields.attr_herkunftsland = data.attr_herkunftsland.trim();
+      }
+
       return {
         source: 'scraper',
         sourceTimestamp: data.scrapedAt ?? admin.firestore.Timestamp.now(),
@@ -272,6 +352,7 @@ async function tryScraper(eans) {
         ingredientStatement,
         hasNutrition,
         nutrFields,
+        extraFields, // attr_preis, attr_hersteller, attr_nutri_score, etc.
       };
     } catch (e) {
       console.warn(`tryScraper: EAN ${ean} lookup failed:`, e?.message);
@@ -379,7 +460,11 @@ async function processProduct(docRef, product, dryRun) {
   // scraper hat shop-spezifische Daten von DE/AT-Märkten, die für
   // unsere Discounter-Eigenmarken meist verlässlicher als crowd-
   // sourced OpenFoodFacts sind.
-  if (!ingredientsCovered || !nutritionCovered) {
+  //
+  // 2026-05-18: tryScraper läuft IMMER (auch wenn covered) damit
+  // attr_*-Felder (Preis, Hersteller, Allergene etc.) auch dann
+  // geschrieben werden wenn die Hauptdaten schon da sind.
+  {
     const s = await tryScraper(eans);
     if (s) {
       if (!ingredientsCovered && s.hasIngredients) {
@@ -413,6 +498,34 @@ async function processProduct(docRef, product, dryRun) {
           reasons.push(`nutrition(scraper:${s.sourceShop || '?'})`);
         }
         nutritionCovered = true;
+      }
+
+      // Extra-Felder (attr_*) — schreiben wenn sie im Scrape sind UND
+      // am produkt-doc noch nicht gesetzt sind (NICHT überschreiben).
+      // Spezial-Fall: attr_preis → schreiben wir NICHT direkt aufs
+      // produkt-doc weil das `preis` Field schon vom user/rewe gepflegt
+      // wird. Wir schreiben preis nur wenn KEIN `preis` da ist UND der
+      // scrape von einem ECHTEN Shop kommt (nicht openfoodfacts).
+      if (s.extraFields && Object.keys(s.extraFields).length > 0) {
+        const isOpenfoodSource = /openfoodfacts/.test((s.sourceShop || '').toLowerCase());
+        for (const [k, v] of Object.entries(s.extraFields)) {
+          // Preis-Sonderbehandlung: nur wenn produkt-doc noch keinen preis
+          // hat UND der Scrape von einem echten Shop kommt
+          if (k === 'attr_preis' && (product.preis != null || isOpenfoodSource)) {
+            continue;
+          }
+          if (k === 'attr_preisPackgroesse' && product.preis != null) continue;
+          if (k === 'attr_preisPerKg' && product.preis != null) continue;
+          // Andere attr_*-Felder: schreiben wenn am Produkt noch nicht gesetzt
+          if (product[k] != null) continue;
+          update[k] = v;
+        }
+        // wenn preis aus Scrape kommt UND noch keiner am Produkt → preisDatum+Shop setzen
+        if (update.attr_preis != null) {
+          update.attr_preisShop = s.sourceShop;
+          update.attr_preisUpdatedAt = s.sourceTimestamp;
+          reasons.push(`preis(scraper:${s.sourceShop || '?'}:${update.attr_preis}€)`);
+        }
       }
     }
   }
