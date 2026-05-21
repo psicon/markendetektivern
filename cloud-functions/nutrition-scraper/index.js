@@ -320,12 +320,24 @@ exports.scrapeBatch = functions.onRequest(
       };
 
       // SIMPLE Strategie (User-Vorgabe 2026-05-18):
-      // Skip wenn IRGENDEINE Source bereits gesetzt (rewe/manual/ocr/scraper/
-      // openfood). User-Logik: "wenn rewe da, dann eh ok, nicht anfassen".
-      // Nur docs ohne JEDE Source werden processed.
+      // Skip wenn IRGENDEINE Source bereits gesetzt ODER attr_*-Metadaten
+      // schon vom Scraper geschrieben wurden (Nicht-LM-Hits: Müllbeutel,
+      // Drogerie etc. mit nur attr_preis/attr_hersteller, ohne nutritionSource).
+      // User-Logik: "wenn rewe da, dann eh ok, nicht anfassen".
       // Cursor + Schema-Migration: ClickUp 86c9vktgg
       const HAS_SOURCE = (data) => {
-        return !!(data?.nutritionSource || data?.ingredientsSource);
+        if (!data) return false;
+        if (data.nutritionSource || data.ingredientsSource) return true;
+        // attr_*-Metadaten als touched-Indikator (z.B. Nicht-Lebensmittel
+        // mit nur Hersteller+Preis aus scraper) — Scanner muss diese
+        // als "fertig" werten, sonst Endlos-Pick.
+        if (data.attr_preisShop || data.attr_hersteller ||
+            (typeof data.attr_preis === 'number' && data.attr_preis > 0)) {
+          return true;
+        }
+        // eanStatus='invalid' → expliziter Mark "unscrape-bar" → skip
+        if (data.eanStatus === 'invalid') return true;
+        return false;
       };
 
       // Pre-Load: EANs die in nutritionscrape als "_failed mit failCount>=3"
@@ -363,9 +375,15 @@ exports.scrapeBatch = functions.onRequest(
         const filtered = snap.docs.filter((d) => {
           const data = d.data();
           if (HAS_SOURCE(data)) return false;
-          // Doc dessen erste EAN auf der failed-Liste ist → überspringen
           const docEans = getEans(data);
-          if (docEans[0] && failedEans.has(docEans[0])) return false;
+          // 2026-05-20: Müll-EAN-Docs ('999', '99999999' etc.) raus aus
+          // Scan — sonst füllen sie die limit=100 Slots und der Scanner
+          // erreicht die ECHTEN frischen Docs nie (~900 markenProdukte
+          // waren unbearbeitet weil alphabetisch früher Müll-EAN-Cluster
+          // den Pick komplett verbrannte).
+          if (docEans.length === 0) return false;
+          // Doc dessen erste EAN auf der failed-Liste ist → überspringen
+          if (failedEans.has(docEans[0])) return false;
           return true;
         });
         docs.push(...filtered);

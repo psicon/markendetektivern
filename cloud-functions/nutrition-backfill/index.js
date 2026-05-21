@@ -502,20 +502,33 @@ async function processProduct(docRef, product, dryRun) {
 
       // Extra-Felder (attr_*) — schreiben wenn sie im Scrape sind UND
       // am produkt-doc noch nicht gesetzt sind (NICHT überschreiben).
-      // Spezial-Fall: attr_preis → schreiben wir NICHT direkt aufs
-      // produkt-doc weil das `preis` Field schon vom user/rewe gepflegt
-      // wird. Wir schreiben preis nur wenn KEIN `preis` da ist UND der
-      // scrape von einem ECHTEN Shop kommt (nicht openfoodfacts).
+      //
+      // 2026-05-20: attr_preis VS preis = ZWEI getrennte Felder!
+      //   - `preis` = legacy/rewe/manual gepflegt → wir rühren das NICHT an
+      //   - `attr_preis` = NEUER Namespace vom Scraper → schreiben wir
+      //     IMMER (auch wenn `preis` gesetzt ist), weil das eine separate
+      //     Info ist (aktueller Shop-Preis vs. legacy). Vorher haben wir
+      //     attr_preis fälschlich geskippt wenn product.preis != null →
+      //     327 nutritionscrape-Hits mit attr_preis sind nie am
+      //     produkt-doc gelandet.
+      //   - openfoodfacts darf weiterhin keinen Preis liefern (kein Shop).
       if (s.extraFields && Object.keys(s.extraFields).length > 0) {
         const isOpenfoodSource = /openfoodfacts/.test((s.sourceShop || '').toLowerCase());
         for (const [k, v] of Object.entries(s.extraFields)) {
-          // Preis-Sonderbehandlung: nur wenn produkt-doc noch keinen preis
-          // hat UND der Scrape von einem echten Shop kommt
-          if (k === 'attr_preis' && (product.preis != null || isOpenfoodSource)) {
+          // Preis-Felder: NUR Openfood-Block, sonst immer schreiben
+          // (attr_preis ist eigener Namespace, koexistiert mit `preis`)
+          if (k === 'attr_preis' && isOpenfoodSource) continue;
+          if (k === 'attr_preisPackgroesse' && isOpenfoodSource) continue;
+          if (k === 'attr_preisPerKg' && isOpenfoodSource) continue;
+          // attr_preis* überschreiben wenn schon da nur wenn neuer Scrape
+          // jünger ist als bestehender attr_preisUpdatedAt
+          if (k.startsWith('attr_preis')) {
+            const oldTs = product.attr_preisUpdatedAt;
+            const newTs = s.sourceTimestamp;
+            if (oldTs && newTs && tsToMillis(newTs) <= tsToMillis(oldTs)) continue;
+            update[k] = v;
             continue;
           }
-          if (k === 'attr_preisPackgroesse' && product.preis != null) continue;
-          if (k === 'attr_preisPerKg' && product.preis != null) continue;
           // Andere attr_*-Felder: schreiben wenn am Produkt noch nicht gesetzt
           if (product[k] != null) continue;
           update[k] = v;
