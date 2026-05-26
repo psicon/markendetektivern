@@ -114,7 +114,9 @@ export default function RegisterScreen() {
           style={[
             styles.overlay,
             {
-              paddingTop: insets.top + 16,
+              // T10 v10: paddingTop identisch zu login.tsx (insets.top+56)
+              // damit Logo-Icon-Y-Position über alle Auth-Pages konsistent ist.
+              paddingTop: insets.top + 56,
               paddingBottom: insets.bottom + 16,
             },
           ]}
@@ -130,9 +132,12 @@ export default function RegisterScreen() {
             </TouchableOpacity>
           )}
 
-          {/* T10 v9: Layout exakt wie login.tsx — Logo oben fix
-              (Page-Konsistenz), Content vertikal zentriert im
-              verbleibenden Raum, Cross-Link am Boden. */}
+          {/* T10 v10: Layout-Klasse exakt wie login.tsx:
+              - Logo+Title als zusammenhängende Top-Gruppe (Header)
+              - Buttons DIREKT drunter (kein flex-Spacer dazwischen)
+              - Cross-Link am Boden via `marginTop: 'auto'`
+              Damit ist Logo-Y-Position identisch zu Login UND Header
+              + Buttons sind eine visuell verbundene Einheit. */}
           <View style={styles.logoBlock}>
             <CustomIcon
               name="iconBlack"
@@ -149,17 +154,19 @@ export default function RegisterScreen() {
             </ThemedText>
           </View>
 
-          <View style={styles.content}>
-            <AuthMethodButtons
-              mode="register"
-              onApple={handleApple}
-              onGoogle={handleGoogle}
-              onEmail={() => router.push('/auth/email-register' as any)}
-              busy={authInFlight}
-              colorScheme={colorScheme}
-            />
-          </View>
+          {/* Buttons direkt unter Header (visuell verbunden) */}
+          <AuthMethodButtons
+            mode="register"
+            onApple={handleApple}
+            onGoogle={handleGoogle}
+            onEmail={() => router.push('/auth/email-register' as any)}
+            busy={authInFlight}
+            colorScheme={colorScheme}
+          />
 
+          {/* Cross-Link: marginTop:auto schiebt ihn an den unteren
+              Rand, OHNE eine extra Spacer-View. Login hat den
+              gleichen Effekt durch Form-Inhalt. */}
           <View style={styles.crossLinkBox}>
             <View style={styles.crossLinkRow}>
               <ThemedText style={styles.crossLinkText}>Schon registriert? </ThemedText>
@@ -203,11 +210,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     gap: 4,
   },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    width: '100%',
-  },
   logoIcon: {
     marginBottom: 2,
   },
@@ -240,9 +242,16 @@ const styles = StyleSheet.create({
     letterSpacing: -0.1,
   },
   // (alt: buttonsBlock — wird nicht mehr genutzt, siehe content)
+  // T10 v10: marginTop:'auto' schiebt den Cross-Link an den unteren
+  // Rand des flex:1 overlay-Containers. Damit bilden Logo + Header +
+  // Buttons eine zusammenhängende Top-Gruppe (visually grouped, kein
+  // flex-Spacer dazwischen) und der Cross-Link liegt einzeln am Boden
+  // — identisches Pattern zu login.tsx wo der Form-Content den Raum
+  // füllt.
   crossLinkBox: {
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: 'auto',
+    paddingTop: 16,
   },
   crossLinkRow: {
     flexDirection: 'row',

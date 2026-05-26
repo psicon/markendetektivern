@@ -159,7 +159,8 @@ export default function WelcomeScreen() {
           style={[
             styles.overlay,
             {
-              paddingTop: insets.top + (isSmallScreen ? 12 : 24),
+              // T10 v10: identisch zu register.tsx + login.tsx + email-register.tsx
+              paddingTop: insets.top + 56,
               paddingBottom: insets.bottom + (isSmallScreen ? 16 : 24),
             },
           ]}
