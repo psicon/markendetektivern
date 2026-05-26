@@ -9,14 +9,14 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { OnboardingService } from '@/lib/services/onboardingService';
 import { GENDER_PILL_OPTIONS, normalizeLegacyGender, type Gender } from '@/lib/types/gender';
-import { approximateBirthDateFromAge } from '@/lib/utils/age';
+import { ageFromBirthDate, ageBucketFromAge, currentAgeFromReported } from '@/lib/utils/age';
+import { AgePicker } from '@/components/ui/AgePicker';
 import {
   showInfoToast,
   showRetryableErrorToast,
 } from '@/lib/services/ui/toast';
 import { Discounter, FirestoreDocument } from '@/lib/types/firestore';
 import { isExpoGo } from '@/lib/utils/platform';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -107,7 +107,8 @@ export default function RegisterScreen() {
     email: prefilledEmailFromQuery ?? '',
     password: '',
     confirmPassword: '',
-    birthDate: null as Date | null,
+    // T12.3: birthDate ersetzt durch Integer-Age (Slider).
+    age: null as number | null,
     gender: '' as Gender | '',
     location: '',
     favoriteMarket: null as FirestoreDocument<Discounter> | null
@@ -163,17 +164,22 @@ export default function RegisterScreen() {
           prefilled.add('gender');
         }
       }
-      // birthDate direkt oder via age
-      if (!next.birthDate) {
-        if (p.birthDate?.toDate) {
-          next.birthDate = p.birthDate.toDate();
-          prefilled.add('birthDate');
-        } else if (p.birthDate instanceof Date) {
-          next.birthDate = p.birthDate;
-          prefilled.add('birthDate');
-        } else if (typeof p.age === 'number' && p.age > 0) {
-          next.birthDate = approximateBirthDateFromAge(p.age);
-          prefilled.add('birthDate');
+      // T12.3: Age direkt aus dem User-Doc. Falls Legacy-Pfad
+      // (alte User mit birthDate aber ohne age) → ageFromBirthDate.
+      if (next.age === null) {
+        if (typeof p.age === 'number' && p.age > 0) {
+          if (typeof p.ageReportedYear === 'number') {
+            next.age = currentAgeFromReported(p.age, p.ageReportedYear);
+          } else {
+            next.age = p.age;
+          }
+          prefilled.add('age');
+        } else if (p.birthDate?.toDate) {
+          const fromDob = ageFromBirthDate(p.birthDate.toDate());
+          if (fromDob) {
+            next.age = fromDob;
+            prefilled.add('age');
+          }
         }
       }
       // location
@@ -198,19 +204,13 @@ export default function RegisterScreen() {
   }, [userProfile]);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [showMarketSelector, setShowMarketSelector] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [validationErrors, setValidationErrors] = useState<{[key: string]: boolean}>({});
 
-  const onDateChange = (event: any, selectedDate?: Date) => {
-    setShowDatePicker(false);
-    
-    if (event.type === 'set' && selectedDate) {
-      setFormData(prev => ({ ...prev, birthDate: selectedDate }));
-    }
-  };
+  // T12.3: onDateChange + showDatePicker entfernt — Alter wird
+  // jetzt via AgePicker erfasst.
 
   const openTermsOfService = async () => {
     try {
@@ -276,7 +276,9 @@ export default function RegisterScreen() {
         formData.username,
         {
           realName: formData.realName || undefined,
-          birthDate: formData.birthDate || undefined,
+          // T12.3: age (Integer) statt birthDate. AuthContext schreibt
+          // age/ageBucket/ageReportedAt/ageReportedYear ans User-Doc.
+          age: typeof formData.age === 'number' ? formData.age : undefined,
           gender: formData.gender || undefined,
           location: formData.location || undefined,
           favoriteMarket: formData.favoriteMarket?.id || undefined,
@@ -608,21 +610,23 @@ export default function RegisterScreen() {
                   </View>
                 </View>
 
-                {/* Birth Date */}
+                {/* T12.3: Alter via AgePicker statt Datums-Picker.
+                    Hint "✓ aus Onboarding" wenn vorbefüllt. */}
                 <View style={styles.inputContainer}>
-                  <ThemedText style={styles.label}>Geburtsdatum</ThemedText>
-                  <TouchableOpacity 
-                    style={[styles.input, isSmallDevice && styles.inputSmall]}
-                    onPress={() => setShowDatePicker(true)}
-                  >
-                    <ThemedText style={styles.selectText}>
-                      {formData.birthDate 
-                        ? formData.birthDate.toLocaleDateString('de-DE')
-                        : 'Datum auswählen'
-                      }
-                    </ThemedText>
-                    <IconSymbol name="calendar" size={20} color="rgba(0,0,0,0.5)" />
-                  </TouchableOpacity>
+                  <ThemedText style={styles.label}>
+                    Alter
+                    {prefilledFields.has('age') && (
+                      <ThemedText style={styles.prefilledHint}>  ✓ aus Onboarding</ThemedText>
+                    )}
+                  </ThemedText>
+                  <View style={styles.agePickerWrapper}>
+                    <AgePicker
+                      value={formData.age}
+                      onChange={(n) => setFormData((prev) => ({ ...prev, age: n }))}
+                      tintColor="#0d8575"
+                      textColor="#1c1c1e"
+                    />
+                  </View>
                 </View>
 
                 {/* Gender — 4 Pills (Enum aus lib/types/gender.ts) */}
@@ -745,17 +749,7 @@ export default function RegisterScreen() {
         </Animated.View>
       </View>
 
-      {/* Date Picker Modal */}
-      {showDatePicker && (
-        <DateTimePicker
-          value={formData.birthDate || new Date()}
-          mode="date"
-          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onChange={onDateChange}
-          maximumDate={new Date()}
-          minimumDate={new Date(1900, 0, 1)}
-        />
-      )}
+      {/* T12.3: DateTimePicker entfernt — Alter via AgePicker inline. */}
 
       {/* Location Picker Modal */}
       <LocationPicker
@@ -968,6 +962,14 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     width: '100%',
+  },
+  // T12.3: AgePicker-Wrapper auf dem dunklen Auth-Background. Heller
+  // Surface-Card mit Padding macht den Slider gut sichtbar.
+  agePickerWrapper: {
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   label: {
     fontSize: 14,
