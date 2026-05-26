@@ -115,7 +115,7 @@ export default function RegisterScreen() {
             styles.overlay,
             {
               paddingTop: insets.top + 16,
-              paddingBottom: insets.bottom + 24,
+              paddingBottom: insets.bottom + 16,
             },
           ]}
         >
@@ -130,40 +130,41 @@ export default function RegisterScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Logo + Title — kompakt, kein Clipping */}
-          <View style={styles.headerBlock}>
-            <CustomIcon
-              name="iconBlack"
-              size={isSmallDevice ? 44 : 56}
-              color="#fff"
-              style={styles.logoIcon}
-            />
-            <ThemedText style={styles.brandText}>MarkenDetektive</ThemedText>
-            <ThemedText style={styles.titleText}>
-              Jetzt registrieren
-            </ThemedText>
-          </View>
+          {/* T10 v6: Best-Practice-Pattern (Strava/Duolingo) — alle
+              Elemente als kompakte Gruppe in einem natürlichen
+              Flow. Kein space-between, kein riesiges Whitespace.
+              Header oben, Buttons direkt drunter, Cross-Link
+              direkt unter den Buttons. */}
+          <View style={styles.contentGroup}>
+            <View style={styles.headerBlock}>
+              <CustomIcon
+                name="iconBlack"
+                size={isSmallDevice ? 44 : 56}
+                color="#fff"
+                style={styles.logoIcon}
+              />
+              <ThemedText style={styles.brandText}>MarkenDetektive</ThemedText>
+              <ThemedText style={styles.titleText}>Jetzt registrieren</ThemedText>
+            </View>
 
-          {/* Buttons — zentriert in der Mitte des Screens via flex:1 */}
-          <View style={styles.buttonsBlock}>
-            <AuthMethodButtons
-              mode="register"
-              onApple={handleApple}
-              onGoogle={handleGoogle}
-              onEmail={() => router.push('/auth/email-register' as any)}
-              busy={authInFlight}
-              colorScheme={colorScheme}
-            />
-          </View>
+            <View style={styles.buttonsBlock}>
+              <AuthMethodButtons
+                mode="register"
+                onApple={handleApple}
+                onGoogle={handleGoogle}
+                onEmail={() => router.push('/auth/email-register' as any)}
+                busy={authInFlight}
+                colorScheme={colorScheme}
+              />
+            </View>
 
-          {/* Cross-Link — Footer */}
-          <View style={styles.crossLinkBox}>
-            <View style={styles.crossLinkDivider} />
-            <View style={styles.crossLinkRow}>
-              <ThemedText style={styles.crossLinkText}>Schon registriert? </ThemedText>
-              <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={8}>
-                <ThemedText style={styles.crossLinkLink}>Hier einloggen</ThemedText>
-              </TouchableOpacity>
+            <View style={styles.crossLinkBox}>
+              <View style={styles.crossLinkRow}>
+                <ThemedText style={styles.crossLinkText}>Schon registriert? </ThemedText>
+                <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={8}>
+                  <ThemedText style={styles.crossLinkLink}>Hier einloggen</ThemedText>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </LinearGradient>
@@ -179,10 +180,10 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     paddingHorizontal: 24,
-    // 3 vertical sections: header / buttons / cross-link.
-    // space-between verteilt sie über die volle Höhe — funktioniert
-    // identisch auf iPhone SE und iPhone 15 Pro Max.
-    justifyContent: 'space-between',
+    // T10 v6: Best Practice — Content beginnt oben (justifyContent
+    // flex-start) und fließt natürlich. KEIN space-between, sonst
+    // klafft eine riesige Lücke zwischen Buttons und Cross-Link.
+    justifyContent: 'flex-start',
   },
   backButton: {
     position: 'absolute',
@@ -195,10 +196,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
+  // T10 v6: gruppierter Content-Block — Header + Buttons + Cross-Link
+  // bilden eine zusammenhängende Einheit ohne große Lücken dazwischen.
+  contentGroup: {
+    marginTop: 32,
+    gap: 24,
+  },
   headerBlock: {
     alignItems: 'center',
     gap: 6,
-    marginTop: 36,
   },
   logoIcon: {
     marginBottom: 2,
@@ -229,12 +235,7 @@ const styles = StyleSheet.create({
   },
   crossLinkBox: {
     alignItems: 'center',
-  },
-  crossLinkDivider: {
-    width: 80,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    marginBottom: 14,
+    paddingTop: 4,
   },
   crossLinkRow: {
     flexDirection: 'row',

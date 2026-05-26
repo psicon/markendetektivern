@@ -1008,20 +1008,21 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_400Regular',
     color: '#1c1c1e',
   },
-  // T10 v2: Gender-Pills auf gleichen Style wie
-  // DemographicsPromptSheet (T3). 2-Spalten-Grid via flexWrap+minWidth
-  // verhindert das Wort-Umbruch-Problem bei 4 Pills in einer Reihe.
+  // T10 v6: Sauberes 2-Spalten-Grid für die 4 Pills.
+  // Vorher: flex:1 + minWidth:45% führte zu unterschiedlichen Pill-
+  // Größen (Pills im 2. Row wurden breiter weil sie alleine eine
+  // Row hatten, plus "Männlich" wurde mal größer mal kleiner je
+  // nach Wrap-Verhalten). Jetzt: fixed width: 48% + gap:8 + flexWrap.
+  // 2 columns garantiert, alle 4 Pills identisch in Größe.
   genderContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
   },
   genderButton: {
-    flex: 1,
-    minWidth: '45%',
-    minHeight: 46,
-    paddingVertical: 11,
-    paddingHorizontal: 14,
+    width: '48.5%',
+    height: 50,
+    paddingHorizontal: 12,
     borderRadius: 14,
     borderWidth: 1.5,
     borderColor: 'rgba(0,0,0,0.06)',
