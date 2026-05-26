@@ -1,4 +1,5 @@
 import { ThemedText } from '@/components/ThemedText';
+import { AuthMethodButtons } from '@/components/auth/AuthMethodButtons';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -446,35 +447,24 @@ export default function RegisterScreen() {
                 </ThemedText>
               </View>
 
-              {/* Social Login Buttons */}
-              <View style={styles.socialSection}>
-                {Platform.OS === 'ios' && (
-                  <TouchableOpacity 
-                    style={[styles.socialButton, styles.appleButton]}
-                    onPress={handleAppleSignIn}
-                    disabled={loading}
-                  >
-                    <IconSymbol name="apple.logo" size={20} color="white" />
-                    <ThemedText style={styles.appleButtonText}>Mit Apple registrieren</ThemedText>
-                  </TouchableOpacity>
-                )}
-                
-                {Platform.OS === 'android' && (
-                  <TouchableOpacity 
-                    style={styles.socialButton}
-                    onPress={handleGoogleSignIn}
-                    disabled={loading}
-                  >
-                    <View style={styles.googleIconContainer}>
-                      <Text style={styles.googleIcon}>G</Text>
-                    </View>
-                    <ThemedText style={styles.socialButtonText}>Mit Google registrieren</ThemedText>
-                  </TouchableOpacity>
-                )}
-              </View>
+              {/* T10: Gemeinsame 3-Button-Auswahl (Apple/Google + Facebook
+                  + Email). Email-Button scrollt zur Form drunter — wir
+                  sind ja schon im Register-Screen. */}
+              <AuthMethodButtons
+                mode="register"
+                onApple={handleAppleSignIn}
+                onGoogle={handleGoogleSignIn}
+                onEmail={() => scrollViewRef.current?.scrollTo({ y: 280, animated: true })}
+                busy={loading}
+                colorScheme={colorScheme}
+              />
 
-              {/* Divider */}
-              <ThemedText style={styles.orText}>oder mit E-Mail Adresse registrieren:</ThemedText>
+              {/* Divider — visuelle Trennung zwischen Social-Buttons + Form */}
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>oder mit E-Mail Adresse</Text>
+                <View style={styles.dividerLine} />
+              </View>
 
               {/* Form Fields */}
               <View style={styles.formContainer}>
@@ -488,7 +478,7 @@ export default function RegisterScreen() {
                       isSmallDevice && styles.inputSmall
                     ]}
                     placeholder="Dein Anzeigename"
-                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    placeholderTextColor="rgba(0,0,0,0.4)"
                     value={formData.username}
                     onChangeText={(text) => {
                       setFormData(prev => ({ ...prev, username: text }));
@@ -510,7 +500,7 @@ export default function RegisterScreen() {
                   <TextInput
                     style={[styles.input, isSmallDevice && styles.inputSmall]}
                     placeholder="Dein vollständiger Name"
-                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    placeholderTextColor="rgba(0,0,0,0.4)"
                     value={formData.realName}
                     onChangeText={(text) => setFormData(prev => ({ ...prev, realName: text }))}
                     autoCapitalize="words"
@@ -530,7 +520,7 @@ export default function RegisterScreen() {
                       isSmallDevice && styles.inputSmall
                     ]}
                     placeholder="deine@email.de"
-                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    placeholderTextColor="rgba(0,0,0,0.4)"
                     value={formData.email}
                     onChangeText={(text) => {
                       setFormData(prev => ({ ...prev, email: text }));
@@ -555,7 +545,7 @@ export default function RegisterScreen() {
                         isSmallDevice && styles.inputSmall
                       ]}
                       placeholder="Mindestens 6 Zeichen"
-                      placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                      placeholderTextColor="rgba(0,0,0,0.4)"
                       value={formData.password}
                       onChangeText={(text) => {
                         setFormData(prev => ({ ...prev, password: text }));
@@ -574,7 +564,7 @@ export default function RegisterScreen() {
                       <IconSymbol 
                         name={showPassword ? "eye.slash" : "eye"} 
                         size={20} 
-                        color="rgba(255, 255, 255, 0.7)" 
+                        color="rgba(0,0,0,0.5)" 
                       />
                     </TouchableOpacity>
                   </View>
@@ -587,7 +577,7 @@ export default function RegisterScreen() {
                     <TextInput
                       style={[styles.passwordInput, isSmallDevice && styles.inputSmall]}
                       placeholder="Passwort wiederholen"
-                      placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                      placeholderTextColor="rgba(0,0,0,0.4)"
                       value={formData.confirmPassword}
                       onChangeText={(text) => setFormData(prev => ({ ...prev, confirmPassword: text }))}
                       secureTextEntry={!showConfirmPassword}
@@ -601,7 +591,7 @@ export default function RegisterScreen() {
                       <IconSymbol 
                         name={showConfirmPassword ? "eye.slash" : "eye"} 
                         size={20} 
-                        color="rgba(255, 255, 255, 0.7)" 
+                        color="rgba(0,0,0,0.5)" 
                       />
                     </TouchableOpacity>
                   </View>
@@ -620,7 +610,7 @@ export default function RegisterScreen() {
                         : 'Datum auswählen'
                       }
                     </ThemedText>
-                    <IconSymbol name="calendar" size={20} color="rgba(255, 255, 255, 0.7)" />
+                    <IconSymbol name="calendar" size={20} color="rgba(0,0,0,0.5)" />
                   </TouchableOpacity>
                 </View>
 
@@ -663,7 +653,7 @@ export default function RegisterScreen() {
                     <ThemedText style={styles.selectText}>
                       {formData.location || 'Standort wählen'}
                     </ThemedText>
-                    <IconSymbol name="location" size={20} color="rgba(255, 255, 255, 0.7)" />
+                    <IconSymbol name="location" size={20} color="rgba(0,0,0,0.5)" />
                   </TouchableOpacity>
                 </View>
 
@@ -680,7 +670,7 @@ export default function RegisterScreen() {
                         : 'Markt auswählen'
                       }
                     </ThemedText>
-                    <IconSymbol name="storefront" size={20} color="rgba(255, 255, 255, 0.7)" />
+                    <IconSymbol name="storefront" size={20} color="rgba(0,0,0,0.5)" />
                   </TouchableOpacity>
                 </View>
 
@@ -727,12 +717,16 @@ export default function RegisterScreen() {
                   )}
                 </TouchableOpacity>
 
-                {/* Login Link */}
+                {/* T10: Login Cross-Link — prominenter platziert, klare
+                    Trennung von der Form. "Schon registriert? Hier einloggen!". */}
                 <View style={styles.loginSection}>
-                  <ThemedText style={styles.loginText}>Schon registriert?</ThemedText>
-                  <TouchableOpacity onPress={() => router.replace('/auth/login')}>
-                    <ThemedText style={[styles.loginLink, { color: colors.primary }]}>Anmelden!</ThemedText>
-                  </TouchableOpacity>
+                  <View style={styles.loginDividerLine} />
+                  <View style={styles.loginRow}>
+                    <ThemedText style={styles.loginText}>Schon registriert? </ThemedText>
+                    <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={6}>
+                      <ThemedText style={styles.loginLinkBold}>Hier einloggen</ThemedText>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             </ScrollView>
@@ -938,15 +932,18 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_500Medium',
     color: 'rgba(76, 175, 80, 0.9)',
   },
+  // T10: Solid weiße Card-Look-Inputs (vorher rgba 0.1-Transparenz
+  // auf Foto-Background → schlecht lesbar). Dark Text auf hellem
+  // BG = klassischer Auth-Form-Look (Apple/Strava/Headspace).
   input: {
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: 'rgba(0,0,0,0.08)',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 16,
     fontSize: 16,
-    color: 'white',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    color: '#1c1c1e',
+    backgroundColor: 'rgba(255,255,255,0.96)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -960,14 +957,33 @@ const styles = StyleSheet.create({
   },
   passwordInput: {
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: 'rgba(0,0,0,0.08)',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 16,
     paddingRight: 50,
     fontSize: 16,
-    color: 'white',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    color: '#1c1c1e',
+    backgroundColor: 'rgba(255,255,255,0.96)',
+  },
+  // T10: Divider zwischen Social-Buttons und Email-Form.
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 18,
+    marginBottom: 18,
+    gap: 12,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+  },
+  dividerText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255,255,255,0.7)',
+    letterSpacing: 0.2,
   },
   eyeButton: {
     position: 'absolute',
@@ -981,13 +997,13 @@ const styles = StyleSheet.create({
   fieldHelp: {
     fontSize: 12,
     fontFamily: 'Nunito_400Regular',
-    color: 'rgba(255, 255, 255, 0.6)',
+    color: 'rgba(255, 255, 255, 0.65)',
     marginTop: 4,
   },
   selectText: {
     fontSize: 16,
     fontFamily: 'Nunito_400Regular',
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: '#1c1c1e',
   },
   genderContainer: {
     flexDirection: 'row',
@@ -1066,16 +1082,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Nunito_600SemiBold',
   },
+  // T10: prominent Cross-Link nach unten — eigene divider line +
+  // Row, "Hier einloggen" als Underline + Bold sichtbar.
   loginSection: {
+    marginTop: 24,
+    paddingTop: 16,
+    alignItems: 'center',
+  },
+  loginDividerLine: {
+    width: 60,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginBottom: 16,
+  },
+  loginRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    marginTop: 16,
   },
   loginText: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 15,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255, 255, 255, 0.85)',
+  },
+  loginLinkBold: {
+    fontSize: 15,
+    fontFamily: 'Nunito_700Bold',
+    color: '#fff',
+    textDecorationLine: 'underline',
   },
   loginLink: {
     fontSize: 14,

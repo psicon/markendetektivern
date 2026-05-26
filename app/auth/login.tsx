@@ -1,4 +1,5 @@
 import { ThemedText } from '@/components/ThemedText';
+import { AuthMethodButtons } from '@/components/auth/AuthMethodButtons';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -245,14 +246,31 @@ export default function LoginScreen() {
           <ThemedText style={[styles.subTitle, isSmallDevice && styles.subTitleSmall]}>Willkommen zurück!</ThemedText>
           
           <View style={styles.authButtons}>
-            {/* Form Fields */}
+            {/* T10: 3-Button-Quick-Login oben — gleiche AuthMethodButtons
+                wie Welcome/Register. */}
+            <AuthMethodButtons
+              mode="login"
+              onApple={handleAppleSignIn}
+              onGoogle={handleGoogleSignIn}
+              onEmail={() => {/* schon auf Login-Screen, Form ist drunter */}}
+              busy={loading}
+              colorScheme={colorScheme}
+            />
+
+            {/* Divider */}
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>oder mit E-Mail</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            {/* Form Fields — solid weiße Inputs für Lesbarkeit (T10) */}
             <View style={[styles.formContainer, isSmallDevice && styles.formContainerSmall]}>
-              {/* Email Input */}
               <View style={styles.inputContainer}>
                 <TextInput
                   style={[styles.input, isSmallDevice && styles.inputSmall]}
                   placeholder="E-Mail"
-                  placeholderTextColor="rgba(255, 255, 255, 0.7)"
+                  placeholderTextColor="rgba(0,0,0,0.4)"
                   value={formData.email}
                   onChangeText={(text) => setFormData(prev => ({ ...prev, email: text }))}
                   keyboardType="email-address"
@@ -261,13 +279,12 @@ export default function LoginScreen() {
                 />
               </View>
 
-              {/* Password Input */}
               <View style={styles.inputContainer}>
                 <View style={styles.passwordContainer}>
                   <TextInput
                     style={[styles.passwordInput, isSmallDevice && styles.inputSmall]}
                     placeholder="Passwort"
-                    placeholderTextColor="rgba(255, 255, 255, 0.7)"
+                    placeholderTextColor="rgba(0,0,0,0.4)"
                     value={formData.password}
                     onChangeText={(text) => setFormData(prev => ({ ...prev, password: text }))}
                     secureTextEntry={!showPassword}
@@ -281,28 +298,26 @@ export default function LoginScreen() {
                     style={styles.eyeButton}
                     onPress={() => setShowPassword(!showPassword)}
                   >
-                    <IconSymbol 
-                      name={showPassword ? "eye.slash" : "eye"} 
-                      size={20} 
-                      color="rgba(255, 255, 255, 0.7)" 
+                    <IconSymbol
+                      name={showPassword ? "eye.slash" : "eye"}
+                      size={20}
+                      color="rgba(0,0,0,0.5)"
                     />
                   </TouchableOpacity>
                 </View>
               </View>
 
-              {/* Forgot Password */}
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.forgotPassword}
                 onPress={() => router.push('/auth/forgot-password')}
               >
-                <ThemedText style={[styles.forgotPasswordText, { color: colors.primary }]}>
+                <ThemedText style={styles.forgotPasswordTextWhite}>
                   Passwort vergessen?
                 </ThemedText>
               </TouchableOpacity>
             </View>
 
-            {/* Login Button */}
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.loginButton, { backgroundColor: colors.primary }, loading && { opacity: 0.7 }]}
               onPress={handleLogin}
               disabled={loading}
@@ -317,32 +332,15 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            <ThemedText style={styles.orText}>Oder direkt mit:</ThemedText>
-
-            {/* Platform-specific Social Buttons */}
-            {/* Google Sign-In (nur Android - iOS vorerst deaktiviert) */}
-            {Platform.OS === 'android' && (
-              <TouchableOpacity style={styles.socialButton} onPress={handleGoogleSignIn}>
-                <View style={styles.googleIconContainer}>
-                  <ThemedText style={styles.googleIcon}>G</ThemedText>
-                </View>
-                <ThemedText style={styles.socialButtonText}>Google</ThemedText>
-              </TouchableOpacity>
-            )}
-
-            {/* Apple Sign-In (nur iOS) */}
-            {Platform.OS === 'ios' && (
-              <TouchableOpacity style={[styles.socialButtonDark, isSmallDevice && styles.socialButtonSmall]} onPress={handleAppleSignIn}>
-                <IconSymbol name="apple.logo" size={20} color="white" />
-                <ThemedText style={styles.socialButtonTextDark}>Apple Account</ThemedText>
-              </TouchableOpacity>
-            )}
-
+            {/* T10: prominenter Cross-Link nach unten — "Noch kein Account?". */}
             <View style={styles.registerSection}>
-              <ThemedText style={styles.registerText}>Noch kein Account?</ThemedText>
-              <TouchableOpacity onPress={() => router.push('/auth/register')}>
-                <ThemedText style={[styles.registerLink, { color: colors.primary }]}>Registrieren!</ThemedText>
-              </TouchableOpacity>
+              <View style={styles.registerDividerLine} />
+              <View style={styles.registerRow}>
+                <ThemedText style={styles.registerText}>Noch kein Account? </ThemedText>
+                <TouchableOpacity onPress={() => router.push('/auth/register')} hitSlop={6}>
+                  <ThemedText style={styles.registerLinkBold}>Kostenlos starten</ThemedText>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </View>
@@ -455,31 +453,71 @@ const styles = StyleSheet.create({
   inputContainer: {
     width: '100%',
   },
+  // T10: solid weiße Inputs für Kontrast auf Foto-Background
   input: {
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: 'rgba(0,0,0,0.08)',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 16,
     fontSize: 16,
-
-    color: 'white',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    color: '#1c1c1e',
+    backgroundColor: 'rgba(255,255,255,0.96)',
   },
   passwordContainer: {
     position: 'relative',
   },
   passwordInput: {
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: 'rgba(0,0,0,0.08)',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 16,
     paddingRight: 50,
     fontSize: 16,
-
-    color: 'white',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    color: '#1c1c1e',
+    backgroundColor: 'rgba(255,255,255,0.96)',
+  },
+  // T10: divider + register-Cross-Link Styles
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 18,
+    marginBottom: 16,
+    gap: 12,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+  },
+  dividerText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255,255,255,0.7)',
+    letterSpacing: 0.2,
+  },
+  forgotPasswordTextWhite: {
+    fontSize: 14,
+    fontFamily: 'Nunito_600SemiBold',
+    color: '#fff',
+    opacity: 0.9,
+  },
+  registerDividerLine: {
+    width: 60,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginBottom: 14,
+  },
+  registerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  registerLinkBold: {
+    fontSize: 15,
+    fontFamily: 'Nunito_700Bold',
+    color: '#fff',
+    textDecorationLine: 'underline',
   },
   eyeButton: {
     position: 'absolute',
@@ -570,16 +608,14 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   registerSection: {
-    flexDirection: 'row',
+    marginTop: 22,
+    paddingTop: 14,
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    marginTop: 12,
   },
   registerText: {
-    fontSize: 14,
-
-    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 15,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255, 255, 255, 0.85)',
   },
   registerLink: {
     fontSize: 14,
