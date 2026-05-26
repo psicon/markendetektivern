@@ -438,16 +438,9 @@ export default function RegisterScreen() {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {/* T10 v5 (2026-05-22): email-register.tsx ist die
-                  dedizierte Email-Form-Page (kein Hub). User kommt
-                  hier via "Mit E-Mail registrieren"-Tap auf
-                  /auth/register-Hub. Form direkt sichtbar. */}
-              <View style={styles.titleSection}>
-                <ThemedText style={[styles.title, isSmallDevice && styles.titleSmall]}>
-                  E-Mail-Registrierung
-                </ThemedText>
-              </View>
-
+              {/* T10 v8: Title weg — der User hat "Mit E-Mail
+                  registrieren" aktiv im Hub gewählt, weiß was
+                  hier passiert. Form startet direkt. */}
               <View style={styles.formContainer}>
                 {/* Username */}
                 <View style={styles.inputContainer}>
@@ -933,7 +926,7 @@ const styles = StyleSheet.create({
   prefilledHint: {
     fontSize: 11,
     fontFamily: 'Nunito_500Medium',
-    color: 'rgba(76, 175, 80, 0.9)',
+    color: '#0d8575',
   },
   // T10: Solid weiße Card-Look-Inputs (vorher rgba 0.1-Transparenz
   // auf Foto-Background → schlecht lesbar). Dark Text auf hellem
@@ -1030,12 +1023,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // T10 v7: Active-State solid grün mit weißem Text — klar lesbar,
-  // klare visuelle Selection-Indikation. Vorher rgba(0.1) BG + grüner
-  // Text war auf hellem Card-BG schlecht lesbar.
+  // T10 v8: Active-State im Brand-Grün (Colors.light.primary
+  // #0d8575). Vorher Material-Grün #4CAF50 — das passt nicht zur
+  // App-Identität.
   genderButtonActive: {
-    backgroundColor: '#4CAF50',
-    borderColor: '#4CAF50',
+    backgroundColor: '#0d8575',
+    borderColor: '#0d8575',
   },
   genderButtonText: {
     fontSize: 14,

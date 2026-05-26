@@ -130,41 +130,40 @@ export default function RegisterScreen() {
             </TouchableOpacity>
           )}
 
-          {/* T10 v7: Best-Practice-Layout (Strava/Headspace/Duolingo):
-              Content vertikal ZENTRIERT im verfügbaren Raum. Auf
-              iPhone SE wenig Whitespace oben+unten, auf iPhone 15
-              proportional mehr — aber NIE oben gequetscht oder
-              unten klaffend. */}
-          <View style={styles.contentCenter}>
-            <View style={styles.headerBlock}>
-              <CustomIcon
-                name="iconBlack"
-                size={isSmallDevice ? 44 : 56}
-                color="#fff"
-                style={styles.logoIcon}
-              />
-              <ThemedText style={styles.brandText}>MarkenDetektive</ThemedText>
-              <ThemedText style={styles.titleText}>
-                Jetzt kostenlos registrieren
-              </ThemedText>
-              <ThemedText style={styles.subtitleText}>
-                und Vorteile genießen!
-              </ThemedText>
-            </View>
-
-            <View style={styles.buttonsBlock}>
-              <AuthMethodButtons
-                mode="register"
-                onApple={handleApple}
-                onGoogle={handleGoogle}
-                onEmail={() => router.push('/auth/email-register' as any)}
-                busy={authInFlight}
-                colorScheme={colorScheme}
-              />
-            </View>
+          {/* T10 v8: Konsistente Position über ALLE Auth-Pages.
+              Header fixed-distance vom Top, Buttons fixed-distance
+              vom Header, Footer am Boden. Spacer flex:1 dazwischen
+              wächst proportional mit Device-Höhe. */}
+          <View style={styles.headerBlock}>
+            <CustomIcon
+              name="iconBlack"
+              size={56}
+              color="#fff"
+              style={styles.logoIcon}
+            />
+            <ThemedText style={styles.brandText}>MarkenDetektive</ThemedText>
+            <ThemedText style={styles.titleText}>
+              Jetzt kostenlos registrieren
+            </ThemedText>
+            <ThemedText style={styles.subtitleText}>
+              und Vorteile genießen!
+            </ThemedText>
           </View>
 
-          {/* Footer-Cross-Link am unteren Rand */}
+          <View style={styles.buttonsBlock}>
+            <AuthMethodButtons
+              mode="register"
+              onApple={handleApple}
+              onGoogle={handleGoogle}
+              onEmail={() => router.push('/auth/email-register' as any)}
+              busy={authInFlight}
+              colorScheme={colorScheme}
+            />
+          </View>
+
+          {/* Spacer — pusht Footer-Cross-Link nach unten */}
+          <View style={styles.spacer} />
+
           <View style={styles.crossLinkBox}>
             <View style={styles.crossLinkRow}>
               <ThemedText style={styles.crossLinkText}>Schon registriert? </ThemedText>
@@ -198,16 +197,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
-  // T10 v7: Content vertikal zentriert im verfügbaren Raum
-  // (zwischen Status-Bar und Footer-Cross-Link). flex:1 + center.
-  contentCenter: {
-    flex: 1,
-    justifyContent: 'center',
-    gap: 28,
-  },
+  // T10 v8: Header an FIXER Position vom Top. Identisch über
+  // register/login/email-register/welcome — User-Wahrnehmung
+  // "Logo wandert nicht" beim Page-Wechsel.
   headerBlock: {
     alignItems: 'center',
     gap: 4,
+    marginTop: 32,
+  },
+  // Spacer pushed Footer nach unten — flex:1 füllt den Rest.
+  spacer: {
+    flex: 1,
+    minHeight: 24,
   },
   logoIcon: {
     marginBottom: 2,
@@ -242,6 +243,7 @@ const styles = StyleSheet.create({
   },
   buttonsBlock: {
     width: '100%',
+    marginTop: 36,
   },
   crossLinkBox: {
     alignItems: 'center',

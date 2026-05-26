@@ -418,17 +418,17 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_500Medium',
     color: 'white',
   },
-  // T10 v5: kompakter Logo-Block. Brand-Text klein (sekundär),
-  // "Willkommen zurück!" als Haupt-Titel mit Clip-Schutz.
+  // T10 v8: gleiche Top-Position wie register.tsx — Logo wandert
+  // nicht beim Page-Wechsel.
   logoBlock: {
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 14,
+    marginTop: 32,
+    marginBottom: 20,
     gap: 4,
   },
   logoBlockSmall: {
-    marginTop: 4,
-    marginBottom: 10,
+    marginTop: 20,
+    marginBottom: 14,
     gap: 2,
   },
   logoIcon: {
