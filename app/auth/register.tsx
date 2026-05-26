@@ -7,6 +7,7 @@ import { MarketSelector } from '@/components/ui/MarketSelector';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { OnboardingService } from '@/lib/services/onboardingService';
 import {
   showInfoToast,
   showRetryableErrorToast,
@@ -179,8 +180,8 @@ export default function RegisterScreen() {
       setLoading(true);
       
       await signUp(
-        formData.email, 
-        formData.password, 
+        formData.email,
+        formData.password,
         formData.username,
         {
           realName: formData.realName || undefined,
@@ -191,7 +192,12 @@ export default function RegisterScreen() {
           favoriteMarketName: formData.favoriteMarket?.name || undefined
         }
       );
-      
+
+      // T5: Onboarding-Status auf 'completed' setzen falls noch nicht
+      // (Re-Start-Bug B1: ohne dies würde der User beim nächsten
+      // App-Boot wieder in /onboarding landen).
+      try { await OnboardingService.markCompleted(); } catch {}
+
       router.replace('/(tabs)');
     } catch (error: any) {
       // Anon-User hat den 'Konto wechseln'-Confirm abgebrochen
@@ -247,6 +253,7 @@ export default function RegisterScreen() {
     try {
       setLoading(true);
       await signInWithGoogle();
+      try { await OnboardingService.markCompleted(); } catch {}
       router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Google Sign-In error:', error);
@@ -277,6 +284,7 @@ export default function RegisterScreen() {
         return;
       }
       await signInWithApple();
+      try { await OnboardingService.markCompleted(); } catch {}
       router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Apple Sign-In error:', error);

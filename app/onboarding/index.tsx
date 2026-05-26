@@ -552,7 +552,9 @@ export default function OnboardingScreen() {
         console.warn('⚠️ pending_onboarding_paywall set failed:', e);
       }
 
-      router.replace('/auth/welcome');
+      // T5: ?from=onboarding-Param damit Welcome den Back-Button
+      // ausblendet (sonst Sackgasse zurück zu Step 6).
+      router.replace('/auth/welcome?from=onboarding' as any);
     } catch (error) {
       console.error('❌ completeOnboardingForAuth error:', error);
       Alert.alert('Fehler', 'Onboarding konnte nicht abgeschlossen werden');

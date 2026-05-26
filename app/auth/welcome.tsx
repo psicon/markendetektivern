@@ -5,67 +5,115 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { OnboardingService } from '@/lib/services/onboardingService';
+import { showInfoToast } from '@/lib/services/ui/toast';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, Animated, Dimensions, ImageBackground, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Animated, Dimensions, ImageBackground, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function WelcomeScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ from?: string }>();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
   const screenHeight = Dimensions.get('window').height;
   const isSmallScreen = screenHeight < 700; // iPhone SE, etc.
 
-  
+  // Wenn welcome.tsx vom Onboarding-Climax aus betreten wird
+  // (router.replace mit `?from=onboarding`), darf der Back-Button
+  // den User nicht zurück in Step 6 schießen — das wäre eine
+  // Sackgasse weil der State da schon persisted ist (B2). Wir
+  // verstecken Back in dem Fall; der einzige Exit ist eine
+  // Auth-Wahl oder "Als Gast fortfahren".
+  const cameFromOnboarding = params.from === 'onboarding';
+
   // States
   const [imageLoaded, setImageLoaded] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
+  const [authInFlight, setAuthInFlight] = useState(false);
 
   const { signInWithGoogle, signInWithApple, signInAnonymously: signInAnon } = useAuth();
 
-  // Continue as guest — covers the "registered session lost"
-  // edge case where the user lands here from the tabs-layout
-  // redirect because Firebase couldn't restore their session
-  // and we refused to silently auto-anon-login. Without this
-  // button they'd be forced to log in or register to escape.
+  /**
+   * Erfolgs-Handler nach jeder Auth-Wahl. Setzt zwei Dinge BEVOR
+   * navigiert wird:
+   * 1. OnboardingService.markCompleted() — Onboarding-Status auf
+   *    'completed' damit Re-Start nicht erneut /onboarding routet
+   *    (Fix B1). Idempotent: wenn schon completed (Climax-Guest-
+   *    Path hat's vorher gesetzt), no-op.
+   * 2. router.replace('/(tabs)') — kein push, damit Welcome aus
+   *    dem Stack raus ist.
+   */
+  const completeAndGoHome = async () => {
+    try {
+      await OnboardingService.markCompleted();
+    } catch (e) {
+      // Non-fatal — User-Doc-Mirror (Firestore) ist die echte
+      // Auth-Quelle. AsyncStorage-Flag ist nur die Boot-Optimierung.
+      console.warn('[Welcome] markCompleted failed:', e);
+    }
+    router.replace('/(tabs)');
+  };
+
   const handleContinueAsGuest = async () => {
+    if (authInFlight) return;
+    setAuthInFlight(true);
     try {
       await signInAnon();
-      router.replace('/(tabs)');
+      await completeAndGoHome();
     } catch (error: any) {
       console.error('Anonymous sign-in error:', error);
-      Alert.alert(
-        'Fehler',
+      showInfoToast(
         error?.message || 'Konnte anonyme Sitzung nicht starten. Bitte versuche es erneut.',
+        'error',
+        colorScheme ?? 'light',
       );
+    } finally {
+      setAuthInFlight(false);
     }
   };
 
   const handleGoogleSignIn = async () => {
+    if (authInFlight) return;
+    setAuthInFlight(true);
     try {
       await signInWithGoogle();
-      router.replace('/(tabs)');
+      await completeAndGoHome();
     } catch (error: any) {
       // User-Cancel des Confirm-Dialogs (anon→bereits-existierender
       // Provider-Account, 'auth/cancelled' aus AuthContext) → kein
-      // Fehler-Alert, Welcome-Screen bleibt einfach stehen.
+      // Fehler-Toast, Welcome-Screen bleibt einfach stehen.
       if (error?.code === 'auth/cancelled') return;
       console.error('Google Sign-In error:', error);
-      Alert.alert('Google Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
+      showInfoToast(
+        error?.message || 'Google-Anmeldung fehlgeschlagen.',
+        'error',
+        colorScheme ?? 'light',
+      );
+    } finally {
+      setAuthInFlight(false);
     }
   };
 
   const handleAppleSignIn = async () => {
+    if (authInFlight) return;
+    setAuthInFlight(true);
     try {
       await signInWithApple();
-      router.replace('/(tabs)');
+      await completeAndGoHome();
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return;
       console.error('Apple Sign-In error:', error);
-      Alert.alert('Apple Anmeldung fehlgeschlagen', error.message || 'Ein Fehler ist aufgetreten');
+      showInfoToast(
+        error?.message || 'Apple-Anmeldung fehlgeschlagen.',
+        'error',
+        colorScheme ?? 'light',
+      );
+    } finally {
+      setAuthInFlight(false);
     }
   };
 
@@ -111,8 +159,10 @@ export default function WelcomeScreen() {
       >
         {/* Back Button — design-system arrow-left in a 40×40 round
             translucent-white pill (auth screens have a coloured
-            background, so neutral theme.text wouldn't read). */}
-        {router.canGoBack() && (
+            background, so neutral theme.text wouldn't read).
+            Versteckt wenn vom Onboarding-Climax aus betreten — sonst
+            wäre's eine Sackgasse zurück zu Step 6 (B2-Fix). */}
+        {router.canGoBack() && !cameFromOnboarding && (
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}

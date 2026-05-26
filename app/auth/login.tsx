@@ -5,6 +5,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { OnboardingService } from '@/lib/services/onboardingService';
 import {
   showInfoToast,
   showRetryableErrorToast,
@@ -57,6 +58,9 @@ export default function LoginScreen() {
 
     try {
       await signIn(formData.email, formData.password);
+      // T5: Onboarding-Status committen damit Re-Start-Bug B1
+      // weg ist (idempotent — no-op wenn schon completed).
+      try { await OnboardingService.markCompleted(); } catch {}
       router.replace('/(tabs)');
     } catch (error: any) {
       // Anon-User hat den 'Konto wechseln'-Confirm abgebrochen —
@@ -132,6 +136,9 @@ export default function LoginScreen() {
     try {
       setLoading(true);
       await signInWithGoogle();
+      // T5: Onboarding-Status committen damit Re-Start-Bug B1
+      // weg ist (idempotent — no-op wenn schon completed).
+      try { await OnboardingService.markCompleted(); } catch {}
       router.replace('/(tabs)');
     } catch (error: any) {
       // User-Cancel (Sheet abgebrochen ODER Confirm-Dialog
@@ -166,6 +173,9 @@ export default function LoginScreen() {
         return;
       }
       await signInWithApple();
+      // T5: Onboarding-Status committen damit Re-Start-Bug B1
+      // weg ist (idempotent — no-op wenn schon completed).
+      try { await OnboardingService.markCompleted(); } catch {}
       router.replace('/(tabs)');
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return;
