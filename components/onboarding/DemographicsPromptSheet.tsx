@@ -65,6 +65,20 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
   const [gender, setGender] = useState<Gender | ''>('');
   const [submitting, setSubmitting] = useState(false);
 
+  // T11.9: Reset auf Default-State wenn das Sheet (re-)öffnet.
+  // Matters für den Debug-Tester im Profil — sonst persistiert ein
+  // alter Age/Gender-State über close→open hinweg. In Produktion
+  // ist das harmlos, da das Sheet nach erfolgreichem Submit oder
+  // Skip nie wieder gezeigt wird.
+  React.useEffect(() => {
+    if (visible) {
+      setAge(AGE_DEFAULT);
+      setAgeInteracted(false);
+      setGender('');
+      setSubmitting(false);
+    }
+  }, [visible]);
+
   const canSubmit = ageInteracted && gender !== '';
 
   const handleSubmit = async () => {
@@ -94,16 +108,22 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
           Anonyme Angaben — jederzeit im Profil änderbar.
         </Text>
 
-        {/* Age — Label + Value inline. PulsingHint solange unangetastet.
-            T11.7: sectionHeader hat fixe minHeight + Text-Elemente
-            haben identische lineHeight damit das Modal NICHT größer
-            wird wenn der User den Slider zieht. */}
+        {/* Age — "Dein Alter: 25" inline, horizontal zentriert.
+            T11.7 + T11.9: sectionHeader hat fixe minHeight + Text-
+            Elemente haben identische lineHeight damit das Modal NICHT
+            größer wird wenn der User den Slider zieht. */}
         <View style={styles.sectionHeader}>
-          <Text style={[styles.label, { color: textColor }]}>Dein Alter</Text>
-          {ageInteracted ? (
-            <Text style={styles.ageValue}>{age}</Text>
-          ) : (
-            <PulsingHintInline />
+          <Text style={[styles.label, { color: textColor }]} allowFontScaling={false}>
+            Dein Alter
+            {ageInteracted ? (
+              <Text style={styles.ageValue}>: {age}</Text>
+            ) : null}
+          </Text>
+          {!ageInteracted && (
+            <>
+              <Text style={[styles.label, { color: textColor }]}> · </Text>
+              <PulsingHintInline />
+            </>
           )}
         </View>
         <Slider
@@ -226,38 +246,42 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: 16,
   },
-  // Section-Header: Label links, Value/Hint rechts.
-  // T11.7: minHeight + fixe lineHeight auf beiden Text-Varianten →
-  // Row springt NICHT in der Höhe wenn der PulsingHint (13pt) durch
-  // den ageValue (18pt) ersetzt wird. Damit pulsiert das Modal
-  // nicht beim ersten Slider-Touch.
+  // Section-Header: "Dein Alter: 25" zentriert, oder "Dein Alter ·
+  // [Ziehe den Regler]" solange unangetastet.
+  // T11.9: justifyContent:center + minHeight gelockt + lineHeight
+  // identisch auf allen Text-Varianten → Row springt nicht beim
+  // ersten Slider-Touch UND Inhalt ist visuell als Einheit zentriert
+  // statt links-/rechts-gepinnt.
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 24,
-    marginBottom: 2,
+    justifyContent: 'center',
+    minHeight: 28,
+    marginBottom: 4,
   },
   label: {
-    fontSize: 14,
-    lineHeight: 24,
+    fontSize: 16,
+    lineHeight: 28,
     fontFamily: 'Nunito_700Bold',
-    letterSpacing: -0.1,
+    letterSpacing: -0.2,
   },
+  // "Dein Geschlecht" hat keine Inline-Value → eigener Block, links
+  // ausgerichtet, mit Top-Margin.
   labelSpaced: {
-    marginTop: 14,
-    marginBottom: 8,
+    marginTop: 18,
+    marginBottom: 10,
+    textAlign: 'left',
   },
   ageValue: {
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 20,
+    lineHeight: 28,
     fontFamily: 'Nunito_700Bold',
     color: Colors.light.tint,
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
   hintInline: {
-    fontSize: 13,
-    lineHeight: 24,
+    fontSize: 14,
+    lineHeight: 28,
     fontFamily: 'Nunito_500Medium',
     color: Colors.light.tint,
     letterSpacing: -0.1,
