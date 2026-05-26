@@ -416,17 +416,28 @@ export default function EditProfileScreen() {
           <Card style={{ marginTop: 16 }}>
             <SectionTitle>Optionale Informationen</SectionTitle>
 
-            {/* T12.2: birthDate ersetzt durch Age-Slider (siehe
-                AgePicker-Komponente). Single SoT für Alter in der App,
-                konsistente UX zwischen Sheet/Profile/Register. */}
-            <Field
-              label="Alter"
-              helper="Anonym — nur für statistische Auswertung."
-            >
-              <AgePicker
-                value={formData.age}
-                onChange={(n) => setFormData((p) => ({ ...p, age: n }))}
-              />
+            {/* T12.2/T12.5: Age-Slider im Compact-Mode (keine Hero-
+                Animation, keine "Ziehe den Regler"-Pulse — das ist
+                ein Form-Feld, kein Onboarding-Prompt). Surface-Wrap
+                matched die Optik der anderen Inputs/SelectRows. */}
+            <Field label="Alter">
+              <View
+                style={{
+                  backgroundColor: theme.surfaceAlt,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                  paddingHorizontal: 14,
+                  paddingTop: 8,
+                  paddingBottom: 6,
+                }}
+              >
+                <AgePicker
+                  value={formData.age}
+                  onChange={(n) => setFormData((p) => ({ ...p, age: n }))}
+                  compact
+                />
+              </View>
             </Field>
 
             {/* Gender */}

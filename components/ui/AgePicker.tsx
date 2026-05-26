@@ -41,9 +41,20 @@ type Props = {
   tintColor?: string;
   /** Text-Farbe für "Dein Alter"-Label. Default folgt theme. */
   textColor?: string;
+  /** Compact-Modus für Form-Felder (edit-profile, settings).
+   *  Nur Wert + Slider + Min/Max — kein pulsierender Hint, keine
+   *  Animationen, kein "Dein Alter:"-Prefix (Field-Label übernimmt
+   *  das schon). Default false (Hero-Modus fürs Demografie-Sheet). */
+  compact?: boolean;
 };
 
-export function AgePicker({ value, onChange, tintColor, textColor }: Props) {
+export function AgePicker({
+  value,
+  onChange,
+  tintColor,
+  textColor,
+  compact = false,
+}: Props) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const tint = tintColor ?? Colors.light.tint;
@@ -53,17 +64,65 @@ export function AgePicker({ value, onChange, tintColor, textColor }: Props) {
   const isSet = value !== null;
   const displayValue = value ?? AGE_DEFAULT;
 
-  // Animierte Opacity für die "Dein Alter: X"-Row.
-  // Layout-Slot bleibt reserviert (Animated.View hält die Höhe),
-  // nur der Inhalt fadet ein sobald isSet → true.
+  // Animierte Opacity für die "Dein Alter: X"-Row (Hero-Mode).
+  // In Compact-Mode nicht genutzt (Form-Feld braucht keine Animation).
   const labelOpacity = useRef(new Animated.Value(isSet ? 1 : 0)).current;
   useEffect(() => {
+    if (compact) return;
     Animated.timing(labelOpacity, {
       toValue: isSet ? 1 : 0,
       duration: 220,
       useNativeDriver: true,
     }).start();
-  }, [isSet, labelOpacity]);
+  }, [isSet, labelOpacity, compact]);
+
+  const slider = (
+    <Slider
+      style={styles.slider}
+      minimumValue={AGE_MIN}
+      maximumValue={AGE_MAX}
+      step={1}
+      value={displayValue}
+      onValueChange={(v) => {
+        const rounded = Math.round(v);
+        if (rounded !== displayValue) {
+          Haptics.selectionAsync().catch(() => {});
+        }
+        onChange(rounded);
+      }}
+      minimumTrackTintColor={tint}
+      maximumTrackTintColor={isDark ? '#444' : '#e2e2e2'}
+      thumbTintColor={tint}
+    />
+  );
+
+  const sliderLabels = (
+    <View style={styles.sliderLabels}>
+      <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MIN}</Text>
+      <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MAX}+</Text>
+    </View>
+  );
+
+  // T12.5 Compact-Mode für Form-Felder: kein Pulse, kein Fade, kein
+  // "Dein Alter:"-Prefix. Der Field-Wrapper liefert das Label drüber.
+  // Wert wird zentriert über dem Slider klein angezeigt.
+  if (compact) {
+    return (
+      <View>
+        <Text
+          style={[
+            styles.valueCompact,
+            { color: isSet ? tint : mutedColor },
+          ]}
+          allowFontScaling={false}
+        >
+          {isSet ? (displayValue >= AGE_MAX ? `${AGE_MAX}+` : displayValue) : '—'}
+        </Text>
+        {slider}
+        {sliderLabels}
+      </View>
+    );
+  }
 
   return (
     <View>
@@ -76,27 +135,8 @@ export function AgePicker({ value, onChange, tintColor, textColor }: Props) {
           </Text>
         </Text>
       </Animated.View>
-      <Slider
-        style={styles.slider}
-        minimumValue={AGE_MIN}
-        maximumValue={AGE_MAX}
-        step={1}
-        value={displayValue}
-        onValueChange={(v) => {
-          const rounded = Math.round(v);
-          if (rounded !== displayValue) {
-            Haptics.selectionAsync().catch(() => {});
-          }
-          onChange(rounded);
-        }}
-        minimumTrackTintColor={tint}
-        maximumTrackTintColor={isDark ? '#444' : '#e2e2e2'}
-        thumbTintColor={tint}
-      />
-      <View style={styles.sliderLabels}>
-        <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MIN}</Text>
-        <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MAX}+</Text>
-      </View>
+      {slider}
+      {sliderLabels}
     </View>
   );
 }
@@ -165,5 +205,16 @@ const styles = StyleSheet.create({
   sliderLabelText: {
     fontSize: 11,
     fontFamily: 'Nunito_500Medium',
+  },
+  // T12.5: Compact-Mode-Wert — klein und zentriert über dem Slider.
+  // Liest sich als "Settings-Slider"-Aesthetik (iOS Settings, Discord
+  // Volume-Slider) statt als prominente Hero-Anzeige.
+  valueCompact: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontFamily: 'Nunito_700Bold',
+    textAlign: 'center',
+    letterSpacing: -0.2,
+    marginBottom: 2,
   },
 });
