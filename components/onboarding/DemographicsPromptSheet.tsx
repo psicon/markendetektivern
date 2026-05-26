@@ -265,11 +265,15 @@ function SliderHintAbove({ color, active }: { color: string; active: boolean }) 
   const opacity = React.useRef(new RNAnimated.Value(0.95)).current;
   React.useEffect(() => {
     if (active) {
-      // Starker Pulse — zieht Aufmerksamkeit.
+      // T11.17: Sanfter, langsamer Pulse — User-Feedback "Animation
+      // ist etwas zu heftig". Range halbiert (0.7-1.0 statt 0.45-1.0),
+      // Takt verlangsamt (1200ms statt 700ms) für ruhige Atmung statt
+      // hektischem Blinken. Affordance bleibt klar, fühlt sich aber
+      // wertiger an.
       const loop = RNAnimated.loop(
         RNAnimated.sequence([
-          RNAnimated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
-          RNAnimated.timing(opacity, { toValue: 0.45, duration: 700, useNativeDriver: true }),
+          RNAnimated.timing(opacity, { toValue: 1, duration: 1200, useNativeDriver: true }),
+          RNAnimated.timing(opacity, { toValue: 0.7, duration: 1200, useNativeDriver: true }),
         ]),
       );
       loop.start();
