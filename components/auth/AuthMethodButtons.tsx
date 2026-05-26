@@ -128,10 +128,13 @@ export function AuthMethodButtons({
         </Text>
       </Pressable>
 
-      {/* Trust-Hint — dezenter Schloss-Hint, kein Logo-Wall */}
+      {/* Trust-Hint — kurz, konkret, kein Logo-Wall.
+          Best Practice 2026: User wollen wissen WO die Daten liegen,
+          WER drauf zugreift, und dass sie löschbar sind. "Apple-Email-
+          Maske" war zu obskur und triggerte eher Misstrauen. */}
       <View style={styles.trustRow}>
         <Text style={[styles.trustText, { color: isDark ? Colors.dark.text : '#fff' }]}>
-          🔒 Apple-ID erlaubt Email-Maske · Daten bleiben anonym bis du dich anmeldest
+          🔒 DSGVO-konform · Server in der EU · Jederzeit löschbar
         </Text>
       </View>
     </View>

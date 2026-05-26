@@ -217,7 +217,7 @@ export default function LoginScreen() {
           'rgba(0, 0, 0, 0.9)',
         ]}
         locations={[0, 0.7, 1]}
-        style={[styles.overlay, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}
+        style={[styles.overlay, { paddingTop: insets.top + 56, paddingBottom: insets.bottom + 20 }]}
       >
         {/* Back Button — design-system arrow-left in a 40×40 round
             translucent-white pill (matches the rest of the app
@@ -246,22 +246,15 @@ export default function LoginScreen() {
           <ThemedText style={[styles.subTitle, isSmallDevice && styles.subTitleSmall]}>Willkommen zurück!</ThemedText>
           
           <View style={styles.authButtons}>
-            {/* T10: 3-Button-Quick-Login oben — gleiche AuthMethodButtons
-                wie Welcome/Register. */}
-            <AuthMethodButtons
-              mode="login"
-              onApple={handleAppleSignIn}
-              onGoogle={handleGoogleSignIn}
-              onEmail={() => {/* schon auf Login-Screen, Form ist drunter */}}
-              busy={loading}
-              colorScheme={colorScheme}
-            />
-
-            {/* Divider */}
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>oder mit E-Mail</Text>
-              <View style={styles.dividerLine} />
+            {/* T10 v2 (2026-05-22): Login-Screen ist NUR Form. Quick-
+                Social-Login bleibt im Welcome-Hub davor. "Noch kein
+                Account?"-Link prominent direkt nach Title (sichtbar
+                OHNE Scrolling) plus Duplikat unten. */}
+            <View style={styles.topLoginRow}>
+              <ThemedText style={styles.topLoginText}>Noch kein Account?</ThemedText>
+              <TouchableOpacity onPress={() => router.push('/auth/register')} hitSlop={8}>
+                <ThemedText style={styles.topLoginLink}>Kostenlos starten</ThemedText>
+              </TouchableOpacity>
             </View>
 
             {/* Form Fields — solid weiße Inputs für Lesbarkeit (T10) */}
@@ -332,7 +325,25 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            {/* T10: prominenter Cross-Link nach unten — "Noch kein Account?". */}
+            {/* T10 v2: Quick-Login Alternative — Apple/Google/Facebook
+                ALS sekundärer Pfad unter dem Email-Login. Welcome-Hub
+                ist primary, hier als Fallback für User die direkt zu
+                /auth/login navigiert sind. */}
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>oder schnell anmelden mit</Text>
+              <View style={styles.dividerLine} />
+            </View>
+            <AuthMethodButtons
+              mode="login"
+              onApple={handleAppleSignIn}
+              onGoogle={handleGoogleSignIn}
+              onEmail={() => {/* schon im Login-Screen — Email-Button no-op */}}
+              busy={loading}
+              colorScheme={colorScheme}
+            />
+
+            {/* Duplikat Cross-Link unten, falls User runter gescrollt hat. */}
             <View style={styles.registerSection}>
               <View style={styles.registerDividerLine} />
               <View style={styles.registerRow}>
@@ -515,6 +526,27 @@ const styles = StyleSheet.create({
   },
   registerLinkBold: {
     fontSize: 15,
+    fontFamily: 'Nunito_700Bold',
+    color: '#fff',
+    textDecorationLine: 'underline',
+  },
+  // T10 v2: prominenter Cross-Link DIREKT nach Title (kein Scrolling
+  // nötig). Plus Duplikat unten via .registerSection.
+  topLoginRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    marginBottom: 20,
+    gap: 6,
+  },
+  topLoginText: {
+    fontSize: 14,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255,255,255,0.85)',
+  },
+  topLoginLink: {
+    fontSize: 14,
     fontFamily: 'Nunito_700Bold',
     color: '#fff',
     textDecorationLine: 'underline',

@@ -403,7 +403,7 @@ export default function RegisterScreen() {
             'rgba(0, 0, 0, 0.9)',
           ]}
           locations={[0, 0.7, 1]}
-          style={[styles.overlay, { paddingTop: insets.top + 20 }]}
+          style={[styles.overlay, { paddingTop: insets.top + 56 }]}
         >
           {/* Back Button — design-system arrow-left in a 40×40
               round translucent-white pill. */}
@@ -437,7 +437,12 @@ export default function RegisterScreen() {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {/* Title */}
+              {/* T10 v2 (2026-05-22): Title + prominenter Login-Link
+                  ganz oben. Best Practice: Register-Screen = Email-Form.
+                  Die 3 Social-Buttons leben im Welcome-Hub davor — hier
+                  würden sie nur redundant zum Welcome sein UND den
+                  Login-Link weit nach unten schieben (User-Beobachtung).
+                  Schnelles Social-Sign-in via Welcome → /(tabs). */}
               <View style={styles.titleSection}>
                 <ThemedText style={[styles.title, isSmallDevice && styles.titleSmall]}>
                   Jetzt registrieren
@@ -447,23 +452,14 @@ export default function RegisterScreen() {
                 </ThemedText>
               </View>
 
-              {/* T10: Gemeinsame 3-Button-Auswahl (Apple/Google + Facebook
-                  + Email). Email-Button scrollt zur Form drunter — wir
-                  sind ja schon im Register-Screen. */}
-              <AuthMethodButtons
-                mode="register"
-                onApple={handleAppleSignIn}
-                onGoogle={handleGoogleSignIn}
-                onEmail={() => scrollViewRef.current?.scrollTo({ y: 280, animated: true })}
-                busy={loading}
-                colorScheme={colorScheme}
-              />
-
-              {/* Divider — visuelle Trennung zwischen Social-Buttons + Form */}
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>oder mit E-Mail Adresse</Text>
-                <View style={styles.dividerLine} />
+              {/* Login-Cross-Link ZUERST sichtbar, gleich nach dem Title.
+                  Plus Duplikat ganz unten nach Submit für jene die zu
+                  Ende gescrollt haben. */}
+              <View style={styles.topLoginRow}>
+                <ThemedText style={styles.topLoginText}>Schon registriert?</ThemedText>
+                <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={8}>
+                  <ThemedText style={styles.topLoginLink}>Hier einloggen</ThemedText>
+                </TouchableOpacity>
               </View>
 
               {/* Form Fields */}
@@ -702,7 +698,7 @@ export default function RegisterScreen() {
                 </TouchableOpacity>
 
                 {/* Register Button */}
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={[styles.registerButton, { backgroundColor: colors.primary }, loading && { opacity: 0.7 }]}
                   onPress={handleRegister}
                   disabled={loading}
@@ -717,8 +713,26 @@ export default function RegisterScreen() {
                   )}
                 </TouchableOpacity>
 
-                {/* T10: Login Cross-Link — prominenter platziert, klare
-                    Trennung von der Form. "Schon registriert? Hier einloggen!". */}
+                {/* T10 v2: Quick-Social-Registrierung als FALLBACK
+                    (für User die direkt zu /auth/register navigiert sind
+                    — Welcome-Hub ist primary). Email-Button no-op weil
+                    wir schon im Email-Form-Screen sind. */}
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>oder schnell mit</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+                <AuthMethodButtons
+                  mode="register"
+                  onApple={handleAppleSignIn}
+                  onGoogle={handleGoogleSignIn}
+                  onEmail={() => {/* schon im Email-Register-Screen */}}
+                  busy={loading}
+                  colorScheme={colorScheme}
+                />
+
+                {/* Duplikat Cross-Link nach Submit — fängt User der nach
+                    Form-Submit doch noch zum Login wechseln will. */}
                 <View style={styles.loginSection}>
                   <View style={styles.loginDividerLine} />
                   <View style={styles.loginRow}>
@@ -1005,31 +1019,59 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_400Regular',
     color: '#1c1c1e',
   },
+  // T10 v2: Gender-Pills auf gleichen Style wie
+  // DemographicsPromptSheet (T3). 2-Spalten-Grid via flexWrap+minWidth
+  // verhindert das Wort-Umbruch-Problem bei 4 Pills in einer Reihe.
   genderContainer: {
     flexDirection: 'row',
-    gap: 8,
+    flexWrap: 'wrap',
+    gap: 10,
   },
   genderButton: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    minWidth: '45%',
+    minHeight: 46,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0,0,0,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.96)',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   genderButtonActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderColor: 'rgba(255, 255, 255, 0.6)',
+    backgroundColor: 'rgba(76,175,80,0.10)',
+    borderColor: '#4CAF50',
   },
   genderButtonText: {
     fontSize: 14,
-    fontFamily: 'Nunito_500Medium',
-    color: 'rgba(255, 255, 255, 0.7)',
+    fontFamily: 'Nunito_600SemiBold',
+    color: '#1c1c1e',
   },
   genderButtonTextActive: {
-    color: 'white',
+    color: '#4CAF50',
+    fontFamily: 'Nunito_700Bold',
+  },
+  // T10 v2: prominenter Login-Cross-Link direkt nach dem Title
+  topLoginRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    marginBottom: 24,
+    gap: 6,
+  },
+  topLoginText: {
+    fontSize: 14,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255,255,255,0.85)',
+  },
+  topLoginLink: {
+    fontSize: 14,
+    fontFamily: 'Nunito_700Bold',
+    color: '#fff',
+    textDecorationLine: 'underline',
   },
   termsContainer: {
     flexDirection: 'row',
