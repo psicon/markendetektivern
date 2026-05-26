@@ -87,14 +87,17 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
       visible={visible}
       title="Hilf uns dich besser zu verstehen"
       onClose={onSkip}
-      maxHeightRatio={0.58}
+      maxHeightRatio={0.52}
     >
       <View style={styles.container}>
         <Text style={[styles.intro, { color: mutedColor }]}>
           Anonyme Angaben — jederzeit im Profil änderbar.
         </Text>
 
-        {/* Age — Label + Value inline. PulsingHint solange unangetastet. */}
+        {/* Age — Label + Value inline. PulsingHint solange unangetastet.
+            T11.7: sectionHeader hat fixe minHeight + Text-Elemente
+            haben identische lineHeight damit das Modal NICHT größer
+            wird wenn der User den Slider zieht. */}
         <View style={styles.sectionHeader}>
           <Text style={[styles.label, { color: textColor }]}>Dein Alter</Text>
           {ageInteracted ? (
@@ -168,6 +171,10 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
         </View>
 
         {/* Primary CTA + Text-Skip. */}
+        {/* T11.7: "Vielleicht später" entfernt — X-Tap und Swipe-Down
+            triggern bereits onSkip (gleiches Verhalten). Reduziert
+            visual noise, matched moderne Sheet-Patterns
+            (Headspace/Strava/TikTok/Duolingo). */}
         <Pressable
           onPress={handleSubmit}
           disabled={!canSubmit || submitting}
@@ -182,9 +189,6 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
           <Text style={styles.primaryBtnText}>
             {submitting ? 'Speichern…' : 'Speichern'}
           </Text>
-        </Pressable>
-        <Pressable onPress={onSkip} disabled={submitting} hitSlop={6} style={styles.skipBtn}>
-          <Text style={[styles.skipBtnText, { color: mutedColor }]}>Vielleicht später</Text>
         </Pressable>
       </View>
     </FilterSheet>
@@ -223,14 +227,20 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   // Section-Header: Label links, Value/Hint rechts.
+  // T11.7: minHeight + fixe lineHeight auf beiden Text-Varianten →
+  // Row springt NICHT in der Höhe wenn der PulsingHint (13pt) durch
+  // den ageValue (18pt) ersetzt wird. Damit pulsiert das Modal
+  // nicht beim ersten Slider-Touch.
   sectionHeader: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
     justifyContent: 'space-between',
+    minHeight: 24,
     marginBottom: 2,
   },
   label: {
     fontSize: 14,
+    lineHeight: 24,
     fontFamily: 'Nunito_700Bold',
     letterSpacing: -0.1,
   },
@@ -239,13 +249,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   ageValue: {
-    fontSize: 22,
+    fontSize: 18,
+    lineHeight: 24,
     fontFamily: 'Nunito_700Bold',
     color: Colors.light.tint,
-    letterSpacing: -0.4,
+    letterSpacing: -0.3,
   },
   hintInline: {
     fontSize: 13,
+    lineHeight: 24,
     fontFamily: 'Nunito_500Medium',
     color: Colors.light.tint,
     letterSpacing: -0.1,
@@ -296,16 +308,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Nunito_700Bold',
     letterSpacing: -0.2,
-  },
-  skipBtn: {
-    alignSelf: 'center',
-    marginTop: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-  },
-  skipBtnText: {
-    fontSize: 13,
-    fontFamily: 'Nunito_500Medium',
-    textDecorationLine: 'underline',
   },
 });
