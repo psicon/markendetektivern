@@ -189,6 +189,30 @@ export function extractNaehrwerte(product: any): NaehrwerteShape | null {
   return fromNutrFields(product) ?? fromLegacy(product);
 }
 
+/**
+ * Formatiert einen Nährwert-Zahlenwert für die Anzeige.
+ * - Rundet auf max `decimals` Dezimalstellen (Default 2).
+ * - Nutzt deutsche Locale (Komma als Dezimaltrennzeichen).
+ * - Strippt trailing Nullen ("8,50" → "8,5", "8,00" → "8").
+ *
+ * Returns null für ungültige Inputs damit Caller "—" o.ä. rendern
+ * können. ClickUp 86c9zf9q5: "bei nährwerten nur maximal 2 dezimal-
+ * stellen erlauben (runden)" — vorher kamen rohe floats wie 8.347
+ * direkt ans UI.
+ */
+export function formatNutritionValue(
+  value: number | undefined | null,
+  decimals = 2,
+): string | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  const factor = Math.pow(10, decimals);
+  const rounded = Math.round(value * factor) / factor;
+  return rounded.toLocaleString('de-DE', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals,
+  });
+}
+
 /** True wenn das Produkt verwendbare Zutaten hat (irgendein Format). */
 export function hasIngredients(product: any): boolean {
   return extractIngredients(product).length > 0;

@@ -59,6 +59,7 @@ import {
   extractEans,
   extractIngredients,
   extractNaehrwerte,
+  formatNutritionValue,
   hasIngredients,
   hasNaehrwerte,
   mergeNaehrwerte,
@@ -1956,7 +1957,14 @@ function SingleInfoCard({
   const rows: Array<[string, string]> = [];
   const pushRow = (label: string, value: any, suffix = '') => {
     if (value == null || value === '') return;
-    rows.push([label, typeof value === 'number' ? `${value}${suffix}` : String(value)]);
+    // ClickUp 86c9zf9q5: Nährwerte max 2 Dezimalstellen + DE-Locale.
+    if (typeof value === 'number') {
+      const formatted = formatNutritionValue(value, 2);
+      if (formatted == null) return;
+      rows.push([label, `${formatted}${suffix}`]);
+    } else {
+      rows.push([label, String(value)]);
+    }
   };
   pushRow('Energie', n.brennwertKcal, ' kcal');
   pushRow('Fett', n.fett, ' g');

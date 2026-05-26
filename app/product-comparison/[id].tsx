@@ -65,6 +65,7 @@ import {
   extractEans,
   extractIngredients,
   extractNaehrwerte,
+  formatNutritionValue,
   hasIngredients,
   hasNaehrwerte,
   mergeNaehrwerte,
@@ -3005,8 +3006,11 @@ function NutritionTable({
     suffix = '',
   ) => {
     if (a == null && b == null) return;
-    const fmt = (v: number | undefined) =>
-      v == null ? '—' : `${v}${suffix}`;
+    // ClickUp 86c9zf9q5: Nährwerte max 2 Dezimalstellen + DE-Locale.
+    const fmt = (v: number | undefined) => {
+      const formatted = formatNutritionValue(v, 2);
+      return formatted == null ? '—' : `${formatted}${suffix}`;
+    };
     rows.push({
       label,
       a: fmt(a),
