@@ -109,6 +109,10 @@ export default function RegisterScreen() {
   });
   const [prefilledFields, setPrefilledFields] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  // T10 v3: 3 Buttons sind immer sichtbar. Email-Button toggelt die
+  // Form auf (collapse-Pattern). So bleibt Login-Link oben sichtbar,
+  // Email-Form ist auf Wunsch da, andere Provider direkt verfügbar.
+  const [showEmailForm, setShowEmailForm] = useState(false);
 
   // ─── Pre-Fill aus userProfile (T6, ClickUp 86c9zbw9e) ───────
   // Wenn der User vom Onboarding-Climax aus zu Register kommt,
@@ -437,12 +441,9 @@ export default function RegisterScreen() {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {/* T10 v2 (2026-05-22): Title + prominenter Login-Link
-                  ganz oben. Best Practice: Register-Screen = Email-Form.
-                  Die 3 Social-Buttons leben im Welcome-Hub davor — hier
-                  würden sie nur redundant zum Welcome sein UND den
-                  Login-Link weit nach unten schieben (User-Beobachtung).
-                  Schnelles Social-Sign-in via Welcome → /(tabs). */}
+              {/* T10 v3 (2026-05-22): User-Spec — 3 Buttons sichtbar,
+                  Email-Button toggelt Form auf. Login-Link prominent
+                  oben sichtbar OHNE Scrolling. */}
               <View style={styles.titleSection}>
                 <ThemedText style={[styles.title, isSmallDevice && styles.titleSmall]}>
                   Jetzt registrieren
@@ -452,9 +453,7 @@ export default function RegisterScreen() {
                 </ThemedText>
               </View>
 
-              {/* Login-Cross-Link ZUERST sichtbar, gleich nach dem Title.
-                  Plus Duplikat ganz unten nach Submit für jene die zu
-                  Ende gescrollt haben. */}
+              {/* Login-Cross-Link DIREKT nach Title — sichtbar ohne Scroll */}
               <View style={styles.topLoginRow}>
                 <ThemedText style={styles.topLoginText}>Schon registriert?</ThemedText>
                 <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={8}>
@@ -462,7 +461,32 @@ export default function RegisterScreen() {
                 </TouchableOpacity>
               </View>
 
-              {/* Form Fields */}
+              {/* 3 (4) Buttons: Apple/Google + Facebook + Email-Toggle.
+                  Email-Button klappt die Form-Felder auf. Andere Buttons
+                  triggern direkt den Provider-Sign-In. */}
+              <AuthMethodButtons
+                mode="register"
+                onApple={handleAppleSignIn}
+                onGoogle={handleGoogleSignIn}
+                onEmail={() => {
+                  setShowEmailForm(true);
+                  // Kurz scrollen so dass User sieht dass Form aufpoppt
+                  setTimeout(() => {
+                    scrollViewRef.current?.scrollToEnd({ animated: true });
+                  }, 50);
+                }}
+                busy={loading}
+                colorScheme={colorScheme}
+              />
+
+              {/* Form Fields — nur sichtbar wenn User "Mit E-Mail" tappt */}
+              {showEmailForm && (
+              <>
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>E-Mail-Registrierung</Text>
+                <View style={styles.dividerLine} />
+              </View>
               <View style={styles.formContainer}>
                 {/* Username */}
                 <View style={styles.inputContainer}>
@@ -712,35 +736,19 @@ export default function RegisterScreen() {
                     </>
                   )}
                 </TouchableOpacity>
+              </View>
+              </>
+              )}
 
-                {/* T10 v2: Quick-Social-Registrierung als FALLBACK
-                    (für User die direkt zu /auth/register navigiert sind
-                    — Welcome-Hub ist primary). Email-Button no-op weil
-                    wir schon im Email-Form-Screen sind. */}
-                <View style={styles.dividerRow}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>oder schnell mit</Text>
-                  <View style={styles.dividerLine} />
-                </View>
-                <AuthMethodButtons
-                  mode="register"
-                  onApple={handleAppleSignIn}
-                  onGoogle={handleGoogleSignIn}
-                  onEmail={() => {/* schon im Email-Register-Screen */}}
-                  busy={loading}
-                  colorScheme={colorScheme}
-                />
-
-                {/* Duplikat Cross-Link nach Submit — fängt User der nach
-                    Form-Submit doch noch zum Login wechseln will. */}
-                <View style={styles.loginSection}>
-                  <View style={styles.loginDividerLine} />
-                  <View style={styles.loginRow}>
-                    <ThemedText style={styles.loginText}>Schon registriert? </ThemedText>
-                    <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={6}>
-                      <ThemedText style={styles.loginLinkBold}>Hier einloggen</ThemedText>
-                    </TouchableOpacity>
-                  </View>
+              {/* Duplikat Login-Cross-Link am unteren Rand — sichtbar
+                  egal ob Form expandiert ist oder nicht. */}
+              <View style={styles.loginSection}>
+                <View style={styles.loginDividerLine} />
+                <View style={styles.loginRow}>
+                  <ThemedText style={styles.loginText}>Schon registriert? </ThemedText>
+                  <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={6}>
+                    <ThemedText style={styles.loginLinkBold}>Hier einloggen</ThemedText>
+                  </TouchableOpacity>
                 </View>
               </View>
             </ScrollView>

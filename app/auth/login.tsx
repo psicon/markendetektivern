@@ -23,6 +23,7 @@ import {
     ImageBackground,
     Platform,
     StyleSheet,
+    Text,
     TextInput,
     TouchableOpacity,
     View
@@ -41,6 +42,10 @@ export default function LoginScreen() {
   // Image loading state and animation
   const [imageLoaded, setImageLoaded] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
+
+  // T10 v3: Email-Form ist initial collapsed. User tippt "Mit E-Mail
+  // anmelden" → Form klappt auf. Andere Buttons triggern direkt.
+  const [showEmailForm, setShowEmailForm] = useState(false);
 
   const [formData, setFormData] = useState({
     email: '',
@@ -246,15 +251,30 @@ export default function LoginScreen() {
           <ThemedText style={[styles.subTitle, isSmallDevice && styles.subTitleSmall]}>Willkommen zurück!</ThemedText>
           
           <View style={styles.authButtons}>
-            {/* T10 v2 (2026-05-22): Login-Screen ist NUR Form. Quick-
-                Social-Login bleibt im Welcome-Hub davor. "Noch kein
-                Account?"-Link prominent direkt nach Title (sichtbar
-                OHNE Scrolling) plus Duplikat unten. */}
+            {/* T10 v3 (2026-05-22): 3 Buttons sichtbar, "Mit E-Mail"
+                togglet Form. Register-Link prominent oben sichtbar. */}
             <View style={styles.topLoginRow}>
               <ThemedText style={styles.topLoginText}>Noch kein Account?</ThemedText>
               <TouchableOpacity onPress={() => router.push('/auth/register')} hitSlop={8}>
                 <ThemedText style={styles.topLoginLink}>Kostenlos starten</ThemedText>
               </TouchableOpacity>
+            </View>
+
+            <AuthMethodButtons
+              mode="login"
+              onApple={handleAppleSignIn}
+              onGoogle={handleGoogleSignIn}
+              onEmail={() => setShowEmailForm(true)}
+              busy={loading}
+              colorScheme={colorScheme}
+            />
+
+            {showEmailForm && (
+            <>
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>E-Mail-Login</Text>
+              <View style={styles.dividerLine} />
             </View>
 
             {/* Form Fields — solid weiße Inputs für Lesbarkeit (T10) */}
@@ -324,24 +344,8 @@ export default function LoginScreen() {
                 </>
               )}
             </TouchableOpacity>
-
-            {/* T10 v2: Quick-Login Alternative — Apple/Google/Facebook
-                ALS sekundärer Pfad unter dem Email-Login. Welcome-Hub
-                ist primary, hier als Fallback für User die direkt zu
-                /auth/login navigiert sind. */}
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>oder schnell anmelden mit</Text>
-              <View style={styles.dividerLine} />
-            </View>
-            <AuthMethodButtons
-              mode="login"
-              onApple={handleAppleSignIn}
-              onGoogle={handleGoogleSignIn}
-              onEmail={() => {/* schon im Login-Screen — Email-Button no-op */}}
-              busy={loading}
-              colorScheme={colorScheme}
-            />
+            </>
+            )}
 
             {/* Duplikat Cross-Link unten, falls User runter gescrollt hat. */}
             <View style={styles.registerSection}>
