@@ -1,22 +1,24 @@
 /**
- * Age-Utilities — birthDate als Single Source of Truth.
+ * Age-Utilities — Integer-Age als Single Source of Truth.
  *
- * Hintergrund: vor T6 koexistierten zwei Quellen für das Alter:
- *   - `users/{uid}.age` (Integer, vom Onboarding-Slider geschrieben)
- *   - `users/{uid}.birthDate` (Timestamp, vom Register-Date-Picker)
- * Bei Geburtstag-Übergängen veraltete `age` und wurde inkonsistent.
+ * Hintergrund (T12): vor dieser Vereinheitlichung koexistierten zwei
+ * Quellen fürs Alter:
+ *   - `users/{uid}.age` (Integer, vom Slider) + `ageReportedAt`/
+ *     `ageReportedYear` (Capture-Date)
+ *   - `users/{uid}.birthDate` (Timestamp, vom DatePicker)
  *
- * T6 macht `birthDate` zur Source of Truth wenn vorhanden:
- *   - Read: ageFromBirthDate() liefert die echte Zahl just-in-time.
- *   - Write: wenn nur ein Slider-Age gegeben ist (Onboarding-
- *     Bottom-Sheet T3), wird sowohl `age` als auch ein
- *     approximativer `birthDate`-Stamp gespeichert. Edit-Profile
- *     kann später den exakten Tag setzen ohne dass die Integer-
- *     Auswertung kaputt geht.
+ * T12 vereinheitlicht auf Integer-Age:
+ *   - Slider in 3 Screens (Sheet, edit-profile, email-register).
+ *   - Capture-Date wird mitgespeichert → currentAgeFromReported()
+ *     rechnet den aktuellen Wert hoch (Year-Precision).
+ *   - `ageFromBirthDate()` bleibt für LEGACY-Reads alter User-Docs
+ *     die noch birthDate haben. Beim ersten Save wird auf age
+ *     migriert.
  */
 
 /** Berechnet das aktuelle Alter in vollen Jahren aus einem
- *  birthDate. Returns null wenn das Datum unplausibel ist. */
+ *  birthDate. Legacy-Pfad — nur für Reads alter User-Docs.
+ *  Returns null wenn das Datum unplausibel ist. */
 export function ageFromBirthDate(birthDate: Date | null | undefined): number | null {
   if (!birthDate) return null;
   const d = birthDate instanceof Date ? birthDate : new Date(birthDate);
@@ -28,15 +30,6 @@ export function ageFromBirthDate(birthDate: Date | null | undefined): number | n
     age--;
   }
   return age >= 0 && age <= 120 ? age : null;
-}
-
-/** Aus integer-Age einen approximativen birthDate-Stamp ableiten
- *  (1. Januar des passenden Jahres). Wird gebraucht wenn Onboarding-
- *  Slider den Wert liefert aber wir keinen exakten Tag haben.
- *  Edit-Profile überschreibt das später mit dem echten Datum. */
-export function approximateBirthDateFromAge(age: number): Date {
-  const now = new Date();
-  return new Date(now.getFullYear() - age, 0, 1);
 }
 
 /** Bucket-Mapping fürs Dashboard-Group-by. */

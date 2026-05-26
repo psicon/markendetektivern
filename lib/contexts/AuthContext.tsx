@@ -36,7 +36,10 @@ import { db } from '../firebase';
 
 interface AdditionalProfileData {
   realName?: string;
-  birthDate?: Date | null;
+  // T12.4: birthDate → age (Integer-Slider). Caller schickt die
+  // Zahl, AuthContext speichert age + ageBucket + ageReportedAt +
+  // ageReportedYear ans User-Doc.
+  age?: number;
   gender?: string;
   location?: string;
   favoriteMarket?: string; // Discounter ID
@@ -481,13 +484,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (additionalData) {
           const { serverTimestamp } = await import('@react-native-firebase/firestore');
+          // T12.4: age + Capture-Timestamps statt birthDate.
+          // ageReportedAt/ageReportedYear nur setzen wenn age tatsächlich
+          // übergeben wurde — sonst bleibt das Feld leer und kann später
+          // im Profile-Editor nachgepflegt werden.
+          const { ageBucketFromAge } = await import('@/lib/utils/age');
+          const agePatch = typeof additionalData.age === 'number'
+            ? {
+                age: additionalData.age,
+                ageBucket: ageBucketFromAge(additionalData.age),
+                ageReportedAt: serverTimestamp(),
+                ageReportedYear: new Date().getFullYear(),
+              }
+            : {};
           await setDoc(
             doc(db, 'users', userCredential.user.uid),
             {
               display_name: displayName,
               real_name: additionalData.realName || '',
               email,
-              birthDate: additionalData.birthDate || null,
+              ...agePatch,
               gender: additionalData.gender || '',
               location: additionalData.location || '',
               photo_url: '',
