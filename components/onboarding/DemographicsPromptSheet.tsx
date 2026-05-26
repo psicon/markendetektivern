@@ -24,7 +24,7 @@
  */
 
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated as RNAnimated, Pressable, StyleSheet, Text, View } from 'react-native';
 import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 
@@ -109,22 +109,26 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
         </Text>
 
         {/* Age — "Dein Alter: 32" horizontal zentriert.
-            T11.12: vor Interaktion zeigen wir "—" als Platzhalter im
-            selben Format wie der Wert. Breiten-Unterschied "—" ↔
-            "32" ist ~5px → kein sichtbarer Shift, Row bleibt visuell
-            zentriert.
-            minHeight + lineHeight aus T11.7/T11.9 bleiben → kein
-            Modal-Pop beim Slider-Touch. */}
+            T11.13:
+            - Default-Wert (AGE_DEFAULT=30) IMMER sichtbar im
+              Format ": 30". Vor Interaktion in muted color (subtler
+              "noch nicht gewählt"-Signal), nach Interaktion in
+              Brand-Grün. → kein Width-Shift beim ersten Touch.
+            - "Ziehe den Regler"-Hint sitzt UNTER dem Slider als
+              eigenes Element (kein Replace mehr) und pulsiert sanft.
+              Verschwindet sobald der User den Slider bedient.
+            - minHeight + lineHeight aus T11.7/T11.9 bleiben → kein
+              Modal-Pop beim Slider-Touch. */}
         <View style={styles.sectionHeader}>
           <Text style={[styles.label, { color: textColor }]} allowFontScaling={false}>
             Dein Alter
-            <Text style={styles.ageValue}>
-              :{' '}
-              {ageInteracted
-                ? age >= AGE_MAX
-                  ? `${AGE_MAX}+`
-                  : age
-                : '—'}
+            <Text
+              style={[
+                styles.ageValue,
+                !ageInteracted && { color: mutedColor },
+              ]}
+            >
+              : {age >= AGE_MAX ? `${AGE_MAX}+` : age}
             </Text>
           </Text>
         </View>
@@ -135,8 +139,14 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
           step={1}
           value={age}
           onValueChange={(v) => {
+            const rounded = Math.round(v);
+            // Light selection-haptic on jedem Step-Change (User
+            // spürt den Schritt-Charakter des Sliders).
+            if (rounded !== age) {
+              Haptics.selectionAsync().catch(() => {});
+            }
             if (!ageInteracted) setAgeInteracted(true);
-            setAge(Math.round(v));
+            setAge(rounded);
           }}
           minimumTrackTintColor={Colors.light.tint}
           maximumTrackTintColor={isDark ? '#444' : '#e2e2e2'}
@@ -146,6 +156,10 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
           <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MIN}</Text>
           <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MAX}+</Text>
         </View>
+        {/* "Ziehe den Regler"-Hint — nur sichtbar bis erste
+            Slider-Interaktion. Sitzt UNTER dem Slider damit er die
+            zentrierte Label-Row nicht verschiebt. */}
+        {!ageInteracted && <SliderHintBelow color={Colors.light.tint} />}
 
         {/* Gender — single-row pills (flex:1, gleicher Breite). */}
         <Text style={[styles.label, styles.labelSpaced, { color: textColor }]}>
@@ -157,7 +171,12 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
             return (
               <Pressable
                 key={opt.value}
-                onPress={() => setGender(opt.value)}
+                onPress={() => {
+                  // Light impact haptic auf Pill-Auswahl (matched
+                  // die "Selection"-Semantik anderer Pickers in der App).
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  setGender(opt.value);
+                }}
                 style={[
                   styles.genderPill,
                   {
@@ -217,6 +236,28 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
   );
 }
 
+/** Sanft pulsierende "Ziehe den Regler"-Hint unter dem Slider.
+ *  Sitzt im Layout-Flow unter den Min/Max-Labels — damit die
+ *  zentrierte Age-Row darüber stabil bleibt. */
+function SliderHintBelow({ color }: { color: string }) {
+  const opacity = React.useRef(new RNAnimated.Value(0.6)).current;
+  React.useEffect(() => {
+    const loop = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(opacity, { toValue: 1, duration: 900, useNativeDriver: true }),
+        RNAnimated.timing(opacity, { toValue: 0.6, duration: 900, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+  return (
+    <RNAnimated.View style={{ opacity, alignSelf: 'center', marginTop: 4 }}>
+      <Text style={[styles.sliderHintBelow, { color }]}>Ziehe den Regler</Text>
+    </RNAnimated.View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     paddingBottom: 8,
@@ -273,6 +314,11 @@ const styles = StyleSheet.create({
   sliderLabelText: {
     fontSize: 11,
     fontFamily: 'Nunito_500Medium',
+  },
+  sliderHintBelow: {
+    fontSize: 13,
+    fontFamily: 'Nunito_600SemiBold',
+    letterSpacing: -0.1,
   },
   // Single-row Gender-Pills, jeweils flex:1 für gleiche Breite.
   genderRow: {
