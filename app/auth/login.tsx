@@ -202,20 +202,20 @@ export default function LoginScreen() {
       {/* Animated ImageBackground */}
       <Animated.View style={[styles.imageContainer, { opacity: fadeAnim }]}>
         <ImageBackground 
-          source={require('@/assets/images/table-optimized.jpg')}
+          source={require("@/assets/images/background.jpg")}
           style={styles.background}
-          blurRadius={2}
+          
           onLoad={handleImageLoad}
         />
       
-      {/* Dynamic gradient overlay based on theme */}
+      {/* T7: Gleicher Gradient wie Onboarding-Step-1-Hero. */}
       <LinearGradient
-        colors={
-          colorScheme === 'dark' 
-            ? ['rgba(0,0,0,0.2)', 'rgba(0,0,0,0.5)', 'rgba(0,0,0,0.85)', 'rgba(0,0,0,0.98)']
-            : ['rgba(0,0,0,0.2)', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.9)']
-        }
-        locations={[0, 0.3, 0.7, 1]}
+        colors={[
+          'rgba(0, 0, 0, 0.1)',
+          'rgba(0, 0, 0, 0.3)',
+          'rgba(0, 0, 0, 0.9)',
+        ]}
+        locations={[0, 0.7, 1]}
         style={[styles.overlay, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}
       >
         {/* Back Button — design-system arrow-left in a 40×40 round

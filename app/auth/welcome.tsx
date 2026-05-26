@@ -136,24 +136,26 @@ export default function WelcomeScreen() {
       {/* Animated ImageBackground */}
       <Animated.View style={[styles.imageContainer, { opacity: fadeAnim }]}>
         <ImageBackground 
-          source={require('@/assets/images/table-optimized.jpg')}
+          source={require("@/assets/images/background.jpg")}
           style={styles.background}
-          blurRadius={2}
+          
           onLoad={handleImageLoad}
         />
       {/* Dynamic gradient overlay based on theme */}
+      {/* T7: Gleicher Gradient wie Onboarding-Step-1-Hero. Auth ist
+          die Verlängerung des Funnels — derselbe Visual-Sprache. */}
       <LinearGradient
-        colors={
-          colorScheme === 'dark' 
-            ? ['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0.95)']
-            : ['transparent', 'rgba(0,0,0,0.2)', 'rgba(0,0,0,0.6)', 'rgba(0,0,0,0.85)']
-        }
-        locations={[0, 0.3, 0.7, 1]}
+        colors={[
+          'rgba(0, 0, 0, 0.1)',
+          'rgba(0, 0, 0, 0.3)',
+          'rgba(0, 0, 0, 0.9)',
+        ]}
+        locations={[0, 0.7, 1]}
         style={[
-          styles.overlay, 
-          { 
-            paddingTop: insets.top + (isSmallScreen ? 10 : 20), 
-            paddingBottom: insets.bottom + (isSmallScreen ? 10 : 20) 
+          styles.overlay,
+          {
+            paddingTop: insets.top + (isSmallScreen ? 10 : 20),
+            paddingBottom: insets.bottom + (isSmallScreen ? 10 : 20)
           }
         ]}
       >
