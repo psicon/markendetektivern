@@ -60,8 +60,13 @@ export function AuthMethodButtons({
 }: Props) {
   const styles = createStyles(colorScheme);
   const isDark = colorScheme === 'dark';
-  const verb = mode === 'register' ? 'registrieren' : 'anmelden';
+  // Email-Button bleibt mode-spezifisch ("Mit E-Mail registrieren" /
+  // "...anmelden") weil die User-Intent dort explizit ist.
   const emailVerb = mode === 'register' ? 'Mit E-Mail registrieren' : 'Mit E-Mail anmelden';
+  // Social-Buttons sind im Identifier-First-Pattern provider-agnostisch:
+  // der Provider entscheidet HINTER dem Tap ob's Login oder Register
+  // wird ("Continue with X" wie TheFork/Linear/Notion/Stripe).
+  const socialLabel = (provider: string) => `Mit ${provider} fortfahren`;
 
   // Apple-Button als JSX (in showAllProviders-Modus beide Plattform-
   // Primary-Buttons gleichzeitig nötig).
@@ -77,7 +82,7 @@ export function AuthMethodButtons({
     >
       <IconSymbol name="apple.logo" size={20} color="white" />
       <Text style={[styles.btnText, styles.btnTextWhite]}>
-        Mit Apple {verb}
+        {socialLabel('Apple')}
       </Text>
     </Pressable>
   );
@@ -96,7 +101,7 @@ export function AuthMethodButtons({
         <Text style={styles.googleG}>G</Text>
       </View>
       <Text style={[styles.btnText, styles.btnTextDark]}>
-        Mit Google {verb}
+        {socialLabel('Google')}
       </Text>
     </Pressable>
   );
@@ -137,7 +142,8 @@ export function AuthMethodButtons({
         </Pressable>
       )}
 
-      {/* Facebook — UI fertig, Handler placeholder */}
+      {/* Facebook — UI fertig, Handler placeholder. Lowercase "facebook"
+          ist Facebook-Brand-Style (eigene Wordmark seit 2019). */}
       <Pressable
         onPress={onFacebookPlaceholder}
         disabled={busy}
@@ -149,7 +155,7 @@ export function AuthMethodButtons({
       >
         <Text style={[styles.fbF]}>f</Text>
         <Text style={[styles.btnText, styles.btnTextWhite]}>
-          Mit Facebook {verb}
+          {socialLabel('facebook')}
         </Text>
       </Pressable>
 
