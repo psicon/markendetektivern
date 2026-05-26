@@ -130,14 +130,13 @@ export default function RegisterScreen() {
             </TouchableOpacity>
           )}
 
-          {/* T10 v8: Konsistente Position über ALLE Auth-Pages.
-              Header fixed-distance vom Top, Buttons fixed-distance
-              vom Header, Footer am Boden. Spacer flex:1 dazwischen
-              wächst proportional mit Device-Höhe. */}
-          <View style={styles.headerBlock}>
+          {/* T10 v9: Layout exakt wie login.tsx — Logo oben fix
+              (Page-Konsistenz), Content vertikal zentriert im
+              verbleibenden Raum, Cross-Link am Boden. */}
+          <View style={styles.logoBlock}>
             <CustomIcon
               name="iconBlack"
-              size={56}
+              size={isSmallDevice ? 44 : 56}
               color="#fff"
               style={styles.logoIcon}
             />
@@ -150,7 +149,7 @@ export default function RegisterScreen() {
             </ThemedText>
           </View>
 
-          <View style={styles.buttonsBlock}>
+          <View style={styles.content}>
             <AuthMethodButtons
               mode="register"
               onApple={handleApple}
@@ -160,9 +159,6 @@ export default function RegisterScreen() {
               colorScheme={colorScheme}
             />
           </View>
-
-          {/* Spacer — pusht Footer-Cross-Link nach unten */}
-          <View style={styles.spacer} />
 
           <View style={styles.crossLinkBox}>
             <View style={styles.crossLinkRow}>
@@ -197,18 +193,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
-  // T10 v8: Header an FIXER Position vom Top. Identisch über
-  // register/login/email-register/welcome — User-Wahrnehmung
-  // "Logo wandert nicht" beim Page-Wechsel.
-  headerBlock: {
+  // T10 v9: Layout-Pattern identisch zu login.tsx — Logo-Block
+  // fixed an Top (marginTop: 32, gleiche Y-Position wie Login).
+  // Content flex:1 + center zentriert die Buttons im verbleibenden
+  // Raum. Cross-Link fließt natürlich darunter ohne flex-spacer.
+  logoBlock: {
     alignItems: 'center',
-    gap: 4,
     marginTop: 32,
+    marginBottom: 20,
+    gap: 4,
   },
-  // Spacer pushed Footer nach unten — flex:1 füllt den Rest.
-  spacer: {
+  content: {
     flex: 1,
-    minHeight: 24,
+    justifyContent: 'center',
+    width: '100%',
   },
   logoIcon: {
     marginBottom: 2,
@@ -241,13 +239,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     letterSpacing: -0.1,
   },
-  buttonsBlock: {
-    width: '100%',
-    marginTop: 36,
-  },
+  // (alt: buttonsBlock — wird nicht mehr genutzt, siehe content)
   crossLinkBox: {
     alignItems: 'center',
-    paddingTop: 4,
+    marginTop: 16,
   },
   crossLinkRow: {
     flexDirection: 'row',

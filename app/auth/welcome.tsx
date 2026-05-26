@@ -246,12 +246,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
+  // T10 v9: marginTop:32 identisch zu register.tsx + login.tsx —
+  // Logo-Y-Position konsistent über alle Auth-Pages.
   logoBlock: {
     alignItems: 'center',
-    marginTop: 60,
-    gap: 8,
+    marginTop: 32,
+    marginBottom: 20,
+    gap: 4,
   },
-  logoBlockSmall: { marginTop: 30, gap: 5 },
+  logoBlockSmall: { marginTop: 20, marginBottom: 14, gap: 2 },
   logoIcon: { marginBottom: 2 },
   logoText: {
     fontSize: 28,

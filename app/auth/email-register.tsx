@@ -806,12 +806,13 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_500Medium',
     color: 'white',
   },
-  // T10 v4: kompakter Logo + Title (kein Overlap mehr, kein Subtitle).
+  // T10 v9: gleiche Y-Position wie register.tsx + login.tsx +
+  // welcome.tsx — Logo wandert nicht zwischen den Auth-Pages.
   logoContainer: {
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: 32,
+    marginBottom: 20,
     gap: 4,
-    marginBottom: 12,
   },
   logoIcon: {
     marginBottom: 0,
