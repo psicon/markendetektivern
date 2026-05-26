@@ -109,22 +109,36 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
         </Text>
 
         {/* Age — "Dein Alter: 25" inline, horizontal zentriert.
-            T11.7 + T11.9: sectionHeader hat fixe minHeight + Text-
-            Elemente haben identische lineHeight damit das Modal NICHT
-            größer wird wenn der User den Slider zieht. */}
+            T11.7 + T11.9 + T11.10:
+            - sectionHeader minHeight + lineHeight gelockt → kein
+              Modal-Pop beim Slider-Touch.
+            - "Dein Alter" sitzt im ageAnchor und zentriert sich
+              allein. Der Suffix (": 71" ODER "· Ziehe den Regler")
+              hängt absolute am rechten Rand des Anchors — er trägt
+              NICHT zur Anchor-Breite bei. Damit bleibt "Dein Alter"
+              an seiner X-Position fix egal ob der Suffix lang oder
+              kurz ist. (User-Feedback: "Dein Alter sollte nicht
+              springen wenn der Regler bedient wird".) */}
         <View style={styles.sectionHeader}>
-          <Text style={[styles.label, { color: textColor }]} allowFontScaling={false}>
-            Dein Alter
-            {ageInteracted ? (
-              <Text style={styles.ageValue}>: {age}</Text>
-            ) : null}
-          </Text>
-          {!ageInteracted && (
-            <>
-              <Text style={[styles.label, { color: textColor }]}> · </Text>
-              <PulsingHintInline />
-            </>
-          )}
+          <View style={styles.ageAnchor}>
+            <Text style={[styles.label, { color: textColor }]} allowFontScaling={false}>
+              Dein Alter
+            </Text>
+            <View style={styles.ageSuffix} pointerEvents="none">
+              {ageInteracted ? (
+                <Text style={styles.ageValue} allowFontScaling={false}>
+                  : {age >= AGE_MAX ? `${AGE_MAX}+` : age}
+                </Text>
+              ) : (
+                <View style={styles.ageHintRow}>
+                  <Text style={[styles.label, { color: textColor }]} allowFontScaling={false}>
+                    {' '}·{' '}
+                  </Text>
+                  <PulsingHintInline />
+                </View>
+              )}
+            </View>
+          </View>
         </View>
         <Slider
           style={styles.slider}
@@ -246,18 +260,34 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: 16,
   },
-  // Section-Header: "Dein Alter: 25" zentriert, oder "Dein Alter ·
-  // [Ziehe den Regler]" solange unangetastet.
-  // T11.9: justifyContent:center + minHeight gelockt + lineHeight
-  // identisch auf allen Text-Varianten → Row springt nicht beim
-  // ersten Slider-Touch UND Inhalt ist visuell als Einheit zentriert
-  // statt links-/rechts-gepinnt.
+  // Section-Header für Alter — siehe T11.10 Kommentar am Render.
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 28,
     marginBottom: 4,
+  },
+  // ageAnchor: nur "Dein Alter" trägt zur Breite bei. Anchor sitzt
+  // in einem center-justified Parent → "Dein Alter" zentriert sich.
+  ageAnchor: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  // Suffix hängt absolute am rechten Rand des Anchors. Trägt NICHT
+  // zur Layout-Breite bei → "Dein Alter" rückt nicht.
+  ageSuffix: {
+    position: 'absolute',
+    left: '100%',
+    top: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  ageHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   label: {
     fontSize: 16,
