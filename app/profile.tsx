@@ -49,6 +49,7 @@ import {
   DetailHeader,
 } from '@/components/design/DetailHeader';
 import { FilterSheet } from '@/components/design/FilterSheet';
+import { DemographicsPromptSheet } from '@/components/onboarding/DemographicsPromptSheet';
 import { AuthRequiredModal } from '@/components/ui/AuthRequiredModal';
 import { SimilarityStagesModal } from '@/components/ui/SimilarityStagesModal';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
@@ -96,6 +97,10 @@ export default function ProfileScreen() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSocialSheet, setShowSocialSheet] = useState(false);
   const [showSimilarityModal, setShowSimilarityModal] = useState(false);
+  // T11.8: Debug-Trigger für das Demographie-Sheet — pure visual
+  // Vorschau, schreibt nichts ans User-Doc (anders als der echte
+  // Climax-Flow). Submit/Skip schließen einfach.
+  const [showDemographicsTest, setShowDemographicsTest] = useState(false);
   const [showOnboardingButton, setShowOnboardingButton] = useState(false);
   const [gamificationDisabled, setGamificationDisabled] = useState(false);
   const [appVersion, setAppVersion] = useState('1.0.0');
@@ -1508,6 +1513,13 @@ export default function ProfileScreen() {
                 label="Toast / Banner Tester"
                 sub="Jeden Toast und jedes Achievement / Level-Banner einzeln triggern"
                 onPress={() => router.push('/debug/notifications' as any)}
+              />
+              <MenuRow
+                icon="account-question-outline"
+                color="#0d8575"
+                label="Demografie-Sheet Tester"
+                sub="Öffnet das Post-Climax Bottom-Sheet (pure Visual-Vorschau, schreibt nichts)"
+                onPress={() => setShowDemographicsTest(true)}
                 last
               />
             </MenuCard>
@@ -1670,6 +1682,15 @@ export default function ProfileScreen() {
         onClose={() => setShowAuthModal(false)}
         feature="Profil bearbeiten"
         message="Erstelle einen Account um dein Profil vollständig zu bearbeiten."
+      />
+
+      {/* T11.8: Debug-Trigger für DemographicsPromptSheet — schreibt
+          KEIN Firestore-Doc, kein AsyncStorage-Flag. Nur Visual-
+          Vorschau für UI-Iteration. */}
+      <DemographicsPromptSheet
+        visible={showDemographicsTest}
+        onSubmit={() => setShowDemographicsTest(false)}
+        onSkip={() => setShowDemographicsTest(false)}
       />
     </View>
   );
