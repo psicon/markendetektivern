@@ -92,6 +92,29 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
     }
   }, [user?.uid]);
 
+  // ─── Attribution Capture (T4, ClickUp 86c9zbxy7) ─────────────
+  // Einmaliger Capture-Versuch sobald wir eine UID haben (anon
+  // oder echt — beides ok für die Attribution-Tabelle). Service
+  // ist idempotent (Storage-Flag), kann also bei jedem App-Start
+  // sicher gerufen werden. Aktuelle Native Modules nicht
+  // installiert → returnt 'unknown', schreibt aber trotzdem
+  // einen Marker damit wir wissen wann der Versuch lief.
+  useEffect(() => {
+    if (!user?.uid) return;
+    (async () => {
+      try {
+        const { AttributionService } = await import(
+          '@/lib/services/attributionService'
+        );
+        await AttributionService.initialize(user.uid);
+      } catch (err) {
+        if (__DEV__) {
+          console.log('[Analytics] attribution init skipped:', err);
+        }
+      }
+    })();
+  }, [user?.uid]);
+
   // Automatisches Screen-Tracking bei Navigation + Journey-Management
   useFocusEffect(
     useCallback(() => {
