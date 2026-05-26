@@ -24,7 +24,7 @@
  */
 
 import React, { useState } from 'react';
-import { Animated as RNAnimated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 
@@ -108,27 +108,25 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
           Anonyme Angaben — jederzeit im Profil änderbar.
         </Text>
 
-        {/* Age — "Dein Alter: 25" left-aligned, gleiche X-Position
-            wie "Dein Geschlecht" → visuell konsistent, kein Shift-
-            Problem (T11.11). minHeight + lineHeight gelockt aus
-            T11.7/T11.9 bleiben, damit das Modal beim Slider-Touch
-            nicht poppt. */}
+        {/* Age — "Dein Alter: 32" horizontal zentriert.
+            T11.12: vor Interaktion zeigen wir "—" als Platzhalter im
+            selben Format wie der Wert. Breiten-Unterschied "—" ↔
+            "32" ist ~5px → kein sichtbarer Shift, Row bleibt visuell
+            zentriert.
+            minHeight + lineHeight aus T11.7/T11.9 bleiben → kein
+            Modal-Pop beim Slider-Touch. */}
         <View style={styles.sectionHeader}>
           <Text style={[styles.label, { color: textColor }]} allowFontScaling={false}>
             Dein Alter
-          </Text>
-          {ageInteracted ? (
-            <Text style={styles.ageValue} allowFontScaling={false}>
-              : {age >= AGE_MAX ? `${AGE_MAX}+` : age}
+            <Text style={styles.ageValue}>
+              :{' '}
+              {ageInteracted
+                ? age >= AGE_MAX
+                  ? `${AGE_MAX}+`
+                  : age
+                : '—'}
             </Text>
-          ) : (
-            <>
-              <Text style={[styles.label, { color: textColor }]} allowFontScaling={false}>
-                {' '}·{' '}
-              </Text>
-              <PulsingHintInline />
-            </>
-          )}
+          </Text>
         </View>
         <Slider
           style={styles.slider}
@@ -219,27 +217,6 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
   );
 }
 
-/** Inline-Variante des PulsingHint — kompakte einzeilige Hint statt
- *  des bisherigen 70 px hohen Display-Boxes. */
-function PulsingHintInline() {
-  const opacity = React.useRef(new RNAnimated.Value(0.55)).current;
-  React.useEffect(() => {
-    const loop = RNAnimated.loop(
-      RNAnimated.sequence([
-        RNAnimated.timing(opacity, { toValue: 1, duration: 900, useNativeDriver: true }),
-        RNAnimated.timing(opacity, { toValue: 0.55, duration: 900, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [opacity]);
-  return (
-    <RNAnimated.View style={{ opacity }}>
-      <Text style={styles.hintInline}>Ziehe den Regler</Text>
-    </RNAnimated.View>
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
     paddingBottom: 8,
@@ -250,15 +227,15 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: 16,
   },
-  // Section-Header für Alter — T11.11: left-aligned damit "Dein Alter"
-  // an derselben X-Position bleibt wie "Dein Geschlecht" weiter unten
-  // (visuelle Konsistenz). Vorheriges Center-Layout führte zu Shift
-  // beim ersten Slider-Touch UND visueller Rechts-Verschiebung weil
-  // der absolute Suffix die optische Mitte verschob.
+  // Section-Header für Alter — T11.12: zurück zu zentriert, weil
+  // der "—"-Platzhalter fast die gleiche Breite hat wie die spätere
+  // Zahl ("32"). Damit shifted "Dein Alter" beim ersten Slider-
+  // Touch nur noch ~5px statt ~70px wie früher mit dem langen
+  // "Ziehe den Regler"-Hint.
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'nowrap',
+    justifyContent: 'center',
     minHeight: 28,
     marginBottom: 4,
   },
@@ -281,13 +258,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_700Bold',
     color: Colors.light.tint,
     letterSpacing: -0.4,
-  },
-  hintInline: {
-    fontSize: 14,
-    lineHeight: 28,
-    fontFamily: 'Nunito_500Medium',
-    color: Colors.light.tint,
-    letterSpacing: -0.1,
   },
   slider: {
     width: '100%',
