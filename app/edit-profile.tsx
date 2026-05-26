@@ -9,7 +9,8 @@
 //   • Spinner-States nur INLINE in Buttons (Save / Avatar-Upload),
 //     nirgends zentral — folgt dem Loader-Triage-Rule aus CLAUDE.md
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { AgePicker } from '@/components/ui/AgePicker';
+import { ageFromBirthDate, ageBucketFromAge, currentAgeFromReported } from '@/lib/utils/age';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useNavigation } from 'expo-router';
 import { updateProfile } from '@react-native-firebase/auth';
@@ -34,7 +35,6 @@ import {
   DETAIL_HEADER_ROW_HEIGHT,
   DetailHeader,
 } from '@/components/design/DetailHeader';
-import { FilterSheet } from '@/components/design/FilterSheet';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { LocationPicker } from '@/components/ui/LocationPicker';
@@ -51,7 +51,9 @@ interface FormData {
   displayName: string;
   realName: string;
   email: string;
-  birthDate: Date | null;
+  /** T12.2: birthDate ersetzt durch Integer-Age (Slider).
+   *  null = noch nicht gesetzt. */
+  age: number | null;
   gender: string;
   location: string;
   photoURL: string;
@@ -90,7 +92,7 @@ export default function EditProfileScreen() {
     displayName: user?.displayName || '',
     realName: '',
     email: user?.email || '',
-    birthDate: null,
+    age: null,
     gender: '',
     location: '',
     photoURL: user?.photoURL || '',
@@ -99,7 +101,6 @@ export default function EditProfileScreen() {
 
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [showMarketSelector, setShowMarketSelector] = useState(false);
 
@@ -117,11 +118,29 @@ export default function EditProfileScreen() {
         const userDoc = await getDoc(doc(db, 'users', user.uid));
         if (!alive || !userDoc.exists()) return;
         const data = userDoc.data() as any;
+        // T12.2: Age-Pre-Fill mit Legacy-Fallback
+        //   1. Wenn `data.age` (Integer) vorhanden → direkt nehmen.
+        //      Bei `data.ageReportedYear` kombiniert ergibt das eine
+        //      hochgerechnete aktuelle Zahl (z.B. 32 in 2026 → 34 in
+        //      2028).
+        //   2. Sonst falls Legacy-Doc nur `birthDate` hat → daraus
+        //      ableiten via ageFromBirthDate. Beim Save wird das auf
+        //      `age` migriert.
+        let prefilledAge: number | null = null;
+        if (typeof data.age === 'number') {
+          if (typeof data.ageReportedYear === 'number') {
+            prefilledAge = currentAgeFromReported(data.age, data.ageReportedYear);
+          } else {
+            prefilledAge = data.age;
+          }
+        } else if (data.birthDate?.toDate) {
+          prefilledAge = ageFromBirthDate(data.birthDate.toDate());
+        }
         setFormData((prev) => ({
           ...prev,
           displayName: data.display_name || user.displayName || '',
           realName: data.real_name || '',
-          birthDate: data.birthDate?.toDate?.() ?? null,
+          age: prefilledAge,
           gender: data.gender || '',
           location: data.location || '',
           photoURL: data.photo_url || user.photoURL || '',
@@ -164,22 +183,33 @@ export default function EditProfileScreen() {
     }
     setSaving(true);
     try {
+      // T12.2: age + ageReportedAt + ageReportedYear schreiben statt
+      // birthDate. ageReportedAt nur setzen wenn der User das Feld
+      // wirklich befüllt hat oder geändert hat — damit die Hochrech-
+      // nungs-Basis (ageReportedYear) nicht bei jedem ungelichen Save
+      // erneuert wird.
+      const userDocPatch: Record<string, any> = {
+        display_name: formData.displayName,
+        real_name: formData.realName,
+        photo_url: formData.photoURL,
+        gender: formData.gender,
+        location: formData.location,
+        favoriteMarket: formData.favoriteMarket?.id || null,
+        favoriteMarketName: formData.favoriteMarket?.name || null,
+        updatedAt: serverTimestamp(),
+      };
+      if (typeof formData.age === 'number') {
+        userDocPatch.age = formData.age;
+        userDocPatch.ageBucket = ageBucketFromAge(formData.age);
+        userDocPatch.ageReportedAt = serverTimestamp();
+        userDocPatch.ageReportedYear = new Date().getFullYear();
+      }
       await Promise.all([
         updateProfile(user, {
           displayName: formData.displayName,
           photoURL: formData.photoURL,
         }),
-        updateDoc(doc(db, 'users', user.uid), {
-          display_name: formData.displayName,
-          real_name: formData.realName,
-          photo_url: formData.photoURL,
-          birthDate: formData.birthDate,
-          gender: formData.gender,
-          location: formData.location,
-          favoriteMarket: formData.favoriteMarket?.id || null,
-          favoriteMarketName: formData.favoriteMarket?.name || null,
-          updatedAt: serverTimestamp(),
-        }),
+        updateDoc(doc(db, 'users', user.uid), userDocPatch),
       ]);
       // Refresh im Hintergrund — kein await. AuthContext fanned das
       // dann an alle Consumer aus sobald der Refresh durchlaeuft.
@@ -386,17 +416,16 @@ export default function EditProfileScreen() {
           <Card style={{ marginTop: 16 }}>
             <SectionTitle>Optionale Informationen</SectionTitle>
 
-            {/* Birth Date */}
-            <Field label="Geburtsdatum">
-              <SelectRow
-                onPress={() => setShowDatePicker(true)}
-                icon="calendar"
-                placeholder="Datum auswählen"
-                value={
-                  formData.birthDate
-                    ? formData.birthDate.toLocaleDateString('de-DE')
-                    : ''
-                }
+            {/* T12.2: birthDate ersetzt durch Age-Slider (siehe
+                AgePicker-Komponente). Single SoT für Alter in der App,
+                konsistente UX zwischen Sheet/Profile/Register. */}
+            <Field
+              label="Alter"
+              helper="Anonym — nur für statistische Auswertung."
+            >
+              <AgePicker
+                value={formData.age}
+                onChange={(n) => setFormData((p) => ({ ...p, age: n }))}
               />
             </Field>
 
@@ -539,45 +568,8 @@ export default function EditProfileScreen() {
         }
       />
 
-      {/* Date picker — Android: native dialog, iOS: FilterSheet wrap */}
-      {Platform.OS === 'android' && showDatePicker ? (
-        <DateTimePicker
-          value={formData.birthDate || new Date(2000, 0, 1)}
-          mode="date"
-          display="default"
-          maximumDate={new Date()}
-          onChange={(event, selectedDate) => {
-            setShowDatePicker(false);
-            if (event.type === 'set' && selectedDate) {
-              setFormData((p) => ({ ...p, birthDate: selectedDate }));
-            }
-          }}
-        />
-      ) : null}
-
-      {Platform.OS === 'ios' ? (
-        <FilterSheet
-          visible={showDatePicker}
-          title="Geburtsdatum"
-          onClose={() => setShowDatePicker(false)}
-        >
-          <View style={{ paddingBottom: 8 }}>
-            <DateTimePicker
-              value={formData.birthDate || new Date(2000, 0, 1)}
-              mode="date"
-              display="spinner"
-              locale="de_DE"
-              maximumDate={new Date()}
-              onChange={(_event, selectedDate) => {
-                if (selectedDate) {
-                  setFormData((p) => ({ ...p, birthDate: selectedDate }));
-                }
-              }}
-              textColor={theme.text}
-            />
-          </View>
-        </FilterSheet>
-      ) : null}
+      {/* T12.2: Date-Picker komplett entfernt — Alter wird jetzt
+          inline via AgePicker erfasst (siehe Optional-Card oben). */}
 
       {/* Location + Market pickers — keep using the existing modal
           components (legacy but functional). Future redesign can
