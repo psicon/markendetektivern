@@ -416,11 +416,42 @@ export default function EditProfileScreen() {
           <Card style={{ marginTop: 16 }}>
             <SectionTitle>Optionale Informationen</SectionTitle>
 
-            {/* T12.2/T12.5/T12.6: Age-Slider im Compact-Mode. KEIN
-                Surface-Wrap — der wirkte wie eine eigene Card und
-                hat den Slider als "neues Design"-Element herausstechen
-                lassen. Stattdessen direkt inline unterm Field-Label,
-                so wie es auch die Gender-Pills sind. */}
+            {/* T12.7: Reihenfolge umgestellt — Ort + Markt nach oben
+                (relevanter für den Spar-Use-Case), Alter + Geschlecht
+                nach unten (demografische Statistik, weniger oft
+                editiert). */}
+
+            {/* Location */}
+            <Field
+              label="Einkaufsort"
+              helper="Hilft uns, lokale Angebote und Märkte zu finden"
+            >
+              <SelectRow
+                onPress={() => setShowLocationPicker(true)}
+                icon="map-marker-outline"
+                placeholder="Standort auswählen"
+                value={formData.location}
+              />
+            </Field>
+
+            {/* Favorite Market */}
+            <Field
+              label="Lieblingsmarkt"
+              helper="Wo kaufst du am liebsten ein?"
+            >
+              <SelectRow
+                onPress={() => setShowMarketSelector(true)}
+                icon="storefront-outline"
+                placeholder="Markt auswählen"
+                value={
+                  formData.favoriteMarket
+                    ? `${flagFor((formData.favoriteMarket as any).land)} ${formData.favoriteMarket.name}`
+                    : ''
+                }
+              />
+            </Field>
+
+            {/* Age — Compact-Slider direkt unterm Field-Label (T12.6). */}
             <Field label="Alter">
               <AgePicker
                 value={formData.age}
@@ -429,8 +460,8 @@ export default function EditProfileScreen() {
               />
             </Field>
 
-            {/* Gender */}
-            <Field label="Geschlecht">
+            {/* Gender — letztes Feld in der Card */}
+            <Field label="Geschlecht" last>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 {GENDER_OPTIONS.map((opt) => {
                   const on = formData.gender === opt;
@@ -465,37 +496,6 @@ export default function EditProfileScreen() {
                   );
                 })}
               </View>
-            </Field>
-
-            {/* Location */}
-            <Field
-              label="Einkaufsort"
-              helper="Hilft uns, lokale Angebote und Märkte zu finden"
-            >
-              <SelectRow
-                onPress={() => setShowLocationPicker(true)}
-                icon="map-marker-outline"
-                placeholder="Standort auswählen"
-                value={formData.location}
-              />
-            </Field>
-
-            {/* Favorite Market */}
-            <Field
-              label="Lieblingsmarkt"
-              helper="Wo kaufst du am liebsten ein?"
-              last
-            >
-              <SelectRow
-                onPress={() => setShowMarketSelector(true)}
-                icon="storefront-outline"
-                placeholder="Markt auswählen"
-                value={
-                  formData.favoriteMarket
-                    ? `${flagFor((formData.favoriteMarket as any).land)} ${formData.favoriteMarket.name}`
-                    : ''
-                }
-              />
             </Field>
           </Card>
 
