@@ -120,14 +120,25 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
               permanente Affordance für den Slider.
             - minHeight + lineHeight aus T11.7/T11.9 bleiben → kein
               Modal-Pop beim Slider-Touch. */}
-        <SliderHintAbove color={Colors.light.tint} />
+        <SliderHintAbove color={Colors.light.tint} active={!ageInteracted} />
         <View style={styles.sectionHeader}>
-          <Text style={[styles.label, { color: textColor }]} allowFontScaling={false}>
+          {/* T11.15: Komplette Label-Row in mutedColor vor Interaktion
+              → stärkstes "muss noch gewählt werden"-Signal.
+              Nach Interaktion: "Dein Alter" in normalem textColor,
+              Wert in Brand-Grün → "schaltet sich an" als visuelles
+              Feedback. */}
+          <Text
+            style={[
+              styles.label,
+              { color: ageInteracted ? textColor : mutedColor },
+            ]}
+            allowFontScaling={false}
+          >
             Dein Alter
             <Text
               style={[
                 styles.ageValue,
-                !ageInteracted && { color: mutedColor },
+                { color: ageInteracted ? Colors.light.tint : mutedColor },
               ]}
             >
               : {age >= AGE_MAX ? `${AGE_MAX}+` : age}
@@ -159,8 +170,17 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
           <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MAX}+</Text>
         </View>
 
-        {/* Gender — single-row pills (flex:1, gleicher Breite). */}
-        <Text style={[styles.label, styles.labelSpaced, { color: textColor }]}>
+        {/* Gender — single-row pills (flex:1, gleicher Breite).
+            T11.15: Label in mutedColor solange nichts gewählt
+            (parallel zum Alter-Pattern), in textColor sobald
+            eine Pill aktiv ist. */}
+        <Text
+          style={[
+            styles.label,
+            styles.labelSpaced,
+            { color: gender ? textColor : mutedColor },
+          ]}
+        >
           Dein Geschlecht
         </Text>
         <View style={styles.genderRow}>
@@ -234,22 +254,28 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
   );
 }
 
-/** Sanft pulsierende "Ziehe den Regler"-Hint ÜBER dem Label-Row.
- *  Wird IMMER gerendert (auch nach Interaktion) damit die Modal-
- *  Höhe stabil bleibt — User-Anweisung T11.14. Pulse läuft
- *  permanent als sanfte Affordance für den Slider. */
-function SliderHintAbove({ color }: { color: string }) {
-  const opacity = React.useRef(new RNAnimated.Value(0.55)).current;
+/** Pulsierende "Ziehe den Regler"-Hint ÜBER dem Label-Row.
+ *  Wird IMMER gerendert (Modal-Höhe stabil — T11.14).
+ *  T11.15: Pulse-Intensität reagiert auf den Interactions-State —
+ *  stark pulsierend solange nicht interagiert (zieht Aufmerksamkeit),
+ *  subtil-konstant nach Interaktion (informativ, nicht aufdringlich). */
+function SliderHintAbove({ color, active }: { color: string; active: boolean }) {
+  const opacity = React.useRef(new RNAnimated.Value(0.95)).current;
   React.useEffect(() => {
-    const loop = RNAnimated.loop(
-      RNAnimated.sequence([
-        RNAnimated.timing(opacity, { toValue: 0.95, duration: 900, useNativeDriver: true }),
-        RNAnimated.timing(opacity, { toValue: 0.55, duration: 900, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [opacity]);
+    if (active) {
+      // Starker Pulse — zieht Aufmerksamkeit.
+      const loop = RNAnimated.loop(
+        RNAnimated.sequence([
+          RNAnimated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
+          RNAnimated.timing(opacity, { toValue: 0.45, duration: 700, useNativeDriver: true }),
+        ]),
+      );
+      loop.start();
+      return () => loop.stop();
+    }
+    // Nach Interaktion: ruhig auf subtilem Level (0.4) bleiben.
+    RNAnimated.timing(opacity, { toValue: 0.4, duration: 400, useNativeDriver: true }).start();
+  }, [active, opacity]);
   return (
     <RNAnimated.View style={{ opacity, alignSelf: 'center', marginBottom: 4 }}>
       <Text style={[styles.sliderHintAbove, { color }]}>Ziehe den Regler</Text>
