@@ -42,6 +42,8 @@ import {
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { OnboardingService } from '@/lib/services/onboardingService';
+
 import {
   DETAIL_HEADER_ROW_HEIGHT,
   DetailHeader,
@@ -139,13 +141,14 @@ export default function ProfileScreen() {
     useCallback(() => {
       let alive = true;
       (async () => {
-        const { OnboardingService } = await import(
-          '@/lib/services/onboardingService'
-        );
-        const skipped = await OnboardingService.isOnboardingSkipped();
-        const completed = await OnboardingService.isOnboardingCompleted();
+        // Onboarding-Button nur zeigen wenn User geskippt hat
+        // (egal ob early oder mid) UND nie abgeschlossen — dann
+        // bieten wir "Onboarding nachholen" an.
+        const status = await OnboardingService.getStatus();
         if (!alive) return;
-        setShowOnboardingButton(skipped && !completed);
+        setShowOnboardingButton(
+          status === 'skipped_early' || status === 'skipped_mid',
+        );
 
         const { gamificationSettingsService } = await import(
           '@/lib/services/gamificationSettingsService'
@@ -276,9 +279,6 @@ export default function ProfileScreen() {
 
   const handleResumeOnboarding = async () => {
     try {
-      const { OnboardingService } = await import(
-        '@/lib/services/onboardingService'
-      );
       await OnboardingService.resetOnboarding();
       setShowOnboardingButton(false);
       router.push('/onboarding' as any);
@@ -476,15 +476,12 @@ export default function ProfileScreen() {
               await AsyncStorage.clear();
 
               // 3. Belt-and-suspenders: explizit nochmal die
-              // bekannten Onboarding/Coachmark-Keys droppen,
-              // falls AsyncStorage.clear() aus irgendeinem Grund
-              // einzelne Keys nicht abgeräumt hat. (Hatten wir in
-              // der Praxis schon — irgendein Native-Cache hielt
-              // 'onboarding_v1_completed' fest.)
+              // bekannten Reset-Keys droppen, falls AsyncStorage.clear()
+              // aus irgendeinem Grund einzelne nicht abgeräumt hat.
+              // Onboarding-Status geht via Service (Single Source of
+              // Truth) — der löscht auch v1-Legacy-Keys mit.
+              await OnboardingService.resetOnboarding();
               await AsyncStorage.multiRemove([
-                'onboarding_v1_completed',
-                'onboarding_v1_skipped',
-                'onboarding_v1_progress',
                 '@gamification_notifications_disabled',
                 'coachmark/v1/home',
                 'coachmark/v1/rewards',

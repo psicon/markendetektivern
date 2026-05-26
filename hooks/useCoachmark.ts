@@ -28,23 +28,16 @@
 //    gerade montiert ist zum sofortigen Anzeigen zwingen — auch
 //    wenn die Tour als gesehen markiert ist.
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { CoachmarkService, TourKey } from '@/lib/services/coachmarkService';
 
-// Mirror der AsyncStorage-Keys aus `onboardingService.ts` damit wir
-// hier nicht abhängig vom Service selbst sind (zirkuläre Imports
-// vermeiden, der Service hat dynamic imports).
-//
-// WICHTIG: User die das Onboarding via "Später"-Button auf dem
-// Hero-Screen skippen, kriegen NUR `onboarding_v1_skipped` gesetzt
-// — NICHT `completed`. Der Hook muss daher BEIDE Flags akzeptieren
-// (entspricht `OnboardingService.hasPassedOnboarding()`-Semantik),
-// sonst sehen Skip-User die Welcome-Tour nie. Das war ein Bug —
-// eine Skip-Geste sollte nicht alle weiteren Tutorials blockieren.
-const ONBOARDING_COMPLETED_KEY = 'onboarding_v1_completed';
-const ONBOARDING_SKIPPED_KEY = 'onboarding_v1_skipped';
+// 2026-05-22: Direkter AsyncStorage-Touch entfernt — wir routen
+// jetzt durch `OnboardingService.hasPassedOnboarding()` (Single
+// Source of Truth, siehe CLAUDE.md Best Practices). Der Service
+// liest jetzt ein Enum-Feld `onboarding_v2_status` und migriert
+// alte v1-Booleans transparent.
+import { OnboardingService } from '@/lib/services/onboardingService';
 
 export type UseCoachmarkResult = {
   /** Soll das Overlay aktuell sichtbar sein? */
@@ -76,20 +69,16 @@ export function useCoachmark(tour: TourKey): UseCoachmarkResult {
       let cancelled = false;
       (async () => {
         try {
-          const [seen, completed, skipped] = await Promise.all([
+          const [seen, hasPassedOnboarding] = await Promise.all([
             CoachmarkService.getSeen(tour),
-            AsyncStorage.getItem(ONBOARDING_COMPLETED_KEY),
-            AsyncStorage.getItem(ONBOARDING_SKIPPED_KEY),
+            OnboardingService.hasPassedOnboarding(),
           ]);
           if (cancelled || localShown) return;
-          // Hard-Block: Onboarding muss durch sein (egal ob
-          // abgeschlossen oder geskipped — siehe Block-Kommentar
-          // bei den Konstanten oben).
-          const hasPassedOnboarding =
-            completed === 'true' || skipped === 'true';
+          // Hard-Block: Onboarding muss durch sein (Climax erreicht
+          // ODER bewusst geskippt — Service abstrahiert das).
           if (__DEV__) {
             console.log(
-              `🎯 useCoachmark[${tour}]: seen=${seen} completed=${completed} skipped=${skipped} → hasPassedOnboarding=${hasPassedOnboarding}`,
+              `🎯 useCoachmark[${tour}]: seen=${seen} hasPassedOnboarding=${hasPassedOnboarding}`,
             );
           }
           if (!hasPassedOnboarding) return;

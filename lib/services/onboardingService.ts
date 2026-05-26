@@ -1,8 +1,43 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const ONBOARDING_COMPLETED_KEY = 'onboarding_v1_completed';
-const ONBOARDING_SKIPPED_KEY = 'onboarding_v1_skipped';
-const ONBOARDING_PROGRESS_KEY = 'onboarding_v1_progress';
+/**
+ * Onboarding-Status-Modell (v2)
+ *
+ * Ein einziges Enum-Feld in AsyncStorage statt zweier Booleans
+ * (`_completed` + `_skipped`) wie im v1-Schema. Damit können wir
+ * zwischen den verschiedenen "fertig"-Pfaden unterscheiden ohne
+ * sie zu vermischen.
+ *
+ *   pending           — User hat Onboarding noch nicht gestartet
+ *                       (oder wurde frisch reset)
+ *   in_progress       — Onboarding läuft (mind. 1 Step passiert)
+ *   completed         — User hat Climax erreicht + ggf. Auth gewählt
+ *   skipped_early     — User hat im Hero-Screen "Später" gedrückt
+ *                       (= keine Daten erfasst)
+ *   skipped_mid       — User hat ab Step 2 die Skip-Pille gedrückt
+ *                       (= Teil-Daten erfasst, in Firestore-Session
+ *                       als status='abandoned')
+ *
+ * Migration aus v1:
+ *   _completed=true → completed
+ *   _skipped=true   → skipped_early (best guess, kein Step-Tracking
+ *                     in v1)
+ */
+export type OnboardingStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'completed'
+  | 'skipped_early'
+  | 'skipped_mid';
+
+/** Storage-Keys. v1 = alte Booleans (werden bei Migration entfernt). */
+const KEY_STATUS_V2 = 'onboarding_v2_status';
+const KEY_PROGRESS = 'onboarding_v2_progress';
+
+// Legacy v1 Keys — nur für Migration nötig
+const LEGACY_KEY_COMPLETED = 'onboarding_v1_completed';
+const LEGACY_KEY_SKIPPED = 'onboarding_v1_skipped';
+const LEGACY_KEY_PROGRESS = 'onboarding_v1_progress';
 
 export interface OnboardingProgress {
   currentStep: number;
@@ -12,154 +47,148 @@ export interface OnboardingProgress {
 
 export class OnboardingService {
   /**
-   * Prüft ob Onboarding bereits abgeschlossen wurde
+   * Liest den aktuellen Status. Migriert v1 → v2 wenn nötig
+   * (one-shot, idempotent). Cached innerhalb des Prozess-Lifecycles.
+   *
+   * Lifecycle:
+   *   pending → in_progress (auf "Los geht's"-Tap)
+   *   in_progress → completed (Climax-Auth abgeschlossen)
+   *   in_progress → skipped_mid (Skip-Pille ab Step 2)
+   *   pending → skipped_early (Skip vom Hero — kein in_progress)
+   *
+   * Caller: app/index.tsx (Boot-Route), onboarding/index.tsx
+   * (lifecycle).
    */
-  static async isOnboardingCompleted(): Promise<boolean> {
+  static async getStatus(): Promise<OnboardingStatus> {
     try {
-      const completed = await AsyncStorage.getItem(ONBOARDING_COMPLETED_KEY);
-      return completed === 'true';
-    } catch (error) {
-      console.error('Error checking onboarding status:', error);
-      return false;
-    }
-  }
+      const v2 = await AsyncStorage.getItem(KEY_STATUS_V2);
+      if (v2) return v2 as OnboardingStatus;
 
-  /**
-   * Prüft ob Onboarding übersprungen wurde
-   */
-  static async isOnboardingSkipped(): Promise<boolean> {
-    try {
-      const skipped = await AsyncStorage.getItem(ONBOARDING_SKIPPED_KEY);
-      return skipped === 'true';
-    } catch (error) {
-      console.error('Error checking onboarding skip status:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Prüft ob User das Onboarding hinter sich hat (completed ODER skipped)
-   */
-  static async hasPassedOnboarding(): Promise<boolean> {
-    try {
+      // Migration: v1-Booleans nachschauen + auf v2 hochziehen
       const [completed, skipped] = await Promise.all([
-        this.isOnboardingCompleted(),
-        this.isOnboardingSkipped()
+        AsyncStorage.getItem(LEGACY_KEY_COMPLETED),
+        AsyncStorage.getItem(LEGACY_KEY_SKIPPED),
       ]);
-      return completed || skipped;
+      let migrated: OnboardingStatus = 'pending';
+      if (completed === 'true') migrated = 'completed';
+      else if (skipped === 'true') migrated = 'skipped_early';
+
+      if (migrated !== 'pending') {
+        // Persist + cleanup alte Keys.
+        await AsyncStorage.setItem(KEY_STATUS_V2, migrated);
+        await Promise.all([
+          AsyncStorage.removeItem(LEGACY_KEY_COMPLETED),
+          AsyncStorage.removeItem(LEGACY_KEY_SKIPPED),
+          AsyncStorage.removeItem(LEGACY_KEY_PROGRESS),
+        ]);
+      }
+      return migrated;
     } catch (error) {
-      console.error('Error checking onboarding status:', error);
-      return false;
+      console.error('[OnboardingService] getStatus failed:', error);
+      return 'pending';
     }
   }
 
   /**
-   * Markiert Onboarding als abgeschlossen
+   * Setzt den Status. Atomar — die einzige Stelle die in den
+   * Storage schreibt. Kein anderer Code darf direkt AsyncStorage
+   * für Onboarding-Status anfassen (siehe CLAUDE.md Best Practices).
+   *
+   * Side-effect: bei 'completed' werden auch die Progress-Daten
+   * gelöscht (Resume nicht mehr nötig).
    */
-  static async markOnboardingCompleted(): Promise<void> {
+  static async setStatus(status: OnboardingStatus): Promise<void> {
     try {
-      await AsyncStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
-      // Lösche Progress und Skip-Flag da nicht mehr benötigt
-      await AsyncStorage.removeItem(ONBOARDING_PROGRESS_KEY);
-      await AsyncStorage.removeItem(ONBOARDING_SKIPPED_KEY);
+      await AsyncStorage.setItem(KEY_STATUS_V2, status);
+      if (status === 'completed' || status === 'skipped_early' || status === 'skipped_mid') {
+        await AsyncStorage.removeItem(KEY_PROGRESS);
+      }
     } catch (error) {
-      console.error('Error marking onboarding as completed:', error);
+      console.error('[OnboardingService] setStatus failed:', error);
       throw error;
     }
   }
 
   /**
-   * Speichert Onboarding Progress für Resume-Funktionalität
+   * Convenience: hat der User das Onboarding "hinter sich"?
+   * (Completed ODER skipped, jeweils). Caller: app/index.tsx
+   * Boot-Routing — wenn true → /(tabs), sonst → /onboarding.
    */
+  static async hasPassedOnboarding(): Promise<boolean> {
+    const status = await this.getStatus();
+    return status === 'completed' || status === 'skipped_early' || status === 'skipped_mid';
+  }
+
+  /** Convenience: Climax erreicht? Wird in (tabs)/index.tsx für
+   *  den Demographics-Bottom-Sheet-Trigger genutzt — wir wollen
+   *  den Sheet NUR bei status='completed' zeigen, nicht bei den
+   *  Skip-Pfaden. */
+  static async wasCompleted(): Promise<boolean> {
+    return (await this.getStatus()) === 'completed';
+  }
+
+  // ─── Convenience Setters (DRY für die Caller) ───────────────
+
+  static markStarted = () => this.setStatus('in_progress');
+  static markCompleted = () => this.setStatus('completed');
+  static markSkippedEarly = () => this.setStatus('skipped_early');
+  static markSkippedMid = () => this.setStatus('skipped_mid');
+
+  // ─── Progress (Resume-Support) ──────────────────────────────
+  // 2026-05-22: Resume ist aktuell NICHT integriert in den
+  // onboarding/index.tsx-Flow. Behält die Methoden aber damit
+  // T2 (Variante B) sie auf Wunsch einbauen kann ohne Service-
+  // Erweiterung. Wenn T2 entscheidet kein Resume zu bauen,
+  // werden diese 3 Methoden im selben Task gelöscht.
+
   static async saveProgress(progress: OnboardingProgress): Promise<void> {
     try {
-      await AsyncStorage.setItem(ONBOARDING_PROGRESS_KEY, JSON.stringify(progress));
+      await AsyncStorage.setItem(KEY_PROGRESS, JSON.stringify(progress));
     } catch (error) {
-      console.error('Error saving onboarding progress:', error);
+      console.error('[OnboardingService] saveProgress failed:', error);
     }
   }
 
-  /**
-   * Lädt gespeicherten Onboarding Progress
-   */
   static async loadProgress(): Promise<OnboardingProgress | null> {
     try {
-      const progressJson = await AsyncStorage.getItem(ONBOARDING_PROGRESS_KEY);
-      if (progressJson) {
-        return JSON.parse(progressJson);
-      }
-      return null;
+      const json = await AsyncStorage.getItem(KEY_PROGRESS);
+      return json ? JSON.parse(json) : null;
     } catch (error) {
-      console.error('Error loading onboarding progress:', error);
+      console.error('[OnboardingService] loadProgress failed:', error);
       return null;
     }
   }
 
-  /**
-   * Löscht Onboarding Progress
-   */
   static async clearProgress(): Promise<void> {
     try {
-      await AsyncStorage.removeItem(ONBOARDING_PROGRESS_KEY);
+      await AsyncStorage.removeItem(KEY_PROGRESS);
     } catch (error) {
-      console.error('Error clearing onboarding progress:', error);
+      console.error('[OnboardingService] clearProgress failed:', error);
     }
   }
 
   /**
-   * Reset Onboarding (für Testing)
+   * Reset für Testing / Debug-Screen. Löscht ALLE Schlüssel
+   * (v2 + v1-Legacy) — User landet beim nächsten App-Start wieder
+   * in /onboarding.
+   *
+   * Aufrufer: app/profile.tsx Debug-Aktion (kein direkter
+   * AsyncStorage-Touch mehr — geht durch diesen Service).
    */
   static async resetOnboarding(): Promise<void> {
     try {
-      await AsyncStorage.removeItem(ONBOARDING_COMPLETED_KEY);
-      await AsyncStorage.removeItem(ONBOARDING_PROGRESS_KEY);
-      await AsyncStorage.removeItem(ONBOARDING_SKIPPED_KEY);
-      console.log('✅ Onboarding reset successfully');
+      await Promise.all([
+        AsyncStorage.removeItem(KEY_STATUS_V2),
+        AsyncStorage.removeItem(KEY_PROGRESS),
+        // Auch Legacy-Keys mit löschen falls Migration nicht lief.
+        AsyncStorage.removeItem(LEGACY_KEY_COMPLETED),
+        AsyncStorage.removeItem(LEGACY_KEY_SKIPPED),
+        AsyncStorage.removeItem(LEGACY_KEY_PROGRESS),
+      ]);
+      console.log('[OnboardingService] reset complete');
     } catch (error) {
-      console.error('Error resetting onboarding:', error);
+      console.error('[OnboardingService] reset failed:', error);
       throw error;
-    }
-  }
-
-  /**
-   * Bestimmt die initiale Route basierend auf Onboarding Status
-   */
-  static async getInitialRoute(): Promise<string> {
-    try {
-      const isCompleted = await this.isOnboardingCompleted();
-      
-      if (isCompleted) {
-        // Onboarding bereits abgeschlossen → Main App
-        return '/(tabs)';
-      } else {
-        // Prüfe ob es einen gespeicherten Progress gibt
-        const progress = await this.loadProgress();
-        
-        if (progress && progress.currentStep > 1) {
-          // Resume Onboarding an der gespeicherten Stelle
-          const stepRoutes = [
-            '/onboarding/hero',
-            '/onboarding/country-auth',
-            '/onboarding/market-selection',
-            '/onboarding/acquisition-source',
-            '/onboarding/budget-slider',
-            '/onboarding/priorities',
-            '/onboarding/loading',
-            '/onboarding/savings-chart',
-            '/onboarding/paywall'
-          ];
-          
-          const routeIndex = Math.min(progress.currentStep - 1, stepRoutes.length - 1);
-          return stepRoutes[routeIndex];
-        } else {
-          // Neues Onboarding starten
-          return '/onboarding/hero';
-        }
-      }
-    } catch (error) {
-      console.error('Error determining initial route:', error);
-      // Fallback zu Main App bei Fehler
-      return '/(tabs)';
     }
   }
 }

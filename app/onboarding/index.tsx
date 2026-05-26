@@ -644,12 +644,22 @@ export default function OnboardingScreen() {
     } catch (error) {
       console.error('❌ Skip tracking error:', error);
     }
-    
-    const AsyncStorage = await import('@react-native-async-storage/async-storage');
-    await AsyncStorage.default.setItem('onboarding_v1_skipped', 'true');
-    
-    // Pending-Paywall-Flag setzen; tatsächliche Präsentation erfolgt sicher in der Home-Seite
+
+    // Onboarding-Status via Service (Single Source of Truth).
+    // Hero-Skip (Step 1) = skipped_early (keine Daten erfasst),
+    // Skip aus späterem Step = skipped_mid (Teil-Daten erfasst).
+    const { OnboardingService } = await import('@/lib/services/onboardingService');
+    if (currentStep === 1) {
+      await OnboardingService.markSkippedEarly();
+    } else {
+      await OnboardingService.markSkippedMid();
+    }
+
+    // Pending-Paywall-Flag setzen; tatsächliche Präsentation erfolgt sicher in der Home-Seite.
+    // NOTE T2: für Variante B sollte dieser Flag NUR im Climax-Pfad gesetzt werden, nicht bei Skip.
+    // Hier vorerst belassen für minimal-invasiven T1-Change.
     try {
+      const AsyncStorage = await import('@react-native-async-storage/async-storage');
       await AsyncStorage.default.setItem('pending_onboarding_paywall', '1');
     } catch (e) {
       console.warn('⚠️ Konnte Pending-Paywall-Flag nicht setzen:', e);
@@ -827,8 +837,9 @@ export default function OnboardingScreen() {
       console.warn('⚠️ Failed to mirror onboarding answers:', mirrorErr);
     }
 
-    const AsyncStorage = await import('@react-native-async-storage/async-storage');
-    await AsyncStorage.default.setItem('onboarding_v1_completed', 'true');
+    // Onboarding-Status via Service (Single Source of Truth).
+    const { OnboardingService } = await import('@/lib/services/onboardingService');
+    await OnboardingService.markCompleted();
 
     // KRITISCH: AuthContext.userProfile refreshen sodass die
     // frisch-gemirrorten Felder (favoriteMarket, age, gender,
@@ -1005,8 +1016,9 @@ export default function OnboardingScreen() {
         console.warn('⚠️ Failed to mirror onboarding answers to user doc:', mirrorErr);
       }
 
-      const AsyncStorage = await import('@react-native-async-storage/async-storage');
-      await AsyncStorage.default.setItem('onboarding_v1_completed', 'true');
+      // Onboarding-Status via Service (Single Source of Truth).
+      const { OnboardingService } = await import('@/lib/services/onboardingService');
+      await OnboardingService.markCompleted();
 
       // KRITISCH: AuthContext.userProfile refreshen — siehe
       // persistOnboardingResults für die ausführliche Begründung.
