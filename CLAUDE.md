@@ -35,6 +35,32 @@ Design-Rule eintragen, im selben Commit wie der Fix. Format:
 "tu Y, nicht Z, weil W". NICHT für Preferences ("User mag X
 anders") oder Spekulation ("vielleicht wäre Y besser").
 
+## Nutrition-Scraper: NIEMALS Name-Search, NUR EAN
+
+Für die Cloud-Function `nutrition-scraper` (alle Endpoints +
+Resolver + Serper-Queries) gilt: **Suche IMMER per GTIN (EAN),
+NIEMALS per Produkt-Name**. User-Vorgabe 2026-05-17, mehrfach
+bestätigt.
+
+Begründung:
+- Name-Search liefert Random-Treffer von ähnlich-genannten
+  Produkten anderer Hersteller → Claude extrahiert falsche Daten
+  → DB wird kontaminiert.
+- EAN ist global-eindeutig → Treffer ist garantiert dasselbe
+  Produkt (oder kein Treffer → safe skip).
+- Audit hat gezeigt: bei EAN-Search liefert Google für die meisten
+  unserer Produkte die echten Shop-Detail-Pages (myTime, Globus,
+  etc.) → ist NICHT die Limitierung. Limitierung früherer Tests
+  war: Stichprobe zu ALDI-Eigenmarken-lastig (4061464*, 4056489*,
+  4337256* — werden NUR bei ALDI verkauft, daher wenig Shop-Coverage).
+
+Was tun:
+- Wenn ein Shop nicht über EAN findbar ist → Shop aus Liste raus,
+  NICHT auf Name-Search ausweichen.
+- Falls neue Source-Adapter (z.B. shop-spezifischer Crawler)
+  hinzukommen: input-Parameter MUSS EAN sein, fail-fast wenn nicht
+  vorhanden.
+
 ## Meta-Regel: ClickUp-Tasks immer kommentieren + 'In Review' setzen
 
 Wenn ich an einem ClickUp-Task arbeite (egal ob Bug, Feature,
@@ -67,6 +93,95 @@ keinen Sinn → wegnehmen") — das endet in Cancel-Loops. Bei
 Unklarheit kurz fragen. Bei Vergleichen ("warum ist X auf Home
 anders als Stöbern?") **nicht** raten welche Seite gewinnt — beide
 Optionen anbieten oder fragen.
+
+## Meta-Regel: Best Practices — IMMER, ohne Ausnahme
+
+Wir entwickeln **immer nach Best Practices**. Das ist keine
+optionale Verbesserung, das ist die Baseline. Wenn ein Pattern
+schmerzhaft ist (State-Race, dead code, copy-paste) → fix it,
+nicht workaround it.
+
+Konkretes Mindest-Set für jede neue/geänderte Datei:
+
+### Architektur
+- **Single Source of Truth pro Domain.** Status der App lebt
+  an EINER Stelle (Service, Context, oder Reducer). Wenn ein
+  AsyncStorage-Key an >1 Stelle direkt geschrieben wird, ist das
+  ein Bug — wickle ihn in einen Service.
+- **No dead code.** Bevor du was Neues schreibst: check ob's
+  schon existiert. Wenn alter Code (Provider, Service-Methode,
+  Komponente) nicht mehr genutzt wird → löschen, nicht parallel
+  einen zweiten Pfad aufbauen.
+- **State-Race verhindern** (nicht reparieren). Wenn zwei
+  setState-Calls im selben Tick + danach ein Read passieren → 
+  benutze `useReducer` mit atomaren Updates ODER refactore zu
+  einem einzigen state-Objekt. Workaround-Parameter wie
+  `overrideXyz` durch drei Funktionen reichen = code smell.
+- **Komponenten < 400 Zeilen.** Wenn eine Datei größer wird,
+  ist das ein Signal das mehrere Verantwortlichkeiten drin
+  stecken. Split: pro Step/Section eigene Komponente, gemeinsamer
+  Provider/Context für Daten, dünner Container der orchestriert.
+- **Hooks-Regel ist nicht verhandelbar.** Niemals "ALLE useState
+  IMMER (keine conditionals!)" als Kommentar — das ist die
+  Hooks-Rule, kein Workaround. Wenn du das hinschreibst, ist
+  der File zu groß und braucht Refactoring.
+
+### State-Persistenz (Onboarding/Auth/etc.)
+- **Storage-Keys NIE direkt schreiben.** Immer durch Service-
+  Methode wickeln. Wenn ein Test/Debug-Screen den Key resetten
+  will → benutze die `reset*`-Methode des Service. Beispiel:
+  `OnboardingService.markCompleted()`, nicht
+  `AsyncStorage.setItem('onboarding_v1_completed', 'true')`.
+- **Status-Transitionen sind atomar.** Wenn `state=completed`
+  bedeutet "User hat Onboarding fertig + Daten in Firestore",
+  dann muss der Flag erst gesetzt werden NACHDEM Firestore-Write
+  succeeded ist. Andernfalls: User killt App nach Storage-Set
+  aber vor Firestore-Write → Onboarding ist "fertig" aber Daten
+  fehlen.
+- **Semantik der Flags klar trennen.** `completed` ≠ `skipped`
+  ≠ `abandoned`. Wenn `hasPassedX()` über zwei Flags ODER-verknüpft,
+  ist das ein Hinweis dass das Statussystem unterspezifiziert ist.
+  Verwende einen Enum-State (`'pending' | 'in_progress' |
+  'completed' | 'skipped'`), nicht zwei Booleans.
+- **Resume-State funktionert oder existiert nicht.**
+  `saveProgress`/`loadProgress` als Methoden zu haben ohne sie
+  jemals aufzurufen ist schlimmer als sie gar nicht zu haben —
+  weil's so aussieht als ob's geht. Entweder Resume integrieren
+  ODER die Methoden löschen.
+
+### Navigation / Flow
+- **Pro Auth/Onboarding-Übergang: GENAU EINE Funktion** die
+  alle Side-Effects orchestriert (Firestore-Save, Storage-Flag,
+  Premium-Refresh, Route). Keine 3 parallelen Pfade
+  (completeOnboarding / completeOnboardingForAuth / skipOnboarding)
+  die nur 80% denselben Code teilen — wenn 80% gleich, dann
+  refactor zu 1 Funktion mit Parameter.
+- **`router.back()` muss immer einen sinnvollen Ziel-State
+  haben.** Wenn ein Screen via `router.replace` betreten wurde,
+  ist `router.back()` ein No-op oder springt aus der App raus.
+  Wenn User den Back-Button sehen darf, dann `router.push` als
+  Übergang — sonst Back-Button ausblenden.
+- **Auth-Pfad muss alle vorgelagerten Flags setzen.**
+  Wenn User durchs Onboarding zu /auth/welcome geleitet wird,
+  muss DORT `markOnboardingCompleted` triggern (in jedem Sign-In-
+  Handler), nicht im vorherigen Screen — sonst Re-Start-Bug.
+
+### Code-Hygiene
+- **Statische Imports oben im File.** Außer wenn ein konkretes
+  Performance-/Lazy-Load-Argument greift (Code-Splitting), keine
+  `await import(...)` in async-Funktionen. Insbesondere NICHT
+  denselben Modul-Pfad an 5 Stellen lazy importieren.
+- **Imports aufräumen.** Ungenutzte Imports sind ein Signal dass
+  der File geschrumpft ist ohne dass jemand nachgezogen hat.
+  Beim Editieren mit-aufräumen.
+- **Error-Handling konsistent pro Funktion.** Entweder die
+  Funktion ist robust (catch + recover) ODER sie wirft (caller
+  fängt). Kein Mix aus "stillen warns" + "Alert.alert" + "kein
+  Catch" in derselben Funktion.
+
+Wenn du eine bestehende Datei berührst und siehst dass sie diese
+Regeln verletzt → **flag es dem User**, fix es nicht heimlich
+mit. Aber das was du SELBER schreibst hält sich an die Regeln.
 
 ## Forbidden Patterns
 
