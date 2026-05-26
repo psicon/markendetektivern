@@ -132,19 +132,18 @@ export default function RegisterScreen() {
             </TouchableOpacity>
           )}
 
-          {/* T10 v11 — Responsive Layout:
-              - Logo+Brand fix oben (marginTop:32 ab paddingTop) →
-                gleiche Y-Position wie Login.
-              - Verbleibender Raum wird via `justifyContent: 'space-evenly'`
-                in contentBlock auf drei Gruppen verteilt:
-                  (1) Header (Jetzt registrieren + Vorteile)
-                  (2) Buttons + Trust-Hint (eine Einheit)
-                  (3) Cross-Link
-              - Jede Gruppe bekommt gleichen Atemraum → "schön verteilt"
-                statt "alles oben" oder "alles gestaucht in der Mitte".
-              - Funktioniert responsive von kleinen iPhones (SE) bis
-                Pro Max ohne Scrollen weil contentBlock flex:1 ist. */}
-          <View style={[styles.logoBlock, isSmallDevice && styles.logoBlockSmall]}>
+          {/* T10 v12 — Auth-Screen Best Practice (Instagram/Spotify/
+              Robinhood/Uber Pattern):
+              - Branding-Block oben:  Logo + Brand + Headline + Subtitle
+                als zusammenhängende Identitäts-Einheit.
+              - Action-Block unten:   Buttons + DSGVO + Cross-Link in
+                der Thumb-Reach-Zone (untere ~55% des Screens).
+              - `justifyContent: 'space-between'` auf dem Overlay pusht
+                die zwei Blöcke auseinander — derselbe Pattern den auch
+                welcome.tsx nutzt. Funktioniert responsive: auf großen
+                Screens wächst der Whitespace dazwischen, auf kleinen
+                schrumpft er, ohne dass irgendwas scrollt. */}
+          <View style={[styles.brandingBlock, isSmallDevice && styles.brandingBlockSmall]}>
             <CustomIcon
               name="iconBlack"
               size={isSmallDevice ? 44 : 56}
@@ -152,20 +151,15 @@ export default function RegisterScreen() {
               style={styles.logoIcon}
             />
             <ThemedText style={styles.brandText}>MarkenDetektive</ThemedText>
+            <ThemedText style={[styles.titleText, isSmallDevice && styles.titleTextSmall]}>
+              Jetzt kostenlos registrieren
+            </ThemedText>
+            <ThemedText style={styles.subtitleText}>
+              und Vorteile genießen!
+            </ThemedText>
           </View>
 
-          <View style={styles.contentBlock}>
-            {/* Header */}
-            <View style={styles.headerBlock}>
-              <ThemedText style={styles.titleText}>
-                Jetzt kostenlos registrieren
-              </ThemedText>
-              <ThemedText style={styles.subtitleText}>
-                und Vorteile genießen!
-              </ThemedText>
-            </View>
-
-            {/* Buttons + Trust-Hint als zusammenhängender Block */}
+          <View style={styles.actionBlock}>
             <AuthMethodButtons
               mode="register"
               onApple={handleApple}
@@ -175,7 +169,6 @@ export default function RegisterScreen() {
               colorScheme={colorScheme}
             />
 
-            {/* Cross-Link */}
             <View style={styles.crossLinkBox}>
               <View style={styles.crossLinkRow}>
                 <ThemedText style={styles.crossLinkText}>Schon registriert? </ThemedText>
@@ -198,6 +191,9 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     paddingHorizontal: 24,
+    // T10 v12: Branding-Block oben, Action-Block unten —
+    // Standard Auth-Screen-Pattern (Welcome nutzt dasselbe).
+    justifyContent: 'space-between',
   },
   backButton: {
     position: 'absolute',
@@ -210,31 +206,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
-  // T10 v11: Logo+Brand sind ein kompakter Block am Top (gleiche
-  // Y-Position wie login.tsx: paddingTop:insets.top+56 + marginTop:32).
-  logoBlock: {
+  // T10 v12 — Branding-Block: Logo + Brand + Headline + Subtitle
+  // als zusammenhängende Identitäts-Einheit am Top. Items sitzen
+  // visuell verbunden (gap:4) wie ein Marken-Header.
+  brandingBlock: {
     alignItems: 'center',
     marginTop: 32,
     gap: 4,
   },
-  logoBlockSmall: {
+  brandingBlockSmall: {
     marginTop: 20,
     gap: 2,
   },
-  // T10 v11: contentBlock füllt den Rest des Screens (flex:1) und
-  // verteilt seine drei Kinder (Header, Buttons, CrossLink) per
-  // `space-evenly` — jeweils gleicher Atemraum, "schön verteilt"
-  // statt "oben geklebt" oder "in der Mitte gestaucht". Responsive
-  // ohne Scroll-Risiko weil die drei Gruppen kompakt sind und der
-  // flex-Container den verfügbaren Raum elastisch aufteilt.
-  contentBlock: {
-    flex: 1,
-    justifyContent: 'space-evenly',
+  // T10 v12 — Action-Block: alle interaktiven Elemente in der
+  // Thumb-Reach-Zone unten (Buttons + DSGVO + Cross-Link).
+  actionBlock: {
     width: '100%',
-  },
-  headerBlock: {
-    alignItems: 'center',
-    gap: 2,
+    gap: 16,
+    paddingBottom: 4,
   },
   logoIcon: {
     marginBottom: 2,
@@ -255,6 +244,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     textAlign: 'center',
     letterSpacing: -0.2,
+    marginTop: 8,
+  },
+  titleTextSmall: {
+    fontSize: 22,
+    lineHeight: 32,
+    marginTop: 4,
   },
   subtitleText: {
     fontSize: 15,
