@@ -235,49 +235,27 @@ export default function LoginScreen() {
           <MaterialCommunityIcons name="arrow-left" size={22} color="white" />
         </TouchableOpacity>
 
-        {/* Logo */}
-        <View style={[styles.logoContainer, isSmallDevice && styles.logoContainerSmall]}>
-          <CustomIcon 
-            name="iconBlack" 
-            size={isSmallDevice ? 48 : 64} 
+        {/* T10 v4 (2026-05-22): Login = Form first. Logo + Title in einem
+            Block ohne Overlap. */}
+        <View style={[styles.logoBlock, isSmallDevice && styles.logoBlockSmall]}>
+          <CustomIcon
+            name="iconBlack"
+            size={isSmallDevice ? 44 : 56}
             color="white"
             style={styles.logoIcon}
           />
-          <ThemedText style={[styles.logoText, isSmallDevice && styles.logoTextSmall]}>MarkenDetektive</ThemedText>
+          <ThemedText style={[styles.logoText, isSmallDevice && styles.logoTextSmall]}>
+            MarkenDetektive
+          </ThemedText>
+          <ThemedText style={[styles.subTitle, isSmallDevice && styles.subTitleSmall]}>
+            Willkommen zurück!
+          </ThemedText>
         </View>
 
-        {/* Content - Everything fits on screen */}
         <View style={[styles.content, isSmallDevice && styles.contentSmall]}>
-          <ThemedText style={[styles.subTitle, isSmallDevice && styles.subTitleSmall]}>Willkommen zurück!</ThemedText>
-          
           <View style={styles.authButtons}>
-            {/* T10 v3 (2026-05-22): 3 Buttons sichtbar, "Mit E-Mail"
-                togglet Form. Register-Link prominent oben sichtbar. */}
-            <View style={styles.topLoginRow}>
-              <ThemedText style={styles.topLoginText}>Noch kein Account?</ThemedText>
-              <TouchableOpacity onPress={() => router.push('/auth/register')} hitSlop={8}>
-                <ThemedText style={styles.topLoginLink}>Kostenlos starten</ThemedText>
-              </TouchableOpacity>
-            </View>
-
-            <AuthMethodButtons
-              mode="login"
-              onApple={handleAppleSignIn}
-              onGoogle={handleGoogleSignIn}
-              onEmail={() => setShowEmailForm(true)}
-              busy={loading}
-              colorScheme={colorScheme}
-            />
-
-            {showEmailForm && (
-            <>
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>E-Mail-Login</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            {/* Form Fields — solid weiße Inputs für Lesbarkeit (T10) */}
+            {/* Login-Form ist PRIMÄR — keine Email-Toggle nötig weil der
+                User schon im Login-Screen ist. */}
             <View style={[styles.formContainer, isSmallDevice && styles.formContainerSmall]}>
               <View style={styles.inputContainer}>
                 <TextInput
@@ -320,8 +298,9 @@ export default function LoginScreen() {
                 </View>
               </View>
 
+              {/* Passwort vergessen — zentriert (User-Spec) */}
               <TouchableOpacity
-                style={styles.forgotPassword}
+                style={styles.forgotPasswordCentered}
                 onPress={() => router.push('/auth/forgot-password')}
               >
                 <ThemedText style={styles.forgotPasswordTextWhite}>
@@ -344,10 +323,24 @@ export default function LoginScreen() {
                 </>
               )}
             </TouchableOpacity>
-            </>
-            )}
 
-            {/* Duplikat Cross-Link unten, falls User runter gescrollt hat. */}
+            {/* Quick-Login Alternative — Apple/Facebook (KEIN Email-Button,
+                Form ist eh sichtbar). Trust-Hint nur einmal hier. */}
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>oder schnell mit</Text>
+              <View style={styles.dividerLine} />
+            </View>
+            <AuthMethodButtons
+              mode="login"
+              onApple={handleAppleSignIn}
+              onGoogle={handleGoogleSignIn}
+              showEmailButton={false}
+              busy={loading}
+              colorScheme={colorScheme}
+            />
+
+            {/* Footer Cross-Link — nur einmal, prominent. */}
             <View style={styles.registerSection}>
               <View style={styles.registerDividerLine} />
               <View style={styles.registerRow}>
@@ -425,32 +418,40 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_500Medium',
     color: 'white',
   },
-  logoContainer: {
+  // T10 v4: Logo + Title + Subtitle in EINEM Block ohne Overlap.
+  // logoBlock ersetzt logoContainer (alt) — neuer Spacing-Modus.
+  logoBlock: {
     alignItems: 'center',
-    marginTop: 40,
-    gap: 5,
+    marginTop: 8,
+    marginBottom: 16,
+    gap: 6,
+  },
+  logoBlockSmall: {
+    marginTop: 4,
+    marginBottom: 10,
+    gap: 4,
   },
   logoIcon: {
-    marginBottom: 4,
+    marginBottom: 0,
   },
   logoText: {
-    fontSize: 28,
+    fontSize: 22,
     fontFamily: 'Nunito_700Bold',
     color: 'white',
     textAlign: 'center',
-    lineHeight: 32,
+    letterSpacing: -0.3,
   },
   content: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     alignItems: 'center',
   },
   subTitle: {
-    fontSize: 22,
-    fontFamily: 'Nunito_600SemiBold',
-    color: 'white',
+    fontSize: 16,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255,255,255,0.85)',
     textAlign: 'center',
-    marginBottom:16,
+    letterSpacing: -0.1,
   },
   authButtons: {
     width: '100%',
@@ -569,6 +570,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 16,
     paddingHorizontal: 0,
+  },
+  // T10 v4: zentriert statt rechts-aligned (User-Spec).
+  forgotPasswordCentered: {
+    alignSelf: 'center',
+    marginTop: 8,
+    marginBottom: 14,
+    paddingVertical: 4,
   },
   forgotPasswordText: {
     fontSize: 14,

@@ -419,15 +419,17 @@ export default function RegisterScreen() {
             <MaterialCommunityIcons name="arrow-left" size={22} color="white" />
           </TouchableOpacity>
 
-          {/* Logo */}
+          {/* T10 v4: kompakter Logo-Block — kein Title-Overlap mehr. */}
           <View style={[styles.logoContainer, isSmallDevice && styles.logoContainerSmall]}>
-            <CustomIcon 
-              name="iconBlack" 
-              size={isSmallDevice ? 48 : 64} 
+            <CustomIcon
+              name="iconBlack"
+              size={isSmallDevice ? 40 : 52}
               color="white"
               style={styles.logoIcon}
             />
-            <ThemedText style={[styles.logoText, isSmallDevice && styles.logoTextSmall]}>MarkenDetektive</ThemedText>
+            <ThemedText style={[styles.logoText, isSmallDevice && styles.logoTextSmall]}>
+              MarkenDetektive
+            </ThemedText>
           </View>
 
           <KeyboardAvoidingView 
@@ -441,36 +443,23 @@ export default function RegisterScreen() {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {/* T10 v3 (2026-05-22): User-Spec — 3 Buttons sichtbar,
-                  Email-Button toggelt Form auf. Login-Link prominent
-                  oben sichtbar OHNE Scrolling. */}
+              {/* T10 v4 (2026-05-22): kompakter Title-Block (kein
+                  Subtitle), Buttons sichtbar, Email-Toggle → Form,
+                  Cross-Link nur EINMAL unter den Buttons. */}
               <View style={styles.titleSection}>
                 <ThemedText style={[styles.title, isSmallDevice && styles.titleSmall]}>
                   Jetzt registrieren
                 </ThemedText>
-                <ThemedText style={[styles.subtitle, isSmallDevice && styles.subtitleSmall]}>
-                  und herausfinden, wer dahintersteckt.
-                </ThemedText>
               </View>
 
-              {/* Login-Cross-Link DIREKT nach Title — sichtbar ohne Scroll */}
-              <View style={styles.topLoginRow}>
-                <ThemedText style={styles.topLoginText}>Schon registriert?</ThemedText>
-                <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={8}>
-                  <ThemedText style={styles.topLoginLink}>Hier einloggen</ThemedText>
-                </TouchableOpacity>
-              </View>
-
-              {/* 3 (4) Buttons: Apple/Google + Facebook + Email-Toggle.
-                  Email-Button klappt die Form-Felder auf. Andere Buttons
-                  triggern direkt den Provider-Sign-In. */}
+              {/* 3 (4) Buttons: Apple/Google + Email + Facebook.
+                  Email klappt die Form-Felder auf. */}
               <AuthMethodButtons
                 mode="register"
                 onApple={handleAppleSignIn}
                 onGoogle={handleGoogleSignIn}
                 onEmail={() => {
                   setShowEmailForm(true);
-                  // Kurz scrollen so dass User sieht dass Form aufpoppt
                   setTimeout(() => {
                     scrollViewRef.current?.scrollToEnd({ animated: true });
                   }, 50);
@@ -478,6 +467,18 @@ export default function RegisterScreen() {
                 busy={loading}
                 colorScheme={colorScheme}
               />
+
+              {/* Login-Cross-Link DIREKT unter den Buttons — sichtbar,
+                  prominent, nur EINMAL (kein Duplikat unten). */}
+              <View style={styles.crossLinkBox}>
+                <View style={styles.crossLinkDivider} />
+                <View style={styles.crossLinkRow}>
+                  <ThemedText style={styles.crossLinkText}>Schon registriert? </ThemedText>
+                  <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={8}>
+                    <ThemedText style={styles.crossLinkLink}>Hier einloggen</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
 
               {/* Form Fields — nur sichtbar wenn User "Mit E-Mail" tappt */}
               {showEmailForm && (
@@ -739,18 +740,8 @@ export default function RegisterScreen() {
               </View>
               </>
               )}
-
-              {/* Duplikat Login-Cross-Link am unteren Rand — sichtbar
-                  egal ob Form expandiert ist oder nicht. */}
-              <View style={styles.loginSection}>
-                <View style={styles.loginDividerLine} />
-                <View style={styles.loginRow}>
-                  <ThemedText style={styles.loginText}>Schon registriert? </ThemedText>
-                  <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={6}>
-                    <ThemedText style={styles.loginLinkBold}>Hier einloggen</ThemedText>
-                  </TouchableOpacity>
-                </View>
-              </View>
+              {/* T10 v4: Doppel-Cross-Link unten ENTFERNT. Es gibt
+                  nur EINEN Link, direkt unter den Buttons (oben). */}
             </ScrollView>
           </KeyboardAvoidingView>
         </LinearGradient>
@@ -855,38 +846,61 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_500Medium',
     color: 'white',
   },
+  // T10 v4: kompakter Logo + Title (kein Overlap mehr, kein Subtitle).
   logoContainer: {
     alignItems: 'center',
-    marginTop: 30,
-    gap: 5,
-    marginBottom: 20,
+    marginTop: 4,
+    gap: 4,
+    marginBottom: 12,
   },
   logoIcon: {
-    marginBottom: 4,
+    marginBottom: 0,
   },
   logoText: {
-    fontSize: 28,
-    fontFamily: 'Nunito_700Bold',
-    color: 'white',
+    fontSize: 18,
+    fontFamily: 'Nunito_600SemiBold',
+    color: 'rgba(255,255,255,0.85)',
     textAlign: 'center',
-    lineHeight: 32,
+    letterSpacing: -0.2,
   },
   titleSection: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 14,
   },
   title: {
     fontSize: 26,
     fontFamily: 'Nunito_700Bold',
     color: 'white',
     textAlign: 'center',
-    marginBottom: 8,
+    letterSpacing: -0.3,
   },
-  subtitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_400Regular',
-    color: 'rgba(255, 255, 255, 0.8)',
-    textAlign: 'center',
+  // subtitle entfernt — bewusst raus.
+  // T10 v4: Cross-Link unter den Buttons — prominent, einmalig.
+  crossLinkBox: {
+    marginTop: 18,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  crossLinkDivider: {
+    width: 80,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    marginBottom: 12,
+  },
+  crossLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  crossLinkText: {
+    fontSize: 15,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255,255,255,0.85)',
+  },
+  crossLinkLink: {
+    fontSize: 15,
+    fontFamily: 'Nunito_700Bold',
+    color: '#fff',
+    textDecorationLine: 'underline',
   },
   socialSection: {
     marginBottom: 16,

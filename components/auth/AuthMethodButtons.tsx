@@ -32,7 +32,13 @@ interface Props {
   mode: Mode;
   onApple: () => void;
   onGoogle: () => void;
-  onEmail: () => void;
+  onEmail?: () => void;
+  /** Optional: Email-Button ausblenden (z.B. auf dem Login-Screen
+   *  wenn die Email-Form schon sichtbar ist — sonst redundant). */
+  showEmailButton?: boolean;
+  /** Optional: Trust-Hint ausblenden wenn er separat dargestellt
+   *  wird oder im Layout-Flow nicht passt. */
+  showTrustHint?: boolean;
   busy?: boolean;
   colorScheme: 'light' | 'dark' | null | undefined;
 }
@@ -42,6 +48,8 @@ export function AuthMethodButtons({
   onApple,
   onGoogle,
   onEmail,
+  showEmailButton = true,
+  showTrustHint = true,
   busy = false,
   colorScheme,
 }: Props) {
@@ -98,19 +106,21 @@ export function AuthMethodButtons({
         </Pressable>
       )}
 
-      {/* E-Mail (primary brand color) */}
-      <Pressable
-        onPress={onEmail}
-        disabled={busy}
-        style={({ pressed }) => [
-          styles.btnBase,
-          styles.btnEmail,
-          (pressed || busy) && styles.btnPressed,
-        ]}
-      >
-        <IconSymbol name="envelope" size={20} color="white" />
-        <Text style={[styles.btnText, styles.btnTextWhite]}>{emailVerb}</Text>
-      </Pressable>
+      {/* E-Mail (primary brand color) — optional ausblendbar */}
+      {showEmailButton && onEmail && (
+        <Pressable
+          onPress={onEmail}
+          disabled={busy}
+          style={({ pressed }) => [
+            styles.btnBase,
+            styles.btnEmail,
+            (pressed || busy) && styles.btnPressed,
+          ]}
+        >
+          <IconSymbol name="envelope" size={20} color="white" />
+          <Text style={[styles.btnText, styles.btnTextWhite]}>{emailVerb}</Text>
+        </Pressable>
+      )}
 
       {/* Facebook — UI fertig, Handler placeholder */}
       <Pressable
@@ -128,15 +138,14 @@ export function AuthMethodButtons({
         </Text>
       </Pressable>
 
-      {/* Trust-Hint — kurz, konkret, kein Logo-Wall.
-          Best Practice 2026: User wollen wissen WO die Daten liegen,
-          WER drauf zugreift, und dass sie löschbar sind. "Apple-Email-
-          Maske" war zu obskur und triggerte eher Misstrauen. */}
-      <View style={styles.trustRow}>
-        <Text style={[styles.trustText, { color: isDark ? Colors.dark.text : '#fff' }]}>
-          🔒 DSGVO-konform · Server in der EU · Jederzeit löschbar
-        </Text>
-      </View>
+      {/* Trust-Hint — optional ausblendbar. */}
+      {showTrustHint && (
+        <View style={styles.trustRow}>
+          <Text style={[styles.trustText, { color: isDark ? Colors.dark.text : '#fff' }]}>
+            🔒 DSGVO-konform · Server in der EU · Jederzeit löschbar
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
