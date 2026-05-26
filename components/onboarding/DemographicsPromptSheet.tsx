@@ -109,16 +109,18 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
         </Text>
 
         {/* Age — "Dein Alter: 32" horizontal zentriert.
-            T11.13:
+            T11.13 + T11.14:
             - Default-Wert (AGE_DEFAULT=30) IMMER sichtbar im
               Format ": 30". Vor Interaktion in muted color (subtler
               "noch nicht gewählt"-Signal), nach Interaktion in
               Brand-Grün. → kein Width-Shift beim ersten Touch.
-            - "Ziehe den Regler"-Hint sitzt UNTER dem Slider als
-              eigenes Element (kein Replace mehr) und pulsiert sanft.
-              Verschwindet sobald der User den Slider bedient.
+            - "Ziehe den Regler" sitzt ÜBER dem Label-Row und wird
+              IMMER gerendert (auch nach Interaktion), damit die
+              Modal-Höhe stabil bleibt. Pulsiert sanft als
+              permanente Affordance für den Slider.
             - minHeight + lineHeight aus T11.7/T11.9 bleiben → kein
               Modal-Pop beim Slider-Touch. */}
+        <SliderHintAbove color={Colors.light.tint} />
         <View style={styles.sectionHeader}>
           <Text style={[styles.label, { color: textColor }]} allowFontScaling={false}>
             Dein Alter
@@ -156,10 +158,6 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
           <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MIN}</Text>
           <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MAX}+</Text>
         </View>
-        {/* "Ziehe den Regler"-Hint — nur sichtbar bis erste
-            Slider-Interaktion. Sitzt UNTER dem Slider damit er die
-            zentrierte Label-Row nicht verschiebt. */}
-        {!ageInteracted && <SliderHintBelow color={Colors.light.tint} />}
 
         {/* Gender — single-row pills (flex:1, gleicher Breite). */}
         <Text style={[styles.label, styles.labelSpaced, { color: textColor }]}>
@@ -236,24 +234,25 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
   );
 }
 
-/** Sanft pulsierende "Ziehe den Regler"-Hint unter dem Slider.
- *  Sitzt im Layout-Flow unter den Min/Max-Labels — damit die
- *  zentrierte Age-Row darüber stabil bleibt. */
-function SliderHintBelow({ color }: { color: string }) {
-  const opacity = React.useRef(new RNAnimated.Value(0.6)).current;
+/** Sanft pulsierende "Ziehe den Regler"-Hint ÜBER dem Label-Row.
+ *  Wird IMMER gerendert (auch nach Interaktion) damit die Modal-
+ *  Höhe stabil bleibt — User-Anweisung T11.14. Pulse läuft
+ *  permanent als sanfte Affordance für den Slider. */
+function SliderHintAbove({ color }: { color: string }) {
+  const opacity = React.useRef(new RNAnimated.Value(0.55)).current;
   React.useEffect(() => {
     const loop = RNAnimated.loop(
       RNAnimated.sequence([
-        RNAnimated.timing(opacity, { toValue: 1, duration: 900, useNativeDriver: true }),
-        RNAnimated.timing(opacity, { toValue: 0.6, duration: 900, useNativeDriver: true }),
+        RNAnimated.timing(opacity, { toValue: 0.95, duration: 900, useNativeDriver: true }),
+        RNAnimated.timing(opacity, { toValue: 0.55, duration: 900, useNativeDriver: true }),
       ]),
     );
     loop.start();
     return () => loop.stop();
   }, [opacity]);
   return (
-    <RNAnimated.View style={{ opacity, alignSelf: 'center', marginTop: 4 }}>
-      <Text style={[styles.sliderHintBelow, { color }]}>Ziehe den Regler</Text>
+    <RNAnimated.View style={{ opacity, alignSelf: 'center', marginBottom: 4 }}>
+      <Text style={[styles.sliderHintAbove, { color }]}>Ziehe den Regler</Text>
     </RNAnimated.View>
   );
 }
@@ -315,7 +314,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'Nunito_500Medium',
   },
-  sliderHintBelow: {
+  sliderHintAbove: {
     fontSize: 13,
     fontFamily: 'Nunito_600SemiBold',
     letterSpacing: -0.1,
