@@ -1030,8 +1030,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // T10 v7: Active-State solid grün mit weißem Text — klar lesbar,
+  // klare visuelle Selection-Indikation. Vorher rgba(0.1) BG + grüner
+  // Text war auf hellem Card-BG schlecht lesbar.
   genderButtonActive: {
-    backgroundColor: 'rgba(76,175,80,0.10)',
+    backgroundColor: '#4CAF50',
     borderColor: '#4CAF50',
   },
   genderButtonText: {
@@ -1040,7 +1043,7 @@ const styles = StyleSheet.create({
     color: '#1c1c1e',
   },
   genderButtonTextActive: {
-    color: '#4CAF50',
+    color: '#fff',
     fontFamily: 'Nunito_700Bold',
   },
   // T10 v2: prominenter Login-Cross-Link direkt nach dem Title

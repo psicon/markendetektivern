@@ -130,12 +130,12 @@ export default function RegisterScreen() {
             </TouchableOpacity>
           )}
 
-          {/* T10 v6: Best-Practice-Pattern (Strava/Duolingo) — alle
-              Elemente als kompakte Gruppe in einem natürlichen
-              Flow. Kein space-between, kein riesiges Whitespace.
-              Header oben, Buttons direkt drunter, Cross-Link
-              direkt unter den Buttons. */}
-          <View style={styles.contentGroup}>
+          {/* T10 v7: Best-Practice-Layout (Strava/Headspace/Duolingo):
+              Content vertikal ZENTRIERT im verfügbaren Raum. Auf
+              iPhone SE wenig Whitespace oben+unten, auf iPhone 15
+              proportional mehr — aber NIE oben gequetscht oder
+              unten klaffend. */}
+          <View style={styles.contentCenter}>
             <View style={styles.headerBlock}>
               <CustomIcon
                 name="iconBlack"
@@ -144,7 +144,12 @@ export default function RegisterScreen() {
                 style={styles.logoIcon}
               />
               <ThemedText style={styles.brandText}>MarkenDetektive</ThemedText>
-              <ThemedText style={styles.titleText}>Jetzt registrieren</ThemedText>
+              <ThemedText style={styles.titleText}>
+                Jetzt kostenlos registrieren
+              </ThemedText>
+              <ThemedText style={styles.subtitleText}>
+                und Vorteile genießen!
+              </ThemedText>
             </View>
 
             <View style={styles.buttonsBlock}>
@@ -157,14 +162,15 @@ export default function RegisterScreen() {
                 colorScheme={colorScheme}
               />
             </View>
+          </View>
 
-            <View style={styles.crossLinkBox}>
-              <View style={styles.crossLinkRow}>
-                <ThemedText style={styles.crossLinkText}>Schon registriert? </ThemedText>
-                <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={8}>
-                  <ThemedText style={styles.crossLinkLink}>Hier einloggen</ThemedText>
-                </TouchableOpacity>
-              </View>
+          {/* Footer-Cross-Link am unteren Rand */}
+          <View style={styles.crossLinkBox}>
+            <View style={styles.crossLinkRow}>
+              <ThemedText style={styles.crossLinkText}>Schon registriert? </ThemedText>
+              <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={8}>
+                <ThemedText style={styles.crossLinkLink}>Hier einloggen</ThemedText>
+              </TouchableOpacity>
             </View>
           </View>
         </LinearGradient>
@@ -180,10 +186,6 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     paddingHorizontal: 24,
-    // T10 v6: Best Practice — Content beginnt oben (justifyContent
-    // flex-start) und fließt natürlich. KEIN space-between, sonst
-    // klafft eine riesige Lücke zwischen Buttons und Cross-Link.
-    justifyContent: 'flex-start',
   },
   backButton: {
     position: 'absolute',
@@ -196,15 +198,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
-  // T10 v6: gruppierter Content-Block — Header + Buttons + Cross-Link
-  // bilden eine zusammenhängende Einheit ohne große Lücken dazwischen.
-  contentGroup: {
-    marginTop: 32,
-    gap: 24,
+  // T10 v7: Content vertikal zentriert im verfügbaren Raum
+  // (zwischen Status-Bar und Footer-Cross-Link). flex:1 + center.
+  contentCenter: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: 28,
   },
   headerBlock: {
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
   },
   logoIcon: {
     marginBottom: 2,
@@ -219,16 +222,23 @@ const styles = StyleSheet.create({
   },
   // T10 v5 — Title-Clipping-Fix: großer lineHeight + paddingVertical
   // damit der ascender (oben) und descender (unten) immer Platz haben.
-  // Nunito_700Bold mit fontSize 28 braucht lineHeight ≥ 40 für sauberen
-  // Render auf iPhone (Foto-Hintergrund verstärkt Clipping-Wahrnehmung).
   titleText: {
-    fontSize: 28,
-    lineHeight: 40,
+    fontSize: 26,
+    lineHeight: 38,
     paddingVertical: 4,
     fontFamily: 'Nunito_700Bold',
     color: '#fff',
     textAlign: 'center',
     letterSpacing: -0.2,
+    marginTop: 4,
+  },
+  subtitleText: {
+    fontSize: 15,
+    lineHeight: 22,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255,255,255,0.85)',
+    textAlign: 'center',
+    letterSpacing: -0.1,
   },
   buttonsBlock: {
     width: '100%',
