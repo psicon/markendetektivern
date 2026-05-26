@@ -25,6 +25,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BannerAd } from '@/components/ads/BannerAd';
 import { HomeWalkthrough } from '@/components/coachmarks/HomeWalkthrough';
+import {
+  DemographicsPromptSheet,
+  type DemographicsResult,
+} from '@/components/onboarding/DemographicsPromptSheet';
 import { DetectiveMark } from '@/components/design/DetectiveMark';
 import {
   MorphingHeader,
@@ -154,6 +158,12 @@ export default function HomeScreen() {
     setShowSearchSheet(true);
   }, [insetTop, scrollY]);
 
+  // ─── Demographics-Bottom-Sheet (T3) ──────────────────────────
+  // Trigger: gesetzt vom Onboarding-Climax (Auth- ODER Guest-Path).
+  // Wird hier einmalig konsumiert, dann Flag entfernt. Caller-
+  // Handler weiter unten schreibt users/{uid}.age / .gender etc.
+  const [showDemographicsSheet, setShowDemographicsSheet] = useState(false);
+
   // Products
   const [enttarnteProdukte, setEnttarnteProdukte] = useState<FirestoreDocument<Produkte>[]>([]);
   const [discounterMap, setDiscounterMap] = useState<Record<string, DiscounterInfo>>({});
@@ -262,6 +272,96 @@ export default function HomeScreen() {
     })();
     return () => { cancelled = true; };
   }, [isPremium]);
+
+  // ─── Pending demographics prompt (T3) ─────────────────────────────────────
+  // Sheet erscheint einmalig nach Climax-Completion. Bedingungen:
+  //   1. pending_demographics_prompt-Flag = '1' (gesetzt vom Onboarding-
+  //      Climax in onboarding/index.tsx).
+  //   2. OnboardingService.wasCompleted() = true (Skip-Pfade triggern
+  //      das Sheet bewusst NICHT — User soll nichts aufgenötigt
+  //      bekommen wenn er weggewischt hat).
+  //   3. users/{uid} hat noch keine `age` UND keine `gender` (=
+  //      bereits beantwortet — auch nicht erneut zeigen).
+  useEffect(() => {
+    if (!user?.uid) return; // erst wenn auth ready
+    let cancelled = false;
+    (async () => {
+      try {
+        const flag = await AsyncStorage.getItem('pending_demographics_prompt');
+        if (flag !== '1') return;
+
+        const { OnboardingService } = await import('@/lib/services/onboardingService');
+        if (!(await OnboardingService.wasCompleted())) {
+          // Skip-Pfad — Flag wegräumen ohne Sheet zu zeigen.
+          await AsyncStorage.removeItem('pending_demographics_prompt');
+          return;
+        }
+
+        // Prüfe ob User-Doc schon age oder gender hat (vom Edit-
+        // Profile oder einer früheren Sheet-Antwort) — dann nicht
+        // erneut fragen.
+        const { getDoc, doc } = await import('@react-native-firebase/firestore');
+        const { db } = await import('@/lib/firebase');
+        const snap = await getDoc(doc(db, 'users', user.uid));
+        const data = snap.exists ? snap.data() : null;
+        if (data?.age != null || (typeof data?.gender === 'string' && data.gender.length > 0)) {
+          await AsyncStorage.removeItem('pending_demographics_prompt');
+          return;
+        }
+
+        // Kurz warten bis Home-Mount ruhig ist (sonst öffnet das Sheet
+        // mitten in den ProductCard-Initial-Animationen).
+        await new Promise<void>(r => InteractionManager.runAfterInteractions(() => r()));
+        if (cancelled) return;
+        setShowDemographicsSheet(true);
+      } catch (err) {
+        console.warn('[Home] demographics prompt check failed:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.uid]);
+
+  const handleDemographicsSubmit = useCallback(async (result: DemographicsResult) => {
+    setShowDemographicsSheet(false);
+    try {
+      if (!user?.uid) return;
+      const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
+      const { db } = await import('@/lib/firebase');
+      await setDoc(
+        doc(db, 'users', user.uid),
+        {
+          age: result.age,
+          ageBucket: result.ageBucket,
+          gender: result.gender,
+          demographicsCapturedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+      await AsyncStorage.removeItem('pending_demographics_prompt');
+    } catch (err) {
+      console.warn('[Home] demographics save failed:', err);
+    }
+  }, [user?.uid]);
+
+  const handleDemographicsSkip = useCallback(async () => {
+    setShowDemographicsSheet(false);
+    try {
+      await AsyncStorage.removeItem('pending_demographics_prompt');
+      if (!user?.uid) return;
+      const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
+      const { db } = await import('@/lib/firebase');
+      await setDoc(
+        doc(db, 'users', user.uid),
+        {
+          demographicsSkipped: true,
+          demographicsSkippedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    } catch (err) {
+      console.warn('[Home] demographics skip-mark failed:', err);
+    }
+  }, [user?.uid]);
 
   // ─── Load levels ────────────────────────────────────────────────────────────
   // Deferred via InteractionManager — die Level-Card auf Home rendert
@@ -1238,6 +1338,15 @@ export default function HomeScreen() {
       <HomeWalkthrough
         visible={homeCoachmark.visible}
         onDismiss={homeCoachmark.dismiss}
+      />
+
+      {/* Demographics-Prompt nach Onboarding-Climax (T3).
+          Sheet wird nur einmal pro User gezeigt — Trigger-Logik im
+          useEffect oben. */}
+      <DemographicsPromptSheet
+        visible={showDemographicsSheet}
+        onSubmit={handleDemographicsSubmit}
+        onSkip={handleDemographicsSkip}
       />
     </View>
   );
