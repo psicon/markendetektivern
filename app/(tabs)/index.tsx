@@ -327,11 +327,20 @@ export default function HomeScreen() {
       if (!user?.uid) return;
       const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
       const { db } = await import('@/lib/firebase');
+      // T11.18: Wir speichern eine eigenständige Capture-Timestamp
+      // SPEZIFISCH für age (nicht nur das umbrella `demographicsCapturedAt`)
+      // damit wir das Alter über die Zeit hochrechnen können — User
+      // hat heute 32 angegeben, in 4 Jahren ist er ≈ 36.
+      // Plus `ageReportedYear` für schnellen Client-side-Lookup
+      // ohne Firestore-Timestamp-Deserialisierung.
+      const now = new Date();
       await setDoc(
         doc(db, 'users', user.uid),
         {
           age: result.age,
           ageBucket: result.ageBucket,
+          ageReportedAt: serverTimestamp(),
+          ageReportedYear: now.getFullYear(),
           gender: result.gender,
           demographicsCapturedAt: serverTimestamp(),
         },

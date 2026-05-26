@@ -48,3 +48,26 @@ export function ageBucketFromAge(age: number): string {
   if (age <= 64) return '55-64';
   return '65+';
 }
+
+/**
+ * Berechnet das aktuelle Alter aus einem damals angegebenen Wert
+ * + dem Jahr der Angabe (T11.18).
+ *
+ * Beispiel: User hat 2026 das Alter 32 angegeben.
+ *   currentAgeFromReported(32, 2026) → 2030 liefert 36.
+ *
+ * Hinweis: dies ist eine YEAR-PRECISION-Schätzung. Wenn der echte
+ * Geburtstag im Jahr noch nicht erreicht ist, ist die Schätzung
+ * 1 Jahr zu hoch. Für höhere Präzision müsste `birthDate` (Tag-
+ * genau) statt `age` (Integer) erhoben werden — der Demografie-
+ * Sheet erfasst aber bewusst nur das Alter (Slider) damit die UX
+ * leichtgewichtig bleibt. Anonymität geht vor Tagesgenauigkeit.
+ */
+export function currentAgeFromReported(
+  reportedAge: number,
+  reportedYear: number,
+  now: Date = new Date(),
+): number {
+  const yearsSince = now.getFullYear() - reportedYear;
+  return reportedAge + Math.max(0, yearsSince);
+}
