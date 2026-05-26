@@ -65,6 +65,18 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
   const [gender, setGender] = useState<Gender | ''>('');
   const [submitting, setSubmitting] = useState(false);
 
+  // T11.16: Animierte Opacity für die "Dein Alter: X"-Row. Layout-Slot
+  // bleibt reserviert (Animated.View nimmt seinen Platz immer ein),
+  // nur der Inhalt fadet ein sobald der User den Slider berührt.
+  const labelOpacity = React.useRef(new RNAnimated.Value(0)).current;
+  React.useEffect(() => {
+    RNAnimated.timing(labelOpacity, {
+      toValue: ageInteracted ? 1 : 0,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [ageInteracted, labelOpacity]);
+
   // T11.9: Reset auf Default-State wenn das Sheet (re-)öffnet.
   // Matters für den Debug-Tester im Profil — sonst persistiert ein
   // alter Age/Gender-State über close→open hinweg. In Produktion
@@ -121,30 +133,20 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
             - minHeight + lineHeight aus T11.7/T11.9 bleiben → kein
               Modal-Pop beim Slider-Touch. */}
         <SliderHintAbove color={Colors.light.tint} active={!ageInteracted} />
-        <View style={styles.sectionHeader}>
-          {/* T11.15: Komplette Label-Row in mutedColor vor Interaktion
-              → stärkstes "muss noch gewählt werden"-Signal.
-              Nach Interaktion: "Dein Alter" in normalem textColor,
-              Wert in Brand-Grün → "schaltet sich an" als visuelles
-              Feedback. */}
-          <Text
-            style={[
-              styles.label,
-              { color: ageInteracted ? textColor : mutedColor },
-            ]}
-            allowFontScaling={false}
-          >
+        {/* T11.16: "Dein Alter: X" ist invisible bis der Slider
+            berührt wird. Animated.View hält den Layout-Slot reserviert
+            (Modal-Höhe bleibt stabil), nur die Opacity fadet ein.
+            Damit liegt vor Interaktion die gesamte visuelle
+            Aufmerksamkeit auf dem (jetzt größeren) "Ziehe den
+            Regler"-Hint + dem Slider. */}
+        <RNAnimated.View style={[styles.sectionHeader, { opacity: labelOpacity }]}>
+          <Text style={[styles.label, { color: textColor }]} allowFontScaling={false}>
             Dein Alter
-            <Text
-              style={[
-                styles.ageValue,
-                { color: ageInteracted ? Colors.light.tint : mutedColor },
-              ]}
-            >
+            <Text style={[styles.ageValue, { color: Colors.light.tint }]}>
               : {age >= AGE_MAX ? `${AGE_MAX}+` : age}
             </Text>
           </Text>
-        </View>
+        </RNAnimated.View>
         <Slider
           style={styles.slider}
           minimumValue={AGE_MIN}
@@ -340,10 +342,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'Nunito_500Medium',
   },
+  // T11.16: deutlich größer (17pt Bold statt 13pt SemiBold) — der
+  // Hint übernimmt jetzt die primäre Aufmerksamkeitsrolle in der
+  // Slider-Sektion solange "Dein Alter: X" noch invisible ist.
   sliderHintAbove: {
-    fontSize: 13,
-    fontFamily: 'Nunito_600SemiBold',
-    letterSpacing: -0.1,
+    fontSize: 17,
+    fontFamily: 'Nunito_700Bold',
+    letterSpacing: -0.2,
   },
   // Single-row Gender-Pills, jeweils flex:1 für gleiche Breite.
   genderRow: {
