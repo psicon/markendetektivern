@@ -416,28 +416,17 @@ export default function EditProfileScreen() {
           <Card style={{ marginTop: 16 }}>
             <SectionTitle>Optionale Informationen</SectionTitle>
 
-            {/* T12.2/T12.5: Age-Slider im Compact-Mode (keine Hero-
-                Animation, keine "Ziehe den Regler"-Pulse — das ist
-                ein Form-Feld, kein Onboarding-Prompt). Surface-Wrap
-                matched die Optik der anderen Inputs/SelectRows. */}
+            {/* T12.2/T12.5/T12.6: Age-Slider im Compact-Mode. KEIN
+                Surface-Wrap — der wirkte wie eine eigene Card und
+                hat den Slider als "neues Design"-Element herausstechen
+                lassen. Stattdessen direkt inline unterm Field-Label,
+                so wie es auch die Gender-Pills sind. */}
             <Field label="Alter">
-              <View
-                style={{
-                  backgroundColor: theme.surfaceAlt,
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                  paddingHorizontal: 14,
-                  paddingTop: 8,
-                  paddingBottom: 6,
-                }}
-              >
-                <AgePicker
-                  value={formData.age}
-                  onChange={(n) => setFormData((p) => ({ ...p, age: n }))}
-                  compact
-                />
-              </View>
+              <AgePicker
+                value={formData.age}
+                onChange={(n) => setFormData((p) => ({ ...p, age: n }))}
+                compact
+              />
             </Field>
 
             {/* Gender */}

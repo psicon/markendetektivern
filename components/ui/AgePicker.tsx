@@ -103,23 +103,27 @@ export function AgePicker({
     </View>
   );
 
-  // T12.5 Compact-Mode für Form-Felder: kein Pulse, kein Fade, kein
-  // "Dein Alter:"-Prefix. Der Field-Wrapper liefert das Label drüber.
-  // Wert wird zentriert über dem Slider klein angezeigt.
+  // T12.5/T12.6 Compact-Mode für Form-Felder: möglichst leise, fügt
+  // sich in den Form-Flow ein statt als "neues Design" rauszustechen.
+  // Aufbau: Slider mit Value-Badge inline rechts auf Höhe der Min/
+  // Max-Labels — keine eigene Header-Row über dem Slider.
   if (compact) {
     return (
-      <View>
-        <Text
-          style={[
-            styles.valueCompact,
-            { color: isSet ? tint : mutedColor },
-          ]}
-          allowFontScaling={false}
-        >
-          {isSet ? (displayValue >= AGE_MAX ? `${AGE_MAX}+` : displayValue) : '—'}
-        </Text>
+      <View style={styles.compactWrap}>
         {slider}
-        {sliderLabels}
+        <View style={styles.compactRow}>
+          <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MIN}</Text>
+          <Text
+            style={[
+              styles.valueCompact,
+              { color: isSet ? tint : mutedColor },
+            ]}
+            allowFontScaling={false}
+          >
+            {isSet ? (displayValue >= AGE_MAX ? `${AGE_MAX}+` : displayValue) : '—'}
+          </Text>
+          <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MAX}+</Text>
+        </View>
       </View>
     );
   }
@@ -206,15 +210,24 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'Nunito_500Medium',
   },
-  // T12.5: Compact-Mode-Wert — klein und zentriert über dem Slider.
-  // Liest sich als "Settings-Slider"-Aesthetik (iOS Settings, Discord
-  // Volume-Slider) statt als prominente Hero-Anzeige.
+  // T12.6: Compact-Mode — Slider erst, dann Min / Value / Max in
+  // einer Zeile darunter. Value sitzt zentriert zwischen Min und Max,
+  // selbe Höhe wie die Labels — wirkt wie ein normaler Slider mit
+  // Wert-Anzeige statt einer "neuen Card".
+  compactWrap: {
+    width: '100%',
+  },
+  compactRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 2,
+    marginTop: -2,
+  },
   valueCompact: {
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 18,
     fontFamily: 'Nunito_700Bold',
-    textAlign: 'center',
-    letterSpacing: -0.2,
-    marginBottom: 2,
+    letterSpacing: -0.1,
   },
 });
