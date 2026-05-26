@@ -58,7 +58,11 @@ interface FormData {
   favoriteMarket: FirestoreDocument<Discounter> | null;
 }
 
-const GENDER_OPTIONS = ['Männlich', 'Weiblich', 'Divers'] as const;
+// T6: Gender-Pills aus zentralem Enum (lib/types/gender.ts). Vorher
+// hardcoded 3-Pill — User mit gender='Anderes' aus dem Demographics-
+// Bottom-Sheet (T3) konnten ihre Pille hier nicht selektieren.
+import { GENDER_VALUES } from '@/lib/types/gender';
+const GENDER_OPTIONS = GENDER_VALUES;
 
 const FLAG_BY_COUNTRY: Record<string, string> = {
   Deutschland: '🇩🇪',

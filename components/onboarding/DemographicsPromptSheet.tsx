@@ -26,46 +26,17 @@ import * as Haptics from 'expo-haptics';
 import { FilterSheet } from '@/components/design/FilterSheet';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { GENDER_PILL_OPTIONS, type Gender } from '@/lib/types/gender';
+import { ageBucketFromAge } from '@/lib/utils/age';
 
 const AGE_MIN = 16;
 const AGE_MAX = 80;
 const AGE_DEFAULT = 30;
 
-/**
- * Gender-Optionen (gemäß T6-Spec, ClickUp 86c9zbw9e). Die ID ist
- * die Storage-Form, der Label-Name die User-facing Anzeige. Das
- * Schema wird in T6 für Onboarding+Register+Edit-Profile
- * vereinheitlicht — hier vorerst exakt wie's der Onboarding-Step 5
- * vor T2 schrieb (kompatibel mit GENDER_USERDOC_MAP-Mapping).
- */
-const GENDER_OPTIONS = [
-  { id: 'männlich', label: 'Männlich' },
-  { id: 'weiblich', label: 'Weiblich' },
-  { id: 'nonbinary', label: 'Non-binär' },
-  { id: 'anderes', label: 'Anderes' },
-] as const;
-
-const GENDER_USERDOC_MAP: Record<string, string> = {
-  männlich: 'Männlich',
-  weiblich: 'Weiblich',
-  nonbinary: 'Divers',
-  anderes: 'Anderes',
-};
-
-function ageBucketFromAge(age: number): string {
-  if (age <= 24) return '16-24';
-  if (age <= 34) return '25-34';
-  if (age <= 44) return '35-44';
-  if (age <= 54) return '45-54';
-  if (age <= 64) return '55-64';
-  return '65+';
-}
-
 export interface DemographicsResult {
   age: number;
   ageBucket: string;
-  gender: string; // user-doc Wert (capitalized)
-  rawGenderId: string; // lowercase ID
+  gender: Gender; // Canonical Enum-Wert
 }
 
 type Props = {
@@ -84,21 +55,20 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
 
   const [age, setAge] = useState<number>(AGE_DEFAULT);
   const [ageInteracted, setAgeInteracted] = useState(false);
-  const [gender, setGender] = useState<string>('');
+  const [gender, setGender] = useState<Gender | ''>('');
   const [submitting, setSubmitting] = useState(false);
 
-  const canSubmit = ageInteracted && gender.length > 0;
+  const canSubmit = ageInteracted && gender !== '';
 
   const handleSubmit = async () => {
-    if (!canSubmit || submitting) return;
+    if (!canSubmit || submitting || gender === '') return;
     setSubmitting(true);
     try {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await onSubmit({
         age,
         ageBucket: ageBucketFromAge(age),
-        gender: GENDER_USERDOC_MAP[gender] ?? gender,
-        rawGenderId: gender,
+        gender,
       });
     } finally {
       setSubmitting(false);
@@ -157,12 +127,12 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
           Dein Geschlecht
         </Text>
         <View style={styles.genderRow}>
-          {GENDER_OPTIONS.map((opt) => {
-            const active = gender === opt.id;
+          {GENDER_PILL_OPTIONS.map((opt) => {
+            const active = gender === opt.value;
             return (
               <Pressable
-                key={opt.id}
-                onPress={() => setGender(opt.id)}
+                key={opt.value}
+                onPress={() => setGender(opt.value)}
                 style={[
                   styles.genderPill,
                   {

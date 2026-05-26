@@ -8,6 +8,8 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { OnboardingService } from '@/lib/services/onboardingService';
+import { GENDER_PILL_OPTIONS, normalizeLegacyGender, type Gender } from '@/lib/types/gender';
+import { approximateBirthDateFromAge } from '@/lib/utils/age';
 import {
   showInfoToast,
   showRetryableErrorToast,
@@ -41,7 +43,7 @@ export default function RegisterScreen() {
   const params = useLocalSearchParams();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const { signUp, signInWithGoogle, signInWithApple } = useAuth();
+  const { signUp, signInWithGoogle, signInWithApple, user, userProfile } = useAuth();
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
   const screenHeight = Dimensions.get('window').height;
@@ -100,11 +102,87 @@ export default function RegisterScreen() {
     password: '',
     confirmPassword: '',
     birthDate: null as Date | null,
-    gender: '',
+    gender: '' as Gender | '',
     location: '',
     favoriteMarket: null as FirestoreDocument<Discounter> | null
   });
+  const [prefilledFields, setPrefilledFields] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+
+  // ─── Pre-Fill aus userProfile (T6, ClickUp 86c9zbw9e) ───────
+  // Wenn der User vom Onboarding-Climax aus zu Register kommt,
+  // sind seine Antworten bereits in users/{uid} gemirrored. Wir
+  // ziehen die Felder ins Form damit nichts doppelt abgefragt wird.
+  // - country/location: aus userProfile.guessedCity etc.
+  // - favoriteMarket: aus userProfile.favoriteMarket (+ Name)
+  // - gender: aus userProfile.gender (normalize legacy values)
+  // - birthDate: aus userProfile.birthDate falls da, ODER
+  //   aus userProfile.age (Onboarding-Demographics-Sheet
+  //   schreibt nur age — wir machen daraus einen approximativen
+  //   1. Januar-Stamp damit der DatePicker einen Default hat).
+  React.useEffect(() => {
+    if (!userProfile) return;
+    const p = userProfile as any;
+    const prefilled = new Set<string>();
+
+    setFormData((prev) => {
+      const next = { ...prev };
+
+      // Names — username/realName erst pre-fillen wenn leer
+      if (!next.username && p.display_name) {
+        next.username = p.display_name;
+        prefilled.add('username');
+      }
+      if (!next.realName && p.real_name) {
+        next.realName = p.real_name;
+        prefilled.add('realName');
+      }
+      // Email — userProfile hat ggf. eine
+      if (!next.email && p.email) {
+        next.email = p.email;
+        prefilled.add('email');
+      }
+      // Gender mit Legacy-Normalisierung
+      if (!next.gender && p.gender) {
+        const g = normalizeLegacyGender(p.gender);
+        if (g) {
+          next.gender = g;
+          prefilled.add('gender');
+        }
+      }
+      // birthDate direkt oder via age
+      if (!next.birthDate) {
+        if (p.birthDate?.toDate) {
+          next.birthDate = p.birthDate.toDate();
+          prefilled.add('birthDate');
+        } else if (p.birthDate instanceof Date) {
+          next.birthDate = p.birthDate;
+          prefilled.add('birthDate');
+        } else if (typeof p.age === 'number' && p.age > 0) {
+          next.birthDate = approximateBirthDateFromAge(p.age);
+          prefilled.add('birthDate');
+        }
+      }
+      // location
+      if (!next.location && (p.city || p.bundesland)) {
+        next.location = p.city || p.bundesland;
+        prefilled.add('location');
+      }
+      // favoriteMarket
+      if (!next.favoriteMarket && p.favoriteMarket && p.favoriteMarketName) {
+        next.favoriteMarket = {
+          id: p.favoriteMarket,
+          name: p.favoriteMarketName,
+          land: p.country ?? 'DE',
+        } as FirestoreDocument<Discounter>;
+        prefilled.add('favoriteMarket');
+      }
+
+      return next;
+    });
+
+    if (prefilled.size > 0) setPrefilledFields(prefilled);
+  }, [userProfile]);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -546,24 +624,29 @@ export default function RegisterScreen() {
                   </TouchableOpacity>
                 </View>
 
-                {/* Gender */}
+                {/* Gender — 4 Pills (Enum aus lib/types/gender.ts) */}
                 <View style={styles.inputContainer}>
-                  <ThemedText style={styles.label}>Geschlecht</ThemedText>
+                  <ThemedText style={styles.label}>
+                    Geschlecht
+                    {prefilledFields.has('gender') && (
+                      <ThemedText style={styles.prefilledHint}>  ✓ aus Onboarding</ThemedText>
+                    )}
+                  </ThemedText>
                   <View style={styles.genderContainer}>
-                    {['Männlich', 'Weiblich', 'Divers'].map((gender) => (
+                    {GENDER_PILL_OPTIONS.map((opt) => (
                       <TouchableOpacity
-                        key={gender}
+                        key={opt.value}
                         style={[
                           styles.genderButton,
-                          formData.gender === gender && styles.genderButtonActive
+                          formData.gender === opt.value && styles.genderButtonActive
                         ]}
-                        onPress={() => setFormData(prev => ({ ...prev, gender }))}
+                        onPress={() => setFormData(prev => ({ ...prev, gender: opt.value }))}
                       >
                         <ThemedText style={[
                           styles.genderButtonText,
-                          formData.gender === gender && styles.genderButtonTextActive
+                          formData.gender === opt.value && styles.genderButtonTextActive
                         ]}>
-                          {gender}
+                          {opt.label}
                         </ThemedText>
                       </TouchableOpacity>
                     ))}
@@ -847,6 +930,13 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_600SemiBold',
     color: 'rgba(255, 255, 255, 0.9)',
     marginBottom: 8,
+  },
+  // T6: Subtiler Hinweis bei aus dem Onboarding/userProfile vor-
+  // befüllten Feldern. Wird inline neben dem Label gerendert.
+  prefilledHint: {
+    fontSize: 11,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(76, 175, 80, 0.9)',
   },
   input: {
     borderWidth: 1,
