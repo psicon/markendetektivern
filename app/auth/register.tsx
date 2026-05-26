@@ -132,13 +132,19 @@ export default function RegisterScreen() {
             </TouchableOpacity>
           )}
 
-          {/* T10 v10: Layout-Klasse exakt wie login.tsx:
-              - Logo+Title als zusammenhängende Top-Gruppe (Header)
-              - Buttons DIREKT drunter (kein flex-Spacer dazwischen)
-              - Cross-Link am Boden via `marginTop: 'auto'`
-              Damit ist Logo-Y-Position identisch zu Login UND Header
-              + Buttons sind eine visuell verbundene Einheit. */}
-          <View style={styles.logoBlock}>
+          {/* T10 v11 — Responsive Layout:
+              - Logo+Brand fix oben (marginTop:32 ab paddingTop) →
+                gleiche Y-Position wie Login.
+              - Verbleibender Raum wird via `justifyContent: 'space-evenly'`
+                in contentBlock auf drei Gruppen verteilt:
+                  (1) Header (Jetzt registrieren + Vorteile)
+                  (2) Buttons + Trust-Hint (eine Einheit)
+                  (3) Cross-Link
+              - Jede Gruppe bekommt gleichen Atemraum → "schön verteilt"
+                statt "alles oben" oder "alles gestaucht in der Mitte".
+              - Funktioniert responsive von kleinen iPhones (SE) bis
+                Pro Max ohne Scrollen weil contentBlock flex:1 ist. */}
+          <View style={[styles.logoBlock, isSmallDevice && styles.logoBlockSmall]}>
             <CustomIcon
               name="iconBlack"
               size={isSmallDevice ? 44 : 56}
@@ -146,33 +152,37 @@ export default function RegisterScreen() {
               style={styles.logoIcon}
             />
             <ThemedText style={styles.brandText}>MarkenDetektive</ThemedText>
-            <ThemedText style={styles.titleText}>
-              Jetzt kostenlos registrieren
-            </ThemedText>
-            <ThemedText style={styles.subtitleText}>
-              und Vorteile genießen!
-            </ThemedText>
           </View>
 
-          {/* Buttons direkt unter Header (visuell verbunden) */}
-          <AuthMethodButtons
-            mode="register"
-            onApple={handleApple}
-            onGoogle={handleGoogle}
-            onEmail={() => router.push('/auth/email-register' as any)}
-            busy={authInFlight}
-            colorScheme={colorScheme}
-          />
+          <View style={styles.contentBlock}>
+            {/* Header */}
+            <View style={styles.headerBlock}>
+              <ThemedText style={styles.titleText}>
+                Jetzt kostenlos registrieren
+              </ThemedText>
+              <ThemedText style={styles.subtitleText}>
+                und Vorteile genießen!
+              </ThemedText>
+            </View>
 
-          {/* Cross-Link: marginTop:auto schiebt ihn an den unteren
-              Rand, OHNE eine extra Spacer-View. Login hat den
-              gleichen Effekt durch Form-Inhalt. */}
-          <View style={styles.crossLinkBox}>
-            <View style={styles.crossLinkRow}>
-              <ThemedText style={styles.crossLinkText}>Schon registriert? </ThemedText>
-              <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={8}>
-                <ThemedText style={styles.crossLinkLink}>Hier einloggen</ThemedText>
-              </TouchableOpacity>
+            {/* Buttons + Trust-Hint als zusammenhängender Block */}
+            <AuthMethodButtons
+              mode="register"
+              onApple={handleApple}
+              onGoogle={handleGoogle}
+              onEmail={() => router.push('/auth/email-register' as any)}
+              busy={authInFlight}
+              colorScheme={colorScheme}
+            />
+
+            {/* Cross-Link */}
+            <View style={styles.crossLinkBox}>
+              <View style={styles.crossLinkRow}>
+                <ThemedText style={styles.crossLinkText}>Schon registriert? </ThemedText>
+                <TouchableOpacity onPress={() => router.replace('/auth/login')} hitSlop={8}>
+                  <ThemedText style={styles.crossLinkLink}>Hier einloggen</ThemedText>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </LinearGradient>
@@ -200,15 +210,31 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
-  // T10 v9: Layout-Pattern identisch zu login.tsx — Logo-Block
-  // fixed an Top (marginTop: 32, gleiche Y-Position wie Login).
-  // Content flex:1 + center zentriert die Buttons im verbleibenden
-  // Raum. Cross-Link fließt natürlich darunter ohne flex-spacer.
+  // T10 v11: Logo+Brand sind ein kompakter Block am Top (gleiche
+  // Y-Position wie login.tsx: paddingTop:insets.top+56 + marginTop:32).
   logoBlock: {
     alignItems: 'center',
     marginTop: 32,
-    marginBottom: 20,
     gap: 4,
+  },
+  logoBlockSmall: {
+    marginTop: 20,
+    gap: 2,
+  },
+  // T10 v11: contentBlock füllt den Rest des Screens (flex:1) und
+  // verteilt seine drei Kinder (Header, Buttons, CrossLink) per
+  // `space-evenly` — jeweils gleicher Atemraum, "schön verteilt"
+  // statt "oben geklebt" oder "in der Mitte gestaucht". Responsive
+  // ohne Scroll-Risiko weil die drei Gruppen kompakt sind und der
+  // flex-Container den verfügbaren Raum elastisch aufteilt.
+  contentBlock: {
+    flex: 1,
+    justifyContent: 'space-evenly',
+    width: '100%',
+  },
+  headerBlock: {
+    alignItems: 'center',
+    gap: 2,
   },
   logoIcon: {
     marginBottom: 2,
@@ -218,8 +244,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_500Medium',
     color: 'rgba(255,255,255,0.8)',
     letterSpacing: -0.1,
-    // includeFontPadding default true auf Android — sorgt für sauberen
-    // ascender-Raum bei Capital-Letters.
   },
   // T10 v5 — Title-Clipping-Fix: großer lineHeight + paddingVertical
   // damit der ascender (oben) und descender (unten) immer Platz haben.
@@ -231,7 +255,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     textAlign: 'center',
     letterSpacing: -0.2,
-    marginTop: 4,
   },
   subtitleText: {
     fontSize: 15,
@@ -241,17 +264,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     letterSpacing: -0.1,
   },
-  // (alt: buttonsBlock — wird nicht mehr genutzt, siehe content)
-  // T10 v10: marginTop:'auto' schiebt den Cross-Link an den unteren
-  // Rand des flex:1 overlay-Containers. Damit bilden Logo + Header +
-  // Buttons eine zusammenhängende Top-Gruppe (visually grouped, kein
-  // flex-Spacer dazwischen) und der Cross-Link liegt einzeln am Boden
-  // — identisches Pattern zu login.tsx wo der Form-Content den Raum
-  // füllt.
   crossLinkBox: {
     alignItems: 'center',
-    marginTop: 'auto',
-    paddingTop: 16,
   },
   crossLinkRow: {
     flexDirection: 'row',
