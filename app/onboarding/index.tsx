@@ -37,6 +37,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { OnboardingButton } from '@/components/ui/OnboardingButton';
+import { OnboardingProgressBar } from '@/components/onboarding/OnboardingProgressBar';
+import { OnboardingSkipPill } from '@/components/onboarding/OnboardingSkipPill';
 import { Colors } from '@/constants/Colors';
 import { auth as authMod, db } from '@/lib/firebase';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -884,57 +886,15 @@ export default function OnboardingScreen() {
     }
   };
 
-  // Progress läuft von Step 2 (Märkte = "1 von 6") bis Step 7 (Loading-
-  // Eintritt = "6 von 6"). Step 1 ist Hero (kein Progress) + Step 8 ist
-  // Climax (kein Progress mehr — Confetti spricht für sich).
-  // ProgressBar zeigt "X von 4" — Hero (Step 1) und Loading (Step 5)
-  // sind Transition-Screens ohne User-Input, daher nicht in der
-  // Frage-Zählung. (TOTAL_STEPS=6, davon 4 echte Frage-Steps.)
+  // T9 (2026-05-22): ProgressBar + SkipPill in eigene Komponenten
+  // ausgelagert (components/onboarding/). Hier nur noch die
+  // currentStep+denominator-Brücke.
   const PROGRESS_DENOM = TOTAL_STEPS - 2;
   const renderProgressBar = () => (
-    <View style={styles.progressContainer}>
-      <View style={styles.progressBar}>
-        <View
-          style={[
-            styles.progressFill,
-            {
-              width:
-                Math.min(
-                  ((currentStep - 1) / PROGRESS_DENOM) * 100,
-                  100,
-                ) + '%',
-            },
-          ]}
-        />
-      </View>
-      <Text style={styles.progressText}>
-        {Math.min(currentStep - 1, PROGRESS_DENOM)} von {PROGRESS_DENOM}
-      </Text>
-    </View>
+    <OnboardingProgressBar currentStep={currentStep} denominator={PROGRESS_DENOM} />
   );
-
-  /**
-   * Compact Skip-Pill — eigene Row, rechtsbündig, sitzt UNTER der
-   * ProgressBar.
-   * Wird auf Step 2 (Märkte — 'Onboarding überspringen' → direkt
-   * in die App) und Step 5 (Alter+Geschlecht — 'Schritt
-   * überspringen' → demographics skip + nächster Step) verwendet.
-   *
-   * Vorher: position absolute oben rechts → kollidierte mit
-   * Status-Bar / Dynamic-Island bzw. mit der ProgressBar-Row.
-   * Jetzt: normale Flow-Row, kein Z-index-Konflikt.
-   */
   const renderSkipPill = (label: string, onPress: () => void) => (
-    <View style={styles.skipPillRow}>
-      <TouchableOpacity
-        style={styles.skipPill}
-        onPress={onPress}
-        activeOpacity={0.7}
-        hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-      >
-        <Text style={styles.skipPillText}>{label}</Text>
-      </TouchableOpacity>
-    </View>
+    <OnboardingSkipPill label={label} onPress={onPress} />
   );
 
   // Loading Screen
