@@ -436,7 +436,8 @@ export default function RegisterScreen() {
           style={[styles.overlay, { paddingTop: insets.top + 56 }]}
         >
           {/* Back Button — design-system arrow-left in a 40×40
-              round translucent-white pill. */}
+              round translucent-white pill. Bleibt fix oben damit
+              er immer erreichbar ist während User scrollt. */}
           <TouchableOpacity
             style={styles.backButtonRound}
             onPress={() => router.back()}
@@ -445,30 +446,35 @@ export default function RegisterScreen() {
             <MaterialCommunityIcons name="arrow-left" size={22} color="white" />
           </TouchableOpacity>
 
-          {/* T10 v4: kompakter Logo-Block — kein Title-Overlap mehr. */}
-          <View style={[styles.logoContainer, isSmallDevice && styles.logoContainerSmall]}>
-            <CustomIcon
-              name="iconBlack"
-              size={isSmallDevice ? 40 : 52}
-              color="white"
-              style={styles.logoIcon}
-            />
-            <ThemedText style={[styles.logoText, isSmallDevice && styles.logoTextSmall]}>
-              MarkenDetektive
-            </ThemedText>
-          </View>
-
-          <KeyboardAvoidingView 
+          <KeyboardAvoidingView
             style={styles.keyboardView}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           >
-            <ScrollView 
+            <ScrollView
               ref={scrollViewRef}
               style={styles.scrollView}
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
+              {/* T11: Logo-Block scrollt mit dem Form mit damit auf
+                  kleinen Devices ohne Tastatur-Overlap genug Platz für
+                  die Felder bleibt. User-Wunsch: "Header wegscrollen
+                  wenn ich nach unten scrolle, kostet zu viel Platz".
+                  Back-Button bleibt absolute-positioned damit er
+                  immer erreichbar ist. */}
+              <View style={[styles.logoContainerScroll, isSmallDevice && styles.logoContainerScrollSmall]}>
+                <CustomIcon
+                  name="iconBlack"
+                  size={isSmallDevice ? 40 : 52}
+                  color="white"
+                  style={styles.logoIcon}
+                />
+                <ThemedText style={[styles.logoText, isSmallDevice && styles.logoTextSmall]}>
+                  MarkenDetektive
+                </ThemedText>
+              </View>
+
               {/* T10 v8: Title weg — der User hat "Mit E-Mail
                   registrieren" aktiv im Hub gewählt, weiß was
                   hier passiert. Form startet direkt. */}
@@ -844,6 +850,22 @@ const styles = StyleSheet.create({
     marginTop: 32,
     marginBottom: 20,
     gap: 4,
+  },
+  // T11: Logo-Block ist jetzt erstes Element IN der ScrollView damit
+  // er beim Scroll-Down mit-wegscrollt (Form bekommt mehr Platz).
+  // Kein marginTop weil paddingTop des Overlays (insets.top+56) bereits
+  // genug Atemraum nach oben gibt; kompakteres marginBottom als der
+  // fixed-Header weil zusammen mit dem Form gescrollt wird.
+  logoContainerScroll: {
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 18,
+    gap: 4,
+  },
+  logoContainerScrollSmall: {
+    marginTop: 2,
+    marginBottom: 12,
+    gap: 2,
   },
   logoIcon: {
     marginBottom: 0,
