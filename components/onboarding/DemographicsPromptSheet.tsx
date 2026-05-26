@@ -13,9 +13,14 @@
  *      User "Vielleicht später" oder Backdrop-Tap → schreibt nur
  *      `demographicsSkipped: true`, niemand fragt nochmal.
  *
- * Design: gemäß CLAUDE.md "Hero pill" + "Selectors → ScopeCard"
- * Pattern. Schreibt das gleiche Gender-Schema das Edit-Profile
- * konsumiert (siehe T6 für Vereinheitlichung).
+ * Design v2 (T11.6) — Compact Demografie-Sheet wie Strava/Whoop/
+ * Headspace machen es:
+ *   - Inline label + value für Alter (statt großes Display)
+ *   - Single-Row Gender-Pills (statt 2x2-Grid)
+ *   - Tightere Section-Gaps (12px statt 18-22)
+ *   - "Vielleicht später" als Text-Link unter dem CTA (statt zweite
+ *     Full-Height-Button-Row)
+ *   - maxHeightRatio 0.58 statt 0.78 — Sheet bleibt kompakt
  */
 
 import React, { useState } from 'react';
@@ -52,6 +57,8 @@ type Props = {
 export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const textColor = isDark ? Colors.dark.text : Colors.light.text;
+  const mutedColor = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)';
 
   const [age, setAge] = useState<number>(AGE_DEFAULT);
   const [ageInteracted, setAgeInteracted] = useState(false);
@@ -80,23 +87,20 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
       visible={visible}
       title="Hilf uns dich besser zu verstehen"
       onClose={onSkip}
-      maxHeightRatio={0.78}
+      maxHeightRatio={0.58}
     >
       <View style={styles.container}>
-        <Text style={[styles.intro, { color: isDark ? Colors.dark.text : Colors.light.text }]}>
-          Anonyme Demografie-Angaben helfen uns die App für deine Zielgruppe zu verbessern.
-          Du kannst sie jederzeit in deinem Profil ändern.
+        <Text style={[styles.intro, { color: mutedColor }]}>
+          Anonyme Angaben — jederzeit im Profil änderbar.
         </Text>
 
-        {/* Age section */}
-        <Text style={[styles.label, { color: isDark ? Colors.dark.text : Colors.light.text }]}>
-          Dein Alter
-        </Text>
-        <View style={styles.ageDisplayBox}>
+        {/* Age — Label + Value inline. PulsingHint solange unangetastet. */}
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.label, { color: textColor }]}>Dein Alter</Text>
           {ageInteracted ? (
-            <Text style={styles.ageNumber}>{age}</Text>
+            <Text style={styles.ageValue}>{age}</Text>
           ) : (
-            <PulsingHint />
+            <PulsingHintInline />
           )}
         </View>
         <Slider
@@ -110,20 +114,16 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
             setAge(Math.round(v));
           }}
           minimumTrackTintColor={Colors.light.tint}
-          maximumTrackTintColor={isDark ? '#444' : '#ddd'}
+          maximumTrackTintColor={isDark ? '#444' : '#e2e2e2'}
           thumbTintColor={Colors.light.tint}
         />
         <View style={styles.sliderLabels}>
-          <Text style={[styles.sliderLabelText, { color: isDark ? Colors.dark.text : Colors.light.text }]}>
-            {AGE_MIN}
-          </Text>
-          <Text style={[styles.sliderLabelText, { color: isDark ? Colors.dark.text : Colors.light.text }]}>
-            {AGE_MAX}+
-          </Text>
+          <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MIN}</Text>
+          <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MAX}+</Text>
         </View>
 
-        {/* Gender section */}
-        <Text style={[styles.label, styles.labelSpaced, { color: isDark ? Colors.dark.text : Colors.light.text }]}>
+        {/* Gender — single-row pills (flex:1, gleicher Breite). */}
+        <Text style={[styles.label, styles.labelSpaced, { color: textColor }]}>
           Dein Geschlecht
         </Text>
         <View style={styles.genderRow}>
@@ -136,28 +136,29 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
                 style={[
                   styles.genderPill,
                   {
-                    backgroundColor: isDark ? Colors.dark.cardBackground : '#fff',
+                    backgroundColor: active
+                      ? Colors.light.tint
+                      : isDark
+                        ? Colors.dark.cardBackground
+                        : '#fff',
                     borderColor: active
                       ? Colors.light.tint
                       : isDark
-                        ? 'rgba(255,255,255,0.08)'
-                        : 'rgba(0,0,0,0.06)',
+                        ? 'rgba(255,255,255,0.10)'
+                        : 'rgba(0,0,0,0.10)',
                   },
-                  active && styles.genderPillActive,
                 ]}
               >
                 <Text
                   style={[
                     styles.genderPillText,
                     {
-                      color: active
-                        ? Colors.light.tint
-                        : isDark
-                          ? Colors.dark.text
-                          : Colors.light.text,
+                      color: active ? '#fff' : textColor,
                       fontFamily: active ? 'Nunito_700Bold' : 'Nunito_600SemiBold',
                     },
                   ]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
                 >
                   {opt.label}
                 </Text>
@@ -166,159 +167,145 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
           })}
         </View>
 
-        {/* Actions */}
+        {/* Primary CTA + Text-Skip. */}
         <Pressable
           onPress={handleSubmit}
           disabled={!canSubmit || submitting}
           style={[
             styles.primaryBtn,
-            { backgroundColor: canSubmit ? Colors.light.tint : '#ccc' },
+            {
+              backgroundColor: canSubmit ? Colors.light.tint : isDark ? '#333' : '#dcdcdc',
+              opacity: submitting ? 0.7 : 1,
+            },
           ]}
         >
           <Text style={styles.primaryBtnText}>
             {submitting ? 'Speichern…' : 'Speichern'}
           </Text>
         </Pressable>
-        <Pressable onPress={onSkip} disabled={submitting} style={styles.secondaryBtn}>
-          <Text style={[styles.secondaryBtnText, { color: isDark ? Colors.dark.text : Colors.light.text }]}>
-            Vielleicht später
-          </Text>
+        <Pressable onPress={onSkip} disabled={submitting} hitSlop={6} style={styles.skipBtn}>
+          <Text style={[styles.skipBtnText, { color: mutedColor }]}>Vielleicht später</Text>
         </Pressable>
       </View>
     </FilterSheet>
   );
 }
 
-/** Sanftes Opacity-Pulse für "Wähle dein Alter"-Hint solange der
- *  User den Slider nicht berührt hat. Ehemals PulsingAgeHint aus
- *  onboarding/index.tsx — wandert mit dem Step in T3 hierher. */
-function PulsingHint() {
-  const opacity = React.useRef(new RNAnimated.Value(0.85)).current;
+/** Inline-Variante des PulsingHint — kompakte einzeilige Hint statt
+ *  des bisherigen 70 px hohen Display-Boxes. */
+function PulsingHintInline() {
+  const opacity = React.useRef(new RNAnimated.Value(0.55)).current;
   React.useEffect(() => {
     const loop = RNAnimated.loop(
       RNAnimated.sequence([
         RNAnimated.timing(opacity, { toValue: 1, duration: 900, useNativeDriver: true }),
-        RNAnimated.timing(opacity, { toValue: 0.85, duration: 900, useNativeDriver: true }),
+        RNAnimated.timing(opacity, { toValue: 0.55, duration: 900, useNativeDriver: true }),
       ]),
     );
     loop.start();
     return () => loop.stop();
   }, [opacity]);
   return (
-    <RNAnimated.View style={{ alignItems: 'center', opacity }}>
-      <Text style={styles.hintLine1}>Wähle dein Alter</Text>
-      <Text style={styles.hintLine2}>Tippe oder ziehe den Regler</Text>
+    <RNAnimated.View style={{ opacity }}>
+      <Text style={styles.hintInline}>Ziehe den Regler</Text>
     </RNAnimated.View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    paddingBottom: 12,
+    paddingBottom: 8,
   },
   intro: {
-    fontSize: 14,
+    fontSize: 13,
     fontFamily: 'Nunito_500Medium',
-    lineHeight: 20,
-    marginBottom: 18,
-    opacity: 0.85,
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  // Section-Header: Label links, Value/Hint rechts.
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginBottom: 2,
   },
   label: {
-    fontSize: 13,
+    fontSize: 14,
     fontFamily: 'Nunito_700Bold',
     letterSpacing: -0.1,
-    marginBottom: 6,
   },
   labelSpaced: {
     marginTop: 14,
+    marginBottom: 8,
   },
-  ageDisplayBox: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 70,
-    marginTop: 6,
-    marginBottom: 2,
-  },
-  ageNumber: {
-    fontSize: 44,
+  ageValue: {
+    fontSize: 22,
     fontFamily: 'Nunito_700Bold',
     color: Colors.light.tint,
-    letterSpacing: -0.8,
-    lineHeight: 54,
+    letterSpacing: -0.4,
   },
-  hintLine1: {
-    fontSize: 18,
-    fontFamily: 'Nunito_700Bold',
-    color: Colors.light.tint,
-    letterSpacing: -0.2,
-  },
-  hintLine2: {
-    fontSize: 11,
+  hintInline: {
+    fontSize: 13,
     fontFamily: 'Nunito_500Medium',
-    opacity: 0.65,
-    marginTop: 3,
+    color: Colors.light.tint,
+    letterSpacing: -0.1,
   },
   slider: {
     width: '100%',
-    height: 40,
+    height: 32,
+    marginTop: 2,
   },
   sliderLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 4,
-    marginTop: -4,
-    marginBottom: 4,
+    paddingHorizontal: 2,
+    marginTop: -2,
   },
   sliderLabelText: {
     fontSize: 11,
     fontFamily: 'Nunito_500Medium',
-    opacity: 0.6,
   },
+  // Single-row Gender-Pills, jeweils flex:1 für gleiche Breite.
   genderRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 4,
+    gap: 6,
   },
   genderPill: {
     flex: 1,
-    minWidth: '45%',
-    minHeight: 46,
-    paddingVertical: 11,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    borderWidth: 1.5,
+    height: 38,
+    paddingHorizontal: 6,
+    borderRadius: 11,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  genderPillActive: {
-    backgroundColor: 'rgba(76,175,80,0.08)',
-  },
   genderPillText: {
-    fontSize: 14,
+    fontSize: 13,
+    letterSpacing: -0.1,
   },
+  // CTA + Skip-Link.
   primaryBtn: {
-    marginTop: 22,
-    height: 50,
+    marginTop: 18,
+    height: 48,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   primaryBtnText: {
-    color: 'white',
+    color: '#fff',
     fontSize: 16,
     fontFamily: 'Nunito_700Bold',
     letterSpacing: -0.2,
   },
-  secondaryBtn: {
-    marginTop: 10,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
+  skipBtn: {
+    alignSelf: 'center',
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
   },
-  secondaryBtnText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-    opacity: 0.7,
+  skipBtnText: {
+    fontSize: 13,
+    fontFamily: 'Nunito_500Medium',
+    textDecorationLine: 'underline',
   },
 });
