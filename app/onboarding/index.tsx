@@ -34,15 +34,28 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
+import { OnboardingService } from '@/lib/services/onboardingService';
 import { remoteConfigService } from '@/lib/services/remoteConfigService';
 import { detectCountry, type DachCountry } from '@/lib/utils/country';
 
 const { width } = Dimensions.get('window');
 
-// Total = 7 sichtbare Schritte (Hero + 6 Frage-Steps).
-// Step 1 ist der Hero — ohne ProgressBar. Step 7 ist Loading (kurz),
-// Step 8 ist der Climax. Wir zeigen "X von 6" auf dem ProgressBar.
-const TOTAL_STEPS = 8;
+// Flow Variante B (User-Decision 2026-05-22):
+//   Step 1 = Hero (ohne ProgressBar, "Los geht's"-Button)
+//   Step 2 = Märkte
+//   Step 3 = Wocheneinkauf (€)
+//   Step 4 = Was ist dir wichtig?
+//   Step 5 = Loading (Labor-Illusion)
+//   Step 6 = Climax + Auth-Hebel
+//
+// Demographics (Alter + Geschlecht) ist NICHT mehr im Funnel — wird
+// post-Climax als opt-in Bottom-Sheet abgefragt (siehe T3, ClickUp
+// 86c9zc61y). Akquisitionsquelle ebenfalls raus — wird durch
+// Attribution-API erkannt (T4, ClickUp 86c9zbxy7).
+//
+// ProgressBar zeigt "X von 4" weil die echten Frage-Steps 2-5 sind
+// (Hero hat keine, Loading-Step zeigt "Almost done"-Look).
+const TOTAL_STEPS = 6;
 
 const COUNTRIES = [
   { code: 'DE', name: 'Deutschland', flag: '🇩🇪' },
@@ -50,57 +63,13 @@ const COUNTRIES = [
   { code: 'CH', name: 'Schweiz', flag: '🇨🇭' },
 ] as const;
 
-// Gender-Optionen — User-facing 4 Pills (Männlich/Weiblich/Non-binär/
-// Anderes). Storage: stable lowercase-ID. User-Doc-Mirror mapped die
-// IDs aufs aktuelle edit-profile-Schema (capitalized) damit Edit-
-// Profile-UI die richtige Pille als selektiert rendert.
-const GENDER_OPTIONS = [
-  { id: 'männlich', name: 'Männlich' },
-  { id: 'weiblich', name: 'Weiblich' },
-  { id: 'nonbinary', name: 'Non-binär' },
-  { id: 'anderes', name: 'Anderes' },
-] as const;
-
-// Mapping ID → User-Doc-Wert (kompatibel mit edit-profile.tsx
-// GENDER_OPTIONS = ['Männlich', 'Weiblich', 'Divers']).
-// 'Anderes' ist NEU (edit-profile-UI rendert das noch nicht — aber
-// das Feld ist im User-Doc auswertbar fürs Dashboard).
-const GENDER_USERDOC_MAP: Record<string, string> = {
-  männlich: 'Männlich',
-  weiblich: 'Weiblich',
-  nonbinary: 'Divers',
-  anderes: 'Anderes',
-};
-
-// Alter — Slider mit ageInteracted-Gate (User MUSS einmal touchen).
-// Default-Wert hat keinen Effekt auf die Daten weil bis zur ersten
-// Interaktion weder Display-Zahl noch Save-Schreibung passieren.
-// Damit kein Anchoring-Bias auf den Default mehr möglich.
-const AGE_MIN = 16;
-const AGE_MAX = 80;
-const AGE_DEFAULT = 30; // visuelle Thumb-Position bis User dran ist
-
-// Bucket-Mapping aus exaktem Alter — fürs Dashboard-Group-by.
-// User-Doc speichert dann BEIDE: age (Integer) + ageBucket (String).
-function ageBucketFromAge(age: number): string {
-  if (age <= 24) return '16-24';
-  if (age <= 34) return '25-34';
-  if (age <= 44) return '35-44';
-  if (age <= 54) return '45-54';
-  if (age <= 64) return '55-64';
-  return '65+';
-}
-
-const ACQUISITION_SOURCES = [
-  { id: 'instagram', name: 'Instagram', icon: '📸' },
-  { id: 'tiktok', name: 'TikTok', icon: '🎵' },
-  { id: 'youtube', name: 'YouTube', icon: '📺' },
-  { id: 'facebook', name: 'Facebook', icon: '👥' },
-  { id: 'friends', name: 'Freunde/Familie', icon: '👫' },
-  { id: 'google', name: 'Google', icon: '🔍' },
-  { id: 'appstore', name: 'App Store', icon: '📱' },
-  { id: 'sonstiges', name: 'Sonstiges', icon: '💭' },
-];
+// Demographics-Konstanten (GENDER_OPTIONS, GENDER_USERDOC_MAP, AGE_*,
+// ageBucketFromAge) wurden in T2 entfernt — Demographics ist jetzt
+// post-Climax als opt-in Bottom-Sheet (T3). Die Logik wandert nach
+// `components/onboarding/DemographicsPromptSheet.tsx`.
+//
+// ACQUISITION_SOURCES ebenfalls entfernt — Attribution kommt aus
+// nativen APIs (T4: iOS AdServices + Android Install-Referrer).
 
 const PRIORITIES = [
   { id: 'preis', name: 'Preis', icon: '💰' },
@@ -111,57 +80,9 @@ const PRIORITIES = [
   { id: 'anderes', name: 'Anderes', icon: '💭' },
 ];
 
-/**
- * PulsingAgeHint — "Wähle dein Alter"-Hint solange der User den
- * Slider noch nicht berührt hat. Sanftes Opacity-Pulse (0.85↔1.0)
- * via RN-Animated — bewusst kleine Range, damit's IMMER gut lesbar
- * bleibt und nur subtil "wartet auf dich" signalisiert.
- * Sobald ageInteracted=true wird der Hint außerhalb dieser
- * Komponente unmounted (siehe Step-5-JSX).
- */
-function PulsingAgeHint() {
-  const opacity = React.useRef(new Animated.Value(0.85)).current;
-  React.useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 900,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacity, {
-          toValue: 0.85,
-          duration: 900,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [opacity]);
-  return (
-    <Animated.View style={{ alignItems: 'center', opacity }}>
-      <Text style={styles_module_age_hint.line1}>Wähle dein Alter</Text>
-      <Text style={styles_module_age_hint.line2}>Tippe oder ziehe den Regler</Text>
-    </Animated.View>
-  );
-}
-
-const styles_module_age_hint = StyleSheet.create({
-  line1: {
-    fontSize: 18,
-    fontFamily: 'Nunito_700Bold',
-    color: Colors.light.tint,
-    letterSpacing: -0.2,
-  },
-  line2: {
-    fontSize: 11,
-    fontFamily: 'Nunito_500Medium',
-    color: Colors.light.text,
-    opacity: 0.65,
-    marginTop: 3,
-  },
-});
+// PulsingAgeHint-Komponente + Style-Block entfernt in T2 — gehörte
+// zum Alter-Slider-Step. Demographics-Flow lebt jetzt im
+// DemographicsPromptSheet (T3).
 
 export default function OnboardingScreen() {
   const { signInAnonymously, refreshUserProfile: refreshAuthUserProfile } = useAuth();
@@ -171,7 +92,10 @@ export default function OnboardingScreen() {
   // Dynamic styles based on color scheme - MUSS VOR useState sein!
   const styles = createStyles(colorScheme);
   
-  // ALLE useState IMMER (keine conditionals!)
+  // State — bewusst flat statt useReducer weil Flow inzwischen
+  // schlank ist (4 Frage-Steps). Wenn der Monolith-Refactor (T9)
+  // angegangen wird, sollte das ein useReducer werden gemäß
+  // CLAUDE.md Best-Practices.
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('');
@@ -184,21 +108,11 @@ export default function OnboardingScreen() {
   const [markets, setMarkets] = useState<any[]>([]);
   const [selectedMarkets, setSelectedMarkets] = useState<any[]>([]);
   const [marketOther, setMarketOther] = useState('');
-  const [acquisitionSource, setAcquisitionSource] = useState('');
-  const [acquisitionOther, setAcquisitionOther] = useState('');
   const [budget, setBudget] = useState(100);
   const [priorities, setPriorities] = useState<string[]>([]);
   const [prioritiesOther, setPrioritiesOther] = useState('');
-  // Demographics (NEU in Step 5). 'skipped' = explizit übersprungen
-  // (Pill oben rechts), 'interacted' = User hat den Slider berührt
-  // (touch/drag). Nur bei interacted=true wird der age-Wert
-  // tatsächlich gespeichert — damit kein passives "Weiter" bei
-  // Default-30 zu Daten-Bias führt.
-  const [age, setAge] = useState<number>(AGE_DEFAULT);
-  const [ageInteracted, setAgeInteracted] = useState(false);
-  const [ageSkipped, setAgeSkipped] = useState(false);
-  const [gender, setGender] = useState<string>('');
-  const [genderOther, setGenderOther] = useState('');
+  // Demographics + Akquisition State entfernt in T2 — sind aus dem
+  // Funnel raus (T3 Bottom-Sheet bzw. T4 Attribution-API).
   const [loadingProgress] = useState(new Animated.Value(0));
   const [loadingMessage, setLoadingMessage] = useState('🕵️ Die MarkenDetektive beginnen ihre Recherche...');
   const [slideAnimation] = useState(new Animated.Value(1)); // Für Slide-Animationen
@@ -262,8 +176,8 @@ export default function OnboardingScreen() {
   useEffect(() => {
     console.log(`📊 Onboarding: Step ${currentStep} viewed`);
     
-    // Konfetti + Haptik für Savings-Seite (Step 8)
-    if (currentStep === 8) {
+    // Konfetti + Haptik für Climax (Step 6)
+    if (currentStep === 6) {
       // Haptisches Feedback wie bei Achievements
       setTimeout(() => {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -288,7 +202,7 @@ export default function OnboardingScreen() {
   }, [country]);
 
   useEffect(() => {
-    if (currentStep === 7) {
+    if (currentStep === 5) {
       // Loading Animation
       Animated.timing(loadingProgress, {
         toValue: 1,
@@ -296,9 +210,9 @@ export default function OnboardingScreen() {
         useNativeDriver: false,
       }).start();
 
-      // Auto-advance
+      // Auto-advance zum Climax
       const timer = setTimeout(() => {
-        setCurrentStep(8);
+        setCurrentStep(6);
       }, 3000);
 
       // Loading Messages
@@ -373,28 +287,17 @@ export default function OnboardingScreen() {
 
   // Tracking-Funktion (nur beim Weiterklicken aufgerufen).
   //
-  // Step-Reihenfolge (post-redesign):
-  //   1 = Hero (kein Tracking — User hat noch nichts beantwortet)
+  // Step-Reihenfolge (T2 Variante B):
+  //   1 = Hero (kein Tracking — noch nichts beantwortet)
   //   2 = Märkte           (favoriteMarkets, primaryMarket)
   //   3 = Wocheneinkauf €  (weeklyBudgetEur)
   //   4 = Prioritäten      (priorities)
-  //   5 = Alter+Geschlecht (age, gender, ageSkipped)
-  //   6 = Wie gehört       (acquisitionSource)
-  //   7 = Loading          (kein eigenes Tracking)
-  //   8 = Climax           (kein Tracking — completeOnboarding regelt das)
+  //   5 = Loading          (kein eigenes Tracking)
+  //   6 = Climax           (kein Tracking — completeOnboarding regelt das)
   //
   // country wird IMMER mitgesendet weil's aus Device-Locale stammt
   // (auch wenn User auf Step 2 noch nicht aktiv geändert hat).
-  //
-  // `overrideAgeSkipped`: explizites Flag für State-Race in
-  // skipDemographicsStep — setState ist async, der direkt danach
-  // gerufene nextStep-→-trackCurrentStep-Pfad liest sonst noch
-  // den alten ageSkipped-Wert aus dem Render-Closure.
-  // STRICT-true-Check: viele onPress-Handler reichen das React-
-  // Press-Event als 1. Arg durch (truthy-Object) — das würde sonst
-  // überall demographicsSkipped triggern.
-  const trackCurrentStep = async (overrideAgeSkipped?: boolean) => {
-    const effectiveAgeSkipped = overrideAgeSkipped === true ? true : ageSkipped;
+  const trackCurrentStep = async () => {
     // Nur tracken wenn der User mindestens einen Step abgeschlossen hat.
     if (currentStep <= 1) return;
 
@@ -411,7 +314,7 @@ export default function OnboardingScreen() {
         status: 'in_progress',
         lastUpdateTime: serverTimestamp(),
         country, // immer aus Locale-Detection oder User-Override
-        version: 'v2', // schema-version geupgraded (age+gender, no auth-step)
+        version: 'v3', // T2: Variante B (5 Steps, ohne Demographics+Akquisition)
         platform: 'mobile',
       };
 
@@ -437,29 +340,6 @@ export default function OnboardingScreen() {
         stepData.priorities = priorities;
         if (prioritiesOther) stepData.prioritiesOther = prioritiesOther;
       }
-      if (currentStep >= 5) {
-        // Demographics. effectiveAgeSkipped=true → User hat den Step
-        // bewusst übersprungen, wir vermerken das (für Skip-Rate-
-        // Analyse).
-        if (effectiveAgeSkipped) {
-          stepData.demographicsSkipped = true;
-        } else {
-          // Nur schreiben wenn User den Slider aktiv berührt hat —
-          // sonst kein age-Wert (verhindert Default-30-Daten-Peak).
-          if (ageInteracted) {
-            stepData.age = age;
-            stepData.ageBucket = ageBucketFromAge(age);
-          }
-          if (gender) stepData.gender = gender;
-          if (gender === 'anderes' && genderOther.trim()) {
-            stepData.genderOther = genderOther.trim();
-          }
-        }
-      }
-      if (currentStep >= 6 && acquisitionSource) {
-        stepData.acquisitionSource = acquisitionSource;
-        if (acquisitionOther) stepData.acquisitionOther = acquisitionOther;
-      }
 
       await setDoc(doc(db, 'onboardingResultsV5', sessionId), stepData);
       console.log('📊 Step tracking saved for step:', currentStep);
@@ -468,14 +348,11 @@ export default function OnboardingScreen() {
     }
   };
 
-  const nextStep = async (overrideAgeSkipped?: boolean) => {
+  const nextStep = async () => {
     if (currentStep < TOTAL_STEPS) {
       // Auf "Los geht's"-Tap (Step 1 → 2): SOFORT anonyme UUID
-      // erzeugen falls noch keiner da ist. Damit hängen alle
-      // folgenden Onboarding-Antworten an einer stabilen UID
-      // (Step 0 "invisible UUID-Generierung" aus dem ClickUp-Task).
-      // Falls AuthContext schon einen Anon-User aufgesetzt hat
-      // (Auto-Anon-Login beim App-Boot), ist das ein No-op.
+      // erzeugen falls noch keiner da ist + Onboarding-Status auf
+      // 'in_progress' setzen.
       if (currentStep === 1) {
         try {
           const { auth } = await import('@/lib/firebase');
@@ -487,16 +364,16 @@ export default function OnboardingScreen() {
           console.warn('⚠️ Anon-Auto-Login fehlgeschlagen:', e);
           // Non-fatal — userId fällt auf "anonymous" zurück im Tracking
         }
+        // Status-Übergang pending → in_progress (Service als SoT).
+        try {
+          await OnboardingService.markStarted();
+        } catch (e) {
+          console.warn('⚠️ markStarted failed:', e);
+        }
       }
 
       // Tracking beim Weiterklicken (nicht bei jeder Auswahl).
-      // overrideAgeSkipped: aus skipDemographicsStep weitergegeben
-      // damit der State-Race (setAgeSkipped → nextStep im selben
-      // Tick) nicht zu falscher Tracking-Schreibung führt.
-      // STRICT-true-Check unten in trackCurrentStep filtert
-      // zugleich React-Press-Events raus die als overrideAgeSkipped
-      // durchgereicht würden (onPress={nextStep}-Pattern).
-      await trackCurrentStep(overrideAgeSkipped === true ? true : undefined);
+      await trackCurrentStep();
 
       // Spezielle Animation für Übergang von Hero (Step 1) zu Step 2
       if (currentStep === 1) {
@@ -528,18 +405,8 @@ export default function OnboardingScreen() {
     }
   };
 
-  /**
-   * Step 5 (Alter+Geschlecht) explicit-skip:
-   * setzt ageSkipped=true und springt direkt zu Step 6.
-   * `overrideAgeSkipped`-Parameter umgeht den setState-Race
-   * (siehe nextStep + trackCurrentStep) — sonst würde
-   * trackCurrentStep noch den alten ageSkipped=false-Wert lesen
-   * und age/gender statt demographicsSkipped schreiben.
-   */
-  const skipDemographicsStep = () => {
-    setAgeSkipped(true);
-    nextStep(true);
-  };
+  // skipDemographicsStep entfernt in T2 — Demographics-Step ist
+  // raus aus dem Funnel (T3 Bottom-Sheet).
 
   const previousStep = () => {
     if (currentStep > 1) {
@@ -612,34 +479,21 @@ export default function OnboardingScreen() {
         currentStep,
         lastUpdateTime: serverTimestamp(),
         completedAt: serverTimestamp(),
-        // Behalte bereits gesammelte Daten
-        country, // immer aus Locale-Detection oder User-Override
+        // Behalte bereits gesammelte Daten (Demographics+Acquisition
+        // ist nicht mehr im Funnel — Variante B).
+        country,
         ...(selectedMarkets.length > 0 && {
           favoriteMarkets: selectedMarkets.map(m => m.name),
-          // primaryMarket: nur echter Discounter, kein 'isOther'-Fake.
           ...(firstRealMarket && { primaryMarket: firstRealMarket.name }),
         }),
         ...(marketOther && { marketOther }),
-        ...(acquisitionSource && { acquisitionSource }),
-        ...(acquisitionOther && { acquisitionOther }),
         ...(budget && { weeklyBudgetEur: budget }),
         ...(priorities.length > 0 && { priorities }),
         ...(prioritiesOther && { prioritiesOther }),
-        // Demographics nur wenn der User Step 5 schon gesehen hat.
-        // age + ageBucket nur wenn ageInteracted (User hat Slider
-        // bewusst berührt) — sonst kein Wert (kein Daten-Bias).
-        ...(currentStep > 5 && !ageSkipped && {
-          ...(ageInteracted && { age, ageBucket: ageBucketFromAge(age) }),
-          ...(gender && { gender }),
-          ...(gender === 'anderes' && genderOther.trim() && {
-            genderOther: genderOther.trim(),
-          }),
-        }),
-        ...(currentStep > 5 && ageSkipped && { demographicsSkipped: true }),
-        version: 'v2',
+        version: 'v3',
         platform: 'mobile',
       });
-      
+
       console.log('📊 Abandon tracked at step:', currentStep);
     } catch (error) {
       console.error('❌ Skip tracking error:', error);
@@ -648,23 +502,17 @@ export default function OnboardingScreen() {
     // Onboarding-Status via Service (Single Source of Truth).
     // Hero-Skip (Step 1) = skipped_early (keine Daten erfasst),
     // Skip aus späterem Step = skipped_mid (Teil-Daten erfasst).
-    const { OnboardingService } = await import('@/lib/services/onboardingService');
     if (currentStep === 1) {
       await OnboardingService.markSkippedEarly();
     } else {
       await OnboardingService.markSkippedMid();
     }
 
-    // Pending-Paywall-Flag setzen; tatsächliche Präsentation erfolgt sicher in der Home-Seite.
-    // NOTE T2: für Variante B sollte dieser Flag NUR im Climax-Pfad gesetzt werden, nicht bei Skip.
-    // Hier vorerst belassen für minimal-invasiven T1-Change.
-    try {
-      const AsyncStorage = await import('@react-native-async-storage/async-storage');
-      await AsyncStorage.default.setItem('pending_onboarding_paywall', '1');
-    } catch (e) {
-      console.warn('⚠️ Konnte Pending-Paywall-Flag nicht setzen:', e);
-    }
-    
+    // KEIN pending_onboarding_paywall bei Skip (T2 Variante B):
+    // User der das Onboarding wegwischt soll NICHT sofort eine
+    // Paywall sehen — kostenlos-erst-ausprobieren. Paywall greift
+    // nur im Climax-Auth-Pfad.
+
     // WICHTIG: Premium Status Force-Refresh VOR Navigation!
     try {
       await refreshPremiumStatus();
@@ -744,25 +592,11 @@ export default function OnboardingScreen() {
       priorities,
       estimatedSavingsPercent: 35,
       estimatedSavingsEurWeek: Math.round(budget * 0.35),
-      version: 'v2',
+      version: 'v3', // T2 Variante B
       platform: 'mobile',
     };
 
-    // Demographics
-    if (ageSkipped) {
-      completionData.demographicsSkipped = true;
-    } else {
-      if (ageInteracted) {
-        completionData.age = age;
-        completionData.ageBucket = ageBucketFromAge(age);
-      }
-      if (gender) completionData.gender = gender;
-      if (gender === 'anderes' && genderOther.trim()) {
-        completionData.genderOther = genderOther.trim();
-      }
-    }
-
-    // Optional fields
+    // Optional fields (Demographics + Akquisition raus — T2)
     if (selectedMarkets.length > 0) {
       completionData.favoriteMarkets = selectedMarkets.map(market => {
         if (market.isOther) {
@@ -778,19 +612,13 @@ export default function OnboardingScreen() {
         completionData.primaryMarket = firstRealMarket;
       }
     }
-    if (acquisitionSource && acquisitionSource !== '') {
-      completionData.acquisitionSource = acquisitionSource;
-      if (acquisitionSource === 'sonstiges' && acquisitionOther.trim() !== '') {
-        completionData.acquisitionOther = acquisitionOther;
-      }
-    }
     if (priorities.includes('anderes') && prioritiesOther.trim() !== '') {
       completionData.prioritiesOther = prioritiesOther;
     }
 
     await setDoc(doc(db, 'onboardingResultsV5', sessionId), completionData);
 
-    // User-Doc Mirror (gleiche Felder wie unten in completeOnboarding).
+    // User-Doc Mirror.
     try {
       const uid = authMod.currentUser?.uid;
       if (uid) {
@@ -809,26 +637,8 @@ export default function OnboardingScreen() {
           }
           userPrefs.primaryMarket = primary;
         }
-        if (acquisitionSource) {
-          userPrefs.acquisitionSource = acquisitionSource;
-          if (acquisitionSource === 'sonstiges' && acquisitionOther.trim() !== '') {
-            userPrefs.acquisitionOther = acquisitionOther;
-          }
-        }
         if (priorities.includes('anderes') && prioritiesOther.trim() !== '') {
           userPrefs.prioritiesOther = prioritiesOther;
-        }
-        if (!ageSkipped) {
-          if (ageInteracted) {
-            userPrefs.age = age;
-            userPrefs.ageBucket = ageBucketFromAge(age);
-          }
-          if (gender) {
-            userPrefs.gender = GENDER_USERDOC_MAP[gender] ?? gender;
-            if (gender === 'anderes' && genderOther.trim() !== '') {
-              userPrefs.genderOther = genderOther.trim();
-            }
-          }
         }
         await setDoc(doc(db, 'users', uid), userPrefs, { merge: true });
         console.log('✅ Onboarding answers mirrored to users/' + uid);
@@ -838,8 +648,16 @@ export default function OnboardingScreen() {
     }
 
     // Onboarding-Status via Service (Single Source of Truth).
-    const { OnboardingService } = await import('@/lib/services/onboardingService');
     await OnboardingService.markCompleted();
+
+    // T3: Demographics-Bottom-Sheet beim ersten App-Mount triggern.
+    // Wird in (tabs)/index.tsx gelesen + entfernt nach Anzeige.
+    try {
+      const AsyncStorage = await import('@react-native-async-storage/async-storage');
+      await AsyncStorage.default.setItem('pending_demographics_prompt', '1');
+    } catch (e) {
+      console.warn('⚠️ pending_demographics_prompt set failed:', e);
+    }
 
     // KRITISCH: AuthContext.userProfile refreshen sodass die
     // frisch-gemirrorten Felder (favoriteMarket, age, gender,
@@ -865,12 +683,13 @@ export default function OnboardingScreen() {
       const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
       const { db, auth } = await import('@/lib/firebase');
       
-      // Vervollständige die Session
+      // Vervollständige die Session (Variante B — ohne Demographics
+      // und ohne Akquisition; beides post-Onboarding behandelt).
       const completionData: any = {
         userId: auth.currentUser?.uid || 'anonymous',
         sessionId,
         status: 'completed',
-        currentStep: TOTAL_STEPS, // = 8
+        currentStep: TOTAL_STEPS, // = 6 (Variante B)
         lastUpdateTime: serverTimestamp(),
         completedAt: serverTimestamp(),
         country,
@@ -878,25 +697,11 @@ export default function OnboardingScreen() {
         priorities,
         estimatedSavingsPercent: 35,
         estimatedSavingsEurWeek: Math.round(budget * 0.35),
-        version: 'v2',
+        version: 'v3',
         platform: 'mobile',
       };
 
-      // Demographics: nur wenn nicht übersprungen + User hat Slider berührt.
-      if (ageSkipped) {
-        completionData.demographicsSkipped = true;
-      } else {
-        if (ageInteracted) {
-          completionData.age = age;
-          completionData.ageBucket = ageBucketFromAge(age);
-        }
-        if (gender) completionData.gender = gender;
-        if (gender === 'anderes' && genderOther.trim()) {
-          completionData.genderOther = genderOther.trim();
-        }
-      }
-      
-      // Nur definierte optionale Felder hinzufügen
+      // Optional fields
       if (selectedMarkets.length > 0) {
         completionData.favoriteMarkets = selectedMarkets.map(market => {
           if (market.isOther) {
@@ -904,25 +709,14 @@ export default function OnboardingScreen() {
           }
           return market;
         });
-        // Hauptmarkt: erster ECHTER Discounter (kein 'isOther'/'other').
-        // Wenn der User nur 'Anderer' gewählt hat → kein primaryMarket
-        // im Save (verhindert kaputte favoriteMarket-Refs in der App).
         if (firstRealMarket) {
           completionData.primaryMarket = firstRealMarket;
         }
       }
-      
-      if (acquisitionSource && acquisitionSource !== '') {
-        completionData.acquisitionSource = acquisitionSource;
-        if (acquisitionSource === 'sonstiges' && acquisitionOther.trim() !== '') {
-          completionData.acquisitionOther = acquisitionOther;
-        }
-      }
-      
       if (priorities.includes('anderes') && prioritiesOther.trim() !== '') {
         completionData.prioritiesOther = prioritiesOther;
       }
-      
+
       // Vervollständige die Session statt neues Dokument
       await setDoc(doc(db, 'onboardingResultsV5', sessionId), completionData);
 
@@ -963,12 +757,7 @@ export default function OnboardingScreen() {
             //
             // `favoriteMarketName` MUSS parallel mitgeschrieben werden
             // — sonst zeigt die Profil-Stat-Card "Dein Lieblingsmarkt"
-            // gar nichts an (sie liest direkt den Namen-String, nicht
-            // die ID). Bug-Fix: vor dieser Änderung war das Feld
-            // ausschließlich vom Edit-Profil-Screen aus gesetzt
-            // worden, sprich nur User die manuell die Profil-Maske
-            // geöffnet hatten sahen ihren Lieblingsmarkt im Profil
-            // tatsächlich.
+            // gar nichts an.
             const primary = completionData.primaryMarket;
             if (primary?.id) {
               userPrefs.favoriteMarket = primary.id;
@@ -976,37 +765,12 @@ export default function OnboardingScreen() {
             }
             userPrefs.primaryMarket = primary;
           }
-          if (acquisitionSource) {
-            userPrefs.acquisitionSource = acquisitionSource;
-            if (acquisitionSource === 'sonstiges' && acquisitionOther.trim() !== '') {
-              userPrefs.acquisitionOther = acquisitionOther;
-            }
-          }
           if (priorities.includes('anderes') && prioritiesOther.trim() !== '') {
             userPrefs.prioritiesOther = prioritiesOther;
           }
+          // Demographics + Akquisition aus T2 raus — werden post-
+          // Onboarding gehandhabt (T3 Bottom-Sheet, T4 Attribution).
 
-          // Demographics ins User-Doc spiegeln (gleiche Felder wie
-          // app/edit-profile.tsx schreibt — gender als Text, plus
-          // ein Integer-age für Dashboard-Auswertung). birthDate
-          // bleibt leer; Edit-Profile kann das später feiner setzen.
-          if (!ageSkipped) {
-            // Slider-Wert + abgeleiteter Bucket — fürs Dashboard.
-            // Nur wenn User den Slider tatsächlich berührt hat.
-            if (ageInteracted) {
-              userPrefs.age = age;
-              userPrefs.ageBucket = ageBucketFromAge(age);
-            }
-            if (gender) {
-              // Edit-Profile schreibt 'männlich' / 'weiblich' / 'divers'.
-              // Wir mappen 'nonbinary' → 'divers' für Konsistenz mit
-              // dem Edit-Profile-Schema.
-              userPrefs.gender = GENDER_USERDOC_MAP[gender] ?? gender;
-              if (gender === 'anderes' && genderOther.trim() !== '') {
-                userPrefs.genderOther = genderOther.trim();
-              }
-            }
-          }
           // Merge so we don't clobber unrelated fields on the user
           // doc (level, points, displayName, photo_url, …).
           await setDoc(doc(db, 'users', uid), userPrefs, { merge: true });
@@ -1017,8 +781,15 @@ export default function OnboardingScreen() {
       }
 
       // Onboarding-Status via Service (Single Source of Truth).
-      const { OnboardingService } = await import('@/lib/services/onboardingService');
       await OnboardingService.markCompleted();
+
+      // T3: Demographics-Bottom-Sheet beim ersten App-Mount triggern.
+      try {
+        const AsyncStorage = await import('@react-native-async-storage/async-storage');
+        await AsyncStorage.default.setItem('pending_demographics_prompt', '1');
+      } catch (e) {
+        console.warn('⚠️ pending_demographics_prompt set failed:', e);
+      }
 
       // KRITISCH: AuthContext.userProfile refreshen — siehe
       // persistOnboardingResults für die ausführliche Begründung.
@@ -1105,7 +876,10 @@ export default function OnboardingScreen() {
   // Progress läuft von Step 2 (Märkte = "1 von 6") bis Step 7 (Loading-
   // Eintritt = "6 von 6"). Step 1 ist Hero (kein Progress) + Step 8 ist
   // Climax (kein Progress mehr — Confetti spricht für sich).
-  const PROGRESS_DENOM = TOTAL_STEPS - 2; // = 6 sichtbare Frage-Schritte
+  // ProgressBar zeigt "X von 4" — Hero (Step 1) und Loading (Step 5)
+  // sind Transition-Screens ohne User-Input, daher nicht in der
+  // Frage-Zählung. (TOTAL_STEPS=6, davon 4 echte Frage-Steps.)
+  const PROGRESS_DENOM = TOTAL_STEPS - 2;
   const renderProgressBar = () => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBar}>
@@ -1425,85 +1199,6 @@ export default function OnboardingScreen() {
     );
   }
 
-  // Step 6: Akquisition (vorher Step 4 — psychologisch ans Ende
-  // verschoben, weil's eine egoistische Frage des Unternehmens ist).
-  if (currentStep === 6) {
-    return (
-      <>
-        <StatusBar hidden={false} />
-        <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-        <Animated.View
-          style={[
-            styles.content,
-            {
-              transform: [{
-                translateX: slideAnimation, // Direkte Translation: width → 0
-              }],
-            }
-          ]}
-        >
-          {renderProgressBar()}
-          
-
-          <View style={styles.mainContent}>
-            <Text style={styles.stepTitle}>Wie hast du von uns gehört?</Text>
-            
-            <FlatList
-              data={ACQUISITION_SOURCES}
-              numColumns={2}
-              keyExtractor={(item) => item.id}
-              showsVerticalScrollIndicator={false}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[styles.marketOption, acquisitionSource === item.id && styles.optionSelected]}
-                  onPress={() => setAcquisitionSource(item.id)}
-                >
-                  <Text style={styles.marketIcon}>{item.icon}</Text>
-                  <Text 
-                    style={[styles.marketText, acquisitionSource === item.id && styles.optionTextSelected]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.8}
-                  >
-                    {item.name}
-                  </Text>
-                  {acquisitionSource === item.id && <Text style={styles.checkmark}>✓</Text>}
-                </TouchableOpacity>
-              )}
-            />
-
-            {acquisitionSource === 'sonstiges' && (
-              <View style={styles.textInputContainer}>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Woher genau?"
-                  value={acquisitionOther}
-                  onChangeText={setAcquisitionOther}
-                  maxLength={50}
-                  autoFocus
-                  placeholderTextColor={colorScheme === 'dark' ? Colors.dark.text + '80' : Colors.light.text + '80'}
-                />
-              </View>
-            )}
-          </View>
-
-          <View style={styles.buttonContainer}>
-            <OnboardingButton
-              title="Weiter"
-              onPress={nextStep}
-              disabled={acquisitionSource === 'sonstiges' && acquisitionOther.trim() === ''}
-            />
-          </View>
-        </Animated.View>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-      </>
-    );
-  }
 
   // Step 3: Wocheneinkauf in € (vorher Step 5).
   if (currentStep === 3) {
@@ -1674,188 +1369,9 @@ export default function OnboardingScreen() {
     );
   }
 
-  // Step 5: Alter + Geschlecht (NEU im Redesign).
-  //
-  // Psychologie-Position: User hat bereits 3 Steps (Märkte/Budget/
-  // Prioritäten) ausgefüllt → Sunk-Cost-Fallacy macht ihn weniger
-  // abbruchfreudig. Plus: Wording verspricht direkten Mehrwert
-  // ("für maßgeschneiderte Alternativen / Vergleich mit deiner
-  // Zielgruppe") statt trockener Demographic-Abfrage.
-  //
-  // Der "Schritt überspringen"-Pill oben rechts ist EXTREM wichtig
-  // (User-Wunsch im ClickUp-Task) — wer sein Alter / Geschlecht
-  // nicht teilen will bleibt im Funnel ohne Bauchschmerzen.
+
+  // Step 5: Loading (Labor-Illusion behält ihren Wert).
   if (currentStep === 5) {
-    return (
-      <>
-        <StatusBar hidden={false} />
-        <SafeAreaView style={styles.container}>
-          <KeyboardAvoidingView
-            style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-          <Animated.View
-            style={[
-              styles.content,
-              {
-                transform: [{
-                  translateX: slideAnimation,
-                }],
-              },
-            ]}
-          >
-            {renderProgressBar()}
-            {renderSkipPill('Schritt überspringen', skipDemographicsStep)}
-
-            <ScrollView
-              style={styles.innerScrollView}
-              contentContainerStyle={styles.innerScrollContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-              automaticallyAdjustKeyboardInsets
-            >
-              <View style={styles.mainContent}>
-                <Text style={styles.stepTitle}>Wie alt bist du?</Text>
-                <Text style={styles.subtitle}>
-                  Für maßgeschneiderte Alternativen — vergleiche
-                  deine Favoriten mit Leuten aus deiner Zielgruppe.
-                </Text>
-
-                {/* Alter — Slider 16-80 mit ageInteracted-Gate.
-                    Bis User den Slider berührt, zeigt Display einen
-                    Hint ('Tippe oder ziehe…') der dezent pulsiert.
-                    Erst onSlidingStart/onValueChange flipped
-                    ageInteracted → echte Zahl wird angezeigt UND
-                    erst dann ins User-Doc geschrieben. Damit kein
-                    Default-30-Daten-Peak. */}
-                <View style={styles.ageDisplayContainer}>
-                  {ageInteracted ? (
-                    <>
-                      <Text style={styles.ageDisplay}>
-                        {age >= AGE_MAX ? `${age}+` : age}
-                      </Text>
-                      <Text style={styles.ageDisplayLabel}>Jahre</Text>
-                    </>
-                  ) : (
-                    <PulsingAgeHint />
-                  )}
-                </View>
-                {/* Slider: gleicher Stil + Haptik wie der Budget-
-                    Slider auf Step 3 (Wocheneinkauf). Brand-grüne
-                    Track-Color, Default-Thumb, Light-Haptik bei
-                    jedem Step-Wechsel (Delta-Check verhindert Haptik-
-                    Spam wenn der Wert sich nicht geändert hat). */}
-                <Slider
-                  style={styles.slider}
-                  minimumValue={AGE_MIN}
-                  maximumValue={AGE_MAX}
-                  value={age}
-                  step={1}
-                  onSlidingStart={() => {
-                    if (!ageInteracted) setAgeInteracted(true);
-                    if (ageSkipped) setAgeSkipped(false);
-                  }}
-                  onValueChange={(v) => {
-                    const rounded = Math.round(v);
-                    if (rounded !== age) {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      setAge(rounded);
-                    }
-                    if (!ageInteracted) setAgeInteracted(true);
-                    if (ageSkipped) setAgeSkipped(false);
-                  }}
-                  minimumTrackTintColor={
-                    colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint
-                  }
-                  maximumTrackTintColor={
-                    colorScheme === 'dark'
-                      ? Colors.dark.border
-                      : Colors.light.tabIconDefault
-                  }
-                />
-                <View style={styles.sliderLabels}>
-                  <Text style={styles.sliderLabel}>{AGE_MIN}</Text>
-                  <Text style={styles.sliderLabel}>{AGE_MAX}+</Text>
-                </View>
-
-                {/* Geschlecht — 4 Pills mit Custom-Input bei "Anderes". */}
-                <Text
-                  style={[
-                    styles.stepTitle,
-                    { fontSize: 20, marginTop: 20, marginBottom: 10 },
-                  ]}
-                >
-                  Geschlecht
-                </Text>
-                <View style={styles.genderRow}>
-                  {GENDER_OPTIONS.map((opt) => {
-                    const active = gender === opt.id;
-                    return (
-                      <TouchableOpacity
-                        key={opt.id}
-                        style={[
-                          styles.genderPill,
-                          active && styles.genderPillActive,
-                        ]}
-                        onPress={() => {
-                          setGender(opt.id);
-                          if (ageSkipped) setAgeSkipped(false);
-                          if (opt.id !== 'anderes') setGenderOther('');
-                        }}
-                        activeOpacity={0.8}
-                      >
-                        <Text
-                          style={[
-                            styles.genderPillText,
-                            active && styles.genderPillTextActive,
-                          ]}
-                        >
-                          {opt.name}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-                {gender === 'anderes' && (
-                  <TextInput
-                    style={styles.genderOtherInput}
-                    placeholder="Wie möchtest du dich beschreiben? (optional)"
-                    placeholderTextColor={
-                      colorScheme === 'dark'
-                        ? Colors.dark.text + '70'
-                        : Colors.light.text + '70'
-                    }
-                    value={genderOther}
-                    onChangeText={setGenderOther}
-                    maxLength={40}
-                    autoFocus
-                  />
-                )}
-              </View>
-            </ScrollView>
-
-            <View style={styles.buttonContainer}>
-              {/* Weiter aktiv wenn Alter-Slider BERÜHRT (ageInteracted)
-                  UND Geschlecht gewählt sind. Wer Demographics gar
-                  nicht teilen will → 'Schritt überspringen'-Pill
-                  oben rechts. Bei 'Anderes' zusätzlich genderOther
-                  optional — Custom-Text ist nice-to-have, nicht
-                  required. */}
-              <OnboardingButton
-                title="Weiter"
-                onPress={nextStep}
-                disabled={!ageInteracted || !gender}
-              />
-            </View>
-          </Animated.View>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </>
-    );
-  }
-
-  // Step 7: Loading
-  if (currentStep === 7) {
     return (
       <>
         <StatusBar hidden={false} />
@@ -1906,8 +1422,8 @@ export default function OnboardingScreen() {
     );
   }
 
-  // Step 8: Savings Chart - Komplett neu mit Animationen
-  if (currentStep === 8) {
+  // Step 6: Climax — Sparpotenzial + Auth-Hebel.
+  if (currentStep === 6) {
     const weeklySavings = Math.round(budget * 0.35);
     const monthlySavings = Math.round(weeklySavings * 4.33); // 52 Wochen / 12 Monate = 4.33
     const yearlySavings = weeklySavings * 52;
@@ -2106,86 +1622,9 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     fontFamily: 'Nunito_600SemiBold',
     color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
   },
-  // ─── Demographics (Step 5: Alter + Geschlecht) ─────────────────────
-  // Alter: Slider mit ageInteracted-Gate. Bis User berührt, zeigt der
-  // Display-Bereich den PulsingAgeHint statt der Zahl.
-  // FIXED height (kein minHeight) damit beim Wechsel Hint → Zahl
-  // die Seite nicht runter hüpft. Beide States center-aligned in
-  // derselben Box.
-  // Kompakt für 5"-Displays: 60 px hoch reicht für 44-px-Zahl + 12-px-Label
-  // oder zweizeiligen Hint (18 + 11 = 29 px + gap).
-  ageDisplayContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 70, // 64→70: mehr Platz für 'ascent' der Zahl, kein Clip oben
-    marginTop: 6, // 10→6: minimal näher am Slider drunter
-    marginBottom: 2,
-  },
-  ageDisplay: {
-    fontSize: 44,
-    fontFamily: 'Nunito_700Bold',
-    color: Colors.light.tint,
-    letterSpacing: -0.8,
-    lineHeight: 54, // 46→54: lineHeight muss ≥ 1.2× fontSize sein
-                    // sonst clipping bei Nunito_700Bold-Numerik
-  },
-  ageDisplayLabel: {
-    fontSize: 12,
-    fontFamily: 'Nunito_500Medium',
-    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
-    opacity: 0.6,
-    marginTop: 2,
-  },
-  // ageSlider/ageSliderLabels Styles entfernt — Step 5 nutzt jetzt
-  // die gleichen styles.slider / styles.sliderLabels wie der
-  // Budget-Slider (Step 3) für konsistenten Look + Haptik.
-  genderRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 4,
-  },
-  genderPill: {
-    flex: 1,
-    minWidth: '45%',
-    minHeight: 46,
-    paddingVertical: 11,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : '#ffffff',
-    borderWidth: 1.5,
-    borderColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  genderPillActive: {
-    borderColor: Colors.light.tint,
-    backgroundColor: colorScheme === 'dark'
-      ? 'rgba(76,175,80,0.16)'
-      : 'rgba(76,175,80,0.08)',
-  },
-  genderPillText: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
-  },
-  genderPillTextActive: {
-    color: Colors.light.tint,
-    fontFamily: 'Nunito_700Bold',
-  },
-  genderOtherInput: {
-    marginTop: 14,
-    height: 48,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    fontSize: 14,
-    fontFamily: 'Nunito_500Medium',
-    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : '#ffffff',
-    borderWidth: 1,
-    borderColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
-    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
-  },
-  // ─── Climax (Step 8) Auth-CTAs ─────────────────────────────────────
+  // Demographics-Step-Styles (ageDisplay, genderPill etc.) entfernt
+  // in T2 — Demographics ist post-Climax via Bottom-Sheet (T3).
+  // ─── Climax (Step 6) Auth-CTAs ─────────────────────────────────────
   climaxAuthSection: {
     marginTop: 8,
     paddingHorizontal: 4,
