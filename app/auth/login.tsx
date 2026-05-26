@@ -418,38 +418,41 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_500Medium',
     color: 'white',
   },
-  // T10 v4: Logo + Title + Subtitle in EINEM Block ohne Overlap.
-  // logoBlock ersetzt logoContainer (alt) — neuer Spacing-Modus.
+  // T10 v5: kompakter Logo-Block. Brand-Text klein (sekundär),
+  // "Willkommen zurück!" als Haupt-Titel mit Clip-Schutz.
   logoBlock: {
     alignItems: 'center',
     marginTop: 8,
-    marginBottom: 16,
-    gap: 6,
+    marginBottom: 14,
+    gap: 4,
   },
   logoBlockSmall: {
     marginTop: 4,
     marginBottom: 10,
-    gap: 4,
+    gap: 2,
   },
   logoIcon: {
-    marginBottom: 0,
+    marginBottom: 2,
   },
   logoText: {
-    fontSize: 22,
-    fontFamily: 'Nunito_700Bold',
-    color: 'white',
+    fontSize: 16,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255,255,255,0.8)',
     textAlign: 'center',
-    letterSpacing: -0.3,
+    letterSpacing: -0.1,
   },
   content: {
     flex: 1,
     justifyContent: 'flex-start',
     alignItems: 'center',
   },
+  // T10 v5: Title-Clip-Fix — großer lineHeight + paddingVertical.
   subTitle: {
-    fontSize: 16,
-    fontFamily: 'Nunito_500Medium',
-    color: 'rgba(255,255,255,0.85)',
+    fontSize: 28,
+    lineHeight: 40,
+    paddingVertical: 4,
+    fontFamily: 'Nunito_700Bold',
+    color: '#fff',
     textAlign: 'center',
     letterSpacing: -0.1,
   },
@@ -670,13 +673,14 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   logoTextSmall: {
-    fontSize: 24,
+    fontSize: 14,
   },
   contentSmall: {
-    paddingTop: 1,
+    paddingTop: 0,
   },
-  subTitleSmall: { 
-    display: 'none',
+  subTitleSmall: {
+    fontSize: 24,
+    lineHeight: 34,
   },
   inputSmall: {
     paddingVertical: 12,
