@@ -1,5 +1,13 @@
-// Simple Onboarding ohne Hooks-Probleme
+// Onboarding-Screen.
+//
+// T8 (2026-05-22): dynamic `await import(...)` für Firebase, AsyncStorage
+// und Services raus — statische Imports oben. War nur historisch
+// nötig wegen einer angenommenen Circular-Import-Sorge mit dem
+// (ehemals existierenden) OnboardingProvider — Provider ist in T8
+// gelöscht, das Pattern braucht's nicht mehr.
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { collection, doc, getDocs, query, serverTimestamp, setDoc, where } from '@react-native-firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,7 +31,6 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  ViewStyle
 } from 'react-native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -31,11 +38,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { OnboardingButton } from '@/components/ui/OnboardingButton';
 import { Colors } from '@/constants/Colors';
+import { auth as authMod, db } from '@/lib/firebase';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { OnboardingService } from '@/lib/services/onboardingService';
 import { remoteConfigService } from '@/lib/services/remoteConfigService';
+import { revenueCatService } from '@/lib/services/revenueCatService';
 import { detectCountry, type DachCountry } from '@/lib/utils/country';
 
 const { width } = Dimensions.get('window');
@@ -138,7 +147,7 @@ export default function OnboardingScreen() {
       
       try {
         // Stelle sicher dass RevenueCat initialisiert ist
-        const { revenueCatService } = await import('@/lib/services/revenueCatService');
+        
         
         // Warte bis RevenueCat ready ist
         let retries = 0;
@@ -242,8 +251,8 @@ export default function OnboardingScreen() {
   // Lade Märkte aus Firestore
   const loadMarkets = async () => {
     try {
-      const { collection, getDocs, query, where } = await import('@react-native-firebase/firestore');
-      const { db } = await import('@/lib/firebase');
+      
+      
       
       console.log('🔍 Loading markets for country:', country);
       
@@ -302,8 +311,8 @@ export default function OnboardingScreen() {
     if (currentStep <= 1) return;
 
     try {
-      const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
-      const { db, auth } = await import('@/lib/firebase');
+      
+      const auth = authMod;
 
       const userId = auth.currentUser?.uid || 'anonymous';
 
@@ -355,7 +364,7 @@ export default function OnboardingScreen() {
       // 'in_progress' setzen.
       if (currentStep === 1) {
         try {
-          const { auth } = await import('@/lib/firebase');
+          const auth = authMod;
           if (!auth.currentUser) {
             await signInAnonymously();
             console.log('✅ Anon-UUID auto-erzeugt am Onboarding-Start');
@@ -456,7 +465,7 @@ export default function OnboardingScreen() {
     
     // Auth sollte bereits automatisch erfolgt sein durch AuthContext
     // Aber sicherheitshalber prüfen ob User existiert
-    const { auth } = await import('@/lib/firebase');
+    const auth = authMod;
     if (!auth.currentUser) {
       try {
         await signInAnonymously();
@@ -467,8 +476,8 @@ export default function OnboardingScreen() {
     
     // Speichere Skip/Abandon
     try {
-      const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
-      const { db, auth } = await import('@/lib/firebase');
+      
+      const auth = authMod;
       
       await setDoc(doc(db, 'onboardingResultsV5', sessionId), {
         userId: auth.currentUser?.uid || 'anonymous',
@@ -546,8 +555,8 @@ export default function OnboardingScreen() {
 
       // Paywall darf nach Auth-Erfolg auf /(tabs) triggern.
       try {
-        const AsyncStorage = await import('@react-native-async-storage/async-storage');
-        await AsyncStorage.default.setItem('pending_onboarding_paywall', '1');
+        
+        await AsyncStorage.setItem('pending_onboarding_paywall', '1');
       } catch (e) {
         console.warn('⚠️ pending_onboarding_paywall set failed:', e);
       }
@@ -574,8 +583,8 @@ export default function OnboardingScreen() {
    * regelt der Caller.
    */
   const persistOnboardingResults = async () => {
-    const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
-    const { db, auth: authMod } = await import('@/lib/firebase');
+    
+    
 
     // Anon-UUID securen falls noch nicht vorhanden (idempotent).
     if (!authMod.currentUser) {
@@ -655,8 +664,8 @@ export default function OnboardingScreen() {
     // T3: Demographics-Bottom-Sheet beim ersten App-Mount triggern.
     // Wird in (tabs)/index.tsx gelesen + entfernt nach Anzeige.
     try {
-      const AsyncStorage = await import('@react-native-async-storage/async-storage');
-      await AsyncStorage.default.setItem('pending_demographics_prompt', '1');
+      
+      await AsyncStorage.setItem('pending_demographics_prompt', '1');
     } catch (e) {
       console.warn('⚠️ pending_demographics_prompt set failed:', e);
     }
@@ -682,8 +691,8 @@ export default function OnboardingScreen() {
     try {
       await signInAnonymously();
       
-      const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
-      const { db, auth } = await import('@/lib/firebase');
+      
+      const auth = authMod;
       
       // Vervollständige die Session (Variante B — ohne Demographics
       // und ohne Akquisition; beides post-Onboarding behandelt).
@@ -787,8 +796,8 @@ export default function OnboardingScreen() {
 
       // T3: Demographics-Bottom-Sheet beim ersten App-Mount triggern.
       try {
-        const AsyncStorage = await import('@react-native-async-storage/async-storage');
-        await AsyncStorage.default.setItem('pending_demographics_prompt', '1');
+        
+        await AsyncStorage.setItem('pending_demographics_prompt', '1');
       } catch (e) {
         console.warn('⚠️ pending_demographics_prompt set failed:', e);
       }
@@ -814,7 +823,7 @@ export default function OnboardingScreen() {
         
         // Erst Käufe wiederherstellen
         try {
-          const { revenueCatService } = await import('@/lib/services/revenueCatService');
+          
           await revenueCatService.restorePurchases();
           console.log('✅ Käufe wiederhergestellt');
           
