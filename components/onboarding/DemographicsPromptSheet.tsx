@@ -8,35 +8,27 @@
  *   2. Beim ersten Mount des Home-Tabs nach dem Trigger wird das
  *      Sheet einmal angezeigt — wenn User noch keine `age`/`gender`
  *      in seinem User-Doc hat UND `OnboardingService.wasCompleted()`.
- *   3. User "Speichern" → schreibt age/ageBucket/gender ans
- *      users/{uid}, setzt `demographicsCapturedAt`.
- *      User "Vielleicht später" oder Backdrop-Tap → schreibt nur
+ *   3. User "Speichern" → schreibt age/ageBucket/ageReportedAt/
+ *      ageReportedYear/gender ans users/{uid}.
+ *      User X-Tap oder Backdrop-Tap → schreibt nur
  *      `demographicsSkipped: true`, niemand fragt nochmal.
  *
- * Design v2 (T11.6) — Compact Demografie-Sheet wie Strava/Whoop/
- * Headspace machen es:
- *   - Inline label + value für Alter (statt großes Display)
- *   - Single-Row Gender-Pills (statt 2x2-Grid)
- *   - Tightere Section-Gaps (12px statt 18-22)
- *   - "Vielleicht später" als Text-Link unter dem CTA (statt zweite
- *     Full-Height-Button-Row)
- *   - maxHeightRatio 0.58 statt 0.78 — Sheet bleibt kompakt
+ * Design (T12.1): Picker-Logik liegt in components/ui/AgePicker.tsx
+ * (geteilt mit edit-profile + email-register). Gender-Pills nutzen
+ * den Profile-Editor-Style (pill-shape, surfaceAlt-bg) für visuelle
+ * Konsistenz.
  */
 
-import React, { useState } from 'react';
-import { Animated as RNAnimated, Pressable, StyleSheet, Text, View } from 'react-native';
-import Slider from '@react-native-community/slider';
+import React, { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 
 import { FilterSheet } from '@/components/design/FilterSheet';
+import { AgePicker, AGE_DEFAULT } from '@/components/ui/AgePicker';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { GENDER_PILL_OPTIONS, type Gender } from '@/lib/types/gender';
 import { ageBucketFromAge } from '@/lib/utils/age';
-
-const AGE_MIN = 16;
-const AGE_MAX = 80;
-const AGE_DEFAULT = 30;
 
 export interface DemographicsResult {
   age: number;
@@ -59,42 +51,26 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
   const isDark = colorScheme === 'dark';
   const textColor = isDark ? Colors.dark.text : Colors.light.text;
   const mutedColor = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)';
+  const surfaceAlt = isDark ? 'rgba(255,255,255,0.06)' : '#f4f5f6';
+  const border = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)';
 
-  const [age, setAge] = useState<number>(AGE_DEFAULT);
-  const [ageInteracted, setAgeInteracted] = useState(false);
+  const [age, setAge] = useState<number | null>(null);
   const [gender, setGender] = useState<Gender | ''>('');
   const [submitting, setSubmitting] = useState(false);
 
-  // T11.16: Animierte Opacity für die "Dein Alter: X"-Row. Layout-Slot
-  // bleibt reserviert (Animated.View nimmt seinen Platz immer ein),
-  // nur der Inhalt fadet ein sobald der User den Slider berührt.
-  const labelOpacity = React.useRef(new RNAnimated.Value(0)).current;
-  React.useEffect(() => {
-    RNAnimated.timing(labelOpacity, {
-      toValue: ageInteracted ? 1 : 0,
-      duration: 220,
-      useNativeDriver: true,
-    }).start();
-  }, [ageInteracted, labelOpacity]);
-
   // T11.9: Reset auf Default-State wenn das Sheet (re-)öffnet.
-  // Matters für den Debug-Tester im Profil — sonst persistiert ein
-  // alter Age/Gender-State über close→open hinweg. In Produktion
-  // ist das harmlos, da das Sheet nach erfolgreichem Submit oder
-  // Skip nie wieder gezeigt wird.
-  React.useEffect(() => {
+  useEffect(() => {
     if (visible) {
-      setAge(AGE_DEFAULT);
-      setAgeInteracted(false);
+      setAge(null);
       setGender('');
       setSubmitting(false);
     }
   }, [visible]);
 
-  const canSubmit = ageInteracted && gender !== '';
+  const canSubmit = age !== null && gender !== '';
 
   const handleSubmit = async () => {
-    if (!canSubmit || submitting || gender === '') return;
+    if (!canSubmit || submitting || gender === '' || age === null) return;
     setSubmitting(true);
     try {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -120,66 +96,14 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
           Anonyme Angaben — jederzeit im Profil änderbar.
         </Text>
 
-        {/* Age — "Dein Alter: 32" horizontal zentriert.
-            T11.13 + T11.14:
-            - Default-Wert (AGE_DEFAULT=30) IMMER sichtbar im
-              Format ": 30". Vor Interaktion in muted color (subtler
-              "noch nicht gewählt"-Signal), nach Interaktion in
-              Brand-Grün. → kein Width-Shift beim ersten Touch.
-            - "Ziehe den Regler" sitzt ÜBER dem Label-Row und wird
-              IMMER gerendert (auch nach Interaktion), damit die
-              Modal-Höhe stabil bleibt. Pulsiert sanft als
-              permanente Affordance für den Slider.
-            - minHeight + lineHeight aus T11.7/T11.9 bleiben → kein
-              Modal-Pop beim Slider-Touch. */}
-        <SliderHintAbove color={Colors.light.tint} active={!ageInteracted} />
-        {/* T11.16: "Dein Alter: X" ist invisible bis der Slider
-            berührt wird. Animated.View hält den Layout-Slot reserviert
-            (Modal-Höhe bleibt stabil), nur die Opacity fadet ein.
-            Damit liegt vor Interaktion die gesamte visuelle
-            Aufmerksamkeit auf dem (jetzt größeren) "Ziehe den
-            Regler"-Hint + dem Slider. */}
-        <RNAnimated.View style={[styles.sectionHeader, { opacity: labelOpacity }]}>
-          <Text style={[styles.label, { color: textColor }]} allowFontScaling={false}>
-            Dein Alter
-            <Text style={[styles.ageValue, { color: Colors.light.tint }]}>
-              : {age >= AGE_MAX ? `${AGE_MAX}+` : age}
-            </Text>
-          </Text>
-        </RNAnimated.View>
-        <Slider
-          style={styles.slider}
-          minimumValue={AGE_MIN}
-          maximumValue={AGE_MAX}
-          step={1}
-          value={age}
-          onValueChange={(v) => {
-            const rounded = Math.round(v);
-            // Light selection-haptic on jedem Step-Change (User
-            // spürt den Schritt-Charakter des Sliders).
-            if (rounded !== age) {
-              Haptics.selectionAsync().catch(() => {});
-            }
-            if (!ageInteracted) setAgeInteracted(true);
-            setAge(rounded);
-          }}
-          minimumTrackTintColor={Colors.light.tint}
-          maximumTrackTintColor={isDark ? '#444' : '#e2e2e2'}
-          thumbTintColor={Colors.light.tint}
-        />
-        <View style={styles.sliderLabels}>
-          <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MIN}</Text>
-          <Text style={[styles.sliderLabelText, { color: mutedColor }]}>{AGE_MAX}+</Text>
-        </View>
+        <AgePicker value={age} onChange={setAge} textColor={textColor} />
 
-        {/* Gender — single-row pills (flex:1, gleicher Breite).
-            T11.15: Label in mutedColor solange nichts gewählt
-            (parallel zum Alter-Pattern), in textColor sobald
-            eine Pill aktiv ist. */}
+        {/* Gender — Pill-Style aus dem Profile-Editor: height 44,
+            radius 22 (pill shape), surfaceAlt bg / brand fill bei
+            active. Konsistent mit edit-profile.tsx. */}
         <Text
           style={[
-            styles.label,
-            styles.labelSpaced,
+            styles.genderLabel,
             { color: gender ? textColor : mutedColor },
           ]}
         >
@@ -192,24 +116,15 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
               <Pressable
                 key={opt.value}
                 onPress={() => {
-                  // Light impact haptic auf Pill-Auswahl (matched
-                  // die "Selection"-Semantik anderer Pickers in der App).
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                   setGender(opt.value);
                 }}
-                style={[
+                style={({ pressed }) => [
                   styles.genderPill,
                   {
-                    backgroundColor: active
-                      ? Colors.light.tint
-                      : isDark
-                        ? Colors.dark.cardBackground
-                        : '#fff',
-                    borderColor: active
-                      ? Colors.light.tint
-                      : isDark
-                        ? 'rgba(255,255,255,0.10)'
-                        : 'rgba(0,0,0,0.10)',
+                    backgroundColor: active ? Colors.light.tint : surfaceAlt,
+                    borderColor: active ? Colors.light.tint : border,
+                    opacity: pressed ? 0.75 : 1,
                   },
                 ]}
               >
@@ -218,7 +133,6 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
                     styles.genderPillText,
                     {
                       color: active ? '#fff' : textColor,
-                      fontFamily: active ? 'Nunito_700Bold' : 'Nunito_600SemiBold',
                     },
                   ]}
                   numberOfLines={1}
@@ -231,11 +145,6 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
           })}
         </View>
 
-        {/* Primary CTA + Text-Skip. */}
-        {/* T11.7: "Vielleicht später" entfernt — X-Tap und Swipe-Down
-            triggern bereits onSkip (gleiches Verhalten). Reduziert
-            visual noise, matched moderne Sheet-Patterns
-            (Headspace/Strava/TikTok/Duolingo). */}
         <Pressable
           onPress={handleSubmit}
           disabled={!canSubmit || submitting}
@@ -256,39 +165,6 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
   );
 }
 
-/** Pulsierende "Ziehe den Regler"-Hint ÜBER dem Label-Row.
- *  Wird IMMER gerendert (Modal-Höhe stabil — T11.14).
- *  T11.15: Pulse-Intensität reagiert auf den Interactions-State —
- *  stark pulsierend solange nicht interagiert (zieht Aufmerksamkeit),
- *  subtil-konstant nach Interaktion (informativ, nicht aufdringlich). */
-function SliderHintAbove({ color, active }: { color: string; active: boolean }) {
-  const opacity = React.useRef(new RNAnimated.Value(0.95)).current;
-  React.useEffect(() => {
-    if (active) {
-      // T11.17: Sanfter, langsamer Pulse — User-Feedback "Animation
-      // ist etwas zu heftig". Range halbiert (0.7-1.0 statt 0.45-1.0),
-      // Takt verlangsamt (1200ms statt 700ms) für ruhige Atmung statt
-      // hektischem Blinken. Affordance bleibt klar, fühlt sich aber
-      // wertiger an.
-      const loop = RNAnimated.loop(
-        RNAnimated.sequence([
-          RNAnimated.timing(opacity, { toValue: 1, duration: 1200, useNativeDriver: true }),
-          RNAnimated.timing(opacity, { toValue: 0.7, duration: 1200, useNativeDriver: true }),
-        ]),
-      );
-      loop.start();
-      return () => loop.stop();
-    }
-    // Nach Interaktion: ruhig auf subtilem Level (0.4) bleiben.
-    RNAnimated.timing(opacity, { toValue: 0.4, duration: 400, useNativeDriver: true }).start();
-  }, [active, opacity]);
-  return (
-    <RNAnimated.View style={{ opacity, alignSelf: 'center', marginBottom: 4 }}>
-      <Text style={[styles.sliderHintAbove, { color }]}>Ziehe den Regler</Text>
-    </RNAnimated.View>
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
     paddingBottom: 8,
@@ -299,80 +175,35 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: 16,
   },
-  // Section-Header für Alter — T11.12: zurück zu zentriert, weil
-  // der "—"-Platzhalter fast die gleiche Breite hat wie die spätere
-  // Zahl ("32"). Damit shifted "Dein Alter" beim ersten Slider-
-  // Touch nur noch ~5px statt ~70px wie früher mit dem langen
-  // "Ziehe den Regler"-Hint.
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 28,
-    marginBottom: 4,
-  },
-  label: {
-    fontSize: 16,
-    lineHeight: 28,
+  // Gender-Label-Style entspricht Field-label aus edit-profile.tsx
+  // (fontSize 13, Bold, marginBottom 6).
+  genderLabel: {
+    fontSize: 13,
     fontFamily: 'Nunito_700Bold',
-    letterSpacing: -0.2,
-  },
-  // "Dein Geschlecht" hat keine Inline-Value → eigener Block, links
-  // ausgerichtet, mit Top-Margin.
-  labelSpaced: {
+    letterSpacing: -0.1,
     marginTop: 18,
-    marginBottom: 10,
-    textAlign: 'left',
+    marginBottom: 6,
   },
-  ageValue: {
-    fontSize: 20,
-    lineHeight: 28,
-    fontFamily: 'Nunito_700Bold',
-    color: Colors.light.tint,
-    letterSpacing: -0.4,
-  },
-  slider: {
-    width: '100%',
-    height: 32,
-    marginTop: 2,
-  },
-  sliderLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 2,
-    marginTop: -2,
-  },
-  sliderLabelText: {
-    fontSize: 11,
-    fontFamily: 'Nunito_500Medium',
-  },
-  // T11.16: deutlich größer (17pt Bold statt 13pt SemiBold) — der
-  // Hint übernimmt jetzt die primäre Aufmerksamkeitsrolle in der
-  // Slider-Sektion solange "Dein Alter: X" noch invisible ist.
-  sliderHintAbove: {
-    fontSize: 17,
-    fontFamily: 'Nunito_700Bold',
-    letterSpacing: -0.2,
-  },
-  // Single-row Gender-Pills, jeweils flex:1 für gleiche Breite.
   genderRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 8,
   },
+  // T12.1: Pill-Style 1:1 wie edit-profile.tsx — height 44, radius
+  // 22 (pill-shape, height/2), surfaceAlt bg, brand fill bei active.
   genderPill: {
     flex: 1,
-    height: 38,
-    paddingHorizontal: 6,
-    borderRadius: 11,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 6,
   },
   genderPillText: {
     fontSize: 13,
+    fontFamily: 'Nunito_700Bold',
     letterSpacing: -0.1,
   },
-  // CTA + Skip-Link.
   primaryBtn: {
     marginTop: 18,
     height: 48,
