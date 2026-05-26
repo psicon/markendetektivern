@@ -13,7 +13,7 @@ import {
 } from '@/lib/services/ui/toast';
 import { isExpoGo } from '@/lib/utils/platform';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
@@ -32,6 +32,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ email?: string }>();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { signIn, signInWithGoogle, signInWithApple } = useAuth();
@@ -47,8 +48,13 @@ export default function LoginScreen() {
   // anmelden" → Form klappt auf. Andere Buttons triggern direkt.
   const [showEmailForm, setShowEmailForm] = useState(false);
 
+  // T11.3: Identifier-First-Flow gibt die Email per Query-Param rein
+  // (vom Register-Screen, falls Email schon existiert).
+  const prefilledEmail =
+    typeof params.email === 'string' ? params.email : '';
+
   const [formData, setFormData] = useState({
-    email: '',
+    email: prefilledEmail,
     password: ''
   });
   const [loading, setLoading] = useState(false);

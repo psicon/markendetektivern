@@ -95,10 +95,16 @@ export default function RegisterScreen() {
     return countryMap[country] || country;
   };
 
+  // T11.3: Identifier-First-Flow gibt die Email per Query-Param rein.
+  // Initial state bekommt sie direkt — vermeidet 1-Frame-Lücke ggü.
+  // useEffect-Prefill.
+  const prefilledEmailFromQuery =
+    typeof params.email === 'string' ? params.email : undefined;
+
   const [formData, setFormData] = useState({
     username: '',
     realName: '',
-    email: '',
+    email: prefilledEmailFromQuery ?? '',
     password: '',
     confirmPassword: '',
     birthDate: null as Date | null,
@@ -106,7 +112,14 @@ export default function RegisterScreen() {
     location: '',
     favoriteMarket: null as FirestoreDocument<Discounter> | null
   });
-  const [prefilledFields, setPrefilledFields] = useState<Set<string>>(new Set());
+  const [prefilledFields, setPrefilledFields] = useState<Set<string>>(() => {
+    // T11.3: Wenn die Email per Query-Param reinkam (Identifier-First-
+    // Flow), markieren wir sie als prefilled damit der "aus Register"-
+    // Hint angezeigt wird.
+    const s = new Set<string>();
+    if (prefilledEmailFromQuery) s.add('email');
+    return s;
+  });
   const [loading, setLoading] = useState(false);
 
   // ─── Pre-Fill aus userProfile (T6, ClickUp 86c9zbw9e) ───────
@@ -289,6 +302,23 @@ export default function RegisterScreen() {
         console.error('Registration error:', error);
       }
 
+      // T11.3: Duplicate-Case → automatische Weiterleitung zu Login
+      // mit prefilled Email. UX-Best-Practice (Linear/Slack/Notion):
+      // User soll nicht selber rätseln müssen "wie komme ich zum
+      // Login", die App routet ihn direkt + Toast erklärt warum.
+      if (error.code === 'auth/email-already-in-use') {
+        showInfoToast(
+          'Du hast bereits einen Account — bitte einloggen.',
+          'info',
+          colorScheme ?? 'light',
+        );
+        router.replace({
+          pathname: '/auth/login',
+          params: { email: formData.email.trim().toLowerCase() },
+        } as any);
+        return;
+      }
+
       // Network = retry-toast, alles andere = info-toast (User
       // muss Eingabe ändern, kein blanker Retry).
       const isTransient = error.code === 'auth/network-request-failed';
@@ -296,8 +326,9 @@ export default function RegisterScreen() {
         'Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.';
       switch (error.code) {
         case 'auth/email-already-in-use':
+          // unreachable — siehe Early-Return oben
           errorMessage =
-            'Diese E-Mail-Adresse wird bereits verwendet. Bitte andere E-Mail oder beim bestehenden Account anmelden.';
+            'Diese E-Mail-Adresse wird bereits verwendet. Bitte beim bestehenden Account anmelden.';
           break;
         case 'auth/weak-password':
           errorMessage =

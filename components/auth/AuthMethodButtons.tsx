@@ -39,6 +39,10 @@ interface Props {
   /** Optional: Trust-Hint ausblenden wenn er separat dargestellt
    *  wird oder im Layout-Flow nicht passt. */
   showTrustHint?: boolean;
+  /** Identifier-First-Modus: zeigt BEIDE Plattform-Buttons (Apple +
+   *  Google) als Alternative neben Facebook. Default false → nur der
+   *  Plattform-Primary (Apple iOS / Google Android). */
+  showAllProviders?: boolean;
   busy?: boolean;
   colorScheme: 'light' | 'dark' | null | undefined;
 }
@@ -50,6 +54,7 @@ export function AuthMethodButtons({
   onEmail,
   showEmailButton = true,
   showTrustHint = true,
+  showAllProviders = false,
   busy = false,
   colorScheme,
 }: Props) {
@@ -57,6 +62,44 @@ export function AuthMethodButtons({
   const isDark = colorScheme === 'dark';
   const verb = mode === 'register' ? 'registrieren' : 'anmelden';
   const emailVerb = mode === 'register' ? 'Mit E-Mail registrieren' : 'Mit E-Mail anmelden';
+
+  // Apple-Button als JSX (in showAllProviders-Modus beide Plattform-
+  // Primary-Buttons gleichzeitig nötig).
+  const appleButton = (
+    <Pressable
+      onPress={onApple}
+      disabled={busy}
+      style={({ pressed }) => [
+        styles.btnBase,
+        styles.btnApple,
+        (pressed || busy) && styles.btnPressed,
+      ]}
+    >
+      <IconSymbol name="apple.logo" size={20} color="white" />
+      <Text style={[styles.btnText, styles.btnTextWhite]}>
+        Mit Apple {verb}
+      </Text>
+    </Pressable>
+  );
+
+  const googleButton = (
+    <Pressable
+      onPress={onGoogle}
+      disabled={busy}
+      style={({ pressed }) => [
+        styles.btnBase,
+        styles.btnGoogle,
+        (pressed || busy) && styles.btnPressed,
+      ]}
+    >
+      <View style={styles.googleIconWrapper}>
+        <Text style={styles.googleG}>G</Text>
+      </View>
+      <Text style={[styles.btnText, styles.btnTextDark]}>
+        Mit Google {verb}
+      </Text>
+    </Pressable>
+  );
 
   // Facebook-Handler — UI fertig, Native-SDK fehlt.
   // TODO Folge-Task: react-native-fbsdk-next + FB-App-ID +
@@ -72,39 +115,11 @@ export function AuthMethodButtons({
   return (
     <View style={styles.container}>
       {/* Platform-Primary Button */}
-      {Platform.OS === 'ios' ? (
-        <Pressable
-          onPress={onApple}
-          disabled={busy}
-          style={({ pressed }) => [
-            styles.btnBase,
-            styles.btnApple,
-            (pressed || busy) && styles.btnPressed,
-          ]}
-        >
-          <IconSymbol name="apple.logo" size={20} color="white" />
-          <Text style={[styles.btnText, styles.btnTextWhite]}>
-            Mit Apple {verb}
-          </Text>
-        </Pressable>
-      ) : (
-        <Pressable
-          onPress={onGoogle}
-          disabled={busy}
-          style={({ pressed }) => [
-            styles.btnBase,
-            styles.btnGoogle,
-            (pressed || busy) && styles.btnPressed,
-          ]}
-        >
-          <View style={styles.googleIconWrapper}>
-            <Text style={styles.googleG}>G</Text>
-          </View>
-          <Text style={[styles.btnText, styles.btnTextDark]}>
-            Mit Google {verb}
-          </Text>
-        </Pressable>
-      )}
+      {Platform.OS === 'ios' ? appleButton : googleButton}
+
+      {/* showAllProviders: zweiter Plattform-Button als gleichwertige
+          Alternative (Identifier-First-Pattern wie TheFork/Uber/Linear). */}
+      {showAllProviders && (Platform.OS === 'ios' ? googleButton : appleButton)}
 
       {/* E-Mail (primary brand color) — optional ausblendbar */}
       {showEmailButton && onEmail && (
