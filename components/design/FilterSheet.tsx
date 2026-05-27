@@ -262,6 +262,10 @@ type OptionListProps<T extends string> = {
   /** T16.3: Custom-Element rechts vom Label (vor dem Radio-Circle).
    *  Wird z.B. für Lock-Icons mit Age-Badge-Overlay genutzt. */
   renderTrailing?: (key: T) => React.ReactNode;
+  /** T16.4: Zeile dimmen (opacity 0.55). Visueller Hinweis dass die
+   *  Option noch nicht aktiv ist (z.B. age-gated Alkohol). Tap bleibt
+   *  möglich — Pressable selbst ist nicht disabled. */
+  getDimmed?: (key: T) => boolean;
 };
 
 export function OptionList<T extends string>({
@@ -270,6 +274,7 @@ export function OptionList<T extends string>({
   onChange,
   renderLeading,
   renderTrailing,
+  getDimmed,
 }: OptionListProps<T>) {
   const { theme, brand } = useTokens();
 
@@ -278,6 +283,7 @@ export function OptionList<T extends string>({
       {options.map(([k, label], i) => {
         const on = value === k;
         const last = i === options.length - 1;
+        const dimmed = getDimmed?.(k) === true;
         return (
           <Pressable
             key={k}
@@ -290,7 +296,10 @@ export function OptionList<T extends string>({
               paddingHorizontal: 4,
               borderBottomWidth: last ? 0 : 1,
               borderBottomColor: theme.border,
-              opacity: pressed ? 0.7 : 1,
+              // T16.4: gedimmte Zeile (locked-by-age) hat reduzierte
+              // base-opacity 0.55. Press-Feedback komponiert sich
+              // darauf (0.55 × 0.7).
+              opacity: pressed ? (dimmed ? 0.4 : 0.7) : (dimmed ? 0.55 : 1),
             })}
           >
             {renderLeading ? renderLeading(k) : null}

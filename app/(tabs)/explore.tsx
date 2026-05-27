@@ -3509,6 +3509,13 @@ export default function ExploreScreen() {
             ] as const
           }
           onChange={(v) => onChangeCategory(v)}
+          getDimmed={(k) => {
+            // T16.4: Alkohol bei Age-Lock gedimmt darstellen → User
+            // sieht sofort dass die Zeile inaktiv ist (Lock-Icon
+            // allein war zu subtil).
+            const c = kategorien.find((x) => x.id === k);
+            return !!c && !!(c as any).isLockedByAge;
+          }}
           renderTrailing={(k) => {
             // T16.3: Lock-Icon mit Age-Badge-Overlay (kleines Person-
             // Icon rechts oben am Schloss). Vermittelt visuell "Alter
