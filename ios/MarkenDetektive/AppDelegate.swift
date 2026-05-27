@@ -1,4 +1,5 @@
 import Expo
+import FBSDKCoreKit
 import FirebaseCore
 import React
 import ReactAppDependencyProvider
@@ -27,6 +28,16 @@ public class AppDelegate: ExpoAppDelegate {
 // @generated begin @react-native-firebase/app-didFinishLaunchingWithOptions - expo prebuild (DO NOT MODIFY) sync-10e8520570672fd76b2403b7e1e27f5198a6349a
 FirebaseApp.configure()
 // @generated end @react-native-firebase/app-didFinishLaunchingWithOptions
+
+    // Facebook SDK initialization — MUST run before super.application's
+    // UIApplicationDidFinishLaunchingNotification fires the FB SDK's
+    // own observers. Without this the SDK ends up half-initialized and
+    // throws on the first internal call (Build 1175 boot crash).
+    ApplicationDelegate.shared.application(
+      application,
+      didFinishLaunchingWithOptions: launchOptions
+    )
+
     factory.startReactNative(
       withModuleName: "main",
       in: window,
@@ -42,6 +53,13 @@ FirebaseApp.configure()
     open url: URL,
     options: [UIApplication.OpenURLOptionsKey: Any] = [:]
   ) -> Bool {
+    // Route Facebook OAuth callbacks (fb<APP_ID>://...) back to the
+    // FB SDK so LoginManager.logInWithPermissions's completion fires.
+    // Without this Safari opens, user authorizes, but the callback
+    // hangs on a white screen (Build 1175 FB-Login bug).
+    if ApplicationDelegate.shared.application(app, open: url, options: options) {
+      return true
+    }
     return super.application(app, open: url, options: options) || RCTLinkingManager.application(app, open: url, options: options)
   }
 
