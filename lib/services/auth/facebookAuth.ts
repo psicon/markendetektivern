@@ -26,13 +26,38 @@ export interface FacebookCredentialBundle {
 }
 
 /**
- * Lädt das FB-SDK in einem try/catch — bei fehlendem Native-Modul
- * (Expo Go, alter Build vor T13.x ohne FB-Plugin) crasht das Modul-
- * Load intern (`new NativeEventEmitter()` requires non-null arg).
- * Wir fangen das hier sauber ab.
+ * Lädt das FB-SDK NUR wenn das Native-Modul registriert ist.
+ *
+ * Hintergrund (T17.1): `require('react-native-fbsdk-next')` führt
+ * intern bei Module-Init `new NativeEventEmitter(NativeModules.X)`
+ * aus. Wenn der Native-Bridge-Module nicht registriert ist (Expo Go,
+ * Dev-Client ohne FB-Plugin, Quick-Patched-Bundle), ist
+ * NativeModules.X === undefined → NativeEventEmitter throwt
+ * "non-null argument". Der Throw passiert WÄHREND der Module-Init,
+ * NICHT durchs require() das wir wrappen könnten — der bubbelt durch
+ * jeden try/catch.
+ *
+ * Lösung: vor dem Require checken ob die Native-Bridge da ist.
+ * Wenn nicht → null returnen ohne require zu touchen.
  */
 function loadFbsdk(): any | null {
   try {
+    // NativeModules-Lookup über react-native (statischer Import, KEIN
+    // dynamic require von 'react-native' selbst — siehe CLAUDE.md
+    // "Never await import('react-native')").
+    const { NativeModules } = require('react-native');
+    // Bekannte Native-Module-Namen des FB-SDK auf iOS + Android.
+    const hasNative =
+      !!NativeModules?.FBSDKAppEvents ||
+      !!NativeModules?.RCTFBSDKAccessToken ||
+      !!NativeModules?.RNFBSDKAppEvents ||
+      !!NativeModules?.RNFBSDKLoginManager;
+    if (!hasNative) {
+      if (__DEV__) {
+        console.warn('[facebookAuth] FB-SDK native modules not registered — falling back gracefully.');
+      }
+      return null;
+    }
     return require('react-native-fbsdk-next');
   } catch (error: any) {
     if (__DEV__) {
