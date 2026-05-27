@@ -21,7 +21,9 @@ import {
     Animated,
     Dimensions,
     ImageBackground,
+    KeyboardAvoidingView,
     Platform,
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -262,8 +264,22 @@ export default function LoginScreen() {
           <MaterialCommunityIcons name="arrow-left" size={22} color="white" />
         </TouchableOpacity>
 
-        {/* T10 v4 (2026-05-22): Login = Form first. Logo + Title in einem
-            Block ohne Overlap. */}
+        {/* T14.6: Login-Content jetzt scrollbar damit auf kleineren
+            Devices (oder bei großen Schriftgrößen) der Cross-Link
+            ganz unten erreichbar bleibt. Auf großen Devices entsteht
+            kein Scroll weil contentContainerStyle.flexGrow:1 dafür
+            sorgt dass der Container mindestens die Viewport-Höhe
+            ausfüllt — passt der Inhalt rein, kein Scroll. */}
+        <KeyboardAvoidingView
+          style={styles.keyboardView}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
         <View style={[styles.logoBlock, isSmallDevice && styles.logoBlockSmall]}>
           <CustomIcon
             name="iconBlack"
@@ -374,13 +390,15 @@ export default function LoginScreen() {
               <View style={styles.registerDividerLine} />
               <View style={styles.registerRow}>
                 <ThemedText style={styles.registerText}>Noch kein Account? </ThemedText>
-                <TouchableOpacity onPress={() => router.push('/auth/register')} hitSlop={6}>
+                <TouchableOpacity onPress={() => router.replace('/auth/register')} hitSlop={6}>
                   <ThemedText style={styles.registerLinkBold}>Kostenlos starten</ThemedText>
                 </TouchableOpacity>
               </View>
             </View>
           </View>
         </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </LinearGradient>
       </Animated.View>
     </View>
@@ -406,6 +424,20 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     paddingHorizontal: 24,
+  },
+  // T14.6: KeyboardAvoidingView + ScrollView damit der Content auf
+  // kleineren Devices oder größeren Schriftgrößen scrollen kann.
+  // flexGrow:1 sorgt dafür dass die ScrollView mindestens die
+  // Viewport-Höhe einnimmt — auf großen Devices = kein Scroll nötig.
+  keyboardView: {
+    flex: 1,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 24,
   },
   backButton: {
     position: 'absolute',
