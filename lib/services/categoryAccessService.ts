@@ -7,10 +7,25 @@ interface CategoryWithAccess extends FirestoreDocument<Kategorien> {
   isLocked: boolean;
   requiredLevel: number;
   unlocksAtLevel?: number;
+  /** T16: Kategorie verlangt ein angegebenes Alter (>=16) um
+   *  freigeschaltet zu werden. Hardcoded auf 'alkohol'. */
+  requiresAge?: boolean;
+  /** T16: True wenn die Kategorie wegen fehlender Age-Angabe
+   *  gesperrt ist (nicht wegen Level). Caller (z.B. explore.tsx)
+   *  kann darauf konkret reagieren — z.B. Demografie-Sheet anbieten
+   *  statt LockedCategoryModal. */
+  isLockedByAge?: boolean;
   temporaryUnlock?: {
     unlockedAt: number;
     expiresAt: number;
   };
+}
+
+// T16: Hardcoded Match auf die Alkohol-Kategorie via bezeichnung.
+// Falls die Kategorie umbenannt wird, hier anpassen. Alternativ
+// kann später `requiresAgeMin: number` ans Firestore-Schema.
+function categoryRequiresAge(cat: { bezeichnung?: string | null }): boolean {
+  return (cat.bezeichnung ?? '').toLowerCase().trim() === 'alkohol';
 }
 
 interface TemporaryUnlock {
@@ -128,51 +143,58 @@ class CategoryAccessService {
    * @param userLevel - Aktuelles User-Level
    * @param isPremium - Premium-Status (Premium-User haben Zugang zu allen Kategorien)
    */
-  async getAllCategoriesWithAccess(userLevel: number, isPremium: boolean = false): Promise<CategoryWithAccess[]> {
+  async getAllCategoriesWithAccess(
+    userLevel: number,
+    isPremium: boolean = false,
+    userAge?: number | null,
+  ): Promise<CategoryWithAccess[]> {
     const now = Date.now();
-    
+
     // Cache verwenden wenn noch gültig
     if (this.cachedCategories.length > 0 && now - this.lastCacheTime < this.cacheDuration) {
-      return this.mapCategoriesWithAccess(this.cachedCategories, userLevel, isPremium);
+      return this.mapCategoriesWithAccess(this.cachedCategories, userLevel, isPremium, userAge);
     }
 
     try {
       // Lade alle Kategorien aus Firestore
       const kategorienRef = collection(db, 'kategorien');
       const querySnapshot = await getDocs(kategorienRef);
-      
+
       const categories: CategoryWithAccess[] = [];
-      
+
       querySnapshot.forEach((doc) => {
         const data = doc.data() as Kategorien;
         const getsFreeAtLevel = data.getsFreeAtLevel ?? 0; // Default: sofort verfügbar
-        
-        const temporaryUnlock = this.isCategoryTemporarilyUnlocked(doc.id) 
-          ? this.temporaryUnlocks[doc.id] 
+
+        const temporaryUnlock = this.isCategoryTemporarilyUnlocked(doc.id)
+          ? this.temporaryUnlocks[doc.id]
           : undefined;
-        
-        const isTemporarilyUnlocked = this.isCategoryTemporarilyUnlocked(doc.id);
-        const isLockedByLevel = userLevel < getsFreeAtLevel;
-        const isLocked = isPremium ? false : (isLockedByLevel && !isTemporarilyUnlocked);
-        
+
+        // T16: requiresAge wird beim Caching mitgespeichert. Der
+        // Age-Lock-State wird erst in mapCategoriesWithAccess gemapped
+        // (abhängig vom userAge, der ändert sich häufiger als der
+        // Kategorie-Stammsatz).
+        const requiresAge = categoryRequiresAge(data);
+
         categories.push({
           id: doc.id,
           ...data,
-          isLocked,
+          isLocked: false, // wird in mapCategoriesWithAccess gesetzt
           requiredLevel: getsFreeAtLevel,
           unlocksAtLevel: getsFreeAtLevel > 0 ? getsFreeAtLevel : undefined,
+          requiresAge,
           temporaryUnlock
         });
       });
-      
+
       // Sortiere alphabetisch
       categories.sort((a, b) => a.bezeichnung.localeCompare(b.bezeichnung, 'de'));
-      
+
       // Cache aktualisieren
       this.cachedCategories = categories;
       this.lastCacheTime = now;
-      
-      return this.mapCategoriesWithAccess(categories, userLevel, isPremium);
+
+      return this.mapCategoriesWithAccess(categories, userLevel, isPremium, userAge);
     } catch (error) {
       console.error('❌ Fehler beim Laden der Kategorien mit Access:', error);
       return [];
@@ -182,29 +204,42 @@ class CategoryAccessService {
   /**
    * Gibt nur die für den User verfügbaren Kategorien zurück
    */
-  async getAvailableCategories(userLevel: number, isPremium: boolean = false): Promise<CategoryWithAccess[]> {
-    const allCategories = await this.getAllCategoriesWithAccess(userLevel, isPremium);
+  async getAvailableCategories(
+    userLevel: number,
+    isPremium: boolean = false,
+    userAge?: number | null,
+  ): Promise<CategoryWithAccess[]> {
+    const allCategories = await this.getAllCategoriesWithAccess(userLevel, isPremium, userAge);
     return allCategories.filter(cat => !cat.isLocked);
   }
 
   /**
    * Gibt nur die gesperrten Kategorien zurück
    */
-  async getLockedCategories(userLevel: number, isPremium: boolean = false): Promise<CategoryWithAccess[]> {
-    const allCategories = await this.getAllCategoriesWithAccess(userLevel, isPremium);
+  async getLockedCategories(
+    userLevel: number,
+    isPremium: boolean = false,
+    userAge?: number | null,
+  ): Promise<CategoryWithAccess[]> {
+    const allCategories = await this.getAllCategoriesWithAccess(userLevel, isPremium, userAge);
     return allCategories.filter(cat => cat.isLocked);
   }
 
   /**
    * Prüft ob eine spezifische Kategorie verfügbar ist
    */
-  async isCategoryAvailable(categoryId: string, userLevel: number, isPremium: boolean = false): Promise<boolean> {
+  async isCategoryAvailable(
+    categoryId: string,
+    userLevel: number,
+    isPremium: boolean = false,
+    userAge?: number | null,
+  ): Promise<boolean> {
     // Check temporary unlock first
     if (this.isCategoryTemporarilyUnlocked(categoryId)) {
       return true;
     }
-    
-    const allCategories = await this.getAllCategoriesWithAccess(userLevel, isPremium);
+
+    const allCategories = await this.getAllCategoriesWithAccess(userLevel, isPremium, userAge);
     const category = allCategories.find(cat => cat.id === categoryId);
     return category ? !category.isLocked : true; // Default: verfügbar wenn nicht gefunden
   }
@@ -249,21 +284,39 @@ class CategoryAccessService {
   }
 
   /**
-   * Hilfsfunktion um Access-Status basierend auf User-Level und Premium-Status zu mappen
+   * Hilfsfunktion um Access-Status zu mappen.
+   *
+   * T16 (User-Wunsch 2026-05-27): App ist FREE, kein Level-Gating
+   * mehr auf Kategorien. Premium = nur Ads weg (siehe RevenueCat).
+   * Einziger noch aktiver Lock-Grund: **Age-Gate auf Alkohol-Kategorie**
+   * (Jugendschutzgesetz). User muss sein Alter angeben (Slider erzwingt
+   * >= 16) damit Alkohol freigeschaltet wird.
+   *
+   * Temporary-Unlock (Rewarded-Ad) bypassed auch das Age-Gate NICHT —
+   * Jugendschutz lässt sich nicht via Ad umgehen.
+   *
+   * `requiredLevel` bleibt im DTO für Backward-Compat (UI nutzt es
+   * vereinzelt nur informativ).
    */
-  private mapCategoriesWithAccess(categories: CategoryWithAccess[], userLevel: number, isPremium: boolean = false): CategoryWithAccess[] {
+  private mapCategoriesWithAccess(
+    categories: CategoryWithAccess[],
+    _userLevel: number,
+    _isPremium: boolean = false,
+    userAge?: number | null,
+  ): CategoryWithAccess[] {
     return categories.map(cat => {
-      const isTemporarilyUnlocked = this.isCategoryTemporarilyUnlocked(cat.id);
-      const isLockedByLevel = userLevel < cat.requiredLevel;
-      const isLocked = isPremium ? false : (isLockedByLevel && !isTemporarilyUnlocked);
-      
-      const temporaryUnlock = this.isCategoryTemporarilyUnlocked(cat.id) 
-        ? this.temporaryUnlocks[cat.id] 
+      // T16: Age-Lock. AgePicker erzwingt 16 als Minimum, deshalb
+      // reicht typeof === 'number' als "hat Alter angegeben" Test.
+      const isLockedByAge = !!cat.requiresAge && (typeof userAge !== 'number' || userAge < 16);
+
+      const temporaryUnlock = this.isCategoryTemporarilyUnlocked(cat.id)
+        ? this.temporaryUnlocks[cat.id]
         : undefined;
 
       return {
-      ...cat,
-        isLocked,
+        ...cat,
+        isLocked: isLockedByAge,
+        isLockedByAge,
         temporaryUnlock
       };
     });

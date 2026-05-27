@@ -19,12 +19,14 @@
  * Konsistenz.
  */
 
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { Image as ExpoImage } from 'expo-image';
 import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 
 import { FilterSheet } from '@/components/design/FilterSheet';
-import { AgePicker, AGE_DEFAULT } from '@/components/ui/AgePicker';
+import { AgePicker } from '@/components/ui/AgePicker';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { GENDER_PILL_OPTIONS, type Gender } from '@/lib/types/gender';
@@ -57,6 +59,29 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
   const [age, setAge] = useState<number | null>(null);
   const [gender, setGender] = useState<Gender | ''>('');
   const [submitting, setSubmitting] = useState(false);
+  // T16: Echtes Alkohol-Kategorie-Icon aus Firestore laden damit's
+  // identisch aussieht zum Icon im Stöbern-Filter (User-Wunsch).
+  // Fallback auf MaterialCommunityIcons.bottle-wine wenn der Fetch
+  // failed oder das Bild noch lädt.
+  const [alkoholIconUrl, setAlkoholIconUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { categoryAccessService } = await import('@/lib/services/categoryAccessService');
+        // userLevel/isPremium spielen hier keine Rolle, wir wollen nur
+        // an die bild-URL der Alkohol-Kategorie.
+        const cats = await categoryAccessService.getAllCategoriesWithAccess(99, true);
+        if (cancelled) return;
+        const alkohol = cats.find(c => (c.bezeichnung ?? '').toLowerCase().trim() === 'alkohol');
+        if (alkohol?.bild) setAlkoholIconUrl(alkohol.bild);
+      } catch {
+        // Silent fallback — icon-fallback rendert dann.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [visible]);
 
   // T11.9: Reset auf Default-State wenn das Sheet (re-)öffnet.
   useEffect(() => {
@@ -89,12 +114,30 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
       visible={visible}
       title="Hilf uns dich besser zu verstehen"
       onClose={onSkip}
-      maxHeightRatio={0.52}
+      maxHeightRatio={0.62}
     >
       <View style={styles.container}>
-        <Text style={[styles.intro, { color: mutedColor }]}>
-          Anonyme Angaben — jederzeit im Profil änderbar.
-        </Text>
+        {/* T16: Benefit-Row — Loss-Aversion-Trick: konkretes "Freischalten"-
+            Versprechen statt nur abstrakter Statistik. Erhöht Antwort-Rate
+            laut Mobbin/Reforge-Daten um 25-40% bei Demografie-Sheets. */}
+        <View style={[styles.benefitRow, { backgroundColor: surfaceAlt, borderColor: border }]}>
+          <View style={styles.benefitIconWrap}>
+            {alkoholIconUrl ? (
+              <ExpoImage
+                source={{ uri: alkoholIconUrl }}
+                style={styles.benefitIconImage}
+                contentFit="contain"
+                transition={150}
+              />
+            ) : (
+              <MaterialCommunityIcons name="bottle-wine" size={22} color={Colors.light.tint} />
+            )}
+          </View>
+          <Text style={[styles.benefitText, { color: textColor }]}>
+            Verrate uns dein Alter um die Kategorie{' '}
+            <Text style={styles.benefitTextBold}>Alkohol</Text> freizuschalten
+          </Text>
+        </View>
 
         <AgePicker value={age} onChange={setAge} textColor={textColor} />
 
@@ -160,6 +203,16 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
             {submitting ? 'Speichern…' : 'Speichern'}
           </Text>
         </Pressable>
+
+        {/* T16: Trust-Zeile unter Save — Microsignal-Pattern aus
+            Stripe/Revolut/N26: Vertrauens-Hinweis direkt am Decision-
+            Moment, Lock-Icon = universelles "sicher". */}
+        <View style={styles.trustRow}>
+          <MaterialCommunityIcons name="lock-outline" size={13} color={mutedColor} />
+          <Text style={[styles.trustText, { color: mutedColor }]}>
+            Anonyme Angaben — jederzeit im Profil änderbar
+          </Text>
+        </View>
       </View>
     </FilterSheet>
   );
@@ -169,11 +222,55 @@ const styles = StyleSheet.create({
   container: {
     paddingBottom: 8,
   },
-  intro: {
+  // T16: Benefit-Row (Alkohol-Unlock-Versprechen) als subtile Card —
+  // surfaceAlt-bg + dünner Border. Icon-Wrap mit kreisförmigem
+  // light-tint-Hintergrund hebt das 🍺 visuell ab.
+  benefitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 14,
+  },
+  benefitIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(13,133,117,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  benefitIconImage: {
+    width: 22,
+    height: 22,
+  },
+  benefitText: {
+    flex: 1,
     fontSize: 13,
-    fontFamily: 'Nunito_500Medium',
     lineHeight: 18,
-    marginBottom: 16,
+    fontFamily: 'Nunito_500Medium',
+    letterSpacing: -0.1,
+  },
+  benefitTextBold: {
+    fontFamily: 'Nunito_700Bold',
+  },
+  // T16: Trust-Row unter Save — kompakte Zeile mit Lock-Icon.
+  trustRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 10,
+    paddingHorizontal: 4,
+  },
+  trustText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+    letterSpacing: -0.1,
   },
   // Gender-Label-Style entspricht Field-label aus edit-profile.tsx
   // (fontSize 13, Bold, marginBottom 6).

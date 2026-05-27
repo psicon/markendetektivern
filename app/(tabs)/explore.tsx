@@ -304,6 +304,27 @@ export default function ExploreScreen() {
   const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
 
+  // T16: Age-Lookup für Alkohol-Kategorie-Gating. Aus userProfile
+  // mit Legacy-Fallback auf birthDate (alte User-Docs vor T12).
+  // Re-computed on profile change.
+  const userAge = useMemo<number | null>(() => {
+    const p = (userProfile ?? null) as any;
+    if (!p) return null;
+    if (typeof p.age === 'number') {
+      // Optional Hochrechnung wenn reportedYear da — sonst direkter Wert.
+      if (typeof p.ageReportedYear === 'number') {
+        const { currentAgeFromReported } = require('@/lib/utils/age');
+        return currentAgeFromReported(p.age, p.ageReportedYear);
+      }
+      return p.age;
+    }
+    if (p.birthDate?.toDate) {
+      const { ageFromBirthDate } = require('@/lib/utils/age');
+      return ageFromBirthDate(p.birthDate.toDate());
+    }
+    return null;
+  }, [userProfile]);
+
   // PagerView for native horizontal tab swipe
   const pagerRef = useRef<PagerView | null>(null);
   // Ref to the search TextInput so the active-search chip's tap can
@@ -704,7 +725,7 @@ export default function ExploreScreen() {
           getDocs(collection(db, 'packungstypen')).catch(() => null),
         ];
         if (!PERF.lazyKategorien) {
-          queries.push(categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium));
+          queries.push(categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium, userAge));
         }
         if (!PERF.lazyHandelsmarken) {
           queries.push(getDocs(collection(db, 'handelsmarken')).catch(() => null));
@@ -807,7 +828,7 @@ export default function ExploreScreen() {
     (async () => {
       try {
         const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
-        const cats = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
+        const cats = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium, userAge);
         setKategorien([...cats].sort(byNameLocal));
       } catch (e) {
         console.warn('Explore: failed to load kategorien lazy', e);
@@ -3652,7 +3673,7 @@ export default function ExploreScreen() {
             // Re-fetch categories so the lock state updates after rewarded-ad unlock
             (async () => {
               const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
-              const cats = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
+              const cats = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium, userAge);
               setKategorien(cats);
             })();
           }}

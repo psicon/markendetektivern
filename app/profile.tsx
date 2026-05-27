@@ -952,8 +952,11 @@ export default function ProfileScreen() {
           </View>
         ) : null}
 
-        {/* Premium banner — only for logged-in non-premium users */}
-        {!isAnonymous && !isPremium ? (
+        {/* T16: Premium-Banner / Ads-Entfernen — App ist FREE, einziger
+            Premium-Benefit ist Werbe-Entfernung. Sichtbar für JEDEN
+            non-premium User (auch anonyme). Title fokussiert auf den
+            konkreten Benefit statt abstraktem "Premium". */}
+        {!isPremium ? (
           <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
             <Pressable
               onPress={() => presentPaywall('profile_upgrade')}
@@ -961,7 +964,7 @@ export default function ProfileScreen() {
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 12,
-                padding: 12,
+                padding: 14,
                 borderRadius: 12,
                 backgroundColor: theme.surface,
                 borderWidth: 1.5,
@@ -969,18 +972,43 @@ export default function ProfileScreen() {
                 opacity: pressed ? 0.92 : 1,
               })}
             >
-              <MaterialCommunityIcons name="crown" size={22} color="#FFC107" />
-              <Text
+              <View
                 style={{
-                  flex: 1,
-                  fontFamily,
-                  fontWeight: fontWeight.extraBold,
-                  fontSize: 14,
-                  color: theme.text,
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  backgroundColor: 'rgba(255,193,7,0.15)',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
               >
-                Jetzt Premium-Mitglied werden
-              </Text>
+                <MaterialCommunityIcons name="close-octagon" size={20} color="#FFC107" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 14,
+                    color: theme.text,
+                    letterSpacing: -0.2,
+                  }}
+                >
+                  Werbung entfernen
+                </Text>
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 12,
+                    color: theme.textMuted,
+                    marginTop: 2,
+                    letterSpacing: -0.1,
+                  }}
+                >
+                  MarkenDetektive werbefrei genießen
+                </Text>
+              </View>
               <MaterialCommunityIcons
                 name="chevron-right"
                 size={18}
