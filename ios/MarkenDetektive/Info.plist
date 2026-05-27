@@ -42,7 +42,7 @@
         <string>facebook</string>
         <key>CFBundleURLSchemes</key>
         <array>
-          <string>fb175787714806270</string>
+          <string>fb1757877148062670</string>
         </array>
       </dict>
       <dict>
@@ -53,9 +53,9 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>1176</string>
+    <string>1177</string>
     <key>FacebookAppID</key>
-    <string>175787714806270</string>
+    <string>1757877148062670</string>
     <key>FacebookClientToken</key>
     <string>d9af024703776b9b46864bcf0c721840</string>
     <key>FacebookDisplayName</key>

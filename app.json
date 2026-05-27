@@ -27,7 +27,7 @@
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "1176",
+      "buildNumber": "1177",
       "appleTeamId": "MZD2N2F887",
       "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true,
@@ -116,10 +116,10 @@
       [
         "react-native-fbsdk-next",
         {
-          "appID": "175787714806270",
+          "appID": "1757877148062670",
           "clientToken": "d9af024703776b9b46864bcf0c721840",
           "displayName": "MarkenDetektive",
-          "scheme": "fb175787714806270",
+          "scheme": "fb1757877148062670",
           "advertiserIDCollectionEnabled": false,
           "autoLogAppEventsEnabled": false,
           "isAutoInitEnabled": false,
