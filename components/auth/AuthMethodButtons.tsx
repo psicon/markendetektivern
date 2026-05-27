@@ -24,7 +24,6 @@ import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
-import { showInfoToast } from '@/lib/services/ui/toast';
 
 type Mode = 'register' | 'login';
 
@@ -32,6 +31,7 @@ interface Props {
   mode: Mode;
   onApple: () => void;
   onGoogle: () => void;
+  onFacebook: () => void;
   onEmail?: () => void;
   /** Optional: Email-Button ausblenden (z.B. auf dem Login-Screen
    *  wenn die Email-Form schon sichtbar ist — sonst redundant). */
@@ -51,6 +51,7 @@ export function AuthMethodButtons({
   mode,
   onApple,
   onGoogle,
+  onFacebook,
   onEmail,
   showEmailButton = true,
   showTrustHint = true,
@@ -106,16 +107,9 @@ export function AuthMethodButtons({
     </Pressable>
   );
 
-  // Facebook-Handler — UI fertig, Native-SDK fehlt.
-  // TODO Folge-Task: react-native-fbsdk-next + FB-App-ID +
-  // signInWithFacebook() im AuthContext implementieren.
-  const onFacebookPlaceholder = () => {
-    showInfoToast(
-      'Facebook-Anmeldung kommt bald — bitte nutze Apple oder E-Mail.',
-      'info',
-      colorScheme ?? 'light',
-    );
-  };
+  // T13.3: Facebook-Handler kommt jetzt vom Eltern-Screen via Props
+  // (welcome/register/login). Native-SDK ist react-native-fbsdk-next
+  // mit Client-Token-Setup in app.json (plugin react-native-fbsdk-next).
 
   return (
     <View style={styles.container}>
@@ -145,7 +139,7 @@ export function AuthMethodButtons({
       {/* Facebook — UI fertig, Handler placeholder. Lowercase "facebook"
           ist Facebook-Brand-Style (eigene Wordmark seit 2019). */}
       <Pressable
-        onPress={onFacebookPlaceholder}
+        onPress={onFacebook}
         disabled={busy}
         style={({ pressed }) => [
           styles.btnBase,

@@ -112,7 +112,20 @@
           "userTrackingUsageDescription": "Diese App verwendet Werbung zur Finanzierung. Ihre Daten werden anonymisiert verarbeitet."
         }
       ],
-      "react-native-document-scanner-plugin"
+      "react-native-document-scanner-plugin",
+      [
+        "react-native-fbsdk-next",
+        {
+          "appID": "175787714806270",
+          "clientToken": "d9af024703776b9b46864bcf0c721840",
+          "displayName": "MarkenDetektive",
+          "scheme": "fb175787714806270",
+          "advertiserIDCollectionEnabled": false,
+          "autoLogAppEventsEnabled": false,
+          "isAutoInitEnabled": true,
+          "iosUserTrackingPermission": "Diese App verwendet deine Daten ausschließlich um deinen Login mit Facebook zu ermöglichen."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

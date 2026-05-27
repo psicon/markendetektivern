@@ -35,7 +35,7 @@ export default function LoginScreen() {
   const params = useLocalSearchParams<{ email?: string }>();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const { signIn, signInWithGoogle, signInWithApple } = useAuth();
+  const { signIn, signInWithGoogle, signInWithApple, signInWithFacebook } = useAuth();
   const insets = useSafeAreaInsets();
   const screenHeight = Dimensions.get('window').height;
   const isSmallDevice = screenHeight < 700;
@@ -204,6 +204,27 @@ export default function LoginScreen() {
     }
   };
 
+  const handleFacebookSignIn = async () => {
+    try {
+      setLoading(true);
+      await signInWithFacebook();
+      try { await OnboardingService.markCompleted(); } catch {}
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      if (error?.code === 'auth/cancelled') return;
+      console.error('Facebook Sign-In error:', error);
+      showRetryableErrorToast(
+        `Facebook-Anmeldung fehlgeschlagen: ${error.message || 'Bitte erneut versuchen.'}`,
+        () => {
+          void handleFacebookSignIn();
+        },
+        { colorScheme: colorScheme ?? 'light' },
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
@@ -341,6 +362,7 @@ export default function LoginScreen() {
               mode="login"
               onApple={handleAppleSignIn}
               onGoogle={handleGoogleSignIn}
+              onFacebook={handleFacebookSignIn}
               showEmailButton={false}
               busy={loading}
               colorScheme={colorScheme}

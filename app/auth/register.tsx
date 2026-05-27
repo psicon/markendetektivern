@@ -72,7 +72,7 @@ export default function RegisterScreen() {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [checkingEmail, setCheckingEmail] = useState(false);
 
-  const { signInWithGoogle, signInWithApple } = useAuth();
+  const { signInWithGoogle, signInWithApple, signInWithFacebook } = useAuth();
 
   // Wenn die Email per Query-Param reinkommt, einmalig übernehmen
   useEffect(() => {
@@ -155,6 +155,15 @@ export default function RegisterScreen() {
         await handleApple();
         return;
       }
+      if (methods.includes('facebook.com')) {
+        showInfoToast(
+          'Dieser Account ist mit Facebook verbunden — bitte mit Facebook anmelden.',
+          'info',
+          colorScheme ?? 'light',
+        );
+        await handleFacebook();
+        return;
+      }
 
       // Keine bekannte Methode → neuer Account, weiter zur Form mit
       // prefilled Email. Falls Enum-Protection aktiv war und Email
@@ -193,6 +202,21 @@ export default function RegisterScreen() {
       if (error?.code === 'auth/cancelled') return;
       console.error('Google Sign-In error:', error);
       showInfoToast(error?.message || 'Google-Anmeldung fehlgeschlagen.', 'error', colorScheme ?? 'light');
+    } finally {
+      setAuthInFlight(false);
+    }
+  };
+
+  const handleFacebook = async () => {
+    if (authInFlight) return;
+    setAuthInFlight(true);
+    try {
+      await signInWithFacebook();
+      await completeAndGoHome();
+    } catch (error: any) {
+      if (error?.code === 'auth/cancelled') return;
+      console.error('Facebook Sign-In error:', error);
+      showInfoToast(error?.message || 'Facebook-Anmeldung fehlgeschlagen.', 'error', colorScheme ?? 'light');
     } finally {
       setAuthInFlight(false);
     }
@@ -304,6 +328,7 @@ export default function RegisterScreen() {
               mode="register"
               onApple={handleApple}
               onGoogle={handleGoogle}
+              onFacebook={handleFacebook}
               showEmailButton={false}
               showAllProviders
               busy={busy}

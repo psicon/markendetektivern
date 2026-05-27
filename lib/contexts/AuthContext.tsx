@@ -28,6 +28,10 @@ import {
   getGoogleCredential,
   signOutGoogle,
 } from '../services/auth/googleAuth';
+import {
+  getFacebookCredential,
+  signOutFacebook,
+} from '../services/auth/facebookAuth';
 import { createUserProfile, getUserProfile, UserProfile } from '../services/userProfile';
 import { scheduleRegionGuess } from '../services/regionGuess';
 import { FirestoreService } from '../services/firestore';
@@ -55,6 +59,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, displayName: string, additionalData?: AdditionalProfileData) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signInWithApple: () => Promise<void>;
+  signInWithFacebook: () => Promise<void>;
   signInAnonymously: () => Promise<void>;
   logout: () => Promise<void>;
   isAppleAuthAvailable: () => Promise<boolean>;
@@ -582,6 +587,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const handleSignInWithFacebook = async () => {
+    try {
+      const bundle = await getFacebookCredential();
+      if (!bundle) {
+        // User hat das Facebook-Sheet abgebrochen.
+        return;
+      }
+      const userCredential = await linkOrSignIn(bundle.credential);
+
+      // Facebook liefert beim ersten Sign-In email + displayName + photoURL
+      // (best-effort, je nach User-Permission). Bei neuem User legen wir
+      // direkt das Firestore-Profil an — spiegelbildlich zum Apple-Pfad.
+      const isNewUser = userCredential.additionalUserInfo?.isNewUser;
+      if (isNewUser && userCredential.user) {
+        await createUserProfile(userCredential.user, {
+          realName: bundle.displayName || userCredential.user.displayName || 'Facebook User',
+          email: bundle.email || userCredential.user.email || '',
+        });
+        console.log(`✅ Facebook Sign-In: NEUER USER → Profil angelegt (${userCredential.user.email})`);
+      } else {
+        console.log('✅ Facebook Sign-In: bestehender User');
+      }
+    } catch (error: any) {
+      if (error?.code === 'auth/cancelled') return;
+      if (__DEV__) {
+        console.error('Facebook Sign-In error:', error);
+      }
+      throw error;
+    }
+  };
+
   const handleSignInAnonymously = async () => {
     try {
       const result = await signInAnonymously(auth);
@@ -600,6 +636,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Sign out from social providers if needed
       await signOutGoogle().catch(() => {}); // Ignore errors
       await signOutApple().catch(() => {}); // Ignore errors
+      await signOutFacebook().catch(() => {}); // Ignore errors
 
       // 🧹 Clear the AsyncStorage auth backup BEFORE signing out.
       // This backup is meant to detect "Firebase session
@@ -794,6 +831,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       signUp,
       signInWithGoogle: handleSignInWithGoogle,
       signInWithApple: handleSignInWithApple,
+      signInWithFacebook: handleSignInWithFacebook,
       signInAnonymously: handleSignInAnonymously,
       logout,
       isAppleAuthAvailable,
@@ -809,6 +847,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       signUp,
       handleSignInWithGoogle,
       handleSignInWithApple,
+      handleSignInWithFacebook,
       handleSignInAnonymously,
       logout,
       refreshUserProfile,

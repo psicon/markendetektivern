@@ -49,7 +49,7 @@ export default function WelcomeScreen() {
   const fadeAnim = useState(new Animated.Value(0))[0];
   const [authInFlight, setAuthInFlight] = useState(false);
 
-  const { signInWithGoogle, signInWithApple, signInAnonymously: signInAnon } = useAuth();
+  const { signInWithGoogle, signInWithApple, signInWithFacebook, signInAnonymously: signInAnon } = useAuth();
 
   /**
    * Post-Auth Erfolgs-Handler. Onboarding-Status auf 'completed'
@@ -94,6 +94,25 @@ export default function WelcomeScreen() {
       console.error('Google Sign-In error:', error);
       showInfoToast(
         error?.message || 'Google-Anmeldung fehlgeschlagen.',
+        'error',
+        colorScheme ?? 'light',
+      );
+    } finally {
+      setAuthInFlight(false);
+    }
+  };
+
+  const handleFacebook = async () => {
+    if (authInFlight) return;
+    setAuthInFlight(true);
+    try {
+      await signInWithFacebook();
+      await completeAndGoHome();
+    } catch (error: any) {
+      if (error?.code === 'auth/cancelled') return;
+      console.error('Facebook Sign-In error:', error);
+      showInfoToast(
+        error?.message || 'Facebook-Anmeldung fehlgeschlagen.',
         'error',
         colorScheme ?? 'light',
       );
@@ -200,6 +219,7 @@ export default function WelcomeScreen() {
               mode="register"
               onApple={handleApple}
               onGoogle={handleGoogle}
+              onFacebook={handleFacebook}
               onEmail={handleEmail}
               busy={authInFlight}
               colorScheme={colorScheme}

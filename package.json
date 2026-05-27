@@ -70,6 +70,7 @@
     "react-native": "0.79.5",
     "react-native-confetti-cannon": "^1.5.2",
     "react-native-document-scanner-plugin": "^2.0.4",
+    "react-native-fbsdk-next": "^13.4.3",
     "react-native-gesture-handler": "~2.24.0",
     "react-native-google-mobile-ads": "^15.8.0",
     "react-native-google-places-autocomplete": "^2.5.7",
