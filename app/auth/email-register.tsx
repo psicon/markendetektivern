@@ -427,14 +427,16 @@ export default function RegisterScreen() {
             onLoad={handleImageLoad}
           />
         
-        {/* T7: Gleicher Gradient wie Onboarding-Step-1-Hero. */}
+        {/* T14.8: Identisch zu register.tsx + login.tsx — kräftigerer
+            schwarzer Gradient für konsistente Lesbarkeit aller Form-
+            Labels gegen das Foto-Background. */}
         <LinearGradient
           colors={[
-            'rgba(0, 0, 0, 0.1)',
-            'rgba(0, 0, 0, 0.3)',
-            'rgba(0, 0, 0, 0.9)',
+            'rgba(0, 0, 0, 0.15)',
+            'rgba(0, 0, 0, 0.45)',
+            'rgba(0, 0, 0, 0.92)',
           ]}
-          locations={[0, 0.7, 1]}
+          locations={[0, 0.5, 1]}
           style={[styles.overlay, { paddingTop: insets.top + 56 }]}
         >
           {/* Back Button — design-system arrow-left in a 40×40

@@ -242,13 +242,16 @@ export default function LoginScreen() {
         />
       
       {/* T7: Gleicher Gradient wie Onboarding-Step-1-Hero. */}
+      {/* T14.8: Identisch zu register.tsx — kräftigerer schwarzer
+          Gradient bis ans Bottom für konsistente Lesbarkeit der
+          Cross-Link/DSGVO-Texte. */}
       <LinearGradient
         colors={[
-          'rgba(0, 0, 0, 0.1)',
-          'rgba(0, 0, 0, 0.3)',
-          'rgba(0, 0, 0, 0.9)',
+          'rgba(0, 0, 0, 0.15)',
+          'rgba(0, 0, 0, 0.45)',
+          'rgba(0, 0, 0, 0.92)',
         ]}
-        locations={[0, 0.7, 1]}
+        locations={[0, 0.5, 1]}
         style={[
           styles.overlay,
           {
