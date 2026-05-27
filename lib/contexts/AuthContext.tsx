@@ -55,6 +55,10 @@ interface AuthContextType {
   userProfile: UserProfile | null;
   loading: boolean;
   isAnonymous: boolean;
+  /** True während logout() läuft — kurzes Fenster zwischen Firebase
+   *  signOut und der Re-Anon-Anmeldung. Tabs-Layout liest das damit
+   *  die Welcome-Escape-Hatch nicht in diesem Fenster feuert. */
+  isLoggingOut: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, displayName: string, additionalData?: AdditionalProfileData) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
@@ -120,6 +124,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAnonymous, setIsAnonymous] = useState(false);
+  // T17.14: True während logout() läuft (signOut → signInAnonymously).
+  // Tabs-Layout liest das damit die "user==null"-Escape-Hatch zu
+  // /auth/welcome NICHT feuert während des kurzen null-User-Fensters
+  // zwischen signOut und der Re-Anon-Anmeldung. Vorher gabs einen
+  // sichtbaren Welcome-Flash beim Abmelden.
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const refreshUserProfile = useCallback(async () => {
     if (user?.uid) {
@@ -589,67 +599,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const handleSignInWithApple = async () => {
-    // T17.12: Apple-Identity-Tokens haben einen Nonce. Firebase iOS
-    // weigert sich denselben Nonce zweimal zu konsumieren — wir können
-    // also bei `auth/unknown + Duplicate credential` (= dieselbe Apple-ID
-    // gehört bereits zu einem anderen Firebase-User) NICHT einfach
-    // `signInWithCredential` mit dem geburnten Token wiederholen.
+    // T17.13: Seamless Apple-Sign-In (matches production-App-Behavior).
     //
-    // Stattdessen: Anon-User abmelden, FRISCH Apple-Token holen
-    // (= neuer Apple-Sheet-Tap, neuer Nonce), dann signInWithCredential.
-    // User sieht zwei Apple-Sheets in Folge — aber dazwischen einen
-    // klaren Hinweis, damit das nicht überrumpelt.
-    const isDuplicate = (e: any): boolean => {
-      if (e?.code === 'auth/credential-already-in-use') return true;
-      const msg = String(e?.message ?? '').toLowerCase();
-      if (e?.code === 'auth/unknown' && msg.includes('duplicate')) return true;
-      return false;
-    };
+    // Wir verzichten auf `linkWithCredential` für Apple. Stattdessen:
+    //   • Anon-User vorher abmelden (falls da), damit Firebase keine
+    //     stale Anon-Session beim Apple-Sign-In versucht zu linken.
+    //   • `signInWithCredential(apple-credential)` — Firebase entscheidet
+    //     automatisch: existierender Apple-Sub? → sign in. Neu? → create.
+    //
+    // Vorteil: EIN Apple-Sheet, kein "Duplicate credential"-Dance, gleicher
+    // Flow wie die alte Production-Version.
+    //
+    // Trade-off: Wenn ein anon-User Favoriten/Cart angesammelt hat, sind
+    // die nach dem Apple-Sign-In NICHT mehr im neuen User. War in der
+    // alten Production-Version aber auch so — ist die akzeptierte Norm.
 
     try {
       const bundle = await getAppleCredential();
       if (!bundle) return;
 
-      let userCredential: FirebaseAuthTypes.UserCredential;
-      try {
-        userCredential = await linkOrSignIn(bundle.credential);
-      } catch (linkErr: any) {
-        if (!isDuplicate(linkErr)) throw linkErr;
-
-        // Existierender Apple-Account erkannt. User informieren + Anon
-        // verwerfen + frischen Apple-Token + signInWithCredential.
-        const confirmed = await new Promise<boolean>((resolve) => {
-          Alert.alert(
-            'Apple-Account bereits verknüpft',
-            'Diese Apple-ID gehört zu einem bestehenden Konto. Wir melden dich gleich mit Apple bei diesem Konto an — bitte im Apple-Dialog noch einmal bestätigen.',
-            [
-              { text: 'Abbrechen', style: 'cancel', onPress: () => resolve(false) },
-              { text: 'Weiter', onPress: () => resolve(true) },
-            ],
-            { cancelable: true, onDismiss: () => resolve(false) },
-          );
-        });
-        if (!confirmed) {
-          const err: any = new Error('Anmeldung abgebrochen');
-          err.code = 'auth/cancelled';
-          throw err;
-        }
-
-        // Anon-Session abmelden — Apple-Token soll für DIESEN Account
-        // gelten, nicht für linkWithCredential auf den anon-User.
-        if (auth.currentUser?.isAnonymous) {
-          try { await signOut(auth); } catch {}
-        }
-
-        // Frischen Apple-Token holen (neuer Nonce → Firebase akzeptiert).
-        const fresh = await getAppleCredential();
-        if (!fresh) {
-          const err: any = new Error('Anmeldung abgebrochen');
-          err.code = 'auth/cancelled';
-          throw err;
-        }
-        userCredential = await signInWithCredential(auth, fresh.credential);
+      // Stale Anon-Session abmelden, sonst Firebase versucht implizit
+      // zu linken und triggert wieder den "Duplicate credential"-Pfad.
+      if (auth.currentUser?.isAnonymous) {
+        try { await signOut(auth); } catch {}
       }
+
+      const userCredential = await signInWithCredential(auth, bundle.credential);
 
       const isNewUser = userCredential.additionalUserInfo?.isNewUser;
       if (isNewUser && userCredential.user) {
@@ -723,6 +698,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    setIsLoggingOut(true);
     try {
       // Sign out from social providers if needed
       await signOutGoogle().catch(() => {}); // Ignore errors
@@ -773,6 +749,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.error('Logout error:', error);
       }
       throw error;
+    } finally {
+      // T17.14: Flag erst NACH Re-Anon-Anmeldung droppen, damit
+      // Tabs-Layout-Escape-Hatch nicht zwischendurch feuert.
+      setIsLoggingOut(false);
     }
   };
 
@@ -918,6 +898,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       userProfile,
       loading,
       isAnonymous,
+      isLoggingOut,
       signIn,
       signUp,
       signInWithGoogle: handleSignInWithGoogle,
@@ -934,6 +915,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       userProfile,
       loading,
       isAnonymous,
+      isLoggingOut,
       signIn,
       signUp,
       handleSignInWithGoogle,

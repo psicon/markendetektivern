@@ -191,6 +191,30 @@ werden sollten. Andere "Don't"-Regeln stehen verteilt im File
 `USE_FLYING_TABS`-Legacy etc.) — hier nur die Learnings aus
 Recent-Sessions.
 
+- **Time-based Debouncing für "wait for async transition to complete"** —
+  Wenn ein React-State-Wechsel ein async-Side-Effect-Window hat
+  (z.B. `signOut()` → kurze Null-User-Phase → `signInAnonymously()`),
+  NICHT mit `setTimeout(action, 600)` werkeln. Stattdessen einen
+  expliziten `isXxxing: boolean`-State im Context als Guard nehmen:
+  `setIsLoggingOut(true)` am Anfang von `logout()`, `setIsLoggingOut(false)`
+  im `finally`. Konsumenten checken `if (isLoggingOut) return;` BEVOR
+  sie auf den transienten Null-State reagieren. Deterministisch, kein
+  Timing-Glücksspiel. Beispiel: Tabs-Layout-Escape-Hatch zu
+  `/auth/welcome` (siehe `app/(tabs)/_layout.tsx` T17.14).
+
+- **Fire-and-forget `void asyncStorageWrite(...)` direkt vor
+  `setVisible(false)`/`setState`** — Race-Garantie. Wenn ein Listener
+  auf das State-Change wartet und dann den just-geschriebenen Wert
+  liest, kommt der Schreib oft NICHT rechtzeitig durch. Repro:
+  Coachmark-`dismiss()` mit `setVisible(false); void markSeen(tour)` →
+  Demographics-Sheet-Effect feuert sofort wegen visible-Flip, fragt
+  `getSeen('home')` → kriegt noch `false` → Sheet wird nie gezeigt.
+  Fix: `await CoachmarkService.markSeen(tour); setVisible(false)` —
+  Storage erst persistieren, DANN das Signal flippen das Listener
+  weckt. 50ms UX-Cost, race weg. Siehe `hooks/useCoachmark.ts`
+  T17.14.
+
+
 - **`BlurView` mit `experimentalBlurMethod="dimezisBlurView"` auf
   Android.** Triggert Surface-Stops / Grey-Screens (Fabric).
   Nur in iOS-Branches verwenden. Für Android-Blur-Look → tinted
@@ -272,6 +296,20 @@ Grund: Builds kosten Zeit (15–25 min) + EAS-Quota + bumpen
 Versionsnummern (autoIncrement). User muss kontrollieren wann das
 passiert. Wenn unsicher ob ein Build gewollt ist → fragen, nicht
 einfach machen.
+
+### Lokale Tests → Metro, NICHT xcodebuild
+
+Wenn User "test mal auf dem sim" sagt → **`expo start`** + Sim mit
+Dev-Client öffnen reicht. Metro served das aktuelle JS hot-reload.
+KEIN voller `xcodebuild -configuration Release …` für jeden
+JS-Change — das kostet 5-10 min pro Iteration für 0 Mehrwert
+gegenüber Metro. Lokale Release-Builds nur wenn explizit ein
+nativer/Pod-Change drinsteckt der getestet werden muss (z.B.
+Plugin-Patch der Info.plist ändert).
+
+User-Hinweis 2026-05-27: "builden musst du nicht immer für solche
+tests da wir ja metro haben". Default: Metro. xcodebuild nur bei
+nativen Änderungen.
 
 ## Android: APK aufs Device — Workflow
 

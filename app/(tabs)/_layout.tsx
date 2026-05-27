@@ -723,7 +723,7 @@ function CustomTabBarButton({ children, onPress, accessibilityState }: any) {
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
-  const { user, loading } = useAuth();
+  const { user, loading, isLoggingOut } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
@@ -765,16 +765,17 @@ export default function TabLayout() {
   // before redirect.
   useEffect(() => {
     if (loading || user) return;
+    // T17.14: NIE zu Welcome routen während ein expliziter logout()
+    // läuft (signOut → signInAnonymously dance). Sonst Welcome-Flash.
+    // Sobald isLoggingOut auf false flippt UND user immer noch null
+    // ist, greift dieser Effect erneut und der normale Escape-Pfad
+    // läuft.
+    if (isLoggingOut) return;
     const id = setTimeout(() => {
-      // Re-check via React state at fire time. If a re-render hasn't
-      // happened yet, we still trust `!user` from closure — but the
-      // delay alone is usually enough for the anonymous signin to
-      // land and clear this effect (deps include `user`, so a state
-      // change cancels the pending timer through the cleanup).
       router.replace('/auth/welcome' as any);
     }, 600);
     return () => clearTimeout(id);
-  }, [loading, user, router]);
+  }, [loading, user, isLoggingOut, router]);
 
   // Auto-anonymous login typically resolves in <300 ms. We
   // deliberately do NOT show a centered ActivityIndicator here —

@@ -1446,26 +1446,16 @@ export default function OnboardingScreen() {
                 </Text>
               </View>
 
-              {/* Hauptfokus: Jahresersparnis (größter Impact) */}
+              {/* T17.16 (CU 86ca037m8): Monats-/Wochen-Cards entfernt —
+                  waren redundant zur Subline und drückten auf kleinen
+                  Displays (iPhone SE) Cards + CTAs unter den Fold.
+                  Weekly-Info wandert inline in den Subtext. */}
               <View style={styles.yearlyHighlight}>
                 <Text style={styles.yearlyLabel}>🏆 Deine Jahresersparnis</Text>
                 <Text style={styles.yearlyAmount}>{yearlySavings}€</Text>
                 <Text style={styles.yearlySubtext}>
-                  Das sind {monthlySavings}€ jeden Monat!
+                  {monthlySavings}€/Monat · {weeklySavings}€/Woche
                 </Text>
-              </View>
-
-              {/* Sekundärer Fokus: Monats- und Wochenersparnis */}
-              <View style={styles.monthlyContainer}>
-                <View style={styles.monthlyCard}>
-                  <Text style={styles.monthlyAmount}>{monthlySavings}€</Text>
-                  <Text style={styles.monthlyLabel}>pro Monat</Text>
-                </View>
-                <View style={styles.monthlySeparator} />
-                <View style={styles.monthlyCard}>
-                  <Text style={styles.monthlyAmount}>{weeklySavings}€</Text>
-                  <Text style={styles.monthlyLabel}>pro Woche</Text>
-                </View>
               </View>
 
             </ScrollView>
@@ -2459,43 +2449,9 @@ const createStyles = (colorScheme: 'light' | 'dark') => StyleSheet.create({
     opacity: 0.8,
   },
   
-  // Monats- und Wochenersparnis
-  monthlyContainer: {
-    flexDirection: 'row',
-    marginBottom: 16, // Mehr Platz für Schatten
-    marginHorizontal: 4, // Seitlicher Platz für Schatten
-    gap: 12, // Mehr Gap zwischen Cards
-  },
-  monthlyCard: {
-    flex: 1,
-    backgroundColor: colorScheme === 'dark' ? Colors.dark.cardBackground : 'white',
-    borderRadius: 14,
-    padding: 16,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.08,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  monthlyAmount: {
-    fontSize: 22,
-    fontFamily: 'Nunito_700Bold',
-    color: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
-    marginBottom: 3,
-  },
-  monthlyLabel: {
-    fontSize: 13,
-    fontFamily: 'Nunito_500Medium',
-    color: colorScheme === 'dark' ? Colors.dark.text : Colors.light.text,
-    opacity: 0.7,
-  },
-  monthlySeparator: {
-    width: 2,
-    backgroundColor: colorScheme === 'dark' ? Colors.dark.border : Colors.light.tabIconDefault + '30',
-    marginVertical: 8,
-  },
-  
+  // T17.16: monthlyContainer/-Card/-Amount/-Label/-Separator
+  // Styles entfernt (Cards waren redundant, siehe Climax-Render).
+
   // Kompakte Vergleichsvisualisierung
   comparisonMini: {
     backgroundColor: 'white',

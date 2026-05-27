@@ -118,9 +118,19 @@ export function useCoachmark(tour: TourKey): UseCoachmarkResult {
     return off;
   }, [tour]);
 
-  const dismiss = useCallback(() => {
+  const dismiss = useCallback(async () => {
+    // T17.14: AWAIT markSeen damit AsyncStorage-Write fertig ist BEVOR
+    // setVisible(false) den next-effect-cycle in einem Caller triggert.
+    // Vorher Race: Demographics-useEffect fragte getSeen('home') sofort
+    // nach visible→false, das markSeen war aber noch async pending →
+    // getSeen returnte false → Sheet wurde nicht gezeigt. Jetzt:
+    // Storage erst persistiert, dann visible-flip.
+    try {
+      await CoachmarkService.markSeen(tour);
+    } catch (e) {
+      console.warn('Coachmark dismiss markSeen failed (non-fatal):', e);
+    }
     setVisible(false);
-    void CoachmarkService.markSeen(tour);
   }, [tour]);
 
   const forceClose = useCallback(() => {

@@ -77,7 +77,7 @@ export default function HomeScreen() {
   // (alle 3 Tabs bleiben gemountet) und blockt den Tap komplett.
   const isFocused = useIsFocused();
 
-  const { user, userProfile } = useAuth();
+  const { user, userProfile, refreshUserProfile } = useAuth();
   const { isPremium, refreshPremiumStatus } = useRevenueCat();
   const analytics = useAnalytics();
   const cashback = useCashbackUserState();
@@ -296,68 +296,48 @@ export default function HomeScreen() {
     return () => { cancelled = true; };
   }, [isPremium]);
 
-  // ─── Pending demographics prompt (T3) ─────────────────────────────────────
-  // Sheet erscheint einmalig nach Climax-Completion. Bedingungen:
-  //   1. pending_demographics_prompt-Flag = '1' (gesetzt vom Onboarding-
-  //      Climax in onboarding/index.tsx).
-  //   2. OnboardingService.wasCompleted() = true (Skip-Pfade triggern
-  //      das Sheet bewusst NICHT — User soll nichts aufgenötigt
-  //      bekommen wenn er weggewischt hat).
-  //   3. users/{uid} hat noch keine `age` UND keine `gender` (=
-  //      bereits beantwortet — auch nicht erneut zeigen).
+  // ─── Demografie-Sheet (T17.15) ────────────────────────────────────────────
+  // Einfache, robuste Logik — basiert auf User-Doc-State, NICHT auf
+  // transienten AsyncStorage-Flags. Damit funktioniert das Sheet:
+  //   • bei Erst-Install nach Onboarding-Climax
+  //   • bei App-Updates (User die Sheet nie gesehen haben kriegen's
+  //     einmalig)
+  //   • bei Onboarding-Skip + späterer Auth (User-Doc füllt sich)
+  // Bedingungen ALLE müssen wahr sein:
+  //   1. User-Auth ready
+  //   2. User aktuell auf Home (isFocused)
+  //   3. Kein Walkthrough aktiv (anyWalkthroughActive=false)
+  //   4. Home-Walkthrough nicht mehr visible
+  //   5. Onboarding wurde durchlaufen (Climax oder Skip — beide OK)
+  //   6. Home-Walkthrough wurde gesehen (auto-shown completed ODER
+  //      explizit geskipped — beide setzen markSeen)
+  //   7. User-Doc hat WEDER age NOCH gender (= unbeantwortet)
+  //   8. User-Doc hat NICHT `demographicsSkipped: true` (User hat
+  //      sich aktiv gegen das Sheet entschieden — nicht nochmal nerven)
   useEffect(() => {
-    if (!user?.uid) return; // erst wenn auth ready
-    // T15 (ClickUp 86c9zmnym) + T15.1: Demografie-Sheet erst zeigen
-    // wenn:
-    //   • der User aktuell wirklich auf Home schaut (isFocused) —
-    //     sonst poppt das Modal als globales Overlay über andere
-    //     Screens (z.B. wenn der Home-Walkthrough den User zum
-    //     Product-Detail geführt hat);
-    //   • KEIN Walkthrough in der App gerade aktiv ist
-    //     (anyWalkthroughActive) — schließt auch product-detail +
-    //     rewards mit ein, nicht nur home;
-    //   • der Home-Walkthrough bereits abgeschlossen wurde
-    //     (CoachmarkService.getSeen('home')) — kein Sheet bevor der
-    //     User die Basics gesehen hat.
-    //
-    // Re-Triggern via Dependencies: jedes Mal wenn isFocused oder
-    // anyWalkthroughActive oder homeCoachmark.visible flippt, wird
-    // hier neu evaluiert.
+    if (!user?.uid) return;
     if (!isFocused) return;
     if (anyWalkthroughActive) return;
     if (homeCoachmark.visible) return;
     let cancelled = false;
     (async () => {
       try {
-        const flag = await AsyncStorage.getItem('pending_demographics_prompt');
-        if (flag !== '1') return;
-
         const { OnboardingService } = await import('@/lib/services/onboardingService');
-        if (!(await OnboardingService.wasCompleted())) {
-          // Skip-Pfad — Flag wegräumen ohne Sheet zu zeigen.
-          await AsyncStorage.removeItem('pending_demographics_prompt');
-          return;
-        }
+        if (!(await OnboardingService.hasPassedOnboarding())) return;
 
-        // T15: Walkthrough-Status checken. Wenn noch nicht gesehen,
-        // NICHT zeigen — wenn der User den Walkthrough dann gleich
-        // dismissed wird homeCoachmark.visible von true→false,
-        // unser useEffect läuft erneut und der getSeen-Check trifft.
         const { CoachmarkService } = await import('@/lib/services/coachmarkService');
-        const homeWalkthroughSeen = await CoachmarkService.getSeen('home');
-        if (!homeWalkthroughSeen) return;
+        if (!(await CoachmarkService.getSeen('home'))) return;
 
-        // Prüfe ob User-Doc schon age oder gender hat (vom Edit-
-        // Profile oder einer früheren Sheet-Antwort) — dann nicht
-        // erneut fragen.
         const { getDoc, doc } = await import('@react-native-firebase/firestore');
         const { db } = await import('@/lib/firebase');
         const snap = await getDoc(doc(db, 'users', user.uid));
         const data = snap.exists ? snap.data() : null;
-        if (data?.age != null || (typeof data?.gender === 'string' && data.gender.length > 0)) {
-          await AsyncStorage.removeItem('pending_demographics_prompt');
-          return;
-        }
+
+        // Daten bereits vorhanden? Nicht nochmal fragen.
+        if (data?.age != null) return;
+        if (typeof data?.gender === 'string' && data.gender.length > 0) return;
+        // User hat bewusst geskipped? Nicht nochmal nerven.
+        if (data?.demographicsSkipped === true) return;
 
         // Kurz warten bis Home-Mount ruhig ist (sonst öffnet das Sheet
         // mitten in den ProductCard-Initial-Animationen).
@@ -397,10 +377,14 @@ export default function HomeScreen() {
         { merge: true },
       );
       await AsyncStorage.removeItem('pending_demographics_prompt');
+      // T17.15: AuthContext-userProfile refreshen, sonst sieht
+      // email-register die frisch geschriebenen age/gender Werte
+      // NICHT (Pre-Fill bleibt leer, User muss alles nochmal eingeben).
+      try { await refreshUserProfile(); } catch {}
     } catch (err) {
       console.warn('[Home] demographics save failed:', err);
     }
-  }, [user?.uid]);
+  }, [user?.uid, refreshUserProfile]);
 
   const handleDemographicsSkip = useCallback(async () => {
     setShowDemographicsSheet(false);
@@ -417,10 +401,11 @@ export default function HomeScreen() {
         },
         { merge: true },
       );
+      try { await refreshUserProfile(); } catch {}
     } catch (err) {
       console.warn('[Home] demographics skip-mark failed:', err);
     }
-  }, [user?.uid]);
+  }, [user?.uid, refreshUserProfile]);
 
   // ─── Load levels ────────────────────────────────────────────────────────────
   // Deferred via InteractionManager — die Level-Card auf Home rendert
