@@ -259,6 +259,9 @@ type OptionListProps<T extends string> = {
   options: readonly (readonly [T, string])[];
   onChange: (value: T) => void;
   renderLeading?: (key: T) => React.ReactNode;
+  /** T16.3: Custom-Element rechts vom Label (vor dem Radio-Circle).
+   *  Wird z.B. für Lock-Icons mit Age-Badge-Overlay genutzt. */
+  renderTrailing?: (key: T) => React.ReactNode;
 };
 
 export function OptionList<T extends string>({
@@ -266,6 +269,7 @@ export function OptionList<T extends string>({
   options,
   onChange,
   renderLeading,
+  renderTrailing,
 }: OptionListProps<T>) {
   const { theme, brand } = useTokens();
 
@@ -302,6 +306,7 @@ export function OptionList<T extends string>({
             >
               {label}
             </Text>
+            {renderTrailing ? renderTrailing(k) : null}
             {on ? (
               <MaterialCommunityIcons name="check-circle" size={22} color={brand.primary} />
             ) : (

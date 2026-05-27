@@ -3499,21 +3499,43 @@ export default function ExploreScreen() {
               ...kategorien.map(
                 (c) => {
                   const base = (c as any).bezeichnung ?? (c as any).name ?? '';
-                  // T16.2: Bewusst KEIN konkreter "ab 16"-Hinweis —
-                  // sonst kann der User die Schwelle gezielt umlügen.
-                  // Stattdessen 🔒 als Lock-Indikator. Beim Tap öffnet
-                  // das Demografie-Sheet das die Mechanik erklärt
-                  // ("Verrate uns dein Alter um die Kategorie Alkohol
-                  // freizuschalten").
-                  if ((c as any).isLocked) {
-                    return [c.id, `${base} 🔒`] as const;
-                  }
+                  // T16.3: Lock-Indicator als renderTrailing-Icon mit
+                  // Age-Badge-Overlay (siehe unten), nicht mehr als
+                  // Emoji im Label. Damit ist die Schwelle (16) NICHT
+                  // im Text verraten — User kann nicht gezielt lügen.
                   return [c.id, base] as const;
                 },
               ),
             ] as const
           }
           onChange={(v) => onChangeCategory(v)}
+          renderTrailing={(k) => {
+            // T16.3: Lock-Icon mit Age-Badge-Overlay (kleines Person-
+            // Icon rechts oben am Schloss). Vermittelt visuell "Alter
+            // ist relevant" ohne den Schwellenwert preiszugeben.
+            const c = kategorien.find((x) => x.id === k);
+            if (!c || !(c as any).isLockedByAge) return null;
+            return (
+              <View style={{ width: 22, height: 22, marginRight: 6 }}>
+                <MaterialCommunityIcons name="lock" size={20} color={theme.textMuted} />
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: -4,
+                    right: -5,
+                    width: 14,
+                    height: 14,
+                    borderRadius: 7,
+                    backgroundColor: theme.surface,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <MaterialCommunityIcons name="account" size={11} color={theme.textMuted} />
+                </View>
+              </View>
+            );
+          }}
           renderLeading={(k) => {
             if (k === 'all')
               return (
