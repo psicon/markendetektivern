@@ -310,6 +310,9 @@ export function extractEmoji(message: string): { emoji: string; text: string } {
     return { emoji, text };
   }
   
-  // Fallback: kein Emoji gefunden
-  return { emoji: '✅', text: message };
+  // Fallback: kein Emoji gefunden → leerer String, damit der Renderer
+  // auf das Kategorie-Icon (mdiForCategory) zurückfällt. Das alte
+  // '✅'-Fallback hat auch ERRORs mit grünem Haken dekoriert (siehe
+  // FB-SDK-Unavailable-Toast in Build 1172) — falsch.
+  return { emoji: '', text: message };
 }
