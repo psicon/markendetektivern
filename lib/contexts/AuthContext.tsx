@@ -589,18 +589,68 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const handleSignInWithApple = async () => {
+    // T17.12: Apple-Identity-Tokens haben einen Nonce. Firebase iOS
+    // weigert sich denselben Nonce zweimal zu konsumieren — wir können
+    // also bei `auth/unknown + Duplicate credential` (= dieselbe Apple-ID
+    // gehört bereits zu einem anderen Firebase-User) NICHT einfach
+    // `signInWithCredential` mit dem geburnten Token wiederholen.
+    //
+    // Stattdessen: Anon-User abmelden, FRISCH Apple-Token holen
+    // (= neuer Apple-Sheet-Tap, neuer Nonce), dann signInWithCredential.
+    // User sieht zwei Apple-Sheets in Folge — aber dazwischen einen
+    // klaren Hinweis, damit das nicht überrumpelt.
+    const isDuplicate = (e: any): boolean => {
+      if (e?.code === 'auth/credential-already-in-use') return true;
+      const msg = String(e?.message ?? '').toLowerCase();
+      if (e?.code === 'auth/unknown' && msg.includes('duplicate')) return true;
+      return false;
+    };
+
     try {
       const bundle = await getAppleCredential();
-      if (!bundle) {
-        // User hat die Apple-Sheet abgebrochen.
-        return;
-      }
-      const userCredential = await linkOrSignIn(bundle.credential);
+      if (!bundle) return;
 
-      // Apple gibt fullName + email NUR beim aller-ersten Sign-In durch.
-      // Wenn das ein neuer User ist (oder das Anon-Linking gerade
-      // erstellt einen "neuen" Provider-User), legen wir das
-      // Firestore-Profil mit den Apple-Daten an.
+      let userCredential: FirebaseAuthTypes.UserCredential;
+      try {
+        userCredential = await linkOrSignIn(bundle.credential);
+      } catch (linkErr: any) {
+        if (!isDuplicate(linkErr)) throw linkErr;
+
+        // Existierender Apple-Account erkannt. User informieren + Anon
+        // verwerfen + frischen Apple-Token + signInWithCredential.
+        const confirmed = await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            'Apple-Account bereits verknüpft',
+            'Diese Apple-ID gehört zu einem bestehenden Konto. Wir melden dich gleich mit Apple bei diesem Konto an — bitte im Apple-Dialog noch einmal bestätigen.',
+            [
+              { text: 'Abbrechen', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Weiter', onPress: () => resolve(true) },
+            ],
+            { cancelable: true, onDismiss: () => resolve(false) },
+          );
+        });
+        if (!confirmed) {
+          const err: any = new Error('Anmeldung abgebrochen');
+          err.code = 'auth/cancelled';
+          throw err;
+        }
+
+        // Anon-Session abmelden — Apple-Token soll für DIESEN Account
+        // gelten, nicht für linkWithCredential auf den anon-User.
+        if (auth.currentUser?.isAnonymous) {
+          try { await signOut(auth); } catch {}
+        }
+
+        // Frischen Apple-Token holen (neuer Nonce → Firebase akzeptiert).
+        const fresh = await getAppleCredential();
+        if (!fresh) {
+          const err: any = new Error('Anmeldung abgebrochen');
+          err.code = 'auth/cancelled';
+          throw err;
+        }
+        userCredential = await signInWithCredential(auth, fresh.credential);
+      }
+
       const isNewUser = userCredential.additionalUserInfo?.isNewUser;
       if (isNewUser && userCredential.user) {
         const displayName = buildAppleDisplayName(bundle.fullName);

@@ -1,240 +1,48 @@
-// Facebook Sign-In via react-native-fbsdk-next.
+// Facebook Sign-In — TEMPORÄR DEAKTIVIERT (T17.11)
 //
-// Diese Datei holt nur die Firebase-Credential von Facebook — das
-// eigentliche Firebase-Sign-In bzw. Anon-Linking macht der
-// AuthContext (siehe linkOrSignIn dort). Spiegelbildlich zu
-// appleAuth.ts und googleAuth.ts.
+// react-native-fbsdk-next 13.4.3 + FBSDKCoreKit 18.0.3 sind mit iOS 26.1
+// + RN-New-Architecture aktuell inkompatibel. Jede SDK-Init-Methode
+// (Settings.initializeSDK, Settings.setAdvertiserTrackingEnabled,
+// LoginManager.logOut, ApplicationDelegate.shared.application(_,
+// didFinishLaunchingWithOptions:)) wirft eine NSException die von
+// JS-try/catch nicht eingefangen werden kann — der RCTTurboModule-
+// Layer rethrowt sie als objc_exception → SIGABRT.
 //
-// Setup-Voraussetzungen (siehe app.json + Meta Developer Dashboard):
-//   • App-ID + Client Token in app.json unter react-native-fbsdk-next.
-//   • iOS + Android Platforms im Meta-Dashboard registriert.
-//   • Facebook Login Produkt aktiviert (`email`, `public_profile`).
-//   • Firebase Console → Auth → Facebook-Provider mit App-ID + Secret.
+// Wir haben den Boot-Crash neutralisiert (FacebookAutoInitEnabled=NO
+// + Patch in FacebookAppDelegate.swift + AppDelegate.swift cleanup),
+// aber jede Form von SDK-Aufruf zur Login-Zeit triggert denselben
+// Crash erneut (siehe Build 1180 Crash via performVoidMethodInvocation).
+//
+// Bis wir entweder
+//   a) eine FB-SDK-Version finden die mit iOS 26.1 funktioniert, oder
+//   b) eine Native-Swift-Bridge schreiben die NSException via Obj-C
+//      @try/@catch sicher abfängt
+// ist FB-Login ausgeschaltet. UI-Button bleibt sichtbar, Tap zeigt
+// einen freundlichen Info-Toast. Apple/Google/Email-Login funktionieren
+// weiter ungestört.
 
-import {
-  FacebookAuthProvider,
-  FirebaseAuthTypes,
-} from '@react-native-firebase/auth';
+import { FirebaseAuthTypes } from '@react-native-firebase/auth';
 
 export interface FacebookCredentialBundle {
-  /** Firebase-Credential, ready für linkOrSignIn. */
   credential: FirebaseAuthTypes.AuthCredential;
-  /** Facebook-Profil-Daten falls verfügbar (best-effort). */
   email?: string | null;
   displayName?: string | null;
   photoURL?: string | null;
 }
 
-/**
- * Lädt das FB-SDK defensiv via require + try/catch.
- *
- * T17.4: KEIN `NativeModules.X`-Vorab-Check mehr. Mit New Architecture
- * (TurboModules, `newArchEnabled: true`) sind native Module NICHT
- * garantiert über `NativeModules.X` erreichbar — das Symbol kann
- * undefined sein obwohl das Modul korrekt registriert und nutzbar ist.
- * Resultat: Produktions-Builds (TestFlight) blockten den Login
- * komplett, weil die "Modul nicht da"-Branch immer triggerte. Siehe
- * googleAuth.ts T17.4 für dasselbe Pattern und root-cause-Notiz.
- *
- * Stattdessen: blind den require versuchen — wenn das Modul wirklich
- * fehlt (Expo Go, alter Build), schlägt erst der require / die Init
- * fehl und wir landen im catch. Auf production builds mit aktivem
- * FB-Plugin existiert das Modul → require liefert die Library.
- *
- * Hintergrund alt (T17.1): `react-native-fbsdk-next` ruft bei
- * Module-Init `new NativeEventEmitter(NativeModules.X)`. Falls
- * NativeModules.X undefined ist UND die RN-Version den null-arg
- * blockiert, throwt das während Module-Init. Bei NeueArch +
- * production-Build ist die native bridge aber da — TurboModule-
- * Wrapper liefert ein gültiges Objekt an NativeEventEmitter.
- */
-let isFbsdkInitialized = false;
-
-function loadFbsdk(): any | null {
-  try {
-    const fbsdk = require('react-native-fbsdk-next');
-    // T17.5: Auto-Init beim App-Launch ist in Info.plist abgeschaltet
-    // (`FacebookAutoInitEnabled = NO`). Wir initialisieren erst hier
-    // lazy, wenn der User aktiv auf den FB-Login tippt — so kann ein
-    // SDK-internal-throw nicht mehr den App-Start abreißen. Wenn die
-    // Init fehlt (z.B. weil das Modul lazy in einer Expo-Go-Variante
-    // läuft), throwt LoginManager unten freundlich; das catchen wir
-    // mit FB_SDK_UNAVAILABLE-Toast.
-    if (!isFbsdkInitialized && fbsdk?.Settings?.initializeSDK) {
-      try {
-        // Privacy-by-default: Ad-ID + Auto-Events vor Init explizit aus.
-        fbsdk.Settings.setAdvertiserTrackingEnabled?.(false);
-        fbsdk.Settings.setAutoLogAppEventsEnabled?.(false);
-        fbsdk.Settings.setAdvertiserIDCollectionEnabled?.(false);
-        fbsdk.Settings.initializeSDK();
-        isFbsdkInitialized = true;
-        if (__DEV__) console.log('[facebookAuth] FB-SDK lazy-initialized');
-      } catch (initErr: any) {
-        console.warn('[facebookAuth] FB-SDK initializeSDK threw:', initErr?.message ?? initErr);
-        // Nicht re-throwen — fbsdk-Objekt zurückgeben, LoginManager
-        // wird beim Tap dann ein normales Fehler-Pattern werfen das wir
-        // im äußeren catch abfangen.
-      }
-    }
-    return fbsdk;
-  } catch (error: any) {
-    if (__DEV__) {
-      console.warn('[facebookAuth] react-native-fbsdk-next not loadable:', error?.message);
-    }
-    return null;
-  }
-}
-
-/**
- * Check ob das Facebook-SDK auf dem aktuellen Build verfügbar ist.
- * Wird in einer Build-Variante ohne FB-Native-Modul (z.B. Expo Go,
- * alter EAS-Build) sauber false returnen, statt zu crashen.
- */
-export const isFacebookAuthAvailable = async (): Promise<boolean> => {
-  const fbsdk = loadFbsdk();
-  return Boolean(fbsdk?.LoginManager);
-};
-
-/** Fehler-Code den der Caller (AuthContext) mit `error.code` checken
- *  kann um sauber einen "bitte Build aktualisieren"-Toast anzuzeigen
- *  statt einer kryptischen NativeEventEmitter-Meldung. */
 export const FB_SDK_UNAVAILABLE = 'auth/facebook-sdk-unavailable';
 
-/**
- * Hole eine Firebase AuthCredential + Profil-Daten von Facebook.
- *
- * Macht KEINEN Firebase-Sign-In — das macht der AuthContext.
- * Returns null bei User-Cancel.
- * Throws Error mit code=FB_SDK_UNAVAILABLE wenn das Native-Modul
- * nicht geladen ist (alter Build oder Expo Go).
- *
- * Hinweis Apple App-Tracking: das FB-SDK initialisiert sich
- * mit `advertiserIDCollectionEnabled: false` + `autoLogAppEvents:
- * false` (siehe app.json plugin config) — wir tracken NICHTS
- * automatisch. Login ist ein User-initiierter Akt.
- */
-export const getFacebookCredential = async (): Promise<FacebookCredentialBundle | null> => {
-  const fbsdk = loadFbsdk();
-  if (!fbsdk) {
+export const isFacebookAuthAvailable = async (): Promise<boolean> => false;
+
+export const getFacebookCredential =
+  async (): Promise<FacebookCredentialBundle | null> => {
     const err: any = new Error(
-      'Facebook-Login ist in diesem Build noch nicht aktiv — bitte App-Update abwarten.',
+      'Facebook-Login wird derzeit überarbeitet. Bitte nutze Apple, Google oder E-Mail.',
     );
     err.code = FB_SDK_UNAVAILABLE;
     throw err;
-  }
-  const { LoginManager, AccessToken, Profile, Settings } = fbsdk;
+  };
 
-  if (!LoginManager) {
-    const err: any = new Error(
-      'Facebook-Login ist in diesem Build noch nicht aktiv — bitte App-Update abwarten.',
-    );
-    err.code = FB_SDK_UNAVAILABLE;
-    throw err;
-  }
-
-  // T17.8: ATT-Permission anfragen damit FB-Native-App geöffnet wird
-  // statt der limited.facebook.com Web-Fallback. iOS' App-Tracking-
-  // Transparency entscheidet:
-  //   • granted (User tippt "Allow") → tracking erlaubt → FB-SDK öffnet
-  //     die native FB-App via `fbauth2://` URL-Scheme. Schöne UX, kein
-  //     Browser-Sheet.
-  //   • denied/restricted/unknown → Limited Login → öffnet
-  //     `limited.facebook.com` im ASWebAuthenticationSession. Login
-  //     funktioniert immer noch, nur ohne native App.
-  // Wenn `requestTrackingPermissionsAsync` fehlschlägt (z.B. Sim ohne
-  // ATT-Dialog), fallen wir sauber auf Limited zurück.
-  let loginTracking: 'enabled' | 'limited' = 'limited';
-  try {
-    const { requestTrackingPermissionsAsync, getTrackingPermissionsAsync } =
-      require('expo-tracking-transparency');
-    const existing = await getTrackingPermissionsAsync();
-    let status = existing?.status;
-    if (status === 'undetermined') {
-      const result = await requestTrackingPermissionsAsync();
-      status = result?.status;
-    }
-    if (status === 'granted') {
-      loginTracking = 'enabled';
-      // FB-SDK Tracking-Flags mit dem ATT-Status synchronisieren —
-      // sonst weiß die SDK nicht dass sie native App-Flow nutzen darf.
-      try {
-        await Settings?.setAdvertiserTrackingEnabled?.(true);
-        Settings?.setAdvertiserIDCollectionEnabled?.(true);
-      } catch {}
-    }
-  } catch (attErr: any) {
-    if (__DEV__) console.warn('[facebookAuth] ATT request failed:', attErr?.message);
-    // Bleibt 'limited' → Login funktioniert via Web-Fallback.
-  }
-
-  // Vorsichtshalber abmelden bevor wir das Sheet öffnen, damit
-  // gestrandete Tokens (z.B. aus Anon-Phase) keinen alten Account
-  // angeben.
-  try { LoginManager.logOut(); } catch {}
-
-  let result: any;
-  try {
-    result = await LoginManager.logInWithPermissions(
-      ['email', 'public_profile'],
-      loginTracking,
-    );
-  } catch (error: any) {
-    if (error?.message?.toLowerCase().includes('cancel')) return null;
-    throw error;
-  }
-
-  // User hat das Sheet aktiv abgebrochen.
-  if (result?.isCancelled) return null;
-
-  const tokenData = await AccessToken.getCurrentAccessToken();
-  if (!tokenData?.accessToken) {
-    throw new Error('Facebook Login failed — kein Access Token.');
-  }
-
-  const credential = FacebookAuthProvider.credential(tokenData.accessToken);
-
-  // Profil-Daten (best-effort — kann scheitern wenn der User Email
-  // oder Profile-Permissions nicht freigegeben hat).
-  let email: string | null = null;
-  let displayName: string | null = null;
-  let photoURL: string | null = null;
-  try {
-    const profile = await Profile?.getCurrentProfile?.();
-    if (profile) {
-      displayName = profile.name ?? null;
-      photoURL = profile.imageURL ?? null;
-      // Email ist im Profile-Objekt nicht enthalten — kommt nur via
-      // Graph-API mit dem Token. Wir machen das (optional) als
-      // Sekundär-Call. Wenn der User die Email-Permission verweigert
-      // hat, ist email einfach null und der AuthContext schreibt
-      // eben `null` ans User-Doc (ist OK).
-      try {
-        const res = await fetch(
-          `https://graph.facebook.com/v18.0/me?fields=email,name&access_token=${tokenData.accessToken}`,
-        );
-        if (res.ok) {
-          const json = await res.json();
-          if (typeof json?.email === 'string') email = json.email;
-          if (!displayName && typeof json?.name === 'string') displayName = json.name;
-        }
-      } catch {
-        // Network/permission-Fehler — bleibt halt null, ist robust.
-      }
-    }
-  } catch {
-    // Profile-API ist optional. Ignorieren.
-  }
-
-  return { credential, email, displayName, photoURL };
-};
-
-/** Sign out vom Facebook-SDK. Firebase-Sign-Out macht der AuthContext.
- *  No-op wenn das Native-Modul nicht geladen ist. */
 export const signOutFacebook = async (): Promise<void> => {
-  const fbsdk = loadFbsdk();
-  try {
-    fbsdk?.LoginManager?.logOut?.();
-  } catch (error: any) {
-    if (__DEV__) console.log('Facebook Sign-Out (ignored):', error?.message);
-  }
+  // No-op — kein SDK-Call (würde NSException werfen).
 };
