@@ -108,6 +108,29 @@ export default function HomeScreen() {
   // Layout-Shifts durch Ads etc. sind damit irrelevant.
   const homeCoachmark = useCoachmark('home');
 
+  // T15.1: Global-State ob IRGENDEIN Walkthrough in der App gerade
+  // aktiv ist. Wird vom CoachmarkService gepflegt — jeder
+  // Walkthrough-Component setActive(true/false) beim Mount/Unmount.
+  // Verwendet als zusätzliches Gate für das Demografie-Sheet damit
+  // es nicht parallel zu z.B. dem product-detail-Walkthrough öffnet
+  // wenn der Home-Walkthrough den User dorthin geführt hat.
+  const [anyWalkthroughActive, setAnyWalkthroughActive] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
+    (async () => {
+      const { CoachmarkService } = await import('@/lib/services/coachmarkService');
+      if (cancelled) return;
+      unsubscribe = CoachmarkService.onActivityChange((any) => {
+        setAnyWalkthroughActive(any);
+      });
+    })();
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, []);
+
   // Spielerische Inhalte-Toggle — wenn aus, blenden wir die Level-
   // Card aus. Cashback / Sparpotenzial / Neue Funde bleiben
   // sichtbar (echter App-Inhalt, nicht Spielelement).
@@ -284,18 +307,24 @@ export default function HomeScreen() {
   //      bereits beantwortet — auch nicht erneut zeigen).
   useEffect(() => {
     if (!user?.uid) return; // erst wenn auth ready
-    // T15 (ClickUp 86c9zmnym): Demografie-Sheet darf NICHT vor dem
-    // Home-Walkthrough kommen — sonst kollidiert "verrate uns mehr"
-    // mit "wie funktioniert die App?" und User sieht zwei Modals
-    // gleichzeitig oder nacheinander ohne Kontext.
+    // T15 (ClickUp 86c9zmnym) + T15.1: Demografie-Sheet erst zeigen
+    // wenn:
+    //   • der User aktuell wirklich auf Home schaut (isFocused) —
+    //     sonst poppt das Modal als globales Overlay über andere
+    //     Screens (z.B. wenn der Home-Walkthrough den User zum
+    //     Product-Detail geführt hat);
+    //   • KEIN Walkthrough in der App gerade aktiv ist
+    //     (anyWalkthroughActive) — schließt auch product-detail +
+    //     rewards mit ein, nicht nur home;
+    //   • der Home-Walkthrough bereits abgeschlossen wurde
+    //     (CoachmarkService.getSeen('home')) — kein Sheet bevor der
+    //     User die Basics gesehen hat.
     //
-    // Wenn der Walkthrough aktiv ist (homeCoachmark.visible) → warten.
-    // Wenn er noch nicht gesehen wurde (getSeen=false) → warten.
-    // Erst wenn er geschlossen ist (visible:false UND seen:true) →
-    // Demografie-Sheet anbieten.
-    //
-    // Die Dependency auf homeCoachmark.visible sorgt dafür dass dieser
-    // Effect re-läuft wenn der Walkthrough geschlossen wird.
+    // Re-Triggern via Dependencies: jedes Mal wenn isFocused oder
+    // anyWalkthroughActive oder homeCoachmark.visible flippt, wird
+    // hier neu evaluiert.
+    if (!isFocused) return;
+    if (anyWalkthroughActive) return;
     if (homeCoachmark.visible) return;
     let cancelled = false;
     (async () => {
@@ -340,7 +369,7 @@ export default function HomeScreen() {
       }
     })();
     return () => { cancelled = true; };
-  }, [user?.uid, homeCoachmark.visible]);
+  }, [user?.uid, homeCoachmark.visible, isFocused, anyWalkthroughActive]);
 
   const handleDemographicsSubmit = useCallback(async (result: DemographicsResult) => {
     setShowDemographicsSheet(false);
