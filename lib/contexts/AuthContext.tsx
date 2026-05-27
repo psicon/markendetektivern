@@ -399,11 +399,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     credential: FirebaseAuthTypes.AuthCredential,
   ): Promise<FirebaseAuthTypes.UserCredential> => {
     const currentUser = auth.currentUser;
+    // Helper: "credential already attached to a different user"
+    // canonical signal in Firebase iOS is `auth/credential-already-in-use`.
+    // BUT RNFirebase on iOS occasionally surfaces it as
+    // `auth/unknown` with the server-message containing "Duplicate
+    // credential" (we have a repro of this with Apple). Treat both
+    // identically — drop anonymous, sign in to the existing account.
+    const isCredentialAlreadyInUse = (e: any): boolean => {
+      if (e?.code === 'auth/credential-already-in-use') return true;
+      const msg = String(e?.message ?? '').toLowerCase();
+      if (e?.code === 'auth/unknown' && msg.includes('duplicate')) return true;
+      return false;
+    };
+
     if (currentUser?.isAnonymous) {
       try {
         return await linkWithCredential(currentUser, credential);
       } catch (e: any) {
-        if (e?.code === 'auth/credential-already-in-use') {
+        if (isCredentialAlreadyInUse(e)) {
           const confirmed = await confirmAccountSwitch();
           if (!confirmed) {
             const err: any = new Error('Anmeldung abgebrochen');
@@ -416,7 +429,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw e;
       }
     }
-    return await signInWithCredential(auth, credential);
+    // Non-anonymous user → straight sign-in. Still treat the same
+    // "duplicate credential" oddity gracefully: it means the user
+    // tapped re-login with the same provider — Firebase rejects but
+    // a fresh sign-in attempt one tick later usually works.
+    try {
+      return await signInWithCredential(auth, credential);
+    } catch (e: any) {
+      if (isCredentialAlreadyInUse(e)) {
+        // Same provider already on this user — that's actually a
+        // successful state from the UX angle. Return the current user.
+        if (auth.currentUser) {
+          // Construct a UserCredential-shaped wrapper. RNFirebase doesn't
+          // export a public way to build one, so we cast a minimal object.
+          return {
+            user: auth.currentUser,
+            additionalUserInfo: null,
+            credential: null,
+          } as unknown as FirebaseAuthTypes.UserCredential;
+        }
+      }
+      throw e;
+    }
   };
 
   const signIn = async (email: string, password: string) => {
