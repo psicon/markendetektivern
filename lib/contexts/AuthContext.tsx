@@ -612,7 +612,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return;
       if (__DEV__) {
-        console.error('Facebook Sign-In error:', error);
+        // T17.2: FB_SDK_UNAVAILABLE (Sim/Expo Go ohne Native-Modul)
+        // ist ein erwarteter Fall — als warn loggen statt error
+        // damit das rote Dev-Overlay nicht aufpoppt.
+        if (error?.code === 'auth/facebook-sdk-unavailable') {
+          console.warn('Facebook Sign-In skipped (SDK unavailable on this build):', error?.message);
+        } else {
+          console.error('Facebook Sign-In error:', error);
+        }
       }
       throw error;
     }

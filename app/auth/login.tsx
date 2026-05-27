@@ -212,7 +212,12 @@ export default function LoginScreen() {
       router.replace('/(tabs)');
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return;
-      console.error('Facebook Sign-In error:', error);
+      // T17.2: FB-SDK-Unavailable (Sim) als warn, nicht error.
+      if (error?.code === 'auth/facebook-sdk-unavailable') {
+        console.warn('[Login] Facebook SDK unavailable:', error?.message);
+      } else {
+        console.error('Facebook Sign-In error:', error);
+      }
       showRetryableErrorToast(
         `Facebook-Anmeldung fehlgeschlagen: ${error.message || 'Bitte erneut versuchen.'}`,
         () => {

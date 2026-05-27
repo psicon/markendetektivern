@@ -123,7 +123,13 @@ export default function WelcomeScreen() {
       await completeAndGoHome();
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return;
-      console.error('Facebook Sign-In error:', error);
+      // T17.2: SDK-Unavailable (Sim/alter Build) → warn statt error,
+      // sonst rotes Dev-Overlay für einen erwarteten Fall.
+      if (error?.code === 'auth/facebook-sdk-unavailable') {
+        console.warn('[Welcome] Facebook SDK unavailable:', error?.message);
+      } else {
+        console.error('Facebook Sign-In error:', error);
+      }
       showInfoToast(
         error?.message || 'Facebook-Anmeldung fehlgeschlagen.',
         'error',

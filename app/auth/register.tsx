@@ -215,7 +215,12 @@ export default function RegisterScreen() {
       await completeAndGoHome();
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return;
-      console.error('Facebook Sign-In error:', error);
+      // T17.2: FB-SDK-Unavailable (Sim) als warn, nicht error.
+      if (error?.code === 'auth/facebook-sdk-unavailable') {
+        console.warn('[Register] Facebook SDK unavailable:', error?.message);
+      } else {
+        console.error('Facebook Sign-In error:', error);
+      }
       showInfoToast(error?.message || 'Facebook-Anmeldung fehlgeschlagen.', 'error', colorScheme ?? 'light');
     } finally {
       setAuthInFlight(false);
