@@ -126,19 +126,30 @@ export class AttributionService {
    * Campaign-ID + Source.
    */
   private static async captureIos(): Promise<AttributionData | null> {
+    // T17.10: `require('react-native-apple-ads-attribution')` wirft auf
+    // Hermes-Production-Bundles 'Requiring unknown module "2550"',
+    // weil die Lib nicht installiert ist und Metro den missing-module-
+    // Eintrag im Bundle nicht durch unser try/catch fangen lässt
+    // (Metro resolved statisch, der Throw kommt aus dem Module-Loader
+    // bevor JS-Code drum greifen kann). Resultat war: unhandled JS
+    // exception → terminate → App-Crash beim Boot des AnalyticsProviders.
+    //
+    // Da die Lib aktuell nicht in package.json steht, hat die
+    // Attribution-Funktion sowieso nichts zu tun. Wir geben null
+    // zurück und überspringen den Apple-AdServices-Pfad komplett.
+    // Wenn wir Apple Search Ads Attribution später wirklich brauchen,
+    // installieren wir `react-native-apple-ads-attribution` UND
+    // reaktivieren den unten auskommentierten Block.
+    return null;
+
+    /* Re-enable when the lib is installed:
     try {
-      // Conditional require — wenn Lib nicht installiert: gracefully null.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const mod = require('react-native-apple-ads-attribution');
       const attr = mod?.AppleAdsAttribution ?? mod?.default ?? mod;
       if (!attr?.getAppleAttributionData) return null;
-
       const payload = await attr.getAppleAttributionData();
       if (!payload) return null;
-
-      // Apple-Payload-Shape (vereinfacht):
-      // { attribution: boolean, orgId, campaignId, conversionType,
-      //   adGroupId, countryOrRegion, keywordId, adId }
       return {
         source: payload.attribution ? 'apple_search_ads' : 'app_store_organic',
         campaign: payload.campaignId ? String(payload.campaignId) : undefined,
@@ -149,11 +160,10 @@ export class AttributionService {
         capturedAt: Date.now(),
       };
     } catch (err) {
-      // Lib nicht installiert ODER User hat ATT-Prompt abgelehnt
-      // ODER Apple-Server liefert leeren Response — alles non-fatal.
       if (__DEV__) console.log('[AttributionService] iOS capture skipped:', (err as any)?.message);
       return null;
     }
+    */
   }
 
   /**
@@ -165,23 +175,26 @@ export class AttributionService {
    * UTM-getaggter Web-Link).
    */
   private static async captureAndroid(): Promise<AttributionData | null> {
+    // T17.10: gleicher Hermes-/Metro-Issue wie captureIos —
+    // require('react-native-play-install-referrer') wirft
+    // 'Requiring unknown module' weil Lib nicht installiert ist und
+    // Metro den Throw nicht durchs try/catch durchlässt. No-op bis
+    // wir die Lib wirklich brauchen + installieren.
+    return null;
+
+    /* Re-enable when the lib is installed:
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const mod = require('react-native-play-install-referrer');
       const ref = mod?.PlayInstallReferrer ?? mod?.default ?? mod;
       if (!ref?.getInstallReferrerInfo) return null;
-
       const payload: { installReferrer?: string } = await new Promise((resolve, reject) => {
         ref.getInstallReferrerInfo((info: any, error: any) => {
           if (error) reject(error);
           else resolve(info);
         });
       });
-
       if (!payload?.installReferrer) return null;
-
-      // Referrer-String ist URL-encoded utm_*-Parameter:
-      // "utm_source=google-play&utm_medium=organic" o.ä.
       const utm = parseUtmString(payload.installReferrer);
       return {
         source: utm.utm_source ?? 'google_play_organic',
@@ -198,6 +211,7 @@ export class AttributionService {
       if (__DEV__) console.log('[AttributionService] Android capture skipped:', (err as any)?.message);
       return null;
     }
+    */
   }
 
   /** Schreibt Attribution-Daten ans users/{uid}-Doc. Merge, damit

@@ -29,14 +29,15 @@ public class AppDelegate: ExpoAppDelegate {
 FirebaseApp.configure()
 // @generated end @react-native-firebase/app-didFinishLaunchingWithOptions
 
-    // Facebook SDK initialization — MUST run before super.application's
-    // UIApplicationDidFinishLaunchingNotification fires the FB SDK's
-    // own observers. Without this the SDK ends up half-initialized and
-    // throws on the first internal call (Build 1175 boot crash).
-    ApplicationDelegate.shared.application(
-      application,
-      didFinishLaunchingWithOptions: launchOptions
-    )
+    // T17.9 — Facebook SDK is NOT initialized at app launch anymore.
+    // The previous comment claimed boot-init was required to prevent
+    // a "half-initialized" crash; in reality the boot-init call itself
+    // was the SIGABRT source on iOS 26.1 + RN New Arch (every build
+    // 1173–1178 died here). FB-SDK is now initialized lazily from JS
+    // (lib/services/auth/facebookAuth.ts → Settings.initializeSDK())
+    // the first time the user taps the FB login button. The `open url`
+    // handler below stays — it processes the OAuth redirect, and by
+    // that point the SDK has been initialized from JS.
 
     factory.startReactNative(
       withModuleName: "main",

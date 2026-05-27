@@ -1,8 +1,8 @@
 diff --git a/node_modules/react-native-fbsdk-next/ios/ExpoAdapterFBSDKNext/FacebookAppDelegate.swift b/node_modules/react-native-fbsdk-next/ios/ExpoAdapterFBSDKNext/FacebookAppDelegate.swift
-index 17f4c2e..099aa6b 100644
+index 17f4c2e..a275c04 100644
 --- a/node_modules/react-native-fbsdk-next/ios/ExpoAdapterFBSDKNext/FacebookAppDelegate.swift
 +++ b/node_modules/react-native-fbsdk-next/ios/ExpoAdapterFBSDKNext/FacebookAppDelegate.swift
-@@ -2,15 +2,40 @@ import ExpoModulesCore
+@@ -2,20 +2,50 @@ import ExpoModulesCore
  import FBSDKCoreKit
  
  public class FacebookAppDelegate: ExpoAppDelegateSubscriber {
@@ -21,6 +21,12 @@ index 17f4c2e..099aa6b 100644
 +  // TestFlight build from 1173 onward crashed at launch with
 +  // `objc_exception_rethrow` through `performVoidMethodInvocation`,
 +  // no readable Last-Exception backtrace.
++  //
++  // Additionally the upstream `open(url:)` handler used the OBSOLETE
++  // FBSDK API `application(_:open:sourceApplication:annotation:)`,
++  // which no longer compiles against current FBSDKCoreKit (it expects
++  // the `application(_:open:options:)` signature). Both bugs in one
++  // file. We rewrite using the current API.
 +  //
 +  // Instead, we initialize the SDK lazily from JS the first time the
 +  // user actually taps the Facebook login button — see
@@ -49,3 +55,9 @@ index 17f4c2e..099aa6b 100644
      return ApplicationDelegate.shared.application(
        application,
        open: url,
+-      sourceApplication: options[UIApplication.OpenURLOptionsKey.sourceApplication] as? String,
+-      annotation: options[UIApplication.OpenURLOptionsKey.annotation]
++      options: options
+     )
+   }
+ }

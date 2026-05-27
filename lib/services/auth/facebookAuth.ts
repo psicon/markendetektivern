@@ -122,7 +122,7 @@ export const getFacebookCredential = async (): Promise<FacebookCredentialBundle 
     err.code = FB_SDK_UNAVAILABLE;
     throw err;
   }
-  const { LoginManager, AccessToken, Profile } = fbsdk;
+  const { LoginManager, AccessToken, Profile, Settings } = fbsdk;
 
   if (!LoginManager) {
     const err: any = new Error(
@@ -132,6 +132,41 @@ export const getFacebookCredential = async (): Promise<FacebookCredentialBundle 
     throw err;
   }
 
+  // T17.8: ATT-Permission anfragen damit FB-Native-App geöffnet wird
+  // statt der limited.facebook.com Web-Fallback. iOS' App-Tracking-
+  // Transparency entscheidet:
+  //   • granted (User tippt "Allow") → tracking erlaubt → FB-SDK öffnet
+  //     die native FB-App via `fbauth2://` URL-Scheme. Schöne UX, kein
+  //     Browser-Sheet.
+  //   • denied/restricted/unknown → Limited Login → öffnet
+  //     `limited.facebook.com` im ASWebAuthenticationSession. Login
+  //     funktioniert immer noch, nur ohne native App.
+  // Wenn `requestTrackingPermissionsAsync` fehlschlägt (z.B. Sim ohne
+  // ATT-Dialog), fallen wir sauber auf Limited zurück.
+  let loginTracking: 'enabled' | 'limited' = 'limited';
+  try {
+    const { requestTrackingPermissionsAsync, getTrackingPermissionsAsync } =
+      require('expo-tracking-transparency');
+    const existing = await getTrackingPermissionsAsync();
+    let status = existing?.status;
+    if (status === 'undetermined') {
+      const result = await requestTrackingPermissionsAsync();
+      status = result?.status;
+    }
+    if (status === 'granted') {
+      loginTracking = 'enabled';
+      // FB-SDK Tracking-Flags mit dem ATT-Status synchronisieren —
+      // sonst weiß die SDK nicht dass sie native App-Flow nutzen darf.
+      try {
+        await Settings?.setAdvertiserTrackingEnabled?.(true);
+        Settings?.setAdvertiserIDCollectionEnabled?.(true);
+      } catch {}
+    }
+  } catch (attErr: any) {
+    if (__DEV__) console.warn('[facebookAuth] ATT request failed:', attErr?.message);
+    // Bleibt 'limited' → Login funktioniert via Web-Fallback.
+  }
+
   // Vorsichtshalber abmelden bevor wir das Sheet öffnen, damit
   // gestrandete Tokens (z.B. aus Anon-Phase) keinen alten Account
   // angeben.
@@ -139,7 +174,10 @@ export const getFacebookCredential = async (): Promise<FacebookCredentialBundle 
 
   let result: any;
   try {
-    result = await LoginManager.logInWithPermissions(['email', 'public_profile']);
+    result = await LoginManager.logInWithPermissions(
+      ['email', 'public_profile'],
+      loginTracking,
+    );
   } catch (error: any) {
     if (error?.message?.toLowerCase().includes('cancel')) return null;
     throw error;
