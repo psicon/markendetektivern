@@ -10,16 +10,20 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { fetchSignInMethodsForEmail } from '@react-native-firebase/auth';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   ImageBackground,
+  Keyboard,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -30,8 +34,11 @@ import { CustomIcon } from '@/components/ui/CustomIcon';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { auth as firebaseAuth } from '@/lib/firebase';
 import { OnboardingService } from '@/lib/services/onboardingService';
 import { showInfoToast } from '@/lib/services/ui/toast';
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function WelcomeScreen() {
   const router = useRouter();
@@ -48,6 +55,12 @@ export default function WelcomeScreen() {
   const [imageLoaded, setImageLoaded] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
   const [authInFlight, setAuthInFlight] = useState(false);
+
+  // T14.1: Identifier-First-Flow direkt auf Welcome (statt vorher
+  // Zwischen-Hub mit "Mit E-Mail registrieren"-Button).
+  const [email, setEmail] = useState('');
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [checkingEmail, setCheckingEmail] = useState(false);
 
   const { signInWithGoogle, signInWithApple, signInWithFacebook, signInAnonymously: signInAnon } = useAuth();
 
@@ -121,11 +134,79 @@ export default function WelcomeScreen() {
     }
   };
 
-  const handleEmail = () => {
-    // Email-Pfad geht zu Register-Form. Von dort gibt's wieder einen
-    // Link "Schon dabei? Einloggen" wenn der User merkt dass er
-    // doch schon ein Konto hat.
-    router.push({ pathname: '/auth/register', params: { from: 'welcome' } } as any);
+  // T14.1: Identifier-First Continue-Handler.
+  // Validiert Email, prüft optimistisch ob die Email schon existiert,
+  // routet entsprechend zu Login oder Email-Register. Identisch zu
+  // register.tsx — Welcome ist jetzt der Entry-Point.
+  const handleContinue = async () => {
+    Keyboard.dismiss();
+    const trimmed = email.trim().toLowerCase();
+
+    if (!trimmed) {
+      setEmailError('Bitte E-Mail-Adresse eingeben.');
+      return;
+    }
+    if (!EMAIL_REGEX.test(trimmed)) {
+      setEmailError('Bitte eine gültige E-Mail-Adresse eingeben.');
+      return;
+    }
+    setEmailError(null);
+    setCheckingEmail(true);
+
+    try {
+      let methods: string[] = [];
+      try {
+        methods = await fetchSignInMethodsForEmail(firebaseAuth, trimmed);
+      } catch (e) {
+        if (__DEV__) console.warn('[Welcome] fetchSignInMethods failed:', e);
+      }
+
+      if (methods.includes('password')) {
+        showInfoToast(
+          'Du hast schon einen Account — bitte einloggen.',
+          'info',
+          colorScheme ?? 'light',
+        );
+        router.push({ pathname: '/auth/login', params: { email: trimmed } } as any);
+        return;
+      }
+      if (methods.includes('google.com')) {
+        showInfoToast(
+          'Dieser Account ist mit Google verbunden — bitte mit Google anmelden.',
+          'info',
+          colorScheme ?? 'light',
+        );
+        await handleGoogle();
+        return;
+      }
+      if (methods.includes('apple.com')) {
+        showInfoToast(
+          'Dieser Account ist mit Apple verbunden — bitte mit Apple anmelden.',
+          'info',
+          colorScheme ?? 'light',
+        );
+        await handleApple();
+        return;
+      }
+      if (methods.includes('facebook.com')) {
+        showInfoToast(
+          'Dieser Account ist mit Facebook verbunden — bitte mit Facebook anmelden.',
+          'info',
+          colorScheme ?? 'light',
+        );
+        await handleFacebook();
+        return;
+      }
+
+      // Keine bekannte Methode → neuer Account, weiter zur Form mit
+      // prefilled Email.
+      router.push({
+        pathname: '/auth/email-register',
+        params: { email: trimmed },
+      } as any);
+    } finally {
+      setCheckingEmail(false);
+    }
   };
 
   const handleGuest = async () => {
@@ -215,13 +296,62 @@ export default function WelcomeScreen() {
           <View style={styles.bottomBlock}>
             <Text style={styles.bottomHeadline}>Jetzt kostenlos starten</Text>
 
+            {/* T14.1: Identifier-First — Email-Feld + Weiter-CTA direkt
+                hier (vorher Zwischen-Hub mit "Mit E-Mail registrieren"-
+                Button, der nur auf /auth/register-Screen lenkte → war
+                ein Klick zu viel). */}
+            <View style={styles.emailInputWrapper}>
+              <TextInput
+                style={[styles.emailInput, emailError && styles.emailInputError]}
+                placeholder="E-Mail-Adresse"
+                placeholderTextColor="rgba(0,0,0,0.4)"
+                value={email}
+                onChangeText={(t) => {
+                  setEmail(t);
+                  if (emailError) setEmailError(null);
+                }}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="email"
+                returnKeyType="next"
+                onSubmitEditing={handleContinue}
+                editable={!authInFlight && !checkingEmail}
+              />
+              {emailError && (
+                <Text style={styles.errorText}>{emailError}</Text>
+              )}
+            </View>
+
+            <Pressable
+              onPress={handleContinue}
+              disabled={authInFlight || checkingEmail}
+              style={({ pressed }) => [
+                styles.continueButton,
+                (pressed || authInFlight || checkingEmail) && styles.continueButtonPressed,
+              ]}
+            >
+              {checkingEmail ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.continueButtonText}>Weiter</Text>
+              )}
+            </Pressable>
+
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>oder</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
             <AuthMethodButtons
               mode="register"
               onApple={handleApple}
               onGoogle={handleGoogle}
               onFacebook={handleFacebook}
-              onEmail={handleEmail}
-              busy={authInFlight}
+              showEmailButton={false}
+              showAllProviders
+              busy={authInFlight || checkingEmail}
               colorScheme={colorScheme}
             />
 
@@ -331,5 +461,65 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_500Medium',
     color: 'rgba(255,255,255,0.6)',
     textDecorationLine: 'underline',
+  },
+  // T14.1: Identifier-First Styles (analog zu register.tsx).
+  emailInputWrapper: {
+    width: '100%',
+  },
+  emailInput: {
+    width: '100%',
+    height: 52,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    fontFamily: 'Nunito_500Medium',
+    color: '#1c1c1e',
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.08)',
+  },
+  emailInputError: {
+    borderColor: '#FF5252',
+    borderWidth: 1.5,
+  },
+  errorText: {
+    fontSize: 13,
+    fontFamily: 'Nunito_500Medium',
+    color: '#FFB4B4',
+    marginTop: 6,
+    marginLeft: 4,
+  },
+  continueButton: {
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: Colors.light.tint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  continueButtonPressed: {
+    opacity: 0.85,
+  },
+  continueButtonText: {
+    fontSize: 16,
+    fontFamily: 'Nunito_700Bold',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginVertical: 4,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+  },
+  dividerText: {
+    fontSize: 12,
+    fontFamily: 'Nunito_500Medium',
+    color: 'rgba(255,255,255,0.7)',
+    letterSpacing: 0.2,
   },
 });

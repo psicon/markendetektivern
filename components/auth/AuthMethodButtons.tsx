@@ -168,7 +168,10 @@ export function AuthMethodButtons({
 function createStyles(_colorScheme: 'light' | 'dark' | null | undefined) {
   return StyleSheet.create({
     container: {
-      gap: 10,
+      // T14.3: gap 12 matched den Rhythmus des actionBlock-Containers
+      // in register.tsx / welcome.tsx — vorher 10 vs 12 wirkte optisch
+      // unterschiedlich.
+      gap: 12,
     },
     btnBase: {
       flexDirection: 'row',

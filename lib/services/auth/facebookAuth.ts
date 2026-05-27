@@ -26,25 +26,44 @@ export interface FacebookCredentialBundle {
 }
 
 /**
+ * Lädt das FB-SDK in einem try/catch — bei fehlendem Native-Modul
+ * (Expo Go, alter Build vor T13.x ohne FB-Plugin) crasht das Modul-
+ * Load intern (`new NativeEventEmitter()` requires non-null arg).
+ * Wir fangen das hier sauber ab.
+ */
+function loadFbsdk(): any | null {
+  try {
+    return require('react-native-fbsdk-next');
+  } catch (error: any) {
+    if (__DEV__) {
+      console.warn('[facebookAuth] react-native-fbsdk-next not loadable:', error?.message);
+    }
+    return null;
+  }
+}
+
+/**
  * Check ob das Facebook-SDK auf dem aktuellen Build verfügbar ist.
  * Wird in einer Build-Variante ohne FB-Native-Modul (z.B. Expo Go,
  * alter EAS-Build) sauber false returnen, statt zu crashen.
  */
 export const isFacebookAuthAvailable = async (): Promise<boolean> => {
-  try {
-    const fbsdk = require('react-native-fbsdk-next');
-    return Boolean(fbsdk?.LoginManager);
-  } catch (error: any) {
-    console.log('📱 Facebook Auth check error:', error?.message);
-    return false;
-  }
+  const fbsdk = loadFbsdk();
+  return Boolean(fbsdk?.LoginManager);
 };
+
+/** Fehler-Code den der Caller (AuthContext) mit `error.code` checken
+ *  kann um sauber einen "bitte Build aktualisieren"-Toast anzuzeigen
+ *  statt einer kryptischen NativeEventEmitter-Meldung. */
+export const FB_SDK_UNAVAILABLE = 'auth/facebook-sdk-unavailable';
 
 /**
  * Hole eine Firebase AuthCredential + Profil-Daten von Facebook.
  *
  * Macht KEINEN Firebase-Sign-In — das macht der AuthContext.
  * Returns null bei User-Cancel.
+ * Throws Error mit code=FB_SDK_UNAVAILABLE wenn das Native-Modul
+ * nicht geladen ist (alter Build oder Expo Go).
  *
  * Hinweis Apple App-Tracking: das FB-SDK initialisiert sich
  * mit `advertiserIDCollectionEnabled: false` + `autoLogAppEvents:
@@ -52,11 +71,22 @@ export const isFacebookAuthAvailable = async (): Promise<boolean> => {
  * automatisch. Login ist ein User-initiierter Akt.
  */
 export const getFacebookCredential = async (): Promise<FacebookCredentialBundle | null> => {
-  const fbsdk = require('react-native-fbsdk-next');
+  const fbsdk = loadFbsdk();
+  if (!fbsdk) {
+    const err: any = new Error(
+      'Facebook-Login ist in diesem Build noch nicht aktiv — bitte App-Update abwarten.',
+    );
+    err.code = FB_SDK_UNAVAILABLE;
+    throw err;
+  }
   const { LoginManager, AccessToken, Profile } = fbsdk;
 
   if (!LoginManager) {
-    throw new Error('Facebook SDK not available — needs EAS-Build with react-native-fbsdk-next.');
+    const err: any = new Error(
+      'Facebook-Login ist in diesem Build noch nicht aktiv — bitte App-Update abwarten.',
+    );
+    err.code = FB_SDK_UNAVAILABLE;
+    throw err;
   }
 
   // Vorsichtshalber abmelden bevor wir das Sheet öffnen, damit
@@ -117,12 +147,13 @@ export const getFacebookCredential = async (): Promise<FacebookCredentialBundle 
   return { credential, email, displayName, photoURL };
 };
 
-/** Sign out vom Facebook-SDK. Firebase-Sign-Out macht der AuthContext. */
+/** Sign out vom Facebook-SDK. Firebase-Sign-Out macht der AuthContext.
+ *  No-op wenn das Native-Modul nicht geladen ist. */
 export const signOutFacebook = async (): Promise<void> => {
+  const fbsdk = loadFbsdk();
   try {
-    const { LoginManager } = require('react-native-fbsdk-next');
-    LoginManager?.logOut?.();
+    fbsdk?.LoginManager?.logOut?.();
   } catch (error: any) {
-    console.log('Facebook Sign-Out (ignored):', error?.message);
+    if (__DEV__) console.log('Facebook Sign-Out (ignored):', error?.message);
   }
 };
