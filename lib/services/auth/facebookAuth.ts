@@ -48,9 +48,35 @@ export interface FacebookCredentialBundle {
  * production-Build ist die native bridge aber da — TurboModule-
  * Wrapper liefert ein gültiges Objekt an NativeEventEmitter.
  */
+let isFbsdkInitialized = false;
+
 function loadFbsdk(): any | null {
   try {
-    return require('react-native-fbsdk-next');
+    const fbsdk = require('react-native-fbsdk-next');
+    // T17.5: Auto-Init beim App-Launch ist in Info.plist abgeschaltet
+    // (`FacebookAutoInitEnabled = NO`). Wir initialisieren erst hier
+    // lazy, wenn der User aktiv auf den FB-Login tippt — so kann ein
+    // SDK-internal-throw nicht mehr den App-Start abreißen. Wenn die
+    // Init fehlt (z.B. weil das Modul lazy in einer Expo-Go-Variante
+    // läuft), throwt LoginManager unten freundlich; das catchen wir
+    // mit FB_SDK_UNAVAILABLE-Toast.
+    if (!isFbsdkInitialized && fbsdk?.Settings?.initializeSDK) {
+      try {
+        // Privacy-by-default: Ad-ID + Auto-Events vor Init explizit aus.
+        fbsdk.Settings.setAdvertiserTrackingEnabled?.(false);
+        fbsdk.Settings.setAutoLogAppEventsEnabled?.(false);
+        fbsdk.Settings.setAdvertiserIDCollectionEnabled?.(false);
+        fbsdk.Settings.initializeSDK();
+        isFbsdkInitialized = true;
+        if (__DEV__) console.log('[facebookAuth] FB-SDK lazy-initialized');
+      } catch (initErr: any) {
+        console.warn('[facebookAuth] FB-SDK initializeSDK threw:', initErr?.message ?? initErr);
+        // Nicht re-throwen — fbsdk-Objekt zurückgeben, LoginManager
+        // wird beim Tap dann ein normales Fehler-Pattern werfen das wir
+        // im äußeren catch abfangen.
+      }
+    }
+    return fbsdk;
   } catch (error: any) {
     if (__DEV__) {
       console.warn('[facebookAuth] react-native-fbsdk-next not loadable:', error?.message);

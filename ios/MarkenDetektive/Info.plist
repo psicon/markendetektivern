@@ -53,13 +53,15 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>1173</string>
+    <string>1176</string>
     <key>FacebookAppID</key>
     <string>175787714806270</string>
     <key>FacebookClientToken</key>
     <string>d9af024703776b9b46864bcf0c721840</string>
     <key>FacebookDisplayName</key>
     <string>MarkenDetektive</string>
+    <key>FacebookAutoInitEnabled</key>
+    <false/>
     <key>FacebookAutoLogAppEventsEnabled</key>
     <false/>
     <key>FacebookAdvertiserIDCollectionEnabled</key>

@@ -27,7 +27,7 @@
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "1172",
+      "buildNumber": "1176",
       "appleTeamId": "MZD2N2F887",
       "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true,
@@ -122,7 +122,7 @@
           "scheme": "fb175787714806270",
           "advertiserIDCollectionEnabled": false,
           "autoLogAppEventsEnabled": false,
-          "isAutoInitEnabled": true,
+          "isAutoInitEnabled": false,
           "iosUserTrackingPermission": "Diese App verwendet deine Daten ausschließlich um deinen Login mit Facebook zu ermöglichen."
         }
       ]
