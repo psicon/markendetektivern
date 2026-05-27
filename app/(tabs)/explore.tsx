@@ -3499,14 +3499,12 @@ export default function ExploreScreen() {
               ...kategorien.map(
                 (c) => {
                   const base = (c as any).bezeichnung ?? (c as any).name ?? '';
-                  // T16: Age-Lock zeigt "🔒 ab 16" als spezifischen
-                  // Hinweis (statt nur generischem 🔒). Level-Locks
-                  // sind nach T16 abgeschafft, aber falls eine Kategorie
-                  // doch noch via getsFreeAtLevel locked wäre, würden
-                  // wir hier nur generisches Schloss zeigen.
-                  if ((c as any).isLockedByAge) {
-                    return [c.id, `${base}  🔒 ab 16`] as const;
-                  }
+                  // T16.2: Bewusst KEIN konkreter "ab 16"-Hinweis —
+                  // sonst kann der User die Schwelle gezielt umlügen.
+                  // Stattdessen 🔒 als Lock-Indikator. Beim Tap öffnet
+                  // das Demografie-Sheet das die Mechanik erklärt
+                  // ("Verrate uns dein Alter um die Kategorie Alkohol
+                  // freizuschalten").
                   if ((c as any).isLocked) {
                     return [c.id, `${base} 🔒`] as const;
                   }
