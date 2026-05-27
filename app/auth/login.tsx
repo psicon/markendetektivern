@@ -21,9 +21,7 @@ import {
     Animated,
     Dimensions,
     ImageBackground,
-    KeyboardAvoidingView,
     Platform,
-    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -251,7 +249,13 @@ export default function LoginScreen() {
           'rgba(0, 0, 0, 0.9)',
         ]}
         locations={[0, 0.7, 1]}
-        style={[styles.overlay, { paddingTop: insets.top + 56, paddingBottom: insets.bottom + 20 }]}
+        style={[
+          styles.overlay,
+          {
+            paddingTop: insets.top + 56,
+            paddingBottom: insets.bottom + 16,
+          },
+        ]}
       >
         {/* Back Button — design-system arrow-left in a 40×40 round
             translucent-white pill (matches the rest of the app
@@ -264,22 +268,10 @@ export default function LoginScreen() {
           <MaterialCommunityIcons name="arrow-left" size={22} color="white" />
         </TouchableOpacity>
 
-        {/* T14.6: Login-Content jetzt scrollbar damit auf kleineren
-            Devices (oder bei großen Schriftgrößen) der Cross-Link
-            ganz unten erreichbar bleibt. Auf großen Devices entsteht
-            kein Scroll weil contentContainerStyle.flexGrow:1 dafür
-            sorgt dass der Container mindestens die Viewport-Höhe
-            ausfüllt — passt der Inhalt rein, kein Scroll. */}
-        <KeyboardAvoidingView
-          style={styles.keyboardView}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <ScrollView
-            style={styles.scrollView}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
+        {/* T14.7: ScrollView raus — echtes responsives Layout via
+            compact-Mode auf kleinen Devices. Alle Heights/Margins
+            schrumpfen proportional damit der Content auf jeder
+            Bildschirmgröße ohne Scroll passt. */}
         <View style={[styles.logoBlock, isSmallDevice && styles.logoBlockSmall]}>
           <CustomIcon
             name="iconBlack"
@@ -397,8 +389,6 @@ export default function LoginScreen() {
             </View>
           </View>
         </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
       </LinearGradient>
       </Animated.View>
     </View>
@@ -421,24 +411,20 @@ const styles = StyleSheet.create({
   imageContainer: {
     flex: 1,
   },
+  // T14.7: Two-Block-Layout — Branding oben, Action unten via
+  // justifyContent:'space-between'. Identisch zu welcome.tsx und
+  // register.tsx → konsistentes Verhalten auf allen Screens.
+  // Auf großen iPhones entsteht natürlicher Atemraum dazwischen,
+  // auf kleinen schrumpft der Gap ohne dass Content abgeschnitten
+  // wird (Branding hat marginTop fix, Action floatet unten).
   overlay: {
     flex: 1,
     paddingHorizontal: 24,
+    justifyContent: 'space-between',
   },
-  // T14.6: KeyboardAvoidingView + ScrollView damit der Content auf
-  // kleineren Devices oder größeren Schriftgrößen scrollen kann.
-  // flexGrow:1 sorgt dafür dass die ScrollView mindestens die
-  // Viewport-Höhe einnimmt — auf großen Devices = kein Scroll nötig.
-  keyboardView: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingBottom: 24,
-  },
+  // T14.7: ScrollView-Styles entfernt — Login ist jetzt nativ
+  // responsiv via compact-Mode + straffe Margins/Heights statt
+  // Scrolling als Workaround.
   backButton: {
     position: 'absolute',
     top: 60,
@@ -479,17 +465,16 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_500Medium',
     color: 'white',
   },
-  // T10 v8: gleiche Top-Position wie register.tsx — Logo wandert
-  // nicht beim Page-Wechsel.
+  // T14.7: Branding-Block oben — Logo + Brand + Title als Einheit.
+  // Identisch zu register.tsx und welcome.tsx. Margin nur oben (Top),
+  // unten frei damit space-between im overlay den Rest verteilt.
   logoBlock: {
     alignItems: 'center',
     marginTop: 32,
-    marginBottom: 20,
     gap: 4,
   },
   logoBlockSmall: {
     marginTop: 20,
-    marginBottom: 14,
     gap: 2,
   },
   logoIcon: {
@@ -502,33 +487,38 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     letterSpacing: -0.1,
   },
+  // T14.7: content ohne flex:1 damit es seine natürliche Höhe nimmt
+  // und der Eltern-Container (overlay mit justifyContent:'space-between')
+  // den Block ans untere Ende der verbleibenden Höhe schiebt.
   content: {
-    flex: 1,
-    justifyContent: 'flex-start',
+    width: '100%',
     alignItems: 'center',
   },
-  // T10 v5: Title-Clip-Fix — großer lineHeight + paddingVertical.
+  // T14.7: Subtitle in normaler Größe — auf isSmallDevice via
+  // subTitleSmall kleiner. Identische Größen wie register.tsx.
   subTitle: {
-    fontSize: 28,
-    lineHeight: 40,
+    fontSize: 26,
+    lineHeight: 38,
     paddingVertical: 4,
     fontFamily: 'Nunito_700Bold',
     color: '#fff',
     textAlign: 'center',
-    letterSpacing: -0.1,
+    letterSpacing: -0.2,
+    marginTop: 6,
   },
   authButtons: {
     width: '100%',
     alignItems: 'center',
   },
+  // T14.7: Form-Container straffer — marginBottom 20→8, gap 16→10.
   formContainer: {
     width: '100%',
-    marginBottom: 20,
-    gap: 16,
+    marginBottom: 8,
+    gap: 10,
   },
   formContainerSmall: {
-    marginBottom: 12,
-    gap: 12,
+    marginBottom: 6,
+    gap: 8,
   },
   inputContainer: {
     width: '100%',
@@ -539,7 +529,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,0,0,0.08)',
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 12,
     fontSize: 16,
     color: '#1c1c1e',
     backgroundColor: 'rgba(255,255,255,0.96)',
@@ -552,18 +542,18 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,0,0,0.08)',
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 12,
     paddingRight: 50,
     fontSize: 16,
     color: '#1c1c1e',
     backgroundColor: 'rgba(255,255,255,0.96)',
   },
-  // T10: divider + register-Cross-Link Styles
+  // T14.7: Divider straffer — marginTop 18→10, marginBottom 16→8.
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 18,
-    marginBottom: 16,
+    marginTop: 10,
+    marginBottom: 8,
     gap: 12,
   },
   dividerLine: {
@@ -635,11 +625,11 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingHorizontal: 0,
   },
-  // T10 v4: zentriert statt rechts-aligned (User-Spec).
+  // T14.7: Forgot-Password straffer — marginTop 8→4, marginBottom 14→6.
   forgotPasswordCentered: {
     alignSelf: 'center',
-    marginTop: 8,
-    marginBottom: 14,
+    marginTop: 4,
+    marginBottom: 6,
     paddingVertical: 4,
   },
   forgotPasswordText: {
@@ -647,14 +637,14 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_600SemiBold',
     color: 'rgba(255, 255, 255, 0.8)',
   },
+  // T14.7: Login-Button kompakter — paddingVertical 16→14, marginBottom 16→0.
   loginButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    paddingVertical: 16,
+    paddingVertical: 14,
     borderRadius: 12,
-    marginBottom: 16,
     gap: 12,
   },
   loginButtonText: {
@@ -715,9 +705,10 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_600SemiBold',
     color: 'white',
   },
+  // T14.7: Register-Section deutlich straffer — marginTop 22→10, paddingTop 14→6.
   registerSection: {
-    marginTop: 22,
-    paddingTop: 14,
+    marginTop: 10,
+    paddingTop: 6,
     alignItems: 'center',
   },
   registerText: {
@@ -740,8 +731,9 @@ const styles = StyleSheet.create({
     paddingTop: 0,
   },
   subTitleSmall: {
-    fontSize: 24,
-    lineHeight: 34,
+    fontSize: 22,
+    lineHeight: 32,
+    marginTop: 4,
   },
   inputSmall: {
     paddingVertical: 12,
