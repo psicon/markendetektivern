@@ -29,30 +29,41 @@ export const configureGoogleSignIn = async () => {
     const { GoogleSignin } = require('@react-native-google-signin/google-signin');
 
     // T17.2: Platform-spezifische Configuration — auf iOS ist
-    // `androidClientId` kein valider Parameter und löst eine
-    // RNGoogleSignIn-Warnung im Console aus. Splitten wir explizit:
-    // jede Platform bekommt nur die Keys die sie versteht.
-    GoogleSignin.configure({
-      // Web Client ID ist plattform-agnostisch (wird für ID-Token gebraucht).
+    // `androidClientId` kein valider Parameter. Auf iOS 26+ ist das
+    // mit dem neuen Architecture Bridge nicht nur eine Warning,
+    // sondern eine ungefangene Obj-C-Exception → SIGABRT beim App-
+    // Start (siehe Build 1171 Crashes, beide TestFlight-Geräte).
+    // Splitten wir explizit: jede Plattform bekommt nur die Keys
+    // die sie versteht.
+    const config: any = {
       webClientId: '139509881339-8r18hd499h6615f4ebos35ihbqqqvjvs.apps.googleusercontent.com',
       offlineAccess: true,
       forceCodeForRefreshToken: true,
       scopes: ['profile', 'email'],
-      ...(Platform.OS === 'ios' && {
-        // 2026-05-27: alter Client `8m7rjqtur27a...` wurde von Google
-        // automatisch gelöscht (6 Monate Inaktivität). Neuer Client
-        // für Bundle `de.markendetektive` + App-Store-ID 6471081082.
-        iosClientId: '139509881339-u77orq1k10s7lqui7vvq615smqskq70b.apps.googleusercontent.com',
-      }),
-      ...(Platform.OS === 'android' && {
-        androidClientId: '139509881339-h8ief6hmf22i77k4bcb6h4psilqna86v.apps.googleusercontent.com',
-        hostedDomain: '',
-        forceAccountSelection: true,
-      }),
-    });
+    };
+    if (Platform.OS === 'ios') {
+      // 2026-05-27: alter Client `8m7rjqtur27a...` wurde von Google
+      // automatisch gelöscht (6 Monate Inaktivität). Neuer Client
+      // für Bundle `de.markendetektive` + App-Store-ID 6471081082.
+      config.iosClientId = '139509881339-u77orq1k10s7lqui7vvq615smqskq70b.apps.googleusercontent.com';
+    } else if (Platform.OS === 'android') {
+      config.androidClientId = '139509881339-h8ief6hmf22i77k4bcb6h4psilqna86v.apps.googleusercontent.com';
+      config.hostedDomain = '';
+      config.forceAccountSelection = true;
+    }
 
-    isGoogleSignInConfigured = true;
-    console.log('✅ Google Sign-In configured');
+    // T17.3: zusätzlicher inner try/catch um die native configure-Call.
+    // Falls die Native-Bridge eine Obj-C-Exception wirft (z.B. wegen
+    // einer zukünftigen Library-Version die andere Keys erwartet),
+    // crashed nicht die ganze App.
+    try {
+      GoogleSignin.configure(config);
+      isGoogleSignInConfigured = true;
+      console.log('✅ Google Sign-In configured');
+    } catch (innerError: any) {
+      console.error('❌ Google Sign-In configure() threw:', innerError?.message ?? innerError);
+      // Nicht re-throwen — GoogleSignIn ist nur ein optionaler Login.
+    }
   } catch (error) {
     console.error('❌ Google Sign-In configuration error:', error);
   }
