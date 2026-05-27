@@ -34,7 +34,15 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
-          <string>com.googleusercontent.apps.139509881339-8m7rjqtur27arme7utiuptqmjbllofbu</string>
+          <string>com.googleusercontent.apps.139509881339-u77orq1k10s7lqui7vvq615smqskq70b</string>
+        </array>
+      </dict>
+      <dict>
+        <key>CFBundleURLName</key>
+        <string>facebook</string>
+        <key>CFBundleURLSchemes</key>
+        <array>
+          <string>fb175787714806270</string>
         </array>
       </dict>
       <dict>
@@ -45,11 +53,30 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>1172</string>
+    <string>1173</string>
+    <key>FacebookAppID</key>
+    <string>175787714806270</string>
+    <key>FacebookClientToken</key>
+    <string>d9af024703776b9b46864bcf0c721840</string>
+    <key>FacebookDisplayName</key>
+    <string>MarkenDetektive</string>
+    <key>FacebookAutoLogAppEventsEnabled</key>
+    <false/>
+    <key>FacebookAdvertiserIDCollectionEnabled</key>
+    <false/>
     <key>GADApplicationIdentifier</key>
     <string>ca-app-pub-9082891656550991~3669162596</string>
     <key>GADDelayAppMeasurementInit</key>
     <true/>
+    <key>GIDClientID</key>
+    <string>139509881339-u77orq1k10s7lqui7vvq615smqskq70b.apps.googleusercontent.com</string>
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+      <string>fbapi</string>
+      <string>fb-messenger-share-api</string>
+      <string>fbauth2</string>
+      <string>fbshareextension</string>
+    </array>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>
