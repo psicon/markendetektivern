@@ -754,10 +754,26 @@ export default function TabLayout() {
   // render a blank background forever. Push the user to the
   // welcome screen so they can log in, register, or skip to
   // anonymous mode — anything but stuck.
+  //
+  // Debounce: we wait 600 ms before firing the redirect. During an
+  // explicit logout the AuthContext does signOut → signInAnonymously
+  // in sequence; in the window between the two calls `user` is
+  // briefly null. Without the debounce that brief null caused a
+  // visible flash where the welcome screen showed for ~200 ms before
+  // the anonymous re-signin landed. If the user is genuinely stuck
+  // (no anonymous fallback), 600 ms is still imperceptible delay
+  // before redirect.
   useEffect(() => {
-    if (!loading && !user) {
+    if (loading || user) return;
+    const id = setTimeout(() => {
+      // Re-check via React state at fire time. If a re-render hasn't
+      // happened yet, we still trust `!user` from closure — but the
+      // delay alone is usually enough for the anonymous signin to
+      // land and clear this effect (deps include `user`, so a state
+      // change cancels the pending timer through the cleanup).
       router.replace('/auth/welcome' as any);
-    }
+    }, 600);
+    return () => clearTimeout(id);
   }, [loading, user, router]);
 
   // Auto-anonymous login typically resolves in <300 ms. We
