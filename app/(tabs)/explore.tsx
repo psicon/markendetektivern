@@ -51,6 +51,7 @@ import { collection, getDocs } from '@react-native-firebase/firestore';
 
 import { BannerAd } from '@/components/ads/BannerAd';
 import { LockedCategoryModal } from '@/components/ui/LockedCategoryModal';
+import { DemographicsPromptSheet, type DemographicsResult } from '@/components/onboarding/DemographicsPromptSheet';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -300,7 +301,7 @@ export default function ExploreScreen() {
       ? params.query.trim()
       : '';
   const hasInitialQuery = initialQuery.length > 0;
-  const { userProfile } = useAuth();
+  const { user, userProfile } = useAuth();
   const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
 
@@ -571,6 +572,10 @@ export default function ExploreScreen() {
 
   // ─── Locked category gate (Alkohol) ────────────────────────────────────
   const [lockedCategory, setLockedCategory] = useState<FirestoreDocument<Kategorien> | null>(null);
+  // T16: Separates Sheet für Age-Gate (Alkohol-Kategorie braucht
+  // angegebenes Alter). Greift NUR für die Alkohol-Kategorie und
+  // führt zum DemographicsPromptSheet.
+  const [showAgeGateSheet, setShowAgeGateSheet] = useState(false);
 
   // ─── Tab-Re-Press Scroll-to-Top ──────────────────────────────────────
   // Re-Tap auf das Stöbern-Icon im Tab-Bar scrollt die aktive Page zum
@@ -966,6 +971,15 @@ export default function ExploreScreen() {
       }
       const selected = kategorien.find((c) => c.id === k);
       if (selected && (selected as any).isLocked) {
+        // T16: Age-Lock (Alkohol) → Demografie-Sheet anbieten statt
+        // LockedCategoryModal (Level/Ad/Paywall). Beim Tap auf Alkohol
+        // ist es nicht ein "Du brauchst Level X"-Problem sondern ein
+        // "Wir müssen dein Alter wissen"-Problem.
+        if ((selected as any).isLockedByAge) {
+          setShowAgeGateSheet(true);
+          setSheet(null);
+          return;
+        }
         setLockedCategory(selected);
         setSheet(null);
         return;
@@ -2384,17 +2398,51 @@ export default function ExploreScreen() {
   // Underlying-State (nonames, markenprodukte etc.) bleibt unverändert
   // → bei resume rehydraten die Memos sofort.
   const EMPTY_ARR: any[] = useMemo(() => [], []);
+
+  // T16: Alkohol-Kategorie-ID + Age-Lock-Status. Wenn der User noch
+  // kein Alter angegeben hat, filtern wir Alkohol-Produkte aus ALLEN
+  // Listen — auch aus den Suchergebnissen (User-Wunsch: "suche nicht
+  // auf alkohol möglich wenn gating aktiv").
+  const alkoholCategoryId = useMemo<string | null>(() => {
+    const cat = kategorien.find(
+      (c) => ((c as any).bezeichnung ?? '').toLowerCase().trim() === 'alkohol',
+    );
+    return cat?.id ?? null;
+  }, [kategorien]);
+  const alkoholAgeLocked = useMemo(
+    () => typeof userAge !== 'number' || userAge < 16,
+    [userAge],
+  );
+  const filterAlkohol = useCallback(
+    (items: any[]): any[] => {
+      if (!alkoholAgeLocked || !alkoholCategoryId) return items;
+      return items.filter((item) => {
+        // Verschiedene Pfade unter denen die Kategorie-ID stecken kann:
+        //  • Algolia-enriched hits → _kategorieId (string)
+        //  • Firestore-products    → kategorie (object mit id) oder kategorie (DocumentReference)
+        const directId = (item as any)._kategorieId;
+        if (typeof directId === 'string') return directId !== alkoholCategoryId;
+        const nestedId = (item as any).kategorie?.id;
+        if (typeof nestedId === 'string') return nestedId !== alkoholCategoryId;
+        const refPath = (item as any).kategorie?.path;
+        if (typeof refPath === 'string') return !refPath.endsWith(`/${alkoholCategoryId}`);
+        return true;
+      });
+    },
+    [alkoholAgeLocked, alkoholCategoryId],
+  );
+
   const dataAlle = useMemo(
-    () => (paused ? EMPTY_ARR : itemsForTab('alle')),
-    [itemsForTab, paused, EMPTY_ARR],
+    () => (paused ? EMPTY_ARR : filterAlkohol(itemsForTab('alle'))),
+    [itemsForTab, paused, EMPTY_ARR, filterAlkohol],
   );
   const dataEigen = useMemo(
-    () => (paused ? EMPTY_ARR : itemsForTab('eigen')),
-    [itemsForTab, paused, EMPTY_ARR],
+    () => (paused ? EMPTY_ARR : filterAlkohol(itemsForTab('eigen'))),
+    [itemsForTab, paused, EMPTY_ARR, filterAlkohol],
   );
   const dataMarken = useMemo(
-    () => (paused ? EMPTY_ARR : itemsForTab('marken')),
-    [itemsForTab, paused, EMPTY_ARR],
+    () => (paused ? EMPTY_ARR : filterAlkohol(itemsForTab('marken'))),
+    [itemsForTab, paused, EMPTY_ARR, filterAlkohol],
   );
 
   // First-load scroll-to-top per tab: when data goes from empty to
@@ -3449,13 +3497,21 @@ export default function ExploreScreen() {
             [
               ['all', 'Alle Kategorien'],
               ...kategorien.map(
-                (c) =>
-                  [
-                    c.id,
-                    `${(c as any).bezeichnung ?? (c as any).name ?? ''}${
-                      (c as any).isLocked ? ' 🔒' : ''
-                    }`,
-                  ] as const,
+                (c) => {
+                  const base = (c as any).bezeichnung ?? (c as any).name ?? '';
+                  // T16: Age-Lock zeigt "🔒 ab 16" als spezifischen
+                  // Hinweis (statt nur generischem 🔒). Level-Locks
+                  // sind nach T16 abgeschafft, aber falls eine Kategorie
+                  // doch noch via getsFreeAtLevel locked wäre, würden
+                  // wir hier nur generisches Schloss zeigen.
+                  if ((c as any).isLockedByAge) {
+                    return [c.id, `${base}  🔒 ab 16`] as const;
+                  }
+                  if ((c as any).isLocked) {
+                    return [c.id, `${base} 🔒`] as const;
+                  }
+                  return [c.id, base] as const;
+                },
               ),
             ] as const
           }
@@ -3653,6 +3709,47 @@ export default function ExploreScreen() {
       </FilterSheet>
       ) : null}
 
+
+      {/* T16: Age-Gate-Sheet — feuert wenn User auf gesperrte Alkohol-
+          Kategorie tappt. Zeigt das DemographicsPromptSheet → User
+          gibt Alter (+ Geschlecht) an → Save schreibt ans User-Doc →
+          Kategorie wird automatisch freigeschaltet + selektiert. */}
+      <DemographicsPromptSheet
+        visible={showAgeGateSheet}
+        onSubmit={async (result: DemographicsResult) => {
+          setShowAgeGateSheet(false);
+          if (!user?.uid) return;
+          try {
+            const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
+            const { db: dbRef } = await import('@/lib/firebase');
+            await setDoc(
+              doc(dbRef, 'users', user.uid),
+              {
+                age: result.age,
+                ageBucket: result.ageBucket,
+                ageReportedAt: serverTimestamp(),
+                ageReportedYear: new Date().getFullYear(),
+                gender: result.gender,
+                demographicsCapturedAt: serverTimestamp(),
+              },
+              { merge: true },
+            );
+            // Cache resetten + neu laden mit dem frischen Age — Alkohol
+            // wird jetzt nicht mehr als locked gemeldet.
+            categoryAccessService.clearCache();
+            const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
+            const cats = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium, result.age);
+            setKategorien(cats);
+            // Direkt Alkohol-Kategorie selektieren (wir wissen ja warum
+            // der User das Sheet überhaupt geöffnet hat).
+            const alkohol = cats.find(c => (c.bezeichnung ?? '').toLowerCase().trim() === 'alkohol');
+            if (alkohol) setCat(alkohol.id);
+          } catch (err) {
+            console.warn('[Explore] age-gate save failed:', err);
+          }
+        }}
+        onSkip={() => setShowAgeGateSheet(false)}
+      />
 
       {/* ─── Locked category modal (Alkohol gating) ─────────────────── */}
       {lockedCategory ? (
