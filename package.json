@@ -3,6 +3,7 @@
   "main": "expo-router/entry",
   "version": "5.0.5",
   "scripts": {
+    "postinstall": "patch-package",
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "analyze-db": "node ./scripts/analyze-firestore.js",

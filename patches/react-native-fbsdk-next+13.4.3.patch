@@ -1,0 +1,51 @@
+diff --git a/node_modules/react-native-fbsdk-next/ios/ExpoAdapterFBSDKNext/FacebookAppDelegate.swift b/node_modules/react-native-fbsdk-next/ios/ExpoAdapterFBSDKNext/FacebookAppDelegate.swift
+index 17f4c2e..099aa6b 100644
+--- a/node_modules/react-native-fbsdk-next/ios/ExpoAdapterFBSDKNext/FacebookAppDelegate.swift
++++ b/node_modules/react-native-fbsdk-next/ios/ExpoAdapterFBSDKNext/FacebookAppDelegate.swift
+@@ -2,15 +2,40 @@ import ExpoModulesCore
+ import FBSDKCoreKit
+ 
+ public class FacebookAppDelegate: ExpoAppDelegateSubscriber {
+-  public func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+-    ApplicationDelegate.shared.application(
+-      application,
+-      didFinishLaunchingWithOptions: launchOptions
+-    )
++  // T17.7 (markendetektive patch): Boot-time FB-SDK initialization
++  // removed. The upstream version called
++  // `ApplicationDelegate.shared.application(_, didFinishLaunchingWithOptions:)`
++  // here, which triggered a SIGABRT on iOS 26.1 + RN New Architecture
++  // before our JS code could run — even with `FacebookAutoInitEnabled`
++  // set to NO in Info.plist (that flag only gates AppEvents auto-
++  // logging, NOT this AppDelegate-hook init path). Repro: each
++  // TestFlight build from 1173 onward crashed at launch with
++  // `objc_exception_rethrow` through `performVoidMethodInvocation`,
++  // no readable Last-Exception backtrace.
++  //
++  // Instead, we initialize the SDK lazily from JS the first time the
++  // user actually taps the Facebook login button — see
++  // `lib/services/auth/facebookAuth.ts`, which calls
++  // `Settings.initializeSDK()`. That path is fully equivalent for
++  // login functionality and avoids the boot-time validation race.
++  //
++  // The `open url` handler stays — it processes the OAuth callback
++  // and must be reachable for the FB Login redirect to land. By the
++  // time this fires, JS has already lazy-init'd the SDK.
++
++  public func application(
++    _ application: UIApplication,
++    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
++  ) -> Bool {
++    // Intentionally no-op. See class comment above.
+     return true
+   }
+ 
+-  public func application(_ application: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
++  public func application(
++    _ application: UIApplication,
++    open url: URL,
++    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
++  ) -> Bool {
+     return ApplicationDelegate.shared.application(
+       application,
+       open: url,
