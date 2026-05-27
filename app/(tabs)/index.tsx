@@ -284,6 +284,19 @@ export default function HomeScreen() {
   //      bereits beantwortet — auch nicht erneut zeigen).
   useEffect(() => {
     if (!user?.uid) return; // erst wenn auth ready
+    // T15 (ClickUp 86c9zmnym): Demografie-Sheet darf NICHT vor dem
+    // Home-Walkthrough kommen — sonst kollidiert "verrate uns mehr"
+    // mit "wie funktioniert die App?" und User sieht zwei Modals
+    // gleichzeitig oder nacheinander ohne Kontext.
+    //
+    // Wenn der Walkthrough aktiv ist (homeCoachmark.visible) → warten.
+    // Wenn er noch nicht gesehen wurde (getSeen=false) → warten.
+    // Erst wenn er geschlossen ist (visible:false UND seen:true) →
+    // Demografie-Sheet anbieten.
+    //
+    // Die Dependency auf homeCoachmark.visible sorgt dafür dass dieser
+    // Effect re-läuft wenn der Walkthrough geschlossen wird.
+    if (homeCoachmark.visible) return;
     let cancelled = false;
     (async () => {
       try {
@@ -296,6 +309,14 @@ export default function HomeScreen() {
           await AsyncStorage.removeItem('pending_demographics_prompt');
           return;
         }
+
+        // T15: Walkthrough-Status checken. Wenn noch nicht gesehen,
+        // NICHT zeigen — wenn der User den Walkthrough dann gleich
+        // dismissed wird homeCoachmark.visible von true→false,
+        // unser useEffect läuft erneut und der getSeen-Check trifft.
+        const { CoachmarkService } = await import('@/lib/services/coachmarkService');
+        const homeWalkthroughSeen = await CoachmarkService.getSeen('home');
+        if (!homeWalkthroughSeen) return;
 
         // Prüfe ob User-Doc schon age oder gender hat (vom Edit-
         // Profile oder einer früheren Sheet-Antwort) — dann nicht
@@ -319,7 +340,7 @@ export default function HomeScreen() {
       }
     })();
     return () => { cancelled = true; };
-  }, [user?.uid]);
+  }, [user?.uid, homeCoachmark.visible]);
 
   const handleDemographicsSubmit = useCallback(async (result: DemographicsResult) => {
     setShowDemographicsSheet(false);
