@@ -26,38 +26,30 @@ export interface FacebookCredentialBundle {
 }
 
 /**
- * Lädt das FB-SDK NUR wenn das Native-Modul registriert ist.
+ * Lädt das FB-SDK defensiv via require + try/catch.
  *
- * Hintergrund (T17.1): `require('react-native-fbsdk-next')` führt
- * intern bei Module-Init `new NativeEventEmitter(NativeModules.X)`
- * aus. Wenn der Native-Bridge-Module nicht registriert ist (Expo Go,
- * Dev-Client ohne FB-Plugin, Quick-Patched-Bundle), ist
- * NativeModules.X === undefined → NativeEventEmitter throwt
- * "non-null argument". Der Throw passiert WÄHREND der Module-Init,
- * NICHT durchs require() das wir wrappen könnten — der bubbelt durch
- * jeden try/catch.
+ * T17.4: KEIN `NativeModules.X`-Vorab-Check mehr. Mit New Architecture
+ * (TurboModules, `newArchEnabled: true`) sind native Module NICHT
+ * garantiert über `NativeModules.X` erreichbar — das Symbol kann
+ * undefined sein obwohl das Modul korrekt registriert und nutzbar ist.
+ * Resultat: Produktions-Builds (TestFlight) blockten den Login
+ * komplett, weil die "Modul nicht da"-Branch immer triggerte. Siehe
+ * googleAuth.ts T17.4 für dasselbe Pattern und root-cause-Notiz.
  *
- * Lösung: vor dem Require checken ob die Native-Bridge da ist.
- * Wenn nicht → null returnen ohne require zu touchen.
+ * Stattdessen: blind den require versuchen — wenn das Modul wirklich
+ * fehlt (Expo Go, alter Build), schlägt erst der require / die Init
+ * fehl und wir landen im catch. Auf production builds mit aktivem
+ * FB-Plugin existiert das Modul → require liefert die Library.
+ *
+ * Hintergrund alt (T17.1): `react-native-fbsdk-next` ruft bei
+ * Module-Init `new NativeEventEmitter(NativeModules.X)`. Falls
+ * NativeModules.X undefined ist UND die RN-Version den null-arg
+ * blockiert, throwt das während Module-Init. Bei NeueArch +
+ * production-Build ist die native bridge aber da — TurboModule-
+ * Wrapper liefert ein gültiges Objekt an NativeEventEmitter.
  */
 function loadFbsdk(): any | null {
   try {
-    // NativeModules-Lookup über react-native (statischer Import, KEIN
-    // dynamic require von 'react-native' selbst — siehe CLAUDE.md
-    // "Never await import('react-native')").
-    const { NativeModules } = require('react-native');
-    // Bekannte Native-Module-Namen des FB-SDK auf iOS + Android.
-    const hasNative =
-      !!NativeModules?.FBSDKAppEvents ||
-      !!NativeModules?.RCTFBSDKAccessToken ||
-      !!NativeModules?.RNFBSDKAppEvents ||
-      !!NativeModules?.RNFBSDKLoginManager;
-    if (!hasNative) {
-      if (__DEV__) {
-        console.warn('[facebookAuth] FB-SDK native modules not registered — falling back gracefully.');
-      }
-      return null;
-    }
     return require('react-native-fbsdk-next');
   } catch (error: any) {
     if (__DEV__) {

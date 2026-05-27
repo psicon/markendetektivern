@@ -10,7 +10,7 @@ import auth, {
   FirebaseAuthTypes,
   GoogleAuthProvider,
 } from '@react-native-firebase/auth';
-import { NativeModules, Platform } from 'react-native';
+import { Platform } from 'react-native';
 
 let isGoogleSignInConfigured = false;
 
@@ -21,11 +21,16 @@ let isGoogleSignInConfigured = false;
 export const configureGoogleSignIn = async () => {
   try {
     if (isGoogleSignInConfigured) return;
-    if (!NativeModules.RNGoogleSignin) {
-      console.log('Google Sign-In native module not available');
-      return;
-    }
 
+    // T17.4: KEIN `NativeModules.RNGoogleSignin`-Check mehr.
+    // Mit newArchEnabled:true (TurboModules) ist das Symbol nicht
+    // garantiert über `NativeModules.X` erreichbar — es kann
+    // `undefined` sein obwohl das Module korrekt registriert ist.
+    // Resultat in Build 1172: early-return → configure() lief NIE →
+    // GIDSignIn.sharedInstance.configuration nil → NSException beim
+    // ersten signIn-Call → SIGABRT. Stattdessen: blind den require
+    // versuchen, durch try/catch abgesichert. Wenn das Module wirklich
+    // fehlt (Expo Go, alter Build), schlägt erst das require fehl.
     const { GoogleSignin } = require('@react-native-google-signin/google-signin');
 
     // T17.2: Platform-spezifische Configuration — auf iOS ist
@@ -86,17 +91,16 @@ export const configureGoogleSignIn = async () => {
  *   - Error wenn idToken nicht erhalten wurde (Konfig-Mismatch)
  */
 export const getGoogleCredential = async (): Promise<FirebaseAuthTypes.AuthCredential | null> => {
-  if (!NativeModules.RNGoogleSignin) {
-    throw new Error(
-      'Google Sign-In ist nur in Production Builds verfügbar. Bitte Email/Password Login verwenden.',
-    );
-  }
-
+  // T17.4: KEIN NativeModules-Check mehr (siehe configureGoogleSignIn-
+  // Kommentar). Wir versuchen es einfach — falls Native-Modul fehlt
+  // (Expo Go, alter Build), schlägt das require fehl und der äußere
+  // try/catch im AuthContext fängt's auf.
   const { GoogleSignin } = require('@react-native-google-signin/google-signin');
 
-  if (!isGoogleSignInConfigured) {
-    await configureGoogleSignIn();
-  }
+  // T17.4: Defensiv konfigurieren falls die initial-configure aus
+  // _layout.tsx aus irgendeinem Grund nicht durchgelaufen ist. Wenn
+  // schon konfiguriert, no-op (idempotent).
+  await configureGoogleSignIn();
 
   // Play Services Check auf Android.
   if (Platform.OS === 'android') {
@@ -161,10 +165,9 @@ export const getGoogleCredential = async (): Promise<FirebaseAuthTypes.AuthCrede
  */
 export const signOutGoogle = async () => {
   try {
-    if (!NativeModules.RNGoogleSignin) {
-      console.log('📱 Google Sign-Out skipped (Expo Go)');
-      return;
-    }
+    // T17.4: KEIN NativeModules-Check (TurboModules unreliable). Falls
+    // das Modul wirklich fehlt (Expo Go), schlägt das require fehl und
+    // landet im catch.
     const { GoogleSignin } = require('@react-native-google-signin/google-signin');
     await GoogleSignin.signOut();
     console.log('✅ Google native sign-out');
@@ -178,7 +181,7 @@ export const signOutGoogle = async () => {
  */
 export const isGoogleSignedIn = async (): Promise<boolean> => {
   try {
-    if (!NativeModules.RNGoogleSignin) return false;
+    // T17.4: KEIN NativeModules-Check (TurboModules unreliable).
     const { GoogleSignin } = require('@react-native-google-signin/google-signin');
     return await GoogleSignin.isSignedIn();
   } catch (error) {
@@ -192,7 +195,7 @@ export const isGoogleSignedIn = async (): Promise<boolean> => {
  */
 export const getCurrentGoogleUser = async () => {
   try {
-    if (!NativeModules.RNGoogleSignin) return null;
+    // T17.4: KEIN NativeModules-Check (TurboModules unreliable).
     const { GoogleSignin } = require('@react-native-google-signin/google-signin');
     return await GoogleSignin.getCurrentUser();
   } catch (error) {
