@@ -32,7 +32,11 @@ export const configureGoogleSignIn = async () => {
       // WICHTIG: Web Client ID für ID Token — nicht Plattform-spezifische ID hier!
       webClientId: '139509881339-8r18hd499h6615f4ebos35ihbqqqvjvs.apps.googleusercontent.com',
       androidClientId: '139509881339-h8ief6hmf22i77k4bcb6h4psilqna86v.apps.googleusercontent.com',
-      iosClientId: '139509881339-8m7rjqtur27arme7utiuptqmjbllofbu.apps.googleusercontent.com',
+      // 2026-05-27: alter Client `8m7rjqtur27a...` wurde von Google
+      // automatisch gelöscht (6 Monate Inaktivität, siehe Banner im
+      // Google-Auth-Platform Detail-View). Neuer Client für Bundle
+      // `de.markendetektive` + App-Store-ID 6471081082 — `u77orq1k...`.
+      iosClientId: '139509881339-u77orq1k10s7lqui7vvq615smqskq70b.apps.googleusercontent.com',
       offlineAccess: true,
       forceCodeForRefreshToken: true,
       scopes: ['profile', 'email'],
