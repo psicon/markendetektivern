@@ -364,6 +364,7 @@ export default function LoginScreen() {
               onGoogle={handleGoogleSignIn}
               onFacebook={handleFacebookSignIn}
               showEmailButton={false}
+              showAllProviders
               busy={loading}
               colorScheme={colorScheme}
             />

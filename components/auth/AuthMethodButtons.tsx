@@ -172,6 +172,11 @@ function createStyles(_colorScheme: 'light' | 'dark' | null | undefined) {
       // in register.tsx / welcome.tsx — vorher 10 vs 12 wirkte optisch
       // unterschiedlich.
       gap: 12,
+      // T14.4: explizit width:100% damit die Buttons in jedem Eltern-
+      // Container die volle Breite einnehmen. Sonst schrumpfen sie auf
+      // Content-Width wenn der Parent `alignItems:'center'` setzt
+      // (so wie login.tsx → styles.authButtons).
+      width: '100%',
     },
     btnBase: {
       flexDirection: 'row',
