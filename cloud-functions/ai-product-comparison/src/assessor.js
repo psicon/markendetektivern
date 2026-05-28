@@ -26,9 +26,9 @@
 
 const { GoogleGenAI, Type } = require('@google/genai');
 
-const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
-const ASSESSMENT_PROMPT_VERSION = 'v3';
+const ASSESSMENT_PROMPT_VERSION = 'v5';
 
 const SYSTEM_INSTRUCTION = `Du bist Ernährungs-Analyst für die deutsche App "MarkenDetektive".
 
@@ -135,11 +135,30 @@ function buildUserContent({ product, category }) {
 
 function snapshotFromDoc(data) {
   if (!data) return null;
+  // Energie kJ → kcal Konvertierung (siehe comparator.js)
+  let energyKcal = numOrNull(data.nutr_Energie_val);
+  const energyUnit = typeof data.nutr_Energie_unit === 'string'
+    ? data.nutr_Energie_unit.toLowerCase()
+    : null;
+  if (energyKcal != null && energyUnit === 'kj') {
+    energyKcal = Math.round(energyKcal / 4.184);
+  }
+  const labels = {
+    nutriscore: typeof data.nutriscore === 'string' ? data.nutriscore.toLowerCase() : null,
+    ecoscore: typeof data.ecoscore === 'string' ? data.ecoscore.toLowerCase() : null,
+    nova: typeof data.nova === 'string' || typeof data.nova === 'number' ? String(data.nova) : null,
+    isVegan: typeof data.attr_isVegan === 'boolean' ? data.attr_isVegan
+             : typeof data.isVegan === 'boolean' ? data.isVegan : null,
+    isVegetarisch: typeof data.attr_isVegetarisch === 'boolean' ? data.attr_isVegetarisch
+                   : typeof data.isVegetarian === 'boolean' ? data.isVegetarian : null,
+    isBio: typeof data.attr_isBio === 'boolean' ? data.attr_isBio
+           : typeof data.isBio === 'boolean' ? data.isBio : null,
+  };
   return {
     name: data.name || data.productName || data.bezeichnung || null,
     hersteller:
       data.herstellerName || data.producerName || null,
-    energy: numOrNull(data.nutr_Energie_val),
+    energy: energyKcal,
     fat: numOrNull(data.nutr_Fett_val),
     satFat: numOrNull(data.nutr_FettdavongesttigteFettsuren_val),
     carbs: numOrNull(data.nutr_Kohlenhydrate_val),
@@ -148,6 +167,7 @@ function snapshotFromDoc(data) {
     protein: numOrNull(data.nutr_Eiwei_val),
     salt: numOrNull(data.nutr_Salz_val),
     ingredients: data.attr_ingredientStatement || data.zutaten || null,
+    labels,
   };
 }
 

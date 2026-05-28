@@ -1308,6 +1308,12 @@ export default function ProfileScreen() {
               color={theme.primary}
               label="App teilen"
               onPress={handleShareApp}
+            />
+            <MenuRow
+              icon="bell-outline"
+              color={theme.primary}
+              label="Benachrichtigungen"
+              onPress={() => router.push('/notification-settings' as any)}
               last
             />
           </MenuCard>

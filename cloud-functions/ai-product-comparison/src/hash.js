@@ -15,6 +15,7 @@ const crypto = require('crypto');
  */
 function snapshotKey(s) {
   if (!s) return 'null';
+  const lbl = s.labels || {};
   return [
     s.energy,
     s.fat,
@@ -30,11 +31,17 @@ function snapshotKey(s) {
       .toLowerCase()
       .replace(/\s+/g, ' ')
       .trim(),
-    // v7: Stufe wieder im Hash. Wenn ein Produkt von Stufe 3 auf 5
-    // hochgestuft wird, MUSS der Cap neu greifen und das Reasoning
-    // neu generiert werden — kann den Score verändern selbst bei
-    // sonst identischen Daten.
     s.stufe ?? 'null',
+    // v10: Labels Teil des Hashes. Wenn Nutri-Score / Vegan-Flag /
+    // Bio-Flag sich ändert, muss neu evaluiert werden.
+    `nu:${lbl.nutriscore ?? ''}`,
+    `ec:${lbl.ecoscore ?? ''}`,
+    `nv:${lbl.nova ?? ''}`,
+    `bi:${lbl.isBio ?? ''}`,
+    `vg:${lbl.isVegan ?? ''}`,
+    `vt:${lbl.isVegetarisch ?? ''}`,
+    `gl:${lbl.isGlutenfrei ?? ''}`,
+    `lk:${lbl.isLaktosefrei ?? ''}`,
   ].join('|');
 }
 

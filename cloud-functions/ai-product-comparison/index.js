@@ -377,8 +377,9 @@ exports.onProduktCreateForComparison = onDocumentCreated(
 
 const RELEVANT_PRODUKTE_FIELDS = [
   'markenProdukt',
-  'stufe', // v7: Stufe-Cap aktiv → bei Stufe-Änderung muss neu evaluiert werden
+  'stufe',
   'nutr_Energie_val',
+  'nutr_Energie_unit', // v10: bei kJ↔kcal-Switch muss neu konvertiert werden
   'nutr_Fett_val',
   'nutr_FettdavongesttigteFettsuren_val',
   'nutr_Kohlenhydrate_val',
@@ -388,6 +389,13 @@ const RELEVANT_PRODUKTE_FIELDS = [
   'nutr_Salz_val',
   'attr_ingredientStatement',
   'zutaten', // legacy
+  // v10: Labels → bei Änderung neu evaluieren
+  'nutriscore', 'ecoscore', 'nova',
+  'attr_isVegan', 'isVegan',
+  'attr_isVegetarisch', 'isVegetarian',
+  'attr_isBio', 'isBio',
+  'attr_isGlutenfrei', 'isGlutenFree',
+  'attr_isLaktosefrei', 'isLactoseFree',
 ];
 
 function relevantFieldsChanged(before, after, fields) {
@@ -452,6 +460,7 @@ exports.onProduktUpdateForComparison = onDocumentUpdated(
 
 const RELEVANT_MP_FIELDS = [
   'nutr_Energie_val',
+  'nutr_Energie_unit',
   'nutr_Fett_val',
   'nutr_FettdavongesttigteFettsuren_val',
   'nutr_Kohlenhydrate_val',
@@ -461,6 +470,12 @@ const RELEVANT_MP_FIELDS = [
   'nutr_Salz_val',
   'attr_ingredientStatement',
   'zutaten',
+  'nutriscore', 'ecoscore', 'nova',
+  'attr_isVegan', 'isVegan',
+  'attr_isVegetarisch', 'isVegetarian',
+  'attr_isBio', 'isBio',
+  'attr_isGlutenfrei', 'isGlutenFree',
+  'attr_isLaktosefrei', 'isLactoseFree',
 ];
 
 const MP_FANOUT_LIMIT = 30; // Sanity-Cap pro MP

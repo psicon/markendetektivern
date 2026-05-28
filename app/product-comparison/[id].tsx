@@ -1912,50 +1912,6 @@ export default function ProductComparisonScreen() {
                       </View>
                     ) : null}
 
-                    {/* AI-Score-Badge top-left — kollidiert nicht mit
-                        Savings-Badge top-right. Farbe gibt instant-
-                        Signal welcher NoName aus KI-Sicht am besten
-                        zum Original passt (Score 3+ ist bereits grün). */}
-                    {(() => {
-                      const aiSc = (nn as any)?.aiComparison?.score as
-                        | 1 | 2 | 3 | 4 | 5 | undefined;
-                      if (typeof aiSc !== 'number' || aiSc < 1 || aiSc > 5) {
-                        return null;
-                      }
-                      const color = ['#e53935', '#fb8c00', '#9ccc65', '#66bb6a', '#2e7d32'][aiSc - 1];
-                      const arrow = aiSc >= 4 ? '↑' : aiSc <= 2 ? '↓' : '=';
-                      return (
-                        <View
-                          style={{
-                            position: 'absolute',
-                            top: 8,
-                            left: 8,
-                            paddingHorizontal: 7,
-                            paddingVertical: 3,
-                            borderRadius: 8,
-                            backgroundColor: color,
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 3,
-                            zIndex: 2,
-                            shadowColor: '#000',
-                            shadowOpacity: 0.18,
-                            shadowRadius: 3,
-                            shadowOffset: { width: 0, height: 1 },
-                            elevation: 3,
-                          }}
-                          accessibilityLabel={`KI-Score ${aiSc} von 5`}
-                        >
-                          <Text style={{ color: '#fff', fontFamily, fontWeight: fontWeight.extraBold, fontSize: 11, lineHeight: 13 }}>
-                            {arrow}
-                          </Text>
-                          <Text style={{ color: '#fff', fontFamily, fontWeight: fontWeight.extraBold, fontSize: 11, lineHeight: 13, letterSpacing: 0.2 }}>
-                            {aiSc}
-                          </Text>
-                        </View>
-                      );
-                    })()}
-
                     <View style={{ flexDirection: 'row', padding: 12, gap: 12, alignItems: 'stretch' }}>
                       {/* Thumb — 76×76 so its height roughly matches the
                           info block (eyebrow + 2-line name + pack row +

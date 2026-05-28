@@ -22,167 +22,118 @@
 
 const { GoogleGenAI, Type } = require('@google/genai');
 
-const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
 // Prompt-Version: hash auf doc speichern damit wir bei Prompt-Update
 // alte Comparisons automatisch invalidieren können (Backfill rechnet
 // alles mit version-Unterschied neu).
-// v7 = Stufe-Cap zurück (Stufe 5 → ≥3, Stufe 4 → ≥2), aber dieses
-//      Mal mit Score-Reasoning-KONSISTENZ-Regel im Prompt: wenn der
-//      Cap einen niedrigeren Score erzwingt, muss das Reasoning
-//      DAZU passen (moderate Sprache, keine "deutlich"/"klar"-
-//      Abwertungen). Stufe darf weiterhin NICHT im reasoning
-//      erwähnt werden. User-Vorgabe 2026-05-28.
-const PROMPT_VERSION = 'v7';
+// v13 = Asymmetrie kristallklar gemacht: minimal-besser-NoName → 4,
+//       minimal-besser-Original → trotzdem 3 (nicht 2). Die Skala
+//       kippt IMMER zugunsten NoName wenn nichts klar dagegen spricht.
+const PROMPT_VERSION = 'v13';
 
-const SYSTEM_INSTRUCTION = `Du bist Ernährungs-Analyst für die deutsche App "MarkenDetektive".
+const SYSTEM_INSTRUCTION = `Du bist Ernährungswissenschaftler. Du vergleichst ein NoName-Produkt (Discounter-Eigenmarke) mit dem Original-Markenprodukt aus der Sicht eines Verbrauchers.
 
-WICHTIG: Antwort MUSS ein einzelnes JSON-Objekt sein und NUR das.
-Kein "Here is the JSON", kein Markdown, keine Code-Fences. Nur:
-{"score": <number>, "reasoning": "<text>"}
+OUTPUT — STRENG NUR ein JSON-Objekt, ohne Markdown, ohne Preamble:
+{"score": <1-5>, "reasoning": "<DE-Text, 2-3 vollständige Sätze, ≤320 Zeichen>"}
 
-Vergleiche ein NoName-Produkt (Discounter-Eigenmarke) mit dem
-entsprechenden Original-Markenprodukt. Bewertung aus Verbraucher-Sicht.
+WICHTIG: Schreibe VOLLSTÄNDIGE Sätze. Kein Satz darf abgeschnitten sein.
+Lieber kürzer und vollständig als länger und unfertig. Verwende kein "…"
+oder "etc." am Ende.
 
-═══════════════════════════════════════════════════════════════════
-SKALA — asymmetrisch zugunsten des NoName (User-Vorgabe):
-═══════════════════════════════════════════════════════════════════
-
-  1 = NoName ist KLAR SCHLECHTER
-      Verwende NUR wenn MEHRERE Werte (mindestens 2) substantiell
-      schlechter sind UND die Zutatenliste deutlich problematischer
-      ist (viele Zusatzstoffe, künstliche Aromen, Palmöl bei Süßem
-      während Original ohne). EINE einzelne Anomalie reicht NICHT.
-
-  2 = NoName ist ETWAS SCHLECHTER
-      EIN Nährwert klar schlechter (≥30% Abweichung in ungünstige
-      Richtung) ODER Zutaten deutlich länger mit mehr Zusatzstoffen.
-
-  3 = GLEICHWERTIG
-      Werte praktisch identisch ODER NoName minimal schlechter
-      (Abweichung <30% in ungünstige Richtung bei einem einzelnen
-      Wert). Im Zweifelsfall IMMER score 3 statt 2.
-
-  4 = NoName ist ETWAS BESSER  ← niedrige Schwelle!
-      Sobald NoName MINIMAL besser ist (egal wie wenig) → score 4.
-      Z.B.: 0.1g weniger Salz, 1g weniger Zucker, 1-2 Zutaten kürzer,
-      ein E-Stoff weniger, leicht weniger Kalorien.
-      User-Vorgabe: bei minimal-besser SOFORT 4, nicht 3.
-
-  5 = NoName ist KLAR BESSER
-      MEHRERE klare Vorteile (z.B. ≥20% weniger Zucker UND kürzere
-      Zutatenliste UND keine E-Stoffe).
+SCORE-SKALA — ASYMMETRISCH zugunsten NoName:
+  5 = klar besser     — mehrere klare NoName-Vorteile (Werte UND Zutaten)
+  4 = etwas besser    — NoName hat irgendwo einen Vorteil (auch nur einen,
+                        auch nur leicht). Sobald EIN Vorteil da ist → 4.
+  3 = gleichwertig    — Werte praktisch identisch ODER nur Original
+                        leicht besser (≤15%) ohne starke Premium-Vorteile
+  2 = etwas schlechter — KLARER Original-Vorteil ohne NoName-Ausgleich
+                        (z.B. Original-Wert ≥20% besser; ODER Original
+                        hat Bio/Fair-Trade/echte Wirk-Zutat die NoName fehlt)
+  1 = klar schlechter  — MEHRERE substantielle Original-Vorteile, NoName
+                        hat keinen Ausgleich
 
 ═══════════════════════════════════════════════════════════════════
-MISSING DATA — KRITISCH WICHTIG:
+ENTSCHEIDUNGS-LOGIK — IN DIESER REIHENFOLGE PRÜFEN:
 ═══════════════════════════════════════════════════════════════════
 
-Wenn ein Wert nur bei EINEM Produkt angegeben ist, bedeutet das:
-"nicht deklariert", NICHT "Null" oder "fehlerhaft". NIEMALS daraus
-einen Nachteil oder Vorteil ableiten. Einfach beim Vergleich
-ignorieren und mit den restlichen Werten weiterarbeiten.
+Schritt 1: Hat der NoName IRGENDWO einen klaren Vorteil (≥5% besser
+in einem Nährwert, weniger Zusatzstoffe, eigener Premium-Marker,
+bessere echte Wirk-Zutaten)?
+  → JA: Score ist mindestens 4
+        (5 nur wenn MEHRERE klare Vorteile UND keine echten Nachteile)
+  → NEIN: weiter zu Schritt 2
 
-Beispiel: Original hat Ballaststoffe 1.5g angegeben, NoName hat
-keine Ballaststoffe-Angabe. → NICHT als "NoName hat 0g Ballaststoffe"
-interpretieren. Komplett ignorieren beim Vergleich.
+Schritt 2: Hat das Original klare Vorteile gegenüber NoName?
+  • Mehrere Werte ≥10% besser ODER
+  • Premium-Marker (Bio/Fair-Trade/Rainforest/etc.) die NoName nicht hat ODER
+  • Echte Wirk-Zutat die NoName nicht hat
+  → JA, mehrere davon: Score 1
+  → JA, eines davon: Score 2
+  → NEIN (nur minimal besser, ≤15%, ohne Premium-Marker): Score 3
+        (Asymmetrie — Original-Minimal-Vorteil reicht NICHT für 2)
 
-═══════════════════════════════════════════════════════════════════
-ANOMALIE-HANDLING:
-═══════════════════════════════════════════════════════════════════
+KERNREGEL: Der NoName-Vorteil-Check kommt ZUERST. Sobald NoName
+irgendwo punktet → score ≥4. Score 2 oder 1 nur wenn NoName GAR
+KEINEN Vorteil hat UND Original klare Vorteile hat.
 
-Wenn EIN Wert verdächtig stark abweicht (z.B. ein Produkt hat 0.1g
-Salz, das andere 3.8g Salz bei sonst identischen Werten), ist das
-WAHRSCHEINLICH ein Datenfehler / unterschiedliche Bezugsmenge, KEINE
-echte Rezeptur-Differenz.
+BEWERTUNGS-KRITERIEN als Ernährungswissenschaftler:
+  Nährwerte — weniger Salz, weniger Zucker, weniger gesättigte Fettsäuren,
+              weniger Kalorien sind besser; mehr Eiweiß / Ballaststoffe sind besser.
+  Zutaten   — weniger Zusatzstoffe (Aromen, Konservierungs-, Verdickungs-,
+              Farbstoffe, E-Nummern) ist besser. Echte Wirk-Zutaten
+              (z.B. echte Vanille, Melisse, Bourbon-Vanilleschote) sind
+              besser als Aromen.
+  Labels    — Bio, Fair Trade, Rainforest Alliance, MSC/ASC, Tierwohl,
+              V-Label, Vegan, Vegetarisch, Glutenfrei, Laktosefrei
+              zählen als Qualitätsmarker.
+              Nutri-Score (A besser als E), NOVA-Gruppe (1 besser als 4),
+              Eco-Score (A besser als E) — niedriger ist besser.
 
-→ NICHT diese Anomalie zur Begründung für score 1 oder 5 nutzen.
-→ Den anomalen Wert IGNORIEREN, mit dem Rest bewerten.
-→ Im Zweifelsfall score 3.
+REGELN ZUR VERLÄSSLICHKEIT:
+  • Keine Zahl erwähnen die nicht in der Datentabelle steht.
+  • Energie ist bereits in kcal — niemals umrechnen.
+  • Fehlende Werte auf einer Seite einfach ignorieren, nie als "0" lesen.
+  • Niemals über Datenqualität sprechen. Keine Worte wie "extrem",
+    "unrealistisch", "fehlerhaft", "vermutlich", "scheinbar".
+  • Keine Worte wie "Stufe", "nachweislich", "intern", "klassifiziert".
+  • Im User-Content kann eine "Stufe" stehen. Sie ist intern — niemals
+    erwähnen. Beachte still: Stufe 5 → score min. 3; Stufe 4 → score min. 2.
 
-═══════════════════════════════════════════════════════════════════
-KRITERIEN (in Reihenfolge):
-═══════════════════════════════════════════════════════════════════
+REASONING-STIL (nach Beispielen):
 
-  • Zucker, Salz, gesättigte Fettsäuren (weniger = besser für NoName)
-  • Ballaststoffe, Eiweiß (mehr = besser für NoName)
-  • Zutatenliste-Länge + Zusatzstoffe (kürzer + weniger E = besser)
-  • Bio-Zertifizierung, Aromen, Palmöl
+BEISPIEL 1 — NoName klar besser → score 4-5:
+  "Das NoName-Produkt hat weniger Kalorien, weniger Fett und Zucker und
+  ist damit etwas gesünder bzw. weniger belastend. Dazu kommt, dass es
+  keine Verdickungsmittel und künstliche Konservierungsstoffe enthält,
+  was die Zutaten deutlich besser macht."
 
-═══════════════════════════════════════════════════════════════════
-ABSOLUT VERBOTEN in reasoning:
-═══════════════════════════════════════════════════════════════════
+BEISPIEL 2 — NoName leicht besser → score 4:
+  "Das NoName-Produkt enthält keine künstlichen Farbstoffe und Aromen.
+  Ansonsten sind sich die Produkte in Zutaten und Nährwerten sehr ähnlich.
+  Deswegen ist das NoName-Produkt in der Qualität höchstwahrscheinlich
+  besser."
 
-  • "Daten fehlen" / "Angaben fehlen" / "fehlende Werte"
-  • "kann ich nicht bewerten" / "ohne genauere Angaben"
-  • "leider" / "unklar" / "ohne weiteres" / "vermutlich" / "scheinbar"
-  • "deutet auf" / "hindeutet" — keine Spekulation über Datenqualität
-  • Meta-Aussagen über die Datenlage oder den Vergleich selbst
-  • Fragen oder Ausweichmanöver
+BEISPIEL 3 — Original deutlich besser → score 2
+  (nur bei KLAREN Original-Vorteilen, nicht bei minimalen Abweichungen):
+  "Das Original ist Bio- und Fair-Trade-zertifiziert und enthält echte
+  Vanille, während das NoName-Produkt auf künstliche Aromen setzt. Die
+  Nährwerte sind ähnlich, aber qualitativ ist die Marke hier vorzuziehen."
 
-═══════════════════════════════════════════════════════════════════
-PRODUKT-STUFE (App-interner Vertrauens-Level):
-═══════════════════════════════════════════════════════════════════
+BEISPIEL 4 — Original nur leicht besser → score 3 (gleichwertig!):
+  "Die Produkte sind in den Zutaten und Nährwerten sehr ähnlich.
+  Das Original hat geringfügig weniger Salz, dieser Unterschied ist
+  jedoch zu klein um qualitativ ins Gewicht zu fallen."
 
-Der User-Content nennt dir eine "Stufe" (3/4/5) für das NoName-
-Produkt. Sie zeigt wie sicher unsere Datenbank ist dass NoName und
-Original derselben Produkt-Familie zugeordnet sind:
-
-  Stufe 3 = wahrscheinliche Alternative (manuelle Recherche)
-  Stufe 4 = von Community bestätigte Alternative
-  Stufe 5 = nachweislich identische Produkt-Familie (gleiche Quelle/
-            Linie, evtl. minimal angepasste Rezeptur)
-
-SCORE-CAPS basierend auf Stufe:
-  • Stufe 5 → Score MUSS ≥ 3 sein
-  • Stufe 4 → Score MUSS ≥ 2 sein
-  • Stufe 3 → keine Cap
-
-WICHTIG — SCORE-REASONING-KONSISTENZ wenn der Cap greift:
-
-Wenn die rohen Werte einen niedrigeren Score nahelegen würden als
-der Cap zulässt (z.B. Stufe 5 mit leichten Nachteil-Indikatoren),
-dann musst du das Reasoning AN DEN GECAPPTEN SCORE anpassen.
-
-→ KEINE Wörter wie "deutlich", "klar", "stark erhöht", "viel mehr"
-  benutzen wenn der Score 3 oder 4 ist.
-→ Bei Score 3 (gleichwertig/leicht-gecappt): moderate Sprache wie
-  "leichte Variationen bei X", "geringfügig höher", "im Rahmen
-  vergleichbar", "weitgehend identisch mit minimalen Abweichungen
-  bei X".
-→ Bei Score 4 (leichter Vorteil/leicht-gecappt): "etwas weniger X
-  bei sonst vergleichbarer Zusammensetzung".
-
-Das Reasoning muss zur Score-Höhe passen, sonst widerspricht sich
-die Aussage selbst.
-
-ABSOLUTES MUSS: Die Stufe NIEMALS im reasoning erwähnen. Keine
-Wörter wie "nachweislich", "identisch", "Stufe", "wahrscheinlich
-gleiches Produkt", "intern klassifiziert", "verlinkt", etc. Auch
-nicht "trotzdem" / "dennoch" / "obwohl" — solche Worte verraten dass
-du etwas relativierst. Sprich rein faktisch über die Werte.
-
-═══════════════════════════════════════════════════════════════════
-OUTPUT:
-═══════════════════════════════════════════════════════════════════
-
-reasoning: 1-2 kurze Sätze auf Deutsch, max ~220 Zeichen.
-KEINE Marketing-Sprache, keine Adjektive wie "super/toll". Reine Fakten.
-
-Gute Beispiele:
-  "NoName hat weniger Salz (1.1g vs 1.4g) bei sonst identischer
-   Zusammensetzung." → score 4
-  "Beide Produkte sind Bio-zertifiziert mit identischen Nährwerten." → score 3
-  "NoName hat 30% weniger Zucker und kürzere Zutatenliste ohne
-   künstliche Aromen." → score 5
-  "NoName enthält Palmöl und mehrere E-Stoffe, die im Original
-   fehlen — bei gleichem Zuckergehalt." → score 2`;
+Schreibe in vollständigen deutschen Sätzen, sachlich, ohne Werbe-Adjektive.
+Konkrete Werte und Marker nennen wenn relevant.`;
 
 const RESPONSE_SCHEMA = {
   type: Type.OBJECT,
   required: ['score', 'reasoning'],
   properties: {
     score: { type: Type.INTEGER, minimum: 1, maximum: 5 },
-    reasoning: { type: Type.STRING, maxLength: 260 },
+    reasoning: { type: Type.STRING, maxLength: 400 },
   },
 };
 
@@ -191,37 +142,24 @@ const RESPONSE_SCHEMA = {
  * Trimmt Werte (kein NaN, kein undefined als String).
  */
 function buildUserContent({ noname, original }) {
-  const lines = ['NoName-Produkt:', formatProduct(noname)];
+  const lines = [
+    'Vergleichs-Daten (alle Nährwerte pro 100g, Energie bereits in kcal):',
+    '',
+    formatComparisonTable(original, noname),
+  ];
   if (noname.stufe) {
-    lines.push(`Stufe: ${noname.stufe} (NUR für Cap-Logik nutzen — NIE im reasoning erwähnen)`);
+    lines.push('', `(interne Stufe: ${noname.stufe})`);
   }
-  lines.push('', 'Original-Markenprodukt:', formatProduct(original));
-  lines.push('');
-  lines.push('Aufgabe: Vergleiche beide aus Verbraucher-Sicht.');
-  lines.push('Regeln zur Erinnerung:');
-  lines.push('  • minimal-besser → 4, minimal-schlechter → 3 (asymmetrisch)');
-  lines.push('  • fehlende Einzel-Werte ignorieren, anomale Werte ignorieren');
-  if (noname.stufe === 5) {
-    lines.push('  • Stufe-5-CAP: Score MUSS ≥ 3 sein. Reasoning entsprechend');
-    lines.push('    moderat: KEINE Wörter wie "deutlich"/"klar"/"viel mehr".');
-    lines.push('    Eher "leichte Variationen", "weitgehend vergleichbar".');
-  } else if (noname.stufe === 4) {
-    lines.push('  • Stufe-4-CAP: Score MUSS ≥ 2 sein. Bei minimalen Nachteilen');
-    lines.push('    reasoning moderat halten — keine "klar schlechter"-Sprache.');
-  }
-  lines.push('Antworte als JSON gemäß Schema.');
+  lines.push('', 'Vergleiche beide und antworte als JSON.');
   return lines.join('\n');
 }
 
+// Wird in buildUserContent durch formatComparisonTable ersetzt — bleibt
+// hier nur falls von externen Aufrufern noch genutzt.
 function formatProduct(p) {
-  // WICHTIG: fehlende Werte werden komplett weggelassen — KEIN
-  // "nicht verfügbar" / "—"-Marker. Das Modell soll fehlende Daten
-  // als "nicht deklariert" interpretieren und einfach beim Vergleich
-  // ignorieren, NICHT als 0 oder als Datenfehler werten.
   const lines = [];
   if (p.name) lines.push(`Name: ${p.name}`);
   if (p.hersteller) lines.push(`Hersteller: ${p.hersteller}`);
-  // Nutrition per 100g — nur Werte die da sind
   const n = [];
   if (typeof p.energy === 'number') n.push(`Energie ${p.energy} kcal`);
   if (typeof p.fat === 'number') n.push(`Fett ${p.fat}g`);
@@ -232,10 +170,77 @@ function formatProduct(p) {
   if (typeof p.protein === 'number') n.push(`Eiweiß ${p.protein}g`);
   if (typeof p.salt === 'number') n.push(`Salz ${p.salt}g`);
   if (n.length > 0) lines.push(`Nährwerte (pro 100g): ${n.join(', ')}`);
-  // Zutaten — nur wenn vorhanden, max 600 Zeichen
   const ing = (p.ingredients || '').slice(0, 600).trim();
   if (ing) lines.push(`Zutaten: ${ing}`);
   return lines.join('\n');
+}
+
+// Side-by-Side Format — verhindert Werte-Verwechslung. Pro Zeile
+// EIN Aspekt mit Original- und NoName-Wert nebeneinander. Wenn ein
+// Wert fehlt: leere Spalte. Das Modell kann hier nicht durcheinander
+// kommen welcher Wert wohin gehört.
+function formatComparisonTable(original, noname) {
+  const rows = [];
+
+  // Header
+  rows.push(`| Aspekt              | ORIGINAL           | EIGENMARKE (NoName) |`);
+  rows.push(`|---------------------|--------------------|---------------------|`);
+
+  const row = (label, oVal, nVal) => {
+    const o = oVal == null ? '' : String(oVal);
+    const n = nVal == null ? '' : String(nVal);
+    return `| ${label.padEnd(19)} | ${o.padEnd(18)} | ${n.padEnd(19)} |`;
+  };
+
+  if (original.name || noname.name) {
+    rows.push(row('Name', original.name, noname.name));
+  }
+  if (original.hersteller || noname.hersteller) {
+    rows.push(row('Hersteller', original.hersteller, noname.hersteller));
+  }
+
+  // Nährwerte (alle in kcal nach v10-Konvertierung)
+  rows.push(row('Energie (kcal)', original.energy, noname.energy));
+  rows.push(row('Fett (g)', original.fat, noname.fat));
+  rows.push(row('gesättigt (g)', original.satFat, noname.satFat));
+  rows.push(row('Kohlenhydrate (g)', original.carbs, noname.carbs));
+  rows.push(row('davon Zucker (g)', original.sugar, noname.sugar));
+  rows.push(row('Ballaststoffe (g)', original.fiber, noname.fiber));
+  rows.push(row('Eiweiß (g)', original.protein, noname.protein));
+  rows.push(row('Salz (g)', original.salt, noname.salt));
+
+  // Labels — nur wenn mindestens einer was hat
+  const lbl = (key, label) => {
+    const o = original.labels?.[key];
+    const n = noname.labels?.[key];
+    if (o == null && n == null) return null;
+    const fmt = (v) => (v === true ? 'ja' : v === false ? 'nein' : v == null ? '' : String(v));
+    return row(label, fmt(o), fmt(n));
+  };
+  const labelRows = [
+    lbl('nutriscore', 'Nutri-Score'),
+    lbl('ecoscore', 'Eco-Score'),
+    lbl('nova', 'NOVA-Gruppe'),
+    lbl('isBio', 'Bio'),
+    lbl('isVegan', 'Vegan'),
+    lbl('isVegetarisch', 'Vegetarisch'),
+    lbl('isGlutenfrei', 'Glutenfrei'),
+    lbl('isLaktosefrei', 'Laktosefrei'),
+  ].filter(Boolean);
+  if (labelRows.length > 0) {
+    rows.push(`|---------------------|--------------------|---------------------|`);
+    rows.push(...labelRows);
+  }
+
+  let out = rows.join('\n');
+
+  // Zutaten als separater Block (zu lang für Tabellen-Format)
+  const oIng = (original.ingredients || '').slice(0, 600).trim();
+  const nIng = (noname.ingredients || '').slice(0, 600).trim();
+  if (oIng) out += `\n\nZUTATEN ORIGINAL:\n${oIng}`;
+  if (nIng) out += `\n\nZUTATEN EIGENMARKE (NoName):\n${nIng}`;
+
+  return out;
 }
 
 /**
@@ -253,6 +258,43 @@ function snapshotFromDoc(data) {
   } else if (typeof data.stufe === 'number') {
     if (data.stufe >= 1 && data.stufe <= 5) stufe = data.stufe;
   }
+
+  // ENERGIE — KRITISCH: nutr_Energie_unit auswerten. Wenn 'kJ' →
+  // konvertieren zu kcal damit Gemini einheitlich kcal-Zahlen sieht
+  // und keine kJ-vs-kcal-Verwechslung entsteht (1 kcal = 4.184 kJ).
+  let energyKcal = numOrNull(data.nutr_Energie_val);
+  const energyUnit = typeof data.nutr_Energie_unit === 'string'
+    ? data.nutr_Energie_unit.toLowerCase()
+    : null;
+  if (energyKcal != null && (energyUnit === 'kj' || energyUnit === 'kJ'.toLowerCase())) {
+    energyKcal = Math.round(energyKcal / 4.184);
+  }
+
+  // Labels — wenn vorhanden, auch an Gemini geben damit Premium-Marker
+  // berücksichtigt werden können. Felder existieren teilweise auf
+  // produkte/markenProdukte (nutriscore) bzw. nach reweapify-Backfill
+  // (attr_isVegan, attr_isVegetarisch).
+  const labels = {
+    nutriscore: typeof data.nutriscore === 'string' ? data.nutriscore.toLowerCase() : null,
+    ecoscore: typeof data.ecoscore === 'string' ? data.ecoscore.toLowerCase() : null,
+    nova: typeof data.nova === 'string' || typeof data.nova === 'number' ? String(data.nova) : null,
+    isVegan: typeof data.attr_isVegan === 'boolean' ? data.attr_isVegan
+             : typeof data.isVegan === 'boolean' ? data.isVegan
+             : null,
+    isVegetarisch: typeof data.attr_isVegetarisch === 'boolean' ? data.attr_isVegetarisch
+                   : typeof data.isVegetarian === 'boolean' ? data.isVegetarian
+                   : null,
+    isGlutenfrei: typeof data.attr_isGlutenfrei === 'boolean' ? data.attr_isGlutenfrei
+                  : typeof data.isGlutenFree === 'boolean' ? data.isGlutenFree
+                  : null,
+    isLaktosefrei: typeof data.attr_isLaktosefrei === 'boolean' ? data.attr_isLaktosefrei
+                   : typeof data.isLactoseFree === 'boolean' ? data.isLactoseFree
+                   : null,
+    isBio: typeof data.attr_isBio === 'boolean' ? data.attr_isBio
+           : typeof data.isBio === 'boolean' ? data.isBio
+           : null,
+  };
+
   return {
     name: data.name || data.productName || data.bezeichnung || null,
     hersteller:
@@ -260,7 +302,7 @@ function snapshotFromDoc(data) {
       data.producerName ||
       null,
     stufe, // 3/4/5 für NoName-Snapshot, null für Markenprodukt
-    energy: numOrNull(data.nutr_Energie_val),
+    energy: energyKcal, // immer in kcal — kJ wurde konvertiert
     fat: numOrNull(data.nutr_Fett_val),
     satFat: numOrNull(data.nutr_FettdavongesttigteFettsuren_val),
     carbs: numOrNull(data.nutr_Kohlenhydrate_val),
@@ -269,6 +311,7 @@ function snapshotFromDoc(data) {
     protein: numOrNull(data.nutr_Eiwei_val),
     salt: numOrNull(data.nutr_Salz_val),
     ingredients: data.attr_ingredientStatement || data.zutaten || null,
+    labels,
   };
 }
 
@@ -373,8 +416,25 @@ async function callGemini({ apiKey, snapshot, model = DEFAULT_MODEL }) {
     score = 2;
   }
 
-  // Hart auf 220 Zeichen kappen falls das Modell länger ist
-  if (reasoning.length > 220) reasoning = reasoning.slice(0, 217) + '…';
+  // Soft-Cap: wenn länger als 380, schneide am letzten Satz-Ende ab
+  // statt mitten im Wort mit '…'. User-Vorgabe: keine angeschnittenen
+  // Texte in der UI.
+  if (reasoning.length > 380) {
+    const truncated = reasoning.slice(0, 380);
+    const lastDot = Math.max(
+      truncated.lastIndexOf('. '),
+      truncated.lastIndexOf('! '),
+      truncated.lastIndexOf('? '),
+    );
+    if (lastDot > 200) {
+      reasoning = truncated.slice(0, lastDot + 1);
+    } else {
+      // Kein vernünftiges Satzende gefunden — auf letztes Leerzeichen
+      const lastSpace = truncated.lastIndexOf(' ');
+      reasoning = (lastSpace > 200 ? truncated.slice(0, lastSpace) : truncated).trim();
+      if (!/[.!?]$/.test(reasoning)) reasoning += '.';
+    }
+  }
 
   return {
     score,

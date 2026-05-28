@@ -1241,7 +1241,7 @@ export default function HomeScreen() {
             style={{ borderRadius: radii.xl, overflow: 'hidden', ...shadows.fab }}
           >
             <Pressable
-              onPress={() => safePush('/barcode-scanner' as any)}
+              onPress={() => safePush('/(tabs)/rewards' as any)}
               style={{ padding: 24 }}
             >
               <View style={{ opacity: 0.18, position: 'absolute', right: -30, bottom: -20 }}>
@@ -1286,7 +1286,7 @@ export default function HomeScreen() {
                     gap: 8,
                   }}
                 >
-                  <MaterialCommunityIcons name="barcode-scan" size={16} color={brand.primary} />
+                  <MaterialCommunityIcons name="trophy" size={16} color={brand.primary} />
                   <Text
                     style={{
                       fontFamily,
@@ -1295,7 +1295,7 @@ export default function HomeScreen() {
                       color: brand.primary,
                     }}
                   >
-                    Beleg scannen
+                    Rewards
                   </Text>
                 </View>
               </View>

@@ -4,6 +4,7 @@ import * as Notifications from 'expo-notifications';
 import { doc, setDoc, updateDoc } from '@react-native-firebase/firestore';
 import { Platform } from 'react-native';
 import { db } from '../firebase';
+import { extractDeepLink, navigateToDeepLink } from './pushDeepLinks';
 
 // Notification Handler Konfiguration
 Notifications.setNotificationHandler({
@@ -175,20 +176,43 @@ class PushNotificationService {
   }
 
   /**
-   * Handle Notification Click
+   * Handle Notification Click — Deep-Link-Routing via expo-router.
+   *
+   * Erwarteter Payload (aus Firebase Console "Erweiterte Optionen →
+   * Custom Data" ODER aus CF mit `data.deepLink`):
+   *   { deepLink: '/noname-detail/abc123' }
+   *
+   * Whitelist + Fallback laut pushDeepLinks.ts. Wenn kein deepLink
+   * gesetzt ist, landet der User auf der Home-Tab.
    */
   private handleNotificationResponse(response: Notifications.NotificationResponse): void {
-    const data = response.notification.request.content.data;
-
-    // Navigation basierend auf Notification-Typ
-    if (data?.type === 'product_deal') {
-      // Navigate zu Produkt
-      // router.push(`/product/${data.productId}`);
-    } else if (data?.type === 'achievement') {
-      // Navigate zu Achievements
-      // router.push('/achievements');
+    try {
+      const data = response.notification.request.content.data;
+      const deepLink = extractDeepLink(data);
+      console.log('[push-tap] deepLink=', deepLink, 'data=', data);
+      navigateToDeepLink(deepLink);
+    } catch (e: any) {
+      console.warn('[push-tap] handleNotificationResponse failed:', e?.message);
     }
-    // etc...
+  }
+
+  /**
+   * Cold-Start-Handler: wenn die App durch eine Push-Notification
+   * geöffnet wurde, wird der Response erst gesetzt nachdem die App
+   * läuft. Wir fragen das beim ersten Mount ab und routen.
+   *
+   * Wird vom PushNotificationProvider aufgerufen sobald der
+   * Root-Navigator ready ist.
+   */
+  async handleColdStartNotification(): Promise<void> {
+    try {
+      const last = await Notifications.getLastNotificationResponseAsync();
+      if (!last) return;
+      console.log('[push-tap] cold-start response found');
+      this.handleNotificationResponse(last);
+    } catch (e: any) {
+      console.warn('[push-tap] cold-start handler failed:', e?.message);
+    }
   }
 
   /**

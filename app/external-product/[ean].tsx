@@ -142,11 +142,19 @@ export default function ExternalProductScreen() {
     };
   }, [product?.manufacturerName]);
 
-  // Alternative-Eigenmarken via Algolia-Name-Search mit Fallback-
-  // Kaskade: wenn primärer Search 0 Hits, versuche erstes Wort allein,
-  // dann jede einzelne Brand-Komponente, dann Kategorie. So sehen
-  // User IMMER irgendwelche Alternativen — "keine gefunden" ist
-  // schlechtes UX-Verhalten.
+  // Alternative-Eigenmarken via Algolia-Name-Search.
+  //
+  // Wichtiger Insight: Brand-Namen (Alpro, Kerrygold, Coca-Cola, …)
+  // tauchen in Eigenmarken-NoName-Namen praktisch NIE auf. NoNames
+  // beschreiben die Produktart (z.B. "Soja-Joghurt Natur") ohne
+  // Brand-Referenz. Daher MUSS der Brand-Name aus der Suche raus,
+  // sonst kommen wir nie an die echten Alternativen.
+  //
+  // Cascade:
+  //   1. Vollständiger Name OHNE Brand
+  //   2. Signifikante Produkt-Wörter einzeln (Joghurt, Soja, Cola, …)
+  //   3. Kategorie (last segment)
+  //   4. Voller Original-Name (Last-Resort)
   useEffect(() => {
     let alive = true;
     const name = product?.productName?.trim();
@@ -156,31 +164,79 @@ export default function ExternalProductScreen() {
     const tryQuery = async (query: string): Promise<AlgoliaSearchResult[]> => {
       try {
         const result = await AlgoliaService.searchNoNameProducts(query, 0, 6);
-        return result?.hits ?? [];
+        const hits = result?.hits ?? [];
+        console.log(`[external-alt] query="${query}" → ${hits.length} hits`);
+        return hits;
       } catch (e) {
-        console.warn('algolia alt-query failed', query, e);
+        console.warn('[external-alt] query failed', query, e);
         return [];
       }
     };
 
-    (async () => {
-      // 1. Voller Produktname
-      let hits = await tryQuery(name);
-      if (!alive) return;
+    // Generische Stop-Words die in Produktnamen ohne Inhalts-Bedeutung
+    // vorkommen. Beim Zerlegen rausfiltern damit "vegan", "natur" etc.
+    // nicht als Such-Token landen (zu generisch, würden 1000+ Hits
+    // bringen).
+    const STOPWORDS = new Set([
+      'mit', 'ohne', 'und', 'oder', 'aus', 'für', 'fur', 'im', 'in', 'der', 'die', 'das',
+      'vegan', 'vegetarisch', 'natur', 'classic', 'original', 'light', 'mini',
+      'plus', 'extra', 'pur', 'pure', 'fein', 'feine', 'frisch', 'echt',
+      'g', 'kg', 'ml', 'l', 'cl', 'stk', 'stück', 'st',
+      'bio', 'eco', 'premium', 'soft', 'hart', 'cremig',
+    ]);
 
-      // 2. Erstes Wort (oft die "Kategorie", z.B. "Cola Light")
+    // Brand-Wörter aus dem Namen entfernen damit wir auf die Produktart
+    // zoomen. Bei "Alpro Joghurtalternative Soja Natur mit Kokosnuss
+    // vegan 400g" → wir wollen "joghurtalternative soja kokosnuss".
+    function stripBrandFromName(raw: string, brand?: string | null): string {
+      let s = raw.toLowerCase();
+      if (brand) {
+        const brandWords = brand.toLowerCase().split(/[,\s]+/).filter((w) => w.length >= 3);
+        for (const bw of brandWords) {
+          s = s.replace(new RegExp(`\\b${escapeRegex(bw)}\\b`, 'gi'), ' ');
+        }
+      }
+      // Pack-Size-Suffixe ("400g", "1l", "6×0,5l") wegnehmen
+      s = s.replace(/\b\d+\s*[×x]?\s*\d*\s*(g|kg|ml|l|cl|stk|stück|st)\b/gi, ' ');
+      return s.replace(/\s+/g, ' ').trim();
+    }
+
+    function escapeRegex(s: string): string {
+      return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function significantWords(s: string): string[] {
+      return s
+        .toLowerCase()
+        .split(/[\s,;:\-_/()]+/)
+        .map((w) => w.trim())
+        .filter((w) => w.length >= 4 && !STOPWORDS.has(w) && !/^\d/.test(w));
+    }
+
+    (async () => {
+      const brandStripped = stripBrandFromName(name, product?.brandName);
+
+      // 1. Brand-stripped name als ganzer Query
+      let hits: AlgoliaSearchResult[] = [];
+      if (brandStripped && brandStripped !== name.toLowerCase()) {
+        hits = await tryQuery(brandStripped);
+        if (!alive) return;
+      }
+
+      // 2. Einzelne signifikante Produktwörter, in Reihenfolge ihrer
+      //    Position im Namen (erstes signifikantes Wort = meist
+      //    Produktart, z.B. "Joghurtalternative").
       if (hits.length === 0) {
-        const firstWord = name.split(/\s+/)[0];
-        if (firstWord && firstWord.length >= 3 && firstWord.toLowerCase() !== name.toLowerCase()) {
-          hits = await tryQuery(firstWord);
+        const words = significantWords(brandStripped || name);
+        for (const w of words) {
+          hits = await tryQuery(w);
           if (!alive) return;
+          if (hits.length > 0) break;
         }
       }
 
-      // 3. Kategorie (wenn vorhanden)
+      // 3. Kategorie aus Source (falls vorhanden)
       if (hits.length === 0 && product?.category) {
-        // Kategorie kann lang sein ("Getränke > Erfrischungsgetränke …")
-        // → letztes Segment nehmen, das ist meist das spezifischste
         const catParts = product.category.split(/[›>,]+/).map((s) => s.trim());
         const lastCat = catParts.filter(Boolean).pop();
         if (lastCat && lastCat.length >= 3) {
@@ -189,13 +245,11 @@ export default function ExternalProductScreen() {
         }
       }
 
-      // 4. Brand-Name als letzte Hoffnung
-      if (hits.length === 0 && product?.brandName) {
-        const firstBrandWord = product.brandName.split(/[,\s]+/)[0];
-        if (firstBrandWord && firstBrandWord.length >= 3) {
-          hits = await tryQuery(firstBrandWord);
-          if (!alive) return;
-        }
+      // 4. Last-Resort: voller Original-Name (auch wenn vorher gefailt,
+      //    Algolia kann mit removeWordsIfNoResults manchmal doch was).
+      if (hits.length === 0) {
+        hits = await tryQuery(name);
+        if (!alive) return;
       }
 
       if (alive) setAlternatives(hits);
@@ -962,7 +1016,6 @@ export default function ExternalProductScreen() {
                     imageUri={alt.bild ?? null}
                     price={typeof alt.preis === 'number' ? alt.preis : 0}
                     stufe={stufeNum ?? null}
-                    aiScore={(alt as any)?.aiComparison?.score ?? null}
                     variant="grid"
                     height={278}
                     onPress={() => {
