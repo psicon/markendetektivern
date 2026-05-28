@@ -24,6 +24,10 @@ import { FilterSheet } from '@/components/design/FilterSheet';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import {
+  ShoppingSuggestion,
+  useShoppingSuggestions,
+} from '@/lib/hooks/useShoppingSuggestions';
 import { FirestoreService } from '@/lib/services/firestore';
 
 import { MarketSelector } from './MarketSelector';
@@ -98,6 +102,24 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
   const [selectedMarket, setSelectedMarket] = useState<any>(null);
   const [showMarketSelector, setShowMarketSelector] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // T17.34: Live-Vorschläge basierend auf Kaufhistorie + Algolia-Such-
+  // Cache. Tap auf Suggestion füllt Formular automatisch.
+  const { suggestions, loading: suggestLoading } = useShoppingSuggestions(itemName);
+
+  const applySuggestion = (s: ShoppingSuggestion) => {
+    setItemName(s.name);
+    setItemType(s.type);
+    if (s.market) {
+      setSelectedMarket({
+        id: s.market.id,
+        name: s.market.name,
+        land: s.market.land,
+        bild: s.market.bild,
+      });
+    }
+    Haptics.selectionAsync().catch(() => {});
+  };
 
   // Reset form on every (re-)open
   useEffect(() => {
@@ -179,7 +201,7 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
             borderRadius: 12,
             paddingHorizontal: 14,
             paddingVertical: 4,
-            marginBottom: 18,
+            marginBottom: 10,
           }}
         >
           <TextInput
@@ -200,6 +222,124 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
             }}
           />
         </View>
+
+        {/* T17.34: Suggestions — Top-Produkte (leer-Input) oder
+            Live-Search-Treffer (≥ 2 Zeichen). Tap füllt Formular
+            automatisch aus. */}
+        {suggestions.length > 0 ? (
+          <View style={{ marginBottom: 18 }}>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold as any,
+                fontSize: 11,
+                color: theme.textMuted,
+                letterSpacing: 0.4,
+                textTransform: 'uppercase',
+                marginBottom: 6,
+              }}
+            >
+              {itemName.trim().length >= 2
+                ? `Vorschläge${suggestLoading ? ' …' : ''}`
+                : 'Deine Top-Produkte'}
+            </Text>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={{ maxHeight: 180 }}
+              keyboardShouldPersistTaps="handled"
+            >
+              {suggestions.map((s) => (
+                <Pressable
+                  key={s.key}
+                  onPress={() => applySuggestion(s)}
+                  style={({ pressed }) => ({
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 10,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    backgroundColor: pressed ? theme.surfaceAlt : 'transparent',
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                    marginBottom: 6,
+                  })}
+                >
+                  <View
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 8,
+                      backgroundColor: theme.surfaceAlt,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <MaterialCommunityIcons
+                      name={s.type === 'noname' ? 'storefront-outline' : 'tag-outline'}
+                      size={16}
+                      color={brand.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.bold as any,
+                        fontSize: 14,
+                        color: theme.text,
+                      }}
+                    >
+                      {s.name}
+                    </Text>
+                    {s.market ? (
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          fontFamily,
+                          fontWeight: fontWeight.medium,
+                          fontSize: 11,
+                          color: theme.textSub,
+                          marginTop: 1,
+                        }}
+                      >
+                        {s.market.name}
+                        {s.preis != null
+                          ? ` · ${s.preis.toFixed(2).replace('.', ',')} €`
+                          : ''}
+                      </Text>
+                    ) : s.type === 'brand' ? (
+                      <Text
+                        style={{
+                          fontFamily,
+                          fontWeight: fontWeight.medium,
+                          fontSize: 11,
+                          color: theme.textSub,
+                          marginTop: 1,
+                        }}
+                      >
+                        Markenprodukt
+                        {s.preis != null
+                          ? ` · ${s.preis.toFixed(2).replace('.', ',')} €`
+                          : ''}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <MaterialCommunityIcons
+                    name="plus"
+                    size={18}
+                    color={theme.textMuted}
+                  />
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : itemName.trim().length >= 2 && suggestLoading ? (
+          <View style={{ marginBottom: 18, alignItems: 'center', paddingVertical: 12 }}>
+            <ActivityIndicator size="small" color={theme.textMuted} />
+          </View>
+        ) : null}
 
         {/* Produkttyp */}
         <Text style={[labelStyle(theme)]}>Produkttyp</Text>
@@ -260,13 +400,24 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
           </>
         ) : null}
 
-        {/* Icon */}
+        {/* Icon — T17.33: Grid statt horizontaler Scroll. Vorher musste
+            User durch eine endlose horizontale Reihe von 32 Icons
+            scrollen. Jetzt 4 Spalten × N Zeilen, gecapped auf ~3.5
+            Zeilen Höhe (190 px) — danach vertikal scrollbar innerhalb
+            des Grids. Item-Width berechnet sich aus row-width / 4
+            (flexBasis 23%, gap 2% zwischen Spalten = 4 × 23 + 3 × 2.3
+            ≈ 99 %). */}
         <Text style={[labelStyle(theme)]}>Icon</Text>
         <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingVertical: 4, paddingRight: 4, gap: 8 }}
-          style={{ marginHorizontal: -20, paddingHorizontal: 20, marginBottom: 18 }}
+          showsVerticalScrollIndicator={false}
+          style={{ maxHeight: 190, marginBottom: 18 }}
+          contentContainerStyle={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: 8,
+            paddingVertical: 4,
+            paddingBottom: 8,
+          }}
         >
           {PRODUCT_ICONS.map((ic) => {
             const on = ic.key === iconKey;
@@ -277,8 +428,11 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
                   setIconKey(ic.key);
                   Haptics.selectionAsync().catch(() => {});
                 }}
+                // flexBasis: ~23 % so dass mit gap:8 exakt 4 Items pro
+                // Zeile passen (auf Screen-Breite ~330 nach FilterSheet-
+                // Padding: (330 - 3*8) / 4 = 76.5 → 4 Items à 76.5 px).
                 style={({ pressed }) => ({
-                  width: 64,
+                  width: '23%',
                   alignItems: 'center',
                   gap: 4,
                   opacity: pressed ? 0.7 : 1,
