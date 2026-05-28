@@ -182,7 +182,10 @@ export function bannerDataFromLevelUp(
 // gefeuert wenn state pending→approved transitioniert. Zentral hier
 // gebaut damit's durch dieselbe Banner-Pipeline läuft wie Achievements/
 // Level-Ups (CLAUDE.md: "ONE celebration component app-wide").
-// Lottie: money.json (im Banner als 72×72-Icon). Tint: brand-grün.
+// Lottie: money.json (im Banner als 72×72-Icon). Tint: brand-grün
+// primär, gold sekundär — klassische Geld-Konnotation. EdgeGlow ON
+// (withGlow=true) damit Cashback denselben "großen Moment"-Charakter
+// hat wie ein Level-Up.
 export function bannerDataFromCashbackPayout(cashbackCents: number): BannerData {
   const formatted = cashbackCents > 0 ? `+${formatCents(cashbackCents)}` : 'Cashback gutgeschrieben';
   return {
@@ -198,6 +201,11 @@ export function bannerDataFromCashbackPayout(cashbackCents: number): BannerData 
       }
     })(),
     tint: '#0d8575',
+    // Gold als Sekundär-Ton — EdgeGlow shimmert zwischen Brand-Grün
+    // (Trust/Erfolg) und Gold (Geld/Wert). Spiegelt visuell was passiert:
+    // grüner Bon → goldenes Geld.
+    secondaryTint: '#F0A030',
+    withGlow: true,
     onTap: () => {
       try {
         router.push('/cashback/history' as any);
