@@ -12,7 +12,7 @@
 //      scannen). Macht konkret was der User TUT um Cashback zu
 //      verdienen + nennt das wöchentliche Limit.
 //   3. **redeem** — Spotlight auf die "Cashback einlösen"-Card.
-//      Erklärt, wie das Geld aufs Konto kommt sobald 5 € voll sind.
+//      Erklärt, wie das Geld aufs Konto kommt sobald 10 € voll sind.
 //
 // Im Vergleich zum vorherigen Slide-Modal (CoachmarkOverlay):
 //   • Pointet auf reale UI-Elemente → User lernt durch ZEIGEN, nicht
@@ -52,7 +52,7 @@ function configForPhase(
         anchorId: REWARDS_ANCHOR_HERO,
         title: 'Dein Cashback-Guthaben',
         body:
-          'Hier siehst du, wie viel Geld du schon gesammelt hast. Sobald 5 € voll sind, überweisen wir dir den Betrag direkt aufs Bankkonto.',
+          'Hier siehst du, wie viel Geld du schon gesammelt hast. Sobald 10 € voll sind, überweisen wir dir den Betrag direkt aufs Bankkonto.',
         lottie: require('@/assets/lottie/gift.json'),
       };
     case 'earn':
@@ -60,15 +60,15 @@ function configForPhase(
         anchorId: REWARDS_ANCHOR_EARN,
         title: 'So sammelst du Cashback',
         body:
-          'Mach ein Foto vom Kassenbon nach dem Einkauf — wir lesen ihn automatisch und schreiben dir 0,08 € gut. Bis zu 6 Bons pro Woche, das sind etwa 2 € extra im Monat.',
+          'Mach ein Foto vom Kassenbon nach dem Einkauf — wir lesen ihn automatisch und schreiben dir bis zu 0,08 € pro Bon gut. Bis zu 6 Bons pro Woche, das sind ungefähr 2 € extra im Monat.',
         lottie: require('@/assets/lottie/task.json'),
       };
     case 'redeem':
       return {
         anchorId: REWARDS_ANCHOR_REDEEM,
-        title: 'Auszahlen ab 5 €',
+        title: 'Auszahlen ab 10 €',
         body:
-          'Ab 5 € kannst du dir dein Cashback auszahlen lassen. Tipp einfach auf „Cashback einlösen" — wir überweisen den vollen Betrag aufs Bankkonto.',
+          'Ab 10 € kannst du dir dein Cashback auszahlen lassen. Tipp einfach auf „Cashback einlösen" — wir überweisen den vollen Betrag aufs Bankkonto.',
         lottie: require('@/assets/lottie/savings.json'),
       };
   }

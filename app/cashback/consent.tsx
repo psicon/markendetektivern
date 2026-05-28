@@ -65,7 +65,7 @@ const STEPS: { icon: string; title: string; sub: string }[] = [
   {
     icon: 'cash-multiple',
     title: 'Cashback sammeln',
-    sub: 'Ab 15 € auszahlen lassen',
+    sub: 'Ab 10 € auszahlen lassen',
   },
 ];
 
@@ -423,7 +423,7 @@ export default function CashbackConsentScreen() {
           <View style={styles.pillRow}>
             <View style={styles.pill}>
               <MaterialCommunityIcons name="receipt" size={11} color="#fff" />
-              <Text style={styles.pillText}>0,08 € pro Bon</Text>
+              <Text style={styles.pillText}>Bis zu 0,08 € pro Bon</Text>
             </View>
             <View style={styles.pill}>
               <MaterialCommunityIcons
@@ -439,7 +439,7 @@ export default function CashbackConsentScreen() {
                 size={11}
                 color="#fff"
               />
-              <Text style={styles.pillText}>Ab 15 € auszahlen</Text>
+              <Text style={styles.pillText}>Ab 10 € auszahlen</Text>
             </View>
           </View>
         </LinearGradient>

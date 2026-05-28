@@ -37,7 +37,7 @@ import { useWeeklyReceiptCount } from '@/lib/hooks/useWeeklyReceiptCount';
 // `useCashbackUserState()` via Firestore-Snapshot — siehe
 // CASHBACK_ARCHITECTURE.md §3.3 (User-Felder).
 const CASHBACK_FALLBACK_EUR = 0.0;
-const PAYOUT_THRESHOLD = 15.0;
+const PAYOUT_THRESHOLD = 10.0;
 
 // Shared height for both hero cards (Cashback in Einlösen +
 // StatusHero in Bestenliste). Fixed so the page geometry doesn't
@@ -766,13 +766,13 @@ function RewardsHelpContent() {
         icon="treasure-chest"
         iconColor="#0d8575"
         title="Cashback-Taler"
-        body="Sammle Cashback-Taler bei jeder Aktion (Bons hochladen, Produktbilder einreichen, Umfragen beantworten). Ab 15 € Guthaben kannst du auszahlen lassen."
+        body="Sammle Cashback-Taler bei jeder Aktion (Bons hochladen, Produktbilder einreichen, Umfragen beantworten). Ab 10 € Guthaben kannst du auszahlen lassen."
       />
       <HelpBlock
         icon="receipt"
         iconColor="#0d8575"
         title="Kassenbon hochladen"
-        body="0,08 € pro Bon, max. 6 Bons pro Woche. Wir erkennen automatisch den Markt und die gekauften Produkte für unsere Markt-Insights."
+        body="Bis zu 0,08 € pro Bon, max. 6 Bons pro Woche. Wir erkennen automatisch den Markt und die gekauften Produkte für unsere Markt-Insights."
       />
       <HelpBlock
         icon="camera-outline"
