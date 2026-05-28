@@ -51,21 +51,25 @@ const TERMS_URL = 'https://markendetektive.de/agb';
 // Three-step "so einfach" flow — numbered circles + crisp labels.
 // Concrete (not "wie magisch"), but the magic of the auto-OCR is the
 // hero, so middle step is a tiny aha-moment.
+// T17.29: "So einfach geht's"-Steps mit klarer Zeitachse — User wollte
+// wissen "wann bekomme ich was?". Schritt 1+2 sind Aktionen, Schritt 3
+// die Belohnung. Mit Hinweis dass Cashback automatisch gutgeschrieben
+// wird sobald der Bon geprüft ist (meist Minuten).
 const STEPS: { icon: string; title: string; sub: string }[] = [
   {
     icon: 'camera-outline',
-    title: 'Bon abfotografieren',
+    title: 'Foto vom Bon machen',
     sub: 'Direkt nach dem Einkauf',
   },
   {
     icon: 'auto-fix',
-    title: 'Wir lesen ihn aus',
-    sub: 'Markt, Datum, Artikel — automatisch',
+    title: 'Cashback wird gutgeschrieben',
+    sub: 'Sobald der Bon geprüft ist — meist in wenigen Minuten',
   },
   {
-    icon: 'cash-multiple',
-    title: 'Einlösen',
-    sub: 'Ab 10 € als Gutschein oder Auszahlung',
+    icon: 'gift-outline',
+    title: 'Ab 10 € einlösen',
+    sub: 'Gutschein deiner Wahl oder Auszahlung aufs Konto',
   },
 ];
 
@@ -85,7 +89,7 @@ const PRIVACY: { icon: string; title: string; body: string }[] = [
   {
     icon: 'account-cancel-outline',
     title: 'Jederzeit widerrufbar',
-    body: 'Bereits gesammeltes Guthaben bleibt auszahlbar.',
+    body: 'Du kannst deine Zustimmung in den Einstellungen jederzeit zurückziehen.',
   },
 ];
 
@@ -413,7 +417,7 @@ export default function CashbackConsentScreen() {
               color="#fff"
             />
           </View>
-          <Text style={styles.heroEyebrow}>Echtes Cashback in €</Text>
+          <Text style={styles.heroEyebrow}>Geld zurück fürs Einkaufen</Text>
           <Text style={styles.heroTitle}>Hol dir Geld für deine Bons</Text>
           <Text style={styles.heroBody}>
             Bis zu 6 Bons pro Woche — das sind rund 25 € im Jahr, nur fürs

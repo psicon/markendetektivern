@@ -393,12 +393,21 @@ export default function CashbackPendingScreen() {
       };
     }
     if (state === 'review') {
+      // T17.30: Konkreten Review-Grund zeigen statt generischem "wir
+      // konnten nicht eindeutig auswerten". User-Wunsch: immer
+      // wissen WARUM.
+      const reviewReason = (doc?.rejectReason as string) ?? '';
+      const reviewBody =
+        reviewReason === 'no_bon_date'
+          ? 'Wir konnten kein Datum auf dem Bon erkennen. Wir prüfen das manuell — meistens innerhalb eines Tages.'
+          : reviewReason === 'reconciliation_delta'
+          ? 'Endbetrag und Einzelartikel passen nicht ganz zusammen. Wir prüfen das manuell — meistens innerhalb eines Tages.'
+          : 'Wir konnten den Bon nicht eindeutig auswerten. Sobald geklärt — meistens innerhalb eines Tages — siehst du das Ergebnis hier.';
       return {
         icon: <MaterialCommunityIcons name="account-search-outline" size={42} color={yellow} />,
         bg: '#f1c40f30',
         title: 'In Prüfung',
-        body:
-          'Wir konnten den Bon nicht eindeutig auswerten. Sobald geklärt — meistens innerhalb eines Tages — siehst du das Ergebnis hier.',
+        body: reviewBody,
         cashback: null,
       };
     }
@@ -415,12 +424,19 @@ export default function CashbackPendingScreen() {
       };
     }
     if (state === 'rejected') {
+      // T17.30: Konkreten Reject-Grund zeigen — Backend emittiert
+      // duplicate_content_self/_cross_user und pubsub_publish_failed
+      // die hier vorher unter den generischen Default fielen
+      // ("Bon konnte nicht verbucht werden") → User hatte keine
+      // Ahnung warum.
       const reason = (doc?.rejectReason as string) ?? '';
       const body =
         reason === 'below_min_items'
           ? 'Auf dem Bon konnten wir weniger als 4 Artikel erkennen — für Cashback brauchen wir mindestens 4.'
-          : reason === 'reconciliation_delta'
-          ? 'Endbetrag und Einzelartikel passen nicht ganz zusammen. Wir konnten den Bon nicht verifizieren.'
+          : reason === 'duplicate_content_self'
+          ? 'Diesen Bon hattest du schon einmal eingereicht. Pro Bon gibt es nur einmal Cashback.'
+          : reason === 'duplicate_content_cross_user'
+          ? 'Dieser Bon wurde bereits eingereicht. Pro Bon gibt es nur einmal Cashback.'
           : reason === 'unknown_merchant'
           ? `Diesen Markt unterstützen wir aktuell noch nicht für Cashback.${doc?.merchantRaw ? ` Erkannt als: „${doc.merchantRaw}".` : ''}`
           : reason === 'bon_too_old'
@@ -429,7 +445,11 @@ export default function CashbackPendingScreen() {
           ? 'Das Foto sieht nicht nach einem Kassenbon aus. Bitte versuche es nochmal mit einem klar lesbaren Bon.'
           : reason === 'process_error'
           ? 'Bei der Auswertung ist etwas schiefgegangen. Versuche es nochmal mit einem schärferen Foto.'
-          : 'Bon konnte nicht verbucht werden.';
+          : reason === 'pubsub_publish_failed'
+          ? 'Beim Hochladen ist etwas schiefgegangen. Bitte versuche es nochmal.'
+          : reason
+          ? `Bon konnte nicht verbucht werden (Grund: ${reason}).`
+          : 'Bon konnte nicht verbucht werden. Bitte versuche es nochmal mit einem schärferen Foto des Kassenbons.';
       return {
         icon: <MaterialCommunityIcons name="close-circle-outline" size={42} color={warn} />,
         bg: warn + '22',

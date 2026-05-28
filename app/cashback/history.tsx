@@ -347,7 +347,7 @@ export default function CashbackHistoryScreen() {
         </Text>
       </View>
       <Pressable
-        onPress={() => router.push('/cashback/consent')}
+        onPress={() => router.replace('/cashback/consent')}
         style={({ pressed }) => ({
           backgroundColor: primary,
           paddingHorizontal: 14,
@@ -413,7 +413,7 @@ export default function CashbackHistoryScreen() {
         Lade nach deinem nächsten Einkauf einen Kassenbon hoch und sammle Cashback.
       </Text>
       <Pressable
-        onPress={() => router.push('/cashback/consent')}
+        onPress={() => router.replace('/cashback/consent')}
         style={({ pressed }) => ({
           marginTop: 8,
           backgroundColor: primary,
