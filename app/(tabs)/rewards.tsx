@@ -15,11 +15,16 @@ import {
 import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { CoachmarkOverlay } from '@/components/coachmarks/CoachmarkOverlay';
-import { getTour } from '@/components/coachmarks/tours';
+import {
+  REWARDS_ANCHOR_EARN,
+  REWARDS_ANCHOR_HERO,
+  REWARDS_ANCHOR_REDEEM,
+  RewardsWalkthrough,
+} from '@/components/coachmarks/RewardsWalkthrough';
 import { FilterSheet } from '@/components/design/FilterSheet';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useCoachmark } from '@/hooks/useCoachmark';
+import { useCoachmarkAnchor } from '@/hooks/useCoachmarkAnchor';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -288,9 +293,11 @@ export default function RewardsScreen() {
         <RewardsHelpContent />
       </FilterSheet>
 
-      {/* Per-Screen Coachmark (Belohnungen). */}
-      <CoachmarkOverlay
-        tour={getTour('rewards')}
+      {/* T17.26: Per-Screen Walkthrough (Belohnungen) — jetzt
+          Spotlight-basiert statt Slide-Modal. Pointet auf Hero,
+          Verdienen-Row und Einlösen-Card mit motivierender Copy
+          und konkreten Zahlen. */}
+      <RewardsWalkthrough
         visible={rewardsCoachmark.visible}
         onDismiss={rewardsCoachmark.dismiss}
       />
@@ -318,6 +325,12 @@ function RedeemTab() {
     () => buildEarnActions(weeklyReceiptCount),
     [weeklyReceiptCount],
   );
+
+  // T17.26: Anchors für den Spotlight-Walkthrough — Cashback-Hero,
+  // Schnellzugriff-Row (Verdienen), Einlösen-Card.
+  const heroAnchor = useCoachmarkAnchor(REWARDS_ANCHOR_HERO);
+  const earnAnchor = useCoachmarkAnchor(REWARDS_ANCHOR_EARN);
+  const redeemAnchor = useCoachmarkAnchor(REWARDS_ANCHOR_REDEEM);
   const pct = Math.min(
     100,
     Math.round((cashbackEur / PAYOUT_THRESHOLD) * 100),
@@ -356,7 +369,11 @@ function RedeemTab() {
           The currency pill (💰 CASHBACK-TALER) sits where the
           STATUS-PKT pill sits on the StatusHero — same shape, same
           position, so the user pattern-matches between the two. */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 4 }}>
+      <View
+        ref={heroAnchor.ref}
+        onLayout={heroAnchor.onLayout}
+        style={{ paddingHorizontal: 20, paddingTop: 4 }}
+      >
         <LinearGradient
           colors={['#0a6f62', '#0d8575', '#10a18a']}
           start={{ x: -1, y: 0.34 }}
@@ -498,7 +515,11 @@ function RedeemTab() {
       </View>
 
       {/* ── Quick actions row ── */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
+      <View
+        ref={earnAnchor.ref}
+        onLayout={earnAnchor.onLayout}
+        style={{ paddingHorizontal: 20, paddingTop: 22 }}
+      >
         <Text
           style={{
             fontFamily,
@@ -597,7 +618,11 @@ function RedeemTab() {
           has hit the PAYOUT_THRESHOLD; the disabled copy explains
           how much is still missing so the user gets actionable
           feedback instead of a dead CTA. */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 28, paddingBottom: 8 }}>
+      <View
+        ref={redeemAnchor.ref}
+        onLayout={redeemAnchor.onLayout}
+        style={{ paddingHorizontal: 20, paddingTop: 28, paddingBottom: 8 }}
+      >
         <View
           style={{
             backgroundColor: theme.surface,
