@@ -326,19 +326,37 @@ async function tryReweapify(ean: string): Promise<ExternalProductDoc | null> {
   try {
     const norm = normaliseEan(ean);
     if (!norm) return null;
-    const q = query(
-      collection(db, 'reweapify'),
-      where('gtin', '==', norm),
-      limit(1),
+    // Doppel-Query: gtin als String UND als Number, weil's je nach
+    // Pipeline-Lauf unterschiedlich serialisiert sein kann.
+    const asString = await getDocs(
+      query(collection(db, 'reweapify'), where('gtin', '==', norm), limit(1)),
     );
-    const snap = await getDocs(q);
-    if (snap.empty) return null;
-    const data = snap.docs[0].data();
-    const normalised = normaliseReweapify(data);
+    let docData: any = null;
+    if (!asString.empty) {
+      docData = asString.docs[0].data();
+      console.log(`[reweapify] hit-by-string ${norm}`);
+    } else {
+      const eanNum = Number(norm);
+      if (Number.isFinite(eanNum)) {
+        const asNumber = await getDocs(
+          query(collection(db, 'reweapify'), where('gtin', '==', eanNum), limit(1)),
+        );
+        if (!asNumber.empty) {
+          docData = asNumber.docs[0].data();
+          console.log(`[reweapify] hit-by-number ${norm}`);
+        }
+      }
+    }
+    if (!docData) {
+      console.log(`[reweapify] no doc for gtin=${norm}`);
+      return null;
+    }
+    const normalised = normaliseReweapify(docData);
     if (!normalised.productName || normalised.productName === 'Produkt') {
-      // Skip wenn das Doc keinen Namen hatte — sonst hat User leeres
-      // Hero. Cascade fällt zu nächster Source.
-      if (!data?.attr_ingredientStatement && !normalised.imageUrl) return null;
+      if (!docData?.attr_ingredientStatement && !normalised.imageUrl) {
+        console.log(`[reweapify] doc found but no useful data, skipping`);
+        return null;
+      }
     }
     await writeThrough(norm, 'rewe', normalised);
     return {
@@ -365,9 +383,15 @@ async function tryNutritionScrape(ean: string): Promise<ExternalProductDoc | nul
     const norm = normaliseEan(ean);
     if (!norm) return null;
     const snap = await getDoc(doc(db, 'nutritionscrape', norm));
-    if (!snap.exists()) return null;
+    if (!snap.exists()) {
+      console.log(`[nutritionscrape] no doc for ean=${norm}`);
+      return null;
+    }
     const data = snap.data();
     if (!data) return null;
+    console.log(
+      `[nutritionscrape] doc found ean=${norm} sourceShop=${data?.sourceShop ?? '?'}`,
+    );
     // Schema fast identisch zu reweapify — gleicher Normalizer.
     const normalised = normaliseReweapify(data);
     // Wenn weder Name noch Image noch Zutaten → nichts wertvolles
@@ -376,6 +400,7 @@ async function tryNutritionScrape(ean: string): Promise<ExternalProductDoc | nul
       !normalised.imageUrl &&
       !normalised.attr_ingredientStatement
     ) {
+      console.log(`[nutritionscrape] doc has no useful data, skipping`);
       return null;
     }
     // Bestimmen Sub-Source aus sourceShop (rewe.de/globus.de/…). Wenn
@@ -479,70 +504,144 @@ async function tryOpenFood(ean: string): Promise<ExternalProductDoc | null> {
 }
 
 /**
+ * Source-Priority-Order. Niedriger Index = bessere Quelle.
+ * Ein gecachter Hit mit Source >= UPGRADE_THRESHOLD wird beim nächsten
+ * Lookup nochmal gegen alle höher-priorisierten Sources gegen-geprüft
+ * (cache-self-heal). Verhindert dass eine alte OpenFood-Cache-Eintrag
+ * für immer "klebt" obwohl jetzt REWE/nutritionscrape Daten dazu hat.
+ */
+const SOURCE_PRIORITY: ExternalProductSource[] = [
+  'rewe',
+  'globus',
+  'metro',
+  'scraper',
+  'openfood',
+];
+const UPGRADE_THRESHOLD_INDEX = SOURCE_PRIORITY.indexOf('openfood'); // 4
+
+function sourcePriority(s: ExternalProductSource): number {
+  const i = SOURCE_PRIORITY.indexOf(s);
+  return i === -1 ? 99 : i;
+}
+
+/**
  * Volle Cascade: Cache → REWE → Globus → OpenFood.
  * Returnt null wenn ALLE Sources versagen.
  *
- * **Garantie**: throwt NIE. Jede Source ist intern try/catch'd, plus
- * äußerer try/catch als Safety-Net. Wenn irgendwas crasht, fällt's
- * graceful zu null durch — der Caller sieht das als "kein Produkt
- * gefunden" und zeigt seinen normalen Fallback (Alert "nicht
- * gefunden" o.ä.).
+ * **Cache-Upgrade**: wenn der Cache eine schwache Source (openfood)
+ * hat, versuchen wir VOR dem Return die besseren Sources nochmal.
+ * Falls die jetzt was haben, Cache-Update + bessere Daten anzeigen.
+ *
+ * **Garantie**: throwt NIE.
  */
 async function lookupByEAN(ean: string): Promise<ExternalLookupResult | null> {
   try {
     const norm = normaliseEan(ean);
     if (!norm) return null;
+    console.log(`[external-lookup] start ean=${norm}`);
 
-    // 1. Cache (frisch)
+    // 1. Cache
     const cached = await getCached(ean);
     if (cached) {
       const stale = isExternalCacheStale(cached.cachedAt as any);
-      if (!stale) {
+      const lowPrio = sourcePriority(cached.source) >= UPGRADE_THRESHOLD_INDEX;
+      console.log(
+        `[external-lookup] cache-hit source=${cached.source} stale=${stale} lowPrio=${lowPrio}`,
+      );
+
+      // Hoch-Priorität-Cache + nicht stale → direkt return.
+      if (!stale && !lowPrio) {
         return { product: cached, fromCache: true, refreshed: false };
       }
-      // Stale: trigger background-refresh aus der ursprünglichen Source,
-      // gib aber trotzdem die alten Daten zurück (UX > Frische).
-      void refreshSilent(norm, cached.source);
+
+      // Niedrig-Priorität-Cache (openfood) → versuche Upgrade auf
+      // bessere Sources. Wenn keine Upgrade möglich → cached zurück.
+      if (lowPrio) {
+        const upgraded = await tryHigherPrioritySources(norm);
+        if (upgraded) {
+          console.log(`[external-lookup] cache upgraded openfood → ${upgraded.source}`);
+          return { product: upgraded, fromCache: false, refreshed: true };
+        }
+      }
+
+      // Stale (hoch-priorität) → trigger background refresh, return cached.
+      if (stale) {
+        void refreshSilent(norm, cached.source);
+      }
       return { product: cached, fromCache: true, refreshed: false };
     }
+    console.log(`[external-lookup] no cache, running full cascade`);
 
-    // 2. REWE-Pipeline (echte reweapify-Collection) — höchste
-    //    Priorität weil das die kuratierten REWE-Daten sind.
-    const fromReweapify = await tryReweapify(norm);
-    if (fromReweapify) {
-      return { product: fromReweapify, fromCache: false, refreshed: false };
-    }
-
-    // 3. nutritionscrape — LLM-Multi-Shop-Scraper-Output. Liefert oft
-    //    Globus/Metro/etc-Daten. `sourceShop`-Feld bestimmt den
-    //    effektiven Source-Tag in external_products.
-    const fromScrape = await tryNutritionScrape(norm);
-    if (fromScrape) {
-      return { product: fromScrape, fromCache: false, refreshed: false };
-    }
-
-    // 4. Legacy scraped_products (Backwards-Compat — wenn neue
-    //    Sources den EAN nicht haben aber alte schon).
-    const fromRewe = await tryRewe(norm);
-    if (fromRewe) return { product: fromRewe, fromCache: false, refreshed: false };
-
-    // 5. Globus-Live-Scrape (Skeleton — CF muss noch HTML-Parse-Logik
-    //    bekommen, siehe cloud-functions/globus-scraper/index.js).
-    const fromGlobus = await tryGlobus(norm);
-    if (fromGlobus) return { product: fromGlobus, fromCache: false, refreshed: false };
-
-    // 6. OpenFood — letzte Fallback-Quelle.
-    const fromOpenFood = await tryOpenFood(norm);
-    if (fromOpenFood) return { product: fromOpenFood, fromCache: false, refreshed: false };
-
-    return null;
+    // 2-6. Full cascade
+    const cascadeResult = await runFullCascade(norm);
+    return cascadeResult;
   } catch (e: any) {
-    // Safety-Net: NICHTS darf eine Cascade nach oben werfen. Wenn
-    // irgendwas schiefgeht (Network, Firestore-Permission, JSON-Parse,
-    // …) → null. Caller zeigt normalen Fallback.
     console.warn('externalProductService.lookupByEAN unexpected error', e?.message);
     return null;
   }
+}
+
+/**
+ * Probiert nur Sources mit höherer Priorität als openfood. Für
+ * Cache-Upgrade-Pfad. Returnt das BESTE Resultat das gefunden wird.
+ */
+async function tryHigherPrioritySources(
+  ean: string,
+): Promise<ExternalProductDoc | null> {
+  const r1 = await tryReweapify(ean);
+  if (r1) return r1;
+  const r2 = await tryNutritionScrape(ean);
+  if (r2) return r2;
+  const r3 = await tryRewe(ean);
+  if (r3) return r3;
+  const r4 = await tryGlobus(ean);
+  if (r4) return r4;
+  return null;
+}
+
+/**
+ * Volle Cascade ohne Cache-Check. Wird vom normalen Lookup
+ * aufgerufen wenn kein Cache existiert.
+ */
+async function runFullCascade(
+  ean: string,
+): Promise<ExternalLookupResult | null> {
+  const fromReweapify = await tryReweapify(ean);
+  if (fromReweapify) {
+    console.log(`[external-lookup] ✅ reweapify hit`);
+    return { product: fromReweapify, fromCache: false, refreshed: false };
+  }
+  console.log(`[external-lookup] reweapify: no hit`);
+
+  const fromScrape = await tryNutritionScrape(ean);
+  if (fromScrape) {
+    console.log(`[external-lookup] ✅ nutritionscrape hit (source=${fromScrape.source})`);
+    return { product: fromScrape, fromCache: false, refreshed: false };
+  }
+  console.log(`[external-lookup] nutritionscrape: no hit`);
+
+  const fromRewe = await tryRewe(ean);
+  if (fromRewe) {
+    console.log(`[external-lookup] ✅ scraped_products (legacy) hit`);
+    return { product: fromRewe, fromCache: false, refreshed: false };
+  }
+  console.log(`[external-lookup] scraped_products: no hit`);
+
+  const fromGlobus = await tryGlobus(ean);
+  if (fromGlobus) {
+    console.log(`[external-lookup] ✅ globus-cf hit`);
+    return { product: fromGlobus, fromCache: false, refreshed: false };
+  }
+  console.log(`[external-lookup] globus-cf: no hit (Skeleton)`);
+
+  const fromOpenFood = await tryOpenFood(ean);
+  if (fromOpenFood) {
+    console.log(`[external-lookup] ✅ openfood hit (Fallback)`);
+    return { product: fromOpenFood, fromCache: false, refreshed: false };
+  }
+  console.log(`[external-lookup] openfood: no hit — cascade ende, kein Produkt`);
+
+  return null;
 }
 
 /**
