@@ -214,6 +214,25 @@ Recent-Sessions.
   weckt. 50ms UX-Cost, race weg. Siehe `hooks/useCoachmark.ts`
   T17.14.
 
+- **Meta-App-Auth-Toggles auf "im Client eingebettet" / "Native oder
+  Desktop-App".** In Meta-Dashboard → App-Einstellungen → Erweitert →
+  "App-Authentifizierung". Wenn EINER dieser Toggles AN ist, schaltet
+  Meta die Server-Side-Operations auf dem App-Secret ab. Konsequenz:
+  Firebase-Backend's `debug_token`-Call (Teil von `signInWithIdp` für
+  Facebook-Provider) failt mit
+  `(#100) "You must provide an app access token, or a user access
+  token that is an owner or developer of the app"` → Firebase
+  retourniert generisches `auth/invalid-credential`, RNFirebase
+  maskiert die echte Server-Antwort, Symptom: jeder FB-Login bricht
+  ab, egal ob nativer FB-SDK oder Browser-OAuth, egal ob App-ID +
+  Secret in Firebase Console korrekt sind. Diagnostik: direkter
+  REST-Call zu `identitytoolkit.googleapis.com/v1/accounts:signInWithIdp`
+  zeigt die echte `INVALID_IDP_RESPONSE`-Message. Fix:
+  **BEIDE Toggles AUS** ("Native oder Desktop-App?" + "Ist der
+  App-Geheimcode im Client eingebettet?"). Erst dann darf Firebase
+  den Secret server-side verwenden. Wir embed'den den Secret nicht in
+  der App; er liegt nur in Firebase Console — die Meta-Settings müssen
+  das reflektieren. T17.19 (Mai 2026), nach 3 Tagen Debugging.
 
 - **`BlurView` mit `experimentalBlurMethod="dimezisBlurView"` auf
   Android.** Triggert Surface-Stops / Grey-Screens (Fabric).

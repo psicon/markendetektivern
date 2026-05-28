@@ -1,10 +1,16 @@
-import { CustomIcon } from '@/components/ui/CustomIcon';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useRef } from 'react';
-import { Animated, Dimensions, Platform, StyleSheet, Text, View } from 'react-native';
+import { Animated, Dimensions, Image, Platform, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+// T17.20: Static require so Metro bundles the asset on first JS-eval —
+// kein Font-Race wie vorher mit `<CustomIcon name="iconBlack">` (das
+// nutzte `MDAppIcons`-Font, der zum Splash-Render-Zeitpunkt noch nicht
+// auf iOS registriert war → System-Fallback → `?`-Placeholder im
+// rounded-square). PNG ist immer ready.
+const SPLASH_ICON = require('../../assets/images/splash-icon.png');
 
 const { width, height } = Dimensions.get('window');
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -43,38 +49,37 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onAnimationComplete 
       ])
     );
 
-    // Splash-Animation-Sequenz
+    // Splash-Animation-Sequenz — Total ~2150ms
     const splashSequence = Animated.sequence([
-      // 1. Logo erscheint mit Scale-Animation
+      // 1. Logo fade-in + Scale (600ms)
       Animated.parallel([
         Animated.timing(logoOpacity, {
           toValue: 1,
-          duration: 800,
+          duration: 600,
           useNativeDriver: true,
         }),
         Animated.spring(logoScale, {
           toValue: 1,
-          tension: 50,
+          tension: 60,
           friction: 8,
           useNativeDriver: true,
         }),
       ]),
-      
-      // 2. Text erscheint nach kurzer Verzögerung
+
+      // 2. Text fade-in (600ms)
       Animated.timing(textOpacity, {
         toValue: 1,
         duration: 600,
-        delay: 200,
         useNativeDriver: true,
       }),
-      
-      // 3. Kurz halten
-      Animated.delay(800),
-      
-      // 4. Fade-out
+
+      // 3. Halten (600ms)
+      Animated.delay(600),
+
+      // 4. Fade-out (350ms)
       Animated.timing(backgroundOpacity, {
         toValue: 0,
-        duration: 500,
+        duration: 350,
         useNativeDriver: true,
       }),
     ]);
@@ -89,7 +94,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onAnimationComplete 
     // Backup-Timer für den Fall, dass die Animation hängt
     const timeout = setTimeout(() => {
       onAnimationComplete?.();
-    }, 4000);
+    }, 3000);
 
     return () => {
       clearTimeout(timeout);
@@ -125,13 +130,14 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onAnimationComplete 
               },
             ]}
           >
-            <CustomIcon 
-              name="iconBlack" 
-              size={60} 
-              color="white"
+            <Image
+              source={SPLASH_ICON}
+              style={{ width: 60, height: 60 }}
+              resizeMode="contain"
+              fadeDuration={0}
             />
           </Animated.View>
-   
+
           {/* Text - Einfach und sicher */}
           <Animated.View
             style={[
@@ -196,13 +202,17 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onAnimationComplete 
               },
             ]}
           >
-            <CustomIcon 
-              name="iconBlack" 
-              size={isSmallDevice ? 60 : 70} 
-              color="white"
+            <Image
+              source={SPLASH_ICON}
+              style={{
+                width: isSmallDevice ? 60 : 70,
+                height: isSmallDevice ? 60 : 70,
+              }}
+              resizeMode="contain"
+              fadeDuration={0}
             />
           </Animated.View>
-   
+
           {/* App Name */}
           <Animated.View
             style={[
