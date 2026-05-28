@@ -8,7 +8,6 @@
 // nur einen generischen Star/Storefront-Platzhalter.
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import React, { useEffect, useState } from 'react';
 import {
@@ -170,7 +169,7 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
   };
 
   return (
-    <FilterSheet visible={visible} title="Produkt hinzufügen" onClose={onClose}>
+    <FilterSheet visible={visible} title="Produkt hinzufügen (Freitext)" onClose={onClose}>
       <View style={{ paddingTop: 4, paddingBottom: 4 }}>
         {/* Produktname */}
         <Text style={[labelStyle(theme)]}>Produktname</Text>
@@ -261,82 +260,69 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
           </>
         ) : null}
 
-        {/* Icon — T17.36: 5-Spalten-Grid mit space-between Layout.
-            width-Prozent statt gap → garantiert 5 Items pro Zeile
-            ohne Überlauf. Soft-Fade am unteren Rand subtiler (kürzer,
-            späte Color-Stops) damit's nicht als „Schatten" liest. */}
+        {/* Icon — T17.37: 5-Spalten-Grid. Fade-Overlay komplett raus
+            (User-Feedback: sah aus wie Schatten). Last-Row-Alignment
+            via unsichtbare Filler-Views damit space-between in der
+            letzten Reihe nicht 2 Icons auseinander schießt. */}
         <Text style={[labelStyle(theme)]}>Icon</Text>
-        <View style={{ position: 'relative', marginBottom: 18 }}>
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            style={{ maxHeight: 180 }}
-            contentContainerStyle={{
-              flexDirection: 'row',
-              flexWrap: 'wrap',
-              justifyContent: 'space-between',
-              rowGap: 12,
-              paddingVertical: 4,
-              paddingBottom: 16,
-            }}
-          >
-            {PRODUCT_ICONS.map((ic) => {
-              const on = ic.key === iconKey;
-              return (
-                <Pressable
-                  key={ic.key}
-                  accessibilityLabel={ic.label}
-                  onPress={() => {
-                    setIconKey(ic.key);
-                    Haptics.selectionAsync().catch(() => {});
-                  }}
-                  // 5 Spalten mit justifyContent: space-between.
-                  // 18% × 5 = 90 %, 10 % verteilt das space-between
-                  // gleichmäßig auf die 4 Lücken zwischen den Items.
-                  style={({ pressed }) => ({
-                    width: '18%',
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          style={{ maxHeight: 180, marginBottom: 18 }}
+          contentContainerStyle={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            justifyContent: 'space-between',
+            rowGap: 12,
+            paddingVertical: 4,
+            paddingBottom: 4,
+          }}
+        >
+          {PRODUCT_ICONS.map((ic) => {
+            const on = ic.key === iconKey;
+            return (
+              <Pressable
+                key={ic.key}
+                accessibilityLabel={ic.label}
+                onPress={() => {
+                  setIconKey(ic.key);
+                  Haptics.selectionAsync().catch(() => {});
+                }}
+                style={({ pressed }) => ({
+                  width: '18%',
+                  alignItems: 'center',
+                  opacity: pressed ? 0.7 : 1,
+                })}
+              >
+                <View
+                  style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: 26,
+                    backgroundColor: on ? brand.primary : theme.surfaceAlt,
+                    borderWidth: on ? 0 : 1,
+                    borderColor: theme.border,
                     alignItems: 'center',
-                    opacity: pressed ? 0.7 : 1,
-                  })}
+                    justifyContent: 'center',
+                  }}
                 >
-                  <View
-                    style={{
-                      width: 52,
-                      height: 52,
-                      borderRadius: 26,
-                      backgroundColor: on ? brand.primary : theme.surfaceAlt,
-                      borderWidth: on ? 0 : 1,
-                      borderColor: theme.border,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <MaterialCommunityIcons
-                      name={ic.key as any}
-                      size={26}
-                      color={on ? '#fff' : theme.text}
-                    />
-                  </View>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-          {/* Soft-Fade am unteren Rand — kürzer (24 px) und Color-Stops
-              spät (50 %), damit der Fade nur in den letzten ~12 px
-              wirklich greift. Vorher 32 px durchgängig → liest sich
-              als dunkler „Schatten" über der ganzen letzten Reihe. */}
-          <LinearGradient
-            pointerEvents="none"
-            colors={['transparent', theme.surface]}
-            locations={[0.5, 1]}
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 24,
-            }}
-          />
-        </View>
+                  <MaterialCommunityIcons
+                    name={ic.key as any}
+                    size={26}
+                    color={on ? '#fff' : theme.text}
+                  />
+                </View>
+              </Pressable>
+            );
+          })}
+          {/* Filler-Views füllen die letzte Reihe so dass die echten
+              Icons links bleiben statt von justifyContent:space-between
+              auseinandergezogen zu werden. */}
+          {Array.from({
+            length: (5 - (PRODUCT_ICONS.length % 5)) % 5,
+          }).map((_, i) => (
+            <View key={`filler-${i}`} style={{ width: '18%', height: 0 }} />
+          ))}
+        </ScrollView>
 
         {/* Submit */}
         <Pressable
