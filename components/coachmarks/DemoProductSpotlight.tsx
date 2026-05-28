@@ -40,6 +40,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ProductCard } from '@/components/design/ProductCard';
 import { fontFamily, fontWeight } from '@/constants/tokens';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import type { FirestoreDocument, Produkte } from '@/lib/types/firestore';
 
@@ -80,6 +81,8 @@ export function DemoProductSpotlight({
   onSkip,
 }: DemoProductSpotlightProps) {
   const { theme, shadows } = useTokens();
+  const scheme = useColorScheme();
+  const isDark = scheme === 'dark';
   const { height: SCREEN_H } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
@@ -173,15 +176,19 @@ export function DemoProductSpotlight({
           paddingHorizontal: 20,
         }}
       >
-        {/* Tooltip-Card */}
+        {/* Tooltip-Card — im Dark-Mode elevation-Surface + sichtbarer
+            Border, sonst verschwimmt die Card mit dem dunklen Backdrop.
+            Body-Text auf textSub statt textMuted für besseren Kontrast. */}
         <View
           style={[
             {
-              backgroundColor: theme.surface,
+              backgroundColor: isDark ? theme.surfaceAlt : theme.surface,
               borderRadius: 18,
               paddingHorizontal: 18,
               paddingVertical: 16,
               maxHeight: SCREEN_H * 0.28,
+              borderWidth: isDark ? 1 : 0,
+              borderColor: isDark ? theme.borderStrong : 'transparent',
             },
             shadows.lg,
           ]}
@@ -204,7 +211,7 @@ export function DemoProductSpotlight({
               fontWeight: fontWeight.medium,
               fontSize: 14,
               lineHeight: 20,
-              color: theme.textMuted,
+              color: theme.textSub,
             }}
           >
             {body}

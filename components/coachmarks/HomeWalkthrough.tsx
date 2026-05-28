@@ -163,8 +163,8 @@ export function HomeWalkthrough({
     <DemoProductSpotlight
       visible
       product={demoProduct}
-      title="Tippe diese Karte"
-      body="Du siehst gleich, wie nah die NoName-Alternative am Original ist — und wie viel du beim Wechsel sparst."
+      title="Diese Karten siehst du überall"
+      body="Markenprodukt oder günstige Alternative — tipp einfach drauf. Du siehst sofort alles: Preis, wie ähnlich beide sind, und wie viel du sparen kannst."
       onTapProduct={handleTapDemoProduct}
       onSkip={onDismiss}
     />

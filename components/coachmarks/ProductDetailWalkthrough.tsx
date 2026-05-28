@@ -66,48 +66,48 @@ function configForPhase(
             anchorId: PRODUCT_DETAIL_ANCHOR_HERO,
             title: 'Das Markenprodukt',
             body:
-              'Hier siehst du das Original — Hersteller, Bild und Marken-Preis. Darunter zeigen wir dir günstigere NoName-Alternativen.',
+              'Das ist die Marke — Name, Bild und Preis. Drunter zeigen wir dir günstigere Alternativen, die fast gleich sind.',
           }
         : {
             anchorId: PRODUCT_DETAIL_ANCHOR_HERO,
-            title: 'Das NoName-Produkt',
+            title: 'Die günstige Alternative',
             body:
-              'Hier siehst du Bild, Hersteller und Preis. Darunter zeigen wir dir die Ähnlichkeitsstufe — wie nah das Produkt einem Markenprodukt kommt.',
+              'Bild, Hersteller und Preis siehst du hier. Drunter steht, wie ähnlich das Produkt einem teureren Markenprodukt ist.',
           };
     case 'context':
       return screenType === 'comparison'
         ? {
             anchorId: PRODUCT_DETAIL_ANCHOR_CONTEXT,
-            title: 'NoName-Alternativen',
+            title: 'Günstigere Alternativen',
             body:
-              'Diese NoName-Produkte kommen vom selben Hersteller wie das Markenprodukt oben. Die Stufen-Balken zeigen dir, wie nah dran sie sind: Stufe 5 = identisch, 4 = sehr ähnlich, 3 = vergleichbar.',
+              'Diese Produkte kommen vom selben Hersteller wie das Original oben — kosten aber weniger. Die Balken zeigen, wie ähnlich sie sind: 5 = identisch, 4 = sehr ähnlich, 3 = vergleichbar.',
           }
         : {
             anchorId: PRODUCT_DETAIL_ANCHOR_CONTEXT,
-            title: 'Ähnlichkeitsstufe',
+            title: 'Wie ähnlich ist es einer Marke?',
             body:
-              'Stufen 1 und 2 stehen für reine NoName-Hersteller bzw. Hersteller die nebenbei auch Markenprodukte produzieren — ohne direkten Marken-Vergleich. Bei Stufen 3-5 findest du das passende Markenprodukt + günstigere Alternativen.',
+              'Die Balken zeigen die Ähnlichkeit. Ab Stufe 3 findest du auch das passende Markenprodukt direkt zum Vergleichen — und siehst, was du beim Wechsel sparst.',
           };
     case 'favorite':
       return {
         anchorId: PRODUCT_DETAIL_ANCHOR_FAVORITE,
-        title: 'Favorisieren',
+        title: 'Als Lieblingsprodukt speichern',
         body:
-          'Tippe um das Produkt als Lieblingsprodukt zu speichern. Du findest deine Favoriten unter Lieblingsprodukte im Profil.',
+          'Tipp aufs Herz, um dir das Produkt zu merken. Du findest es später unter „Lieblingsprodukte" im Profil wieder.',
       };
     case 'cart':
       return {
         anchorId: PRODUCT_DETAIL_ANCHOR_CART,
-        title: 'Einkaufsliste',
+        title: 'Auf den Einkaufszettel',
         body:
-          'Tippe hier um das Produkt zur Einkaufsliste hinzuzufügen. Die interaktive Einkaufsliste ist die letzte die du brauchen wirst — du siehst sofort deine Ersparnis und sie wird automatisch aufsummiert.',
+          'Tipp drauf, um das Produkt zum Einkaufszettel hinzuzufügen. Die Liste rechnet automatisch zusammen, wie viel du sparen wirst.',
       };
     case 'rating':
       return {
         anchorId: PRODUCT_DETAIL_ANCHOR_RATING,
-        title: 'Bewertungen',
+        title: 'Wie schmeckt’s dir?',
         body:
-          'Tippe um das Produkt zu bewerten oder zu sehen was andere Detektive davon halten.',
+          'Bewerte das Produkt mit Sternen — oder schau erst mal, was andere Detektive davon halten.',
       };
   }
 }

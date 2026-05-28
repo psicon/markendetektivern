@@ -53,26 +53,26 @@ export const TOURS: Record<SlideTours, Tour> = {
     key: 'rewards',
     slides: [
       {
+        visual: { type: 'lottie', lottie: 'gift' },
+        title: 'Echtes Geld zurück',
+        body:
+          'Hier sammelst du Cashback — richtiges Geld, das wir dir aufs Konto überweisen. Je mehr du mit MarkenDetektive sparst, desto mehr kommt dazu.',
+      },
+      {
         visual: {
           type: 'gradient-icon',
-          icon: 'medal-outline',
+          icon: 'receipt',
           gradient: GRADIENT_GOLD,
         },
-        title: 'Punkte und Taler',
+        title: 'So verdienst du',
         body:
-          'Detektiv-Punkte misst deine Aktivität in der App. Cashback-Taler ist echtes Geld, das du dir auszahlen kannst, sobald du 5 € erreicht hast.',
+          'Mach ein Foto von deinem Kassenbon, lade es hoch — fertig. Pro Bon bekommst du 0,08 €. Bis zu 6 Bons pro Woche. Bald gibt’s noch mehr Wege.',
       },
       {
-        visual: { type: 'lottie', lottie: 'streak-fire' },
-        title: 'Bestenliste',
+        visual: { type: 'lottie', lottie: 'savings' },
+        title: 'Auszahlen ab 5 €',
         body:
-          'Vergleich dich mit anderen Detektiven — wöchentlich, monatlich, all-time. Auch nach Bundesland und Stadt.',
-      },
-      {
-        visual: { type: 'lottie', lottie: 'gift' },
-        title: 'Sparen lohnt sich doppelt',
-        body:
-          'Jedes gekaufte No-Name-Produkt füllt deine Taler-Kasse. Auszahlen geht ab 5 € — direkt aufs Konto.',
+          'Sobald 5 € auf deinem Cashback-Konto sind, kannst du dir das Geld auszahlen lassen — direkt auf dein Bankkonto.',
       },
     ],
   },

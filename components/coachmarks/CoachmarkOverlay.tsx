@@ -139,7 +139,9 @@ function SlideContent({ slide }: { slide: Slide }) {
           fontWeight: fontWeight.medium,
           fontSize: 15,
           lineHeight: 22,
-          color: theme.textMuted,
+          // textSub statt textMuted — textMuted ist im Dark-Mode zu blass
+          // gegen die dunkle Card und im Light-Mode noch ausreichend lesbar.
+          color: theme.textSub,
           textAlign: 'center',
           paddingHorizontal: 8,
         }}
@@ -335,14 +337,18 @@ export function CoachmarkOverlay({ visible, tour, onDismiss }: CoachmarkOverlayP
           </Pressable>
         </View>
 
-        {/* Card-Container */}
+        {/* Card-Container — im Dark-Mode elevation-Surface (surfaceAlt)
+            + sichtbarer Border, sonst verschwimmt die Card mit der dunklen
+            BlurView/dem dunklen Overlay-Tint im Dark-Mode. */}
         <View
           style={[
             {
               flex: 1,
-              backgroundColor: theme.surface,
+              backgroundColor: scheme === 'dark' ? theme.surfaceAlt : theme.surface,
               borderRadius: 24,
               overflow: 'hidden',
+              borderWidth: scheme === 'dark' ? 1 : 0,
+              borderColor: scheme === 'dark' ? theme.borderStrong : 'transparent',
             },
             shadows.lg,
           ]}
