@@ -29,6 +29,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
+import { ProductCard } from '@/components/design/ProductCard';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import {
@@ -154,7 +155,7 @@ export default function ExternalProductScreen() {
 
     const tryQuery = async (query: string): Promise<AlgoliaSearchResult[]> => {
       try {
-        const result = await AlgoliaService.searchNoNameProducts(query, 0, 8);
+        const result = await AlgoliaService.searchNoNameProducts(query, 0, 6);
         return result?.hits ?? [];
       } catch (e) {
         console.warn('algolia alt-query failed', query, e);
@@ -648,35 +649,155 @@ export default function ExternalProductScreen() {
           </Section>
         ) : null}
 
-        {/* T17.45: Hersteller-Match-Section — wenn der externe
-            manufacturer-Name konfident matched mit einem hersteller_new-
-            Eintrag, zeige die mit ihm verbundenen Marken (gleiches
-            Pattern wie noname-detail Stufe 2). User erkennt:
-            "ah, das ist ja der gleiche Hersteller wie diese Marken
-            hier — vielleicht ist eine Alternative dabei". */}
-        {manufacturerMatch && connectedBrands.length > 0 ? (
-          <Section title="Vom selben Hersteller">
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.medium,
-                fontSize: 12,
-                color: theme.textMuted,
-                marginBottom: 10,
-                lineHeight: 16,
-              }}
-            >
-              {manufacturerMatch.name} produziert auch{' '}
-              {connectedBrands.length === 1 ? 'diese Marke' : 'diese Marken'}:
-            </Text>
-            <View
-              style={{
-                flexDirection: 'row',
-                flexWrap: 'wrap',
-                gap: 8,
-              }}
-            >
-              {connectedBrands.map((b) => {
+        {/* Hersteller-Section — wird IMMER angezeigt wenn die Source
+            einen Hersteller-Namen liefert. Drei Zustände:
+              (a) Match in unserer hersteller_new-DB + Connected-Brands
+                  → Hersteller-Logo + Name + Confidence-Pill + Brand-Chips
+              (b) Match aber keine Connected-Brands → nur Hersteller-Card
+              (c) Kein Match (externer Hersteller unbekannt) → nur Name
+                  als Text, ohne Brand-Section. */}
+        {product.manufacturerName ? (
+          <Section title="Hersteller">
+            {manufacturerMatch ? (
+              // Match vorhanden — Logo (wenn da) + Name + Confidence
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                  marginBottom: connectedBrands.length > 0 ? 14 : 0,
+                }}
+              >
+                {manufacturerMatch.bild ? (
+                  <View
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 22,
+                      backgroundColor: '#fff',
+                      overflow: 'hidden',
+                      borderWidth: 0.5,
+                      borderColor: theme.border,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <RNImage
+                      source={{ uri: manufacturerMatch.bild }}
+                      style={{ width: '90%', height: '90%' }}
+                      resizeMode="contain"
+                    />
+                  </View>
+                ) : (
+                  <View
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 22,
+                      backgroundColor: brand.primary + '22',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <MaterialCommunityIcons
+                      name="factory"
+                      size={22}
+                      color={brand.primary}
+                    />
+                  </View>
+                )}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.extraBold,
+                      fontSize: 15,
+                      color: theme.text,
+                      letterSpacing: -0.1,
+                    }}
+                  >
+                    {manufacturerMatch.name}
+                  </Text>
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.medium,
+                      fontSize: 11,
+                      color: theme.textMuted,
+                      marginTop: 2,
+                    }}
+                  >
+                    laut {sourceLabel ?? 'Quelle'}: {product.manufacturerName}
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              // Kein Match — nur den rohen Source-Namen zeigen
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                }}
+              >
+                <View
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    backgroundColor: theme.surfaceAlt,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <MaterialCommunityIcons
+                    name="factory"
+                    size={22}
+                    color={theme.textMuted}
+                  />
+                </View>
+                <Text
+                  numberOfLines={2}
+                  style={{
+                    flex: 1,
+                    fontFamily,
+                    fontWeight: fontWeight.bold as any,
+                    fontSize: 14,
+                    color: theme.text,
+                    lineHeight: 19,
+                  }}
+                >
+                  {product.manufacturerName}
+                </Text>
+              </View>
+            )}
+
+            {/* Connected-Brands sub-section — nur wenn Match + Brands */}
+            {manufacturerMatch && connectedBrands.length > 0 ? (
+              <>
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 12,
+                    color: theme.textMuted,
+                    marginBottom: 10,
+                    lineHeight: 16,
+                  }}
+                >
+                  Produziert auch{' '}
+                  {connectedBrands.length === 1 ? 'diese Marke' : 'diese Marken'}:
+                </Text>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                  }}
+                >
+                  {connectedBrands.map((b) => {
                 const initial = (b.name || '?').trim().charAt(0).toUpperCase();
                 return (
                   <View
@@ -751,7 +872,9 @@ export default function ExternalProductScreen() {
                   </View>
                 );
               })}
-            </View>
+                </View>
+              </>
+            ) : null}
           </Section>
         ) : null}
 
@@ -799,97 +922,60 @@ export default function ExternalProductScreen() {
             </Text>
           </View>
         ) : (
-          <View style={{ paddingHorizontal: 16, gap: 8 }}>
-            {alternatives.map((alt) => (
-              <Pressable
-                key={alt.objectID}
-                onPress={() => router.push(`/noname-detail/${alt.objectID}` as any)}
-                style={({ pressed }) => ({
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 12,
-                  backgroundColor: theme.surface,
-                  borderRadius: 12,
-                  padding: 10,
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                  opacity: pressed ? 0.85 : 1,
-                })}
-              >
+          // 2-column grid mit Standard-ProductCard (gleicher Look wie
+          // Stöbern-Grid / Home-Top-Rated). Max 6 Items (Algolia-Limit).
+          // Algolia liefert nur Basisfelder — packSize/unitPrice können
+          // wir hier nicht zeigen weil das ein Firestore-Enrich
+          // bräuchte; für Alternativen-Übersicht ist Stufe + Markt +
+          // Preis aussagekräftig genug.
+          <View
+            style={{
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              paddingHorizontal: 10,
+            }}
+          >
+            {alternatives.slice(0, 6).map((alt, index) => {
+              const stufeNum =
+                typeof alt.stufe === 'string'
+                  ? parseInt(alt.stufe, 10) || undefined
+                  : (alt.stufe as any);
+              const eyebrow =
+                alt.handelsmarke?.bezeichnung ?? alt.discounter?.name ?? null;
+              const eyebrowLogo =
+                alt.discounter?.bild ?? alt.handelsmarke?.bild ?? null;
+              return (
                 <View
+                  key={alt.objectID}
                   style={{
-                    width: 56,
-                    height: 56,
-                    borderRadius: 10,
-                    backgroundColor: theme.surfaceAlt,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    overflow: 'hidden',
+                    width: '50%',
+                    paddingHorizontal: 6,
+                    paddingBottom: 12,
+                    height: 290,
                   }}
                 >
-                  {alt.bild ? (
-                    <RNImage
-                      source={{ uri: alt.bild }}
-                      style={{ width: 56, height: 56 }}
-                      resizeMode="contain"
-                    />
-                  ) : (
-                    <MaterialCommunityIcons
-                      name="package-variant-closed"
-                      size={22}
-                      color={theme.textMuted}
-                    />
-                  )}
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  {alt.discounter?.name ? (
-                    <Text
-                      numberOfLines={1}
-                      style={{
-                        fontFamily,
-                        fontWeight: fontWeight.bold as any,
-                        fontSize: 10,
-                        color: brand.primary,
-                        letterSpacing: 0.4,
-                        textTransform: 'uppercase',
-                      }}
-                    >
-                      {alt.discounter.name}
-                    </Text>
-                  ) : null}
-                  <Text
-                    numberOfLines={2}
-                    style={{
-                      fontFamily,
-                      fontWeight: fontWeight.bold as any,
-                      fontSize: 14,
-                      color: theme.text,
-                      lineHeight: 18,
+                  <ProductCard
+                    title={alt.name ?? ''}
+                    brand={eyebrow}
+                    eyebrowLogoUri={eyebrowLogo}
+                    hersteller={alt.hersteller?.name ?? null}
+                    imageUri={alt.bild ?? null}
+                    price={typeof alt.preis === 'number' ? alt.preis : 0}
+                    stufe={stufeNum ?? null}
+                    variant="grid"
+                    height={278}
+                    onPress={() => {
+                      // Prefetch + navigate — gleicher Pattern wie
+                      // Stöbern/Favoriten für instant-Reveal des Details.
+                      try {
+                        FirestoreService.prefetchProductDetails(alt.objectID);
+                      } catch {}
+                      router.push(`/noname-detail/${alt.objectID}` as any);
                     }}
-                  >
-                    {alt.name}
-                  </Text>
-                  {typeof alt.preis === 'number' ? (
-                    <Text
-                      style={{
-                        fontFamily,
-                        fontWeight: fontWeight.extraBold,
-                        fontSize: 13,
-                        color: theme.text,
-                        marginTop: 2,
-                      }}
-                    >
-                      {formatPrice(alt.preis)}
-                    </Text>
-                  ) : null}
+                  />
                 </View>
-                <MaterialCommunityIcons
-                  name="chevron-right"
-                  size={20}
-                  color={theme.textMuted}
-                />
-              </Pressable>
-            ))}
+              );
+            })}
           </View>
         )}
 

@@ -17,6 +17,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  increment,
   limit,
   query,
   serverTimestamp,
@@ -33,12 +34,14 @@ import ScrapedProductsService, {
 } from '@/lib/services/scrapedProductsService';
 import {
   EXTERNAL_CACHE_MAX_AGE_MS,
+  EXTERNAL_MISS_DEFAULT_STATUS,
   type ExternalLookupResult,
   type ExternalProductDoc,
   type ExternalProductSource,
 } from '@/lib/types/externalProduct';
 
 const COLLECTION = 'external_products';
+const MISSES_COLLECTION = 'external_lookup_misses';
 
 /** Normalisiert einen EAN-String auf nur Ziffern (Doc-Id-safe). */
 export function normaliseEan(ean: string): string {
@@ -100,6 +103,72 @@ async function writeThrough(
     await setDoc(ref, payload, { merge: true });
   } catch (e: any) {
     console.warn('ExternalProductService.writeThrough failed', e?.message);
+  }
+}
+
+/**
+ * Schreibt / aktualisiert ein "Miss"-Doc für eine EAN deren Cascade
+ * keinen oder nur einen schwachen Hit (openfood) lieferte.
+ *
+ * Pattern: Upsert via `merge: true`.
+ *   • Erste Sichtung → firstSeenAt = now, status = 'pending', hitCount = 1
+ *   • Folge-Sichtung → lastSeenAt = now, hitCount + 1, status & firstSeenAt
+ *                      bleiben (Firestore merge ändert sie nicht)
+ *
+ * **Throwt NIE** — bei Permission-Fehler / offline silent warn, der
+ * Caller (Cascade) darf NICHT blockieren.
+ *
+ * Aufruf nur intern aus runFullCascade. Public-API ist optional —
+ * wir exposen es für ggf. spätere Manual-Reporting-Pfade ("dieses
+ * Produkt ist falsch, bitte neu scrapen").
+ */
+async function recordMiss(
+  ean: string,
+  triedSources: string[],
+  bestSource: ExternalProductSource | null,
+): Promise<void> {
+  const norm = normaliseEan(ean);
+  if (!norm) return;
+  try {
+    const ref = doc(db, MISSES_COLLECTION, norm);
+
+    // Erst lesen damit wir wissen ob firstSeenAt schon existiert
+    // (sonst würde merge: true es überschreiben).
+    let exists = false;
+    try {
+      const snap = await getDoc(ref);
+      exists = snap.exists();
+    } catch {
+      // Read-Failure egal — wir behandeln es wie "noch nicht da"
+      // und überschreiben firstSeenAt unten. Schlimmster Fall:
+      // firstSeenAt wandert nach vorne. Kein Daten-Verlust.
+      exists = false;
+    }
+
+    const now = serverTimestamp() as Timestamp;
+    const payload: Record<string, any> = {
+      ean: norm,
+      lastSeenAt: now,
+      hitCount: increment(1),
+      triedSources,
+      bestSource,
+    };
+    if (!exists) {
+      payload.firstSeenAt = now;
+      payload.status = EXTERNAL_MISS_DEFAULT_STATUS;
+    }
+
+    await setDoc(ref, payload, { merge: true });
+    console.error(
+      `[miss] recorded ean=${norm} bestSource=${bestSource ?? 'null'} tried=${triedSources.join(',')}`,
+    );
+  } catch (e: any) {
+    // Permission denied (Rules nicht freigegeben) / offline → silent.
+    // User-Flow muss weiterlaufen. Wir loggen für Debugging.
+    console.warn(
+      'externalProductService.recordMiss failed (non-blocking)',
+      e?.message,
+    );
   }
 }
 
@@ -261,32 +330,66 @@ function parseLeadingNumber(s?: string | null): number | undefined {
 function normaliseReweapify(
   data: any,
 ): Omit<ExternalProductDoc, 'ean' | 'source' | 'cachedAt'> {
-  // reweapify-Schema ist nah am ExternalProductDoc — die meisten Felder
-  // sind 1:1. Defensiv geschrieben falls ein Feld fehlt (Layout-Drift).
+  // ACHTUNG: reweapify-Schema benutzt eigene Feld-Namen — NICHT
+  // attr_brand / attr_hersteller / images / attr_preis (das war eine
+  // falsche Annahme). Echte Felder (siehe User-gepasted Doc 2026-05-28):
+  //   - image: string (single, nicht array)
+  //   - price_current / price_regular: number
+  //   - price_grammage: string ("130g (1 kg = 23 €)")
+  //   - attr_BrandId / brandKey: string (Marke, z.B. "Kerrygold")
+  //   - attr_ContactName: string (Hersteller-Firma, z.B. "Ornua Deutschland GmbH")
+  //   - url: string (REWE-Shop-URL)
+  //   - merchant_company: string ("Rewe")
+  // Wir fallen für jedes Feld auf alte Namen zurück damit Daten aus
+  // anderen Sources (nutritionscrape Multi-Shop) noch greifen.
   const image =
+    (typeof data?.image === 'string' && data.image) ||
     (Array.isArray(data?.images) && data.images[0]) ||
     data?.productImageUrl ||
     data?.attr_image ||
     undefined;
+  // Pack-Size: aus price_grammage extrahieren ("130g (1 kg = 23 €)" → "130g")
+  let packSize: string | undefined;
+  if (typeof data?.price_grammage === 'string' && data.price_grammage) {
+    const m = data.price_grammage.match(/^([^(]+)/);
+    packSize = m ? m[1].trim() : data.price_grammage;
+  } else if (
+    typeof data?.attr_packageSize === 'number' &&
+    data?.attr_packageUnit
+  ) {
+    packSize = `${data.attr_packageSize} ${data.attr_packageUnit}`;
+  } else if (typeof data?.attr_preisPackgroesse === 'string') {
+    packSize = data.attr_preisPackgroesse;
+  } else {
+    packSize = data?.itemSize;
+  }
   return {
     productName:
       data?.productName ?? data?.attr_productName ?? data?.title ?? 'Produkt',
-    brandName: data?.brandName ?? data?.attr_brand ?? data?.attr_marke,
-    manufacturerName: data?.attr_hersteller ?? data?.producer,
+    brandName:
+      data?.attr_BrandId ??
+      data?.brandKey ??
+      data?.brandName ??
+      data?.attr_brand ??
+      data?.attr_marke,
+    manufacturerName:
+      data?.attr_ContactName ?? data?.attr_hersteller ?? data?.producer,
     imageUrl: image,
     price:
-      typeof data?.attr_preis === 'number'
+      typeof data?.price_current === 'number'
+        ? data.price_current
+        : typeof data?.price_regular === 'number'
+        ? data.price_regular
+        : typeof data?.attr_preis === 'number'
         ? data.attr_preis
         : typeof data?.price === 'number'
         ? data.price
         : undefined,
-    packSize:
-      typeof data?.attr_packageSize === 'number' && data?.attr_packageUnit
-        ? `${data.attr_packageSize} ${data.attr_packageUnit}`
-        : typeof data?.attr_preisPackgroesse === 'string'
-        ? data.attr_preisPackgroesse
-        : data?.itemSize,
-    category: data?.productCategory ?? data?.attr_category,
+    packSize,
+    category:
+      data?.productCategory ??
+      data?.attr_category ??
+      (typeof data?.productGroupId === 'string' ? data.productGroupId : undefined),
     sourceUrl: data?.scrapedUrl ?? data?.url ?? undefined,
     attr_ingredientStatement: data?.attr_ingredientStatement,
     nutr_Energie_val: typeof data?.nutr_Energie_val === 'number' ? data.nutr_Energie_val : undefined,
@@ -324,19 +427,34 @@ function normaliseReweapify(
 }
 
 async function tryReweapify(ean: string): Promise<ExternalProductDoc | null> {
+  const norm = normaliseEan(ean);
+  if (!norm) return null;
+  let docData: any = null;
+
+  // String-Query (Standard — Firestore-Console-Test bestätigt:
+  // gtin ist als String gespeichert)
   try {
-    const norm = normaliseEan(ean);
-    if (!norm) return null;
-    // Doppel-Query: gtin als String UND als Number, weil's je nach
-    // Pipeline-Lauf unterschiedlich serialisiert sein kann.
     const asString = await getDocs(
       query(collection(db, 'reweapify'), where('gtin', '==', norm), limit(1)),
     );
-    let docData: any = null;
     if (!asString.empty) {
       docData = asString.docs[0].data();
-      console.error(`[reweapify] hit-by-string ${norm}`);
-    } else {
+      console.error(`[reweapify] ✅ hit-by-string ${norm}`);
+    }
+  } catch (e: any) {
+    // KRITISCH: zeige exakten Error-Code — wenn permission-denied,
+    // dann sind die Firestore-Rules das Problem (Reweapify ist meist
+    // nur für admin lesbar). User muss in Firebase-Console die
+    // `reweapify`-Collection für allUsers (oder zumindest auth) lesen
+    // freigeben.
+    console.error(
+      `[reweapify] ❌ STRING-QUERY ERROR code=${e?.code} msg=${e?.message}`,
+    );
+  }
+
+  // Number-Query Fallback nur wenn String nichts gefunden hat
+  if (!docData) {
+    try {
       const eanNum = Number(norm);
       if (Number.isFinite(eanNum)) {
         const asNumber = await getDocs(
@@ -344,14 +462,22 @@ async function tryReweapify(ean: string): Promise<ExternalProductDoc | null> {
         );
         if (!asNumber.empty) {
           docData = asNumber.docs[0].data();
-          console.error(`[reweapify] hit-by-number ${norm}`);
+          console.error(`[reweapify] ✅ hit-by-number ${norm}`);
         }
       }
+    } catch (e: any) {
+      console.error(
+        `[reweapify] ❌ NUMBER-QUERY ERROR code=${e?.code} msg=${e?.message}`,
+      );
     }
-    if (!docData) {
-      console.error(`[reweapify] no doc for gtin=${norm}`);
-      return null;
-    }
+  }
+
+  if (!docData) {
+    console.error(`[reweapify] no doc for gtin=${norm}`);
+    return null;
+  }
+
+  try {
     const normalised = normaliseReweapify(docData);
     if (!normalised.productName || normalised.productName === 'Produkt') {
       if (!docData?.attr_ingredientStatement && !normalised.imageUrl) {
@@ -367,7 +493,7 @@ async function tryReweapify(ean: string): Promise<ExternalProductDoc | null> {
       cachedAt: Timestamp.fromMillis(Date.now()),
     } as ExternalProductDoc;
   } catch (e: any) {
-    console.warn('externalProductService.tryReweapify failed', e?.message);
+    console.error(`[reweapify] normalise failed: ${e?.message}`);
     return null;
   }
 }
@@ -446,24 +572,55 @@ async function tryRewe(ean: string): Promise<ExternalProductDoc | null> {
 }
 
 // T3: Globus-Scraper Cloud Function endpoint (europe-west1).
-// Aktuell skeleton — returnt { found: false } bis die HTML-Parse-
-// Logik in cloud-functions/globus-scraper/index.js implementiert ist.
-// Sobald die CF deployed ist und echte Daten liefert, funktioniert
-// die Cascade automatisch ohne weitere Client-Änderung.
+//
+// ─── STATUS 2026-05-28: DEAKTIVIERT ──────────────────────────────────
+// Die CF ist NICHT deployed (firebase functions:list zeigt sie nicht,
+// curl gibt 404) und sie ist auch NICHT in firebase.json als Codebase
+// registriert. Plus: der CF-Code in cloud-functions/globus-scraper/
+// index.js ist ein Skeleton (returnt immer { found: false }).
+//
+// Wir skippen den HTTP-Call deshalb komplett bis das alles steht —
+// sonst kostet jeder EAN-Lookup einen unnötigen 200-500ms-Roundtrip
+// zu einer 404-Page.
+//
+// Was zu tun ist um Globus zu aktivieren:
+//   1. Strategie in cloud-functions/globus-scraper/index.js wählen
+//      (Serper.dev-Search ist die naheliegende Option — siehe
+//      Code-Kommentare in index.js)
+//   2. Codebase in firebase.json eintragen (analog nutrition-scraper)
+//   3. Secrets falls nötig setzen: firebase functions:secrets:set SERPER_API_KEY
+//   4. firebase deploy --only functions:globus-scraper
+//   5. EXPO_PUBLIC_GLOBUS_ENABLED=true in .env / EAS-Env setzen
+//
+// Bis Schritt 5 ist `tryGlobus` ein No-Op. Cascade fällt direkt von
+// nutritionscrape zu OpenFood durch.
 const GLOBUS_FN_URL =
   (process as any).env?.EXPO_PUBLIC_GLOBUS_FN_URL ||
   'https://europe-west1-markendetektive-895f7.cloudfunctions.net/globusLookupByEan';
+const GLOBUS_ENABLED =
+  String((process as any).env?.EXPO_PUBLIC_GLOBUS_ENABLED ?? 'false') === 'true';
 
 async function tryGlobus(ean: string): Promise<ExternalProductDoc | null> {
+  if (!GLOBUS_ENABLED) {
+    // CF nicht deployed bzw. nicht implementiert — silently skip ohne
+    // HTTP-Roundtrip zu verbrennen.
+    return null;
+  }
   try {
     // Callable-onCall-Format: { data: { ean } }, returnt { result: {...} }.
+    // ACHTUNG: wenn die CF mit functions.onCall (statt onRequest) gebaut
+    // ist, braucht der Call ein Firebase-Auth-Bearer-Token. Anonymes
+    // Auth reicht — aber wir müssen den ID-Token an den Request hängen
+    // wenn der Server das prüft. Aktuell ist der Code dafür nicht
+    // vorbereitet; sobald die echte CF steht, hier ggf. Auth-Header
+    // ergänzen ODER die CF auf onRequest (cors:true) umbauen.
     const res = await fetch(GLOBUS_FN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ data: { ean } }),
     });
     if (!res.ok) {
-      // 404/500 etc. → silently fail, Cascade fällt zu OpenFood durch.
+      console.warn(`[globus] HTTP ${res.status} from CF — check deployment`);
       return null;
     }
     const json = await res.json();
@@ -479,7 +636,7 @@ async function tryGlobus(ean: string): Promise<ExternalProductDoc | null> {
       cachedAt: Timestamp.fromMillis(Date.now()),
     } as ExternalProductDoc;
   } catch (e: any) {
-    // Netzwerk-Fehler / CF nicht deployed / Timeout → null.
+    // Netzwerk-Fehler / Timeout → null.
     // Wichtig: NICHT werfen, damit die Cascade weiter zu OpenFood fällt.
     console.warn('externalProductService.tryGlobus failed', e?.message);
     return null;
@@ -546,9 +703,29 @@ async function lookupByEAN(ean: string): Promise<ExternalLookupResult | null> {
     if (cached) {
       const stale = isExternalCacheStale(cached.cachedAt as any);
       const lowPrio = sourcePriority(cached.source) >= UPGRADE_THRESHOLD_INDEX;
+      // Auto-heal: wenn essentielle Felder fehlen (Bild + Preis + Name
+      // alle leer), ist das Doc kaputt — z.B. weil ein früherer
+      // Normalizer-Bug die Felder nicht gemappt hat. Re-fetch erzwingen
+      // damit der User nicht "Cache leeren" tippen muss.
+      const isBroken =
+        !cached.imageUrl &&
+        (cached.price === undefined || cached.price === null) &&
+        (!cached.productName || cached.productName === 'Produkt');
       console.log(
-        `[external-lookup] cache-hit source=${cached.source} stale=${stale} lowPrio=${lowPrio}`,
+        `[external-lookup] cache-hit source=${cached.source} stale=${stale} lowPrio=${lowPrio} broken=${isBroken}`,
       );
+
+      // Kaputtes Doc → komplett neu cascaden (Cache überschreibt sich selbst).
+      if (isBroken) {
+        console.error(
+          `[external-lookup] cached doc broken (no image+price+name) → forcing re-fetch`,
+        );
+        const fresh = await runFullCascade(norm);
+        if (fresh) return fresh;
+        // Wenn Re-Fetch auch nichts liefert → cached zurück (Datenrest ist
+        // besser als nichts).
+        return { product: cached, fromCache: true, refreshed: false };
+      }
 
       // Hoch-Priorität-Cache + nicht stale → direkt return.
       if (!stale && !lowPrio) {
@@ -563,6 +740,13 @@ async function lookupByEAN(ean: string): Promise<ExternalLookupResult | null> {
           console.error(`[external-lookup] cache upgraded openfood → ${upgraded.source}`);
           return { product: upgraded, fromCache: false, refreshed: true };
         }
+        // Upgrade fehlgeschlagen — EAN hat NUR openfood-Daten. Miss
+        // erneut tracken damit der Processor noch eine Runde dreht.
+        void recordMiss(
+          norm,
+          ['reweapify', 'nutritionscrape', 'scraped_products', GLOBUS_ENABLED ? 'globus-cf' : 'globus-cf(disabled)'],
+          'openfood',
+        );
       }
 
       // Stale (hoch-priorität) → trigger background refresh, return cached.
@@ -607,7 +791,14 @@ async function tryHigherPrioritySources(
 async function runFullCascade(
   ean: string,
 ): Promise<ExternalLookupResult | null> {
+  // Track welche Sources versucht wurden — für Miss-Recording. Hilft
+  // beim Debugging ("welche Sources haben wir schon abgeklappert?")
+  // und ist ein gutes Signal für den Miss-Processor (T4) welche
+  // Strategie noch übrig ist.
+  const tried: string[] = [];
+
   const fromReweapify = await tryReweapify(ean);
+  tried.push('reweapify');
   if (fromReweapify) {
     console.error(`[external-lookup] ✅ reweapify hit`);
     return { product: fromReweapify, fromCache: false, refreshed: false };
@@ -615,6 +806,7 @@ async function runFullCascade(
   console.error(`[external-lookup] reweapify: no hit`);
 
   const fromScrape = await tryNutritionScrape(ean);
+  tried.push('nutritionscrape');
   if (fromScrape) {
     console.error(`[external-lookup] ✅ nutritionscrape hit (source=${fromScrape.source})`);
     return { product: fromScrape, fromCache: false, refreshed: false };
@@ -622,6 +814,7 @@ async function runFullCascade(
   console.error(`[external-lookup] nutritionscrape: no hit`);
 
   const fromRewe = await tryRewe(ean);
+  tried.push('scraped_products');
   if (fromRewe) {
     console.error(`[external-lookup] ✅ scraped_products (legacy) hit`);
     return { product: fromRewe, fromCache: false, refreshed: false };
@@ -629,19 +822,30 @@ async function runFullCascade(
   console.error(`[external-lookup] scraped_products: no hit`);
 
   const fromGlobus = await tryGlobus(ean);
+  tried.push(GLOBUS_ENABLED ? 'globus-cf' : 'globus-cf(disabled)');
   if (fromGlobus) {
     console.error(`[external-lookup] ✅ globus-cf hit`);
     return { product: fromGlobus, fromCache: false, refreshed: false };
   }
-  console.error(`[external-lookup] globus-cf: no hit (Skeleton)`);
+  console.error(
+    `[external-lookup] globus-cf: ${GLOBUS_ENABLED ? 'no hit' : 'DISABLED (CF nicht deployed)'}`,
+  );
 
   const fromOpenFood = await tryOpenFood(ean);
+  tried.push('openfood');
   if (fromOpenFood) {
     console.error(`[external-lookup] ✅ openfood hit (Fallback)`);
+    // SCHWACHER HIT: openfood ist Last-Resort. Wir wollen für diese EAN
+    // einen Multi-Shop-Re-Scrape triggern damit beim nächsten Lookup
+    // bessere Daten da sind. Fire-and-forget — UI bekommt sofort die
+    // openfood-Daten zurück.
+    void recordMiss(ean, tried, 'openfood');
     return { product: fromOpenFood, fromCache: false, refreshed: false };
   }
   console.error(`[external-lookup] openfood: no hit — cascade ende, kein Produkt`);
 
+  // KOMPLETTER MISS: keine Source hatte was. Persistieren für Processor.
+  void recordMiss(ean, tried, null);
   return null;
 }
 
@@ -710,6 +914,7 @@ export const ExternalProductService = {
   normaliseEan,
   lookupByEAN,
   forceLookupByEAN,
+  recordMiss,
 };
 
 export default ExternalProductService;

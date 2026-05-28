@@ -116,3 +116,70 @@ export interface ExternalLookupResult {
   /** true wenn cached aber stale war und Refresh erfolgte. */
   refreshed: boolean;
 }
+
+// ─── Miss-Tracking ────────────────────────────────────────────────────
+//
+// Wenn die Cascade keinen oder nur einen schwachen Treffer (openfood)
+// liefert, schreiben wir das als "miss" in eine eigene Collection.
+// Damit haben wir einen Backlog für:
+//   • manuelle Investigation ("welche EANs scannen User die wir noch
+//     nicht haben?")
+//   • automatisierte Re-Scrape-Versuche (T4: scheduled CF die
+//     nutrition-scraper.scrapeEan für pending misses aufruft — dadurch
+//     greifen Globus + 30+ andere whitelisted Shops aus der
+//     nutrition-scraper-Pipeline)
+//
+// Doc-Id = EAN (normalisiert), Upsert via merge:true (incrementiert
+// hitCount + updated lastSeenAt). So bleibt jede EAN ein einziges Doc,
+// egal wie oft sie gescannt wird.
+
+/**
+ * Status-Übergänge:
+ *   pending     — initial nach erstem Miss, wartet auf Processor
+ *   processing  — Processor läuft gerade für diese EAN (Lock-Pattern,
+ *                 damit nicht zwei Worker dieselbe EAN gleichzeitig
+ *                 abarbeiten)
+ *   resolved    — Re-Scrape war erfolgreich, Daten landeten in
+ *                 nutritionscrape/{ean} (Client liest beim nächsten
+ *                 Lookup von dort)
+ *   no-data     — Re-Scrape mehrfach durchgelaufen, KEINE Source hatte
+ *                 was. Wir geben auf. Manuelle Pflege möglich.
+ *   skipped     — Manuell als nicht-prozessierbar markiert (z.B. falscher
+ *                 EAN-Typ, Erwachsenen-Produkt, etc.)
+ */
+export type ExternalMissStatus =
+  | 'pending'
+  | 'processing'
+  | 'resolved'
+  | 'no-data'
+  | 'skipped';
+
+export interface ExternalLookupMissDoc {
+  /** EAN, gleich der doc-id (nur Ziffern). */
+  ean: string;
+  /** Status des Miss. Default 'pending'. */
+  status: ExternalMissStatus;
+  /** Erste Sichtung der EAN als Miss. */
+  firstSeenAt: Timestamp;
+  /** Letzte Sichtung — wird bei jedem erneuten Miss-Hit aktualisiert. */
+  lastSeenAt: Timestamp;
+  /** Wie oft wurde diese EAN schon gescannt + landete im Miss-State. */
+  hitCount: number;
+  /** Welche Sources die Client-Cascade probiert hat (für Debugging). */
+  triedSources: string[];
+  /**
+   * Beste Source die *etwas* hatte, auch wenn schwach. Wenn z.B. nur
+   * OpenFood was hatte → 'openfood'. null wenn gar nichts.
+   */
+  bestSource: ExternalProductSource | null;
+  /** Wenn der Processor schon mal lief: wann + Resultat-Source. */
+  processedAt?: Timestamp;
+  processedSource?: ExternalProductSource | null;
+  /** Bei Fehlern im Processor: kurzer Error-String für Debugging. */
+  processingError?: string;
+  /** Optional: Notiz vom Admin / Investigation-Sicht. */
+  note?: string;
+}
+
+/** Default-Wert für ein neues Miss-Doc. */
+export const EXTERNAL_MISS_DEFAULT_STATUS: ExternalMissStatus = 'pending';

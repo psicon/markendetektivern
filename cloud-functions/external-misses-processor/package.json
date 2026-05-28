@@ -1,0 +1,14 @@
+{
+  "name": "external-misses-processor",
+  "version": "0.1.0",
+  "description": "Scheduled CF: bearbeitet pending external_lookup_misses durch Aufruf von nutrition-scraper.scrapeEan. So greifen Globus + 30+ andere whitelisted Shops als EAN-Backfill.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.0.0"
+  },
+  "private": true
+}

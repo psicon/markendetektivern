@@ -27,7 +27,7 @@
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "1184",
+      "buildNumber": "1185",
       "appleTeamId": "MZD2N2F887",
       "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true,

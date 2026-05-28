@@ -114,6 +114,18 @@
         "firebase-debug.*.log",
         "*.local"
       ]
+    },
+    {
+      "source": "cloud-functions/external-misses-processor",
+      "codebase": "external-misses-processor",
+      "runtime": "nodejs22",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ]
     }
   ]
 }
