@@ -16,6 +16,7 @@
 // Previews nutzen, damit das Testing identisch zum Real-User-Erlebnis
 // aussieht.
 
+import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
@@ -23,6 +24,7 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { DetailHeader } from '@/components/design/DetailHeader';
 import {
   bannerDataFromAchievement,
+  bannerDataFromCashbackPayout,
   bannerDataFromLevelUp,
   useGamification,
 } from '@/components/ui/GamificationProvider';
@@ -331,6 +333,55 @@ export default function NotificationsDebugScreen() {
                 },
               )
             }
+          />
+        </View>
+
+        {/* ── Cashback-Banner ───────────────────────────────────── */}
+        <SectionTitle title="Cashback-Banner" />
+        <View style={{ paddingHorizontal: 20 }}>
+          <DebugButton
+            label="Submit-Haptik (Light Impact)"
+            sub="Wie beim Tap auf 'Bon einreichen' in review.tsx — leichter Buzz, kein Banner"
+            tint="#0d8575"
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+            }}
+          />
+          <DebugButton
+            label="Approval · 1,49 € Cashback"
+            sub="Success-Haptik + Banner mit money-Lottie (kleiner Bon)"
+            tint="#0d8575"
+            onPress={() => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+              showBanner(bannerDataFromCashbackPayout(149));
+            }}
+          />
+          <DebugButton
+            label="Approval · 4,99 € Cashback"
+            sub="Success-Haptik + Banner (mittlerer Bon)"
+            tint="#0d8575"
+            onPress={() => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+              showBanner(bannerDataFromCashbackPayout(499));
+            }}
+          />
+          <DebugButton
+            label="Approval · 12,73 € Cashback"
+            sub="Success-Haptik + Banner (großer Bon)"
+            tint="#0d8575"
+            onPress={() => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+              showBanner(bannerDataFromCashbackPayout(1273));
+            }}
+          />
+          <DebugButton
+            label="Approval · 0 € (Edge-Case)"
+            sub="Wenn Bon approved aber keine cashbackCents geliefert wurden — Banner zeigt Fallback-Text"
+            tint="#0d8575"
+            onPress={() => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+              showBanner(bannerDataFromCashbackPayout(0));
+            }}
           />
         </View>
 
