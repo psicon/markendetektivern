@@ -2009,6 +2009,8 @@ type CustomCardProps = {
   onDelete: () => void;
   loadingCheck: boolean;
   loadingDelete: boolean;
+  onIncrement?: () => void;
+  onDecrement?: () => void;
 };
 
 function CustomCard({
@@ -2017,15 +2019,14 @@ function CustomCard({
   onDelete,
   loadingCheck,
   loadingDelete,
+  onIncrement,
+  onDecrement,
 }: CustomCardProps) {
   const { theme, brand } = useTokens();
   const isBrand = item.customType === 'brand';
   // Picked icon takes priority. Fall back to generic glyph for legacy
   // custom items that predate the icon picker.
   const iconName: any = item.customIcon || (isBrand ? 'star' : 'cart-outline');
-  // T17.38: Menge anzeigen wenn > 1. Legacy-Items haben anzahl=1 als
-  // Default aus dem Mapping.
-  const qty = item.anzahl ?? 1;
   return (
     <View
       style={{
@@ -2080,28 +2081,6 @@ function CustomCard({
               {isBrand ? 'MARKE' : 'NONAME'}
             </Text>
           </View>
-          {qty > 1 ? (
-            <View
-              style={{
-                backgroundColor: brand.primary,
-                paddingHorizontal: 6,
-                paddingVertical: 2,
-                borderRadius: 4,
-              }}
-            >
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.extraBold,
-                  fontSize: 9,
-                  color: '#fff',
-                  letterSpacing: 0.4,
-                }}
-              >
-                ×{qty}
-              </Text>
-            </View>
-          ) : null}
         </View>
         <Text
           numberOfLines={2}
@@ -2162,6 +2141,27 @@ function CustomCard({
         )}
       </View>
       </View>
+      {/* T17.39: CompactQuantityPill rechts vor dem Check-Edge —
+          gleiches Layout wie bei BrandCard/NoNameCard. */}
+      {onIncrement && onDecrement ? (
+        <View
+          pointerEvents="box-none"
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            right: 8,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <CompactQuantityPill
+            anzahl={item.anzahl ?? 1}
+            onIncrement={onIncrement}
+            onDecrement={onDecrement}
+          />
+        </View>
+      ) : null}
       <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
     </View>
   );
@@ -2978,7 +2978,39 @@ export default function ShoppingListScreen() {
   // dahinter der Firestore-Sync via addToShoppingCart bzw. decrementCartQuantity.
   const handleIncrementCart = async (item: EnrichedItem) => {
     if (!user?.uid) return;
-    if (item.isCustom) return; // Custom-Items haben keinen productId
+    if (item.isCustom) {
+      // T17.39: Custom-Items haben kein productId — wir adressieren
+      // direkt über die cart-doc-id (item.id) via updateCustomItemQuantity.
+      const prevAnzahl = item.anzahl ?? 1;
+      const newAnzahl = Math.min(99, prevAnzahl + 1);
+      const isBrand = item.customType === 'brand';
+      // Optimistic
+      if (isBrand) {
+        setBrandProducts((prev) =>
+          prev.map((it) => (it.id === item.id ? { ...it, anzahl: newAnzahl } : it)),
+        );
+      } else {
+        setNoNameProducts((prev) =>
+          prev.map((it) => (it.id === item.id ? { ...it, anzahl: newAnzahl } : it)),
+        );
+      }
+      try {
+        await FirestoreService.updateCustomItemQuantity(user.uid, item.id, newAnzahl);
+      } catch (e) {
+        // Revert
+        if (isBrand) {
+          setBrandProducts((prev) =>
+            prev.map((it) => (it.id === item.id ? { ...it, anzahl: prevAnzahl } : it)),
+          );
+        } else {
+          setNoNameProducts((prev) =>
+            prev.map((it) => (it.id === item.id ? { ...it, anzahl: prevAnzahl } : it)),
+          );
+        }
+        showInfoToast('Fehler — bitte erneut versuchen');
+      }
+      return;
+    }
     const productData = item.product;
     // Fix (2026-05-07): explicit productId Feld nutzen, NICHT product.id
     // (getDocumentByReference returnt nur doc.data() ohne id-Feld).
@@ -3027,8 +3059,41 @@ export default function ShoppingListScreen() {
   const handleDecrementCart = async (item: EnrichedItem) => {
     if (!user?.uid) return;
     if (item.isCustom) {
-      // Custom-Items: bei − direkt entfernen (haben kein anzahl-Konzept)
-      handleRemoveFromCart(item.id);
+      // T17.39: Custom-Items haben jetzt anzahl-Konzept. Bei anzahl > 1
+      // dekrementieren, bei anzahl == 1 ganz entfernen (wie bei DB-Items
+      // wo die Pill dann den Trash-Icon zeigt).
+      const prevAnzahl = item.anzahl ?? 1;
+      if (prevAnzahl <= 1) {
+        handleRemoveFromCart(item.id);
+        return;
+      }
+      const newAnzahl = prevAnzahl - 1;
+      const isBrand = item.customType === 'brand';
+      // Optimistic
+      if (isBrand) {
+        setBrandProducts((prev) =>
+          prev.map((it) => (it.id === item.id ? { ...it, anzahl: newAnzahl } : it)),
+        );
+      } else {
+        setNoNameProducts((prev) =>
+          prev.map((it) => (it.id === item.id ? { ...it, anzahl: newAnzahl } : it)),
+        );
+      }
+      try {
+        await FirestoreService.updateCustomItemQuantity(user.uid, item.id, newAnzahl);
+      } catch (e) {
+        // Revert
+        if (isBrand) {
+          setBrandProducts((prev) =>
+            prev.map((it) => (it.id === item.id ? { ...it, anzahl: prevAnzahl } : it)),
+          );
+        } else {
+          setNoNameProducts((prev) =>
+            prev.map((it) => (it.id === item.id ? { ...it, anzahl: prevAnzahl } : it)),
+          );
+        }
+        showInfoToast('Fehler — bitte erneut versuchen');
+      }
       return;
     }
     const productData = item.product;
@@ -3402,6 +3467,8 @@ export default function ShoppingListScreen() {
               onDelete={() => handleRemoveFromCartConfirm(item.id)}
               loadingCheck={loadingCheck}
               loadingDelete={loadingDelete}
+              onIncrement={() => handleIncrementCart(item)}
+              onDecrement={() => handleDecrementCart(item)}
             />
           )}
         />

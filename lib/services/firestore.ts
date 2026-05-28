@@ -3697,6 +3697,22 @@ export class FirestoreService {
   }
 
   /**
+   * T17.39: Quantity eines Custom-Items im Cart updaten. Anders als
+   * DB-Items, die über addToShoppingCart/decrementCartQuantity mit
+   * productId-Lookup laufen, hat ein custom item keine productId —
+   * wir adressieren über die cart-doc-id direkt.
+   */
+  static async updateCustomItemQuantity(
+    userId: string,
+    cartDocId: string,
+    anzahl: number,
+  ): Promise<void> {
+    const clamped = Math.max(1, Math.min(99, anzahl));
+    const ref = doc(db, 'users', userId, 'einkaufswagen', cartDocId);
+    await updateDoc(ref, { anzahl: clamped });
+  }
+
+  /**
    * Fügt ein Produkt zum Einkaufszettel hinzu (bestehende Funktion)
    */
   static async addToShoppingCart(

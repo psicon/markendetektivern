@@ -328,74 +328,89 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
           ))}
         </ScrollView>
 
-        {/* T17.38: Menge — wie viele davon soll ich kaufen? */}
+        {/* T17.39: Menge — gleicher Capsule-Look wie CompactQuantityPill
+            auf DB-Produkt-Cards. Pill 46 hoch, runde Buttons, +-Button
+            mit brand-primary Akzent. */}
         <Text style={[labelStyle(theme)]}>Menge</Text>
         <View
           style={{
             flexDirection: 'row',
             alignItems: 'center',
-            backgroundColor: theme.surfaceAlt,
-            borderRadius: 12,
-            paddingHorizontal: 6,
-            paddingVertical: 6,
+            justifyContent: 'center',
             marginBottom: 18,
-            gap: 8,
           }}
         >
-          <Pressable
-            onPress={() => {
-              setQuantity((q) => Math.max(1, q - 1));
-              Haptics.selectionAsync().catch(() => {});
-            }}
-            disabled={quantity <= 1}
-            accessibilityRole="button"
-            accessibilityLabel="Menge verringern"
-            style={({ pressed }) => ({
-              width: 40,
-              height: 40,
-              borderRadius: 10,
-              backgroundColor: theme.surface,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: quantity <= 1 ? 0.4 : pressed ? 0.7 : 1,
-            })}
-          >
-            <MaterialCommunityIcons name="minus" size={20} color={theme.text} />
-          </Pressable>
-          <Text
+          <View
             style={{
-              flex: 1,
-              textAlign: 'center',
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 18,
-              color: theme.text,
-              letterSpacing: -0.2,
-            }}
-            accessibilityLabel={`Aktuelle Menge: ${quantity}`}
-          >
-            {quantity}× {itemName.trim() || 'Stück'}
-          </Text>
-          <Pressable
-            onPress={() => {
-              setQuantity((q) => Math.min(99, q + 1));
-              Haptics.selectionAsync().catch(() => {});
-            }}
-            disabled={quantity >= 99}
-            accessibilityRole="button"
-            accessibilityLabel="Menge erhöhen"
-            style={({ pressed }) => ({
-              width: 40,
-              height: 40,
-              borderRadius: 10,
-              backgroundColor: theme.surface,
+              flexDirection: 'row',
               alignItems: 'center',
-              justifyContent: 'center',
-              opacity: quantity >= 99 ? 0.4 : pressed ? 0.7 : 1,
-            })}
+              backgroundColor: theme.surface,
+              borderWidth: 1,
+              borderColor: theme.border,
+              borderRadius: 23,
+              paddingHorizontal: 3,
+              height: 46,
+            }}
           >
-            <MaterialCommunityIcons name="plus" size={20} color={theme.text} />
-          </Pressable>
+            <Pressable
+              onPress={() => {
+                setQuantity((q) => Math.max(1, q - 1));
+                Haptics.selectionAsync().catch(() => {});
+              }}
+              disabled={quantity <= 1}
+              accessibilityRole="button"
+              accessibilityLabel="Menge verringern"
+              hitSlop={8}
+              style={({ pressed }) => ({
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: pressed ? theme.surfaceAlt : 'transparent',
+                opacity: quantity <= 1 ? 0.4 : 1,
+              })}
+            >
+              <MaterialCommunityIcons name="minus" size={18} color={theme.text} />
+            </Pressable>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 16,
+                color: theme.text,
+                minWidth: 32,
+                textAlign: 'center',
+                letterSpacing: -0.2,
+              }}
+              accessibilityLabel={`Aktuelle Menge: ${quantity}`}
+            >
+              {quantity}
+            </Text>
+            <Pressable
+              onPress={() => {
+                setQuantity((q) => Math.min(99, q + 1));
+                Haptics.selectionAsync().catch(() => {});
+              }}
+              disabled={quantity >= 99}
+              accessibilityRole="button"
+              accessibilityLabel="Menge erhöhen"
+              hitSlop={8}
+              style={({ pressed }) => ({
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: pressed
+                  ? brand.primaryContainer ?? theme.surfaceAlt
+                  : brand.primary,
+                opacity: quantity >= 99 ? 0.4 : 1,
+              })}
+            >
+              <MaterialCommunityIcons name="plus" size={18} color="#fff" />
+            </Pressable>
+          </View>
         </View>
 
         {/* Submit */}
