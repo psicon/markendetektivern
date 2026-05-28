@@ -22,7 +22,7 @@
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import LottieView from 'lottie-react-native';
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -98,21 +98,34 @@ export function AchievementUnlockBanner({
   const scale = useSharedValue(0.92);
 
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // T17.23: isExiting steuert den EdgeGlow-Fade-Out. Sobald exit-Phase
+  // beginnt → EdgeGlow visible=false → seine eigene 900ms Easing.out
+  // Fade-Animation läuft. Banner-Card selbst exitet schneller (~280ms),
+  // dann bleibt der Component noch ~720ms gemounted damit der Glow
+  // alleine ausfadet bevor onDismiss → Unmount kommt. Sonst popt der
+  // Glow weg weil der Component beim Unmount sofort verschwindet.
+  const [isExiting, setIsExiting] = useState(false);
 
   const animateOut = useCallback(() => {
+    setIsExiting(true);
     translateY.value = withTiming(HIDDEN_OFFSET, {
       duration: 280,
       easing: Easing.in(Easing.cubic),
     });
-    opacity.value = withTiming(
-      0,
-      { duration: 220, easing: Easing.in(Easing.cubic) },
-      (finished) => {
-        if (finished) {
-          runOnJS(onDismiss)();
-        }
-      },
-    );
+    opacity.value = withTiming(0, {
+      duration: 220,
+      easing: Easing.in(Easing.cubic),
+    });
+    // onDismiss verzögert auf 950ms — EdgeGlow's interne Fade-Out
+    // Duration ist 900ms (siehe EdgeGlow.tsx Zeile 167). 50ms Buffer
+    // damit der letzte Frame des Glows sicher gerendert wird bevor
+    // der Component unmounted.
+    if (onDismissTimer.current) clearTimeout(onDismissTimer.current);
+    onDismissTimer.current = setTimeout(() => {
+      onDismiss();
+    }, 950);
   }, [translateY, opacity, onDismiss]);
 
   // Haptic-Feedback wird VOR dem Spring-Entry ausgelöst — der
@@ -170,6 +183,10 @@ export function AchievementUnlockBanner({
       if (dismissTimer.current) {
         clearTimeout(dismissTimer.current);
         dismissTimer.current = null;
+      }
+      if (onDismissTimer.current) {
+        clearTimeout(onDismissTimer.current);
+        onDismissTimer.current = null;
       }
     };
   }, [visible, translateY, opacity, scale, triggerHaptic, animateOut]);
@@ -240,7 +257,9 @@ export function AchievementUnlockBanner({
           Achievements bekommen kein Glow → vermeidet Inflation. */}
       {data.withGlow ? (
         <EdgeGlow
-          visible={visible}
+          // T17.23: !isExiting damit EdgeGlow seine eigene 900ms Fade-Out
+          // Animation noch laufen kann bevor der Banner unmounted.
+          visible={visible && !isExiting}
           tint={data.tint}
           secondaryTint={data.secondaryTint}
         />
