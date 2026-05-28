@@ -1183,19 +1183,32 @@ export default function ProfileScreen() {
         {/* Account / Inhalte menu */}
         <View style={{ paddingHorizontal: 20, paddingTop: 16 }}>
           <MenuCard>
-            {/* "Belohnungen & Level"-Eintrag führt zur Errungenschaften-
-                Seite — rein spielerischer Inhalt, daher hinter dem
-                Toggle. Wenn versteckt rückt die Einkaufszettel-Row in
-                die `first`-Position (kein Top-Border mehr). */}
+            {/* Gamification-Bereich: zwei Einträge, beide hinter dem
+                Toggle versteckbar.
+                  1. "Belohnungen" → führt zum Rewards-Tab (Cashback
+                     einlösen, Bestenliste).
+                  2. "Level & Errungenschaften" → führt zur Errungen-
+                     schaften-Seite (Level-Catalog + Achievement-Liste).
+                Wenn beide versteckt sind rückt die Einkaufszettel-Row
+                in die `first`-Position. */}
             {gamificationEnabled ? (
-              <MenuRow
-                icon="trophy-outline"
-                color="#e0a800"
-                label="Belohnungen & Level"
-                sub={`Level ${level} · ${points.toLocaleString('de-DE')} Pkt`}
-                onPress={() => router.push('/achievements' as any)}
-                first
-              />
+              <>
+                <MenuRow
+                  icon="gift-outline"
+                  color="#f97316"
+                  label="Belohnungen"
+                  sub="Cashback einlösen · Bestenliste"
+                  onPress={() => router.push('/(tabs)/rewards' as any)}
+                  first
+                />
+                <MenuRow
+                  icon="trophy-outline"
+                  color="#e0a800"
+                  label="Level & Errungenschaften"
+                  sub={`Level ${level} · ${points.toLocaleString('de-DE')} Pkt`}
+                  onPress={() => router.push('/achievements' as any)}
+                />
+              </>
             ) : null}
             <MenuRow
               icon="format-list-checks"
