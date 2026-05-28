@@ -69,6 +69,12 @@ const {
   PROMPT_VERSION,
   DEFAULT_MODEL,
 } = require('./src/comparator');
+const {
+  ASSESSMENT_PROMPT_VERSION,
+  snapshotFromDoc: assessmentSnapshotFromDoc,
+  isAssessable,
+  callGeminiAssessment,
+} = require('./src/assessor');
 const { inputHash } = require('./src/hash');
 
 if (!admin.apps.length) admin.initializeApp();
@@ -107,17 +113,11 @@ async function runComparison(db, produktId, opts = {}) {
   // markenProdukt-Ref auflösen
   const mpRef = produktData.markenProdukt;
   if (!mpRef) {
-    await produktRef.set(
-      {
-        aiComparison: {
-          skipped: 'no-markenprodukt',
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          promptVersion: PROMPT_VERSION,
-        },
-      },
-      { merge: true },
-    );
-    return { state: 'no-markenprodukt' };
+    // Kein MP-Link → kein Vergleich möglich. Stattdessen Standalone-
+    // Assessment (Kategorie-relative Bewertung) durchführen, damit
+    // auch Stufe-1/2-Produkte eine KI-Aussage bekommen (User-Vorgabe
+    // 2026-05-28).
+    return await runAssessment(db, produktId, opts);
   }
 
   // Akzeptiert sowohl DocReference als auch String-ID
@@ -222,6 +222,130 @@ async function runComparison(db, produktId, opts = {}) {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// Hilfsfunktion — runAssessment(produktId)
+// ════════════════════════════════════════════════════════════════════
+//
+// Standalone-Bewertung wenn KEIN markenProdukt-Link existiert.
+// Output landet auf produkte/{id}.aiAssessment (separates Feld zu
+// aiComparison damit die UI klar trennen kann).
+//
+// Hash-Check über die Input-Snapshot — wenn Nährwerte/Zutaten/Name
+// unverändert, kein Gemini-Call.
+
+async function runAssessment(db, produktId, opts = {}) {
+  const { force = false, apiKey } = opts;
+  const produktRef = db.collection('produkte').doc(produktId);
+  const produktSnap = await produktRef.get();
+  if (!produktSnap.exists) {
+    return { state: 'not-found' };
+  }
+  const produktData = produktSnap.data() || {};
+  const snap = assessmentSnapshotFromDoc(produktData);
+
+  if (!isAssessable(snap)) {
+    // Wirklich gar nichts da — selbst Name fehlt. Schreiben wir
+    // skipped damit nicht jeder Trigger das nochmal versucht.
+    await produktRef.set(
+      {
+        aiAssessment: {
+          skipped: 'no-data',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          promptVersion: ASSESSMENT_PROMPT_VERSION,
+        },
+      },
+      { merge: true },
+    );
+    return { state: 'assessment-no-data' };
+  }
+
+  // Hash-Check — einfacher als bei Comparison weil nur ein Produkt
+  const hashKey = JSON.stringify([
+    snap.energy, snap.fat, snap.satFat, snap.carbs, snap.sugar,
+    snap.fiber, snap.protein, snap.salt,
+    String(snap.ingredients || '').toLowerCase().replace(/\s+/g, ' ').trim(),
+  ]);
+  const hash = require('crypto').createHash('sha256').update(hashKey).digest('hex').slice(0, 16);
+  const prev = produktData.aiAssessment;
+  if (
+    !force &&
+    prev?.inputHash === hash &&
+    prev?.promptVersion === ASSESSMENT_PROMPT_VERSION &&
+    typeof prev?.healthScore === 'number'
+  ) {
+    return { state: 'assessment-skipped-nochange' };
+  }
+
+  // Kategorie aus kategorie-Ref auflösen (falls Ref). Optional —
+  // wenn nicht resolvebar, geht Gemini ohne Kategorie-Hinweis weiter.
+  let categoryName = null;
+  try {
+    const catRef = produktData.kategorie;
+    if (catRef) {
+      let catDoc;
+      if (typeof catRef === 'string') {
+        catDoc = await db.collection('kategorien').doc(catRef).get();
+      } else if (catRef.get && typeof catRef.get === 'function') {
+        catDoc = await catRef.get();
+      } else if (catRef.path) {
+        catDoc = await db.doc(catRef.path).get();
+      }
+      if (catDoc?.exists) {
+        const c = catDoc.data() || {};
+        categoryName = c.bezeichnung || c.name || null;
+      }
+    }
+  } catch (e) {
+    // Egal — Kategorie ist optional
+  }
+
+  // Gemini-Call
+  let result;
+  try {
+    result = await callGeminiAssessment({
+      apiKey: apiKey || GEMINI_API_KEY.value(),
+      snapshot: snap,
+      category: categoryName,
+    });
+  } catch (e) {
+    console.error(`[ai-assessment] Gemini failed für ${produktId}:`, e.message);
+    await produktRef.set(
+      {
+        aiAssessment: {
+          lastError: String(e.message || e).slice(0, 200),
+          lastErrorAt: admin.firestore.FieldValue.serverTimestamp(),
+          promptVersion: ASSESSMENT_PROMPT_VERSION,
+        },
+      },
+      { merge: true },
+    );
+    return { state: 'assessment-gemini-failed', detail: e.message };
+  }
+
+  await produktRef.set(
+    {
+      aiAssessment: {
+        healthScore: result.healthScore,
+        reasoning: result.reasoning,
+        model: result.model,
+        promptVersion: result.promptVersion,
+        inputHash: hash,
+        category: categoryName,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastError: admin.firestore.FieldValue.delete(),
+        lastErrorAt: admin.firestore.FieldValue.delete(),
+        skipped: admin.firestore.FieldValue.delete(),
+      },
+    },
+    { merge: true },
+  );
+
+  return {
+    state: 'assessment-updated',
+    detail: `healthScore=${result.healthScore} model=${result.model}`,
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════
 // Trigger 1 — onProduktCreate (neues NoName-Produkt)
 // ════════════════════════════════════════════════════════════════════
 
@@ -253,6 +377,7 @@ exports.onProduktCreateForComparison = onDocumentCreated(
 
 const RELEVANT_PRODUKTE_FIELDS = [
   'markenProdukt',
+  'stufe', // v7: Stufe-Cap aktiv → bei Stufe-Änderung muss neu evaluiert werden
   'nutr_Energie_val',
   'nutr_Fett_val',
   'nutr_FettdavongesttigteFettsuren_val',

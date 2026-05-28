@@ -55,9 +55,15 @@ export interface Produkte {
    * cloud-functions/ai-product-comparison. Score 1-5 (1=NoName klar
    * schlechter, 5=NoName klar besser). reasoning ist 1-2 Sätze DE.
    * Nicht alle Produkte haben das — Stufe-1/2-Produkte (kein
-   * Markenprodukt-Link) bekommen `skipped: 'no-markenprodukt'`.
+   * Markenprodukt-Link) bekommen stattdessen aiAssessment.
    */
   aiComparison?: AiComparison;
+  /**
+   * KI-Standalone-Bewertung (für Stufe 1/2 ohne Markenprodukt-Link).
+   * healthScore 1-5 KATEGORIE-RELATIV (1=unter Durchschnitt der
+   * Kategorie, 5=sehr gute Wahl). reasoning ist 1-2 Sätze DE.
+   */
+  aiAssessment?: AiAssessment;
 }
 
 export interface AiComparison {
@@ -68,6 +74,25 @@ export interface AiComparison {
   inputHash?: string;
   updatedAt?: Timestamp;
   skipped?: 'no-markenprodukt' | 'incomparable';
+  lastError?: string;
+  lastErrorAt?: Timestamp;
+}
+
+/**
+ * Standalone-Bewertung (Stufe 1/2 ohne Markenprodukt-Link). Wird auf
+ * derselben CF (ai-product-comparison) berechnet wenn aiComparison
+ * nicht möglich ist. healthScore ist KATEGORIE-RELATIV (1 = unter
+ * Durchschnitt der Kategorie, 5 = sehr gute Wahl in der Kategorie).
+ */
+export interface AiAssessment {
+  healthScore?: 1 | 2 | 3 | 4 | 5;
+  reasoning?: string;
+  category?: string | null;
+  model?: string;
+  promptVersion?: string;
+  inputHash?: string;
+  updatedAt?: Timestamp;
+  skipped?: 'no-data';
   lastError?: string;
   lastErrorAt?: Timestamp;
 }

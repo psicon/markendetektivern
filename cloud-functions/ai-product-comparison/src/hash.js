@@ -30,6 +30,11 @@ function snapshotKey(s) {
       .toLowerCase()
       .replace(/\s+/g, ' ')
       .trim(),
+    // v7: Stufe wieder im Hash. Wenn ein Produkt von Stufe 3 auf 5
+    // hochgestuft wird, MUSS der Cap neu greifen und das Reasoning
+    // neu generiert werden — kann den Score verändern selbst bei
+    // sonst identischen Daten.
+    s.stufe ?? 'null',
   ].join('|');
 }
 

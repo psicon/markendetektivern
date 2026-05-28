@@ -74,6 +74,14 @@ type Props = {
   imageOverlayTopLeft?: React.ReactNode;
   imageOverlayBottomLeft?: React.ReactNode;
   /**
+   * Optionaler AI-Score-Badge (1-5) der oben rechts auf dem Bild
+   * angezeigt wird. Wird gefüttert aus produkte.aiComparison.score
+   * (siehe cloud-functions/ai-product-comparison). Wenn undefined,
+   * wird kein Badge gerendert — useful für Cards die nicht aus
+   * dem comparison-Kontext kommen (z.B. Markenprodukte selbst).
+   */
+  aiScore?: 1 | 2 | 3 | 4 | 5 | null;
+  /**
    * Optionaler Footer unter Preis/Größe — z.B. Rating-Zeile +
    * Kommentar-Vorschau auf der Home-Top-Rated-Liste.
    */
@@ -112,6 +120,7 @@ function ProductCardImpl({
   height,
   imageOverlayTopLeft,
   imageOverlayBottomLeft,
+  aiScore,
   footer,
 }: Props) {
   const { theme, shadows } = useTokens();
@@ -254,6 +263,13 @@ function ProductCardImpl({
             {imageOverlayBottomLeft}
           </View>
         ) : null}
+
+        {/* AI-Score-Badge oben rechts. Farbe = Score-Tier (rot → grün).
+            Score 3 ist bereits grün (User-Vorgabe: "gleichwertig ist OK").
+            Pfeil-Icon zeigt Richtung relative zum Markenprodukt. */}
+        {typeof aiScore === 'number' && aiScore >= 1 && aiScore <= 5 ? (
+          <AiScoreBadge score={aiScore as 1 | 2 | 3 | 4 | 5} />
+        ) : null}
       </View>
 
       <View style={{ padding: 12, paddingBottom: 14 }}>
@@ -393,3 +409,70 @@ function ProductCardImpl({
 }
 
 export const ProductCard = React.memo(ProductCardImpl);
+
+// ─── AiScoreBadge ─────────────────────────────────────────────────────
+//
+// Kleiner farbiger Pill oben rechts auf der Product-Card-Image-Section.
+// Identische Farbpalette wie AiComparisonScale (Score 3 = grün, bewusst
+// keine gelb-Stufe — User-Vorgabe). Pfeil zeigt Richtung relativ zum
+// Markenprodukt:
+//   1-2 → ↓ (schlechter)
+//   3   → = (gleichwertig)
+//   4-5 → ↑ (besser)
+
+const AI_SCORE_COLORS = ['#e53935', '#fb8c00', '#9ccc65', '#66bb6a', '#2e7d32'] as const;
+
+function AiScoreBadge({ score }: { score: 1 | 2 | 3 | 4 | 5 }) {
+  const color = AI_SCORE_COLORS[score - 1];
+  const arrow = score >= 4 ? '↑' : score <= 2 ? '↓' : '=';
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        top: 8,
+        right: 8,
+        paddingHorizontal: 7,
+        paddingVertical: 3,
+        borderRadius: 8,
+        backgroundColor: color,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 3,
+        ...Platform.select({
+          ios: {
+            shadowColor: '#000',
+            shadowOpacity: 0.18,
+            shadowRadius: 3,
+            shadowOffset: { width: 0, height: 1 },
+          },
+          android: { elevation: 3 },
+        }),
+      }}
+      accessibilityLabel={`KI-Score ${score} von 5`}
+    >
+      <Text
+        style={{
+          color: '#fff',
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 11,
+          lineHeight: 13,
+        }}
+      >
+        {arrow}
+      </Text>
+      <Text
+        style={{
+          color: '#fff',
+          fontFamily,
+          fontWeight: fontWeight.extraBold,
+          fontSize: 11,
+          lineHeight: 13,
+          letterSpacing: 0.2,
+        }}
+      >
+        {score}
+      </Text>
+    </View>
+  );
+}

@@ -40,6 +40,7 @@ import {
 } from '@/components/design/EnttarnteAlternativesList';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { AiComparisonScale } from '@/components/design/AiComparisonScale';
+import { AiHealthScale } from '@/components/design/AiHealthScale';
 import { StufenChips } from '@/components/design/StufenChips';
 import { CoachmarkScrollProvider } from '@/components/coachmarks/CoachmarkScrollContext';
 import {
@@ -1535,12 +1536,6 @@ export default function NoNameDetailScreen() {
               </View>
             ) : null}
 
-            {/* T17.47: AI-Comparison-Bewertung — nur wenn die CF
-                ai-product-comparison für dieses Produkt einen Score
-                geliefert hat (Stufe-1/2 ohne Markenprodukt-Link
-                bekommen score=undefined → Component returnt null). */}
-            <AiComparisonScale aiComparison={(p as any)?.aiComparison ?? null} />
-
             {/* Detektiv-Check-Zeile — ÜBER den Inhaltstabellen, exakt
                 wie auf der Stufe-3/4/5-Seite (product-comparison). Statt
                 der alten "S1 + Punkte"-Custom-Anzeige wird hier die
@@ -1635,11 +1630,14 @@ export default function NoNameDetailScreen() {
               </Animated.View>
             ) : null}
 
-            {/* (Detektiv-Check-Zeile sitzt oberhalb der Tabs, siehe
-                weiter oben — sie hatte früher hier am Ende der Page
-                geklebt, wandert jetzt in den Kontext der Inhalts-
-                tabellen damit der User die Einordnung sofort sieht
-                bevor er Inhaltsstoffe/Nährwerte liest.) */}
+            {/* T17.49: AI-Bewertung — UNTER den Tabs platziert
+                (User-Vorgabe 2026-05-28). Comparison wenn MP-Link da,
+                sonst Standalone-Assessment. Beide returnen null wenn
+                keine Daten → andere Sections rücken automatisch nach. */}
+            <AiComparisonScale aiComparison={(p as any)?.aiComparison ?? null} />
+            {(p as any)?.aiComparison?.score ? null : (
+              <AiHealthScale aiAssessment={(p as any)?.aiAssessment ?? null} />
+            )}
           </View>
         </Crossfade>
 

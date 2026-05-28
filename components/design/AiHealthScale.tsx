@@ -1,23 +1,15 @@
 /**
- * AiComparisonScale — visualisiert das KI-Verdikt eines NoName-
- * Produkts gegenüber seinem Original-Markenprodukt.
+ * AiHealthScale — visualisiert die Standalone-KI-Bewertung eines
+ * Produkts ohne Markenprodukt-Vergleich.
  *
- * Schema (von `cloud-functions/ai-product-comparison`):
- *   score: 1..5     // 1 = NoName klar schlechter (rot)
- *                   // 3 = ungefähr gleichwertig (gelb)
- *                   // 5 = NoName klar besser (grün)
- *   reasoning: 1-2 Sätze auf Deutsch
+ * Anders als AiComparisonScale (NoName↔Marken-Vergleich) zeigt diese
+ * Komponente eine KATEGORIE-RELATIVE Einschätzung:
+ *   healthScore 1 = unter Durchschnitt der Produkt-Kategorie
+ *   healthScore 5 = sehr gute Wahl in der Kategorie
  *
- * Render-Verhalten:
- *   • Wenn aiComparison fehlt ODER score nicht gesetzt → returnt null
- *     (Caller entscheidet ob Loading/Placeholder gezeigt werden soll)
- *   • Wenn skipped='no-markenprodukt' → returnt null (Stufe 1/2 hat
- *     keinen Vergleich; existing Detektiv-Check-Zeile übernimmt)
- *   • Wenn skipped='incomparable' → returnt null
- *   • Bei score → 5-Dot-Skala (rot → grün) mit highlight'tem Dot +
- *     Kurzbeschreibung darunter
+ * Use-Case: noname-detail Stufe 1/2 (NoNames ohne MP-Link).
  *
- * Design-Tokens-konform: padding, radii, fontWeight aus tokens.
+ * Skip-Verhalten identisch zu AiComparisonScale: keine Daten → null.
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -26,47 +18,43 @@ import { Text, View, ViewStyle } from 'react-native';
 
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
-import type { AiComparison } from '@/lib/types/firestore';
+import type { AiAssessment } from '@/lib/types/firestore';
 
 interface Props {
-  aiComparison?: AiComparison | null;
-  /** Optional. Wird in der Headline benutzt z.B. "Bewertung". */
+  aiAssessment?: AiAssessment | null;
+  /** Optional. Default 'Detektiv-KI Einschätzung'. */
   title?: string;
   style?: ViewStyle;
 }
 
-// 5-Tier Farb-Gradient — User-Vorgabe 2026-05-28:
-// "gleichwertig" (Score 3) soll bereits grün sein. Wir lesen das so:
-// ab Score 3 ist der NoName mindestens eine valide Alternative
-// (kein Nachteil) → grün-Tier. Score 1+2 = ungünstig → rot/orange.
-//   1 = Rot          (NoName klar schlechter)
-//   2 = Orange       (etwas schlechter)
-//   3 = Hellgrün     (gleichwertig — bereits OK)
-//   4 = Grün         (etwas besser)
-//   5 = Tiefgrün     (klar besser)
+// Identische Palette wie AiComparisonScale — Score 3 bereits grün.
 const SCALE_COLORS = ['#e53935', '#fb8c00', '#9ccc65', '#66bb6a', '#2e7d32'] as const;
 const SCALE_LABELS = [
-  'klar schlechter',
-  'etwas schlechter',
-  'gleichwertig',
-  'etwas besser',
-  'klar besser',
+  'unter Durchschnitt',
+  'leicht unterdurchschnittlich',
+  'durchschnittlich',
+  'überdurchschnittlich',
+  'sehr gute Wahl',
 ] as const;
 
-export function AiComparisonScale({ aiComparison, title = 'Detektiv-KI Bewertung', style }: Props) {
+export function AiHealthScale({
+  aiAssessment,
+  title = 'Detektiv-KI Einschätzung',
+  style,
+}: Props) {
   const { theme } = useTokens();
 
-  // Skip-Logik — Caller sieht "nichts da" und kann eigenen Fallback wählen
-  if (!aiComparison) return null;
-  if (aiComparison.skipped) return null;
-  if (aiComparison.lastError && typeof aiComparison.score !== 'number') return null;
-  const score = aiComparison.score;
+  if (!aiAssessment) return null;
+  if (aiAssessment.skipped) return null;
+  if (aiAssessment.lastError && typeof aiAssessment.healthScore !== 'number') return null;
+  const score = aiAssessment.healthScore;
   if (typeof score !== 'number' || score < 1 || score > 5) return null;
 
   const idx = score - 1;
   const accent = SCALE_COLORS[idx];
   const label = SCALE_LABELS[idx];
-  const reasoning = (aiComparison.reasoning || '').trim();
+  const reasoning = (aiAssessment.reasoning || '').trim();
+  const category = aiAssessment.category;
 
   return (
     <View
@@ -94,18 +82,33 @@ export function AiComparisonScale({ aiComparison, title = 'Detektiv-KI Bewertung
         }}
       >
         <MaterialCommunityIcons name="brain" size={16} color={accent} />
-        <Text
-          style={{
-            flex: 1,
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 13,
-            color: theme.text,
-            letterSpacing: -0.1,
-          }}
-        >
-          {title}
-        </Text>
+        <View style={{ flex: 1 }}>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 13,
+              color: theme.text,
+              letterSpacing: -0.1,
+            }}
+          >
+            {title}
+          </Text>
+          {category ? (
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 10,
+                color: theme.textMuted,
+                letterSpacing: 0.2,
+                marginTop: 1,
+              }}
+            >
+              im Vergleich zur Kategorie {category}
+            </Text>
+          ) : null}
+        </View>
         <View
           style={{
             paddingHorizontal: 8,
@@ -154,7 +157,6 @@ export function AiComparisonScale({ aiComparison, title = 'Detektiv-KI Bewertung
           );
         })}
       </View>
-      {/* Labels rot…grün */}
       <View
         style={{
           flexDirection: 'row',
@@ -172,7 +174,7 @@ export function AiComparisonScale({ aiComparison, title = 'Detektiv-KI Bewertung
             textTransform: 'uppercase',
           }}
         >
-          NoName schlechter
+          unter Durchschnitt
         </Text>
         <Text
           style={{
@@ -184,7 +186,7 @@ export function AiComparisonScale({ aiComparison, title = 'Detektiv-KI Bewertung
             textTransform: 'uppercase',
           }}
         >
-          NoName besser
+          sehr gute Wahl
         </Text>
       </View>
 
@@ -206,4 +208,4 @@ export function AiComparisonScale({ aiComparison, title = 'Detektiv-KI Bewertung
   );
 }
 
-export default AiComparisonScale;
+export default AiHealthScale;

@@ -962,6 +962,7 @@ export default function ExternalProductScreen() {
                     imageUri={alt.bild ?? null}
                     price={typeof alt.preis === 'number' ? alt.preis : 0}
                     stufe={stufeNum ?? null}
+                    aiScore={(alt as any)?.aiComparison?.score ?? null}
                     variant="grid"
                     height={278}
                     onPress={() => {
