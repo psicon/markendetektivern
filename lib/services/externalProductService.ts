@@ -12,11 +12,16 @@
 
 import { db } from '@/lib/firebase';
 import {
+  collection,
   doc,
   getDoc,
+  getDocs,
+  limit,
+  query,
   serverTimestamp,
   setDoc,
   Timestamp,
+  where,
 } from '@react-native-firebase/firestore';
 
 import OpenFoodService, {
@@ -246,6 +251,156 @@ function parseLeadingNumber(s?: string | null): number | undefined {
 // trotzdem die alten Daten zurück — UX > Frische. Wenn der Refresh
 // erfolgreich ist, ist beim nächsten Aufruf der Cache aktualisiert.
 
+// ─── Reweapify (echte REWE-Pipeline) ─────────────────────────────────
+//
+// Die `reweapify`-Collection wird vom mediaingestor → reweapify-Pipeline
+// gefüttert (REWE.de Web-Scrape). Felder folgen dem `attr_*` und
+// `nutr_*`-Schema (siehe CLAUDE.md). Wir suchen per `gtin`-Equality.
+
+function normaliseReweapify(
+  data: any,
+): Omit<ExternalProductDoc, 'ean' | 'source' | 'cachedAt'> {
+  // reweapify-Schema ist nah am ExternalProductDoc — die meisten Felder
+  // sind 1:1. Defensiv geschrieben falls ein Feld fehlt (Layout-Drift).
+  const image =
+    (Array.isArray(data?.images) && data.images[0]) ||
+    data?.productImageUrl ||
+    data?.attr_image ||
+    undefined;
+  return {
+    productName:
+      data?.productName ?? data?.attr_productName ?? data?.title ?? 'Produkt',
+    brandName: data?.brandName ?? data?.attr_brand ?? data?.attr_marke,
+    manufacturerName: data?.attr_hersteller ?? data?.producer,
+    imageUrl: image,
+    price:
+      typeof data?.attr_preis === 'number'
+        ? data.attr_preis
+        : typeof data?.price === 'number'
+        ? data.price
+        : undefined,
+    packSize:
+      typeof data?.attr_packageSize === 'number' && data?.attr_packageUnit
+        ? `${data.attr_packageSize} ${data.attr_packageUnit}`
+        : typeof data?.attr_preisPackgroesse === 'string'
+        ? data.attr_preisPackgroesse
+        : data?.itemSize,
+    category: data?.productCategory ?? data?.attr_category,
+    sourceUrl: data?.scrapedUrl ?? data?.url ?? undefined,
+    attr_ingredientStatement: data?.attr_ingredientStatement,
+    nutr_Energie_val: typeof data?.nutr_Energie_val === 'number' ? data.nutr_Energie_val : undefined,
+    nutr_Energie_unit: data?.nutr_Energie_unit,
+    nutr_Fett_val: typeof data?.nutr_Fett_val === 'number' ? data.nutr_Fett_val : undefined,
+    nutr_Fett_unit: data?.nutr_Fett_unit,
+    nutr_FettdavongesttigteFettsuren_val:
+      typeof data?.nutr_FettdavongesttigteFettsuren_val === 'number'
+        ? data.nutr_FettdavongesttigteFettsuren_val
+        : undefined,
+    nutr_FettdavongesttigteFettsuren_unit: data?.nutr_FettdavongesttigteFettsuren_unit,
+    nutr_Kohlenhydrate_val:
+      typeof data?.nutr_Kohlenhydrate_val === 'number' ? data.nutr_Kohlenhydrate_val : undefined,
+    nutr_Kohlenhydrate_unit: data?.nutr_Kohlenhydrate_unit,
+    nutr_KohlenhydratedavonZucker_val:
+      typeof data?.nutr_KohlenhydratedavonZucker_val === 'number'
+        ? data.nutr_KohlenhydratedavonZucker_val
+        : undefined,
+    nutr_KohlenhydratedavonZucker_unit: data?.nutr_KohlenhydratedavonZucker_unit,
+    nutr_Ballaststoffe_val:
+      typeof data?.nutr_Ballaststoffe_val === 'number' ? data.nutr_Ballaststoffe_val : undefined,
+    nutr_Ballaststoffe_unit: data?.nutr_Ballaststoffe_unit,
+    nutr_Eiwei_val: typeof data?.nutr_Eiwei_val === 'number' ? data.nutr_Eiwei_val : undefined,
+    nutr_Eiwei_unit: data?.nutr_Eiwei_unit,
+    nutr_Salz_val: typeof data?.nutr_Salz_val === 'number' ? data.nutr_Salz_val : undefined,
+    nutr_Salz_unit: data?.nutr_Salz_unit,
+    nutr_serving_size: data?.nutr_serving_size ?? 100,
+    nutr_serving_unit: data?.nutr_serving_unit ?? 'g',
+    scoreNutri: data?.attr_nutri_score,
+    scoreEco: data?.attr_eco_score,
+    isVegan: data?.attr_isVegan,
+    isVegetarian: data?.attr_isVegetarisch,
+    raw: data,
+  };
+}
+
+async function tryReweapify(ean: string): Promise<ExternalProductDoc | null> {
+  try {
+    const norm = normaliseEan(ean);
+    if (!norm) return null;
+    const q = query(
+      collection(db, 'reweapify'),
+      where('gtin', '==', norm),
+      limit(1),
+    );
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    const data = snap.docs[0].data();
+    const normalised = normaliseReweapify(data);
+    if (!normalised.productName || normalised.productName === 'Produkt') {
+      // Skip wenn das Doc keinen Namen hatte — sonst hat User leeres
+      // Hero. Cascade fällt zu nächster Source.
+      if (!data?.attr_ingredientStatement && !normalised.imageUrl) return null;
+    }
+    await writeThrough(norm, 'rewe', normalised);
+    return {
+      ...normalised,
+      ean: norm,
+      source: 'rewe',
+      cachedAt: Timestamp.fromMillis(Date.now()),
+    } as ExternalProductDoc;
+  } catch (e: any) {
+    console.warn('externalProductService.tryReweapify failed', e?.message);
+    return null;
+  }
+}
+
+// ─── nutritionscrape (LLM-extrahierte Multi-Shop-Daten) ─────────────
+//
+// Die `nutritionscrape`-Collection wird vom nutrition-scraper-CF
+// gefüttert. EAN ist die Doc-ID. Daten kommen von verschiedenen Shops
+// (rewe.de, globus.de, metro.de, …) je nachdem wo der Scraper den
+// EAN gefunden hat. `sourceShop`-Feld nennt die echte Quelle.
+
+async function tryNutritionScrape(ean: string): Promise<ExternalProductDoc | null> {
+  try {
+    const norm = normaliseEan(ean);
+    if (!norm) return null;
+    const snap = await getDoc(doc(db, 'nutritionscrape', norm));
+    if (!snap.exists()) return null;
+    const data = snap.data();
+    if (!data) return null;
+    // Schema fast identisch zu reweapify — gleicher Normalizer.
+    const normalised = normaliseReweapify(data);
+    // Wenn weder Name noch Image noch Zutaten → nichts wertvolles
+    if (
+      (!normalised.productName || normalised.productName === 'Produkt') &&
+      !normalised.imageUrl &&
+      !normalised.attr_ingredientStatement
+    ) {
+      return null;
+    }
+    // Bestimmen Sub-Source aus sourceShop (rewe.de/globus.de/…). Wenn
+    // Shop unklar → 'scraper' als generic source.
+    const shop = String(data?.sourceShop ?? '').toLowerCase();
+    let subSource: ExternalProductSource = 'scraper';
+    if (shop.includes('rewe')) subSource = 'rewe';
+    else if (shop.includes('globus')) subSource = 'globus';
+    else if (shop.includes('metro')) subSource = 'metro';
+    else if (shop) subSource = shop.split('.')[0] as ExternalProductSource;
+    await writeThrough(norm, subSource, normalised);
+    return {
+      ...normalised,
+      ean: norm,
+      source: subSource,
+      cachedAt: Timestamp.fromMillis(Date.now()),
+    } as ExternalProductDoc;
+  } catch (e: any) {
+    console.warn('externalProductService.tryNutritionScrape failed', e?.message);
+    return null;
+  }
+}
+
+// ─── Legacy scraped_products (bleibt als Fallback) ──────────────────
+
 async function tryRewe(ean: string): Promise<ExternalProductDoc | null> {
   try {
     const scraped = await ScrapedProductsService.searchScrapedProductByGTIN(ean);
@@ -351,15 +506,32 @@ async function lookupByEAN(ean: string): Promise<ExternalLookupResult | null> {
       return { product: cached, fromCache: true, refreshed: false };
     }
 
-    // 2. REWE — bleibt erste Wahl
+    // 2. REWE-Pipeline (echte reweapify-Collection) — höchste
+    //    Priorität weil das die kuratierten REWE-Daten sind.
+    const fromReweapify = await tryReweapify(norm);
+    if (fromReweapify) {
+      return { product: fromReweapify, fromCache: false, refreshed: false };
+    }
+
+    // 3. nutritionscrape — LLM-Multi-Shop-Scraper-Output. Liefert oft
+    //    Globus/Metro/etc-Daten. `sourceShop`-Feld bestimmt den
+    //    effektiven Source-Tag in external_products.
+    const fromScrape = await tryNutritionScrape(norm);
+    if (fromScrape) {
+      return { product: fromScrape, fromCache: false, refreshed: false };
+    }
+
+    // 4. Legacy scraped_products (Backwards-Compat — wenn neue
+    //    Sources den EAN nicht haben aber alte schon).
     const fromRewe = await tryRewe(norm);
     if (fromRewe) return { product: fromRewe, fromCache: false, refreshed: false };
 
-    // 3. Globus
+    // 5. Globus-Live-Scrape (Skeleton — CF muss noch HTML-Parse-Logik
+    //    bekommen, siehe cloud-functions/globus-scraper/index.js).
     const fromGlobus = await tryGlobus(norm);
     if (fromGlobus) return { product: fromGlobus, fromCache: false, refreshed: false };
 
-    // 4. OpenFood
+    // 6. OpenFood — letzte Fallback-Quelle.
     const fromOpenFood = await tryOpenFood(norm);
     if (fromOpenFood) return { product: fromOpenFood, fromCache: false, refreshed: false };
 
@@ -385,11 +557,14 @@ async function refreshSilent(
 ): Promise<void> {
   try {
     if (preferredSource === 'rewe') {
-      await tryRewe(ean);
+      const r1 = await tryReweapify(ean);
+      if (r1) return;
+      await tryRewe(ean); // legacy fallback
       return;
     }
-    if (preferredSource === 'globus') {
-      await tryGlobus(ean);
+    if (preferredSource === 'globus' || preferredSource === 'metro' || preferredSource === 'scraper') {
+      // Multi-shop LLM-Scrape — Daten leben in nutritionscrape
+      await tryNutritionScrape(ean);
       return;
     }
     if (preferredSource === 'openfood') {

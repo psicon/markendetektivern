@@ -46,6 +46,8 @@ import type { ExternalProductDoc } from '@/lib/types/externalProduct';
 const SOURCE_LABEL: Record<string, string> = {
   rewe: 'REWE',
   globus: 'Globus',
+  metro: 'Metro',
+  scraper: 'Online-Shop',
   openfood: 'OpenFoodFacts',
 };
 
