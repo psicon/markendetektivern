@@ -22,7 +22,7 @@ import {
 
 import { FilterSheet } from '@/components/design/FilterSheet';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
-import { fontFamily, fontWeight } from '@/constants/tokens';
+import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { FirestoreService } from '@/lib/services/firestore';
 
@@ -192,9 +192,13 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
             style={{
               flex: 1,
               backgroundColor: theme.surfaceAlt,
-              borderRadius: 12,
-              paddingHorizontal: 14,
-              paddingVertical: 4,
+              // T17.41: Capsule wie das Home-Search-Feld — borderRadius
+              // full, Höhe 48, Padding-Left 16.
+              borderRadius: radii.full,
+              height: 48,
+              paddingLeft: 16,
+              paddingRight: 12,
+              justifyContent: 'center',
             }}
           >
             <TextInput
@@ -209,9 +213,8 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
               style={{
                 fontFamily,
                 fontWeight: fontWeight.semibold,
-                fontSize: 16,
+                fontSize: 15,
                 color: theme.text,
-                paddingVertical: 12,
               }}
             />
           </View>
