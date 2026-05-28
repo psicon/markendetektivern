@@ -49,6 +49,15 @@ export interface FacebookCredentialBundle {
 
 export const FB_SDK_UNAVAILABLE = 'auth/facebook-sdk-unavailable';
 
+// T17.18: Module-level Diagnostik damit der AuthContext den letzten
+// FB-Token-State im Toast anzeigen kann (TestFlight hat kein
+// console.log, also brauchen wir die Info im UI).
+export const lastFbDebug: { tokenPrefix: string; tokenLen: number; graphStatus: string } = {
+  tokenPrefix: '',
+  tokenLen: 0,
+  graphStatus: '',
+};
+
 export const isFacebookAuthAvailable = async (): Promise<boolean> => true;
 
 /**
@@ -115,6 +124,10 @@ export const getFacebookCredential = async (): Promise<FacebookCredentialBundle 
     if (__DEV__) console.warn('[facebookAuth] No access_token in redirect URL:', url);
     return null;
   }
+  // Diagnostik für späteren AuthContext-Toast (TestFlight)
+  lastFbDebug.tokenPrefix = accessToken.slice(0, 12);
+  lastFbDebug.tokenLen = accessToken.length;
+  lastFbDebug.graphStatus = 'pending';
   if (__DEV__) {
     console.log('[facebookAuth] Token format:',
       `${accessToken.slice(0, 20)}…(len=${accessToken.length})`);
@@ -135,15 +148,18 @@ export const getFacebookCredential = async (): Promise<FacebookCredentialBundle 
     if (profileRes.ok) {
       const profile = await profileRes.json();
       graphProfileOk = true;
+      lastFbDebug.graphStatus = `OK id=${profile?.id ?? '?'}`;
       if (typeof profile?.email === 'string') email = profile.email;
       if (typeof profile?.name === 'string') displayName = profile.name;
       if (profile?.picture?.data?.url) photoURL = profile.picture.data.url;
       if (__DEV__) console.log('[facebookAuth] Graph /me OK, id=', profile?.id, 'email=', email);
     } else {
       const errBody = await profileRes.text();
+      lastFbDebug.graphStatus = `${profileRes.status}: ${errBody.slice(0, 100)}`;
       if (__DEV__) console.warn('[facebookAuth] Graph /me failed:', profileRes.status, errBody);
     }
   } catch (graphErr: any) {
+    lastFbDebug.graphStatus = `fetch err: ${graphErr?.message ?? '?'}`;
     if (__DEV__) console.warn('[facebookAuth] Graph fetch failed:', graphErr?.message);
   }
 

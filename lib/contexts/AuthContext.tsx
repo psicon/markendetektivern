@@ -30,6 +30,7 @@ import {
 } from '../services/auth/googleAuth';
 import {
   getFacebookCredential,
+  lastFbDebug,
   signOutFacebook,
 } from '../services/auth/facebookAuth';
 import { createUserProfile, getUserProfile, UserProfile } from '../services/userProfile';
@@ -671,14 +672,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return;
       if (__DEV__) {
-        // T17.2: FB_SDK_UNAVAILABLE (Sim/Expo Go ohne Native-Modul)
-        // ist ein erwarteter Fall — als warn loggen statt error
-        // damit das rote Dev-Overlay nicht aufpoppt.
         if (error?.code === 'auth/facebook-sdk-unavailable') {
           console.warn('Facebook Sign-In skipped (SDK unavailable on this build):', error?.message);
         } else {
           console.error('Facebook Sign-In error:', error);
         }
+      }
+
+      // T17.18: TestFlight-Diagnostik. Wir können keine console.log
+      // sehen in Production-Builds — also packen wir alle FB-OAuth-
+      // Infos in die error.message, damit der Toast in welcome/login/
+      // register sie anzeigt. Format ist absichtlich kompakt.
+      if (error?.code !== 'auth/facebook-sdk-unavailable' && lastFbDebug.tokenLen > 0) {
+        const debug = `[FB-Debug] token=${lastFbDebug.tokenPrefix}…(${lastFbDebug.tokenLen}) graph=${lastFbDebug.graphStatus}`;
+        const fbErr: any = new Error(
+          `${error?.code || 'err'}: ${error?.message || 'unknown'} | ${debug}`,
+        );
+        fbErr.code = error?.code;
+        throw fbErr;
       }
       throw error;
     }
