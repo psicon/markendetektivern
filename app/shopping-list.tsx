@@ -2140,28 +2140,30 @@ function CustomCard({
           </Text>
         )}
       </View>
+        {/* T17.40: CompactQuantityPill INNERHALB der content-body
+            (flex:1 wrapper), nicht als Sibling vom EdgeCheckButton —
+            sonst überlappt right:8 die Check-Edge-Spalte. Gleiches
+            Pattern wie BrandCard/NoNameCard. */}
+        {onIncrement && onDecrement ? (
+          <View
+            pointerEvents="box-none"
+            style={{
+              position: 'absolute',
+              top: 0,
+              bottom: 0,
+              right: 8,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <CompactQuantityPill
+              anzahl={item.anzahl ?? 1}
+              onIncrement={onIncrement}
+              onDecrement={onDecrement}
+            />
+          </View>
+        ) : null}
       </View>
-      {/* T17.39: CompactQuantityPill rechts vor dem Check-Edge —
-          gleiches Layout wie bei BrandCard/NoNameCard. */}
-      {onIncrement && onDecrement ? (
-        <View
-          pointerEvents="box-none"
-          style={{
-            position: 'absolute',
-            top: 0,
-            bottom: 0,
-            right: 8,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <CompactQuantityPill
-            anzahl={item.anzahl ?? 1}
-            onIncrement={onIncrement}
-            onDecrement={onDecrement}
-          />
-        </View>
-      ) : null}
       <EdgeCheckButton onPress={onCheck} loading={loadingCheck} />
     </View>
   );

@@ -175,39 +175,122 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
   return (
     <FilterSheet visible={visible} title="Produkt hinzufügen (Freitext)" onClose={onClose}>
       <View style={{ paddingTop: 4, paddingBottom: 4 }}>
-        {/* Produktname */}
+        {/* Produktname + Menge in einer Row — T17.40: vorher war
+            Menge als eigener Block unten in der Mitte, sah komisch
+            aus. Plus reduziert Vertikalplatz um ~70 px (passt damit
+            auf iPhone SE ohne scrollen). */}
         <Text style={[labelStyle(theme)]}>Produktname</Text>
         <View
           style={{
-            backgroundColor: theme.surfaceAlt,
-            borderRadius: 12,
-            paddingHorizontal: 14,
-            paddingVertical: 4,
-            marginBottom: 18,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+            marginBottom: 14,
           }}
         >
-          <TextInput
-            value={itemName}
-            onChangeText={setItemName}
-            placeholder="z.B. Butter, Brot, Milch …"
-            placeholderTextColor={theme.textMuted}
-            autoCapitalize="words"
-            autoComplete="off"
-            maxLength={50}
-            returnKeyType="done"
+          <View
             style={{
-              fontFamily,
-              fontWeight: fontWeight.semibold,
-              fontSize: 16,
-              color: theme.text,
-              paddingVertical: 12,
+              flex: 1,
+              backgroundColor: theme.surfaceAlt,
+              borderRadius: 12,
+              paddingHorizontal: 14,
+              paddingVertical: 4,
             }}
-          />
+          >
+            <TextInput
+              value={itemName}
+              onChangeText={setItemName}
+              placeholder="z.B. Butter, Brot, Milch …"
+              placeholderTextColor={theme.textMuted}
+              autoCapitalize="words"
+              autoComplete="off"
+              maxLength={50}
+              returnKeyType="done"
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.semibold,
+                fontSize: 16,
+                color: theme.text,
+                paddingVertical: 12,
+              }}
+            />
+          </View>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: theme.surface,
+              borderWidth: 1,
+              borderColor: theme.border,
+              borderRadius: 23,
+              paddingHorizontal: 3,
+              height: 46,
+            }}
+          >
+            <Pressable
+              onPress={() => {
+                setQuantity((q) => Math.max(1, q - 1));
+                Haptics.selectionAsync().catch(() => {});
+              }}
+              disabled={quantity <= 1}
+              accessibilityRole="button"
+              accessibilityLabel="Menge verringern"
+              hitSlop={6}
+              style={({ pressed }) => ({
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: pressed ? theme.surfaceAlt : 'transparent',
+                opacity: quantity <= 1 ? 0.4 : 1,
+              })}
+            >
+              <MaterialCommunityIcons name="minus" size={16} color={theme.text} />
+            </Pressable>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 15,
+                color: theme.text,
+                minWidth: 24,
+                textAlign: 'center',
+                letterSpacing: -0.2,
+              }}
+              accessibilityLabel={`Menge ${quantity}`}
+            >
+              {quantity}
+            </Text>
+            <Pressable
+              onPress={() => {
+                setQuantity((q) => Math.min(99, q + 1));
+                Haptics.selectionAsync().catch(() => {});
+              }}
+              disabled={quantity >= 99}
+              accessibilityRole="button"
+              accessibilityLabel="Menge erhöhen"
+              hitSlop={6}
+              style={({ pressed }) => ({
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: pressed
+                  ? brand.primaryContainer ?? theme.surfaceAlt
+                  : brand.primary,
+                opacity: quantity >= 99 ? 0.4 : 1,
+              })}
+            >
+              <MaterialCommunityIcons name="plus" size={16} color="#fff" />
+            </Pressable>
+          </View>
         </View>
 
         {/* Produkttyp */}
         <Text style={[labelStyle(theme)]}>Produkttyp</Text>
-        <View style={{ marginBottom: 18 }}>
+        <View style={{ marginBottom: 14 }}>
           <SegmentedTabs
             tabs={[
               { key: 'brand', label: 'Markenprodukt' },
@@ -228,8 +311,8 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
                 backgroundColor: theme.surfaceAlt,
                 borderRadius: 12,
                 paddingHorizontal: 14,
-                paddingVertical: 14,
-                marginBottom: 18,
+                paddingVertical: 12,
+                marginBottom: 14,
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 10,
@@ -271,13 +354,16 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
         <Text style={[labelStyle(theme)]}>Icon</Text>
         <ScrollView
           showsVerticalScrollIndicator={false}
-          style={{ maxHeight: 180, marginBottom: 18 }}
+          // 130 px → ~2 Reihen sichtbar (52 px Icons + 12 rowGap),
+          // rest scrollbar. Tighter so dass auf iPhone SE der Submit-
+          // Button ohne Scroll erreichbar bleibt.
+          style={{ maxHeight: 130, marginBottom: 14 }}
           contentContainerStyle={{
             flexDirection: 'row',
             flexWrap: 'wrap',
             justifyContent: 'space-between',
-            rowGap: 12,
-            paddingVertical: 4,
+            rowGap: 10,
+            paddingVertical: 2,
             paddingBottom: 4,
           }}
         >
@@ -328,90 +414,6 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
           ))}
         </ScrollView>
 
-        {/* T17.39: Menge — gleicher Capsule-Look wie CompactQuantityPill
-            auf DB-Produkt-Cards. Pill 46 hoch, runde Buttons, +-Button
-            mit brand-primary Akzent. */}
-        <Text style={[labelStyle(theme)]}>Menge</Text>
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 18,
-          }}
-        >
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              backgroundColor: theme.surface,
-              borderWidth: 1,
-              borderColor: theme.border,
-              borderRadius: 23,
-              paddingHorizontal: 3,
-              height: 46,
-            }}
-          >
-            <Pressable
-              onPress={() => {
-                setQuantity((q) => Math.max(1, q - 1));
-                Haptics.selectionAsync().catch(() => {});
-              }}
-              disabled={quantity <= 1}
-              accessibilityRole="button"
-              accessibilityLabel="Menge verringern"
-              hitSlop={8}
-              style={({ pressed }) => ({
-                width: 36,
-                height: 36,
-                borderRadius: 18,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: pressed ? theme.surfaceAlt : 'transparent',
-                opacity: quantity <= 1 ? 0.4 : 1,
-              })}
-            >
-              <MaterialCommunityIcons name="minus" size={18} color={theme.text} />
-            </Pressable>
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 16,
-                color: theme.text,
-                minWidth: 32,
-                textAlign: 'center',
-                letterSpacing: -0.2,
-              }}
-              accessibilityLabel={`Aktuelle Menge: ${quantity}`}
-            >
-              {quantity}
-            </Text>
-            <Pressable
-              onPress={() => {
-                setQuantity((q) => Math.min(99, q + 1));
-                Haptics.selectionAsync().catch(() => {});
-              }}
-              disabled={quantity >= 99}
-              accessibilityRole="button"
-              accessibilityLabel="Menge erhöhen"
-              hitSlop={8}
-              style={({ pressed }) => ({
-                width: 36,
-                height: 36,
-                borderRadius: 18,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: pressed
-                  ? brand.primaryContainer ?? theme.surfaceAlt
-                  : brand.primary,
-                opacity: quantity >= 99 ? 0.4 : 1,
-              })}
-            >
-              <MaterialCommunityIcons name="plus" size={18} color="#fff" />
-            </Pressable>
-          </View>
-        </View>
 
         {/* Submit */}
         <Pressable
