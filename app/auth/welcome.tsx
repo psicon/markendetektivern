@@ -282,6 +282,20 @@ export default function WelcomeScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Skip-X — überspringt Registrierung als Gast.
+              Sichtbar IMMER (nicht nur wenn Back möglich). Macht den
+              gleichen handleGuest-Flow wie "Ohne Anmeldung fortfahren"
+              unten — nur als schneller Top-Right-Shortcut. */}
+          <TouchableOpacity
+            style={[styles.skipButton, { top: insets.top + 8 }]}
+            onPress={handleGuest}
+            disabled={authInFlight}
+            hitSlop={8}
+            accessibilityLabel="Registrierung überspringen"
+          >
+            <MaterialCommunityIcons name="close" size={22} color="#fff" />
+          </TouchableOpacity>
+
           {/* Logo + Tagline — kompakter als vorher damit Auth-Buttons im Viewport */}
           <View style={[styles.logoBlock, isSmallScreen && styles.logoBlockSmall]}>
             <CustomIcon
@@ -395,6 +409,17 @@ const styles = StyleSheet.create({
   backButton: {
     position: 'absolute',
     left: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  skipButton: {
+    position: 'absolute',
+    right: 16,
     width: 40,
     height: 40,
     borderRadius: 20,

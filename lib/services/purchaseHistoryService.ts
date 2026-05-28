@@ -79,24 +79,30 @@ class PurchaseHistoryService {
       const allDocs = snapshot.docs;
       
       // Client-side filter by productType if specified
-      const filteredDocs = productType 
+      const filteredDocs = productType
         ? allDocs.filter(doc => doc.data().productType === productType)
         : allDocs;
-      
+
       const purchasedItems: PurchasedProduct[] = [];
-      
+
       // Take only pageSize items after filtering
       const docs = filteredDocs.slice(0, pageSize);
-      
-      // Smart hasMore calculation: 
-      // - If we got fewer filtered docs than pageSize, definitely no more
-      // - If we got exactly pageSize filtered docs, check if there were more total docs
-      let hasMore = false;
-      if (filteredDocs.length >= pageSize) {
-        // We got enough filtered items, check if there might be more
-        hasMore = allDocs.length >= batchSize; // Hit our batch limit, likely more exists
-      }
-      
+
+      // hasMore-Logik (2026-05-28 Fix): wenn wir den batchSize-Limit
+      // erreicht haben, gibt es DEFINITIV noch mehr Docs in der Collection
+      // — egal wie wenig davon den Filter passieren. Bei asymmetrischer
+      // Verteilung (z.B. 52 Marken vs 1355 NoNames) müssen wir weiter
+      // paginieren bis wir genug filtered-items haben oder die Collection
+      // erschöpft ist.
+      //
+      // Plus: wenn die ersten N Docs ZU VIELE filtered-items lieferten
+      // (filteredDocs > pageSize), bleibt noch was im Buffer für die
+      // nächste Page → hasMore=true auch wenn wir den batch nicht
+      // ausgeschöpft haben.
+      const hasMore =
+        allDocs.length >= batchSize ||      // Batch ausgeschöpft → mehr Docs in DB
+        filteredDocs.length > pageSize;     // Mehr filtered-items als pageSize → Rest für nächste Page
+
       // Set lastDoc to the last document from the ORIGINAL (unfiltered) query for proper pagination
       let newLastDoc = null;
       if (allDocs.length > 0) {
