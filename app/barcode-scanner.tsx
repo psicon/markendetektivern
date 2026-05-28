@@ -420,9 +420,11 @@ export default function BarcodeScannerScreen() {
         setIsSearching(false);
         setScanningLoading(false);
 
-        // Navigiere zur Detail-Page mit External-Mode (T5 baut die
-        // Hero-Anzeige aus, T6 die Alternative-Section).
-        const url = `/product-comparison/${ean}?type=external&source=${product.source}`;
+        // Navigiere zur separate External-Product-Detail-Page (T5 +
+        // T6). Eigene Route weil product-comparison's Daten-Modell
+        // stark an Marken-Stufen gekoppelt ist und external keine
+        // Stufen hat.
+        const url = `/external-product/${ean}?source=${product.source}`;
         console.log(`🚀 NAVIGATING to: ${url}`);
         router.replace(url);
         return;
