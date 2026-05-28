@@ -3666,6 +3666,7 @@ export class FirestoreService {
       name: string;
       type: 'brand' | 'noname';
       icon?: string;
+      quantity?: number;
       marketId?: string;
       marketName?: string;
       marketLand?: string;
@@ -3674,10 +3675,15 @@ export class FirestoreService {
   ): Promise<string> {
     try {
       const userRef = doc(db, 'users', userId);
+      // T17.38: Menge auf top-level `anzahl` schreiben (gleiches Schema
+      // wie DB-Produkte) — so liest CustomCard's EnrichedItem.anzahl
+      // den Wert direkt aus dem doc, ohne customItem.quantity-Sonderfall.
+      const anzahl = Math.max(1, Math.min(99, customItem.quantity ?? 1));
       const data: Partial<Einkaufswagen> = {
         customItem: customItem,
         gekauft: false,
         name: customItem.name, // Für schnelle Anzeige
+        anzahl,
         timestamp: serverTimestamp() as Timestamp
       };
 

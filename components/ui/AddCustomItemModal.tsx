@@ -98,6 +98,8 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
   const [selectedMarket, setSelectedMarket] = useState<any>(null);
   const [showMarketSelector, setShowMarketSelector] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // T17.38: Menge — wie viele soll ich kaufen? Default 1.
+  const [quantity, setQuantity] = useState<number>(1);
 
   // Reset form on every (re-)open
   useEffect(() => {
@@ -106,6 +108,7 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
       setItemType('brand');
       setIconKey(PRODUCT_ICONS[0].key);
       setSelectedMarket(null);
+      setQuantity(1);
     }
   }, [visible]);
 
@@ -141,6 +144,7 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
         name: itemName.trim(),
         type: itemType,
         icon: iconKey,
+        quantity: Math.max(1, Math.min(99, quantity)),
         ...(itemType === 'noname' && selectedMarket
           ? {
               marketId: selectedMarket.id,
@@ -323,6 +327,76 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
             <View key={`filler-${i}`} style={{ width: '18%', height: 0 }} />
           ))}
         </ScrollView>
+
+        {/* T17.38: Menge — wie viele davon soll ich kaufen? */}
+        <Text style={[labelStyle(theme)]}>Menge</Text>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: theme.surfaceAlt,
+            borderRadius: 12,
+            paddingHorizontal: 6,
+            paddingVertical: 6,
+            marginBottom: 18,
+            gap: 8,
+          }}
+        >
+          <Pressable
+            onPress={() => {
+              setQuantity((q) => Math.max(1, q - 1));
+              Haptics.selectionAsync().catch(() => {});
+            }}
+            disabled={quantity <= 1}
+            accessibilityRole="button"
+            accessibilityLabel="Menge verringern"
+            style={({ pressed }) => ({
+              width: 40,
+              height: 40,
+              borderRadius: 10,
+              backgroundColor: theme.surface,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: quantity <= 1 ? 0.4 : pressed ? 0.7 : 1,
+            })}
+          >
+            <MaterialCommunityIcons name="minus" size={20} color={theme.text} />
+          </Pressable>
+          <Text
+            style={{
+              flex: 1,
+              textAlign: 'center',
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 18,
+              color: theme.text,
+              letterSpacing: -0.2,
+            }}
+            accessibilityLabel={`Aktuelle Menge: ${quantity}`}
+          >
+            {quantity}× {itemName.trim() || 'Stück'}
+          </Text>
+          <Pressable
+            onPress={() => {
+              setQuantity((q) => Math.min(99, q + 1));
+              Haptics.selectionAsync().catch(() => {});
+            }}
+            disabled={quantity >= 99}
+            accessibilityRole="button"
+            accessibilityLabel="Menge erhöhen"
+            style={({ pressed }) => ({
+              width: 40,
+              height: 40,
+              borderRadius: 10,
+              backgroundColor: theme.surface,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: quantity >= 99 ? 0.4 : pressed ? 0.7 : 1,
+            })}
+          >
+            <MaterialCommunityIcons name="plus" size={20} color={theme.text} />
+          </Pressable>
+        </View>
 
         {/* Submit */}
         <Pressable

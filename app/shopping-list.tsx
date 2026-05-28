@@ -2023,6 +2023,9 @@ function CustomCard({
   // Picked icon takes priority. Fall back to generic glyph for legacy
   // custom items that predate the icon picker.
   const iconName: any = item.customIcon || (isBrand ? 'star' : 'cart-outline');
+  // T17.38: Menge anzeigen wenn > 1. Legacy-Items haben anzahl=1 als
+  // Default aus dem Mapping.
+  const qty = item.anzahl ?? 1;
   return (
     <View
       style={{
@@ -2077,6 +2080,28 @@ function CustomCard({
               {isBrand ? 'MARKE' : 'NONAME'}
             </Text>
           </View>
+          {qty > 1 ? (
+            <View
+              style={{
+                backgroundColor: brand.primary,
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                borderRadius: 4,
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 9,
+                  color: '#fff',
+                  letterSpacing: 0.4,
+                }}
+              >
+                ×{qty}
+              </Text>
+            </View>
+          ) : null}
         </View>
         <Text
           numberOfLines={2}
