@@ -28,7 +28,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { DetailHeader } from '@/components/design/DetailHeader';
+import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import {
@@ -96,27 +96,70 @@ export default function ExternalProductScreen() {
     };
   }, [ean]);
 
-  // Alternative-Eigenmarken via Algolia-Name-Search.
+  // Alternative-Eigenmarken via Algolia-Name-Search mit Fallback-
+  // Kaskade: wenn primärer Search 0 Hits, versuche erstes Wort allein,
+  // dann jede einzelne Brand-Komponente, dann Kategorie. So sehen
+  // User IMMER irgendwelche Alternativen — "keine gefunden" ist
+  // schlechtes UX-Verhalten.
   useEffect(() => {
     let alive = true;
     const name = product?.productName?.trim();
     if (!name) return;
     setAltLoading(true);
-    (async () => {
+
+    const tryQuery = async (query: string): Promise<AlgoliaSearchResult[]> => {
       try {
-        const result = await AlgoliaService.searchNoNameProducts(name, 0, 8);
-        if (!alive) return;
-        setAlternatives(result?.hits ?? []);
+        const result = await AlgoliaService.searchNoNameProducts(query, 0, 8);
+        return result?.hits ?? [];
       } catch (e) {
-        console.warn('ExternalProductScreen alternatives load failed', e);
-      } finally {
-        if (alive) setAltLoading(false);
+        console.warn('algolia alt-query failed', query, e);
+        return [];
       }
+    };
+
+    (async () => {
+      // 1. Voller Produktname
+      let hits = await tryQuery(name);
+      if (!alive) return;
+
+      // 2. Erstes Wort (oft die "Kategorie", z.B. "Cola Light")
+      if (hits.length === 0) {
+        const firstWord = name.split(/\s+/)[0];
+        if (firstWord && firstWord.length >= 3 && firstWord.toLowerCase() !== name.toLowerCase()) {
+          hits = await tryQuery(firstWord);
+          if (!alive) return;
+        }
+      }
+
+      // 3. Kategorie (wenn vorhanden)
+      if (hits.length === 0 && product?.category) {
+        // Kategorie kann lang sein ("Getränke > Erfrischungsgetränke …")
+        // → letztes Segment nehmen, das ist meist das spezifischste
+        const catParts = product.category.split(/[›>,]+/).map((s) => s.trim());
+        const lastCat = catParts.filter(Boolean).pop();
+        if (lastCat && lastCat.length >= 3) {
+          hits = await tryQuery(lastCat);
+          if (!alive) return;
+        }
+      }
+
+      // 4. Brand-Name als letzte Hoffnung
+      if (hits.length === 0 && product?.brandName) {
+        const firstBrandWord = product.brandName.split(/[,\s]+/)[0];
+        if (firstBrandWord && firstBrandWord.length >= 3) {
+          hits = await tryQuery(firstBrandWord);
+          if (!alive) return;
+        }
+      }
+
+      if (alive) setAlternatives(hits);
+      if (alive) setAltLoading(false);
     })();
+
     return () => {
       alive = false;
     };
-  }, [product?.productName]);
+  }, [product?.productName, product?.category, product?.brandName]);
 
   const sourceLabel = useMemo(() => {
     if (!product?.source) return null;
@@ -231,57 +274,16 @@ export default function ExternalProductScreen() {
 
       <ScrollView
         contentContainerStyle={{
-          paddingTop: insets.top + 8,
+          // T17.44: Header verdeckt Top — paddingTop muss die volle
+          // Header-Höhe + Safe-Area mit einrechnen.
+          paddingTop: insets.top + DETAIL_HEADER_ROW_HEIGHT + 12,
           paddingBottom: insets.bottom + 24,
         }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Hinweis-Banner */}
-        <View
-          style={{
-            marginHorizontal: 16,
-            marginTop: 4,
-            marginBottom: 12,
-            padding: 12,
-            borderRadius: radii.md ?? 12,
-            backgroundColor: brand.primaryContainer ?? theme.surfaceAlt,
-            flexDirection: 'row',
-            alignItems: 'flex-start',
-            gap: 10,
-          }}
-        >
-          <MaterialCommunityIcons
-            name="information-outline"
-            size={18}
-            color={brand.primary}
-          />
-          <View style={{ flex: 1 }}>
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold as any,
-                fontSize: 13,
-                color: theme.text,
-              }}
-            >
-              Externe Daten{sourceLabel ? ` aus ${sourceLabel}` : ''}
-            </Text>
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.medium,
-                fontSize: 12,
-                color: theme.textSub,
-                marginTop: 2,
-                lineHeight: 16,
-              }}
-            >
-              Dieses Produkt ist nicht in unserer Datenbank. Wir zeigen dir die
-              Informationen aus einer externen Quelle und unten ähnliche
-              Eigenmarken-Alternativen.
-            </Text>
-          </View>
-        </View>
+        {/* T17.44: Vorheriger Hinweis-Banner ("nicht in unserer
+            Datenbank") raus — sorgte für Frustration beim User.
+            Stattdessen wird die Quelle ganz unten kompakt erwähnt. */}
 
         {/* Hero-Card */}
         <View
@@ -552,6 +554,7 @@ export default function ExternalProductScreen() {
             marginHorizontal: 16,
             marginTop: 18,
             paddingHorizontal: 4,
+            marginBottom: 10,
           }}
         >
           <Text
@@ -561,24 +564,9 @@ export default function ExternalProductScreen() {
               fontSize: 20,
               letterSpacing: -0.2,
               color: theme.text,
-              marginBottom: 6,
             }}
           >
             Alternative Eigenmarkenprodukte
-          </Text>
-          {/* Hinweis: kein direkter Match, sind Vorschläge */}
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 12,
-              color: theme.textMuted,
-              lineHeight: 17,
-              marginBottom: 10,
-            }}
-          >
-            Kein direkter Match — hier sind ähnliche Produkte aus unserer
-            Datenbank als Vorschläge.
           </Text>
         </View>
 
@@ -587,6 +575,8 @@ export default function ExternalProductScreen() {
             <ActivityIndicator size="small" color={theme.textMuted} />
           </View>
         ) : alternatives.length === 0 ? (
+          // Mit dem Fallback-Suchkaskaden-System fast nie der Fall.
+          // Wenn doch: höflicher Hinweis ohne Frustration.
           <View style={{ paddingHorizontal: 20, paddingTop: 4 }}>
             <Text
               style={{
@@ -598,7 +588,7 @@ export default function ExternalProductScreen() {
                 paddingVertical: 16,
               }}
             >
-              Keine passenden Alternativen gefunden.
+              Stöbere in unserem Sortiment nach Alternativen.
             </Text>
           </View>
         ) : (
@@ -695,6 +685,27 @@ export default function ExternalProductScreen() {
             ))}
           </View>
         )}
+
+        {/* T17.44: Quelle ganz unten als unaufdringlicher Footer.
+            Ersetzt den frustrierenden Banner oben ("nicht in unserer
+            Datenbank"). User erfährt die Source erst nach dem Lesen
+            der Daten — neutraler Ton. */}
+        {sourceLabel ? (
+          <Text
+            style={{
+              marginTop: 20,
+              marginHorizontal: 16,
+              textAlign: 'center',
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 11,
+              color: theme.textMuted,
+              letterSpacing: 0.1,
+            }}
+          >
+            Daten via {sourceLabel}
+          </Text>
+        ) : null}
       </ScrollView>
     </View>
   );

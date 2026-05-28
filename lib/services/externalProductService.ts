@@ -326,37 +326,51 @@ async function tryOpenFood(ean: string): Promise<ExternalProductDoc | null> {
 /**
  * Volle Cascade: Cache → REWE → Globus → OpenFood.
  * Returnt null wenn ALLE Sources versagen.
+ *
+ * **Garantie**: throwt NIE. Jede Source ist intern try/catch'd, plus
+ * äußerer try/catch als Safety-Net. Wenn irgendwas crasht, fällt's
+ * graceful zu null durch — der Caller sieht das als "kein Produkt
+ * gefunden" und zeigt seinen normalen Fallback (Alert "nicht
+ * gefunden" o.ä.).
  */
 async function lookupByEAN(ean: string): Promise<ExternalLookupResult | null> {
-  const norm = normaliseEan(ean);
-  if (!norm) return null;
+  try {
+    const norm = normaliseEan(ean);
+    if (!norm) return null;
 
-  // 1. Cache (frisch)
-  const cached = await getCached(ean);
-  if (cached) {
-    const stale = isExternalCacheStale(cached.cachedAt as any);
-    if (!stale) {
+    // 1. Cache (frisch)
+    const cached = await getCached(ean);
+    if (cached) {
+      const stale = isExternalCacheStale(cached.cachedAt as any);
+      if (!stale) {
+        return { product: cached, fromCache: true, refreshed: false };
+      }
+      // Stale: trigger background-refresh aus der ursprünglichen Source,
+      // gib aber trotzdem die alten Daten zurück (UX > Frische).
+      void refreshSilent(norm, cached.source);
       return { product: cached, fromCache: true, refreshed: false };
     }
-    // Stale: trigger background-refresh aus der ursprünglichen Source,
-    // gib aber trotzdem die alten Daten zurück (UX > Frische).
-    void refreshSilent(norm, cached.source);
-    return { product: cached, fromCache: true, refreshed: false };
+
+    // 2. REWE — bleibt erste Wahl
+    const fromRewe = await tryRewe(norm);
+    if (fromRewe) return { product: fromRewe, fromCache: false, refreshed: false };
+
+    // 3. Globus
+    const fromGlobus = await tryGlobus(norm);
+    if (fromGlobus) return { product: fromGlobus, fromCache: false, refreshed: false };
+
+    // 4. OpenFood
+    const fromOpenFood = await tryOpenFood(norm);
+    if (fromOpenFood) return { product: fromOpenFood, fromCache: false, refreshed: false };
+
+    return null;
+  } catch (e: any) {
+    // Safety-Net: NICHTS darf eine Cascade nach oben werfen. Wenn
+    // irgendwas schiefgeht (Network, Firestore-Permission, JSON-Parse,
+    // …) → null. Caller zeigt normalen Fallback.
+    console.warn('externalProductService.lookupByEAN unexpected error', e?.message);
+    return null;
   }
-
-  // 2. REWE
-  const fromRewe = await tryRewe(norm);
-  if (fromRewe) return { product: fromRewe, fromCache: false, refreshed: false };
-
-  // 3. Globus
-  const fromGlobus = await tryGlobus(norm);
-  if (fromGlobus) return { product: fromGlobus, fromCache: false, refreshed: false };
-
-  // 4. OpenFood
-  const fromOpenFood = await tryOpenFood(norm);
-  if (fromOpenFood) return { product: fromOpenFood, fromCache: false, refreshed: false };
-
-  return null;
 }
 
 /**
