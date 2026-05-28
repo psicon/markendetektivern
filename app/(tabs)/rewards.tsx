@@ -369,11 +369,11 @@ function RedeemTab() {
           The currency pill (💰 CASHBACK-TALER) sits where the
           STATUS-PKT pill sits on the StatusHero — same shape, same
           position, so the user pattern-matches between the two. */}
-      <View
-        ref={heroAnchor.ref}
-        onLayout={heroAnchor.onLayout}
-        style={{ paddingHorizontal: 20, paddingTop: 4 }}
-      >
+      <View style={{ paddingHorizontal: 20, paddingTop: 4 }}>
+        {/* T17.27: Anchor um den echten Card-Inhalt, NICHT am
+            paddingHorizontal-Wrapper — sonst spotlightet das Cutout
+            +40 px ungenutzten Padding-Bereich rundherum. */}
+        <View ref={heroAnchor.ref} onLayout={heroAnchor.onLayout}>
         <LinearGradient
           colors={['#0a6f62', '#0d8575', '#10a18a']}
           start={{ x: -1, y: 0.34 }}
@@ -512,14 +512,14 @@ function RedeemTab() {
           />
           </View>
         </LinearGradient>
+        </View>
       </View>
 
       {/* ── Quick actions row ── */}
-      <View
-        ref={earnAnchor.ref}
-        onLayout={earnAnchor.onLayout}
-        style={{ paddingHorizontal: 20, paddingTop: 22 }}
-      >
+      <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
+        {/* T17.27: Anchor um Section-Title + Card-Row, NICHT
+            am padding-Wrapper. */}
+        <View ref={earnAnchor.ref} onLayout={earnAnchor.onLayout}>
         <Text
           style={{
             fontFamily,
@@ -541,6 +541,7 @@ function RedeemTab() {
               onCashbackTap={a.k === 'receipt' ? onScanBon : undefined}
             />
           ))}
+        </View>
         </View>
       </View>
 
@@ -618,12 +619,11 @@ function RedeemTab() {
           has hit the PAYOUT_THRESHOLD; the disabled copy explains
           how much is still missing so the user gets actionable
           feedback instead of a dead CTA. */}
-      <View
-        ref={redeemAnchor.ref}
-        onLayout={redeemAnchor.onLayout}
-        style={{ paddingHorizontal: 20, paddingTop: 28, paddingBottom: 8 }}
-      >
+      <View style={{ paddingHorizontal: 20, paddingTop: 28, paddingBottom: 8 }}>
+        {/* T17.27: Anchor um die echte Card, NICHT am padding-Wrapper. */}
         <View
+          ref={redeemAnchor.ref}
+          onLayout={redeemAnchor.onLayout}
           style={{
             backgroundColor: theme.surface,
             borderRadius: 18,

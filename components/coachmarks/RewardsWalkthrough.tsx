@@ -45,28 +45,31 @@ export type RewardsWalkthroughProps = {
 
 function configForPhase(
   phase: Phase,
-): { anchorId: string; title: string; body: string } {
+): { anchorId: string; title: string; body: string; lottie: any } {
   switch (phase) {
     case 'hero':
       return {
         anchorId: REWARDS_ANCHOR_HERO,
-        title: 'Dein Cashback-Konto',
+        title: 'Dein Cashback-Guthaben',
         body:
-          'Hier wächst echtes Geld — kein Punkte-System, kein Gutschein-Trick. Was du hier siehst, zahlen wir dir aufs Bankkonto aus, sobald 5 € voll sind.',
+          'Hier siehst du, wie viel Geld du schon gesammelt hast. Sobald 5 € voll sind, überweisen wir dir den Betrag direkt aufs Bankkonto.',
+        lottie: require('@/assets/lottie/gift.json'),
       };
     case 'earn':
       return {
         anchorId: REWARDS_ANCHOR_EARN,
-        title: 'So füllst du dein Konto',
+        title: 'So sammelst du Cashback',
         body:
-          'Foto vom Kassenbon machen, hochladen — wir lesen ihn automatisch. 0,08 € pro Bon, bis zu 6 Bons pro Woche. Das macht bis zu 2 € extra im Monat, einfach so beim Einkaufen.',
+          'Mach ein Foto vom Kassenbon nach dem Einkauf — wir lesen ihn automatisch und schreiben dir 0,08 € gut. Bis zu 6 Bons pro Woche, das sind etwa 2 € extra im Monat.',
+        lottie: require('@/assets/lottie/task.json'),
       };
     case 'redeem':
       return {
         anchorId: REWARDS_ANCHOR_REDEEM,
         title: 'Auszahlen ab 5 €',
         body:
-          'Sobald 5 € voll sind, tipp einfach auf „Cashback einlösen". Wir überweisen direkt auf dein Bankkonto. Keine Bedingungen, keine Provision — dein Geld gehört dir.',
+          'Ab 5 € kannst du dir dein Cashback auszahlen lassen. Tipp einfach auf „Cashback einlösen" — wir überweisen den vollen Betrag aufs Bankkonto.',
+        lottie: require('@/assets/lottie/savings.json'),
       };
   }
 }
@@ -117,6 +120,7 @@ export function RewardsWalkthrough({
       anchorId={config.anchorId}
       title={config.title}
       body={config.body}
+      lottie={config.lottie}
       onSkip={onDismiss}
       onPrimary={advance}
       primaryLabel={primaryLabel}

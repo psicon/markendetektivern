@@ -37,6 +37,7 @@
 // Position. Statisch, keine Scroll-Verfolgung.
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import LottieView from 'lottie-react-native';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
@@ -63,6 +64,7 @@ const AnimatedPath = Animated.createAnimatedComponent(Path);
 const AnimatedRect = Animated.createAnimatedComponent(Rect);
 
 import { fontFamily, fontWeight } from '@/constants/tokens';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { type AnchorRect, subscribeAnchor } from '@/hooks/useCoachmarkAnchor';
 import { useCoachmarkScrollContext } from './CoachmarkScrollContext';
@@ -112,6 +114,14 @@ export type SpotlightOverlayProps = {
    * Breathen unruhig statt einladend — dort lieber statisch.
    */
   disablePulse?: boolean;
+  /**
+   * Optionales Lottie das oben in der Tooltip-Card mit Title +
+   * Body läuft (statisches require()-Asset). Bringt visuelles
+   * Leben in den Hint, ohne den Spotlight selbst zu überfrachten.
+   * Wenn weggelassen, rendert die Card ohne Visual (alter
+   * Default-Look).
+   */
+  lottie?: any;
 };
 
 export function SpotlightOverlay({
@@ -125,8 +135,10 @@ export function SpotlightOverlay({
   onPrimary,
   primaryLabel,
   disablePulse = false,
+  lottie,
 }: SpotlightOverlayProps) {
   const { theme, brand, shadows } = useTokens();
+  const isDark = useColorScheme() === 'dark';
   const { width: SCREEN_W, height: SCREEN_H } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const ctx = useCoachmarkScrollContext();
@@ -498,35 +510,65 @@ export function SpotlightOverlay({
             position: 'absolute',
             left: TOOLTIP_SIDE_MARGIN,
             right: TOOLTIP_SIDE_MARGIN,
-            backgroundColor: theme.surface,
+            // Dark-Mode-Kontrast: theme.surface verschwimmt mit dem
+            // dunklen Backdrop dahinter. surfaceAlt + Border-Strong
+            // hebt die Card sichtbar ab.
+            backgroundColor: isDark ? theme.surfaceAlt : theme.surface,
             borderRadius: 18,
             paddingHorizontal: 18,
             paddingVertical: 16,
             maxHeight: SCREEN_H * 0.4,
+            borderWidth: isDark ? 1 : 0,
+            borderColor: isDark ? theme.borderStrong : 'transparent',
           },
           shadows.lg,
           tooltipPosStyle,
         ]}
       >
-        <Text
+        {/* Header-Row mit Lottie + Title — Lottie nur wenn `lottie`
+            prop gesetzt ist. 56×56 Lottie links, Title flex:1 daneben.
+            Bringt visuelles Leben in den Hint analog zur alten Slide-
+            Tour (CoachmarkOverlay), ohne den Spotlight zu überfrachten. */}
+        <View
           style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 17,
-            letterSpacing: -0.2,
-            color: theme.text,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: lottie ? 10 : 0,
             marginBottom: 6,
           }}
         >
-          {title}
-        </Text>
+          {lottie ? (
+            <LottieView
+              source={lottie}
+              autoPlay
+              loop
+              speed={0.8}
+              style={{ width: 56, height: 56 }}
+            />
+          ) : null}
+          <Text
+            style={{
+              flex: 1,
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 17,
+              letterSpacing: -0.2,
+              color: theme.text,
+            }}
+          >
+            {title}
+          </Text>
+        </View>
         <Text
           style={{
             fontFamily,
             fontWeight: fontWeight.medium,
             fontSize: 13,
             lineHeight: 19,
-            color: theme.textMuted,
+            // textSub statt textMuted — bessere Lesbarkeit in beiden
+            // Modi (textMuted ist im Dark-Mode zu blass gegen die
+            // Card).
+            color: theme.textSub,
           }}
         >
           {body}
