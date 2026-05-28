@@ -36,6 +36,11 @@ import {
   type AlgoliaSearchResult,
 } from '@/lib/services/algolia';
 import ExternalProductService from '@/lib/services/externalProductService';
+import { FirestoreService } from '@/lib/services/firestore';
+import {
+  matchManufacturer,
+  type ManufacturerMatch,
+} from '@/lib/services/manufacturerMatchService';
 import type { ExternalProductDoc } from '@/lib/types/externalProduct';
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -66,6 +71,10 @@ export default function ExternalProductScreen() {
   const [loading, setLoading] = useState(true);
   const [alternatives, setAlternatives] = useState<AlgoliaSearchResult[]>([]);
   const [altLoading, setAltLoading] = useState(false);
+  const [manufacturerMatch, setManufacturerMatch] = useState<ManufacturerMatch | null>(null);
+  const [connectedBrands, setConnectedBrands] = useState<
+    Array<{ id: string; name: string; bild: string | null; source: string }>
+  >([]);
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -95,6 +104,38 @@ export default function ExternalProductScreen() {
       alive = false;
     };
   }, [ean]);
+
+  // T17.45: Hersteller-Match auf unsere hersteller_new-Collection.
+  // External Source liefert manufacturerName als String → Levenshtein-
+  // Match. Wenn confidence ≥ 0.75 → zeige Connected-Brands-Section
+  // (gleiches Pattern wie Stufe 1/2 in noname-detail).
+  useEffect(() => {
+    let alive = true;
+    const extName = product?.manufacturerName?.trim();
+    if (!extName) {
+      setManufacturerMatch(null);
+      setConnectedBrands([]);
+      return;
+    }
+    (async () => {
+      try {
+        const match = await matchManufacturer(extName);
+        if (!alive) return;
+        setManufacturerMatch(match);
+        if (match) {
+          const brands = await FirestoreService.getConnectedBrandsForHersteller(match.id);
+          if (alive) setConnectedBrands(brands ?? []);
+        } else {
+          if (alive) setConnectedBrands([]);
+        }
+      } catch (e) {
+        console.warn('manufacturer match flow failed', e);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [product?.manufacturerName]);
 
   // Alternative-Eigenmarken via Algolia-Name-Search mit Fallback-
   // Kaskade: wenn primärer Search 0 Hits, versuche erstes Wort allein,
@@ -366,6 +407,10 @@ export default function ExternalProductScreen() {
                   {product.packSize}
                 </Text>
               ) : null}
+              {/* T17.45: Preis-Anzeige immer sichtbar — bei
+                  vorhandenem Preis prominent (großer Bold-Text), sonst
+                  schwacher "Preis nicht verfügbar"-Hinweis. So weiß
+                  der User immer woran er ist. */}
               {formatPrice(product.price) ? (
                 <Text
                   style={{
@@ -379,7 +424,20 @@ export default function ExternalProductScreen() {
                 >
                   {formatPrice(product.price)}
                 </Text>
-              ) : null}
+              ) : (
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 12,
+                    color: theme.textMuted,
+                    marginTop: 8,
+                    fontStyle: 'italic',
+                  }}
+                >
+                  Preis nicht verfügbar
+                </Text>
+              )}
             </View>
           </View>
         </View>
@@ -545,6 +603,113 @@ export default function ExternalProductScreen() {
             >
               {product.productDescription}
             </Text>
+          </Section>
+        ) : null}
+
+        {/* T17.45: Hersteller-Match-Section — wenn der externe
+            manufacturer-Name konfident matched mit einem hersteller_new-
+            Eintrag, zeige die mit ihm verbundenen Marken (gleiches
+            Pattern wie noname-detail Stufe 2). User erkennt:
+            "ah, das ist ja der gleiche Hersteller wie diese Marken
+            hier — vielleicht ist eine Alternative dabei". */}
+        {manufacturerMatch && connectedBrands.length > 0 ? (
+          <Section title="Vom selben Hersteller">
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 12,
+                color: theme.textMuted,
+                marginBottom: 10,
+                lineHeight: 16,
+              }}
+            >
+              {manufacturerMatch.name} produziert auch{' '}
+              {connectedBrands.length === 1 ? 'diese Marke' : 'diese Marken'}:
+            </Text>
+            <View
+              style={{
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                gap: 8,
+              }}
+            >
+              {connectedBrands.map((b) => {
+                const initial = (b.name || '?').trim().charAt(0).toUpperCase();
+                return (
+                  <View
+                    key={b.id}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
+                      paddingLeft: 4,
+                      paddingRight: 12,
+                      paddingVertical: 4,
+                      borderRadius: radii.full,
+                      backgroundColor: theme.surfaceAlt,
+                      borderWidth: 1,
+                      borderColor: theme.border,
+                    }}
+                  >
+                    {b.bild ? (
+                      <View
+                        style={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: 12,
+                          backgroundColor: '#fff',
+                          overflow: 'hidden',
+                          borderWidth: 0.5,
+                          borderColor: theme.border,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <RNImage
+                          source={{ uri: b.bild }}
+                          style={{ width: '90%', height: '90%' }}
+                          resizeMode="contain"
+                        />
+                      </View>
+                    ) : (
+                      <View
+                        style={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: 12,
+                          backgroundColor: brand.primary + '22',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontFamily,
+                            fontWeight: fontWeight.extraBold,
+                            fontSize: 11,
+                            color: brand.primary,
+                          }}
+                        >
+                          {initial}
+                        </Text>
+                      </View>
+                    )}
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.bold as any,
+                        fontSize: 13,
+                        color: theme.text,
+                      }}
+                    >
+                      {b.name}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
           </Section>
         ) : null}
 
