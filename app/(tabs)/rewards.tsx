@@ -24,6 +24,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
+import { useWeeklyReceiptCount } from '@/lib/hooks/useWeeklyReceiptCount';
 
 // ─── Cashback fallback ─────────────────────────────────────────────────
 // Wenn kein User eingeloggt ist (oder das Cashback-Backend offline)
@@ -45,9 +46,15 @@ const HERO_HEIGHT = 144;
 // button on a third-party provider page (separate flow, not
 // implemented yet).
 
-const RECEIPT_LIMIT = { perWeek: 6, eurEach: 0.08, usedThisWeek: 2 };
-const PHOTO_LIMIT = { perWeek: 20, eurEach: 0.1, usedThisWeek: 14 };
+// T17.24: usedThisWeek war hardcoded → User sah fake-counters
+// ("2/6 Woche", "14/20 Woche") die nie zur Realität gehörten. Photo-
+// Submission gibt's eh noch nicht (steht in achievements.ts als
+// „später"). Counter wird jetzt live aus useWeeklyReceiptCount
+// hydratiert, Photo-Card sagt ehrlich „Bald verfügbar".
+const RECEIPT_LIMIT = { perWeek: 6, eurEach: 0.08 };
+const PHOTO_LIMIT = { perWeek: 20, eurEach: 0.1 };
 const SURVEY_AVAILABLE = false;
+const PHOTO_SUBMISSION_AVAILABLE = false;
 
 // Single source of truth for the three earn-action cards. The same
 // data feeds the Schnellzugriff tile + (formerly) the "Taler verdienen"
@@ -64,46 +71,47 @@ type EarnAction = {
   statusLabel: string; // "2/6 diese Woche" / "Aktuell keine Umfrage" / "Limit erreicht"
   progress?: number; // 0..1 — undefined for survey (no weekly counter)
 };
-const EARN_ACTIONS: EarnAction[] = [
-  {
-    k: 'receipt',
-    icon: 'receipt',
-    label: 'Kassenbon\nscannen',
-    bg: '#0d8575',
-    dark: true,
-    reward: `${RECEIPT_LIMIT.eurEach.toFixed(2).replace('.', ',')} €`,
-    available: RECEIPT_LIMIT.usedThisWeek < RECEIPT_LIMIT.perWeek,
-    statusLabel:
-      RECEIPT_LIMIT.usedThisWeek < RECEIPT_LIMIT.perWeek
-        ? `${RECEIPT_LIMIT.usedThisWeek}/${RECEIPT_LIMIT.perWeek} Woche`
+
+function buildEarnActions(weeklyReceiptCount: number): EarnAction[] {
+  const receiptAvailable = weeklyReceiptCount < RECEIPT_LIMIT.perWeek;
+  return [
+    {
+      k: 'receipt',
+      icon: 'receipt',
+      label: 'Kassenbon\nscannen',
+      bg: '#0d8575',
+      dark: true,
+      reward: `${RECEIPT_LIMIT.eurEach.toFixed(2).replace('.', ',')} €`,
+      available: receiptAvailable,
+      statusLabel: receiptAvailable
+        ? `${weeklyReceiptCount}/${RECEIPT_LIMIT.perWeek} Woche`
         : 'Limit erreicht',
-    progress: RECEIPT_LIMIT.usedThisWeek / RECEIPT_LIMIT.perWeek,
-  },
-  {
-    k: 'photo',
-    icon: 'camera-plus-outline',
-    label: 'Produkte\neinreichen',
-    bg: '#5b4f9c',
-    dark: true,
-    reward: `${PHOTO_LIMIT.eurEach.toFixed(2).replace('.', ',')} €`,
-    available: PHOTO_LIMIT.usedThisWeek < PHOTO_LIMIT.perWeek,
-    statusLabel:
-      PHOTO_LIMIT.usedThisWeek < PHOTO_LIMIT.perWeek
-        ? `${PHOTO_LIMIT.usedThisWeek}/${PHOTO_LIMIT.perWeek} Woche`
-        : 'Limit erreicht',
-    progress: PHOTO_LIMIT.usedThisWeek / PHOTO_LIMIT.perWeek,
-  },
-  {
-    k: 'survey',
-    icon: 'poll',
-    label: 'Umfragen',
-    bg: '#dde2e4',
-    dark: false,
-    reward: '0,20-2,50 €',
-    available: SURVEY_AVAILABLE,
-    statusLabel: SURVEY_AVAILABLE ? 'Verfügbar' : 'Aktuell keine',
-  },
-];
+      progress: weeklyReceiptCount / RECEIPT_LIMIT.perWeek,
+    },
+    {
+      k: 'photo',
+      icon: 'camera-plus-outline',
+      label: 'Produkte\neinreichen',
+      bg: '#5b4f9c',
+      dark: true,
+      reward: `${PHOTO_LIMIT.eurEach.toFixed(2).replace('.', ',')} €`,
+      available: PHOTO_SUBMISSION_AVAILABLE,
+      statusLabel: PHOTO_SUBMISSION_AVAILABLE ? `0/${PHOTO_LIMIT.perWeek} Woche` : 'Bald verfügbar',
+      // Kein Progress solange Feature nicht aktiv ist.
+      progress: undefined,
+    },
+    {
+      k: 'survey',
+      icon: 'poll',
+      label: 'Umfragen',
+      bg: '#dde2e4',
+      dark: false,
+      reward: '0,20-2,50 €',
+      available: SURVEY_AVAILABLE,
+      statusLabel: SURVEY_AVAILABLE ? 'Verfügbar' : 'Aktuell keine',
+    },
+  ];
+}
 
 const HEADER_ROW_HEIGHT = 52;
 
@@ -303,6 +311,13 @@ function RedeemTab() {
   const cashbackEur = cashback.uid
     ? cashback.balanceCents / 100
     : CASHBACK_FALLBACK_EUR;
+  // T17.24: Echter Wochen-Counter aus Firestore — ersetzt die
+  // hardcoded fake-Werte.
+  const weeklyReceiptCount = useWeeklyReceiptCount();
+  const earnActions = React.useMemo(
+    () => buildEarnActions(weeklyReceiptCount),
+    [weeklyReceiptCount],
+  );
   const pct = Math.min(
     100,
     Math.round((cashbackEur / PAYOUT_THRESHOLD) * 100),
@@ -498,7 +513,7 @@ function RedeemTab() {
           Schnellzugriff · Mehr Taler & Punkte sammeln
         </Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          {EARN_ACTIONS.map((a) => (
+          {earnActions.map((a) => (
             <QuickActionTile
               key={a.k}
               action={a}

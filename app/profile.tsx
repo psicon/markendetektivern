@@ -56,6 +56,7 @@ import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useGamificationEnabled } from '@/hooks/useGamificationEnabled';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { useTheme } from '@/lib/contexts/ThemeContext';
 import { achievementService } from '@/lib/services/achievementService';
@@ -91,6 +92,10 @@ export default function ProfileScreen() {
   const navigation = useNavigation();
 
   const { user, userProfile, logout, isAnonymous } = useAuth();
+  const cashback = useCashbackUserState();
+  const cashbackEurStr = (cashback.balanceCents / 100)
+    .toFixed(2)
+    .replace('.', ',');
   const { isPremium, presentPaywall } = useRevenueCat();
   const { isDarkMode, toggleDarkMode } = useTheme();
 
@@ -1197,7 +1202,7 @@ export default function ProfileScreen() {
                   icon="gift-outline"
                   color="#f97316"
                   label="Belohnungen"
-                  sub="Cashback einlösen · Bestenliste"
+                  sub={`${cashbackEurStr} € Cashback-Konto`}
                   onPress={() => router.push('/(tabs)/rewards' as any)}
                   first
                 />
