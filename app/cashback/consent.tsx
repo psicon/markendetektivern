@@ -216,16 +216,20 @@ export default function CashbackConsentScreen() {
         marginTop: 6,
       },
       pillRow: {
+        // T17.32: nowrap statt wrap — alle 3 Pills sollen auf eine
+        // Zeile passen. Texte sind oben bereits gekürzt, padding ist
+        // tighter, flexShrink an den Pills fängt Restrest ab.
         flexDirection: 'row' as const,
-        flexWrap: 'wrap' as const,
-        gap: 6,
+        flexWrap: 'nowrap' as const,
+        gap: 5,
         marginTop: 14,
       },
       pill: {
         flexDirection: 'row' as const,
         alignItems: 'center' as const,
-        gap: 5,
-        paddingHorizontal: 9,
+        flexShrink: 1,
+        gap: 4,
+        paddingHorizontal: 8,
         paddingVertical: 5,
         borderRadius: 999,
         backgroundColor: 'rgba(255,255,255,0.22)',
@@ -235,7 +239,7 @@ export default function CashbackConsentScreen() {
         fontSize: 11,
         fontFamily,
         fontWeight: fontWeight.bold as any,
-        letterSpacing: 0.2,
+        letterSpacing: 0.1,
       },
 
       sectionLabel: {
@@ -427,7 +431,9 @@ export default function CashbackConsentScreen() {
           <View style={styles.pillRow}>
             <View style={styles.pill}>
               <MaterialCommunityIcons name="receipt" size={11} color="#fff" />
-              <Text style={styles.pillText}>Bis zu 0,08 € pro Bon</Text>
+              <Text numberOfLines={1} style={styles.pillText}>
+                Bis zu 0,08 €/Bon
+              </Text>
             </View>
             <View style={styles.pill}>
               <MaterialCommunityIcons
@@ -435,15 +441,19 @@ export default function CashbackConsentScreen() {
                 size={11}
                 color="#fff"
               />
-              <Text style={styles.pillText}>6 Bons/Woche</Text>
+              <Text numberOfLines={1} style={styles.pillText}>
+                6/Woche
+              </Text>
             </View>
             <View style={styles.pill}>
               <MaterialCommunityIcons
-                name="bank-transfer-out"
+                name="gift-outline"
                 size={11}
                 color="#fff"
               />
-              <Text style={styles.pillText}>Ab 10 € auszahlen</Text>
+              <Text numberOfLines={1} style={styles.pillText}>
+                Ab 10 € einlösen
+              </Text>
             </View>
           </View>
         </LinearGradient>
