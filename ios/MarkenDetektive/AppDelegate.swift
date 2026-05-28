@@ -25,14 +25,17 @@ public class AppDelegate: ExpoAppDelegate {
 
 #if os(iOS) || os(tvOS)
     window = UIWindow(frame: UIScreen.main.bounds)
-    // T17.18: Window-Background sofort auf Brand-Grün setzen, BEVOR
-    // die Storyboard greift. Sonst zeigt iOS in den ersten ~100ms des
-    // Cold-Starts seinen Default-White-Background → User sieht weißen
-    // Flash bevor unsere Splash-Storyboard mit grünem Hintergrund da
-    // ist. UIColor(named:) liest aus Images.xcassets/SplashScreenBackground
-    // — Single Source of Truth, falls wir die Brand-Farbe mal ändern,
-    // ändert sich's überall.
-    window?.backgroundColor = UIColor(named: "SplashScreenBackground") ?? .white
+    // T17.18: Window-Background sofort auf Brand-Grün (#0d8575)
+    // hardcoded setzen, BEVOR irgendetwas anderes geladen wird.
+    // UIColor(named:) ist beim Cold-Start zu früh — der Asset-Catalog
+    // ist noch nicht initialisiert → würde nil zurückgeben → weiß
+    // Fallback. Hardcode = race-free.
+    window?.backgroundColor = UIColor(
+      red: 13.0/255.0,
+      green: 133.0/255.0,
+      blue: 117.0/255.0,
+      alpha: 1.0
+    )
 // @generated begin @react-native-firebase/app-didFinishLaunchingWithOptions - expo prebuild (DO NOT MODIFY) sync-10e8520570672fd76b2403b7e1e27f5198a6349a
 FirebaseApp.configure()
 // @generated end @react-native-firebase/app-didFinishLaunchingWithOptions
