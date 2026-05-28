@@ -34,7 +34,11 @@ import * as WebBrowser from 'expo-web-browser';
 
 const FB_APP_ID = '1757877148062670';
 const FB_REDIRECT_URI = `fb${FB_APP_ID}://authorize`;
-const FB_OAUTH_URL = `https://m.facebook.com/v18.0/dialog/oauth`;
+// T17.17: www.facebook.com statt m.facebook.com — die m.-Variante
+// löst auf iOS gerne Limited-Login aus (ID-Token statt access_token),
+// und Firebase's FacebookAuthProvider.credential() akzeptiert nur
+// Graph-API-Access-Tokens. v22.0 ist die aktuelle stabile Graph-Version.
+const FB_OAUTH_URL = `https://www.facebook.com/v22.0/dialog/oauth`;
 
 export interface FacebookCredentialBundle {
   credential: FirebaseAuthTypes.AuthCredential;
@@ -54,14 +58,17 @@ export const isFacebookAuthAvailable = async (): Promise<boolean> => true;
 export const getFacebookCredential = async (): Promise<FacebookCredentialBundle | null> => {
   // Build OAuth URL — implicit flow (response_type=token gibt direkt
   // access_token zurück im URL-Fragment, kein Token-Exchange nötig).
+  // T17.17: `auth_type=rerequest` raus — triggert Limited Login auf iOS,
+  // was einen JWT-ID-Token statt einen Graph-API-Access-Token zurückgibt.
+  // Firebase's FacebookAuthProvider akzeptiert nur Access-Tokens.
   const params = new URLSearchParams({
     client_id: FB_APP_ID,
     redirect_uri: FB_REDIRECT_URI,
     scope: 'email,public_profile',
     response_type: 'token',
-    auth_type: 'rerequest', // erlaubt User Permission-Updates
   });
   const authUrl = `${FB_OAUTH_URL}?${params.toString()}`;
+  if (__DEV__) console.log('[facebookAuth] Opening:', authUrl);
 
   // ASWebAuthenticationSession via expo-web-browser. dismissButtonStyle
   // = 'cancel' damit User sauber abbrechen kann. preferEphemeralSession
@@ -79,6 +86,7 @@ export const getFacebookCredential = async (): Promise<FacebookCredentialBundle 
   }
 
   if (result.type !== 'success' || !result.url) {
+    if (__DEV__) console.log('[facebookAuth] WebBrowser result:', result.type, 'no URL');
     // User hat Sheet abgebrochen (type='cancel' oder 'dismiss').
     return null;
   }
@@ -87,6 +95,7 @@ export const getFacebookCredential = async (): Promise<FacebookCredentialBundle 
   // zurück: fb1757877148062670://authorize#access_token=XXX&expires_in=...
   // Falls Fehler: ...?error=access_denied&error_reason=...
   const url = result.url;
+  if (__DEV__) console.log('[facebookAuth] Redirect URL:', url);
   const fragmentMatch = url.match(/#(.+)$/);
   const queryMatch = url.match(/\?(.+?)(?:#|$)/);
   const paramsStr = fragmentMatch?.[1] ?? queryMatch?.[1] ?? '';
@@ -97,7 +106,6 @@ export const getFacebookCredential = async (): Promise<FacebookCredentialBundle 
     const errCode = responseParams.get('error');
     const errReason = responseParams.get('error_reason') || responseParams.get('error_description');
     if (__DEV__) console.warn('[facebookAuth] OAuth error:', errCode, errReason);
-    // User hat Login abgelehnt im FB-Dialog = Cancel
     if (errCode === 'access_denied') return null;
     throw new Error(`Facebook-Login fehlgeschlagen: ${errReason || errCode}`);
   }
@@ -107,29 +115,48 @@ export const getFacebookCredential = async (): Promise<FacebookCredentialBundle 
     if (__DEV__) console.warn('[facebookAuth] No access_token in redirect URL:', url);
     return null;
   }
+  if (__DEV__) {
+    console.log('[facebookAuth] Token format:',
+      `${accessToken.slice(0, 20)}…(len=${accessToken.length})`);
+  }
 
-  // Firebase-Credential bauen
-  const credential = FacebookAuthProvider.credential(accessToken);
-
-  // Profil-Daten via Graph-API holen (best-effort).
+  // T17.17: Token gegen Graph-API verifizieren BEVOR wir's an Firebase
+  // weitergeben. Wenn FB selbst es ablehnt, ist's eindeutig ein Token-
+  // Problem (Limited Login statt Access Token, abgelaufen, etc.).
+  // Wenn FB es akzeptiert aber Firebase ablehnt → Firebase-Config-Problem.
   let email: string | null = null;
   let displayName: string | null = null;
   let photoURL: string | null = null;
+  let graphProfileOk = false;
   try {
     const profileRes = await fetch(
-      `https://graph.facebook.com/v18.0/me?fields=email,name,picture&access_token=${encodeURIComponent(accessToken)}`,
+      `https://graph.facebook.com/v22.0/me?fields=id,email,name,picture&access_token=${encodeURIComponent(accessToken)}`,
     );
     if (profileRes.ok) {
       const profile = await profileRes.json();
+      graphProfileOk = true;
       if (typeof profile?.email === 'string') email = profile.email;
       if (typeof profile?.name === 'string') displayName = profile.name;
       if (profile?.picture?.data?.url) photoURL = profile.picture.data.url;
+      if (__DEV__) console.log('[facebookAuth] Graph /me OK, id=', profile?.id, 'email=', email);
+    } else {
+      const errBody = await profileRes.text();
+      if (__DEV__) console.warn('[facebookAuth] Graph /me failed:', profileRes.status, errBody);
     }
   } catch (graphErr: any) {
-    if (__DEV__) console.warn('[facebookAuth] Graph profile fetch failed:', graphErr?.message);
-    // Non-fatal — Firebase-Credential geht trotzdem.
+    if (__DEV__) console.warn('[facebookAuth] Graph fetch failed:', graphErr?.message);
   }
 
+  if (!graphProfileOk) {
+    // Token wurde von FB selbst abgelehnt. Vermutung: Limited-Login
+    // ID-Token statt Access-Token, oder Token ist tatsächlich abgelaufen.
+    throw new Error(
+      'Facebook-Login fehlgeschlagen: Token von Facebook abgelehnt. Bitte erneut versuchen.',
+    );
+  }
+
+  // Firebase-Credential bauen — Token hat Graph-API verifiziert
+  const credential = FacebookAuthProvider.credential(accessToken);
   return { credential, email, displayName, photoURL };
 };
 
