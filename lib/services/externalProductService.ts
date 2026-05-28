@@ -13,6 +13,7 @@
 import { db } from '@/lib/firebase';
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -334,7 +335,7 @@ async function tryReweapify(ean: string): Promise<ExternalProductDoc | null> {
     let docData: any = null;
     if (!asString.empty) {
       docData = asString.docs[0].data();
-      console.log(`[reweapify] hit-by-string ${norm}`);
+      console.error(`[reweapify] hit-by-string ${norm}`);
     } else {
       const eanNum = Number(norm);
       if (Number.isFinite(eanNum)) {
@@ -343,18 +344,18 @@ async function tryReweapify(ean: string): Promise<ExternalProductDoc | null> {
         );
         if (!asNumber.empty) {
           docData = asNumber.docs[0].data();
-          console.log(`[reweapify] hit-by-number ${norm}`);
+          console.error(`[reweapify] hit-by-number ${norm}`);
         }
       }
     }
     if (!docData) {
-      console.log(`[reweapify] no doc for gtin=${norm}`);
+      console.error(`[reweapify] no doc for gtin=${norm}`);
       return null;
     }
     const normalised = normaliseReweapify(docData);
     if (!normalised.productName || normalised.productName === 'Produkt') {
       if (!docData?.attr_ingredientStatement && !normalised.imageUrl) {
-        console.log(`[reweapify] doc found but no useful data, skipping`);
+        console.error(`[reweapify] doc found but no useful data, skipping`);
         return null;
       }
     }
@@ -384,7 +385,7 @@ async function tryNutritionScrape(ean: string): Promise<ExternalProductDoc | nul
     if (!norm) return null;
     const snap = await getDoc(doc(db, 'nutritionscrape', norm));
     if (!snap.exists()) {
-      console.log(`[nutritionscrape] no doc for ean=${norm}`);
+      console.error(`[nutritionscrape] no doc for ean=${norm}`);
       return null;
     }
     const data = snap.data();
@@ -400,7 +401,7 @@ async function tryNutritionScrape(ean: string): Promise<ExternalProductDoc | nul
       !normalised.imageUrl &&
       !normalised.attr_ingredientStatement
     ) {
-      console.log(`[nutritionscrape] doc has no useful data, skipping`);
+      console.error(`[nutritionscrape] doc has no useful data, skipping`);
       return null;
     }
     // Bestimmen Sub-Source aus sourceShop (rewe.de/globus.de/…). Wenn
@@ -538,7 +539,7 @@ async function lookupByEAN(ean: string): Promise<ExternalLookupResult | null> {
   try {
     const norm = normaliseEan(ean);
     if (!norm) return null;
-    console.log(`[external-lookup] start ean=${norm}`);
+    console.error(`[external-lookup] start ean=${norm}`);
 
     // 1. Cache
     const cached = await getCached(ean);
@@ -559,7 +560,7 @@ async function lookupByEAN(ean: string): Promise<ExternalLookupResult | null> {
       if (lowPrio) {
         const upgraded = await tryHigherPrioritySources(norm);
         if (upgraded) {
-          console.log(`[external-lookup] cache upgraded openfood → ${upgraded.source}`);
+          console.error(`[external-lookup] cache upgraded openfood → ${upgraded.source}`);
           return { product: upgraded, fromCache: false, refreshed: true };
         }
       }
@@ -570,7 +571,7 @@ async function lookupByEAN(ean: string): Promise<ExternalLookupResult | null> {
       }
       return { product: cached, fromCache: true, refreshed: false };
     }
-    console.log(`[external-lookup] no cache, running full cascade`);
+    console.error(`[external-lookup] no cache, running full cascade`);
 
     // 2-6. Full cascade
     const cascadeResult = await runFullCascade(norm);
@@ -608,38 +609,38 @@ async function runFullCascade(
 ): Promise<ExternalLookupResult | null> {
   const fromReweapify = await tryReweapify(ean);
   if (fromReweapify) {
-    console.log(`[external-lookup] ✅ reweapify hit`);
+    console.error(`[external-lookup] ✅ reweapify hit`);
     return { product: fromReweapify, fromCache: false, refreshed: false };
   }
-  console.log(`[external-lookup] reweapify: no hit`);
+  console.error(`[external-lookup] reweapify: no hit`);
 
   const fromScrape = await tryNutritionScrape(ean);
   if (fromScrape) {
-    console.log(`[external-lookup] ✅ nutritionscrape hit (source=${fromScrape.source})`);
+    console.error(`[external-lookup] ✅ nutritionscrape hit (source=${fromScrape.source})`);
     return { product: fromScrape, fromCache: false, refreshed: false };
   }
-  console.log(`[external-lookup] nutritionscrape: no hit`);
+  console.error(`[external-lookup] nutritionscrape: no hit`);
 
   const fromRewe = await tryRewe(ean);
   if (fromRewe) {
-    console.log(`[external-lookup] ✅ scraped_products (legacy) hit`);
+    console.error(`[external-lookup] ✅ scraped_products (legacy) hit`);
     return { product: fromRewe, fromCache: false, refreshed: false };
   }
-  console.log(`[external-lookup] scraped_products: no hit`);
+  console.error(`[external-lookup] scraped_products: no hit`);
 
   const fromGlobus = await tryGlobus(ean);
   if (fromGlobus) {
-    console.log(`[external-lookup] ✅ globus-cf hit`);
+    console.error(`[external-lookup] ✅ globus-cf hit`);
     return { product: fromGlobus, fromCache: false, refreshed: false };
   }
-  console.log(`[external-lookup] globus-cf: no hit (Skeleton)`);
+  console.error(`[external-lookup] globus-cf: no hit (Skeleton)`);
 
   const fromOpenFood = await tryOpenFood(ean);
   if (fromOpenFood) {
-    console.log(`[external-lookup] ✅ openfood hit (Fallback)`);
+    console.error(`[external-lookup] ✅ openfood hit (Fallback)`);
     return { product: fromOpenFood, fromCache: false, refreshed: false };
   }
-  console.log(`[external-lookup] openfood: no hit — cascade ende, kein Produkt`);
+  console.error(`[external-lookup] openfood: no hit — cascade ende, kein Produkt`);
 
   return null;
 }
@@ -675,6 +676,32 @@ async function refreshSilent(
   }
 }
 
+/**
+ * Cache-busted Lookup: löscht das external_products-Doc für die EAN
+ * BEVOR die Cascade läuft. Damit kann der Detail-Screen den "Cache
+ * leeren & neu suchen"-Pfad anbieten.
+ *
+ * Throwt NIE — bei Delete-Fehler trotzdem Cascade ausführen.
+ */
+async function forceLookupByEAN(
+  ean: string,
+): Promise<ExternalLookupResult | null> {
+  try {
+    const norm = normaliseEan(ean);
+    if (!norm) return null;
+    try {
+      await deleteDoc(doc(db, COLLECTION, norm));
+      console.error(`[external-lookup] cache CLEARED for ${norm}`);
+    } catch (e: any) {
+      console.warn('forceLookupByEAN: cache-delete failed', e?.message);
+    }
+    return await lookupByEAN(norm);
+  } catch (e: any) {
+    console.warn('forceLookupByEAN failed', e?.message);
+    return null;
+  }
+}
+
 export const ExternalProductService = {
   getCached,
   getFresh,
@@ -682,6 +709,7 @@ export const ExternalProductService = {
   isExternalCacheStale,
   normaliseEan,
   lookupByEAN,
+  forceLookupByEAN,
 };
 
 export default ExternalProductService;

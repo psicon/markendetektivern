@@ -17,7 +17,7 @@
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
-import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image as RNImage,
@@ -83,29 +83,31 @@ export default function ExternalProductScreen() {
   }, [navigation]);
 
   // Daten laden — primär Cache, sonst Cascade.
-  useEffect(() => {
-    let alive = true;
-    const e = String(ean ?? '');
-    if (!e) {
-      setLoading(false);
-      return;
-    }
-    (async () => {
+  const loadProduct = useCallback(
+    async (force: boolean) => {
+      const e = String(ean ?? '');
+      if (!e) {
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
-        const result = await ExternalProductService.lookupByEAN(e);
-        if (!alive) return;
+        const result = force
+          ? await ExternalProductService.forceLookupByEAN(e)
+          : await ExternalProductService.lookupByEAN(e);
         setProduct(result?.product ?? null);
       } catch (err) {
         console.warn('ExternalProductScreen load failed', err);
       } finally {
-        if (alive) setLoading(false);
+        setLoading(false);
       }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [ean]);
+    },
+    [ean],
+  );
+
+  useEffect(() => {
+    void loadProduct(false);
+  }, [loadProduct]);
 
   // T17.45: Hersteller-Match auf unsere hersteller_new-Collection.
   // External Source liefert manufacturerName als String → Levenshtein-
@@ -313,7 +315,45 @@ export default function ExternalProductScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <DetailHeader title="Produkt" onBack={() => router.back()} />
+      <DetailHeader
+        title="Produkt"
+        onBack={() => router.back()}
+        // T17.46: Dev-only Reload-Button im rechten Header-Slot. Löscht
+        // den external_products-Cache-Eintrag für diese EAN und fährt
+        // die Cascade von vorne. Damit kann man testen ob neue Sources
+        // jetzt Daten haben statt am alten OpenFood-Cache zu hängen.
+        right={
+          __DEV__ ? (
+            <Pressable
+              onPress={() => loadProduct(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Cache leeren & neu suchen"
+              style={({ pressed }) => ({
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                borderRadius: 999,
+                backgroundColor: pressed ? brand.primaryContainer : theme.surfaceAlt,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+              })}
+            >
+              <MaterialCommunityIcons name="refresh" size={14} color={brand.primary} />
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.bold as any,
+                  fontSize: 11,
+                  color: brand.primary,
+                  letterSpacing: 0.2,
+                }}
+              >
+                Cache leeren
+              </Text>
+            </Pressable>
+          ) : null
+        }
+      />
 
       <ScrollView
         contentContainerStyle={{
