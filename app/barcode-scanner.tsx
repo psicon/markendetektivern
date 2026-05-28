@@ -14,7 +14,7 @@ import { FirestoreService } from '@/lib/services/firestore';
 import { interstitialAdService } from '@/lib/services/interstitialAdService';
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import scanHistoryService, { ScanHistoryItem } from '@/lib/services/scanHistoryService';
-import ScrapedProductsService from '@/lib/services/scrapedProductsService';
+import ExternalProductService from '@/lib/services/externalProductService';
 import { isExpoGo, platformLog } from '@/lib/utils/platform';
 import { Camera, CameraType, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
@@ -368,22 +368,31 @@ export default function BarcodeScannerScreen() {
       
       // Produkt nicht gefunden in unserer DB - versuche Fallback-Quellen
       console.log(`❌ No product found in our DB for EAN: ${ean}`);
-      console.log(`🔄 Trying fallback sources...`);
-      
-      // Suche in Fallback-Quellen (scraped_products und OpenFood)
-      const fallbackProduct = await ScrapedProductsService.searchFallbackProduct(ean);
-      
-      if (fallbackProduct) {
-        console.log(`✅ Found fallback product: ${fallbackProduct.displayData.name}`);
-        
-        // Track successful scan (mit Fallback-Info)
-        journeyTrackingService.trackScannedCode(ean, true, {
-          productId: fallbackProduct.displayData.id,
-          productName: fallbackProduct.displayData.name,
-          productType: 'brand' // Fallback-Produkte werden als Markenprodukte behandelt
-        }, user?.uid);
-        
-        // GA4 Tracking für Fallback-Scan
+      console.log(`🔄 Trying external sources cascade…`);
+
+      // T17.42: Lookup-Cascade via ExternalProductService (REWE →
+      // Globus → OpenFood) mit external_products als Cache.
+      const lookupResult = await ExternalProductService.lookupByEAN(ean);
+
+      if (lookupResult) {
+        const { product, fromCache } = lookupResult;
+        console.log(
+          `✅ Found external product: ${product.productName} (source=${product.source}, cache=${fromCache})`,
+        );
+
+        // Track successful external scan
+        journeyTrackingService.trackScannedCode(
+          ean,
+          true,
+          {
+            productId: product.ean,
+            productName: product.productName,
+            productType: 'brand', // External wird als Markenprodukt behandelt
+          },
+          user?.uid,
+        );
+
+        // GA4 Tracking
         if (analytics.trackEvent) {
           analytics.trackEvent({
             event_name: 'scan_successful',
@@ -391,31 +400,31 @@ export default function BarcodeScannerScreen() {
             scan_type: 'camera',
             product_found: true,
             is_fallback: true,
-            fallback_source: fallbackProduct.type,
-            product_id: fallbackProduct.displayData.id,
-            product_name: fallbackProduct.displayData.name,
-            has_price: !!fallbackProduct.displayData.price,
-            has_image: !!fallbackProduct.displayData.imageUrl
-          });
+            fallback_source: product.source,
+            from_cache: fromCache,
+            product_id: product.ean,
+            product_name: product.productName,
+            has_price: typeof product.price === 'number',
+            has_image: !!product.imageUrl,
+          } as any);
         }
-        
-        // Visuelles Feedback
+
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-        
-        // Zeige temporär Loading-State während Navigation
         setScanningLoading(true);
-        
-        // WICHTIG: Fallback-Produkte NICHT zur History hinzufügen
-        // Nur Produkte aus unserer DB werden gespeichert
-        console.log('📝 Skipping history for fallback product');
-        
+
+        // External-Produkte NICHT in die History — wir wollen nur
+        // kuratierte Produkte da drin.
+        console.log('📝 Skipping history for external product');
+
         setHasNavigated(true);
         setIsSearching(false);
         setScanningLoading(false);
-        
-        // Navigiere zur Produktdetailseite mit Fallback-Daten
-        console.log(`🚀 NAVIGATING to: /product-comparison/${ean}?type=fallback&source=${fallbackProduct.type}`);
-        router.replace(`/product-comparison/${ean}?type=fallback&source=${fallbackProduct.type}`);
+
+        // Navigiere zur Detail-Page mit External-Mode (T5 baut die
+        // Hero-Anzeige aus, T6 die Alternative-Section).
+        const url = `/product-comparison/${ean}?type=external&source=${product.source}`;
+        console.log(`🚀 NAVIGATING to: ${url}`);
+        router.replace(url);
         return;
       }
       
