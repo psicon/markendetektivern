@@ -17,7 +17,7 @@ import { db } from '../firebase';
 export interface LeaderboardEntry {
   userId: string;
   displayName: string;
-  photoUrl?: string;
+  photoUrl?: string | null;
   stats: {
     points: {
       total: number;
@@ -121,10 +121,16 @@ class LeaderboardService {
         currentStats.savings.yearly += savingsGained;
       }
 
+      // T17.25: photoUrl darf NICHT undefined sein — Firestore rejects
+      // mit "Unsupported field value: undefined". Anonyme User haben
+      // typisch kein photo_url gesetzt → undefined → Crash bei jedem
+      // App-Start sobald Achievements den Service triggern. ?? null
+      // schützt gegen das + erlaubt der Leaderboard-UI den Avatar-
+      // Fallback korrekt anzuwenden.
       const leaderboardEntry: LeaderboardEntry = {
         userId,
         displayName: userData.display_name || 'Anonymer Nutzer',
-        photoUrl: userData.photo_url,
+        photoUrl: userData.photo_url ?? null,
         stats: currentStats,
         lastUpdated: serverTimestamp() as Timestamp,
         weekStartDate: weekStart,
