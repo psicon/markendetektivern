@@ -64,8 +64,8 @@ const STEPS: { icon: string; title: string; sub: string }[] = [
   },
   {
     icon: 'cash-multiple',
-    title: 'Cashback sammeln',
-    sub: 'Ab 10 € auszahlen lassen',
+    title: 'Einlösen',
+    sub: 'Ab 10 € als Gutschein oder Auszahlung',
   },
 ];
 
@@ -75,12 +75,12 @@ const PRIVACY: { icon: string; title: string; body: string }[] = [
   {
     icon: 'database-check-outline',
     title: 'Daten in der EU verarbeitet',
-    body: 'Foto wird nach 30 Tagen gelöscht. Strukturierte Daten bleiben.',
+    body: 'Foto wird nach 30 Tagen gelöscht. Bon-Daten (Markt, Datum, Artikel) bleiben.',
   },
   {
-    icon: 'shield-check-outline',
-    title: 'DSGVO-konform',
-    body: 'Auszahlung über unseren Partner Tremendous (PayPal, SEPA, Gutscheine).',
+    icon: 'gift-outline',
+    title: 'Auszahlung über Partner',
+    body: 'Per PayPal, SEPA-Überweisung oder Gutschein deiner Wahl.',
   },
   {
     icon: 'account-cancel-outline',
@@ -416,8 +416,8 @@ export default function CashbackConsentScreen() {
           <Text style={styles.heroEyebrow}>Echtes Cashback in €</Text>
           <Text style={styles.heroTitle}>Hol dir Geld für deine Bons</Text>
           <Text style={styles.heroBody}>
-            Bis zu 6 Bons pro Woche → bis zu rund 25 € im Jahr, nur fürs
-            Hochladen. Plus extra für Produktbilder & Umfragen.
+            Bis zu 6 Bons pro Woche — das sind rund 25 € im Jahr, nur fürs
+            Hochladen.
           </Text>
 
           <View style={styles.pillRow}>
