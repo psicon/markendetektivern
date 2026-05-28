@@ -1,6 +1,31 @@
+import { REVENUECAT_CONFIG } from '@/lib/config/revenueCatConfig';
 import { revenueCatService } from '@/lib/services/revenueCatService';
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
+
+// T17.21: Premium-Cache so dass returning Premium-User beim App-Start
+// NICHT erst "kein Premium" rendern (→ Ads / Buy-Button für 200-800ms
+// sichtbar) und dann "doch Premium" (→ Pop weg). Wir cachen den
+// letzten bekannten Wert lokal, hydraten als initial state, und
+// schreiben bei jedem Statuswechsel zurück. RevenueCat ist Source of
+// Truth, der Cache nur Bridge gegen die async-Latenz.
+const PREMIUM_CACHE_KEY = 'premium_cache_v1';
+
+const readCachedPremium = async (): Promise<boolean | null> => {
+  try {
+    const raw = await AsyncStorage.getItem(PREMIUM_CACHE_KEY);
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const writeCachedPremium = (value: boolean) => {
+  AsyncStorage.setItem(PREMIUM_CACHE_KEY, value ? 'true' : 'false').catch(() => {});
+};
 
 interface RevenueCatContextType {
   isPremium: boolean;
@@ -34,150 +59,138 @@ interface RevenueCatProviderProps {
 
 export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children }) => {
   const { user } = useAuth();
+  // T17.21: Initial-State aus AsyncStorage-Cache hydratiert (siehe
+  // Effect unten). Beim allerersten App-Open ist's `false` (also wie
+  // vorher) — aber returning Premium-User starten mit `true` und sehen
+  // KEINEN Pop wenn RC-Call später bestätigt.
   const [isPremium, setIsPremium] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [offerings, setOfferings] = useState<any[]>([]);
-  const [hasCheckedInitialStatus, setHasCheckedInitialStatus] = useState(false);
-  
 
-  // RevenueCat initialisieren wenn User sich ändert
+  // Hydrate from cache ONCE on mount (synchron-ish via useEffect ohne
+  // Auth-Dep — feuert vor dem User-Effect). Hält den Fall ab dass
+  // User-Effect verspätet feuert und initial-render trotzdem `false`
+  // zeigt.
   useEffect(() => {
+    let cancelled = false;
+    readCachedPremium().then((cached) => {
+      if (cancelled || cached === null) return;
+      // Nur setzen wenn noch nicht durch RC-Call überschrieben.
+      // RC-Service-Init dauert min. eine Round-Trip, der Cache-Read
+      // ist immer schneller → kein Konflikt zu erwarten.
+      setIsPremium(cached);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Cache schreiben bei jedem isPremium-Wechsel (RC = Source of Truth,
+  // Cache nur ein Hint für nächsten Boot).
+  useEffect(() => {
+    writeCachedPremium(isPremium);
+  }, [isPremium]);
+
+  // RevenueCat initialisieren wenn User sich ändert.
+  // T17.21: KEIN paralleler Polling-Effect mehr (war Race-Condition).
+  // KEIN reset-then-set-Trick in refreshPremiumStatus mehr (war Pop-
+  // Ursache). State-Updates passieren direkt, einmal pro echter
+  // Status-Änderung.
+  const initRanRef = useRef(false);
+  useEffect(() => {
+    if (!user) {
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
     const initializeRevenueCat = async () => {
       try {
-        setIsLoading(true);
-        
-        // RevenueCat mit User ID initialisieren
+        if (!initRanRef.current) {
+          setIsLoading(true);
+        }
+
         await revenueCatService.initialize(user?.uid);
-        
-        // User ID setzen falls bereits initialisiert
+        if (cancelled) return;
+
         if (user?.uid) {
           await revenueCatService.setUserId(user?.uid);
+          if (cancelled) return;
         }
-        
-        // EINFACH: Nur getCustomerInfo, kein restore beim Start!
+
+        // Ersten Premium-Status holen (cached innerhalb von RC SDK)
         try {
           const isPremiumUser = await revenueCatService.isPremium();
+          if (cancelled) return;
           setIsPremium(isPremiumUser);
-          
-          // Falls kein Premium, trotzdem im Hintergrund restore versuchen
+
+          // Falls (noch) kein Premium: restore im Hintergrund versuchen.
+          // Cleanup-Flag verhindert state-set nach Unmount.
           if (!isPremiumUser) {
-            // Async im Hintergrund, blockiert nicht
             revenueCatService.restorePurchases()
               .then(async () => {
-                // Nochmal checken nach restore
+                if (cancelled) return;
                 const isPremiumNow = await revenueCatService.isPremium();
-                if (isPremiumNow && !isPremiumUser) {
-                  setIsPremium(true);
-                }
+                if (cancelled) return;
+                if (isPremiumNow) setIsPremium(true);
               })
-              .catch(() => {}); // Ignoriere Fehler
+              .catch(() => {});
           }
-        } catch (error) {
-          // Bei Fehler: Kein Premium
-          setIsPremium(false);
+        } catch {
+          // Bei Fehler: cached value behalten, nicht künstlich auf false setzen
         }
-        
-        // Premium Status und Offerings laden (mit Timeout)
-        const loadPromises = [
-          refreshPremiumStatus(),
-          loadOfferings()
-        ];
-        
-        // 10 Sekunden Timeout für RevenueCat Calls
+
+        // Offerings parallel laden mit Timeout
         await Promise.race([
-          Promise.all(loadPromises),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('RevenueCat timeout')), 10000)
-          )
+          loadOfferings(),
+          new Promise<void>((resolve) =>
+            setTimeout(() => resolve(), 10000)
+          ),
         ]);
+        if (cancelled) return;
 
         console.log('✅ RevenueCat Provider: Fully initialized');
-
       } catch (error) {
         console.error('❌ RevenueCat Provider initialization failed:', error);
-        // App soll trotzdem funktionieren - setze Safe Defaults
-        setIsPremium(false);
-        setOfferings([]);
-        console.log('🛒 RevenueCat Provider: Using safe defaults due to error');
+        if (!cancelled) setOfferings([]);
       } finally {
-        setIsLoading(false);
-        setHasCheckedInitialStatus(true);
+        if (!cancelled) {
+          setIsLoading(false);
+          initRanRef.current = true;
+        }
       }
     };
 
-    // Nur initialisieren wenn User vorhanden (verhindert Race Conditions)
-    if (user) {
-      initializeRevenueCat();
-    } else {
-      setIsLoading(false);
-    }
+    initializeRevenueCat();
+    return () => { cancelled = true; };
   }, [user?.uid]);
-  
-  // SOFORTIGER Premium-Check beim App-Start (ohne Verzögerung!)
-  useEffect(() => {
-    // Skip wenn kein User - wird automatisch nochmal laufen wenn User kommt
-    if (!user) return;
-    
-    const checkPremiumOnMount = async () => {
-      
-      // Warte kurz bis RevenueCat ready ist
-      let retries = 0;
-      const maxRetries = 10;
-      
-      while (retries < maxRetries) {
-        try {
-          if (revenueCatService.isInitialized) {
-            const isPremiumNow = await revenueCatService.isPremium();
-            setIsPremium(isPremiumNow);
-            console.log('✅ App-Start Premium Check:', isPremiumNow ? 'PREMIUM AKTIV' : 'Kein Premium');
-            break;
-          }
-        } catch (error) {
-          console.log('⏳ Warte auf RevenueCat...', retries);
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 200));
-        retries++;
-      }
-    };
-    
-    checkPremiumOnMount();
-  }, [user]);
 
   const refreshPremiumStatus = async (forceRefresh: boolean = false) => {
+    // T17.21: KEIN reset-then-set Trick mehr. setIsPremium nur einmal
+    // mit dem echten Wert. React diffd selbst und re-rendert nur wenn
+    // sich der Wert ändert — kein "Force-Flip" nötig.
     try {
-      console.log('🛒 Refreshing premium status...', { forceRefresh });
-      
       let premium: boolean;
-      
       try {
         if (forceRefresh) {
-          // FORCE REFRESH: Cache löschen und neu laden
           const customerInfo = await revenueCatService.forceRefreshCustomerInfo();
           premium = !!customerInfo?.entitlements?.active?.[REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM];
         } else {
-          // Normal: Cache nutzen für Speed
           premium = await revenueCatService.isPremium();
         }
       } catch (error) {
         console.warn('⚠️ Premium Check fehlgeschlagen, nutze Fallback:', error);
-        // Fallback: Versuche normalen Check
         try {
           premium = await revenueCatService.isPremium();
-        } catch (fallbackError) {
-          console.error('❌ Auch Fallback fehlgeschlagen:', fallbackError);
-          premium = false;
+        } catch {
+          // Bei doppeltem Fail: bestehenden State nicht antasten.
+          // Reset auf false würde alle Premium-User „depremium-en" bis
+          // zum nächsten erfolgreichen Check — unerwünscht.
+          return;
         }
       }
-      
-      // Force State Update auch wenn Wert gleich ist
-      setIsPremium(false); // Reset
-      setTimeout(() => setIsPremium(premium), 100); // Dann setzen
-      
+      setIsPremium(premium);
       console.log('🛒 Premium Status refreshed:', premium, forceRefresh ? '(forced)' : '(cached)');
     } catch (error) {
       console.error('❌ Error refreshing premium status:', error);
-      setIsPremium(false);
     }
   };
 
