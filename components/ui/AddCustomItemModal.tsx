@@ -261,10 +261,10 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
           </>
         ) : null}
 
-        {/* Icon — T17.35: Grid statt horizontal scroll. 5 Spalten ohne
-            Label-Text, kompakter Look. Untere Kante mit LinearGradient-
-            Fade auf Sheet-Background, damit überstehende Icons sanft
-            "verschwinden" statt hart abgeschnitten zu wirken. */}
+        {/* Icon — T17.36: 5-Spalten-Grid mit space-between Layout.
+            width-Prozent statt gap → garantiert 5 Items pro Zeile
+            ohne Überlauf. Soft-Fade am unteren Rand subtiler (kürzer,
+            späte Color-Stops) damit's nicht als „Schatten" liest. */}
         <Text style={[labelStyle(theme)]}>Icon</Text>
         <View style={{ position: 'relative', marginBottom: 18 }}>
           <ScrollView
@@ -273,9 +273,10 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
             contentContainerStyle={{
               flexDirection: 'row',
               flexWrap: 'wrap',
-              gap: 10,
+              justifyContent: 'space-between',
+              rowGap: 12,
               paddingVertical: 4,
-              paddingBottom: 24,
+              paddingBottom: 16,
             }}
           >
             {PRODUCT_ICONS.map((ic) => {
@@ -288,9 +289,9 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
                     setIconKey(ic.key);
                     Haptics.selectionAsync().catch(() => {});
                   }}
-                  // 5 Spalten: (100% - 4 * gap) / 5. Bei gap 10 und
-                  // FilterSheet-inner-Breite ~ 330 px: ~ 58 px je Item.
-                  // width 18% = 5 Items mit etwas Atemraum.
+                  // 5 Spalten mit justifyContent: space-between.
+                  // 18% × 5 = 90 %, 10 % verteilt das space-between
+                  // gleichmäßig auf die 4 Lücken zwischen den Items.
                   style={({ pressed }) => ({
                     width: '18%',
                     alignItems: 'center',
@@ -319,18 +320,20 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
               );
             })}
           </ScrollView>
-          {/* Soft-Fade am unteren Rand — analog zum Pattern unter den
-              Tab-Bar-Menüs. Überstehende Icons fade'n graceful auf
-              Sheet-Background statt hart abgeschnitten. */}
+          {/* Soft-Fade am unteren Rand — kürzer (24 px) und Color-Stops
+              spät (50 %), damit der Fade nur in den letzten ~12 px
+              wirklich greift. Vorher 32 px durchgängig → liest sich
+              als dunkler „Schatten" über der ganzen letzten Reihe. */}
           <LinearGradient
             pointerEvents="none"
             colors={['transparent', theme.surface]}
+            locations={[0.5, 1]}
             style={{
               position: 'absolute',
               left: 0,
               right: 0,
               bottom: 0,
-              height: 32,
+              height: 24,
             }}
           />
         </View>
