@@ -264,12 +264,45 @@ async function tryRewe(ean: string): Promise<ExternalProductDoc | null> {
   }
 }
 
+// T3: Globus-Scraper Cloud Function endpoint (europe-west1).
+// Aktuell skeleton — returnt { found: false } bis die HTML-Parse-
+// Logik in cloud-functions/globus-scraper/index.js implementiert ist.
+// Sobald die CF deployed ist und echte Daten liefert, funktioniert
+// die Cascade automatisch ohne weitere Client-Änderung.
+const GLOBUS_FN_URL =
+  (process as any).env?.EXPO_PUBLIC_GLOBUS_FN_URL ||
+  'https://europe-west1-markendetektive-895f7.cloudfunctions.net/globusLookupByEan';
+
 async function tryGlobus(ean: string): Promise<ExternalProductDoc | null> {
-  // T3-Stub: Globus-Cloud-Function existiert noch nicht. Wenn die CF
-  // implementiert ist, hier einen httpsCallable-Aufruf einbauen.
-  // void-ean damit ESLint nicht meckert.
-  void ean;
-  return null;
+  try {
+    // Callable-onCall-Format: { data: { ean } }, returnt { result: {...} }.
+    const res = await fetch(GLOBUS_FN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: { ean } }),
+    });
+    if (!res.ok) {
+      // 404/500 etc. → silently fail, Cascade fällt zu OpenFood durch.
+      return null;
+    }
+    const json = await res.json();
+    const payload = json?.result ?? json;
+    if (!payload?.found || !payload?.product) return null;
+    // Globus-Schema = identisch zu ScrapedProduct (CF beschreibt das so).
+    const normalised = normaliseScraped(payload.product as any);
+    await writeThrough(ean, 'globus', normalised);
+    return {
+      ...normalised,
+      ean: normaliseEan(ean),
+      source: 'globus',
+      cachedAt: Timestamp.fromMillis(Date.now()),
+    } as ExternalProductDoc;
+  } catch (e: any) {
+    // Netzwerk-Fehler / CF nicht deployed / Timeout → null.
+    // Wichtig: NICHT werfen, damit die Cascade weiter zu OpenFood fällt.
+    console.warn('externalProductService.tryGlobus failed', e?.message);
+    return null;
+  }
 }
 
 async function tryOpenFood(ean: string): Promise<ExternalProductDoc | null> {

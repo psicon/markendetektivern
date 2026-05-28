@@ -1,0 +1,15 @@
+{
+  "name": "globus-scraper",
+  "version": "0.1.0",
+  "description": "Globus-Produkt-Lookup für External-Lookup-Cascade. EAN → Globus-Produkt-Page → JSON.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.0.0"
+  },
+  "private": true
+}
