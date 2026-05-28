@@ -111,10 +111,11 @@ export function RewardsWalkthrough({
     ? 'Verstanden'
     : `Weiter (${stepIndex}/${totalSteps})`;
 
-  // Hero + earn-row + redeem-Card sind alle groß — Pulse darauf wirkt
-  // unruhig. Im Vergleich zu ProductDetailWalkthrough wo ab Phase 3
-  // kleine Buttons gespotlighted werden (Pulse hilft Blick) sind hier
-  // alle 3 Phasen "große Container". Daher disablePulse durchgängig.
+  // Pulse-Outline aktiviert auf allen Phasen — User-Feedback T17.28:
+  // "die animation fehlt teilweise". Auch große Container profitieren
+  // von der subtilen Atem-Animation, weil sie klar markiert WELCHES
+  // Element gerade beschrieben wird. Vorher wurde sie als „unruhig"
+  // eingestuft, in der Praxis wirkt sie aber einladend.
   return (
     <SpotlightOverlay
       visible
@@ -125,7 +126,6 @@ export function RewardsWalkthrough({
       onSkip={onDismiss}
       onPrimary={advance}
       primaryLabel={primaryLabel}
-      disablePulse
     />
   );
 }

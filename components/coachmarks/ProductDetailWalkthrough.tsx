@@ -161,14 +161,12 @@ export function ProductDetailWalkthrough({
   // animated Rect-Werte im Overlay bleiben erhalten und gleiten
   // mit `withSpring` zur neuen Position (siehe SpotlightOverlay).
   //
-  // Pulse-Animation: in den ersten beiden Phasen (hero + context)
-  // sind die Spotlight-Targets sehr groß (ganze Title-Block bzw.
-  // ganze Alternativen-Section). Auf solchen Flächen wirkt das
-  // 4-px-Atmen unruhig statt einladend → wir setzen disablePulse.
-  // Ab Phase 3 (favorite/cart/rating) sind die Targets klein
-  // (48-px-Buttons) — da bringt die Pulse den Blick auf das
-  // konkrete Element, deshalb dort an.
-  const disablePulse = phase === 'hero' || phase === 'context';
+  // T17.28: Pulse-Animation jetzt auf ALLEN Phasen aktiv. Vorher
+  // war sie auf hero+context aus (Argument: zu unruhig auf großen
+  // Containern). In der Praxis war das aber „animation fehlt
+  // teilweise"-Gefühl — die subtile Atem-Animation hilft auch bei
+  // großen Targets, weil sie klar signalisiert WELCHES Element
+  // gerade beschrieben wird.
 
   return (
     <SpotlightOverlay
@@ -180,7 +178,6 @@ export function ProductDetailWalkthrough({
       skipLabel="Tour beenden"
       onPrimary={isLastStep ? onDismiss : advance}
       primaryLabel={primaryLabel}
-      disablePulse={disablePulse}
     />
   );
 }
