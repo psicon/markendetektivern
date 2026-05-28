@@ -7,6 +7,7 @@ import {
   setLevelUpHandler,
   setPointsEarnedHandler,
 } from '@/lib/services/achievementService';
+import { formatCents } from '@/lib/types/cashback';
 import { CoachmarkService } from '@/lib/services/coachmarkService';
 import { gamificationSettingsService } from '@/lib/services/gamificationSettingsService';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
@@ -172,6 +173,36 @@ export function bannerDataFromLevelUp(
         router.push('/achievements' as any);
       } catch (e) {
         console.warn('LevelUp banner nav failed (non-fatal):', e);
+      }
+    },
+  };
+}
+
+// T17.22: Cashback-Payout Celebration. Wird vom pending/[id]-Screen
+// gefeuert wenn state pending→approved transitioniert. Zentral hier
+// gebaut damit's durch dieselbe Banner-Pipeline läuft wie Achievements/
+// Level-Ups (CLAUDE.md: "ONE celebration component app-wide").
+// Lottie: money.json (im Banner als 72×72-Icon). Tint: brand-grün.
+export function bannerDataFromCashbackPayout(cashbackCents: number): BannerData {
+  const formatted = cashbackCents > 0 ? `+${formatCents(cashbackCents)}` : 'Cashback gutgeschrieben';
+  return {
+    title: 'Cashback gutgeschrieben!',
+    subtitle: cashbackCents > 0
+      ? `${formatted} sind deinem Konto gutgeschrieben.`
+      : 'Dein Bon wurde verbucht.',
+    lottie: (() => {
+      try {
+        return require('@/assets/lottie/money.json');
+      } catch {
+        return require('@/assets/lottie/confetti.json');
+      }
+    })(),
+    tint: '#0d8575',
+    onTap: () => {
+      try {
+        router.push('/cashback/history' as any);
+      } catch (e) {
+        console.warn('Cashback banner nav failed (non-fatal):', e);
       }
     },
   };

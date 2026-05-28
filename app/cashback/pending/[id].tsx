@@ -14,10 +14,11 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import * as Haptics from 'expo-haptics';
 import { Image as ExpoImage } from 'expo-image';
 import { getDownloadURL, ref as storageRef } from '@react-native-firebase/storage';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -32,6 +33,7 @@ import {
   DetailHeader,
   DETAIL_HEADER_ROW_HEIGHT,
 } from '@/components/design/DetailHeader';
+import { bannerDataFromCashbackPayout, useGamification } from '@/components/ui/GamificationProvider';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -137,6 +139,7 @@ export default function CashbackPendingScreen() {
   const navigation = useNavigation();
   const { theme, shadows } = useTokens();
   const { user } = useAuth();
+  const { showBanner } = useGamification();
 
   const [doc, setDoc] = useState<MirrorDoc | null>(null);
   const [hasResponded, setHasResponded] = useState(false);
@@ -321,6 +324,31 @@ export default function CashbackPendingScreen() {
     }
     return viewStateFor(doc.status);
   }, [doc, hasResponded, uploadStep]);
+
+  // T17.22: Approval-Celebration. Wenn der Bon LIVE während der User
+  // auf dem Screen ist von pending/review/uploading → approved
+  // transitioniert, feuern wir Banner mit money-Lottie + Success-
+  // Haptik. NICHT feuern wenn der Screen direkt mit state=approved
+  // geöffnet wird (z.B. via History) — dann hat der User die News
+  // schon „verstanden", die Animation wäre stale.
+  const prevStateRef = useRef<ViewState | null>(null);
+  const celebratedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevStateRef.current;
+    prevStateRef.current = state;
+    // Erste Render-Pass: prev ist null → keine Transition, nur "first sighting".
+    if (prev === null) return;
+    if (prev === state) return;
+    if (state !== 'approved') return;
+    // Nur einmal pro Bon-Id celebrieren (selbst wenn der State später
+    // erneut flippt durch eine spätere Mutation).
+    const currentId = String(params.id ?? '');
+    if (celebratedIdRef.current === currentId) return;
+    celebratedIdRef.current = currentId;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    const cents = typeof doc?.cashbackCents === 'number' ? doc.cashbackCents : 0;
+    showBanner(bannerDataFromCashbackPayout(cents));
+  }, [state, doc?.cashbackCents, params.id, showBanner]);
 
   const primary = theme.primary ?? '#0d8575';
   const warn = '#d6603a';

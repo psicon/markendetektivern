@@ -11,6 +11,7 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
@@ -154,6 +155,10 @@ export default function CashbackReviewScreen() {
       // Non-fatal — pending screen will still upload, just won't have
       // the placeholder shown in history during the brief window.
     }
+    // T17.22: Submit-Feedback — leichte Haptik damit der User
+    // bestätigt fühlt dass der Tap registriert wurde. Die volle
+    // Banner+Celebration kommt erst bei Approval in pending/[id].tsx.
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     router.replace({
       pathname: '/cashback/pending/[id]' as any,
       params: {
