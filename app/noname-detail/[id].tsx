@@ -39,6 +39,7 @@ import {
   type EnttarnteAlternative,
 } from '@/components/design/EnttarnteAlternativesList';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
+import { AiComparisonScale } from '@/components/design/AiComparisonScale';
 import { StufenChips } from '@/components/design/StufenChips';
 import { CoachmarkScrollProvider } from '@/components/coachmarks/CoachmarkScrollContext';
 import {
@@ -1533,6 +1534,12 @@ export default function NoNameDetailScreen() {
                 </View>
               </View>
             ) : null}
+
+            {/* T17.47: AI-Comparison-Bewertung — nur wenn die CF
+                ai-product-comparison für dieses Produkt einen Score
+                geliefert hat (Stufe-1/2 ohne Markenprodukt-Link
+                bekommen score=undefined → Component returnt null). */}
+            <AiComparisonScale aiComparison={(p as any)?.aiComparison ?? null} />
 
             {/* Detektiv-Check-Zeile — ÜBER den Inhaltstabellen, exakt
                 wie auf der Stufe-3/4/5-Seite (product-comparison). Statt

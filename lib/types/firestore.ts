@@ -50,6 +50,26 @@ export interface Produkte {
   bildCleanProcessedAt?: Timestamp;
   bildCleanError?: string;
   bildCleanErrorAt?: Timestamp;
+  /**
+   * KI-basierter NoName-vs-Markenprodukt-Vergleich. Gefüttert von
+   * cloud-functions/ai-product-comparison. Score 1-5 (1=NoName klar
+   * schlechter, 5=NoName klar besser). reasoning ist 1-2 Sätze DE.
+   * Nicht alle Produkte haben das — Stufe-1/2-Produkte (kein
+   * Markenprodukt-Link) bekommen `skipped: 'no-markenprodukt'`.
+   */
+  aiComparison?: AiComparison;
+}
+
+export interface AiComparison {
+  score?: 1 | 2 | 3 | 4 | 5;
+  reasoning?: string;
+  model?: string;
+  promptVersion?: string;
+  inputHash?: string;
+  updatedAt?: Timestamp;
+  skipped?: 'no-markenprodukt' | 'incomparable';
+  lastError?: string;
+  lastErrorAt?: Timestamp;
 }
 
 export interface MarkenProdukte {

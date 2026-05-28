@@ -43,6 +43,7 @@ import { ImageZoomModal, type SourceRect } from '@/components/design/ImageZoomMo
 import { getProductImage } from '@/lib/utils/productImage';
 import { calculateSavings } from '@/lib/utils/savings';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
+import { AiComparisonScale } from '@/components/design/AiComparisonScale';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { CoachmarkScrollProvider } from '@/components/coachmarks/CoachmarkScrollContext';
 import {
@@ -2446,6 +2447,15 @@ export default function ProductComparisonScreen() {
             </Text>
           </View>
         )}
+
+        {/* T17.47: AI-Comparison-Bewertung des aktuell-gepickten
+            NoName-Produkts. Sitzt zwischen Alternativen-Carousel und
+            Nutrition/Ingredients-Tabs. Component returnt null wenn
+            kein Score → andere Sections rücken automatisch nach. */}
+        <AiComparisonScale
+          aiComparison={(picked as any)?.aiComparison ?? null}
+          title={picked?.name ? `KI-Vergleich: ${picked.name}` : 'KI-Vergleich'}
+        />
 
         {/* ─── Tabs: Inhaltsstoffe / Nährwerte ─────────────────────
             Nur sichtbar wenn:
