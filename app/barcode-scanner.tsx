@@ -652,7 +652,7 @@ export default function BarcodeScannerScreen() {
             Um Barcodes zu scannen, benötigt die App Zugriff auf deine Kamera.
             {permission.canAskAgain ? '' : '\n\nBitte erlaube den Zugriff in den Einstellungen.'}
           </ThemedText>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.permissionButton, { backgroundColor: colors.primary }]}
             onPress={async () => {
               if (permission.canAskAgain) {
@@ -667,6 +667,46 @@ export default function BarcodeScannerScreen() {
               {permission.canAskAgain ? 'Kamera-Zugriff erlauben' : 'Einstellungen öffnen'}
             </ThemedText>
           </TouchableOpacity>
+          {/* T17.43: Fallback ohne Kamera — direkt manueller Barcode-
+              Input via Alert.prompt (iOS-only API, aber das ist
+              genau der iOS-Sim-Use-Case). Auf Android in Permission-
+              Denied-State sehen User stattdessen den "Einstellungen
+              öffnen"-Hauptbutton drüber. */}
+          {Platform.OS === 'ios' ? (
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                Alert.prompt(
+                  'Barcode eingeben',
+                  'EAN (z.B. 4013900013457)',
+                  [
+                    { text: 'Abbrechen', style: 'cancel' },
+                    {
+                      text: 'Suchen',
+                      onPress: (text) => {
+                        const trimmed = (text ?? '').trim();
+                        if (trimmed) searchProductByEAN(trimmed);
+                      },
+                    },
+                  ],
+                  'plain-text',
+                  '',
+                  'numeric' as any,
+                );
+              }}
+              style={{ marginTop: 16, padding: 12 }}
+            >
+              <ThemedText
+                style={{
+                  fontSize: 14,
+                  textDecorationLine: 'underline',
+                  opacity: 0.85,
+                }}
+              >
+                Oder Barcode manuell eingeben
+              </ThemedText>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </ThemedView>
     );
@@ -757,17 +797,19 @@ export default function BarcodeScannerScreen() {
               </View>
 
               {/* Manual Input Button - direkt unter Instructions */}
-              <TouchableOpacity 
-                style={[styles.manualInputButton, { 
-                  backgroundColor: (isSearching || hasNavigated || !cameraReady) ? 'rgba(66, 169, 104, 0.5)' : colors.primary,
-                  opacity: cameraReady ? 1 : 0.5, // Visueller Hinweis für deaktiviert
+              <TouchableOpacity
+                // T17.43: cameraReady-Gate entfernt — manueller
+                // Barcode-Input ist explizit der NICHT-Kamera-Pfad.
+                // Im iOS-Sim gibt's keine Kamera → ohne Gate ist
+                // External-Lookup-Cascade trotzdem testbar.
+                style={[styles.manualInputButton, {
+                  backgroundColor: (isSearching || hasNavigated) ? 'rgba(66, 169, 104, 0.5)' : colors.primary,
                 }]}
                 onPress={() => {
-                  if (!cameraReady) return;
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   setShowManualInput(true);
                 }}
-                disabled={isSearching || hasNavigated || !cameraReady}
+                disabled={isSearching || hasNavigated}
               >
                 {isSearching ? (
                   <>
