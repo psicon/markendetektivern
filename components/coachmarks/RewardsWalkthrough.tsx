@@ -12,7 +12,8 @@
 //      scannen). Macht konkret was der User TUT um Cashback zu
 //      verdienen + nennt das wöchentliche Limit.
 //   3. **redeem** — Spotlight auf die "Cashback einlösen"-Card.
-//      Erklärt, wie das Geld aufs Konto kommt sobald 10 € voll sind.
+//      Erklärt was bei 10 € Schwelle passiert: Gutschein-Auswahl
+//      ODER Auszahlung — beides über unseren Partner.
 //
 // Im Vergleich zum vorherigen Slide-Modal (CoachmarkOverlay):
 //   • Pointet auf reale UI-Elemente → User lernt durch ZEIGEN, nicht
@@ -52,7 +53,7 @@ function configForPhase(
         anchorId: REWARDS_ANCHOR_HERO,
         title: 'Dein Cashback-Guthaben',
         body:
-          'Hier siehst du, wie viel Geld du schon gesammelt hast. Sobald 10 € voll sind, überweisen wir dir den Betrag direkt aufs Bankkonto.',
+          'Hier siehst du, wie viel Geld du schon gesammelt hast. Ab 10 € kannst du es einlösen — als Gutschein oder Auszahlung.',
         lottie: require('@/assets/lottie/gift.json'),
       };
     case 'earn':
@@ -66,9 +67,9 @@ function configForPhase(
     case 'redeem':
       return {
         anchorId: REWARDS_ANCHOR_REDEEM,
-        title: 'Auszahlen ab 10 €',
+        title: 'Ab 10 € geht’s los',
         body:
-          'Ab 10 € kannst du dir dein Cashback auszahlen lassen. Tipp einfach auf „Cashback einlösen" — wir überweisen den vollen Betrag aufs Bankkonto.',
+          'Such dir bei unserem Partner einen Gutschein deiner Wahl aus — z.B. Amazon, Rewe oder Apple — oder lass dir den Betrag auszahlen.',
         lottie: require('@/assets/lottie/savings.json'),
       };
   }
