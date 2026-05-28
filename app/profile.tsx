@@ -1364,8 +1364,48 @@ export default function ProfileScreen() {
               label="Spielerische Inhalte ausblenden"
               value={gamificationDisabled}
               onChange={handleGamificationToggle}
-              last
             />
+            {/* T17.31: Cashback-Zustimmung lässt sich hier zurückziehen
+                — erfüllt das Versprechen vom Consent-Screen "Du kannst
+                deine Zustimmung in den Einstellungen jederzeit
+                zurückziehen". Toggle erscheint nur wenn der User
+                aktuell Cashback aktiviert hat. Aus-Toggeln triggert
+                Confirm-Alert; bestätigt → revokeCashbackConsent. */}
+            {cashback.hasConsent ? (
+              <ToggleRow
+                icon="cash-multiple"
+                label="Cashback aktiv"
+                value
+                onChange={() => {
+                  Alert.alert(
+                    'Cashback deaktivieren?',
+                    'Du kannst keine Bons mehr einreichen. Bereits gutgeschriebenes Cashback bleibt erhalten — Auszahlung wie gewohnt ab 10 €.',
+                    [
+                      { text: 'Abbrechen', style: 'cancel' },
+                      {
+                        text: 'Deaktivieren',
+                        style: 'destructive',
+                        onPress: async () => {
+                          if (!user?.uid) return;
+                          try {
+                            const { revokeCashbackConsent } = await import(
+                              '@/lib/services/cashbackService'
+                            );
+                            await revokeCashbackConsent(user.uid);
+                          } catch (e: any) {
+                            Alert.alert(
+                              'Fehler',
+                              e?.message ?? 'Bitte erneut versuchen.',
+                            );
+                          }
+                        },
+                      },
+                    ],
+                  );
+                }}
+                last
+              />
+            ) : null}
           </MenuCard>
         </View>
 
