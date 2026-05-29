@@ -608,10 +608,10 @@ export default function ProductComparisonScreen() {
   const [infoSheet, setInfoSheet] = useState<{
     title: string;
     brandImage?: string | null;
-    markeText?: string | null;
+    markeInfos?: string | null; // kuratiertes infos-Feld der MARKE
     herstellerName?: string | null;
     herstellerHerkunft?: string | null;
-    herstellerText?: string | null;
+    herstellerText?: string | null; // KI-Bewertung des echten Herstellers
   } | null>(null);
 
   // Stufe-Copy aus Remote Config laden + state für Re-Render forcen
@@ -1507,21 +1507,27 @@ export default function ProductComparisonScreen() {
               // sekundär vom Markenprodukt-Doc selbst (zukunftssicher).
               const marke = (mp as any)?.marke;
               const herstellerNew = (mp as any)?.hersteller; // hersteller_new = echter Hersteller
-              const markeAi = marke?.aiHersteller;
               const herstellerAi = herstellerNew?.aiHersteller;
-              const usableMarkeAi = markeAi && !markeAi.skipped ? markeAi : null;
               const usableHerstellerAi =
                 herstellerAi && !herstellerAi.skipped ? herstellerAi : null;
+              // MARKE-Infos = kuratiertes infos-Feld (beschreibt für bekannte
+              // Marken wie Bärenmarke wirklich die Marke). KEINE KI hier —
+              // die KI-Marken-Bewertung beschrieb fälschlich die Firma.
+              const markeInfosRaw = marke?.infos ?? (mp as any)?.infos;
+              const markeInfos =
+                typeof markeInfosRaw === 'string' && markeInfosRaw.trim().length > 10
+                  ? markeInfosRaw.trim()
+                  : null;
               return (
                 <Pressable
                   onPress={() => {
                     collapseAllPills();
                     setInfoSheet({
-                      // Titel = MARKE-Name (z.B. "Greisinger"), NICHT die
-                      // Hersteller-Entität ("Greisinger GmbH").
+                      // Titel = MARKE-Name (z.B. "Bärenmarke"), NICHT die
+                      // Hersteller-Entität ("Hochwald Foods GmbH").
                       title: marke?.name || brandName,
                       brandImage: marke?.bild || herstellerNew?.bild || null,
-                      markeText: usableMarkeAi?.summary || null,
+                      markeInfos,
                       herstellerName:
                         herstellerNew?.herstellername || herstellerNew?.name || null,
                       herstellerHerkunft: usableHerstellerAi?.herkunft || null,
@@ -2566,56 +2572,94 @@ export default function ProductComparisonScreen() {
         title={infoSheet?.title ?? ''}
         onClose={() => setInfoSheet(null)}
       >
-        {/* ─── MARKE: Bild links + KI-Infos zur Marke rechts ─────────── */}
-        {infoSheet?.brandImage || infoSheet?.markeText ? (
-          <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-            {infoSheet?.brandImage ? (
-              <View
-                style={{
-                  width: 88,
-                  height: 64,
-                  borderRadius: 10,
-                  backgroundColor: '#ffffff',
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: 6,
-                }}
-              >
-                <Image
-                  source={{ uri: infoSheet.brandImage }}
-                  style={{ width: '100%', height: '100%' }}
-                  resizeMode="contain"
-                />
-              </View>
-            ) : null}
-            {infoSheet?.markeText ? (
-              <Text
-                style={{
-                  flex: 1,
-                  fontFamily,
-                  fontWeight: fontWeight.medium,
-                  fontSize: 13,
-                  lineHeight: 19,
-                  color: theme.textSub,
-                }}
-              >
-                {infoSheet.markeText}
-              </Text>
-            ) : null}
-          </View>
+        {/* ═══ MARKE ═══ Logo (eigene Zeile, links) + Name, dann kuratierte
+            Marken-Infos in voller Breite darunter → kein White-Space. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+          <MaterialCommunityIcons name="tag-outline" size={14} color={theme.textMuted} />
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.bold as any,
+              fontSize: 11,
+              letterSpacing: 0.8,
+              color: theme.textMuted,
+            }}
+          >
+            MARKE
+          </Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+          {infoSheet?.brandImage ? (
+            <View
+              style={{
+                width: 72,
+                height: 56,
+                borderRadius: 10,
+                backgroundColor: '#ffffff',
+                borderWidth: 1,
+                borderColor: theme.border,
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 6,
+              }}
+            >
+              <Image
+                source={{ uri: infoSheet.brandImage }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="contain"
+              />
+            </View>
+          ) : null}
+          <Text
+            style={{
+              flex: 1,
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 17,
+              color: theme.text,
+              letterSpacing: -0.2,
+            }}
+          >
+            {infoSheet?.title ?? ''}
+          </Text>
+        </View>
+        {infoSheet?.markeInfos ? (
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.regular,
+              fontSize: 14,
+              lineHeight: 21,
+              color: theme.text,
+            }}
+          >
+            {infoSheet.markeInfos}
+          </Text>
         ) : null}
 
-        {/* ─── HERSTELLER: Name + Herkunft + KI-Text (kein grauer Kasten) ── */}
+        {/* ═══ HERSTELLER ═══ Name + Herkunft + KI-Text (kein grauer Kasten) */}
         {infoSheet?.herstellerName || infoSheet?.herstellerText ? (
-          <View>
+          <View style={{ marginTop: 18 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <MaterialCommunityIcons name="factory" size={14} color={theme.textMuted} />
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.bold as any,
+                  fontSize: 11,
+                  letterSpacing: 0.8,
+                  color: theme.textMuted,
+                }}
+              >
+                HERSTELLER
+              </Text>
+            </View>
             {infoSheet?.herstellerName ? (
               <Text
                 style={{
                   fontFamily,
                   fontWeight: fontWeight.extraBold,
-                  fontSize: 14,
+                  fontSize: 15,
                   color: theme.text,
                   letterSpacing: -0.1,
                   marginBottom: 2,
@@ -2641,32 +2685,34 @@ export default function ProductComparisonScreen() {
               <Text
                 style={{
                   fontFamily,
-                  fontWeight: fontWeight.medium,
-                  fontSize: 13,
-                  lineHeight: 19,
-                  color: theme.textSub,
+                  fontWeight: fontWeight.regular,
+                  fontSize: 14,
+                  lineHeight: 21,
+                  color: theme.text,
                 }}
               >
                 {infoSheet.herstellerText}
               </Text>
             ) : null}
+            {/* KI-Hinweis nur für den KI-generierten Hersteller-Teil */}
+            {infoSheet?.herstellerText ? (
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 10,
+                  color: theme.textMuted,
+                  letterSpacing: 0.2,
+                  marginTop: 10,
+                }}
+              >
+                KI-Einschätzung auf Basis von Modellwissen · keine tagesaktuellen Angaben
+              </Text>
+            ) : null}
           </View>
         ) : null}
 
-        {/* KI-Hinweis */}
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 10,
-            color: theme.textMuted,
-            letterSpacing: 0.2,
-            marginTop: 14,
-            paddingBottom: 8,
-          }}
-        >
-          KI-Einschätzung auf Basis von Modellwissen · keine tagesaktuellen Angaben
-        </Text>
+        <View style={{ height: 8 }} />
       </FilterSheet>
 
       {/* Ratings sheet — opened from any star ActionButton. Shared for both
