@@ -608,10 +608,11 @@ export default function ProductComparisonScreen() {
   // null = zu, Object = sichtbar mit den jeweiligen Daten.
   const [infoSheet, setInfoSheet] = useState<{
     title: string;
-    body: string;
     brandImage?: string | null;
-    herstellerAi?: any;
+    markeText?: string | null;
     herstellerName?: string | null;
+    herstellerHerkunft?: string | null;
+    herstellerText?: string | null;
   } | null>(null);
 
   // Stufe-Copy aus Remote Config laden + state für Re-Render forcen
@@ -1507,36 +1508,25 @@ export default function ProductComparisonScreen() {
               // sekundär vom Markenprodukt-Doc selbst (zukunftssicher).
               const marke = (mp as any)?.marke;
               const herstellerNew = (mp as any)?.hersteller; // hersteller_new = echter Hersteller
-              const rawInfos = marke?.infos ?? (mp as any)?.infos;
-              const infosText =
-                typeof rawInfos === 'string' && rawInfos.trim().length > 0
-                  ? rawInfos.trim()
-                  : null;
-              // Fallback wenn `infos` leer: NUR Marken-Adresse als
-              // Zusatz (nicht Hersteller-Adresse!). Wenn auch das
-              // fehlt → klare "keine Infos hinterlegt"-Meldung.
-              const fallbackLines = [
-                marke?.adresse ? String(marke.adresse) : null,
-                [marke?.plz, marke?.stadt].filter(Boolean).join(' ') ||
-                  null,
-                marke?.land ? String(marke.land) : null,
-              ].filter(Boolean) as string[];
-              const sheetBody =
-                infosText ??
-                (fallbackLines.length > 0
-                  ? fallbackLines.join('\n')
-                  : 'Zu dieser Marke sind aktuell keine Zusatz-Informationen hinterlegt.');
+              const markeAi = marke?.aiHersteller;
+              const herstellerAi = herstellerNew?.aiHersteller;
+              const usableMarkeAi = markeAi && !markeAi.skipped ? markeAi : null;
+              const usableHerstellerAi =
+                herstellerAi && !herstellerAi.skipped ? herstellerAi : null;
               return (
                 <Pressable
                   onPress={() => {
                     collapseAllPills();
                     setInfoSheet({
-                      title: brandName,
-                      body: sheetBody,
+                      // Titel = MARKE-Name (z.B. "Greisinger"), NICHT die
+                      // Hersteller-Entität ("Greisinger GmbH").
+                      title: marke?.name || brandName,
                       brandImage: marke?.bild || herstellerNew?.bild || null,
-                      herstellerAi: herstellerNew?.aiHersteller ?? null,
+                      markeText: usableMarkeAi?.summary || null,
                       herstellerName:
                         herstellerNew?.herstellername || herstellerNew?.name || null,
+                      herstellerHerkunft: usableHerstellerAi?.herkunft || null,
+                      herstellerText: usableHerstellerAi?.summary || null,
                     });
                   }}
                   style={({ pressed }) => ({
@@ -2587,63 +2577,107 @@ export default function ProductComparisonScreen() {
         title={infoSheet?.title ?? ''}
         onClose={() => setInfoSheet(null)}
       >
-        {/* Markenbild */}
-        {infoSheet?.brandImage ? (
-          <View style={{ alignItems: 'center', marginBottom: 12 }}>
-            <View
-              style={{
-                width: 96,
-                height: 64,
-                borderRadius: 12,
-                backgroundColor: '#ffffff',
-                borderWidth: 1,
-                borderColor: theme.border,
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: 8,
-              }}
-            >
-              <Image
-                source={{ uri: infoSheet.brandImage }}
-                style={{ width: '100%', height: '100%' }}
-                resizeMode="contain"
-              />
-            </View>
+        {/* ─── MARKE: Bild links + KI-Infos zur Marke rechts ─────────── */}
+        {infoSheet?.brandImage || infoSheet?.markeText ? (
+          <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+            {infoSheet?.brandImage ? (
+              <View
+                style={{
+                  width: 88,
+                  height: 64,
+                  borderRadius: 10,
+                  backgroundColor: '#ffffff',
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 6,
+                }}
+              >
+                <Image
+                  source={{ uri: infoSheet.brandImage }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="contain"
+                />
+              </View>
+            ) : null}
+            {infoSheet?.markeText ? (
+              <Text
+                style={{
+                  flex: 1,
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 13,
+                  lineHeight: 19,
+                  color: theme.textSub,
+                }}
+              >
+                {infoSheet.markeText}
+              </Text>
+            ) : null}
           </View>
         ) : null}
 
-        {/* Kuratierte Marken-Infos (infos-Feld / Adresse / Fallback) */}
-        {infoSheet?.body ? (
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.regular,
-              fontSize: 14,
-              lineHeight: 21,
-              color: theme.text,
-              paddingBottom: 4,
-            }}
-          >
-            {infoSheet.body}
-          </Text>
+        {/* ─── HERSTELLER: Name + Herkunft + KI-Text (kein grauer Kasten) ── */}
+        {infoSheet?.herstellerName || infoSheet?.herstellerText ? (
+          <View>
+            {infoSheet?.herstellerName ? (
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 14,
+                  color: theme.text,
+                  letterSpacing: -0.1,
+                  marginBottom: 2,
+                }}
+              >
+                {infoSheet.herstellerName}
+              </Text>
+            ) : null}
+            {infoSheet?.herstellerHerkunft ? (
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.bold as any,
+                  fontSize: 12,
+                  color: theme.primary ?? theme.textMuted,
+                  marginBottom: 6,
+                }}
+              >
+                {infoSheet.herstellerHerkunft}
+              </Text>
+            ) : null}
+            {infoSheet?.herstellerText ? (
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 13,
+                  lineHeight: 19,
+                  color: theme.textSub,
+                }}
+              >
+                {infoSheet.herstellerText}
+              </Text>
+            ) : null}
+          </View>
         ) : null}
 
-        {/* EINE KI-Karte: der echte Hersteller (collection `hersteller_new`).
-            Die Marke ist oben durch Bild + kuratierte Infos repräsentiert —
-            keine zweite Hersteller-artige Karte (wäre doppelt, v.a. wenn
-            Marke = Hersteller, z.B. Bauer / J. Bauer GmbH & Co. KG).
-            Nur zeigen, wenn der Hersteller sich vom Markennamen unterscheidet
-            ODER es eine echte KI-Einschätzung gibt. */}
-        <AiManufacturerCard
-          aiHersteller={infoSheet?.herstellerAi ?? null}
-          title={
-            infoSheet?.herstellerName
-              ? `Hersteller: ${infoSheet.herstellerName}`
-              : 'Hersteller'
-          }
-          icon="factory"
-          style={{ marginHorizontal: 0, marginTop: 12, marginBottom: 8 }}
-        />
+        {/* KI-Hinweis */}
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 10,
+            color: theme.textMuted,
+            letterSpacing: 0.2,
+            marginTop: 14,
+            paddingBottom: 8,
+          }}
+        >
+          KI-Einschätzung auf Basis von Modellwissen · keine tagesaktuellen Angaben
+        </Text>
       </FilterSheet>
 
       {/* Ratings sheet — opened from any star ActionButton. Shared for both
