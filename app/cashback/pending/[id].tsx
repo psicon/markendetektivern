@@ -333,21 +333,24 @@ export default function CashbackPendingScreen() {
   // schon „verstanden", die Animation wäre stale.
   const prevStateRef = useRef<ViewState | null>(null);
   const celebratedIdRef = useRef<string | null>(null);
+  // Nur LIVE-Approvals feiern: der User muss eine laufende Verarbeitung
+  // (uploading/pending/review) → approved erlebt haben. Initiales Laden
+  // (null/unknown → approved, z.B. Bon ERNEUT aus der History öffnen)
+  // feuert NICHT — die News ist dann „alt".
+  const CELEBRATABLE_PREV: ViewState[] = ['uploading', 'pending', 'review'];
   useEffect(() => {
     const prev = prevStateRef.current;
     prevStateRef.current = state;
-    // Erste Render-Pass: prev ist null → keine Transition, nur "first sighting".
-    if (prev === null) return;
-    if (prev === state) return;
     if (state !== 'approved') return;
-    // Nur einmal pro Bon-Id celebrieren (selbst wenn der State später
-    // erneut flippt durch eine spätere Mutation).
+    if (!prev || !CELEBRATABLE_PREV.includes(prev)) return;
+    // Nur einmal pro Bon-Id celebrieren.
     const currentId = String(params.id ?? '');
     if (celebratedIdRef.current === currentId) return;
     celebratedIdRef.current = currentId;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     const cents = typeof doc?.cashbackCents === 'number' ? doc.cashbackCents : 0;
     showBanner(bannerDataFromCashbackPayout(cents));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, doc?.cashbackCents, params.id, showBanner]);
 
   const primary = theme.primary ?? '#0d8575';
@@ -495,7 +498,7 @@ export default function CashbackPendingScreen() {
           >
             <MaterialCommunityIcons name="information-outline" size={18} color="#b08800" />
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
+              <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.bold, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
                 Diesen Bon hattest du schon eingereicht
               </Text>
               <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 13, marginTop: 2, lineHeight: 18 }}>
@@ -616,7 +619,7 @@ export default function CashbackPendingScreen() {
                 <Text
                   style={{
                     color: '#fff',
-                    fontFamily: fontFamilyVariants.body,
+                    fontFamily: fontFamilyVariants.bold,
                     fontWeight: fontWeight.bold as any,
                     fontSize: 14,
                   }}
@@ -766,7 +769,7 @@ export default function CashbackPendingScreen() {
                         numberOfLines={2}
                         style={{
                           color: theme.text,
-                          fontFamily: fontFamilyVariants.body,
+                          fontFamily: fontFamilyVariants.medium,
                           fontSize: 14,
                           fontWeight: fontWeight.medium as any,
                         }}
@@ -782,7 +785,7 @@ export default function CashbackPendingScreen() {
                     <Text
                       style={{
                         color: theme.text,
-                        fontFamily: fontFamilyVariants.body,
+                        fontFamily: fontFamilyVariants.bold,
                         fontWeight: fontWeight.bold as any,
                         fontSize: 14,
                       }}
@@ -807,10 +810,10 @@ export default function CashbackPendingScreen() {
                 }}
               >
                 <View style={{ width: 22 }} />
-                <Text style={{ flex: 1, color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 13, fontWeight: fontWeight.medium as any }}>
+                <Text style={{ flex: 1, color: theme.textSub, fontFamily: fontFamilyVariants.medium, fontSize: 13, fontWeight: fontWeight.medium as any }}>
                   Σ Artikel
                 </Text>
-                <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
+                <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.bold, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
                   {formatCents(sumItemsCents)}
                 </Text>
               </View>
@@ -829,7 +832,7 @@ export default function CashbackPendingScreen() {
                   }}
                 >
                   <View style={{ width: 22 }} />
-                  <Text style={{ flex: 1, color: theme.text, fontFamily: fontFamilyVariants.body, fontSize: 14, fontWeight: fontWeight.bold as any }}>
+                  <Text style={{ flex: 1, color: theme.text, fontFamily: fontFamilyVariants.bold, fontSize: 14, fontWeight: fontWeight.bold as any }}>
                     Bon-Endbetrag
                   </Text>
                   <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.heading, fontWeight: fontWeight.extraBold as any, fontSize: 16 }}>
@@ -929,7 +932,7 @@ export default function CashbackPendingScreen() {
             opacity: pressed ? 0.85 : 1,
           })}
         >
-          <Text style={{ color: primary, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
+          <Text style={{ color: primary, fontFamily: fontFamilyVariants.bold, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
             Meine Bons
           </Text>
         </Pressable>
@@ -956,7 +959,7 @@ export default function CashbackPendingScreen() {
             size={16}
             color="#fff"
           />
-          <Text style={{ color: '#fff', fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
+          <Text style={{ color: '#fff', fontFamily: fontFamilyVariants.bold, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
             {state === 'rejected' || state === 'not_found' ? 'Neuer Bon' : 'Fertig'}
           </Text>
         </Pressable>

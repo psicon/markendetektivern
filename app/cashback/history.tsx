@@ -208,9 +208,13 @@ export default function CashbackHistoryScreen() {
             numberOfLines={1}
             style={{
               color: theme.text,
-              fontFamily: fontFamilyVariants.body,
-              fontWeight: fontWeight.bold as any,
-              fontSize: 15,
+              // Bold-Variante explizit (NUNITO_BOLD) — fontWeight allein
+              // greift bei expliziter Font-Variante nicht (Android-Bug).
+              // Matcht den Card-Titel-Stil im Rest der App.
+              fontFamily: fontFamilyVariants.heading,
+              fontWeight: fontWeight.extraBold as any,
+              fontSize: 16,
+              letterSpacing: -0.2,
             }}
           >
             {merchant}
@@ -220,7 +224,8 @@ export default function CashbackHistoryScreen() {
               style={{
                 color: v.color,
                 backgroundColor: v.bg,
-                fontFamily: fontFamilyVariants.body,
+                // medium-Variante explizit (sonst greift fontWeight nicht).
+                fontFamily: fontFamilyVariants.medium,
                 fontWeight: fontWeight.medium as any,
                 fontSize: 11,
                 paddingHorizontal: 8,
