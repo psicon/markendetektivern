@@ -1416,6 +1416,24 @@ faktischer Begründungstext. Liegt in `cloud-functions/ai-product-comparison/`.
   Bump). Platzhalter ("z - NoName", Single-Char) → `skipped:'no-name'`.
 - HTTPS `runManufacturerForHersteller?key=…&herstellerId=…&force=1`.
 
+### Cashback-Pipeline kann schon OCR + Zeilen-Positionen (nicht neu bauen!)
+
+`cloud-functions/cashback-pipeline` (Gemini-OCR, `lib/ocr.js extractReceipt`)
+liefert PRO BON bereits: `items[] {name, priceCents, qty}` + `bonDate` +
+Total, dazu Merchant-Resolver (→ Discounter, `lib/merchant.js`), Σ-vs-Total-
+Reconciliation + DocAI-Fallback. Schreibt `users/{uid}/purchased_products/
+{cashbackId_slug}` mit `{itemName, priceCents, qty, receiptId, bonDate,
+merchantId/Name/Land}`. → Bon-Rohdaten + Markt + Preis + Datum pro Position
+sind PROD-erprobt da. Beim Thema „Bon-Artikel zuordnen / Journey abschließen"
+(ClickUp 86ca0wbg7) NICHT die OCR neu bauen. Was FEHLT ist nur: (1) Zuordnung
+`itemName` → unsere `produkte`/`markenProdukte`-`productId` (Klassifikation +
+KI-Normalisierung + Vektor-Shortlist + KI-Pick + Alias-Lexikon), (2) Preis-
+verlauf-Verknüpfung (`pricehistory_*`/`observedPrice` + Einheiten-Norm),
+(3) Journey/Zettel-Abschluss (`sourceJourneyId` + Outcome-Resolver Bon+Abhaken,
+dedupe), (4) not-in-catalog → ExternalLookupMiss, (5) BigQuery-Export (B2B).
+Bonus: Match-Precision lässt sich direkt an den bereits gesammelten
+`purchased_products` messen (kein separater OCR-Spike nötig).
+
 ## Other notes
 
 - TypeScript strict; `tsc --noEmit -p tsconfig.json` is the
