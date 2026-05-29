@@ -184,7 +184,7 @@ export function FilterSheet({
                     borderRadius: 3,
                     backgroundColor: theme.borderStrong,
                     alignSelf: 'center',
-                    marginBottom: 14,
+                    marginBottom: title ? 14 : 4,
                   }}
                 />
                 {/* Bei leerem Titel: kompakte Zeile nur mit Close-Button
@@ -195,7 +195,7 @@ export function FilterSheet({
                     alignItems: 'center',
                     justifyContent: title ? 'space-between' : 'flex-end',
                     paddingHorizontal: 20,
-                    marginBottom: title ? 14 : 2,
+                    marginBottom: title ? 14 : 0,
                   }}
                 >
                   {title ? (
