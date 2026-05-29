@@ -163,13 +163,16 @@ function scoreLabels(noname, original) {
  * @param ingredientVerdict 'noname' | 'original' | 'equal' (von der KI)
  * @param stufe            optional 3/4/5 (Trust-Cap)
  */
-function combineScore({ nutritionPoints, labelPoints, ingredientVerdict, stufe }) {
-  // Zutaten-Verdikt der KI in Punkte: sauberere Zutaten = ±2.5
-  // (genug damit ein klarer Zutaten-Vorteil allein für "etwas besser"
-  //  reicht — z.B. NoName ohne künstliche Aromen die das Original hat).
+function combineScore({ nutritionPoints, labelPoints, ingredientVerdict, ingredientStrength, stufe }) {
+  // Zutaten-QUALITÄT ist EXTREM wichtig (User-Vorgabe 2026-05-29). Die KI
+  // liefert Verdikt + Stärke; wir gewichten gradiert. Eine sauberere
+  // Zutatenliste (echte statt künstliche Aromen, weniger Zusatzstoffe,
+  // hochwertigere Zutaten in höherem Anteil) zählt deutlich.
+  const STRENGTH_POINTS = { slight: 1.5, clear: 3.5, strong: 5.0 };
+  const mag = STRENGTH_POINTS[ingredientStrength] || STRENGTH_POINTS.slight;
   let ingredientPoints = 0;
-  if (ingredientVerdict === 'noname') ingredientPoints = 2.5;
-  else if (ingredientVerdict === 'original') ingredientPoints = -2.5;
+  if (ingredientVerdict === 'noname') ingredientPoints = mag;
+  else if (ingredientVerdict === 'original') ingredientPoints = -mag;
 
   const total = nutritionPoints + labelPoints + ingredientPoints;
 
@@ -188,6 +191,21 @@ function combineScore({ nutritionPoints, labelPoints, ingredientVerdict, stufe }
   else if (total > -3.5) score = 3;     // gleichwertig (asymmetrischer Tilt)
   else if (total > -6.0) score = 2;     // etwas schlechter
   else score = 1;                       // klar schlechter
+
+  // ─── Zutaten-Qualitäts-CAP (EXTREM-Gewichtung, User-Vorgabe) ───────
+  // Ein klarer/starker Zutaten-NACHTEIL des NoName (mehr Zusatzstoffe,
+  // künstliche statt echte Aromen, billigere Substitute) verhindert das
+  // Top-Urteil — egal wie gut die Nährwerte sind. Ein Produkt voller
+  // Zusatzstoffe ist nicht "klar besser", auch mit weniger Zucker/Fett.
+  // Symmetrisch: ein klarer/starker Zutaten-VORTEIL schützt vor dem
+  // schlechtesten Urteil.
+  if (ingredientVerdict === 'original') {
+    if (ingredientStrength === 'strong' && score > 3) score = 3;
+    else if (ingredientStrength === 'clear' && score > 4) score = 4;
+  } else if (ingredientVerdict === 'noname') {
+    if (ingredientStrength === 'strong' && score < 3) score = 3;
+    else if (ingredientStrength === 'clear' && score < 2) score = 2;
+  }
 
   // Stufe-Cap (unbemerkt): nachweislich identische Produkt-Familien
   // dürfen nicht unter "gleichwertig" fallen.

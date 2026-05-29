@@ -40,59 +40,94 @@ const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 //       werden nicht mehr als 'incomparable' geskippt, sondern das NoName
 //       wird standalone (kategorie-relativ) bewertet. Außerdem laufen
 //       Live-Updates jetzt debounced (1h) über den Pending-Sweeper.
-const PROMPT_VERSION = 'v15';
+// v16 = Zutaten-QUALITÄT EXTREM gewichtet (User-Vorgabe 2026-05-29).
+//       Detaillierte Qualitäts-Rubrik (natürliches Aroma vs Aroma,
+//       Zusatzstoffe, billige Substitute, Reihenfolge/%) + ingredientStrength
+//       (slight/clear/strong). combineScore gewichtet gradiert UND cappt:
+//       ein klarer/starker Zutaten-Nachteil verhindert "klar besser",
+//       egal wie gut die Nährwerte sind.
+const PROMPT_VERSION = 'v16';
 
 // Die KI bewertet NUR die Zutaten-Qualität + schreibt den Text. Sie
 // vergibt KEINEN Score (das macht der deterministische Scorer).
-const SYSTEM_INSTRUCTION = `Du bist Ernährungswissenschaftler und beurteilst die ZUTATEN-QUALITÄT zweier Lebensmittel: ein NoName-Produkt (Discounter-Eigenmarke) vs. das Original-Markenprodukt.
+const SYSTEM_INSTRUCTION = `Du bist Lebensmittelchemiker und beurteilst die ZUTATEN-QUALITÄT zweier Lebensmittel: ein NoName-Produkt (Discounter-Eigenmarke) vs. das Original-Markenprodukt. Die Zutaten-Qualität ist das ZENTRALE, sehr wichtige Kriterium.
 
-Die Nährwerte (Salz, Zucker, Fett, Kalorien, …) sind bereits separat ausgewertet — DU bewertest sie NICHT und nennst keinen Gesamt-Score. Dein Job:
+Die Nährwerte sind bereits separat ausgewertet — DU bewertest sie NICHT und nennst keinen Gesamt-Score. Dein Job: die Zutatenlisten qualitativ vergleichen.
 
-1. ingredientVerdict: Welche Zutatenliste ist QUALITATIV sauberer?
-   - 'noname'   → NoName hat weniger/keine Zusatzstoffe (Aromen,
-                  Konservierungs-, Verdickungs-, Farbstoffe, E-Nummern,
-                  Palmöl) ODER echtere Wirk-Zutaten (echte Vanille statt
-                  Aroma, echte Frucht statt Konzentrat).
-   - 'original' → umgekehrt: Original sauberer / echtere Zutaten.
-   - 'equal'    → Zutatenlisten qualitativ gleichwertig (beide einfach
-                  oder beide ähnlich verarbeitet).
+═══ QUALITÄTS-RUBRIK (genau anwenden) ═══
 
-2. reasoning: 2-3 vollständige deutsche Sätze, die die wichtigsten
-   FAKTEN nennen — Nährwert-Unterschiede UND Zutaten-Unterschiede. Du
-   bekommst die berechneten Nährwert-Fakten als Vorgabe; verwende sie
-   wörtlich (Zahlen nicht ändern/erfinden). Beschreibe sachlich, OHNE
-   ein Gesamturteil wie "besser/schlechter/gleichwertig" auszusprechen —
-   das Urteil setzt das System aus den Zahlen. Du lieferst die
-   Begründung.
+ABWERTEND (mehr davon = schlechtere Zutaten-Qualität):
+  • Künstliche/undefinierte Aromen: "Aroma", "Aromen", "künstliches Aroma"
+    sind SCHLECHTER als "natürliches Aroma", und beide schlechter als die
+    ECHTE Zutat (echte Vanille, echtes Fruchtmark). WICHTIG: "natürliches
+    Aroma" ist BESSER als bloßes "Aroma"/"Aromen" — diesen Unterschied
+    klar erkennen.
+  • Zusatzstoffe: Stabilisatoren (Glycerin, Sorbit), Emulgatoren
+    (Lecithine, Mono-/Diglyceride), Phosphate (Diphosphate), Farbstoffe,
+    Konservierungsstoffe, Geschmacksverstärker, Süßstoffe, E-Nummern.
+    Je mehr/künstlicher, desto schlechter.
+  • Billige Substitute statt hochwertiger Zutaten:
+    – Palmöl/Palmfett statt Butter oder hochwertigem Öl
+    – Glukose-Fruktose-Sirup statt Zucker/Glukosesirup
+    – stark entöltes/fettarmes Kakaopulver statt Kakaobutter/Kakaomasse
+    – Eipulver statt echtem Ei, Magermilch-/Molkenpulver statt Vollmilch
+    – Frucht-Konzentrat/Aroma statt echter Frucht
 
-OUTPUT — STRENG NUR ein JSON-Objekt, ohne Markdown, ohne Preamble:
-{"ingredientVerdict": "noname"|"original"|"equal", "reasoning": "<DE-Text, 2-3 vollständige Sätze, ≤320 Zeichen>"}
+AUFWERTEND (besser):
+  • Kurze, klare Zutatenliste ohne Zusatzstoffe.
+  • Echte/hochwertige Wirk-Zutaten (echte Butter, echtes Ei, echte Frucht,
+    echte Vanille, Kakaobutter).
+  • REIHENFOLGE + PROZENT: Zutaten sind nach Menge sortiert (erste = meiste).
+    Steht eine hochwertige Zutat (echter Kakao, Butter, Frucht, Nüsse)
+    WEITER VORNE oder mit höherem %-Anteil (z.B. "15% Vollmilchpulver"),
+    ist das ein Qualitätsvorteil. Wird von einer teuren/guten Zutat MEHR
+    verwendet, zählt das positiv.
+
+═══ AUSGABE ═══
+
+1. ingredientVerdict: welche Zutatenliste ist qualitativ besser?
+   'noname' = Eigenmarke besser | 'original' = Original besser | 'equal' = gleichwertig
+
+2. ingredientStrength: wie deutlich ist der Qualitätsunterschied?
+   'slight'  = kleiner Unterschied (1 Detail, sonst ähnlich)
+   'clear'   = klarer Unterschied (z.B. eine Seite mehrere Zusatzstoffe
+               mehr, oder echte vs künstliche Schlüsselzutat)
+   'strong'  = starker Unterschied (eine Seite deutlich verarbeiteter:
+               mehrere Zusatzstoffe + billige Substitute, die andere clean)
+   Bei 'equal' → 'slight'.
+
+3. reasoning: 2-3 vollständige deutsche Sätze mit den wichtigsten FAKTEN —
+   konkrete Zutaten-Qualitätsunterschiede UND die vorgegebenen Nährwert-
+   Fakten (Zahlen wörtlich übernehmen, nichts erfinden). Beschreibe
+   sachlich, OHNE ein Gesamturteil ("besser/schlechter/gleichwertig")
+   auszusprechen — das setzt das System.
+
+OUTPUT — STRENG NUR ein JSON-Objekt, ohne Markdown/Preamble:
+{"ingredientVerdict":"noname"|"original"|"equal","ingredientStrength":"slight"|"clear"|"strong","reasoning":"<DE-Text, 2-3 Sätze, ≤320 Zeichen>"}
 
 REGELN:
   • Vollständige Sätze, kein abgeschnittener Text, kein "…"/"etc." am Ende.
-  • Keine Zahl erfinden — nur die vorgegebenen Nährwert-Fakten + was in
-    den Zutatenlisten steht.
-  • Niemals über Datenqualität reden ("extrem", "unrealistisch",
-    "fehlerhaft", "vermutlich"). Keine Meta-Sätze.
-  • Niemals "Stufe", "nachweislich", "intern", "klassifiziert" erwähnen.
+  • Keine Zahl erfinden — nur vorgegebene Nährwert-Fakten + was in den
+    Zutatenlisten steht.
+  • Niemals über Datenqualität reden ("unrealistisch", "fehlerhaft",
+    "vermutlich"). Keine Meta-Sätze. Niemals "Stufe"/"intern"/"Score".
   • Sachlich, keine Werbe-Adjektive ("super", "toll").
 
-REASONING-BEISPIELE (Stil — NICHT das Verdikt-Wort aussprechen):
-  "Beide Zutatenlisten sind einfach und frei von Zusatzstoffen. Die
-   Eigenmarke hat etwas weniger Salz (2,83g vs 3g), das Original
-   geringfügig weniger Fett und Zucker."
-  "Das NoName-Produkt verzichtet auf künstliche Aromen und Farbstoffe,
-   die das Original enthält. Die Nährwerte beider Produkte sind nahezu
-   identisch."
-  "Das Original enthält echte Vanille und ist Bio-zertifiziert, das
-   NoName-Produkt setzt auf Aroma. Die Kalorien liegen mit 240 vs 242
-   praktisch gleichauf."`;
+REASONING-BEISPIELE (Stil — Verdikt-Wort NICHT aussprechen):
+  "Die Eigenmarke enthält Stabilisatoren (Glycerin, Sorbit), einen
+   Emulgator und Glukose-Fruktose-Sirup, das Original kommt ohne diese
+   Zusatzstoffe aus. Nährwertseitig hat die Eigenmarke weniger Zucker
+   (30g vs 39,9g) und mehr Eiweiß (5,9g vs 2,8g)."
+  "Beide Listen sind kurz; die Eigenmarke nutzt natürliches Aroma statt
+   des künstlichen Aromas im Original und enthält echte Butter. Salz liegt
+   mit 0,9g vs 1,1g etwas niedriger."`;
 
 const RESPONSE_SCHEMA = {
   type: Type.OBJECT,
-  required: ['ingredientVerdict', 'reasoning'],
+  required: ['ingredientVerdict', 'ingredientStrength', 'reasoning'],
   properties: {
     ingredientVerdict: { type: Type.STRING, enum: ['noname', 'original', 'equal'] },
+    ingredientStrength: { type: Type.STRING, enum: ['slight', 'clear', 'strong'] },
     reasoning: { type: Type.STRING, maxLength: 400 },
   },
 };
@@ -365,11 +400,17 @@ async function callGemini({ apiKey, snapshot, model = DEFAULT_MODEL }) {
 
   const parsed = parseLooseJson(rawText);
 
-  // KI liefert NUR Zutaten-Verdikt + Text. Score kommt aus dem Scorer.
+  // KI liefert NUR Zutaten-Verdikt + Stärke + Text. Score kommt aus dem Scorer.
   let ingredientVerdict = String(parsed.ingredientVerdict || 'equal').toLowerCase();
   if (!['noname', 'original', 'equal'].includes(ingredientVerdict)) {
     ingredientVerdict = 'equal';
   }
+  let ingredientStrength = String(parsed.ingredientStrength || 'slight').toLowerCase();
+  if (!['slight', 'clear', 'strong'].includes(ingredientStrength)) {
+    ingredientStrength = 'slight';
+  }
+  // 'equal' hat keine Stärke-Richtung → neutralisieren
+  if (ingredientVerdict === 'equal') ingredientStrength = 'slight';
   let reasoning = String(parsed.reasoning || '').trim();
   if (reasoning.length === 0) {
     throw new Error('Gemini returned empty reasoning');
@@ -381,6 +422,7 @@ async function callGemini({ apiKey, snapshot, model = DEFAULT_MODEL }) {
     nutritionPoints: nut.nutritionPoints,
     labelPoints: lab.labelPoints,
     ingredientVerdict,
+    ingredientStrength,
     stufe,
   });
 
@@ -410,6 +452,7 @@ async function callGemini({ apiKey, snapshot, model = DEFAULT_MODEL }) {
     _nutritionPoints: Math.round(nut.nutritionPoints * 100) / 100,
     _labelPoints: Math.round(lab.labelPoints * 100) / 100,
     _ingredientVerdict: ingredientVerdict,
+    _ingredientStrength: ingredientStrength,
     _total: Math.round(total * 100) / 100,
   };
 }
