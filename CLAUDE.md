@@ -589,9 +589,18 @@ führt (catch-22 wenn die Höhe über onLayout der Pages bestimmt
 werden soll). Für solche embedded-Tabs (Beispiel:
 `product-comparison/[id].tsx` Inhaltsstoffe/Nährwerte) →
 conditional Render: `{tab === 'X' ? <PageA/> : <PageB/>}`. Tap
-auf SegmentedTabs switched. Kein nativer Swipe — aber die Tabs
-liegen meist nicht im primären User-Flow, dafür funktioniert
-Vertical-Scroll der Page einwandfrei.
+auf SegmentedTabs switched.
+
+**Swipe ohne PagerView (2026-05-29):** Statt PagerView (das den
+Vertical-Scroll blockiert) eine horizontale `Gesture.Pan()` aus
+`react-native-gesture-handler`, NUR um den Tab-Content gewickelt
+(`<GestureDetector>`), mit `.activeOffsetX([-20,20])` (startet nur bei
+klar horizontalem Swipe) + `.failOffsetY([-12,12])` (bei vertikalem Drag
+gewinnt der parent-ScrollView). `.onEnd` prüft `translationX` (Schwelle
+±40) und ruft `runOnJS(onTabChange)(...)`. Geste via `useMemo([tab])`
+damit der im Worklet gelesene tab-Wert frisch bleibt. So funktioniert
+Swipe + Vertical-Scroll gleichzeitig, ohne PagerView-Höhen-Bug, und der
+Swipe ist exakt auf den Tab-Bereich begrenzt.
 
 PagerView bleibt das richtige Werkzeug wenn die Tabs den ganzen
 Screen einnehmen UND die Pages SELBST scrollbare Listen sind

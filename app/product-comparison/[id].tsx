@@ -24,6 +24,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
@@ -432,6 +433,28 @@ export default function ProductComparisonScreen() {
     collapseAllPills();
     setTab(next);
   };
+  // Swipe zwischen Inhaltsstoffe ↔ Nährwerte — NUR im Tab-Content-Bereich
+  // (die GestureDetector-Region), damit der Rest der Seite normal scrollt.
+  // activeOffsetX → Geste startet nur bei klar horizontalem Swipe;
+  // failOffsetY → bei vertikalem Drag gewinnt der parent-ScrollView (kein
+  // PagerView, daher kein Höhen-/Scroll-Bug; siehe CLAUDE.md). useMemo([tab])
+  // hält den im Worklet gelesenen tab-Wert frisch.
+  const tabSwipeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-20, 20])
+        .failOffsetY([-12, 12])
+        .onEnd((e) => {
+          'worklet';
+          if (e.translationX <= -40 && tab === 'ingredients') {
+            runOnJS(onTabChange)('nutrition');
+          } else if (e.translationX >= 40 && tab === 'nutrition') {
+            runOnJS(onTabChange)('ingredients');
+          }
+        }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tab],
+  );
   const [carouselIdx, setCarouselIdx] = useState(0);
   const carouselRef = useRef<ScrollView | null>(null);
   // FlyToCart wiring — one ref to drive the overlay, plus a Map of
@@ -2501,28 +2524,39 @@ export default function ProductComparisonScreen() {
               </View>
             ) : null}
 
-            <View>
-              {tab === 'ingredients' ? (
-                <IngredientsMatch
-                  brandProduct={mp}
-                  noname={picked}
-                  theme={theme}
-                  brandFallback={openFoodFallback.brand?.zutaten}
-                  nonameFallback={openFoodFallback.noname?.zutaten}
-                  fallbackLoading={openFoodFallback.loading}
-                />
+            {(() => {
+              const tabBody = (
+                <View>
+                  {tab === 'ingredients' ? (
+                    <IngredientsMatch
+                      brandProduct={mp}
+                      noname={picked}
+                      theme={theme}
+                      brandFallback={openFoodFallback.brand?.zutaten}
+                      nonameFallback={openFoodFallback.noname?.zutaten}
+                      fallbackLoading={openFoodFallback.loading}
+                    />
+                  ) : (
+                    <NutritionTable
+                      brandProduct={mp}
+                      noname={picked}
+                      theme={theme}
+                      primary={brand.primary}
+                      brandFallback={openFoodFallback.brand?.naehrwerte}
+                      nonameFallback={openFoodFallback.noname?.naehrwerte}
+                      fallbackLoading={openFoodFallback.loading}
+                    />
+                  )}
+                </View>
+              );
+              // Swipe nur wenn beide Tabs existieren — sonst gibt's nichts
+              // zu wechseln. Die Geste ist auf genau diesen Bereich begrenzt.
+              return showBothTabs ? (
+                <GestureDetector gesture={tabSwipeGesture}>{tabBody}</GestureDetector>
               ) : (
-                <NutritionTable
-                  brandProduct={mp}
-                  noname={picked}
-                  theme={theme}
-                  primary={brand.primary}
-                  brandFallback={openFoodFallback.brand?.naehrwerte}
-                  nonameFallback={openFoodFallback.noname?.naehrwerte}
-                  fallbackLoading={openFoodFallback.loading}
-                />
-              )}
-            </View>
+                tabBody
+              );
+            })()}
           </Animated.View>
         ) : null}
 
