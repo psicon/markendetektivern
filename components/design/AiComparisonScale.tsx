@@ -23,15 +23,11 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import React, { useState } from 'react';
 import { Pressable, Text, View, ViewStyle } from 'react-native';
-import Animated, { LinearTransition } from 'react-native-reanimated';
-
-// Animierte Pressable, damit die ganze Card ihre Höhe weich animieren kann
-// (Akkordeon) statt beim Aufklappen sofort auf volle Höhe zu springen.
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import type { AiComparison } from '@/lib/types/firestore';
+import { ReasoningAccordion, isReasoningLong } from './ReasoningAccordion';
 
 interface Props {
   aiComparison?: AiComparison | null;
@@ -72,15 +68,11 @@ export function AiComparisonScale({
   const idx = score - 1;
   const accent = SCALE_COLORS[idx];
   const reasoning = (aiComparison.reasoning || '').trim();
-  const isLong = reasoning.length > 45;
+  const isLong = isReasoningLong(reasoning);
 
   return (
-    <AnimatedPressable
+    <Pressable
       // Die ganze Card ist Tap-Target zum Auf-/Einklappen des Detailtexts.
-      // LinearTransition animiert die Card-Höhe auf dem UI-Thread (instant +
-      // weich), overflow:hidden gibt den Akkordeon-Effekt (Text wird beim
-      // Wachsen progressiv freigegeben statt sofort sichtbar zu sein).
-      layout={LinearTransition.duration(220)}
       onPress={() => {
         if (isLong) setExpanded((v) => !v);
       }}
@@ -95,7 +87,6 @@ export function AiComparisonScale({
           backgroundColor: theme.surface,
           borderWidth: 1,
           borderColor: theme.border,
-          overflow: 'hidden',
         },
         style,
       ]}
@@ -209,52 +200,10 @@ export function AiComparisonScale({
         );
       })()}
 
-      {/* Reasoning — standardmäßig auf 1 Zeile gekürzt. Tap auf die ganze
-          Card klappt auf/zu (siehe Pressable oben). Der Chevron ist nur
-          visueller Hinweis. (Aufklappen = späterer Tracking-Hook, ClickUp.) */}
-      {reasoning ? (
-        <View>
-          <Text
-            numberOfLines={!isLong || expanded ? undefined : 1}
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 13,
-              lineHeight: 19,
-              color: theme.textSub,
-            }}
-          >
-            {reasoning}
-          </Text>
-          {isLong ? (
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 3,
-                marginTop: 8,
-              }}
-            >
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.bold as any,
-                  fontSize: 12,
-                  color: accent,
-                }}
-              >
-                {expanded ? 'Weniger anzeigen' : 'Mehr anzeigen'}
-              </Text>
-              <MaterialCommunityIcons
-                name={expanded ? 'chevron-up' : 'chevron-down'}
-                size={16}
-                color={accent}
-              />
-            </View>
-          ) : null}
-        </View>
-      ) : null}
-    </AnimatedPressable>
+      {/* Reasoning — 1 Zeile gekürzt, ganze Card klappt auf/zu (Pressable
+          oben). Symmetrische Höhen-Animation via ReasoningAccordion. */}
+      <ReasoningAccordion text={reasoning} accent={accent} expanded={expanded} />
+    </Pressable>
   );
 }
 

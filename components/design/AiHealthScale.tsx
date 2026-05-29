@@ -7,18 +7,24 @@
  *   healthScore 1 = unter Durchschnitt der Produkt-Kategorie
  *   healthScore 5 = sehr gute Wahl in der Kategorie
  *
- * Use-Case: noname-detail Stufe 1/2 (NoNames ohne MP-Link).
+ * Use-Case: Stufe 1/2 (NoNames ohne MP-Link) UND verknüpfte Produkte,
+ * die mangels Daten nicht vergleichbar sind (Marke ohne Nährwerte/Zutaten).
+ *
+ * UI gespiegelt zu AiComparisonScale: kein Header-Pill (kein Titel-Umbruch),
+ * aktive Skalen-Seite als Pill, Detailtext auf 1 Zeile gekürzt + ganze Card
+ * als Tap-Target zum weich animierten Auf-/Einklappen.
  *
  * Skip-Verhalten identisch zu AiComparisonScale: keine Daten → null.
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import React from 'react';
-import { Text, View, ViewStyle } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, Text, View, ViewStyle } from 'react-native';
 
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import type { AiAssessment } from '@/lib/types/firestore';
+import { ReasoningAccordion, isReasoningLong } from './ReasoningAccordion';
 
 interface Props {
   aiAssessment?: AiAssessment | null;
@@ -29,13 +35,6 @@ interface Props {
 
 // Identische Palette wie AiComparisonScale — Score 3 bereits grün.
 const SCALE_COLORS = ['#e53935', '#fb8c00', '#9ccc65', '#66bb6a', '#2e7d32'] as const;
-const SCALE_LABELS = [
-  'unter Durchschnitt',
-  'leicht unterdurchschnittlich',
-  'durchschnittlich',
-  'überdurchschnittlich',
-  'sehr gute Wahl',
-] as const;
 
 export function AiHealthScale({
   aiAssessment,
@@ -43,6 +42,7 @@ export function AiHealthScale({
   style,
 }: Props) {
   const { theme } = useTokens();
+  const [expanded, setExpanded] = useState(false);
 
   if (!aiAssessment) return null;
   if (aiAssessment.skipped) return null;
@@ -52,12 +52,42 @@ export function AiHealthScale({
 
   const idx = score - 1;
   const accent = SCALE_COLORS[idx];
-  const label = SCALE_LABELS[idx];
   const reasoning = (aiAssessment.reasoning || '').trim();
+  const isLong = isReasoningLong(reasoning);
   const category = aiAssessment.category;
 
+  const worseActive = score < 3; // unter Durchschnitt
+  const betterActive = score > 3; // sehr gute Wahl
+
+  const pillStyle = {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radii.full,
+    backgroundColor: accent + '22',
+  } as const;
+  const pillText = {
+    fontFamily,
+    fontWeight: fontWeight.bold as any,
+    fontSize: 10,
+    letterSpacing: 0.3,
+    color: accent,
+    textTransform: 'uppercase' as const,
+  };
+  const plainText = {
+    fontFamily,
+    fontWeight: fontWeight.medium,
+    fontSize: 10,
+    letterSpacing: 0.2,
+    color: theme.textMuted,
+    textTransform: 'uppercase' as const,
+  };
+
   return (
-    <View
+    <Pressable
+      onPress={() => {
+        if (isLong) setExpanded((v) => !v);
+      }}
+      disabled={!isLong}
       style={[
         {
           marginHorizontal: 20,
@@ -72,15 +102,8 @@ export function AiHealthScale({
         style,
       ]}
     >
-      {/* Header */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: 10,
-        }}
-      >
+      {/* Header — ohne Pill (kein Titel-Umbruch) */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <MaterialCommunityIcons name="brain" size={16} color={accent} />
         <View style={{ flex: 1 }}>
           <Text
@@ -109,38 +132,10 @@ export function AiHealthScale({
             </Text>
           ) : null}
         </View>
-        <View
-          style={{
-            paddingHorizontal: 8,
-            paddingVertical: 3,
-            borderRadius: radii.full,
-            backgroundColor: accent + '22',
-          }}
-        >
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.bold as any,
-              fontSize: 10,
-              letterSpacing: 0.3,
-              color: accent,
-              textTransform: 'uppercase',
-            }}
-          >
-            {label}
-          </Text>
-        </View>
       </View>
 
       {/* 5-Dot-Skala */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 6,
-          marginBottom: 10,
-        }}
-      >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
         {[1, 2, 3, 4, 5].map((n) => {
           const active = n === score;
           const color = SCALE_COLORS[n - 1];
@@ -157,54 +152,35 @@ export function AiHealthScale({
           );
         })}
       </View>
+
+      {/* Ausschlag-Labels — aktive Seite als Pill, sonst ausgegraut. */}
       <View
         style={{
           flexDirection: 'row',
           justifyContent: 'space-between',
+          alignItems: 'center',
           marginBottom: 12,
         }}
       >
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 10,
-            color: theme.textMuted,
-            letterSpacing: 0.2,
-            textTransform: 'uppercase',
-          }}
-        >
-          unter Durchschnitt
-        </Text>
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 10,
-            color: theme.textMuted,
-            letterSpacing: 0.2,
-            textTransform: 'uppercase',
-          }}
-        >
-          sehr gute Wahl
-        </Text>
+        {worseActive ? (
+          <View style={pillStyle}>
+            <Text style={pillText}>unter Durchschnitt</Text>
+          </View>
+        ) : (
+          <Text style={plainText}>unter Durchschnitt</Text>
+        )}
+        {betterActive ? (
+          <View style={pillStyle}>
+            <Text style={pillText}>sehr gute Wahl</Text>
+          </View>
+        ) : (
+          <Text style={plainText}>sehr gute Wahl</Text>
+        )}
       </View>
 
-      {/* Reasoning */}
-      {reasoning ? (
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 13,
-            lineHeight: 19,
-            color: theme.textSub,
-          }}
-        >
-          {reasoning}
-        </Text>
-      ) : null}
-    </View>
+      {/* Reasoning — 1 Zeile gekürzt, ganze Card klappt auf/zu. */}
+      <ReasoningAccordion text={reasoning} accent={accent} expanded={expanded} />
+    </Pressable>
   );
 }
 
