@@ -974,8 +974,8 @@ exports.processPendingComparisons = functions.scheduler.onSchedule(
 // Hash-Check über die Stammdaten (name/legalName/land/stadt) + promptVer.
 
 async function runManufacturer(db, herstellerId, opts = {}) {
-  const { force = false, apiKey } = opts;
-  const ref = db.collection('hersteller').doc(herstellerId);
+  const { force = false, apiKey, collection = 'hersteller' } = opts;
+  const ref = db.collection(collection).doc(herstellerId);
   const snapDoc = await ref.get();
   if (!snapDoc.exists) return { state: 'not-found' };
   const data = snapDoc.data() || {};
@@ -1102,8 +1102,11 @@ exports.runManufacturerForHersteller = onRequest(
       return;
     }
     const force = String(req.query?.force || req.body?.force || '') === '1';
+    // collection: 'hersteller' (Marken) oder 'hersteller_new' (echte Hersteller).
+    let collection = String(req.query?.collection || req.body?.collection || 'hersteller_new').trim();
+    if (collection !== 'hersteller' && collection !== 'hersteller_new') collection = 'hersteller_new';
     try {
-      const result = await runManufacturer(admin.firestore(), herstellerId, { force });
+      const result = await runManufacturer(admin.firestore(), herstellerId, { force, collection });
       res.status(200).json({ herstellerId, ...result });
     } catch (e) {
       res.status(500).send(String(e?.message || e));
@@ -1189,6 +1192,118 @@ exports.scheduledManufacturerBackfill = functions.scheduler.onSchedule(
     );
     console.log(
       `[hersteller-backfill] batch: ${processed} verarbeitet, cursor=${lastDocId}, reachedEnd=${reachedEnd}`,
+    );
+  },
+);
+
+// ════════════════════════════════════════════════════════════════════
+// HERSTELLER_NEW — die ECHTEN Hersteller (collection `hersteller_new`)
+// ════════════════════════════════════════════════════════════════════
+//
+// WICHTIG: `produkte.hersteller` zeigt auf `hersteller_new` — DAS ist die
+// Quelle für die Hersteller-Karte auf der Produktdetail-/Vergleichsseite.
+// (Die collection `hersteller` enthält Marken und wird separat bewertet.)
+// Gleiche Logik wie oben, nur andere collection + eigenes State-Doc.
+
+const HERSTELLERNEW_BACKFILL_STATE_PATH = 'aggregates/aiHerstellerNewBackfill';
+
+exports.onHerstellerNewCreateForRating = onDocumentCreated(
+  { ...COMMON_OPTS, document: 'hersteller_new/{herstellerId}' },
+  async (event) => {
+    const id = event.params.herstellerId;
+    try {
+      const res = await runManufacturer(admin.firestore(), id, { collection: 'hersteller_new' });
+      console.log(`[ai-herstellerNew][onCreate] ${id} → ${res.state} ${res.detail || ''}`);
+    } catch (e) {
+      console.error(`[ai-herstellerNew][onCreate] ${id} unexpected:`, e?.message);
+    }
+  },
+);
+
+exports.onHerstellerNewUpdateForRating = onDocumentUpdated(
+  { ...COMMON_OPTS, document: 'hersteller_new/{herstellerId}' },
+  async (event) => {
+    const id = event.params.herstellerId;
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    if (!relevantFieldsChanged(before, after, RELEVANT_HERSTELLER_FIELDS)) return;
+    try {
+      const res = await runManufacturer(admin.firestore(), id, { collection: 'hersteller_new' });
+      console.log(`[ai-herstellerNew][onUpdate] ${id} → ${res.state} ${res.detail || ''}`);
+    } catch (e) {
+      console.error(`[ai-herstellerNew][onUpdate] ${id} unexpected:`, e?.message);
+    }
+  },
+);
+
+exports.scheduledHerstellerNewBackfill = functions.scheduler.onSchedule(
+  { ...COMMON_OPTS, schedule: 'every 5 minutes' },
+  async () => {
+    const db = admin.firestore();
+    const stateRef = db.doc(HERSTELLERNEW_BACKFILL_STATE_PATH);
+    const stateSnap = await stateRef.get();
+    const state = stateSnap.exists ? stateSnap.data() : {};
+
+    if (state.promptVersion !== MANUFACTURER_PROMPT_VERSION) {
+      await stateRef.set(
+        {
+          promptVersion: MANUFACTURER_PROMPT_VERSION,
+          cursor: null,
+          completedAt: null,
+          processed: 0,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      return;
+    }
+    if (state.completedAt) return;
+
+    let q = db
+      .collection('hersteller_new')
+      .orderBy(admin.firestore.FieldPath.documentId())
+      .limit(HERSTELLER_BACKFILL_BATCH);
+    if (state.cursor) q = q.startAfter(state.cursor);
+
+    const snap = await q.get();
+    if (snap.empty) {
+      await stateRef.set(
+        { completedAt: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+      console.log('[herstellerNew-backfill] keine weiteren Docs → completed');
+      return;
+    }
+
+    const lastDocId = snap.docs[snap.docs.length - 1].id;
+    const toProcess = snap.docs.filter((doc) => {
+      const ai = doc.data()?.aiHersteller;
+      return !(
+        ai?.promptVersion === MANUFACTURER_PROMPT_VERSION &&
+        (typeof ai.summary === 'string' || ai.skipped)
+      );
+    });
+    const processed = await runPool(toProcess, HERSTELLER_BACKFILL_CONCURRENCY, async (doc) => {
+      try {
+        await runManufacturer(db, doc.id, { collection: 'hersteller_new' });
+      } catch (e) {
+        console.error(`[herstellerNew-backfill] ${doc.id} failed:`, e?.message);
+        throw e;
+      }
+    });
+
+    const reachedEnd = snap.size < HERSTELLER_BACKFILL_BATCH;
+    await stateRef.set(
+      {
+        cursor: lastDocId,
+        processed: (state.processed || 0) + processed,
+        completedAt: reachedEnd ? admin.firestore.FieldValue.serverTimestamp() : null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    console.log(
+      `[herstellerNew-backfill] batch: ${processed} verarbeitet, cursor=${lastDocId}, reachedEnd=${reachedEnd}`,
     );
   },
 );
