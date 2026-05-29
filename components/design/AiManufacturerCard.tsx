@@ -21,12 +21,22 @@ import type { AiHersteller } from '@/lib/types/firestore';
 
 interface Props {
   aiHersteller?: AiHersteller | null;
-  /** Hersteller-Name fürs Header-Label (optional). */
+  /** Hersteller-Name fürs Header-Label (optional) → "Hersteller: <name>". */
   herstellerName?: string | null;
+  /** Überschreibt das komplette Header-Label (z.B. "Marke: X"). */
+  title?: string;
+  /** Header-Icon (MaterialCommunityIcons). Default 'factory'. */
+  icon?: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
   style?: ViewStyle;
 }
 
-export function AiManufacturerCard({ aiHersteller, herstellerName, style }: Props) {
+export function AiManufacturerCard({
+  aiHersteller,
+  herstellerName,
+  title: titleOverride,
+  icon = 'factory',
+  style,
+}: Props) {
   const { theme } = useTokens();
 
   if (!aiHersteller) return null;
@@ -35,7 +45,9 @@ export function AiManufacturerCard({ aiHersteller, herstellerName, style }: Prop
   if (!summary) return null; // nur Fehler / leer → nichts rendern
 
   const herkunft = (aiHersteller.herkunft || '').trim();
-  const title = herstellerName?.trim() ? `Hersteller: ${herstellerName.trim()}` : 'Hersteller';
+  const title =
+    titleOverride?.trim() ||
+    (herstellerName?.trim() ? `Hersteller: ${herstellerName.trim()}` : 'Hersteller');
 
   return (
     <View
@@ -55,7 +67,7 @@ export function AiManufacturerCard({ aiHersteller, herstellerName, style }: Prop
     >
       {/* Header */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: herkunft ? 8 : 10 }}>
-        <MaterialCommunityIcons name="factory" size={16} color={theme.textMuted} />
+        <MaterialCommunityIcons name={icon} size={16} color={theme.textMuted} />
         <Text
           style={{
             flex: 1,

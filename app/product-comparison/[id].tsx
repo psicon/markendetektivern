@@ -606,7 +606,14 @@ export default function ProductComparisonScreen() {
   // Marken-Info-Sheet: Pressable (i)-Icon im Hersteller-Chip am Hero
   // öffnet ein FilterSheet mit zusätzlichen Hersteller/Marken-Infos.
   // null = zu, Object = sichtbar mit den jeweiligen Daten.
-  const [infoSheet, setInfoSheet] = useState<{ title: string; body: string } | null>(null);
+  const [infoSheet, setInfoSheet] = useState<{
+    title: string;
+    body: string;
+    brandImage?: string | null;
+    markeAi?: any;
+    herstellerAi?: any;
+    herstellerName?: string | null;
+  } | null>(null);
 
   // Stufe-Copy aus Remote Config laden + state für Re-Render forcen
   // wenn neue Werte reinkommen. `loadStufeCopy()` ist idempotent
@@ -1500,6 +1507,7 @@ export default function ProductComparisonScreen() {
               // Wir lesen `infos` daher PRIMÄR vom marke-Objekt,
               // sekundär vom Markenprodukt-Doc selbst (zukunftssicher).
               const marke = (mp as any)?.marke;
+              const herstellerNew = (mp as any)?.hersteller; // hersteller_new = echter Hersteller
               const rawInfos = marke?.infos ?? (mp as any)?.infos;
               const infosText =
                 typeof rawInfos === 'string' && rawInfos.trim().length > 0
@@ -1523,7 +1531,15 @@ export default function ProductComparisonScreen() {
                 <Pressable
                   onPress={() => {
                     collapseAllPills();
-                    setInfoSheet({ title: brandName, body: sheetBody });
+                    setInfoSheet({
+                      title: brandName,
+                      body: sheetBody,
+                      brandImage: marke?.bild || herstellerNew?.bild || null,
+                      markeAi: marke?.aiHersteller ?? null,
+                      herstellerAi: herstellerNew?.aiHersteller ?? null,
+                      herstellerName:
+                        herstellerNew?.herstellername || herstellerNew?.name || null,
+                    });
                   }}
                   style={({ pressed }) => ({
                     position: 'absolute',
@@ -2573,18 +2589,66 @@ export default function ProductComparisonScreen() {
         title={infoSheet?.title ?? ''}
         onClose={() => setInfoSheet(null)}
       >
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.regular,
-            fontSize: 14,
-            lineHeight: 21,
-            color: theme.text,
-            paddingBottom: 8,
-          }}
-        >
-          {infoSheet?.body ?? ''}
-        </Text>
+        {/* Markenbild */}
+        {infoSheet?.brandImage ? (
+          <View style={{ alignItems: 'center', marginBottom: 12 }}>
+            <View
+              style={{
+                width: 96,
+                height: 64,
+                borderRadius: 12,
+                backgroundColor: '#ffffff',
+                borderWidth: 1,
+                borderColor: theme.border,
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 8,
+              }}
+            >
+              <Image
+                source={{ uri: infoSheet.brandImage }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="contain"
+              />
+            </View>
+          </View>
+        ) : null}
+
+        {/* Kuratierte Marken-Infos (infos-Feld / Adresse / Fallback) */}
+        {infoSheet?.body ? (
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.regular,
+              fontSize: 14,
+              lineHeight: 21,
+              color: theme.text,
+              paddingBottom: 4,
+            }}
+          >
+            {infoSheet.body}
+          </Text>
+        ) : null}
+
+        {/* KI-Einschätzung Marke (collection `hersteller`) */}
+        <AiManufacturerCard
+          aiHersteller={infoSheet?.markeAi ?? null}
+          title={infoSheet?.title ? `Marke: ${infoSheet.title}` : 'Marke'}
+          icon="tag-outline"
+          style={{ marginHorizontal: 0, marginTop: 12 }}
+        />
+
+        {/* KI-Einschätzung echter Hersteller (collection `hersteller_new`) */}
+        <AiManufacturerCard
+          aiHersteller={infoSheet?.herstellerAi ?? null}
+          title={
+            infoSheet?.herstellerName
+              ? `Hersteller: ${infoSheet.herstellerName}`
+              : 'Hersteller'
+          }
+          icon="factory"
+          style={{ marginHorizontal: 0, marginTop: 12, marginBottom: 8 }}
+        />
       </FilterSheet>
 
       {/* Ratings sheet — opened from any star ActionButton. Shared for both

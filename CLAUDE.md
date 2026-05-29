@@ -1377,8 +1377,22 @@ faktischer Begründungstext. Liegt in `cloud-functions/ai-product-comparison/`.
   pro Produkt — derselbe Hersteller wird nicht 50× bewertet. Die App liest
   es über die `hersteller`-Reference, die im Produkt-Detail eh geladen wird
   (folgt der Marke→Hersteller-Kette, also der echte Maker, kein Platzhalter).
-- KEIN Score (User-Vorgabe) — reine Info-Karte `AiManufacturerCard` unter
-  der KI-Analyse: `{herkunft}` (Badge) + `{summary}` (2-4 Sätze).
+- KEIN Score (User-Vorgabe) — reine Info-Karte `AiManufacturerCard`:
+  `{herkunft}` (Badge) + `{summary}` (2-4 Sätze).
+- ZWEI Collections (User-Klärung 2026-05-29):
+  • `hersteller` = MARKEN (haben `herstellerref` → hersteller_new, `bild`=
+    Markenbild). `markenProdukte.hersteller` zeigt hierauf.
+  • `hersteller_new` = die ECHTEN Hersteller. `produkte.hersteller` zeigt
+    hierauf — DAS liest die NoName-Produktkarte. Beide werden bewertet
+    (eigene Trigger + Backfills + State-Docs).
+- UI-Platzierung:
+  • noname-detail + product-comparison: `AiManufacturerCard` für den
+    Hersteller des NoName (`p/picked.hersteller` = hersteller_new) UNTER
+    der KI-Analyse.
+  • product-comparison Hero: das (i)-Info-Icon am Markenprodukt-Hersteller
+    öffnet ein FilterSheet mit Markenbild + kuratierten `infos` + KI-Karte
+    der MARKE (`mp.marke.aiHersteller`) + KI-Karte des echten HERSTELLERS
+    (`mp.hersteller.aiHersteller`).
 - Inhalt = Modell-Wissen: neutrale Herkunft/Einordnung + NUR breit
   dokumentierte, unstrittige Kontroversen, DEFENSIV formuliert ("stand in
   der Kritik wegen…"). NIE erfinden; unbekannter Hersteller → nur Herkunft.
