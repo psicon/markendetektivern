@@ -779,7 +779,10 @@ exports.runComparisonBackfill = onRequest(
 //   • Batch < limit → Ende erreicht → completedAt setzen.
 
 const BACKFILL_STATE_PATH = 'aggregates/aiComparisonBackfill';
-const BACKFILL_BATCH = 40; // 40 × ~2s = ~80s, gut innerhalb 540s-Timeout
+// Parallelisiert (Pool 8) → großer Batch passt locker in 540s.
+// 600 / 8 × ~1.5s ≈ 110s. Bei ~7300 Produkten → ~1h für den Komplett-Pass.
+const BACKFILL_BATCH = 600;
+const BACKFILL_CONCURRENCY = 8;
 
 exports.scheduledComparisonBackfill = functions.scheduler.onSchedule(
   {
@@ -832,26 +835,24 @@ exports.scheduledComparisonBackfill = functions.scheduler.onSchedule(
       return;
     }
 
-    let processed = 0;
-    let lastDocId = state.cursor || null;
-    for (const doc of snap.docs) {
-      lastDocId = doc.id;
+    const lastDocId = snap.docs[snap.docs.length - 1].id;
+    // Nur Docs die noch NICHT aktuell sind (Trigger könnte zwischendurch
+    // schon welche erledigt haben) — parallel abarbeiten.
+    const toProcess = snap.docs.filter((doc) => {
       const ai = doc.data()?.aiComparison;
-      // schon aktuell (durch Trigger zwischendurch) → skip, kein Call
-      if (
+      return !(
         ai?.promptVersion === PROMPT_VERSION &&
         (typeof ai.score === 'number' || ai.skipped)
-      ) {
-        continue;
-      }
+      );
+    });
+    const processed = await runPool(toProcess, BACKFILL_CONCURRENCY, async (doc) => {
       try {
         await runComparison(db, doc.id);
-        processed += 1;
       } catch (e) {
         console.error(`[scheduled-backfill] ${doc.id} failed:`, e?.message);
+        throw e;
       }
-      await sleep(200); // ~5 RPS Throttle gegen Gemini
-    }
+    });
 
     const reachedEnd = snap.size < BACKFILL_BATCH;
     await stateRef.set(
@@ -1113,7 +1114,9 @@ exports.runManufacturerForHersteller = onRequest(
 // SCHEDULED — Hersteller-Backfill (cursor-basiert, wie Comparison-Backfill).
 // Reset bei promptVersion-Bump → komplettes Re-Backfill aller Hersteller.
 const HERSTELLER_BACKFILL_STATE_PATH = 'aggregates/aiHerstellerBackfill';
-const HERSTELLER_BACKFILL_BATCH = 30;
+// Parallelisiert (Pool 8): ~968 Hersteller in 1-2 Ticks durch.
+const HERSTELLER_BACKFILL_BATCH = 400;
+const HERSTELLER_BACKFILL_CONCURRENCY = 8;
 
 exports.scheduledManufacturerBackfill = functions.scheduler.onSchedule(
   { ...COMMON_OPTS, schedule: 'every 5 minutes' },
@@ -1157,25 +1160,22 @@ exports.scheduledManufacturerBackfill = functions.scheduler.onSchedule(
       return;
     }
 
-    let processed = 0;
-    let lastDocId = state.cursor || null;
-    for (const doc of snap.docs) {
-      lastDocId = doc.id;
+    const lastDocId = snap.docs[snap.docs.length - 1].id;
+    const toProcess = snap.docs.filter((doc) => {
       const ai = doc.data()?.aiHersteller;
-      if (
+      return !(
         ai?.promptVersion === MANUFACTURER_PROMPT_VERSION &&
         (typeof ai.summary === 'string' || ai.skipped)
-      ) {
-        continue;
-      }
+      );
+    });
+    const processed = await runPool(toProcess, HERSTELLER_BACKFILL_CONCURRENCY, async (doc) => {
       try {
         await runManufacturer(db, doc.id);
-        processed += 1;
       } catch (e) {
         console.error(`[hersteller-backfill] ${doc.id} failed:`, e?.message);
+        throw e;
       }
-      await sleep(200);
-    }
+    });
 
     const reachedEnd = snap.size < HERSTELLER_BACKFILL_BATCH;
     await stateRef.set(
@@ -1195,4 +1195,30 @@ exports.scheduledManufacturerBackfill = functions.scheduler.onSchedule(
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Einfacher Concurrency-Pool: arbeitet `items` mit max `concurrency`
+ * gleichzeitig laufenden `worker`-Calls ab. Ersetzt das sequenzielle
+ * for+sleep im Backfill → deutlich schneller, ohne Gemini-Rate-Limits zu
+ * reissen (8 parallele Flash-Calls ≈ moderate RPM). Worker-Fehler werden
+ * vom Worker selbst geloggt; hier nur gezählt.
+ */
+async function runPool(items, concurrency, worker) {
+  let idx = 0;
+  let done = 0;
+  const runner = async () => {
+    while (idx < items.length) {
+      const cur = idx++;
+      try {
+        await worker(items[cur]);
+        done += 1;
+      } catch (e) {
+        // worker loggt Details
+      }
+    }
+  };
+  const n = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: n }, runner));
+  return done;
 }
