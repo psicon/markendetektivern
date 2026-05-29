@@ -23,6 +23,11 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import React, { useState } from 'react';
 import { Pressable, Text, View, ViewStyle } from 'react-native';
+import Animated, { LinearTransition } from 'react-native-reanimated';
+
+// Animierte Pressable, damit die ganze Card ihre Höhe weich animieren kann
+// (Akkordeon) statt beim Aufklappen sofort auf volle Höhe zu springen.
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
@@ -70,8 +75,12 @@ export function AiComparisonScale({
   const isLong = reasoning.length > 45;
 
   return (
-    <Pressable
+    <AnimatedPressable
       // Die ganze Card ist Tap-Target zum Auf-/Einklappen des Detailtexts.
+      // LinearTransition animiert die Card-Höhe auf dem UI-Thread (instant +
+      // weich), overflow:hidden gibt den Akkordeon-Effekt (Text wird beim
+      // Wachsen progressiv freigegeben statt sofort sichtbar zu sein).
+      layout={LinearTransition.duration(220)}
       onPress={() => {
         if (isLong) setExpanded((v) => !v);
       }}
@@ -86,6 +95,7 @@ export function AiComparisonScale({
           backgroundColor: theme.surface,
           borderWidth: 1,
           borderColor: theme.border,
+          overflow: 'hidden',
         },
         style,
       ]}
@@ -244,7 +254,7 @@ export function AiComparisonScale({
           ) : null}
         </View>
       ) : null}
-    </Pressable>
+    </AnimatedPressable>
   );
 }
 
