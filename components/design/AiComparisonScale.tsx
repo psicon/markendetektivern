@@ -45,13 +45,6 @@ interface Props {
 //   4 = Grün         (etwas besser)
 //   5 = Tiefgrün     (klar besser)
 const SCALE_COLORS = ['#e53935', '#fb8c00', '#9ccc65', '#66bb6a', '#2e7d32'] as const;
-const SCALE_LABELS = [
-  'klar schlechter',
-  'etwas schlechter',
-  'gleichwertig',
-  'etwas besser',
-  'klar besser',
-] as const;
 
 export function AiComparisonScale({
   aiComparison,
@@ -69,7 +62,6 @@ export function AiComparisonScale({
 
   const idx = score - 1;
   const accent = SCALE_COLORS[idx];
-  const label = SCALE_LABELS[idx];
   const reasoning = (aiComparison.reasoning || '').trim();
 
   return (
@@ -110,27 +102,6 @@ export function AiComparisonScale({
         >
           {title}
         </Text>
-        <View
-          style={{
-            paddingHorizontal: 8,
-            paddingVertical: 3,
-            borderRadius: radii.full,
-            backgroundColor: accent + '22',
-          }}
-        >
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.bold as any,
-              fontSize: 10,
-              letterSpacing: 0.3,
-              color: accent,
-              textTransform: 'uppercase',
-            }}
-          >
-            {label}
-          </Text>
-        </View>
       </View>
 
       {/* 5-Dot-Skala */}
@@ -158,43 +129,71 @@ export function AiComparisonScale({
           );
         })}
       </View>
-      {/* Labels rot…grün — die Ausschlagrichtung wird hervorgehoben:
-          score < 3 → "schlechter" fett+farbig, score > 3 → "besser". */}
+      {/* Ausschlag-Labels — das aktive Ende bekommt das Pill-Design
+          (statt der entfernten Header-Pill). Links "Marke besser"
+          (score<3), rechts "NoName besser" (score>3), Mitte
+          "Gleichwertig" (score 3). */}
       {(() => {
-        const worseActive = score < 3;
-        const betterActive = score > 3;
+        const worseActive = score < 3; // Marke besser
+        const betterActive = score > 3; // NoName besser
+
+        const pillStyle = {
+          paddingHorizontal: 8,
+          paddingVertical: 3,
+          borderRadius: radii.full,
+          backgroundColor: accent + '22',
+        } as const;
+        const pillText = {
+          fontFamily,
+          fontWeight: fontWeight.bold as any,
+          fontSize: 10,
+          letterSpacing: 0.3,
+          color: accent,
+          textTransform: 'uppercase' as const,
+        };
+        const plainText = {
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 10,
+          letterSpacing: 0.2,
+          color: theme.textMuted,
+          textTransform: 'uppercase' as const,
+        };
+
+        // Gleichwertig → eine zentrierte Pill, keine Richtungs-Labels.
+        if (!worseActive && !betterActive) {
+          return (
+            <View style={{ alignItems: 'center', marginBottom: 12 }}>
+              <View style={pillStyle}>
+                <Text style={pillText}>Gleichwertig</Text>
+              </View>
+            </View>
+          );
+        }
+
         return (
           <View
             style={{
               flexDirection: 'row',
               justifyContent: 'space-between',
+              alignItems: 'center',
               marginBottom: 12,
             }}
           >
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: (worseActive ? fontWeight.extraBold : fontWeight.medium) as any,
-                fontSize: 10,
-                color: worseActive ? accent : theme.textMuted,
-                letterSpacing: 0.2,
-                textTransform: 'uppercase',
-              }}
-            >
-              NoName schlechter
-            </Text>
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: (betterActive ? fontWeight.extraBold : fontWeight.medium) as any,
-                fontSize: 10,
-                color: betterActive ? accent : theme.textMuted,
-                letterSpacing: 0.2,
-                textTransform: 'uppercase',
-              }}
-            >
-              NoName besser
-            </Text>
+            {worseActive ? (
+              <View style={pillStyle}>
+                <Text style={pillText}>Marke besser</Text>
+              </View>
+            ) : (
+              <Text style={plainText}>Marke besser</Text>
+            )}
+            {betterActive ? (
+              <View style={pillStyle}>
+                <Text style={pillText}>NoName besser</Text>
+              </View>
+            ) : (
+              <Text style={plainText}>NoName besser</Text>
+            )}
           </View>
         );
       })()}
