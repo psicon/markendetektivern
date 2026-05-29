@@ -187,25 +187,29 @@ export function FilterSheet({
                     marginBottom: 14,
                   }}
                 />
+                {/* Bei leerem Titel: kompakte Zeile nur mit Close-Button
+                    (kein reservierter Titel-Platz → kein White-Space oben). */}
                 <View
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
+                    justifyContent: title ? 'space-between' : 'flex-end',
                     paddingHorizontal: 20,
-                    marginBottom: 14,
+                    marginBottom: title ? 14 : 2,
                   }}
                 >
-                  <Text
-                    style={{
-                      fontFamily,
-                      fontWeight: fontWeight.extraBold,
-                      fontSize: 18,
-                      color: theme.text,
-                    }}
-                  >
-                    {title}
-                  </Text>
+                  {title ? (
+                    <Text
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.extraBold,
+                        fontSize: 18,
+                        color: theme.text,
+                      }}
+                    >
+                      {title}
+                    </Text>
+                  ) : null}
                   <Pressable onPress={onClose} hitSlop={8}>
                     <MaterialCommunityIcons
                       name="close"
