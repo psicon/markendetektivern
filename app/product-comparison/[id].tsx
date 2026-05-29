@@ -610,7 +610,6 @@ export default function ProductComparisonScreen() {
     title: string;
     body: string;
     brandImage?: string | null;
-    markeAi?: any;
     herstellerAi?: any;
     herstellerName?: string | null;
   } | null>(null);
@@ -1535,7 +1534,6 @@ export default function ProductComparisonScreen() {
                       title: brandName,
                       body: sheetBody,
                       brandImage: marke?.bild || herstellerNew?.bild || null,
-                      markeAi: marke?.aiHersteller ?? null,
                       herstellerAi: herstellerNew?.aiHersteller ?? null,
                       herstellerName:
                         herstellerNew?.herstellername || herstellerNew?.name || null,
@@ -2630,15 +2628,12 @@ export default function ProductComparisonScreen() {
           </Text>
         ) : null}
 
-        {/* KI-Einschätzung Marke (collection `hersteller`) */}
-        <AiManufacturerCard
-          aiHersteller={infoSheet?.markeAi ?? null}
-          title={infoSheet?.title ? `Marke: ${infoSheet.title}` : 'Marke'}
-          icon="tag-outline"
-          style={{ marginHorizontal: 0, marginTop: 12 }}
-        />
-
-        {/* KI-Einschätzung echter Hersteller (collection `hersteller_new`) */}
+        {/* EINE KI-Karte: der echte Hersteller (collection `hersteller_new`).
+            Die Marke ist oben durch Bild + kuratierte Infos repräsentiert —
+            keine zweite Hersteller-artige Karte (wäre doppelt, v.a. wenn
+            Marke = Hersteller, z.B. Bauer / J. Bauer GmbH & Co. KG).
+            Nur zeigen, wenn der Hersteller sich vom Markennamen unterscheidet
+            ODER es eine echte KI-Einschätzung gibt. */}
         <AiManufacturerCard
           aiHersteller={infoSheet?.herstellerAi ?? null}
           title={

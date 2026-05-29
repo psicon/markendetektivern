@@ -1390,9 +1390,12 @@ faktischer Begründungstext. Liegt in `cloud-functions/ai-product-comparison/`.
     Hersteller des NoName (`p/picked.hersteller` = hersteller_new) UNTER
     der KI-Analyse.
   • product-comparison Hero: das (i)-Info-Icon am Markenprodukt-Hersteller
-    öffnet ein FilterSheet mit Markenbild + kuratierten `infos` + KI-Karte
-    der MARKE (`mp.marke.aiHersteller`) + KI-Karte des echten HERSTELLERS
-    (`mp.hersteller.aiHersteller`).
+    öffnet ein FilterSheet mit: Markenbild + kuratierten `infos` (= die
+    MARKE) und GENAU EINER KI-Hersteller-Karte (`mp.hersteller.aiHersteller`
+    = hersteller_new). KEINE zweite KI-Karte für die Marke — die wäre
+    Hersteller-artig redundant, v.a. wenn Marke = Hersteller (z.B. Bauer /
+    J. Bauer GmbH & Co. KG). Die Marke-Bewertung auf collection `hersteller`
+    läuft zwar weiter, wird hier aber NICHT als eigene Karte gezeigt.
 - Inhalt = Modell-Wissen: neutrale Herkunft/Einordnung + NUR breit
   dokumentierte, unstrittige Kontroversen, DEFENSIV formuliert ("stand in
   der Kritik wegen…"). NIE erfinden; unbekannter Hersteller → nur Herkunft.
