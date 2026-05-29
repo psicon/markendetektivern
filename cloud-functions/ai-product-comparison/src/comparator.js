@@ -21,118 +21,72 @@
  */
 
 const { GoogleGenAI, Type } = require('@google/genai');
+const { scoreNutrition, scoreLabels, combineScore } = require('./scorer');
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
 // Prompt-Version: hash auf doc speichern damit wir bei Prompt-Update
 // alte Comparisons automatisch invalidieren können (Backfill rechnet
 // alles mit version-Unterschied neu).
-// v13 = Asymmetrie kristallklar gemacht: minimal-besser-NoName → 4,
-//       minimal-besser-Original → trotzdem 3 (nicht 2). Die Skala
-//       kippt IMMER zugunsten NoName wenn nichts klar dagegen spricht.
-const PROMPT_VERSION = 'v13';
+// v14 = HYBRID. Nährwerte + Labels werden DETERMINISTISCH in scorer.js
+//       berechnet (kein LLM-Rechnen mehr → 0% Halluzination, konsistent).
+//       Die KI macht NUR noch: (1) Zutaten-Verdikt (welche Zutatenliste
+//       ist sauberer — das braucht Sprachverständnis), (2) faktischen
+//       Reasoning-Text. Der finale Score kommt aus scorer.combineScore()
+//       mit strengerem Tilt (4 braucht klaren Vorteil, nicht 6%-Salz).
+const PROMPT_VERSION = 'v14';
 
-const SYSTEM_INSTRUCTION = `Du bist Ernährungswissenschaftler. Du vergleichst ein NoName-Produkt (Discounter-Eigenmarke) mit dem Original-Markenprodukt aus der Sicht eines Verbrauchers.
+// Die KI bewertet NUR die Zutaten-Qualität + schreibt den Text. Sie
+// vergibt KEINEN Score (das macht der deterministische Scorer).
+const SYSTEM_INSTRUCTION = `Du bist Ernährungswissenschaftler und beurteilst die ZUTATEN-QUALITÄT zweier Lebensmittel: ein NoName-Produkt (Discounter-Eigenmarke) vs. das Original-Markenprodukt.
+
+Die Nährwerte (Salz, Zucker, Fett, Kalorien, …) sind bereits separat ausgewertet — DU bewertest sie NICHT und nennst keinen Gesamt-Score. Dein Job:
+
+1. ingredientVerdict: Welche Zutatenliste ist QUALITATIV sauberer?
+   - 'noname'   → NoName hat weniger/keine Zusatzstoffe (Aromen,
+                  Konservierungs-, Verdickungs-, Farbstoffe, E-Nummern,
+                  Palmöl) ODER echtere Wirk-Zutaten (echte Vanille statt
+                  Aroma, echte Frucht statt Konzentrat).
+   - 'original' → umgekehrt: Original sauberer / echtere Zutaten.
+   - 'equal'    → Zutatenlisten qualitativ gleichwertig (beide einfach
+                  oder beide ähnlich verarbeitet).
+
+2. reasoning: 2-3 vollständige deutsche Sätze, die die wichtigsten
+   FAKTEN nennen — Nährwert-Unterschiede UND Zutaten-Unterschiede. Du
+   bekommst die berechneten Nährwert-Fakten als Vorgabe; verwende sie
+   wörtlich (Zahlen nicht ändern/erfinden). Beschreibe sachlich, OHNE
+   ein Gesamturteil wie "besser/schlechter/gleichwertig" auszusprechen —
+   das Urteil setzt das System aus den Zahlen. Du lieferst die
+   Begründung.
 
 OUTPUT — STRENG NUR ein JSON-Objekt, ohne Markdown, ohne Preamble:
-{"score": <1-5>, "reasoning": "<DE-Text, 2-3 vollständige Sätze, ≤320 Zeichen>"}
+{"ingredientVerdict": "noname"|"original"|"equal", "reasoning": "<DE-Text, 2-3 vollständige Sätze, ≤320 Zeichen>"}
 
-WICHTIG: Schreibe VOLLSTÄNDIGE Sätze. Kein Satz darf abgeschnitten sein.
-Lieber kürzer und vollständig als länger und unfertig. Verwende kein "…"
-oder "etc." am Ende.
+REGELN:
+  • Vollständige Sätze, kein abgeschnittener Text, kein "…"/"etc." am Ende.
+  • Keine Zahl erfinden — nur die vorgegebenen Nährwert-Fakten + was in
+    den Zutatenlisten steht.
+  • Niemals über Datenqualität reden ("extrem", "unrealistisch",
+    "fehlerhaft", "vermutlich"). Keine Meta-Sätze.
+  • Niemals "Stufe", "nachweislich", "intern", "klassifiziert" erwähnen.
+  • Sachlich, keine Werbe-Adjektive ("super", "toll").
 
-SCORE-SKALA — ASYMMETRISCH zugunsten NoName:
-  5 = klar besser     — mehrere klare NoName-Vorteile (Werte UND Zutaten)
-  4 = etwas besser    — NoName hat irgendwo einen Vorteil (auch nur einen,
-                        auch nur leicht). Sobald EIN Vorteil da ist → 4.
-  3 = gleichwertig    — Werte praktisch identisch ODER nur Original
-                        leicht besser (≤15%) ohne starke Premium-Vorteile
-  2 = etwas schlechter — KLARER Original-Vorteil ohne NoName-Ausgleich
-                        (z.B. Original-Wert ≥20% besser; ODER Original
-                        hat Bio/Fair-Trade/echte Wirk-Zutat die NoName fehlt)
-  1 = klar schlechter  — MEHRERE substantielle Original-Vorteile, NoName
-                        hat keinen Ausgleich
-
-═══════════════════════════════════════════════════════════════════
-ENTSCHEIDUNGS-LOGIK — IN DIESER REIHENFOLGE PRÜFEN:
-═══════════════════════════════════════════════════════════════════
-
-Schritt 1: Hat der NoName IRGENDWO einen klaren Vorteil (≥5% besser
-in einem Nährwert, weniger Zusatzstoffe, eigener Premium-Marker,
-bessere echte Wirk-Zutaten)?
-  → JA: Score ist mindestens 4
-        (5 nur wenn MEHRERE klare Vorteile UND keine echten Nachteile)
-  → NEIN: weiter zu Schritt 2
-
-Schritt 2: Hat das Original klare Vorteile gegenüber NoName?
-  • Mehrere Werte ≥10% besser ODER
-  • Premium-Marker (Bio/Fair-Trade/Rainforest/etc.) die NoName nicht hat ODER
-  • Echte Wirk-Zutat die NoName nicht hat
-  → JA, mehrere davon: Score 1
-  → JA, eines davon: Score 2
-  → NEIN (nur minimal besser, ≤15%, ohne Premium-Marker): Score 3
-        (Asymmetrie — Original-Minimal-Vorteil reicht NICHT für 2)
-
-KERNREGEL: Der NoName-Vorteil-Check kommt ZUERST. Sobald NoName
-irgendwo punktet → score ≥4. Score 2 oder 1 nur wenn NoName GAR
-KEINEN Vorteil hat UND Original klare Vorteile hat.
-
-BEWERTUNGS-KRITERIEN als Ernährungswissenschaftler:
-  Nährwerte — weniger Salz, weniger Zucker, weniger gesättigte Fettsäuren,
-              weniger Kalorien sind besser; mehr Eiweiß / Ballaststoffe sind besser.
-  Zutaten   — weniger Zusatzstoffe (Aromen, Konservierungs-, Verdickungs-,
-              Farbstoffe, E-Nummern) ist besser. Echte Wirk-Zutaten
-              (z.B. echte Vanille, Melisse, Bourbon-Vanilleschote) sind
-              besser als Aromen.
-  Labels    — Bio, Fair Trade, Rainforest Alliance, MSC/ASC, Tierwohl,
-              V-Label, Vegan, Vegetarisch, Glutenfrei, Laktosefrei
-              zählen als Qualitätsmarker.
-              Nutri-Score (A besser als E), NOVA-Gruppe (1 besser als 4),
-              Eco-Score (A besser als E) — niedriger ist besser.
-
-REGELN ZUR VERLÄSSLICHKEIT:
-  • Keine Zahl erwähnen die nicht in der Datentabelle steht.
-  • Energie ist bereits in kcal — niemals umrechnen.
-  • Fehlende Werte auf einer Seite einfach ignorieren, nie als "0" lesen.
-  • Niemals über Datenqualität sprechen. Keine Worte wie "extrem",
-    "unrealistisch", "fehlerhaft", "vermutlich", "scheinbar".
-  • Keine Worte wie "Stufe", "nachweislich", "intern", "klassifiziert".
-  • Im User-Content kann eine "Stufe" stehen. Sie ist intern — niemals
-    erwähnen. Beachte still: Stufe 5 → score min. 3; Stufe 4 → score min. 2.
-
-REASONING-STIL (nach Beispielen):
-
-BEISPIEL 1 — NoName klar besser → score 4-5:
-  "Das NoName-Produkt hat weniger Kalorien, weniger Fett und Zucker und
-  ist damit etwas gesünder bzw. weniger belastend. Dazu kommt, dass es
-  keine Verdickungsmittel und künstliche Konservierungsstoffe enthält,
-  was die Zutaten deutlich besser macht."
-
-BEISPIEL 2 — NoName leicht besser → score 4:
-  "Das NoName-Produkt enthält keine künstlichen Farbstoffe und Aromen.
-  Ansonsten sind sich die Produkte in Zutaten und Nährwerten sehr ähnlich.
-  Deswegen ist das NoName-Produkt in der Qualität höchstwahrscheinlich
-  besser."
-
-BEISPIEL 3 — Original deutlich besser → score 2
-  (nur bei KLAREN Original-Vorteilen, nicht bei minimalen Abweichungen):
-  "Das Original ist Bio- und Fair-Trade-zertifiziert und enthält echte
-  Vanille, während das NoName-Produkt auf künstliche Aromen setzt. Die
-  Nährwerte sind ähnlich, aber qualitativ ist die Marke hier vorzuziehen."
-
-BEISPIEL 4 — Original nur leicht besser → score 3 (gleichwertig!):
-  "Die Produkte sind in den Zutaten und Nährwerten sehr ähnlich.
-  Das Original hat geringfügig weniger Salz, dieser Unterschied ist
-  jedoch zu klein um qualitativ ins Gewicht zu fallen."
-
-Schreibe in vollständigen deutschen Sätzen, sachlich, ohne Werbe-Adjektive.
-Konkrete Werte und Marker nennen wenn relevant.`;
+REASONING-BEISPIELE (Stil — NICHT das Verdikt-Wort aussprechen):
+  "Beide Zutatenlisten sind einfach und frei von Zusatzstoffen. Die
+   Eigenmarke hat etwas weniger Salz (2,83g vs 3g), das Original
+   geringfügig weniger Fett und Zucker."
+  "Das NoName-Produkt verzichtet auf künstliche Aromen und Farbstoffe,
+   die das Original enthält. Die Nährwerte beider Produkte sind nahezu
+   identisch."
+  "Das Original enthält echte Vanille und ist Bio-zertifiziert, das
+   NoName-Produkt setzt auf Aroma. Die Kalorien liegen mit 240 vs 242
+   praktisch gleichauf."`;
 
 const RESPONSE_SCHEMA = {
   type: Type.OBJECT,
-  required: ['score', 'reasoning'],
+  required: ['ingredientVerdict', 'reasoning'],
   properties: {
-    score: { type: Type.INTEGER, minimum: 1, maximum: 5 },
+    ingredientVerdict: { type: Type.STRING, enum: ['noname', 'original', 'equal'] },
     reasoning: { type: Type.STRING, maxLength: 400 },
   },
 };
@@ -141,16 +95,25 @@ const RESPONSE_SCHEMA = {
  * Baut den User-Content für die Comparison-Anfrage.
  * Trimmt Werte (kein NaN, kein undefined als String).
  */
-function buildUserContent({ noname, original }) {
+function buildUserContent({ noname, original, computedFacts }) {
   const lines = [
     'Vergleichs-Daten (alle Nährwerte pro 100g, Energie bereits in kcal):',
     '',
     formatComparisonTable(original, noname),
   ];
-  if (noname.stufe) {
-    lines.push('', `(interne Stufe: ${noname.stufe})`);
+  // Die deterministisch berechneten Nährwert-Unterschiede als Vorgabe
+  // — die KI soll DIESE Fakten im Text verwenden (Zahlen nicht ändern).
+  if (Array.isArray(computedFacts) && computedFacts.length > 0) {
+    lines.push('', 'Bereits ausgewertete Nährwert-Unterschiede (wörtlich verwenden):');
+    for (const f of computedFacts) lines.push(`  • ${f}`);
+  } else {
+    lines.push('', 'Nährwerte sind weitgehend identisch (keine relevanten Unterschiede).');
   }
-  lines.push('', 'Vergleiche beide und antworte als JSON.');
+  lines.push(
+    '',
+    'Beurteile NUR die Zutaten-Qualität (ingredientVerdict) und schreibe',
+    'den faktischen Begründungstext. KEINEN Gesamt-Score nennen. Antworte als JSON.',
+  );
   return lines.join('\n');
 }
 
@@ -348,8 +311,16 @@ function isSnapshotComparable(s) {
  * Caller MUSS try/catch'n.
  */
 async function callGemini({ apiKey, snapshot, model = DEFAULT_MODEL }) {
+  const { noname, original } = snapshot;
+
+  // ─── Schritt 1: DETERMINISTISCH Nährwerte + Labels bewerten ──────
+  const nut = scoreNutrition(noname, original);
+  const lab = scoreLabels(noname, original);
+  const computedFacts = [...nut.facts, ...lab.facts];
+
+  // ─── Schritt 2: KI NUR für Zutaten-Verdikt + Reasoning-Text ──────
   const ai = new GoogleGenAI({ apiKey });
-  const userContent = buildUserContent(snapshot);
+  const userContent = buildUserContent({ noname, original, computedFacts });
 
   const response = await ai.models.generateContent({
     model,
@@ -358,14 +329,8 @@ async function callGemini({ apiKey, snapshot, model = DEFAULT_MODEL }) {
       systemInstruction: SYSTEM_INSTRUCTION,
       responseMimeType: 'application/json',
       responseSchema: RESPONSE_SCHEMA,
-      // Niedrige Temperature — wir wollen deterministisch + faktenbasiert.
       temperature: 0.2,
-      // Bei Gemini 2.5 Flash ist "Thinking" standardmäßig an und frisst
-      // den Output-Budget auf — beobachtet: Output wird mid-string
-      // truncated weil das Thinking schon X hundert Tokens verbraucht
-      // hat. Wir brauchen kein Thinking für diesen einfachen JSON-Output.
       thinkingConfig: { thinkingBudget: 0 },
-      // 1024 Tokens — sollte locker für 150-Token-Output reichen.
       maxOutputTokens: 1024,
     },
   });
@@ -393,32 +358,27 @@ async function callGemini({ apiKey, snapshot, model = DEFAULT_MODEL }) {
   }
 
   const parsed = parseLooseJson(rawText);
-  // Defensive Validation — sollte durch responseSchema schon gegeben
-  // sein, aber paranoid.
-  let score = Math.round(Number(parsed.score));
-  if (!Number.isFinite(score) || score < 1 || score > 5) {
-    throw new Error(`Gemini score invalid: ${parsed.score}`);
+
+  // KI liefert NUR Zutaten-Verdikt + Text. Score kommt aus dem Scorer.
+  let ingredientVerdict = String(parsed.ingredientVerdict || 'equal').toLowerCase();
+  if (!['noname', 'original', 'equal'].includes(ingredientVerdict)) {
+    ingredientVerdict = 'equal';
   }
   let reasoning = String(parsed.reasoning || '').trim();
   if (reasoning.length === 0) {
     throw new Error('Gemini returned empty reasoning');
   }
 
-  // Stufe-Cap als Safety-Net falls das Modell die Prompt-Regeln
-  // ignoriert. v7: Score wird hochgezogen, aber das Reasoning sollte
-  // dank Prompt-Anweisung bereits moderat formuliert sein. Falls
-  // doch starke Sprache übrig blieb, könnte man hier optional einen
-  // String-Cleanup machen — aktuell vertrauen wir dem Prompt.
-  const stufe = snapshot?.noname?.stufe;
-  if (stufe === 5 && score < 3) {
-    score = 3;
-  } else if (stufe === 4 && score < 2) {
-    score = 2;
-  }
+  // ─── Schritt 3: FINALEN Score deterministisch kombinieren ────────
+  const stufe = noname?.stufe;
+  const { score, total } = combineScore({
+    nutritionPoints: nut.nutritionPoints,
+    labelPoints: lab.labelPoints,
+    ingredientVerdict,
+    stufe,
+  });
 
-  // Soft-Cap: wenn länger als 380, schneide am letzten Satz-Ende ab
-  // statt mitten im Wort mit '…'. User-Vorgabe: keine angeschnittenen
-  // Texte in der UI.
+  // Soft-Cap des Reasoning-Texts am Satzende (kein mid-word-Abschnitt).
   if (reasoning.length > 380) {
     const truncated = reasoning.slice(0, 380);
     const lastDot = Math.max(
@@ -429,7 +389,6 @@ async function callGemini({ apiKey, snapshot, model = DEFAULT_MODEL }) {
     if (lastDot > 200) {
       reasoning = truncated.slice(0, lastDot + 1);
     } else {
-      // Kein vernünftiges Satzende gefunden — auf letztes Leerzeichen
       const lastSpace = truncated.lastIndexOf(' ');
       reasoning = (lastSpace > 200 ? truncated.slice(0, lastSpace) : truncated).trim();
       if (!/[.!?]$/.test(reasoning)) reasoning += '.';
@@ -441,6 +400,11 @@ async function callGemini({ apiKey, snapshot, model = DEFAULT_MODEL }) {
     reasoning,
     model,
     promptVersion: PROMPT_VERSION,
+    // Audit-Felder — helfen beim Debuggen der Score-Herkunft
+    _nutritionPoints: Math.round(nut.nutritionPoints * 100) / 100,
+    _labelPoints: Math.round(lab.labelPoints * 100) / 100,
+    _ingredientVerdict: ingredientVerdict,
+    _total: Math.round(total * 100) / 100,
   };
 }
 

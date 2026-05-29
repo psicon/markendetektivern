@@ -670,6 +670,120 @@ exports.runComparisonBackfill = onRequest(
   },
 );
 
+// ════════════════════════════════════════════════════════════════════
+// SCHEDULED Backfill — selbst-fortsetzend, Cursor-basiert
+// ════════════════════════════════════════════════════════════════════
+//
+// Ersetzt den fragilen Bash-HTTP-Loop. Läuft alle paar Minuten,
+// arbeitet einen Batch produkte ab und merkt sich die Cursor-Position
+// in einem State-Doc. Überlebt Unterbrechungen (Session-Kill etc.) —
+// macht beim nächsten Tick einfach weiter wo er aufgehört hat.
+//
+// State-Doc: aggregates/aiComparisonBackfill
+//   { cursor: lastDocId|null, promptVersion, completedAt, processed,
+//     updatedAt }
+//
+// Logik pro Tick:
+//   • Wenn promptVersion != aktuell  → Reset (Cursor=null, neu scannen),
+//     promptVersion setzen. So triggert ein Prompt-Bump automatisch
+//     ein komplettes Re-Backfill.
+//   • Wenn completedAt gesetzt + promptVersion aktuell → fertig, no-op.
+//   • Sonst: nächsten Batch ab Cursor verarbeiten, Cursor speichern.
+//   • Batch < limit → Ende erreicht → completedAt setzen.
+
+const BACKFILL_STATE_PATH = 'aggregates/aiComparisonBackfill';
+const BACKFILL_BATCH = 40; // 40 × ~2s = ~80s, gut innerhalb 540s-Timeout
+
+exports.scheduledComparisonBackfill = functions.scheduler.onSchedule(
+  {
+    ...COMMON_OPTS,
+    schedule: 'every 5 minutes',
+  },
+  async () => {
+    const db = admin.firestore();
+    const stateRef = db.doc(BACKFILL_STATE_PATH);
+    const stateSnap = await stateRef.get();
+    const state = stateSnap.exists ? stateSnap.data() : {};
+
+    // Prompt-Version-Wechsel → kompletter Reset
+    if (state.promptVersion !== PROMPT_VERSION) {
+      console.log(
+        `[scheduled-backfill] promptVersion ${state.promptVersion} → ${PROMPT_VERSION}, reset cursor`,
+      );
+      await stateRef.set(
+        {
+          promptVersion: PROMPT_VERSION,
+          cursor: null,
+          completedAt: null,
+          processed: 0,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      return; // nächster Tick startet den Scan
+    }
+
+    // Schon fertig für diese Version → no-op
+    if (state.completedAt) {
+      return;
+    }
+
+    // Nächsten Batch holen
+    let q = db
+      .collection('produkte')
+      .orderBy(admin.firestore.FieldPath.documentId())
+      .limit(BACKFILL_BATCH);
+    if (state.cursor) q = q.startAfter(state.cursor);
+
+    const snap = await q.get();
+    if (snap.empty) {
+      console.log('[scheduled-backfill] keine weiteren Docs → completed');
+      await stateRef.set(
+        { completedAt: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+      return;
+    }
+
+    let processed = 0;
+    let lastDocId = state.cursor || null;
+    for (const doc of snap.docs) {
+      lastDocId = doc.id;
+      const ai = doc.data()?.aiComparison;
+      // schon aktuell (durch Trigger zwischendurch) → skip, kein Call
+      if (
+        ai?.promptVersion === PROMPT_VERSION &&
+        (typeof ai.score === 'number' || ai.skipped)
+      ) {
+        continue;
+      }
+      try {
+        await runComparison(db, doc.id);
+        processed += 1;
+      } catch (e) {
+        console.error(`[scheduled-backfill] ${doc.id} failed:`, e?.message);
+      }
+      await sleep(200); // ~5 RPS Throttle gegen Gemini
+    }
+
+    const reachedEnd = snap.size < BACKFILL_BATCH;
+    await stateRef.set(
+      {
+        cursor: lastDocId,
+        processed: (state.processed || 0) + processed,
+        completedAt: reachedEnd
+          ? admin.firestore.FieldValue.serverTimestamp()
+          : null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    console.log(
+      `[scheduled-backfill] batch done: ${processed} processed, cursor=${lastDocId}, reachedEnd=${reachedEnd}`,
+    );
+  },
+);
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
