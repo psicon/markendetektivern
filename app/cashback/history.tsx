@@ -27,14 +27,27 @@ import {
   DetailHeader,
   DETAIL_HEADER_ROW_HEIGHT,
 } from '@/components/design/DetailHeader';
+import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import {
-  subscribeUserCashbackHistory,
+  getCashbackCount,
+  subscribeUserCashbackHistoryPaged,
   type CashbackStatusEntry,
 } from '@/lib/services/cashbackUpload';
 import { formatCents } from '@/lib/types/cashback';
+
+const PAGE_SIZE = 20;
+
+// Zeitraum-Filter-Presets (Tage; 0 = alle).
+const DATE_PRESETS: [string, string][] = [
+  ['all', 'Alle'],
+  ['7', 'Letzte 7 Tage'],
+  ['30', 'Letzte 30 Tage'],
+  ['90', 'Letzte 90 Tage'],
+];
 
 // ─── Status copy + colors ──────────────────────────────────────────
 
@@ -130,34 +143,87 @@ export default function CashbackHistoryScreen() {
   const { user } = useAuth();
 
   const [entries, setEntries] = useState<CashbackStatusEntry[] | null>(null);
+  const [pageLimit, setPageLimit] = useState(PAGE_SIZE);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+  const [marketFilter, setMarketFilter] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<string>('all');
+  const [showFilter, setShowFilter] = useState(false);
+
+  const { lifetimeCents } = useCashbackUserState();
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
+  // Realtime + lazy: re-subscribe wenn pageLimit wächst. Bleibt live
+  // (neue Bons + Status-Flips sofort), lädt aber nur pageLimit Docs.
   useEffect(() => {
     if (!user?.uid) {
       setEntries([]);
       return;
     }
-    const unsub = subscribeUserCashbackHistory((rows) =>
-      // 'superseded' entries are duplicate-detected placeholders that
-      // the user is automatically redirected to the canonical bon —
-      // hiding them keeps the list tidy.
+    const unsub = subscribeUserCashbackHistoryPaged(pageLimit, (rows) =>
+      // 'superseded' = Duplikat-Platzhalter → ausblenden.
       setEntries(rows.filter((r) => r.status !== 'superseded')),
     );
     return unsub;
+  }, [user?.uid, pageLimit]);
+
+  // Gesamtanzahl für den Header (1 günstiger Count-Read).
+  useEffect(() => {
+    if (!user?.uid) {
+      setTotalCount(0);
+      return;
+    }
+    getCashbackCount().then(setTotalCount).catch(() => setTotalCount(null));
   }, [user?.uid]);
 
   const headerOffset = insets.top + DETAIL_HEADER_ROW_HEIGHT;
   const primary = theme.primary ?? '#0d8575';
 
-  const totalEarned = useMemo(() => {
-    if (!entries) return 0;
-    return entries
-      .filter((e) => e.status === 'approved' || e.status === 'paid')
-      .reduce((acc, e) => acc + (e.cashbackCents ?? 0), 0);
+  // „Insgesamt verdient" aus dem User-Aggregat (realtime, korrekt auch
+  // bei Pagination) statt aus der geladenen Teilmenge summiert.
+  const totalEarned = lifetimeCents ?? 0;
+
+  const merchantKey = (e: CashbackStatusEntry) =>
+    String(e.merchantId || e.merchant || e.merchantName || '');
+
+  // Distinct Märkte aus den geladenen Einträgen (Filter-Optionen).
+  const marketOptions = useMemo<[string, string][]>(() => {
+    const map = new Map<string, string>();
+    (entries ?? []).forEach((e) => {
+      const id = merchantKey(e);
+      if (!id) return;
+      if (!map.has(id)) {
+        map.set(id, e.merchantDisplayName || e.merchantName || e.merchant || id);
+      }
+    });
+    return [['all', 'Alle Märkte'], ...Array.from(map.entries())];
   }, [entries]);
+
+  const dateCutoff = useMemo(() => {
+    const days = parseInt(dateFilter, 10);
+    return Number.isFinite(days) && days > 0 ? Date.now() - days * 86_400_000 : 0;
+  }, [dateFilter]);
+
+  // Client-seitige Filter über das Live-Fenster (kein Composite-Index).
+  const filtered = useMemo(() => {
+    let list = entries ?? [];
+    if (marketFilter !== 'all') {
+      list = list.filter((e) => merchantKey(e) === marketFilter);
+    }
+    if (dateCutoff > 0) {
+      list = list.filter((e) => (e.updatedAt?.toMillis?.() ?? 0) >= dateCutoff);
+    }
+    return list;
+  }, [entries, marketFilter, dateCutoff]);
+
+  const hasMore = (entries?.length ?? 0) >= pageLimit;
+  const activeFilterCount =
+    (marketFilter !== 'all' ? 1 : 0) + (dateFilter !== 'all' ? 1 : 0);
+  const loadMore = () => {
+    if (hasMore) setPageLimit((p) => p + PAGE_SIZE);
+  };
 
   const renderItem = ({ item }: { item: CashbackStatusEntry }) => {
     const v = statusVisual(item.status, primary);
@@ -348,7 +414,7 @@ export default function CashbackHistoryScreen() {
             marginTop: 2,
           }}
         >
-          {entries?.length ?? 0} Bons eingereicht
+          {totalCount ?? entries?.length ?? 0} Bons eingereicht
         </Text>
       </View>
       <Pressable
@@ -441,7 +507,57 @@ export default function CashbackHistoryScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <DetailHeader title="Bons-Verlauf" onBack={() => router.back()} />
+      <DetailHeader
+        title="Bons-Verlauf"
+        onBack={() => router.back()}
+        right={
+          entries && entries.length > 0 ? (
+            <Pressable
+              onPress={() => setShowFilter(true)}
+              hitSlop={6}
+              style={({ pressed }) => ({
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                backgroundColor: theme.surfaceAlt ?? theme.surface,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <MaterialCommunityIcons name="tune-vertical" size={18} color={theme.textMuted} />
+              {activeFilterCount > 0 ? (
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: -2,
+                    right: -2,
+                    minWidth: 16,
+                    height: 16,
+                    borderRadius: 8,
+                    paddingHorizontal: 4,
+                    backgroundColor: primary,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontFamily: fontFamilyVariants.heading,
+                      fontWeight: fontWeight.extraBold as any,
+                      fontSize: 10,
+                      color: '#fff',
+                      lineHeight: 14,
+                    }}
+                  >
+                    {activeFilterCount}
+                  </Text>
+                </View>
+              ) : null}
+            </Pressable>
+          ) : null
+        }
+      />
       {entries === null ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={primary} />
@@ -452,7 +568,7 @@ export default function CashbackHistoryScreen() {
         </View>
       ) : (
         <FlatList
-          data={entries}
+          data={filtered}
           keyExtractor={(e) => e.id}
           renderItem={renderItem}
           ListHeaderComponent={
@@ -460,10 +576,98 @@ export default function CashbackHistoryScreen() {
               <HeaderCard />
             </View>
           }
+          ListEmptyComponent={
+            <View style={{ alignItems: 'center', paddingTop: 32, paddingHorizontal: 24 }}>
+              <Text
+                style={{
+                  color: theme.textSub,
+                  fontFamily: fontFamilyVariants.body,
+                  fontSize: 14,
+                  textAlign: 'center',
+                }}
+              >
+                Keine Bons für diese Filter.
+              </Text>
+            </View>
+          }
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={
+            hasMore ? (
+              <View style={{ paddingVertical: 18 }}>
+                <ActivityIndicator color={primary} />
+              </View>
+            ) : null
+          }
           contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      {/* Filter: Zeitraum + Markt */}
+      <FilterSheet
+        visible={showFilter}
+        title="Filter"
+        onClose={() => setShowFilter(false)}
+      >
+        <View style={{ paddingBottom: 8 }}>
+          <Text
+            style={{
+              fontFamily: fontFamilyVariants.heading,
+              fontWeight: fontWeight.extraBold as any,
+              fontSize: 13,
+              color: theme.textMuted,
+              letterSpacing: 0.4,
+              textTransform: 'uppercase',
+              marginBottom: 6,
+            }}
+          >
+            Zeitraum
+          </Text>
+          <OptionList value={dateFilter} options={DATE_PRESETS} onChange={setDateFilter} />
+
+          {marketOptions.length > 1 ? (
+            <View style={{ marginTop: 18 }}>
+              <Text
+                style={{
+                  fontFamily: fontFamilyVariants.heading,
+                  fontWeight: fontWeight.extraBold as any,
+                  fontSize: 13,
+                  color: theme.textMuted,
+                  letterSpacing: 0.4,
+                  textTransform: 'uppercase',
+                  marginBottom: 6,
+                }}
+              >
+                Markt
+              </Text>
+              <OptionList value={marketFilter} options={marketOptions} onChange={setMarketFilter} />
+            </View>
+          ) : null}
+
+          {activeFilterCount > 0 ? (
+            <Pressable
+              onPress={() => {
+                setMarketFilter('all');
+                setDateFilter('all');
+              }}
+              style={({ pressed }) => ({ marginTop: 18, opacity: pressed ? 0.6 : 1 })}
+            >
+              <Text
+                style={{
+                  fontFamily: fontFamilyVariants.medium,
+                  fontWeight: fontWeight.medium as any,
+                  fontSize: 13,
+                  color: primary,
+                  textAlign: 'center',
+                }}
+              >
+                Filter zurücksetzen
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </FilterSheet>
     </View>
   );
 }

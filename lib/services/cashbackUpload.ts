@@ -14,7 +14,11 @@ import { auth, storage } from '@/lib/firebase';
 import {
   collection,
   doc,
+  getCountFromServer,
+  limit as fsLimit,
   onSnapshot,
+  orderBy,
+  query,
   serverTimestamp,
   setDoc,
   type Unsubscribe,
@@ -419,7 +423,7 @@ export function subscribeUserCashbackHistory(
   return onSnapshot(
     collection(db, `users/${uid}/cashback_status`),
     (qs) => {
-      const rows: CashbackStatusEntry[] = qs.docs.map((d) => ({
+      const rows: CashbackStatusEntry[] = qs.docs.map((d: any) => ({
         id: d.id,
         ...(d.data() as any),
       }));
@@ -435,6 +439,57 @@ export function subscribeUserCashbackHistory(
       onChange([]);
     },
   );
+}
+
+/**
+ * Live + lazy: realtime-Query mit wachsendem `limit` (statt alle Bons auf
+ * einmal zu laden). Bleibt realtime (neue Bons + Status-Flips erscheinen
+ * sofort), lädt aber nur `pageLimit` Docs. „Load more" = pageLimit erhöhen
+ * → neue Subscription. Sortiert serverseitig nach updatedAt desc.
+ */
+export function subscribeUserCashbackHistoryPaged(
+  pageLimit: number,
+  onChange: (entries: CashbackStatusEntry[]) => void,
+): Unsubscribe {
+  const uid = auth.currentUser?.uid;
+  if (!uid) {
+    onChange([]);
+    return () => {};
+  }
+  const q = query(
+    collection(db, `users/${uid}/cashback_status`),
+    orderBy('updatedAt', 'desc'),
+    fsLimit(pageLimit),
+  );
+  return onSnapshot(
+    q,
+    (qs) => {
+      const rows: CashbackStatusEntry[] = qs.docs.map((d: any) => ({
+        id: d.id,
+        ...(d.data() as any),
+      }));
+      onChange(rows);
+    },
+    (error) => {
+      console.warn('⚠️ subscribeUserCashbackHistoryPaged error:', error);
+      onChange([]);
+    },
+  );
+}
+
+/** Gesamtanzahl der Bons (für die Header-Anzeige) — 1 günstiger Count-Read. */
+export async function getCashbackCount(): Promise<number> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return 0;
+  try {
+    const snap = await getCountFromServer(
+      collection(db, `users/${uid}/cashback_status`),
+    );
+    return (snap.data().count as number) ?? 0;
+  } catch (e) {
+    console.warn('⚠️ getCashbackCount error:', (e as any)?.message);
+    return 0;
+  }
 }
 
 export function subscribeReceipt(
