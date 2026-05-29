@@ -22,7 +22,7 @@ import type { AiAssessment } from '@/lib/types/firestore';
 
 interface Props {
   aiAssessment?: AiAssessment | null;
-  /** Optional. Default 'Detektiv-KI Einschätzung'. */
+  /** Optional. Default 'KI-Qualitäts- & Inhaltsanalyse'. */
   title?: string;
   style?: ViewStyle;
 }
@@ -39,7 +39,7 @@ const SCALE_LABELS = [
 
 export function AiHealthScale({
   aiAssessment,
-  title = 'Detektiv-KI Einschätzung',
+  title = 'KI-Qualitäts- & Inhaltsanalyse',
   style,
 }: Props) {
   const { theme } = useTokens();
