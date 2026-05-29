@@ -158,7 +158,8 @@ export function AiHealthScale({
         })}
       </View>
 
-      {/* Ausschlag-Labels — aktive Seite als Pill, sonst ausgegraut. */}
+      {/* Ausschlag-Labels — aktive Seite als Pill, sonst ausgegraut.
+          Bei Durchschnitt (Score 3) zusätzlich mittig eine Pill. */}
       <View
         style={{
           flexDirection: 'row',
@@ -174,6 +175,11 @@ export function AiHealthScale({
         ) : (
           <Text style={plainText}>unter Durchschnitt</Text>
         )}
+        {!worseActive && !betterActive ? (
+          <View style={pillStyle}>
+            <Text style={pillText}>Durchschnitt</Text>
+          </View>
+        ) : null}
         {betterActive ? (
           <View style={pillStyle}>
             <Text style={pillText}>sehr gute Wahl</Text>

@@ -181,7 +181,9 @@ export function AiComparisonScale({
         };
 
         // Beide Labels IMMER sichtbar (auch bei gleichwertig → beide
-        // ausgegraut). Nur die aktive Seite bekommt die farbige Pill.
+        // ausgegraut). Aktive Seite = farbige Pill. Bei gleichwertig
+        // zusätzlich mittig eine "Gleichwertig"-Pill.
+        const equal = !worseActive && !betterActive;
         return (
           <View
             style={{
@@ -198,6 +200,11 @@ export function AiComparisonScale({
             ) : (
               <Text style={plainText}>Marke besser</Text>
             )}
+            {equal ? (
+              <View style={pillStyle}>
+                <Text style={pillText}>Gleichwertig</Text>
+              </View>
+            ) : null}
             {betterActive ? (
               <View style={pillStyle}>
                 <Text style={pillText}>NoName besser</Text>
