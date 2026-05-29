@@ -44,6 +44,7 @@ import { getProductImage } from '@/lib/utils/productImage';
 import { calculateSavings } from '@/lib/utils/savings';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
 import { AiComparisonScale } from '@/components/design/AiComparisonScale';
+import { AiHealthScale } from '@/components/design/AiHealthScale';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { CoachmarkScrollProvider } from '@/components/coachmarks/CoachmarkScrollContext';
 import {
@@ -2524,6 +2525,13 @@ export default function ProductComparisonScreen() {
           aiComparison={(picked as any)?.aiComparison ?? null}
           title={picked?.name ? `KI-Analyse: ${picked.name}` : 'KI-Analyse'}
         />
+        {/* Fallback: wenn kein echter Vergleich möglich war (z.B. das
+            verknüpfte Markenprodukt hat noch keine Nährwerte/Zutaten),
+            bewertet die KI das NoName standalone kategorie-relativ. Dann
+            zeigen wir die Einzel-Bewertung statt gar nichts. */}
+        {(picked as any)?.aiComparison?.score ? null : (
+          <AiHealthScale aiAssessment={(picked as any)?.aiAssessment ?? null} />
+        )}
           </View>
         </Crossfade>
 

@@ -24,16 +24,35 @@
  *
  * ─── Wann das läuft ──────────────────────────────────────────────────
  *
- *   1. onProduktCreate     — neues NoName-Produkt angelegt
+ * Die Trigger (1-3) bewerten NICHT sofort, sondern setzen nur ein
+ * Dirty-Flag (`aiComparisonDirtyAt`). Der debounce-Sweeper (4) verarbeitet
+ * ein Produkt erst, wenn seit der letzten Änderung ≥ 1h vergangen ist —
+ * so läuft die KI nicht 5× während ein Pflege-Vorgang mehrere Felder
+ * nacheinander schreibt (User-Vorgabe 2026-05-29).
+ *
+ *   1. onProduktCreate     — neues NoName-Produkt → dirty
  *   2. onProduktUpdate     — relevante Felder (Nutrition / Zutaten /
- *                            markenProdukt-Ref) haben sich geändert
+ *                            markenProdukt-Ref) geändert → dirty
  *   3. onMarkenProduktUpdate — Original-Markenprodukt-Nutrition oder
  *                            -Zutaten geändert → alle gelinkten
- *                            NoNames neu bewerten
- *   4. runComparisonBackfill (HTTPS, manual) — alle NoNames ohne
- *                            aiComparison.score abarbeiten
- *   5. runComparisonForProduct (HTTPS, manual) — eine spezifische
- *                            EAN/ID neu bewerten (debug + admin)
+ *                            NoNames dirty (Vergleich springt automatisch
+ *                            wieder an wenn die Marke später gepflegt wird)
+ *   4. processPendingComparisons (scheduled, alle 15 Min) — verarbeitet
+ *                            alle dirty-Produkte deren letzte Änderung ≥1h
+ *                            her ist (trailing debounce)
+ *   5. scheduledComparisonBackfill (scheduled) — Komplett-Durchlauf,
+ *                            re-evaluiert alles bei promptVersion-Bump
+ *   6. runComparisonBackfill / runComparisonForProduct (HTTPS, manual) —
+ *                            sofort + force, für debug + admin
+ *
+ * ─── Fallback wenn kein Vergleich möglich ────────────────────────────
+ *
+ *   • NoName ohne markenProdukt-Link    → Standalone-Assessment
+ *     (kategorie-relativ, aiAssessment).
+ *   • NoName MIT Link, aber Marke ohne Daten → Standalone-Assessment
+ *     des NoName (statt skippen). Sobald die Marke Daten bekommt, springt
+ *     der echte Vergleich an und überschreibt das Assessment.
+ *   • NoName selbst ohne Daten           → skipped (UI rendert nichts).
  *
  * ─── Idempotenz / Cost-Cap ───────────────────────────────────────────
  *
@@ -89,6 +108,36 @@ const COMMON_OPTS = {
   memory: '512MiB',
   secrets: [GEMINI_API_KEY],
 };
+
+// ─── Debounce (Trailing) ─────────────────────────────────────────────
+// Trigger laufen NICHT mehr sofort, sondern setzen nur ein Dirty-Flag
+// (`aiComparisonDirtyAt` = Zeitpunkt der letzten relevanten Änderung).
+// Der processPendingComparisons-Sweeper verarbeitet ein Produkt erst,
+// wenn dessen letzte Änderung ≥ DEBOUNCE_MS her ist — also wenn ein
+// Editier-/Pflege-Vorgang abgeschlossen ist und sich nichts mehr tut.
+// User-Vorgabe 2026-05-29: "nicht sofort anspringen, lieber 1h später
+// wenn alle felder gepflegt sind."
+const DIRTY_FIELD = 'aiComparisonDirtyAt';
+const DEBOUNCE_MS = 60 * 60 * 1000; // 1 Stunde
+
+/**
+ * Markiert ein produkte-Doc als "neu zu bewerten" (Dirty-Flag = jetzt).
+ * Jede relevante Änderung bumpt den Zeitstempel → der Sweeper wartet,
+ * bis 1h lang KEINE Änderung mehr kam (trailing debounce).
+ *
+ * Hinweis: Das Schreiben des Flags triggert onProduktUpdate erneut, aber
+ * DIRTY_FIELD ist NICHT in RELEVANT_PRODUKTE_FIELDS → der Re-Trigger
+ * bricht sofort ab (kein Loop, kein Gemini-Call).
+ */
+async function markDirty(db, produktId) {
+  await db
+    .collection('produkte')
+    .doc(produktId)
+    .set(
+      { [DIRTY_FIELD]: admin.firestore.FieldValue.serverTimestamp() },
+      { merge: true },
+    );
+}
 
 // ════════════════════════════════════════════════════════════════════
 // Hilfsfunktion — runComparison(produktId)
@@ -146,7 +195,12 @@ async function runComparison(db, produktId, opts = {}) {
   const nonameSnap = snapshotFromDoc(produktData);
   const originalSnap = snapshotFromDoc(mpDoc.data());
 
-  if (!isSnapshotComparable(nonameSnap) || !isSnapshotComparable(originalSnap)) {
+  const nonameHasData = isSnapshotComparable(nonameSnap);
+  const originalHasData = isSnapshotComparable(originalSnap);
+
+  // Fall 1: NoName selbst hat KEINE Daten → es gibt nichts zu bewerten
+  // (egal ob die Marke Daten hat). UI rendert nichts.
+  if (!nonameHasData) {
     await produktRef.set(
       {
         aiComparison: {
@@ -154,10 +208,23 @@ async function runComparison(db, produktId, opts = {}) {
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           promptVersion: PROMPT_VERSION,
         },
+        // Falls vorher eine Standalone-Bewertung existierte: weg damit.
+        aiAssessment: admin.firestore.FieldValue.delete(),
       },
       { merge: true },
     );
     return { state: 'incomparable' };
+  }
+
+  // Fall 2: NoName HAT Daten, aber die MARKE (noch) nicht → kein echter
+  // Vergleich möglich. Statt zu skippen bewerten wir das NoName standalone
+  // (kategorie-relativ), damit es wenigstens eine KI-Aussage gibt. Sobald
+  // die Marke später Nährwerte/Zutaten gepflegt bekommt, springt der
+  // Vergleich automatisch wieder an (onMarkenProduktUpdate → Dirty-Flag →
+  // Sweeper) und überschreibt die Standalone-Bewertung sauber.
+  // (User-Vorgabe 2026-05-29.)
+  if (!originalHasData) {
+    return await runAssessment(db, produktId, opts);
   }
 
   // Hash-Check — wenn Input + Prompt identisch, nichts tun.
@@ -211,6 +278,9 @@ async function runComparison(db, produktId, opts = {}) {
         lastErrorAt: admin.firestore.FieldValue.delete(),
         skipped: admin.firestore.FieldValue.delete(),
       },
+      // Ein echter Vergleich gewinnt — eine evtl. vorhandene Standalone-
+      // Bewertung wird entfernt, damit die UI nie beide gleichzeitig sieht.
+      aiAssessment: admin.firestore.FieldValue.delete(),
     },
     { merge: true },
   );
@@ -335,6 +405,10 @@ async function runAssessment(db, produktId, opts = {}) {
         lastErrorAt: admin.firestore.FieldValue.delete(),
         skipped: admin.firestore.FieldValue.delete(),
       },
+      // Es gibt aktuell keinen echten Vergleich (kein Link oder Marke ohne
+      // Daten) → eine evtl. veraltete Vergleichs-Bewertung entfernen, damit
+      // die UI die Standalone-Bewertung zeigt und nicht beide.
+      aiComparison: admin.firestore.FieldValue.delete(),
     },
     { merge: true },
   );
@@ -358,8 +432,11 @@ exports.onProduktCreateForComparison = onDocumentCreated(
     const produktId = event.params.produktId;
     const db = admin.firestore();
     try {
-      const res = await runComparison(db, produktId);
-      console.log(`[ai-comparison][onCreate] ${produktId} → ${res.state} ${res.detail || ''}`);
+      // Nicht sofort bewerten — neu angelegte Produkte bekommen ihre
+      // Felder meist erst kurz nach dem Create gepflegt. Dirty-Flag setzen,
+      // der Sweeper bewertet 1h nach der letzten Änderung.
+      await markDirty(db, produktId);
+      console.log(`[ai-comparison][onCreate] ${produktId} → dirty`);
     } catch (e) {
       console.error(`[ai-comparison][onCreate] ${produktId} unexpected:`, e?.message);
     }
@@ -435,14 +512,18 @@ exports.onProduktUpdateForComparison = onDocumentUpdated(
     const before = event.data?.before?.data();
     const after = event.data?.after?.data();
     if (!relevantFieldsChanged(before, after, RELEVANT_PRODUKTE_FIELDS)) {
-      // Häufiger Fall: image-Update, stufe-Update, etc. → skip ohne
-      // Gemini-Call. Wichtig damit wir nicht in Kosten ertrinken.
+      // Häufiger Fall: image-Update, stufe-Update, das Dirty-Flag selbst,
+      // etc. → skip. Wichtig damit wir nicht in Kosten ertrinken UND damit
+      // das Setzen des Dirty-Flags keinen Re-Trigger-Loop erzeugt.
       return;
     }
     const db = admin.firestore();
     try {
-      const res = await runComparison(db, produktId);
-      console.log(`[ai-comparison][onUpdate] ${produktId} → ${res.state} ${res.detail || ''}`);
+      // Debounce: nur Dirty-Flag bumpen. Der Sweeper bewertet 1h nach der
+      // letzten relevanten Änderung — so läuft die KI nicht 5× während ein
+      // Admin/Scraper mehrere Felder nacheinander pflegt.
+      await markDirty(db, produktId);
+      console.log(`[ai-comparison][onUpdate] ${produktId} → dirty`);
     } catch (e) {
       console.error(`[ai-comparison][onUpdate] ${produktId} unexpected:`, e?.message);
     }
@@ -508,17 +589,17 @@ exports.onMarkenProduktUpdateForComparison = onDocumentUpdated(
       return;
     }
     console.log(
-      `[ai-comparison][onMpUpdate] mp=${mpId} touched, ${linkedSnap.size} linked NoNames`,
+      `[ai-comparison][onMpUpdate] mp=${mpId} touched, ${linkedSnap.size} linked NoNames → dirty`,
     );
-    // Sequentiell — nicht parallel — damit wir die Rate-Limits von
-    // Gemini nicht reissen. Bei großem Fan-out könnte man später
-    // batchen oder eine Task-Queue einbauen.
+    // Debounce: alle verknüpften NoNames als dirty markieren statt sofort
+    // zu bewerten. Wenn die Marke gerade erst Nährwerte/Zutaten gepflegt
+    // bekommt (typisch: mehrere Felder nacheinander), wartet der Sweeper
+    // bis sich 1h nichts mehr tut und rechnet DANN den Vergleich sauber neu.
     for (const doc of linkedSnap.docs) {
       try {
-        const res = await runComparison(db, doc.id);
-        console.log(`[ai-comparison][onMpUpdate] noname=${doc.id} → ${res.state}`);
+        await markDirty(db, doc.id);
       } catch (e) {
-        console.error(`[ai-comparison][onMpUpdate] noname=${doc.id} failed:`, e?.message);
+        console.error(`[ai-comparison][onMpUpdate] noname=${doc.id} mark failed:`, e?.message);
       }
     }
   },
@@ -780,6 +861,96 @@ exports.scheduledComparisonBackfill = functions.scheduler.onSchedule(
     );
     console.log(
       `[scheduled-backfill] batch done: ${processed} processed, cursor=${lastDocId}, reachedEnd=${reachedEnd}`,
+    );
+  },
+);
+
+// ════════════════════════════════════════════════════════════════════
+// SCHEDULED — processPendingComparisons (Debounce-Sweeper)
+// ════════════════════════════════════════════════════════════════════
+//
+// Verarbeitet alle produkte deren Dirty-Flag (aiComparisonDirtyAt) ≥
+// DEBOUNCE_MS (1h) alt ist — also wo seit der letzten relevanten Änderung
+// genug Zeit vergangen ist, dass die Pflege abgeschlossen sein dürfte.
+//
+// Läuft alle 15 Min. Pro Tick ein begrenzter Batch (Cost-Cap). Produkte
+// die noch "frisch" geändert wurden (Flag < 1h) werden NICHT angefasst —
+// trailing debounce. Das Flag wird nach erfolgreicher Verarbeitung
+// transaktional entfernt, aber nur wenn es sich seitdem NICHT geändert
+// hat (sonst würde eine Änderung während des Gemini-Calls verschluckt).
+
+const PENDING_BATCH = 25;
+
+exports.processPendingComparisons = functions.scheduler.onSchedule(
+  {
+    ...COMMON_OPTS,
+    schedule: 'every 15 minutes',
+  },
+  async () => {
+    const db = admin.firestore();
+    const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - DEBOUNCE_MS);
+
+    let snap;
+    try {
+      snap = await db
+        .collection('produkte')
+        .where(DIRTY_FIELD, '<=', cutoff)
+        .orderBy(DIRTY_FIELD)
+        .limit(PENDING_BATCH)
+        .get();
+    } catch (e) {
+      // Häufigster Fehler: fehlender Single-Field-Index. Wird beim ersten
+      // Deploy automatisch angelegt; bis dahin loggen + sauber abbrechen.
+      console.error('[pending-sweeper] query failed:', e?.message);
+      return;
+    }
+
+    if (snap.empty) {
+      console.log('[pending-sweeper] nichts fällig');
+      return;
+    }
+
+    let processed = 0;
+    let cleared = 0;
+    for (const doc of snap.docs) {
+      const produktId = doc.id;
+      const seenDirtyAt = doc.get(DIRTY_FIELD); // Timestamp den wir verarbeiten
+      try {
+        const res = await runComparison(db, produktId);
+        processed += 1;
+        console.log(`[pending-sweeper] ${produktId} → ${res.state} ${res.detail || ''}`);
+      } catch (e) {
+        console.error(`[pending-sweeper] ${produktId} runComparison failed:`, e?.message);
+        // Flag NICHT löschen → nächster Tick versucht es erneut.
+        continue;
+      }
+
+      // Flag nur entfernen wenn sich seit dem Lesen nichts geändert hat.
+      // Sonst kam während des Gemini-Calls eine neue Änderung rein und
+      // wir würden ihr Signal verschlucken.
+      try {
+        await db.runTransaction(async (tx) => {
+          const ref = db.collection('produkte').doc(produktId);
+          const fresh = await tx.get(ref);
+          const cur = fresh.get(DIRTY_FIELD);
+          const unchanged =
+            cur && seenDirtyAt && typeof cur.isEqual === 'function'
+              ? cur.isEqual(seenDirtyAt)
+              : cur === seenDirtyAt;
+          if (unchanged) {
+            tx.update(ref, { [DIRTY_FIELD]: admin.firestore.FieldValue.delete() });
+          }
+        });
+        cleared += 1;
+      } catch (e) {
+        console.warn(`[pending-sweeper] ${produktId} clear-flag failed:`, e?.message);
+      }
+
+      await sleep(200); // ~5 RPS Throttle gegen Gemini
+    }
+
+    console.log(
+      `[pending-sweeper] batch done: ${processed} verarbeitet, ${cleared} Flags entfernt, ${snap.size} fällig`,
     );
   },
 );

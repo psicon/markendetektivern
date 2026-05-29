@@ -34,7 +34,13 @@ const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 //       ist sauberer — das braucht Sprachverständnis), (2) faktischen
 //       Reasoning-Text. Der finale Score kommt aus scorer.combineScore()
 //       mit strengerem Tilt (4 braucht klaren Vorteil, nicht 6%-Salz).
-const PROMPT_VERSION = 'v14';
+// v15 = Verhaltens-Bump (Scoring identisch zu v14). Erzwingt einen
+//       sauberen Komplett-Durchlauf, damit die neue Fallback-Logik greift:
+//       Produkte die verknüpft sind aber wo die MARKE keine Daten hat,
+//       werden nicht mehr als 'incomparable' geskippt, sondern das NoName
+//       wird standalone (kategorie-relativ) bewertet. Außerdem laufen
+//       Live-Updates jetzt debounced (1h) über den Pending-Sweeper.
+const PROMPT_VERSION = 'v15';
 
 // Die KI bewertet NUR die Zutaten-Qualität + schreibt den Text. Sie
 // vergibt KEINEN Score (das macht der deterministische Scorer).
