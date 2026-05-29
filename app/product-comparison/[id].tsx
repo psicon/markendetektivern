@@ -2569,7 +2569,7 @@ export default function ProductComparisonScreen() {
           des Herstellers in einem scrollbaren Body. */}
       <FilterSheet
         visible={!!infoSheet}
-        title={infoSheet?.title ?? ''}
+        title=""
         onClose={() => setInfoSheet(null)}
       >
         {/* ═══ MARKE ═══ Logo (eigene Zeile, links) + Name, dann kuratierte
