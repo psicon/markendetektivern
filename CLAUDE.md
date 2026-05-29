@@ -1324,6 +1324,54 @@ Cloud Functions: `cloud-functions/nutrition-history-watcher/`
 (onWrite-Trigger), `cloud-functions/nutrition-backfill/` (HTTPS-Trigger
 für one-shot reweapify→openfood→scraper Backfill).
 
+### KI-Analyse (ai-product-comparison) — Architektur ab v15
+
+NoName-vs-Markenprodukt-Bewertung (5-Punkte-Skala 1=rot…5=grün) +
+faktischer Begründungstext. Liegt in `cloud-functions/ai-product-comparison/`.
+
+**Hybrid-Prinzip (seit v14): Mathematik macht Code, nicht die KI.**
+- `src/scorer.js` rechnet Nährwerte + Labels DETERMINISTISCH (0%
+  Halluzination, konsistent, gratis). Ein Unterschied zählt nur wenn er
+  BEIDE Schwellen reisst: relativ ≥8% UND absolut ≥`minAbs` (gegen das
+  Small-Base-Problem: satFat 0,7 vs 0,4g = +75% rel. aber nur 0,3g abs.
+  → irrelevant). `combineScore` hat asymmetrischen NoName-Tilt: +2.5
+  für "besser", -3.5 für "schlechter" (kleine Original-Vorteile bleiben
+  "gleichwertig"). NIE die Score-Mathe wieder ins LLM zurückverlagern.
+- Das LLM (`src/comparator.js`, gemini-3.5-flash) liefert NUR noch
+  `{ingredientVerdict, reasoning}` — Zutaten-Qualität + Fakten-Text,
+  KEINEN Score. Das verhindert die alte v1-v13-Inkonsistenz (Score
+  widersprach dem Reasoning).
+
+**Fallback-Kette (nie "skippen wenn irgendwas fehlt"):**
+- NoName ohne markenProdukt-Link → Standalone-Assessment
+  (`src/assessor.js`, kategorie-relativ → Schoki wird an Schoki gemessen,
+  nicht an Salat). Landet in `aiAssessment`.
+- NoName MIT Link, aber Marke (noch) ohne Daten → ebenfalls Standalone-
+  Assessment des NoName, NICHT skippen. Sobald die Marke gepflegt wird,
+  springt der echte Vergleich an und überschreibt es.
+- Nur wenn das NoName SELBST keine Daten hat → `aiComparison.skipped`.
+- `aiComparison` und `aiAssessment` werden gegenseitig gelöscht
+  (FieldValue.delete) → die UI sieht nie beide. Beide Detail-Screens
+  (`noname-detail`, `product-comparison`) rendern `AiComparisonScale`
+  und fallen auf `AiHealthScale` (aiAssessment) zurück.
+
+**Debounce — trailing, 1h (NICHT sofort triggern):**
+- Trigger (onCreate/onUpdate/onMarkenProduktUpdate) bewerten NICHT
+  sofort, sondern setzen nur `aiComparisonDirtyAt = serverTimestamp()`.
+  Jede relevante Änderung bumpt den Timestamp.
+- `processPendingComparisons` (scheduled, alle 15 Min) verarbeitet nur
+  Produkte deren letzte Änderung ≥1h her ist. So läuft die KI nicht 5×
+  während ein Scraper/Admin mehrere Felder nacheinander pflegt. Flag-
+  Clear ist transaktional (löscht nur wenn `dirtyAt` unverändert, sonst
+  würde eine Änderung während des Gemini-Calls verschluckt).
+- WICHTIG: `aiComparisonDirtyAt` darf NICHT in `RELEVANT_PRODUKTE_FIELDS`
+  stehen — sonst triggert das Setzen des Flags einen Re-Trigger-Loop.
+- `scheduledComparisonBackfill` (cursor-basiert) macht den Komplett-
+  Durchlauf und resettet automatisch bei `PROMPT_VERSION`-Bump → ein
+  Versions-Bump = sauberes Re-Backfill aller ~7321 Produkte.
+- HTTPS `runComparisonForProduct?key=…&produktId=…&force=1` läuft sofort
+  + force (debug/admin). TRIGGER_KEY = Secret `NUTRITION_SCRAPER_TRIGGER_KEY`.
+
 ## Other notes
 
 - TypeScript strict; `tsc --noEmit -p tsconfig.json` is the
