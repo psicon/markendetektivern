@@ -41,6 +41,7 @@ import {
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { AiComparisonScale } from '@/components/design/AiComparisonScale';
 import { AiHealthScale } from '@/components/design/AiHealthScale';
+import { AiManufacturerCard } from '@/components/design/AiManufacturerCard';
 import { StufenChips } from '@/components/design/StufenChips';
 import { CoachmarkScrollProvider } from '@/components/coachmarks/CoachmarkScrollContext';
 import {
@@ -1638,6 +1639,15 @@ export default function NoNameDetailScreen() {
             {(p as any)?.aiComparison?.score ? null : (
               <AiHealthScale aiAssessment={(p as any)?.aiAssessment ?? null} />
             )}
+            {/* Hersteller-Einschätzung (Info-Karte, kein Score). */}
+            <AiManufacturerCard
+              aiHersteller={(p as any)?.hersteller?.aiHersteller ?? null}
+              herstellerName={
+                (p as any)?.hersteller?.name ||
+                (p as any)?.hersteller?.herstellername ||
+                null
+              }
+            />
           </View>
         </Crossfade>
 

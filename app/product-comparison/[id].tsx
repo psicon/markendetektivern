@@ -45,6 +45,7 @@ import { calculateSavings } from '@/lib/utils/savings';
 import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/design/RatingsSheet';
 import { AiComparisonScale } from '@/components/design/AiComparisonScale';
 import { AiHealthScale } from '@/components/design/AiHealthScale';
+import { AiManufacturerCard } from '@/components/design/AiManufacturerCard';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { CoachmarkScrollProvider } from '@/components/coachmarks/CoachmarkScrollContext';
 import {
@@ -2532,6 +2533,16 @@ export default function ProductComparisonScreen() {
         {(picked as any)?.aiComparison?.score ? null : (
           <AiHealthScale aiAssessment={(picked as any)?.aiAssessment ?? null} />
         )}
+        {/* Hersteller-Einschätzung (Info-Karte, kein Score) — folgt der
+            aufgelösten hersteller-Reference des gepickten Produkts. */}
+        <AiManufacturerCard
+          aiHersteller={(picked as any)?.hersteller?.aiHersteller ?? null}
+          herstellerName={
+            (picked as any)?.hersteller?.name ||
+            (picked as any)?.hersteller?.herstellername ||
+            null
+          }
+        />
           </View>
         </Crossfade>
 

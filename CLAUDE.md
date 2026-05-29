@@ -1372,6 +1372,24 @@ faktischer Begründungstext. Liegt in `cloud-functions/ai-product-comparison/`.
 - HTTPS `runComparisonForProduct?key=…&produktId=…&force=1` läuft sofort
   + force (debug/admin). TRIGGER_KEY = Secret `NUTRITION_SCRAPER_TRIGGER_KEY`.
 
+**Hersteller-Einschätzung (`src/manufacturer.js`, ab Mai 2026):**
+- PRO HERSTELLER einmal berechnet (`hersteller/{id}.aiHersteller`), NICHT
+  pro Produkt — derselbe Hersteller wird nicht 50× bewertet. Die App liest
+  es über die `hersteller`-Reference, die im Produkt-Detail eh geladen wird
+  (folgt der Marke→Hersteller-Kette, also der echte Maker, kein Platzhalter).
+- KEIN Score (User-Vorgabe) — reine Info-Karte `AiManufacturerCard` unter
+  der KI-Analyse: `{herkunft}` (Badge) + `{summary}` (2-4 Sätze).
+- Inhalt = Modell-Wissen: neutrale Herkunft/Einordnung + NUR breit
+  dokumentierte, unstrittige Kontroversen, DEFENSIV formuliert ("stand in
+  der Kritik wegen…"). NIE erfinden; unbekannter Hersteller → nur Herkunft.
+  Grund: falsche Skandal-Behauptung = Rufschädigungs-Risiko. Trainingsstand,
+  keine Live-News → Transparenz-Hinweis in der Karte.
+- Trigger: `onHerstellerCreate/Update` (sofort, ~968 Hersteller = geringes
+  Volumen, kein Debounce nötig) + `scheduledManufacturerBackfill` (cursor,
+  `aggregates/aiHerstellerBackfill`, Reset bei `MANUFACTURER_PROMPT_VERSION`-
+  Bump). Platzhalter ("z - NoName", Single-Char) → `skipped:'no-name'`.
+- HTTPS `runManufacturerForHersteller?key=…&herstellerId=…&force=1`.
+
 ## Other notes
 
 - TypeScript strict; `tsc --noEmit -p tsconfig.json` is the

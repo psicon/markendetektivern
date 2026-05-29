@@ -94,6 +94,12 @@ const {
   isAssessable,
   callGeminiAssessment,
 } = require('./src/assessor');
+const {
+  MANUFACTURER_PROMPT_VERSION,
+  snapshotFromHersteller,
+  isEvaluable: isHerstellerEvaluable,
+  callGeminiManufacturer,
+} = require('./src/manufacturer');
 const { inputHash } = require('./src/hash');
 
 if (!admin.apps.length) admin.initializeApp();
@@ -951,6 +957,238 @@ exports.processPendingComparisons = functions.scheduler.onSchedule(
 
     console.log(
       `[pending-sweeper] batch done: ${processed} verarbeitet, ${cleared} Flags entfernt, ${snap.size} fällig`,
+    );
+  },
+);
+
+// ════════════════════════════════════════════════════════════════════
+// HERSTELLER-BEWERTUNG — KI-Einschätzung pro Hersteller (kein Score)
+// ════════════════════════════════════════════════════════════════════
+//
+// Pro hersteller/{id} EINMAL berechnet (nicht pro Produkt). Liefert eine
+// neutrale Herkunfts-/Einordnungs-Aussage + ggf. vorsichtige bekannte
+// Kontroverse aus Modell-Wissen. Ergebnis → hersteller/{id}.aiHersteller.
+// Die App liest es über die hersteller-Reference, die eh geladen wird.
+//
+// Hash-Check über die Stammdaten (name/legalName/land/stadt) + promptVer.
+
+async function runManufacturer(db, herstellerId, opts = {}) {
+  const { force = false, apiKey } = opts;
+  const ref = db.collection('hersteller').doc(herstellerId);
+  const snapDoc = await ref.get();
+  if (!snapDoc.exists) return { state: 'not-found' };
+  const data = snapDoc.data() || {};
+  const snap = snapshotFromHersteller(data);
+
+  if (!isHerstellerEvaluable(snap)) {
+    await ref.set(
+      {
+        aiHersteller: {
+          skipped: 'no-name',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          promptVersion: MANUFACTURER_PROMPT_VERSION,
+        },
+      },
+      { merge: true },
+    );
+    return { state: 'hersteller-skipped' };
+  }
+
+  const hashKey = JSON.stringify([
+    String(snap.name || '').toLowerCase(),
+    String(snap.legalName || '').toLowerCase(),
+    String(snap.land || '').toLowerCase(),
+    String(snap.stadt || '').toLowerCase(),
+  ]);
+  const hash = require('crypto').createHash('sha256').update(hashKey).digest('hex').slice(0, 16);
+  const prev = data.aiHersteller;
+  if (
+    !force &&
+    prev?.inputHash === hash &&
+    prev?.promptVersion === MANUFACTURER_PROMPT_VERSION &&
+    typeof prev?.summary === 'string'
+  ) {
+    return { state: 'hersteller-skipped-nochange' };
+  }
+
+  let result;
+  try {
+    result = await callGeminiManufacturer({
+      apiKey: apiKey || GEMINI_API_KEY.value(),
+      snapshot: snap,
+    });
+  } catch (e) {
+    console.error(`[ai-hersteller] Gemini failed für ${herstellerId}:`, e.message);
+    await ref.set(
+      {
+        aiHersteller: {
+          lastError: String(e.message || e).slice(0, 200),
+          lastErrorAt: admin.firestore.FieldValue.serverTimestamp(),
+          promptVersion: MANUFACTURER_PROMPT_VERSION,
+        },
+      },
+      { merge: true },
+    );
+    return { state: 'hersteller-gemini-failed', detail: e.message };
+  }
+
+  await ref.set(
+    {
+      aiHersteller: {
+        herkunft: result.herkunft,
+        summary: result.summary,
+        model: result.model,
+        promptVersion: result.promptVersion,
+        inputHash: hash,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastError: admin.firestore.FieldValue.delete(),
+        lastErrorAt: admin.firestore.FieldValue.delete(),
+        skipped: admin.firestore.FieldValue.delete(),
+      },
+    },
+    { merge: true },
+  );
+
+  return { state: 'hersteller-updated', detail: result.herkunft };
+}
+
+// Trigger: neuer Hersteller → sofort bewerten (geringes Volumen, ~968 total).
+exports.onHerstellerCreateForRating = onDocumentCreated(
+  { ...COMMON_OPTS, document: 'hersteller/{herstellerId}' },
+  async (event) => {
+    const id = event.params.herstellerId;
+    try {
+      const res = await runManufacturer(admin.firestore(), id);
+      console.log(`[ai-hersteller][onCreate] ${id} → ${res.state} ${res.detail || ''}`);
+    } catch (e) {
+      console.error(`[ai-hersteller][onCreate] ${id} unexpected:`, e?.message);
+    }
+  },
+);
+
+// Trigger: Hersteller-Stammdaten geändert → neu bewerten (nur bei
+// relevanten Feldern; aiHersteller selbst ist NICHT relevant → kein Loop).
+const RELEVANT_HERSTELLER_FIELDS = ['name', 'herstellername', 'land', 'stadt'];
+exports.onHerstellerUpdateForRating = onDocumentUpdated(
+  { ...COMMON_OPTS, document: 'hersteller/{herstellerId}' },
+  async (event) => {
+    const id = event.params.herstellerId;
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    if (!relevantFieldsChanged(before, after, RELEVANT_HERSTELLER_FIELDS)) return;
+    try {
+      const res = await runManufacturer(admin.firestore(), id);
+      console.log(`[ai-hersteller][onUpdate] ${id} → ${res.state} ${res.detail || ''}`);
+    } catch (e) {
+      console.error(`[ai-hersteller][onUpdate] ${id} unexpected:`, e?.message);
+    }
+  },
+);
+
+// HTTPS — runManufacturerForHersteller (admin/debug, sofort + force)
+exports.runManufacturerForHersteller = onRequest(
+  { ...COMMON_OPTS, secrets: [GEMINI_API_KEY, TRIGGER_KEY] },
+  async (req, res) => {
+    const triggerKey = TRIGGER_KEY.value();
+    const provided = req.query?.key || req.body?.key;
+    if (!triggerKey || provided !== triggerKey) {
+      res.status(401).send('Unauthorized');
+      return;
+    }
+    const herstellerId = String(req.query?.herstellerId || req.body?.herstellerId || '').trim();
+    if (!herstellerId) {
+      res.status(400).send('Missing herstellerId');
+      return;
+    }
+    const force = String(req.query?.force || req.body?.force || '') === '1';
+    try {
+      const result = await runManufacturer(admin.firestore(), herstellerId, { force });
+      res.status(200).json({ herstellerId, ...result });
+    } catch (e) {
+      res.status(500).send(String(e?.message || e));
+    }
+  },
+);
+
+// SCHEDULED — Hersteller-Backfill (cursor-basiert, wie Comparison-Backfill).
+// Reset bei promptVersion-Bump → komplettes Re-Backfill aller Hersteller.
+const HERSTELLER_BACKFILL_STATE_PATH = 'aggregates/aiHerstellerBackfill';
+const HERSTELLER_BACKFILL_BATCH = 30;
+
+exports.scheduledManufacturerBackfill = functions.scheduler.onSchedule(
+  { ...COMMON_OPTS, schedule: 'every 5 minutes' },
+  async () => {
+    const db = admin.firestore();
+    const stateRef = db.doc(HERSTELLER_BACKFILL_STATE_PATH);
+    const stateSnap = await stateRef.get();
+    const state = stateSnap.exists ? stateSnap.data() : {};
+
+    if (state.promptVersion !== MANUFACTURER_PROMPT_VERSION) {
+      console.log(
+        `[hersteller-backfill] promptVersion ${state.promptVersion} → ${MANUFACTURER_PROMPT_VERSION}, reset`,
+      );
+      await stateRef.set(
+        {
+          promptVersion: MANUFACTURER_PROMPT_VERSION,
+          cursor: null,
+          completedAt: null,
+          processed: 0,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      return;
+    }
+    if (state.completedAt) return;
+
+    let q = db
+      .collection('hersteller')
+      .orderBy(admin.firestore.FieldPath.documentId())
+      .limit(HERSTELLER_BACKFILL_BATCH);
+    if (state.cursor) q = q.startAfter(state.cursor);
+
+    const snap = await q.get();
+    if (snap.empty) {
+      await stateRef.set(
+        { completedAt: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+      console.log('[hersteller-backfill] keine weiteren Docs → completed');
+      return;
+    }
+
+    let processed = 0;
+    let lastDocId = state.cursor || null;
+    for (const doc of snap.docs) {
+      lastDocId = doc.id;
+      const ai = doc.data()?.aiHersteller;
+      if (
+        ai?.promptVersion === MANUFACTURER_PROMPT_VERSION &&
+        (typeof ai.summary === 'string' || ai.skipped)
+      ) {
+        continue;
+      }
+      try {
+        await runManufacturer(db, doc.id);
+        processed += 1;
+      } catch (e) {
+        console.error(`[hersteller-backfill] ${doc.id} failed:`, e?.message);
+      }
+      await sleep(200);
+    }
+
+    const reachedEnd = snap.size < HERSTELLER_BACKFILL_BATCH;
+    await stateRef.set(
+      {
+        cursor: lastDocId,
+        processed: (state.processed || 0) + processed,
+        completedAt: reachedEnd ? admin.firestore.FieldValue.serverTimestamp() : null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    console.log(
+      `[hersteller-backfill] batch: ${processed} verarbeitet, cursor=${lastDocId}, reachedEnd=${reachedEnd}`,
     );
   },
 );

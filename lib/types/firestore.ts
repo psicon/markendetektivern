@@ -162,6 +162,27 @@ export interface HerstellerNew {
   plz: string;
   stadt: string;
   herstellername: string;
+  /**
+   * KI-Einschätzung des Herstellers (Modell-Wissen). Pro Hersteller EINMAL
+   * berechnet von cloud-functions/ai-product-comparison. KEIN Score —
+   * reine Info (Herkunft/Einordnung + ggf. vorsichtige bekannte Kontroverse).
+   * In der App als eigene Info-Karte unter der KI-Analyse angezeigt.
+   */
+  aiHersteller?: AiHersteller;
+}
+
+export interface AiHersteller {
+  /** One-Liner fürs Badge, z.B. "Deutschland · Familienunternehmen". */
+  herkunft?: string;
+  /** 2-4 Sätze DE, neutral; ggf. vorsichtige bekannte Kontroverse. */
+  summary?: string;
+  model?: string;
+  promptVersion?: string;
+  inputHash?: string;
+  updatedAt?: Timestamp;
+  skipped?: 'no-name';
+  lastError?: string;
+  lastErrorAt?: Timestamp;
 }
 
 export interface Packungstypen {
