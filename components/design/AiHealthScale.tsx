@@ -20,11 +20,14 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import React, { useState } from 'react';
 import { Pressable, Text, View, ViewStyle } from 'react-native';
+import Animated, { LinearTransition } from 'react-native-reanimated';
 
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import type { AiAssessment } from '@/lib/types/firestore';
 import { ReasoningAccordion, isReasoningLong } from './ReasoningAccordion';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 interface Props {
   aiAssessment?: AiAssessment | null;
@@ -83,7 +86,8 @@ export function AiHealthScale({
   };
 
   return (
-    <Pressable
+    <AnimatedPressable
+      layout={LinearTransition.duration(220)}
       onPress={() => {
         if (isLong) setExpanded((v) => !v);
       }}
@@ -98,6 +102,7 @@ export function AiHealthScale({
           backgroundColor: theme.surface,
           borderWidth: 1,
           borderColor: theme.border,
+          overflow: 'hidden',
         },
         style,
       ]}
@@ -180,7 +185,7 @@ export function AiHealthScale({
 
       {/* Reasoning — 1 Zeile gekürzt, ganze Card klappt auf/zu. */}
       <ReasoningAccordion text={reasoning} accent={accent} expanded={expanded} />
-    </Pressable>
+    </AnimatedPressable>
   );
 }
 

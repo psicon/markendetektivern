@@ -23,11 +23,16 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import React, { useState } from 'react';
 import { Pressable, Text, View, ViewStyle } from 'react-native';
+import Animated, { LinearTransition } from 'react-native-reanimated';
 
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import type { AiComparison } from '@/lib/types/firestore';
 import { ReasoningAccordion, isReasoningLong } from './ReasoningAccordion';
+
+// Animierte Pressable: ganze Card animiert ihre Höhe weich (LinearTransition,
+// UI-Thread) in BEIDE Richtungen, overflow:hidden gibt den Akkordeon-Effekt.
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 interface Props {
   aiComparison?: AiComparison | null;
@@ -71,8 +76,11 @@ export function AiComparisonScale({
   const isLong = isReasoningLong(reasoning);
 
   return (
-    <Pressable
-      // Die ganze Card ist Tap-Target zum Auf-/Einklappen des Detailtexts.
+    <AnimatedPressable
+      // Ganze Card = Tap-Target zum Auf-/Einklappen. LinearTransition
+      // animiert die Card-Höhe weich (beide Richtungen), overflow:hidden
+      // gibt den Akkordeon-Effekt.
+      layout={LinearTransition.duration(220)}
       onPress={() => {
         if (isLong) setExpanded((v) => !v);
       }}
@@ -87,6 +95,7 @@ export function AiComparisonScale({
           backgroundColor: theme.surface,
           borderWidth: 1,
           borderColor: theme.border,
+          overflow: 'hidden',
         },
         style,
       ]}
@@ -203,7 +212,7 @@ export function AiComparisonScale({
       {/* Reasoning — 1 Zeile gekürzt, ganze Card klappt auf/zu (Pressable
           oben). Symmetrische Höhen-Animation via ReasoningAccordion. */}
       <ReasoningAccordion text={reasoning} accent={accent} expanded={expanded} />
-    </Pressable>
+    </AnimatedPressable>
   );
 }
 
