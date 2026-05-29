@@ -67,9 +67,15 @@ export function AiComparisonScale({
   const idx = score - 1;
   const accent = SCALE_COLORS[idx];
   const reasoning = (aiComparison.reasoning || '').trim();
+  const isLong = reasoning.length > 45;
 
   return (
-    <View
+    <Pressable
+      // Die ganze Card ist Tap-Target zum Auf-/Einklappen des Detailtexts.
+      onPress={() => {
+        if (isLong) setExpanded((v) => !v);
+      }}
+      disabled={!isLong}
       style={[
         {
           marginHorizontal: 20,
@@ -193,58 +199,52 @@ export function AiComparisonScale({
         );
       })()}
 
-      {/* Reasoning — standardmäßig auf 3 Zeilen gekürzt, "Mehr anzeigen"
-          klappt den vollen Text auf (= Tracking-Signal, s. ClickUp). */}
-      {reasoning
-        ? (() => {
-            const isLong = reasoning.length > 140;
-            return (
-              <View>
-                <Text
-                  numberOfLines={!isLong || expanded ? undefined : 3}
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.medium,
-                    fontSize: 13,
-                    lineHeight: 19,
-                    color: theme.textSub,
-                  }}
-                >
-                  {reasoning}
-                </Text>
-                {isLong ? (
-                  <Pressable
-                    onPress={() => setExpanded((v) => !v)}
-                    hitSlop={6}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 3,
-                      marginTop: 8,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontFamily,
-                        fontWeight: fontWeight.bold as any,
-                        fontSize: 12,
-                        color: accent,
-                      }}
-                    >
-                      {expanded ? 'Weniger anzeigen' : 'Mehr anzeigen'}
-                    </Text>
-                    <MaterialCommunityIcons
-                      name={expanded ? 'chevron-up' : 'chevron-down'}
-                      size={16}
-                      color={accent}
-                    />
-                  </Pressable>
-                ) : null}
-              </View>
-            );
-          })()
-        : null}
-    </View>
+      {/* Reasoning — standardmäßig auf 1 Zeile gekürzt. Tap auf die ganze
+          Card klappt auf/zu (siehe Pressable oben). Der Chevron ist nur
+          visueller Hinweis. (Aufklappen = späterer Tracking-Hook, ClickUp.) */}
+      {reasoning ? (
+        <View>
+          <Text
+            numberOfLines={!isLong || expanded ? undefined : 1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 13,
+              lineHeight: 19,
+              color: theme.textSub,
+            }}
+          >
+            {reasoning}
+          </Text>
+          {isLong ? (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 3,
+                marginTop: 8,
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.bold as any,
+                  fontSize: 12,
+                  color: accent,
+                }}
+              >
+                {expanded ? 'Weniger anzeigen' : 'Mehr anzeigen'}
+              </Text>
+              <MaterialCommunityIcons
+                name={expanded ? 'chevron-up' : 'chevron-down'}
+                size={16}
+                color={accent}
+              />
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+    </Pressable>
   );
 }
 
