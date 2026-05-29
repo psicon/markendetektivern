@@ -189,6 +189,13 @@ export default function CashbackCaptureScreen() {
       }
       // On cancel: just stay on the picker UI — user can try again
       // or pick from gallery instead.
+      // WICHTIG (2026-05-28 Fix): `result === 'cancel'` IST ein String —
+      // ohne expliziten Ausschluss würde der Cancel-Sentinel als gültige
+      // URI an goReview durchgereicht (→ User landet trotz Abbruch auf
+      // der Bestätigungsseite). Daher 'cancel' + null hier hart abfangen.
+      if (result === 'cancel' || result == null) {
+        return; // bleibt auf Picker-UI
+      }
       if (typeof result === 'string') {
         await goReview(result, 'live_camera');
       }

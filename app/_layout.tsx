@@ -187,7 +187,12 @@ function ThemedApp() {
                 />
                 <Stack.Screen
                   name="cashback/review"
-                  options={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: true }}
+                  // gestureEnabled:false — review ist eine In-Progress-Stufe.
+                  // Vorige Screens wurden via router.replace ersetzt, daher
+                  // würde Swipe-Back inkonsistent zur rewards-Tab springen
+                  // statt zur Kamera. Exit nur über X (→ rewards) oder
+                  // "Nochmal" (→ capture). 2026-05-28.
+                  options={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: false }}
                 />
                 <Stack.Screen
                   name="cashback/history"
@@ -195,6 +200,11 @@ function ThemedApp() {
                 />
                 <Stack.Screen
                   name="cashback/pending/[id]"
+                  // gestureEnabled bleibt true: pending dient zwei Zwecken —
+                  // (1) frisch abgeschickter Bon (review→replace → Swipe-Back
+                  //     landet sicher auf rewards, kein Stale-review dahinter)
+                  // (2) Detail-View eines existierenden Bons (history→push →
+                  //     Swipe-Back→history ist erwünscht).
                   options={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: true }}
                 />
                 <Stack.Screen name="+not-found" />
