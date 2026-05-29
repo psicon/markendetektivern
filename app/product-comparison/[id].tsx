@@ -3029,45 +3029,42 @@ function IngredientsMatch({
     );
   }
 
+  // Label + Zutaten-Block (wird in der gemeinsamen Card 2× verwendet).
+  const section = (label: string, text: string, fromOpenFood: boolean) => (
+    <View>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.bold,
+          fontSize: 11,
+          color: theme.textMuted,
+          letterSpacing: 1,
+          textTransform: 'uppercase',
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </Text>
+      <Text
+        style={{
+          fontFamily,
+          fontWeight: fontWeight.regular,
+          fontSize: 13,
+          lineHeight: 19,
+          color: theme.text,
+        }}
+      >
+        {text}
+      </Text>
+      {fromOpenFood ? <OpenFoodSourceCaption theme={theme} /> : null}
+    </View>
+  );
+
   return (
     <View style={{ marginHorizontal: 20, marginTop: 18 }}>
-      {brandIngredients ? (
-        <View
-          style={{
-            backgroundColor: theme.surface,
-            borderRadius: 14,
-            padding: 16,
-            marginBottom: nonameIngredients ? 12 : 0,
-          }}
-        >
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.bold,
-              fontSize: 11,
-              color: theme.textMuted,
-              letterSpacing: 1,
-              textTransform: 'uppercase',
-              marginBottom: 6,
-            }}
-          >
-            Original
-          </Text>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.regular,
-              fontSize: 13,
-              lineHeight: 19,
-              color: theme.text,
-            }}
-          >
-            {brandIngredients}
-          </Text>
-          {brandFromOpenFood ? <OpenFoodSourceCaption theme={theme} /> : null}
-        </View>
-      ) : null}
-      {nonameIngredients ? (
+      {/* EINE Card, Original + Eigenmarke optisch durch eine Hairline
+          getrennt (statt zwei separater Cards). */}
+      {brandIngredients || nonameIngredients ? (
         <View
           style={{
             backgroundColor: theme.surface,
@@ -3075,31 +3072,18 @@ function IngredientsMatch({
             padding: 16,
           }}
         >
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.bold,
-              fontSize: 11,
-              color: theme.textMuted,
-              letterSpacing: 1,
-              textTransform: 'uppercase',
-              marginBottom: 6,
-            }}
-          >
-            Eigenmarke
-          </Text>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.regular,
-              fontSize: 13,
-              lineHeight: 19,
-              color: theme.text,
-            }}
-          >
-            {nonameIngredients}
-          </Text>
-          {nonameFromOpenFood ? <OpenFoodSourceCaption theme={theme} /> : null}
+          {brandIngredients ? section('Original', brandIngredients, brandFromOpenFood) : null}
+          {brandIngredients && nonameIngredients ? (
+            <View
+              style={{
+                height: 1,
+                backgroundColor: theme.border,
+                marginVertical: 14,
+                marginHorizontal: -16, // bis an die Card-Kanten
+              }}
+            />
+          ) : null}
+          {nonameIngredients ? section('Eigenmarke', nonameIngredients, nonameFromOpenFood) : null}
         </View>
       ) : null}
       {!brandIngredients && !nonameIngredients ? (

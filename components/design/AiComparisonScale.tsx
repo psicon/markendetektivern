@@ -21,8 +21,8 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import React from 'react';
-import { Text, View, ViewStyle } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, Text, View, ViewStyle } from 'react-native';
 
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
@@ -52,6 +52,10 @@ export function AiComparisonScale({
   style,
 }: Props) {
   const { theme } = useTokens();
+  // Detailtext standardmäßig eingeklappt. Das Aufklappen ist später der
+  // Tracking-Hook (ClickUp 86ca1h3fk): Aufklappen = bewusstes "genauer
+  // anschauen"-Signal. Hier vorerst rein visuell, ohne Tracking.
+  const [expanded, setExpanded] = useState(false);
 
   // Skip-Logik — Caller sieht "nichts da" und kann eigenen Fallback wählen
   if (!aiComparison) return null;
@@ -160,17 +164,8 @@ export function AiComparisonScale({
           textTransform: 'uppercase' as const,
         };
 
-        // Gleichwertig → eine zentrierte Pill, keine Richtungs-Labels.
-        if (!worseActive && !betterActive) {
-          return (
-            <View style={{ alignItems: 'center', marginBottom: 12 }}>
-              <View style={pillStyle}>
-                <Text style={pillText}>Gleichwertig</Text>
-              </View>
-            </View>
-          );
-        }
-
+        // Beide Labels IMMER sichtbar (auch bei gleichwertig → beide
+        // ausgegraut). Nur die aktive Seite bekommt die farbige Pill.
         return (
           <View
             style={{
@@ -198,20 +193,57 @@ export function AiComparisonScale({
         );
       })()}
 
-      {/* Reasoning */}
-      {reasoning ? (
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 13,
-            lineHeight: 19,
-            color: theme.textSub,
-          }}
-        >
-          {reasoning}
-        </Text>
-      ) : null}
+      {/* Reasoning — standardmäßig auf 3 Zeilen gekürzt, "Mehr anzeigen"
+          klappt den vollen Text auf (= Tracking-Signal, s. ClickUp). */}
+      {reasoning
+        ? (() => {
+            const isLong = reasoning.length > 140;
+            return (
+              <View>
+                <Text
+                  numberOfLines={!isLong || expanded ? undefined : 3}
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 13,
+                    lineHeight: 19,
+                    color: theme.textSub,
+                  }}
+                >
+                  {reasoning}
+                </Text>
+                {isLong ? (
+                  <Pressable
+                    onPress={() => setExpanded((v) => !v)}
+                    hitSlop={6}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 3,
+                      marginTop: 8,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily,
+                        fontWeight: fontWeight.bold as any,
+                        fontSize: 12,
+                        color: accent,
+                      }}
+                    >
+                      {expanded ? 'Weniger anzeigen' : 'Mehr anzeigen'}
+                    </Text>
+                    <MaterialCommunityIcons
+                      name={expanded ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={accent}
+                    />
+                  </Pressable>
+                ) : null}
+              </View>
+            );
+          })()
+        : null}
     </View>
   );
 }
