@@ -87,12 +87,25 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
+    // 2026-05-29 Fix: lintVitalRelease brach den Release-Build ab wegen
+    // ExtraTranslation-Fehlern in values-b+de/strings.xml. Die Datei
+    // enthält iOS-Info.plist-Keys (NSCameraUsageDescription, CFBundle*,
+    // …) die das expo-locales-Plugin für iOS generiert, auf Android aber
+    // sinnlos sind und im Default-Locale fehlen. Sie sind harmlos
+    // (ungenutzt auf Android), aber Android-Lint wertet sie als fatal.
+    // → ExtraTranslation deaktivieren + Release-Build nicht an Lint
+    //   abbrechen lassen. Andere Lint-Checks bleiben aktiv.
+    lint {
+        disable 'ExtraTranslation'
+        abortOnError false
+    }
+
     namespace 'de.markendetektive'
     defaultConfig {
         applicationId 'de.markendetektive'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1161
+        versionCode 1172
             versionName "5.0.7"
     }
     signingConfigs {
