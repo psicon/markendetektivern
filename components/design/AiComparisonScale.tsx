@@ -53,7 +53,11 @@ const SCALE_LABELS = [
   'klar besser',
 ] as const;
 
-export function AiComparisonScale({ aiComparison, title = 'Detektiv-KI Bewertung', style }: Props) {
+export function AiComparisonScale({
+  aiComparison,
+  title = 'KI-Qualitäts- & Inhaltsanalyse',
+  style,
+}: Props) {
   const { theme } = useTokens();
 
   // Skip-Logik — Caller sieht "nichts da" und kann eigenen Fallback wählen
@@ -154,39 +158,46 @@ export function AiComparisonScale({ aiComparison, title = 'Detektiv-KI Bewertung
           );
         })}
       </View>
-      {/* Labels rot…grün */}
-      <View
-        style={{
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 10,
-            color: theme.textMuted,
-            letterSpacing: 0.2,
-            textTransform: 'uppercase',
-          }}
-        >
-          NoName schlechter
-        </Text>
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.medium,
-            fontSize: 10,
-            color: theme.textMuted,
-            letterSpacing: 0.2,
-            textTransform: 'uppercase',
-          }}
-        >
-          NoName besser
-        </Text>
-      </View>
+      {/* Labels rot…grün — die Ausschlagrichtung wird hervorgehoben:
+          score < 3 → "schlechter" fett+farbig, score > 3 → "besser". */}
+      {(() => {
+        const worseActive = score < 3;
+        const betterActive = score > 3;
+        return (
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              marginBottom: 12,
+            }}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: (worseActive ? fontWeight.extraBold : fontWeight.medium) as any,
+                fontSize: 10,
+                color: worseActive ? accent : theme.textMuted,
+                letterSpacing: 0.2,
+                textTransform: 'uppercase',
+              }}
+            >
+              NoName schlechter
+            </Text>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: (betterActive ? fontWeight.extraBold : fontWeight.medium) as any,
+                fontSize: 10,
+                color: betterActive ? accent : theme.textMuted,
+                letterSpacing: 0.2,
+                textTransform: 'uppercase',
+              }}
+            >
+              NoName besser
+            </Text>
+          </View>
+        );
+      })()}
 
       {/* Reasoning */}
       {reasoning ? (

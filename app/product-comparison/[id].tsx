@@ -2565,10 +2565,7 @@ export default function ProductComparisonScreen() {
             platzieren (vorher war's drüber). Component returnt null
             wenn kein Score → Alternativen-Liste rückt automatisch
             nach. */}
-        <AiComparisonScale
-          aiComparison={(picked as any)?.aiComparison ?? null}
-          title={picked?.name ? `KI-Analyse: ${picked.name}` : 'KI-Analyse'}
-        />
+        <AiComparisonScale aiComparison={(picked as any)?.aiComparison ?? null} />
         {/* Fallback: wenn kein echter Vergleich möglich war (z.B. das
             verknüpfte Markenprodukt hat noch keine Nährwerte/Zutaten),
             bewertet die KI das NoName standalone kategorie-relativ. Dann
