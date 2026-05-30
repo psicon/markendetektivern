@@ -283,24 +283,31 @@ async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo) {
  *
  * Runs in a transaction so concurrent re-publishes can't race.
  */
-async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, bonDateIso, campaignId) {
+async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, bonDateIso, campaignId, campaignMode) {
   const ledgerCol = userRef.collection('cashback_ledger');
+  // Tatsächlich gutgeschriebener Betrag — kann durch Budget-Deckelung IN
+  // der Transaktion < cashbackCents sein (+ ob das Budget dabei leer war).
+  let creditedCents = cashbackCents;
+  let budgetExhausted = false;
 
   await db.runTransaction(async (tx) => {
-    // Fetch all existing earn entries for this receipt.
+    // ── Alle Reads ZUERST (Firestore-Transaktions-Regel) ──
     const earns = await tx.get(
       ledgerCol.where('receiptId', '==', cashbackId).where('type', '==', 'earn'),
     );
     const reverses = await tx.get(
       ledgerCol.where('receiptId', '==', cashbackId).where('type', '==', 'reverse'),
     );
+    const userSnap = await tx.get(userRef);
+    // Aktions-Budget FRISCH in der Transaktion lesen → race-frei cappen.
+    const campaignRef = campaignId ? db.collection(CAMPAIGNS_COL).doc(campaignId) : null;
+    const campaignSnap = campaignMode && campaignRef ? await tx.get(campaignRef) : null;
 
     const totalEarned = earns.docs.reduce((s, d) => s + (d.data().cents || 0), 0);
     const totalReversed = reverses.docs.reduce((s, d) => s + (d.data().cents || 0), 0);
     const netActive = totalEarned - totalReversed;
     const wantApproved = status === 'approved' && cashbackCents > 0;
 
-    const userSnap = await tx.get(userRef);
     const u = userSnap.exists ? userSnap.data() : {};
     const balance = u.cashback_balance_cents || 0;
     const lifetime = u.cashback_lifetime_cents || 0;
@@ -339,27 +346,43 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
 
     if (wantApproved && netActive === 0) {
       // First-time approval (or reapproval after a reverse).
-      const ref = ledgerCol.doc();
-      tx.set(ref, {
-        type: 'earn',
-        cents: cashbackCents,
-        receiptId: cashbackId,
-        campaignId: campaignId || null, // für Budget-Refund beim Reverse
-        balanceAfterCents: balance + cashbackCents,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      tx.set(
-        userRef,
-        {
-          cashback_balance_cents: balance + cashbackCents,
-          cashback_lifetime_cents: lifetime + cashbackCents,
-          cashback_last_bon_date: bonDateIso || todayBerlin(),
-          ...monthlyDelta(cashbackCents, 1),
-          ...campaignDelta(campaignId, cashbackCents, 1),
-        },
-        { merge: true },
-      );
-      adjustBudget(campaignId, -cashbackCents);
+      // Aktions-Modus: Betrag ATOMAR auf das verbleibende Budget cappen —
+      // das schließt die Race-Lücke (2 Bons am letzten Budget-Rest).
+      let earnCents = cashbackCents;
+      if (campaignMode && campaignSnap) {
+        const remaining = Number.isFinite(campaignSnap.data()?.budgetRemainingCents)
+          ? campaignSnap.data().budgetRemainingCents
+          : 0;
+        earnCents = Math.max(0, Math.min(cashbackCents, remaining));
+      }
+      creditedCents = earnCents;
+      budgetExhausted = campaignMode && earnCents === 0 && cashbackCents > 0;
+
+      if (earnCents > 0) {
+        const ref = ledgerCol.doc();
+        tx.set(ref, {
+          type: 'earn',
+          cents: earnCents,
+          receiptId: cashbackId,
+          campaignId: campaignId || null, // für Budget-Refund beim Reverse
+          balanceAfterCents: balance + earnCents,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        tx.set(
+          userRef,
+          {
+            cashback_balance_cents: balance + earnCents,
+            cashback_lifetime_cents: lifetime + earnCents,
+            cashback_last_bon_date: bonDateIso || todayBerlin(),
+            ...monthlyDelta(earnCents, 1),
+            ...campaignDelta(campaignId, earnCents, 1),
+          },
+          { merge: true },
+        );
+        adjustBudget(campaignId, -earnCents);
+      }
+      // earnCents === 0 → keine Gutschrift; Status wird außen auf
+      // no_reward / campaign_budget_exhausted gesetzt.
     } else if (wantApproved && netActive > 0) {
       // Already credited (PubSub redelivery). Noop unless cents changed.
       if (netActive !== cashbackCents) {
@@ -414,6 +437,8 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
     }
     // else: not approved + no prior earn — noop.
   });
+
+  return { creditedCents, budgetExhausted };
 }
 
 async function verifyAuthFromRequest(req) {
@@ -1044,16 +1069,11 @@ exports.processCashback = onMessagePublished(
                 }
               }
             }
-            // Verbleibendes Aktions-Budget (cappt; 0 → erschöpft).
-            if (reward > 0) {
-              const remaining = Number.isFinite(selectedCampaign.budgetRemainingCents)
-                ? selectedCampaign.budgetRemainingCents
-                : 0;
-              if (reward > remaining) {
-                reward = Math.max(0, remaining);
-                if (reward === 0) zeroReason = 'campaign_budget_exhausted';
-              }
-            }
+            // Budget-Deckelung passiert NICHT hier (stale read → Race bei
+            // 2 parallelen Bons am letzten Budget-Rest), sondern atomar in
+            // der Ledger-Transaktion (syncLedgerForReceipt liest das Budget
+            // im tx.get und cappt dort). Hier nur der Brutto-Reward nach
+            // Wochen-/Per-User-Cap.
             cashbackCents = reward;
           }
         }
@@ -1125,6 +1145,31 @@ exports.processCashback = onMessagePublished(
         }
       } else {
         status = 'approved';
+      }
+
+      // 6z) Ledger + Budget ATOMAR verbuchen — VOR dem Mirror/Receipt-Write,
+      // weil die Budget-Deckelung in der Transaktion den Betrag (und damit
+      // den Status) noch ändern kann. Idempotent per receiptId.
+      const userRef = db.doc(`users/${uid}`);
+      const campaignMode = config.campaignsEnabled && !!selectedCampaign;
+      const settle = await syncLedgerForReceipt(
+        userRef,
+        cashbackId,
+        status,
+        cashbackCents,
+        ocr.parsed.bonDate,
+        selectedCampaign?.id || null,
+        campaignMode,
+      );
+      // Budget war beim Verbuchen leer → Betrag + Status korrigieren, damit
+      // Mirror/Receipt das echte Ergebnis zeigen (kein „approved +X" ohne
+      // tatsächliche Gutschrift).
+      if (status === 'approved' && settle.creditedCents !== cashbackCents) {
+        cashbackCents = settle.creditedCents;
+        if (cashbackCents === 0) {
+          status = 'no_reward';
+          rejectReason = 'campaign_budget_exhausted';
+        }
       }
 
       // 6a) Mirror the status into the user sub-collection (so the
@@ -1229,20 +1274,6 @@ exports.processCashback = onMessagePublished(
         'storage.sizeBytes': sizeBytes,
         updatedAt: now,
       });
-
-      // 7) Ledger sync — idempotent on receiptId.
-      // PubSub may redeliver, and we may explicitly re-publish for a
-      // re-process. Either way: at most ONE active earn per receiptId.
-      // If reprocess flips approved→rejected, we reverse the earlier earn.
-      const userRef = db.doc(`users/${uid}`);
-      await syncLedgerForReceipt(
-        userRef,
-        cashbackId,
-        status,
-        cashbackCents,
-        ocr.parsed.bonDate,
-        selectedCampaign?.id || null,
-      );
 
       // 7a) Produkt-Tracking ist UNABHÄNGIG von der Vergütung: jeder gültige
       // Bon (approved ODER no_reward = angenommen, aber keine Aktion/0 €)
