@@ -75,17 +75,25 @@ export default function PayoutScreen() {
   const clamp = (c: number) => Math.max(thresholdCents, Math.min(balanceCents, Math.round(c || 0)));
 
   const [amountText, setAmountText] = useState('');
+  // Cursor mitsteuern: beim PROGRAMMATISCHEN Setzen ans Ende. Sonst crasht
+  // iOS (NSRangeException/SIGABRT), wenn der neue controlled-value kürzer
+  // als die aktuelle Cursor-Position ist (z. B. „500,00" → „10,00" via Min).
+  const [sel, setSel] = useState<{ start: number; end: number } | undefined>(undefined);
+  const setAmount = (s: string) => {
+    setAmountText(s);
+    setSel({ start: s.length, end: s.length });
+  };
   // Initialwert = ganze Balance, sobald bekannt (einmalig).
   const initRef = useRef(false);
   useEffect(() => {
     if (!initRef.current && balanceCents >= thresholdCents) {
       initRef.current = true;
-      setAmountText(eurStr(balanceCents));
+      setAmount(eurStr(balanceCents));
     }
   }, [balanceCents, thresholdCents]);
 
   const cents = clamp(parseEurToCents(amountText));
-  const step = (delta: number) => setAmountText(eurStr(clamp(cents + delta)));
+  const step = (delta: number) => setAmount(eurStr(clamp(cents + delta)));
 
   const [busy, setBusy] = useState(false);
   const unsubRef = useRef<null | (() => void)>(null);
@@ -199,8 +207,12 @@ export default function PayoutScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center' }}>
               <TextInput
                 value={amountText}
-                onChangeText={setAmountText}
-                onBlur={() => setAmountText(eurStr(cents))}
+                selection={sel}
+                onChangeText={(t) => {
+                  setAmountText(t);
+                  setSel(undefined);
+                }}
+                onBlur={() => setAmount(eurStr(cents))}
                 keyboardType="decimal-pad"
                 returnKeyType="done"
                 style={{
@@ -224,8 +236,8 @@ export default function PayoutScreen() {
 
           {/* Min / Max */}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 16 }}>
-            {chip(`Min · ${eurStr(thresholdCents)} €`, () => setAmountText(eurStr(thresholdCents)))}
-            {chip(`Max · ${eurStr(balanceCents)} €`, () => setAmountText(eurStr(balanceCents)))}
+            {chip(`Min · ${eurStr(thresholdCents)} €`, () => setAmount(eurStr(thresholdCents)))}
+            {chip(`Max · ${eurStr(balanceCents)} €`, () => setAmount(eurStr(balanceCents)))}
           </View>
 
           {/* Hinweis / fehlende E-Mail */}
