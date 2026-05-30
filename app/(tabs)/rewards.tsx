@@ -1129,70 +1129,36 @@ function CampaignChip({
 function RewardsHelpContent() {
   return (
     <View style={{ paddingBottom: 8 }}>
-      {/* ── Einlösen / Cashback-Taler ── */}
-      <HelpSectionHeader
-        icon="treasure-chest"
-        title="Einlösen — Cashback-Taler"
-      />
+      <HelpSectionHeader icon="treasure-chest" title="So sammelst du Cashback" />
       <HelpBlock
-        icon="treasure-chest"
+        icon="tag-multiple"
         iconColor="#0d8575"
-        title="Cashback-Taler"
-        body="Sammle Cashback-Taler bei jeder Aktion (Bons hochladen, Produktbilder einreichen, Umfragen beantworten). Ab 10 € Guthaben kannst du auszahlen lassen."
+        title="Aktion wählen"
+        body="Cashback gibt es immer über eine laufende Aktion. Welche gerade aktiv sind, siehst du unten in der Aktionen-Liste."
       />
       <HelpBlock
         icon="receipt"
         iconColor="#0d8575"
-        title="Kassenbon hochladen"
-        body="Bis zu 0,08 € pro Bon, max. 6 Bons pro Woche. Wir erkennen automatisch den Markt und die gekauften Produkte für unsere Markt-Insights."
+        title="Kassenbon scannen"
+        body="Aktion auswählen, Kassenbon abfotografieren — wir erkennen Markt und Produkte automatisch und schreiben dir den Cashback gut."
       />
       <HelpBlock
-        icon="camera-outline"
+        icon="camera-plus-outline"
         iconColor="#5b4f9c"
         title="Produktbilder einreichen"
-        body="0,10 € pro Produkt-Set (7 Fotos: Front, Rückseite, Barcode, Zutaten, Nährwerte, Hersteller, Preis). Hilft uns, die Datenbank vollständig zu halten."
+        body="Fotografiere ein Produkt von allen Seiten (Vorder- und Rückseite, Barcode, Zutaten, Nährwerte, Hersteller, Preis). Hilft, unsere Datenbank vollständig zu halten."
       />
       <HelpBlock
         icon="poll"
-        iconColor="#dde2e4"
+        iconColor="#9a9ea1"
         title="Umfragen"
-        body="0,20 € – 2,00 € je nach Länge. Nur verfügbar, wenn gerade eine passende Umfrage aktiv ist — wir benachrichtigen dich automatisch."
+        body="Beantworte kurze Umfragen, wenn gerade eine passende läuft — wir benachrichtigen dich, sobald eine verfügbar ist."
       />
       <HelpBlock
         icon="gift-outline"
         iconColor="#0d8575"
-        title="Auszahlung"
-        body="Tausche dein Cashback bei unseren Partnern in Gutscheine (Amazon, Rewe, Apple…), eine PayPal-Auszahlung, eine Visa-Prepaid oder eine Spende um."
-      />
-
-      {/* ── Bestenliste / Detektiv-Punkte ── */}
-      <HelpSectionHeader
-        icon="trophy-outline"
-        title="Bestenliste — Detektiv-Punkte"
-      />
-      <HelpBlock
-        icon="star-four-points"
-        iconColor="#f5b301"
-        title="Detektiv-Punkte sammeln"
-        body="Produkt scannen +2 · Suchen +1 · Vergleich anschauen +3 · Einkaufszettel abschließen +5 · Bewertung schreiben +2 · erste Aktion +10."
-      />
-      <HelpBlock
-        icon="star-circle"
-        iconColor="#bf8636"
-        title="Levels & Aufstieg"
-        body="Mit Punkten und Ersparnissen steigst du im Level auf. Jedes Level schaltet eine neue Produktkategorie frei (Veggie, Getränke, Baby, …)."
-      />
-      <HelpBlock
-        icon="fire"
-        iconColor="#ffb84a"
-        title="Streak & Freezes"
-        body="Sei jeden Tag aktiv und deine Streak wächst. Verpasst du einen Tag, schützt dich ein Freeze-Token (alle 14 Tage gibt's einen, max. 2 gleichzeitig)."
-      />
-      <HelpBlock
-        icon="map-marker-radius"
-        iconColor="#0d6efd"
-        title="Liga & Region"
-        body="In der Bestenliste vergleichst du dich mit ganz Deutschland — als einzelner Detektiv (Overall) oder als Region (Bundesländer + Städte). Wird täglich aktualisiert."
+        title="Auszahlen"
+        body="Sobald dein Guthaben die Guthabenschwelle erreicht, kannst du es bei unseren Partnern in Gutscheine, eine PayPal-Auszahlung, eine Visa-Prepaid oder eine Spende umwandeln."
       />
     </View>
   );
