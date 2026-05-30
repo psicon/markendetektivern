@@ -1549,17 +1549,32 @@ exports.processPayout = onDocumentCreated(
         return;
       }
 
+      const reward = orderJson?.order?.rewards?.[0] || {};
       const orderId = orderJson?.order?.id || null;
-      const rewardId = orderJson?.order?.rewards?.[0]?.id || null;
+      const rewardId = reward?.id || null;
+      // Redemption-Link defensiv aus mehreren möglichen Feldern ziehen
+      // (Feldname variiert je nach Delivery/Version). Wenn vorhanden,
+      // öffnet ihn die App direkt im In-App-Browser; die E-Mail bleibt
+      // als Backup-Kanal (delivery: EMAIL).
+      const redemptionLink =
+        reward?.delivery?.link ||
+        reward?.redemption?.link ||
+        reward?.redemption_link ||
+        reward?.link ||
+        null;
+      // Sandbox-Diagnose: einmal die Reward-Struktur mitloggen, um das
+      // echte Link-Feld zu bestätigen.
+      logger.info('tremendous-reward-shape', { payoutId, reward });
       await snap.ref.update({
         status: 'sent',
         tremendousOrderId: orderId,
         tremendousRewardId: rewardId,
+        redemptionLink,
         recipientEmail: email,
         sentAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
-      logger.info('payout-sent', { payoutId, orderId, env: TREMENDOUS_BASE });
+      logger.info('payout-sent', { payoutId, orderId, hasLink: !!redemptionLink, env: TREMENDOUS_BASE });
     } catch (e) {
       logger.error('processPayout-failed', { payoutId, err: e.message });
       await refundFailedPayout(uid, payoutId, amountCents);

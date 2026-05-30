@@ -3,7 +3,8 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import * as WebBrowser from 'expo-web-browser';
 import {
   ActivityIndicator,
   Image as RNImage,
@@ -34,7 +35,7 @@ import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { getActiveCashbackCampaigns, getCashbackConfig, type ActiveCampaign } from '@/lib/services/cashbackService';
 import { useWeeklyReceiptCount } from '@/lib/hooks/useWeeklyReceiptCount';
 import { showInfoToast } from '@/lib/services/ui/toast';
-import { requestPayout, setSelectedCampaignId } from '@/lib/services/cashbackUpload';
+import { requestPayout, setSelectedCampaignId, subscribePayout } from '@/lib/services/cashbackUpload';
 
 // ─── Cashback fallback ─────────────────────────────────────────────────
 // Wenn kein User eingeloggt ist (oder das Cashback-Backend offline)
@@ -434,30 +435,68 @@ function RedeemTab() {
     setCampaignPickerOpen(true);
   }, [campaignsEnabled, receiptCampaigns, onScanBon]);
 
-  // Auszahlung anfragen — Server debitiert das Guthaben transaktional, legt
-  // die Payout-Anfrage an und schickt dem User die Tremendous-Reward-Mail
-  // (dort wählt er die Auszahlungsart). Daher in-app KEINE Methodenwahl.
+  // Auszahlung: requestPayout debitiert + legt die Anfrage an; der
+  // processPayout-Trigger erstellt dann die Tremendous-Order. Wir warten
+  // per Subscription auf das Ergebnis und öffnen den Redemption-Link direkt
+  // im In-App-Browser (Mail kommt zusätzlich als Backup).
+  const payoutUnsubRef = useRef<null | (() => void)>(null);
+  const payoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cleanupPayoutWait = useCallback(() => {
+    payoutUnsubRef.current?.();
+    payoutUnsubRef.current = null;
+    if (payoutTimerRef.current) clearTimeout(payoutTimerRef.current);
+    payoutTimerRef.current = null;
+  }, []);
+  useEffect(() => cleanupPayoutWait, [cleanupPayoutWait]);
+
   const handlePayout = useCallback(async () => {
     if (payoutBusy) return;
     setPayoutBusy(true);
     try {
-      await requestPayout();
-      setPayoutOpen(false);
-      showInfoToast(
-        'Auszahlung angefragt — wir haben dir eine E-Mail mit deinem Reward geschickt. Dort wählst du die Auszahlungsart.',
-        'info',
-        scheme,
-      );
+      const r = await requestPayout();
+      const payoutId = r.payoutId;
+      if (!payoutId) throw new Error('no_payout_id');
+
+      // Auf den Trigger warten (Order-Erstellung ~1–3 s). Spinner läuft.
+      payoutUnsubRef.current = subscribePayout(payoutId, async (p) => {
+        if (!p) return;
+        if (p.status === 'sent') {
+          cleanupPayoutWait();
+          setPayoutBusy(false);
+          setPayoutOpen(false);
+          if (p.redemptionLink) {
+            try {
+              await WebBrowser.openBrowserAsync(p.redemptionLink);
+            } catch {
+              showInfoToast('Auszahlung läuft — check zusätzlich deine E-Mail.', 'info', scheme);
+            }
+          } else {
+            showInfoToast('Auszahlung angefragt — wir haben dir eine E-Mail mit deinem Reward geschickt.', 'info', scheme);
+          }
+        } else if (p.status === 'failed') {
+          cleanupPayoutWait();
+          setPayoutBusy(false);
+          showInfoToast('Auszahlung fehlgeschlagen — dein Guthaben wurde zurückgebucht.', 'error', scheme);
+        }
+      });
+
+      // Fallback, falls der Trigger ungewöhnlich lange braucht.
+      payoutTimerRef.current = setTimeout(() => {
+        cleanupPayoutWait();
+        setPayoutBusy(false);
+        setPayoutOpen(false);
+        showInfoToast('Auszahlung läuft — du bekommst gleich eine E-Mail mit deinem Reward.', 'info', scheme);
+      }, 20000);
     } catch (e: any) {
+      cleanupPayoutWait();
+      setPayoutBusy(false);
       const msg =
         e?.code === 'below_threshold'
           ? 'Dein Guthaben reicht noch nicht für eine Auszahlung.'
           : 'Auszahlung konnte nicht angefragt werden. Bitte versuch es später nochmal.';
       showInfoToast(msg, 'error', scheme);
-    } finally {
-      setPayoutBusy(false);
     }
-  }, [payoutBusy, scheme]);
+  }, [payoutBusy, scheme, cleanupPayoutWait]);
 
   return (
     <>
@@ -945,7 +984,7 @@ function RedeemTab() {
                 paddingHorizontal: 8,
               }}
             >
-              Wir schicken deinen Reward per E-Mail. Dort wählst du die Auszahlungsart (Gutschein, PayPal, Überweisung u. a.).
+              Die Auszahlungsseite öffnet sich gleich direkt hier. Dort wählst du die Auszahlungsart (Gutschein, PayPal, Überweisung u. a.).
             </Text>
 
             {/* Ziel-E-Mail */}
@@ -964,7 +1003,7 @@ function RedeemTab() {
             >
               <MaterialCommunityIcons name="email-outline" size={16} color={theme.textMuted} />
               <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 12, color: theme.textMuted }}>
-                Reward geht an:
+                Auch per E-Mail an:
               </Text>
               <Text numberOfLines={1} style={{ flex: 1, fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.text }}>
                 {payoutEmail ?? '— keine E-Mail hinterlegt —'}
@@ -988,7 +1027,7 @@ function RedeemTab() {
               <MaterialCommunityIcons name="alert-outline" size={16} color="#b8860b" style={{ marginTop: 1 }} />
               <Text style={{ flex: 1, fontFamily, fontWeight: fontWeight.bold as any, fontSize: 12, color: '#8a6d00', lineHeight: 17 }}>
                 {payoutEmail
-                  ? 'Stelle sicher, dass du Zugriff auf dieses Postfach hast — sonst ist dein Cashback weg.'
+                  ? 'Zusätzlich kommt eine E-Mail an diese Adresse. Stelle sicher, dass du Zugriff auf dieses Postfach hast — sonst ist dein Cashback weg.'
                   : 'Du hast keine E-Mail hinterlegt. Füge zuerst in deinem Profil eine E-Mail hinzu — sonst kann der Reward nicht zugestellt werden.'}
               </Text>
             </View>

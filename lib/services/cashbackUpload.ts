@@ -450,6 +450,33 @@ export async function requestPayout(method?: PayoutMethodKey): Promise<RequestPa
   return payload as RequestPayoutResult;
 }
 
+export interface PayoutDoc {
+  id: string;
+  status?: string; // requested | sent | delivered | failed
+  amountCents?: number;
+  method?: string | null;
+  redemptionLink?: string | null;
+  tremendousOrderId?: string | null;
+  recipientEmail?: string | null;
+  error?: string | null;
+}
+
+/**
+ * Live-Subscription auf eine Auszahlung. Der Client wartet damit, bis
+ * der processPayout-Trigger die Tremendous-Order erstellt hat
+ * (status 'sent' + ggf. redemptionLink) bzw. fehlschlägt ('failed').
+ */
+export function subscribePayout(payoutId: string, onChange: (p: PayoutDoc | null) => void): Unsubscribe {
+  return onSnapshot(
+    doc(db, 'cashback_payouts', payoutId),
+    (snap: any) => onChange(snap.exists ? ({ id: snap.id, ...(snap.data() as any) } as PayoutDoc) : null),
+    (e) => {
+      console.warn('⚠️ subscribePayout error:', (e as any)?.message);
+      onChange(null);
+    },
+  );
+}
+
 // ─── Snapshot subscription on the user-sub-collection mirror ────────
 //
 // The Cloud Function mirrors a slim status into
