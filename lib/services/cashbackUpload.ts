@@ -401,6 +401,55 @@ export async function enqueueCashback(args: EnqueueArgs): Promise<EnqueueResult>
   return payload as EnqueueResult;
 }
 
+// ─── Payout request ─────────────────────────────────────────────────
+
+export type PayoutMethodKey = 'paypal' | 'giftcard' | 'sepa';
+
+export interface RequestPayoutResult {
+  ok?: boolean;
+  payoutId?: string;
+  amountCents?: number;
+  method?: string;
+  // Fehlerfall:
+  code?: string;
+  balanceCents?: number;
+  thresholdCents?: number;
+}
+
+/**
+ * Auszahlung anfragen. Der Server prüft die Schwelle, debitiert das
+ * Guthaben transaktional und legt ein cashback_payouts-Doc (status
+ * 'requested') an. Zahlt die GANZE Balance aus. Wirft mit `code` bei
+ * Fehlern (below_threshold / invalid_method / unauthenticated / internal).
+ */
+export async function requestPayout(method: PayoutMethodKey): Promise<RequestPayoutResult> {
+  const user = auth.currentUser;
+  if (!user) {
+    const e: any = new Error('not_authenticated');
+    e.code = 'unauthenticated';
+    throw e;
+  }
+  const idToken = await user.getIdToken();
+  const res = await fetch(`${FUNCTIONS_BASE}/requestPayout`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({ method }),
+  });
+  let payload: any = null;
+  try {
+    payload = await res.json();
+  } catch {
+    payload = null;
+  }
+  if (!res.ok) {
+    const err: any = new Error(payload?.message || payload?.code || `payout_${res.status}`);
+    err.code = payload?.code || `http_${res.status}`;
+    err.payload = payload;
+    throw err;
+  }
+  return payload as RequestPayoutResult;
+}
+
 // ─── Snapshot subscription on the user-sub-collection mirror ────────
 //
 // The Cloud Function mirrors a slim status into

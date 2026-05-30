@@ -1335,3 +1335,87 @@ exports.processCashback = onMessagePublished(
     }
   },
 );
+
+// ─── requestPayout (HTTPS) ──────────────────────────────────────────
+//
+// Auszahlungs-Anfrage. Prüft die Schwelle serverseitig, debitiert das
+// Guthaben TRANSAKTIONAL (race-/doppel-fest: die Transaktion auf userRef
+// serialisiert konkurrierende Anfragen — die zweite liest die schon
+// debitierte Balance und fällt unter die Schwelle) und legt an:
+//   • cashback_payouts/{id} (status 'requested')
+//   • users/{uid}/cashback_ledger/{id} (type 'payout')
+// Die eigentliche Tremendous-Order-Erstellung passiert SPÄTER (separater
+// Worker, der 'requested' → 'sent'/'delivered' flippt). KYC erledigt
+// Tremendous bei der Order-Erstellung. Zahlt immer die GANZE Balance aus.
+const VALID_PAYOUT_METHODS = ['paypal', 'giftcard', 'sepa'];
+
+exports.requestPayout = onRequest(
+  { region: REGION, timeoutSeconds: 30, memory: '256MiB', cors: true, invoker: 'public' },
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).json({ code: 'method_not_allowed' });
+      return;
+    }
+    const decoded = await verifyAuthFromRequest(req);
+    if (!decoded?.uid) {
+      res.status(401).json({ code: 'unauthenticated' });
+      return;
+    }
+    const uid = decoded.uid;
+    const method = String((req.body || {}).method || '');
+    if (!VALID_PAYOUT_METHODS.includes(method)) {
+      res.status(400).json({ code: 'invalid_method', message: `method must be one of ${VALID_PAYOUT_METHODS.join(', ')}` });
+      return;
+    }
+
+    const config = await loadConfig();
+    const threshold = Number.isFinite(config.payoutThresholdCents) ? config.payoutThresholdCents : 1000;
+
+    try {
+      const result = await db.runTransaction(async (tx) => {
+        const userRef = db.doc(`users/${uid}`);
+        const userSnap = await tx.get(userRef);
+        const u = userSnap.exists ? userSnap.data() : {};
+        const balance = u.cashback_balance_cents || 0;
+
+        if (balance < threshold) {
+          return { error: 'below_threshold', balanceCents: balance, thresholdCents: threshold };
+        }
+
+        const amountCents = balance; // ganze Balance
+        const payoutRef = db.collection('cashback_payouts').doc();
+        const ledgerRef = userRef.collection('cashback_ledger').doc();
+        const ts = admin.firestore.FieldValue.serverTimestamp();
+
+        tx.set(payoutRef, {
+          userId: uid,
+          amountCents,
+          method,
+          status: 'requested',
+          kycPassed: false, // Tremendous übernimmt KYC bei Order-Erstellung
+          createdAt: ts,
+        });
+        tx.set(ledgerRef, {
+          type: 'payout',
+          cents: amountCents,
+          payoutId: payoutRef.id,
+          balanceAfterCents: balance - amountCents,
+          createdAt: ts,
+        });
+        tx.set(userRef, { cashback_balance_cents: balance - amountCents }, { merge: true });
+
+        return { ok: true, payoutId: payoutRef.id, amountCents, method };
+      });
+
+      if (result.error) {
+        res.status(400).json({ code: result.error, ...result });
+        return;
+      }
+      logger.info('payout-requested', { uid, payoutId: result.payoutId, amountCents: result.amountCents, method });
+      res.status(200).json(result);
+    } catch (e) {
+      logger.error('requestPayout-failed', { uid, err: e.message });
+      res.status(500).json({ code: 'internal' });
+    }
+  },
+);
