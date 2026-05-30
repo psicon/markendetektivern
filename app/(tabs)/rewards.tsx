@@ -332,6 +332,8 @@ export default function RewardsScreen() {
 function RedeemTab() {
   const { theme } = useTokens();
   const scheme = useColorScheme() ?? 'light';
+  const { user } = useAuth();
+  const payoutEmail = user?.email ?? null;
   // Live cashback state from Firestore. Falls back to 0,00 € when
   // the user isn't signed in or the backend hasn't seeded the field
   // yet (Phase 1 deploys the fields lazy via the Cloud Function).
@@ -943,12 +945,57 @@ function RedeemTab() {
                 paddingHorizontal: 8,
               }}
             >
-              Du bekommst gleich eine E-Mail mit deinem Reward. Dort wählst du die Auszahlungsart (Gutschein, PayPal, Überweisung u. a.).
+              Wir schicken deinen Reward per E-Mail. Dort wählst du die Auszahlungsart (Gutschein, PayPal, Überweisung u. a.).
             </Text>
+
+            {/* Ziel-E-Mail */}
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                marginTop: 14,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                borderRadius: 12,
+                backgroundColor: theme.surfaceAlt ?? theme.surface,
+                alignSelf: 'stretch',
+              }}
+            >
+              <MaterialCommunityIcons name="email-outline" size={16} color={theme.textMuted} />
+              <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 12, color: theme.textMuted }}>
+                Reward geht an:
+              </Text>
+              <Text numberOfLines={1} style={{ flex: 1, fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.text }}>
+                {payoutEmail ?? '— keine E-Mail hinterlegt —'}
+              </Text>
+            </View>
+
+            {/* Warnhinweis */}
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'flex-start',
+                gap: 8,
+                marginTop: 8,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                borderRadius: 12,
+                backgroundColor: '#f59e0b1c',
+                alignSelf: 'stretch',
+              }}
+            >
+              <MaterialCommunityIcons name="alert-outline" size={16} color="#b8860b" style={{ marginTop: 1 }} />
+              <Text style={{ flex: 1, fontFamily, fontWeight: fontWeight.bold as any, fontSize: 12, color: '#8a6d00', lineHeight: 17 }}>
+                {payoutEmail
+                  ? 'Stelle sicher, dass du Zugriff auf dieses Postfach hast — sonst ist dein Cashback weg.'
+                  : 'Du hast keine E-Mail hinterlegt. Füge zuerst in deinem Profil eine E-Mail hinzu — sonst kann der Reward nicht zugestellt werden.'}
+              </Text>
+            </View>
           </View>
 
           <Pressable
-            disabled={payoutBusy}
+            disabled={payoutBusy || !payoutEmail}
             onPress={handlePayout}
             style={({ pressed }) => ({
               marginTop: 12,
@@ -959,7 +1006,7 @@ function RedeemTab() {
               justifyContent: 'center',
               flexDirection: 'row',
               gap: 8,
-              opacity: payoutBusy ? 0.6 : pressed ? 0.9 : 1,
+              opacity: payoutBusy || !payoutEmail ? 0.6 : pressed ? 0.9 : 1,
             })}
           >
             {payoutBusy ? (
