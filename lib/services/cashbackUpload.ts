@@ -422,7 +422,7 @@ export interface RequestPayoutResult {
  * 'requested') an. Zahlt die GANZE Balance aus. Wirft mit `code` bei
  * Fehlern (below_threshold / invalid_method / unauthenticated / internal).
  */
-export async function requestPayout(method: PayoutMethodKey): Promise<RequestPayoutResult> {
+export async function requestPayout(method?: PayoutMethodKey): Promise<RequestPayoutResult> {
   const user = auth.currentUser;
   if (!user) {
     const e: any = new Error('not_authenticated');
@@ -433,7 +433,7 @@ export async function requestPayout(method: PayoutMethodKey): Promise<RequestPay
   const res = await fetch(`${FUNCTIONS_BASE}/requestPayout`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-    body: JSON.stringify({ method }),
+    body: JSON.stringify(method ? { method } : {}),
   });
   let payload: any = null;
   try {

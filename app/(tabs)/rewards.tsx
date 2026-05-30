@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
 import React, { useCallback, useState } from 'react';
 import {
+  ActivityIndicator,
   Image as RNImage,
   Platform,
   Pressable,
@@ -33,7 +34,7 @@ import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { getActiveCashbackCampaigns, getCashbackConfig, type ActiveCampaign } from '@/lib/services/cashbackService';
 import { useWeeklyReceiptCount } from '@/lib/hooks/useWeeklyReceiptCount';
 import { showInfoToast } from '@/lib/services/ui/toast';
-import { requestPayout, setSelectedCampaignId, type PayoutMethodKey } from '@/lib/services/cashbackUpload';
+import { requestPayout, setSelectedCampaignId } from '@/lib/services/cashbackUpload';
 
 // ─── Cashback fallback ─────────────────────────────────────────────────
 // Wenn kein User eingeloggt ist (oder das Cashback-Backend offline)
@@ -431,32 +432,30 @@ function RedeemTab() {
     setCampaignPickerOpen(true);
   }, [campaignsEnabled, receiptCampaigns, onScanBon]);
 
-  // Auszahlung anfragen — Server debitiert das Guthaben transaktional und
-  // legt die Payout-Anfrage an (Tremendous-Übergabe folgt serverseitig).
-  const handlePayout = useCallback(
-    async (method: PayoutMethodKey) => {
-      if (payoutBusy) return;
-      setPayoutBusy(true);
-      try {
-        const r = await requestPayout(method);
-        setPayoutOpen(false);
-        showInfoToast(
-          `Auszahlung über ${((r.amountCents ?? 0) / 100).toFixed(2).replace('.', ',')} € angefragt — du wirst zu unserem Partner weitergeleitet.`,
-          'info',
-          scheme,
-        );
-      } catch (e: any) {
-        const msg =
-          e?.code === 'below_threshold'
-            ? 'Dein Guthaben reicht noch nicht für eine Auszahlung.'
-            : 'Auszahlung konnte nicht angefragt werden. Bitte versuch es später nochmal.';
-        showInfoToast(msg, 'error', scheme);
-      } finally {
-        setPayoutBusy(false);
-      }
-    },
-    [payoutBusy, scheme],
-  );
+  // Auszahlung anfragen — Server debitiert das Guthaben transaktional, legt
+  // die Payout-Anfrage an und schickt dem User die Tremendous-Reward-Mail
+  // (dort wählt er die Auszahlungsart). Daher in-app KEINE Methodenwahl.
+  const handlePayout = useCallback(async () => {
+    if (payoutBusy) return;
+    setPayoutBusy(true);
+    try {
+      await requestPayout();
+      setPayoutOpen(false);
+      showInfoToast(
+        'Auszahlung angefragt — wir haben dir eine E-Mail mit deinem Reward geschickt. Dort wählst du die Auszahlungsart.',
+        'info',
+        scheme,
+      );
+    } catch (e: any) {
+      const msg =
+        e?.code === 'below_threshold'
+          ? 'Dein Guthaben reicht noch nicht für eine Auszahlung.'
+          : 'Auszahlung konnte nicht angefragt werden. Bitte versuch es später nochmal.';
+      showInfoToast(msg, 'error', scheme);
+    } finally {
+      setPayoutBusy(false);
+    }
+  }, [payoutBusy, scheme]);
 
   return (
     <>
@@ -911,52 +910,69 @@ function RedeemTab() {
         </View>
       </FilterSheet>
 
-      {/* Auszahlung — Methoden-Auswahl (zahlt die ganze Balance aus) */}
+      {/* Auszahlung — Bestätigung (zahlt die ganze Balance aus). Die
+          Auszahlungsart wählt der User auf der Tremendous-Reward-Seite. */}
       <FilterSheet visible={payoutOpen} title="Auszahlung" onClose={() => setPayoutOpen(false)}>
-        <View style={{ gap: 8, paddingBottom: 4 }}>
-          <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 13, color: theme.textMuted, marginBottom: 2 }}>
-            {`Dein Guthaben von ${cashbackEur.toFixed(2).replace('.', ',')} € auszahlen — wähle, wie:`}
-          </Text>
-          {([
-            ['paypal', 'PayPal', 'wallet-outline', '#2563eb'],
-            ['giftcard', 'Gutschein', 'gift-outline', '#0d8575'],
-            ['sepa', 'Überweisung (SEPA)', 'bank-outline', '#7c3aed'],
-          ] as [PayoutMethodKey, string, string, string][]).map(([key, label, icon, tint]) => (
-            <Pressable
-              key={key}
-              disabled={payoutBusy}
-              onPress={() => handlePayout(key)}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
+        <View style={{ paddingBottom: 4 }}>
+          <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+            <View
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: 28,
+                backgroundColor: (theme.primary ?? '#0d8575') + '18',
                 alignItems: 'center',
-                gap: 10,
-                padding: 14,
-                borderRadius: 14,
-                backgroundColor: theme.surface,
-                opacity: payoutBusy ? 0.5 : pressed ? 0.9 : 1,
-              })}
+                justifyContent: 'center',
+                marginBottom: 12,
+              }}
             >
-              <View
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 18,
-                  backgroundColor: tint + '1c',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <MaterialCommunityIcons name={icon as any} size={18} color={tint} />
-              </View>
-              <Text style={{ flex: 1, fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: theme.text }}>
-                {label}
-              </Text>
-              <MaterialCommunityIcons name="chevron-right" size={18} color={theme.textMuted} />
-            </Pressable>
-          ))}
-          <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 11, color: theme.textMuted, marginTop: 4, lineHeight: 16 }}>
-            Die Auswahl der konkreten Belohnung erfolgt extern bei unserem Partner.
-          </Text>
+              <MaterialCommunityIcons name="gift-outline" size={28} color={theme.primary ?? '#0d8575'} />
+            </View>
+            <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 28, letterSpacing: -0.6, color: theme.text }}>
+              {cashbackEur.toFixed(2).replace('.', ',')} €
+            </Text>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 13,
+                color: theme.textMuted,
+                textAlign: 'center',
+                marginTop: 8,
+                lineHeight: 19,
+                paddingHorizontal: 8,
+              }}
+            >
+              Du bekommst gleich eine E-Mail mit deinem Reward. Dort wählst du die Auszahlungsart (Gutschein, PayPal, Überweisung u. a.).
+            </Text>
+          </View>
+
+          <Pressable
+            disabled={payoutBusy}
+            onPress={handlePayout}
+            style={({ pressed }) => ({
+              marginTop: 12,
+              height: 54,
+              borderRadius: 14,
+              backgroundColor: theme.primary ?? '#0d8575',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexDirection: 'row',
+              gap: 8,
+              opacity: payoutBusy ? 0.6 : pressed ? 0.9 : 1,
+            })}
+          >
+            {payoutBusy ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 16, color: '#fff', letterSpacing: 0.2 }}>
+                  Jetzt auszahlen
+                </Text>
+                <MaterialCommunityIcons name="arrow-right" size={18} color="#fff" />
+              </>
+            )}
+          </Pressable>
         </View>
       </FilterSheet>
     </>

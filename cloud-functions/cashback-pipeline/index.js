@@ -1366,11 +1366,11 @@ exports.requestPayout = onRequest(
       return;
     }
     const uid = decoded.uid;
-    const method = String((req.body || {}).method || '');
-    if (!VALID_PAYOUT_METHODS.includes(method)) {
-      res.status(400).json({ code: 'invalid_method', message: `method must be one of ${VALID_PAYOUT_METHODS.join(', ')}` });
-      return;
-    }
+    // Methode ist OPTIONAL — die konkrete Auszahlungsart wählt der User auf
+    // der Tremendous-Hosted-Page. Kommt doch eine gültige mit, speichern
+    // wir sie als Hinweis; sonst null.
+    const rawMethod = String((req.body || {}).method || '');
+    const method = VALID_PAYOUT_METHODS.includes(rawMethod) ? rawMethod : null;
 
     const config = await loadConfig();
     const threshold = Number.isFinite(config.payoutThresholdCents) ? config.payoutThresholdCents : 1000;
