@@ -41,6 +41,7 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const admin = require('firebase-admin');
 const functions = require('firebase-functions');
 const { logger } = require('firebase-functions');
@@ -54,6 +55,8 @@ const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 // Tremendous-API-Key (Sandbox ODER Production — je nach env TREMENDOUS_ENV).
 // Secret setzen: firebase functions:secrets:set TREMENDOUS_API_KEY
 const TREMENDOUS_API_KEY = defineSecret('TREMENDOUS_API_KEY');
+// Webhook-Signing-Key (Tremendous „Private key") für die Signaturprüfung.
+const TREMENDOUS_WEBHOOK_SECRET = defineSecret('TREMENDOUS_WEBHOOK_SECRET');
 
 const { extractReceipt, reconcile, countEligibleItems, tierFor, DEFAULT_MODEL } = require('./lib/ocr');
 const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
@@ -1612,12 +1615,34 @@ exports.processPayout = onDocumentCreated(
 // Aktuell (Sandbox) wird das rohe Event geloggt, um die echte Struktur zu
 // bestätigen, und ungeprüft verarbeitet (ändert nur Status-Felder, kein Geld).
 exports.tremendousWebhook = onRequest(
-  { region: REGION, timeoutSeconds: 20, memory: '256MiB', cors: false, invoker: 'public' },
+  { region: REGION, timeoutSeconds: 20, memory: '256MiB', cors: false, invoker: 'public', secrets: [TREMENDOUS_WEBHOOK_SECRET] },
   async (req, res) => {
     if (req.method !== 'POST') {
       res.status(405).send('method_not_allowed');
       return;
     }
+    // ── Signaturprüfung (HMAC-SHA256 über den ROHEN Body mit dem
+    // Tremendous „Private key"). Header-Format/Scheme variiert → wir
+    // berechnen die Signatur, loggen Treffer/Header zum Bestätigen und
+    // LEHNEN bei Mismatch noch NICHT ab (Sandbox-Iteration). Sobald das
+    // Scheme bestätigt ist → harte Ablehnung aktivieren.
+    const sigHeader =
+      req.get('Tremendous-Webhook-Signature') ||
+      req.get('tremendous-webhook-signature') ||
+      req.get('X-Tremendous-Signature') ||
+      null;
+    let sigOk = false;
+    try {
+      const secret = TREMENDOUS_WEBHOOK_SECRET.value();
+      const raw = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
+      const computedHex = crypto.createHmac('sha256', secret).update(raw).digest('hex');
+      const computedB64 = crypto.createHmac('sha256', secret).update(raw).digest('base64');
+      sigOk = !!sigHeader && (sigHeader.includes(computedHex) || sigHeader.includes(computedB64));
+      logger.info('tremendous-webhook-sig', { sigHeader, computedHex, computedB64, sigOk });
+    } catch (e) {
+      logger.warn('tremendous-webhook-sig-failed', { err: e.message });
+    }
+
     const body = req.body || {};
     logger.info('tremendous-webhook', {
       event: body.event || null,
