@@ -783,6 +783,7 @@ function RedeemTab() {
                 : `Noch ${gapEur} € bis zur ${payoutThreshold.toFixed(2).replace('.', ',')} €-Schwelle`}
             </Text>
           </View>
+          <MaterialCommunityIcons name="chevron-right" size={20} color={theme.primary ?? theme.textMuted} />
         </Pressable>
       </View>
 

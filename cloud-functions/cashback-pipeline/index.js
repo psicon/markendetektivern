@@ -1597,3 +1597,73 @@ exports.processPayout = onDocumentCreated(
     }
   },
 );
+
+// ─── tremendousWebhook (HTTPS) ──────────────────────────────────────
+//
+// Empfängt Tremendous-Webhook-Events (Redeem-Status). Die GET-API liefert
+// den Redeem-Status NICHT — nur Webhooks. URL im Tremendous-Dashboard
+// registrieren:
+//   https://europe-west3-markendetektive-895f7.cloudfunctions.net/tremendousWebhook
+// Bei einem Redeem-Event suchen wir den Payout per tremendousRewardId und
+// setzen status 'delivered' + redeemedForm + redeemedAt → die Statusseite
+// (Live-Subscription) zieht automatisch nach.
+//
+// TODO Produktion: Signatur verifizieren (HMAC mit Webhook-Signing-Secret).
+// Aktuell (Sandbox) wird das rohe Event geloggt, um die echte Struktur zu
+// bestätigen, und ungeprüft verarbeitet (ändert nur Status-Felder, kein Geld).
+exports.tremendousWebhook = onRequest(
+  { region: REGION, timeoutSeconds: 20, memory: '256MiB', cors: false, invoker: 'public' },
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).send('method_not_allowed');
+      return;
+    }
+    const body = req.body || {};
+    logger.info('tremendous-webhook', {
+      event: body.event || null,
+      keys: Object.keys(body),
+      body,
+    });
+    try {
+      const p = body.payload || body.data || {};
+      const reward = p.reward || p.resource || {};
+      const rewardId = reward.id || p.reward_id || p.id || null;
+      const redeemedForm =
+        reward?.products?.[0]?.name ||
+        reward?.redemption?.product?.name ||
+        reward?.redemption?.method ||
+        p?.product?.name ||
+        null;
+
+      if (rewardId) {
+        const qs = await db
+          .collection('cashback_payouts')
+          .where('tremendousRewardId', '==', rewardId)
+          .limit(1)
+          .get();
+        if (!qs.empty) {
+          const doc = qs.docs[0];
+          const cur = doc.data();
+          const ev = String(body.event || '').toUpperCase();
+          const isRedeem = ev.includes('REDEEM') || !!redeemedForm;
+          await doc.ref.set(
+            {
+              status: isRedeem ? 'delivered' : cur.status,
+              redeemedForm: redeemedForm || cur.redeemedForm || null,
+              redeemedAt: isRedeem
+                ? admin.firestore.FieldValue.serverTimestamp()
+                : cur.redeemedAt || null,
+              lastWebhookEvent: body.event || null,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          );
+        }
+      }
+    } catch (e) {
+      logger.error('tremendous-webhook-failed', { err: e.message });
+    }
+    // Immer 200 → Tremendous retried nicht endlos.
+    res.status(200).send('ok');
+  },
+);

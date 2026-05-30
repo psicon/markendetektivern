@@ -62,6 +62,7 @@ export default function PayoutsScreen() {
   }, [navigation]);
 
   const [rows, setRows] = useState<PayoutDoc[] | null>(null);
+  const [displayLimit, setDisplayLimit] = useState(30);
   useEffect(() => subscribeUserPayouts(setRows), []);
 
   const headerOffset = insets.top + DETAIL_HEADER_ROW_HEIGHT;
@@ -98,7 +99,7 @@ export default function PayoutsScreen() {
           contentContainerStyle={{ paddingTop: headerOffset + 12, paddingHorizontal: 20, paddingBottom: insets.bottom + 32, gap: 10 }}
           showsVerticalScrollIndicator={false}
         >
-          {rows!.map((p) => {
+          {rows!.slice(0, displayLimit).map((p) => {
             const v = statusVisual(p, primary);
             const canOpen = (p.status === 'sent' || p.status === 'delivered') && !!p.redemptionLink;
             return (
@@ -173,6 +174,27 @@ export default function PayoutsScreen() {
               </View>
             );
           })}
+
+          {rows!.length > displayLimit ? (
+            <Pressable
+              onPress={() => setDisplayLimit((n) => n + 30)}
+              style={({ pressed }) => ({
+                marginTop: 4,
+                height: 46,
+                borderRadius: 14,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: theme.surface,
+                borderWidth: 1,
+                borderColor: theme.border,
+                opacity: pressed ? 0.9 : 1,
+              })}
+            >
+              <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 13, color: theme.text }}>
+                Mehr anzeigen ({rows!.length - displayLimit})
+              </Text>
+            </Pressable>
+          ) : null}
         </ScrollView>
       )}
     </View>
