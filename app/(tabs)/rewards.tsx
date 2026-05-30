@@ -433,18 +433,21 @@ function RedeemTab() {
       const r = await requestPayout(amount);
       const payoutId = r.payoutId;
       if (!payoutId) throw new Error('no_payout_id');
-      payoutUnsubRef.current = subscribePayout(payoutId, async (p) => {
+      payoutUnsubRef.current = subscribePayout(payoutId, (p) => {
         if (!p) return;
         if (p.status === 'sent') {
           cleanupPayoutWait();
           setPayoutBusy(false);
+          const link = p.redemptionLink || null;
+          // Sheet ZUERST schließen, dann (nach der 260ms-Schließanimation +
+          // nativem Modal-Dismiss) den In-App-Browser öffnen. Sonst
+          // kollidieren zwei Modals (Sheet + SFSafariViewController) → Freeze.
           setPayoutOpen(false);
-          if (p.redemptionLink) {
-            try {
-              await WebBrowser.openBrowserAsync(p.redemptionLink);
-            } catch {}
+          if (link) {
+            setTimeout(() => {
+              WebBrowser.openBrowserAsync(link).catch(() => {});
+            }, 450);
           }
-          router.push('/cashback/payouts');
         } else if (p.status === 'failed') {
           cleanupPayoutWait();
           setPayoutBusy(false);
@@ -1109,7 +1112,7 @@ function RedeemTab() {
             <Text style={{ flex: 1, fontFamily, fontSize: 12, lineHeight: 17, color: payoutEmail ? theme.textMuted : '#8a6d00', fontWeight: payoutEmail ? fontWeight.medium : (fontWeight.bold as any) }}>
               {payoutEmail ? (
                 <>
-                  Dein Reward läuft auf <Text style={{ fontWeight: fontWeight.extraBold, color: theme.text }}>{payoutEmail}</Text>. Stelle sicher, dass diese E-Mail gültig ist und du Zugriff hast — manche Belohnungen werden dorthin zugestellt.
+                  Dein Reward läuft auf <Text style={{ fontWeight: fontWeight.extraBold, color: theme.text }}>{payoutEmail}</Text>. Stelle sicher, dass diese E-Mail gültig ist und du Zugriff darauf hast — die Belohnung wird dorthin zugestellt.
                 </>
               ) : (
                 'Du hast keine E-Mail hinterlegt. Füge zuerst in deinem Profil eine gültige E-Mail hinzu, dann kannst du auszahlen.'
@@ -1195,9 +1198,6 @@ function CampaignListItem({
   const budgetColor = pct > 50 ? '#10a18a' : pct > 15 ? '#f59e0b' : '#ef4444';
 
   const description = (campaign.description || '').trim() || 'Cashback auf deinen Einkauf';
-
-  const fmtEur = (cents: number) =>
-    (cents / 100).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
   const onAction = () => {
     if (kind === 'receipt') {
@@ -1296,10 +1296,10 @@ function CampaignListItem({
           }}
         >
           <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, color: theme.textMuted }}>
-            {fmtEur(campaign.budgetRemainingCents)} € von {fmtEur(campaign.budgetTotalCents)} € übrig
+            Verfügbarkeit
           </Text>
           <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 11, color: budgetColor }}>
-            {pct}%
+            {pct}% übrig
           </Text>
         </View>
         <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.surfaceAlt ?? theme.border, overflow: 'hidden' }}>
