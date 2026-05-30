@@ -1643,52 +1643,65 @@ exports.tremendousWebhook = onRequest(
       logger.warn('tremendous-webhook-sig-failed', { err: e.message });
     }
 
+    // Signatur ist bestätigt (sha256=<hex> über rawBody) → unsignierte
+    // Events nicht verarbeiten. 200, damit Tremendous nicht endlos retried.
+    if (!sigOk) {
+      logger.warn('tremendous-webhook-unsigned', { sigHeader });
+      res.status(200).send('ignored_unsigned');
+      return;
+    }
+
     const body = req.body || {};
-    logger.info('tremendous-webhook', {
-      event: body.event || null,
-      keys: Object.keys(body),
-      body,
-    });
+    logger.info('tremendous-webhook', { event: body.event || null, keys: Object.keys(body) });
     try {
-      const p = body.payload || body.data || {};
-      const reward = p.reward || p.resource || {};
-      const rewardId = reward.id || p.reward_id || p.id || null;
+      const pl = body.payload || {};
+      const meta = pl.meta || {};
+      const resource = pl.resource || {};
+      const reward = pl.reward || (Array.isArray(meta.rewards) ? meta.rewards[0] : null) || {};
+      const rewardId = reward.id || (resource.type === 'rewards' ? resource.id : null) || null;
+      const orderId =
+        meta.id || (resource.type === 'orders' ? resource.id : null) || pl.order_id || null;
+
+      // Redeem-Form defensiv (Feldname unbekannt bis ein echtes Redeem-
+      // Event kommt — Tremendous liefert es in diesem Setup aber nicht).
       const redeemedForm =
         reward?.products?.[0]?.name ||
         reward?.redemption?.product?.name ||
         reward?.redemption?.method ||
-        p?.product?.name ||
+        pl?.product?.name ||
         null;
+      const ev = String(body.event || '').toUpperCase();
+      const isRedeem = ev.includes('REDEEM') || !!redeemedForm;
 
+      // Payout per Reward-ID ODER Order-ID finden.
+      let doc = null;
       if (rewardId) {
-        const qs = await db
-          .collection('cashback_payouts')
-          .where('tremendousRewardId', '==', rewardId)
-          .limit(1)
-          .get();
-        if (!qs.empty) {
-          const doc = qs.docs[0];
-          const cur = doc.data();
-          const ev = String(body.event || '').toUpperCase();
-          const isRedeem = ev.includes('REDEEM') || !!redeemedForm;
-          await doc.ref.set(
-            {
-              status: isRedeem ? 'delivered' : cur.status,
-              redeemedForm: redeemedForm || cur.redeemedForm || null,
-              redeemedAt: isRedeem
-                ? admin.firestore.FieldValue.serverTimestamp()
-                : cur.redeemedAt || null,
-              lastWebhookEvent: body.event || null,
-              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            },
-            { merge: true },
-          );
-        }
+        const qs = await db.collection('cashback_payouts').where('tremendousRewardId', '==', rewardId).limit(1).get();
+        if (!qs.empty) doc = qs.docs[0];
+      }
+      if (!doc && orderId) {
+        const qs = await db.collection('cashback_payouts').where('tremendousOrderId', '==', orderId).limit(1).get();
+        if (!qs.empty) doc = qs.docs[0];
+      }
+
+      if (doc) {
+        const cur = doc.data();
+        await doc.ref.set(
+          {
+            status: isRedeem ? 'delivered' : cur.status,
+            redeemedForm: redeemedForm || cur.redeemedForm || null,
+            redeemedAt: isRedeem ? admin.firestore.FieldValue.serverTimestamp() : cur.redeemedAt || null,
+            lastWebhookEvent: body.event || null,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      } else {
+        logger.info('tremendous-webhook-no-match', { rewardId, orderId, event: body.event });
       }
     } catch (e) {
       logger.error('tremendous-webhook-failed', { err: e.message });
     }
-    // Immer 200 → Tremendous retried nicht endlos.
     res.status(200).send('ok');
   },
 );
