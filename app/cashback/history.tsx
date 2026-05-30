@@ -68,6 +68,13 @@ function statusVisual(s: string | undefined, primary: string): StatusVisual {
         bg: primary + '20',
         icon: 'check-circle-outline',
       };
+    case 'no_reward':
+      return {
+        label: 'Ohne Vergütung',
+        color: '#b08800',
+        bg: 'rgba(241,196,15,0.18)',
+        icon: 'information-outline',
+      };
     case 'rejected':
       return {
         label: 'Abgelehnt',

@@ -138,24 +138,52 @@ const CAMPAIGNS_COL = 'cashback_campaigns';
 
 // Aktuell laufende Aktion laden (active==true UND now in [startAt, endAt]).
 // Bei mehreren: die mit dem frühesten Ende (läuft zuerst aus). null = keine.
-async function loadActiveCampaign() {
+/** Lade EINE Aktion per Doc-ID (die vom User gewählte). */
+async function loadCampaignById(id) {
+  if (!id) return null;
   try {
-    const now = Date.now();
-    const snap = await db.collection(CAMPAIGNS_COL).where('active', '==', true).get();
-    let best = null;
-    snap.forEach((d) => {
-      const c = d.data() || {};
-      const startMs = c.startAt?.toMillis ? c.startAt.toMillis() : 0;
-      const endMs = c.endAt?.toMillis ? c.endAt.toMillis() : 0;
-      if (now >= startMs && now <= endMs) {
-        if (!best || endMs < best._endMs) best = { id: d.id, ...c, _startMs: startMs, _endMs: endMs };
-      }
-    });
-    return best;
+    const snap = await db.collection(CAMPAIGNS_COL).doc(id).get();
+    return snap.exists ? { id: snap.id, ...snap.data() } : null;
   } catch (e) {
-    logger.warn('campaign-load-failed', { err: e.message });
+    logger.warn('campaign-by-id-failed', { id, err: e.message });
     return null;
   }
+}
+
+/** Timestamp → ms (0 wenn fehlt). */
+function toMs(ts) {
+  return ts && typeof ts.toMillis === 'function' ? ts.toMillis() : 0;
+}
+
+/**
+ * Brutto-Cashback (Cent) für einen Bon im Kontext EINER Aktion, VOR
+ * Wochenlimit / Per-User-Cap / Budget. Spiegel von `campaignReward` in
+ * lib/types/cashback.ts — bei Änderung BEIDE anpassen.
+ */
+function campaignRewardCents(eligibleItemCount, campaign, config) {
+  const minItems = Number.isFinite(campaign.minItems) ? campaign.minItems : config.minItemsForPayout;
+  if (eligibleItemCount < minItems) return 0;
+  if (Array.isArray(campaign.tiers) && campaign.tiers.length > 0) {
+    return tierFor(eligibleItemCount, campaign.tiers);
+  }
+  const flat = Number(campaign.cashbackPerBonCents) || 0;
+  return flat > 0 ? flat : 0;
+}
+
+/**
+ * ISO-Wochen-Key (Mo–So) für ein Bon-Datum 'YYYY-MM-DD' → 'YYYY-Www'.
+ * Donnerstag-Regel (ISO-8601). Bon-Datum ist bereits Berlin-Datum.
+ */
+function isoWeekKey(iso) {
+  const base = /^\d{4}-\d{2}-\d{2}/.test(String(iso || '')) ? String(iso).slice(0, 10) : todayBerlin();
+  const d = new Date(base + 'T12:00:00Z');
+  const dayNr = (d.getUTCDay() + 6) % 7; // Mo=0 … So=6
+  d.setUTCDate(d.getUTCDate() - dayNr + 3); // Donnerstag dieser Woche
+  const firstThu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const firstDayNr = (firstThu.getUTCDay() + 6) % 7;
+  firstThu.setUTCDate(firstThu.getUTCDate() - firstDayNr + 3);
+  const week = 1 + Math.round((d - firstThu) / (7 * 86400000));
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
 async function loadConfig() {
@@ -288,6 +316,16 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
         },
       },
     });
+    // Pro-Aktion-Zähler: Wochen-Bons (Mo–So Berlin) + Gesamt-Cents.
+    // Treiben das Wochenlimit + den Per-User-Cap der Aktion.
+    const weekKey = isoWeekKey(bonDateIso || todayBerlin());
+    const campaignDelta = (cid, cents, bons) =>
+      cid
+        ? {
+            cashback_campaign_weekly: { [cid]: { [weekKey]: { count: inc(bons) } } },
+            cashback_campaign_totals: { [cid]: inc(cents) },
+          }
+        : {};
     // Aktions-Budget transaktional anpassen (merge+increment → race-frei,
     // sicher auch wenn Feld fehlt). Negativ = verbraucht, positiv = Refund.
     const adjustBudget = (cid, cents) => {
@@ -317,6 +355,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
           cashback_lifetime_cents: lifetime + cashbackCents,
           cashback_last_bon_date: bonDateIso || todayBerlin(),
           ...monthlyDelta(cashbackCents, 1),
+          ...campaignDelta(campaignId, cashbackCents, 1),
         },
         { merge: true },
       );
@@ -341,6 +380,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
             cashback_balance_cents: balance + delta,
             cashback_lifetime_cents: lifetime + Math.max(0, delta),
             ...monthlyDelta(delta, 0),
+            ...campaignDelta(earns.docs[0]?.data()?.campaignId || campaignId, delta, 0),
           },
           { merge: true },
         );
@@ -358,17 +398,19 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         reason: 'reprocess_to_' + status,
       });
+      const reverseCid = earns.docs[0]?.data()?.campaignId || campaignId;
       tx.set(
         userRef,
         {
           cashback_balance_cents: Math.max(0, balance - netActive),
           cashback_lifetime_cents: Math.max(0, lifetime - netActive),
           ...monthlyDelta(-netActive, -1),
+          ...campaignDelta(reverseCid, -netActive, -1),
         },
         { merge: true },
       );
       // Budget zurück an die Kampagne, die ursprünglich gutgeschrieben hat.
-      adjustBudget(earns.docs[0]?.data()?.campaignId || campaignId, netActive);
+      adjustBudget(reverseCid, netActive);
     }
     // else: not approved + no prior earn — noop.
   });
@@ -415,6 +457,7 @@ exports.enqueueCashback = onRequest(
       perceptualHash,
       source,
       journey,
+      campaignId, // optional: vom User gewählte Aktion (cashback_campaigns/{id})
       clientUploadId, // optional: client's pre-allocated id for the receipt doc
     } = body;
     if (!storagePath || !bytesHash) {
@@ -651,6 +694,9 @@ exports.enqueueCashback = onRequest(
     await docRef.set({
       userId: uid,
       status: 'ocr_pending',
+      // Vom User gewählte Aktion — Quelle der Wahrheit für die Vergütung
+      // in processCashback (campaignsEnabled-Modus). null = keine Aktion.
+      campaignId: typeof campaignId === 'string' && campaignId ? campaignId : null,
       capture: {
         source: source || 'live_camera',
         appCheck: false, // wire when the App Check token lands
@@ -928,58 +974,110 @@ exports.processCashback = onMessagePublished(
         }
       }
 
-      // 6) Eligibility + tier (only computed if all gates pass)
+      // 6) Gates + Vergütung. Zwei Modi:
+      //    • campaignsEnabled=false → Dauer-Cashback über globale Tiers
+      //      (+ optionales Monats-Limit). Bisheriges Verhalten, unverändert.
+      //    • campaignsEnabled=true  → Vergütung NUR im Kontext der vom User
+      //      gewählten Aktion (receipt.campaignId). Die Aktion definiert
+      //      Tiers/Flat, minItems, Wochenlimit, Per-User-Cap und Budget.
+      //      Keine globalen Earning-Regeln mehr.
       const eligibleItemCount = countEligibleItems(ocr.parsed);
-      let cashbackCents =
+      const gatesOk =
         merchantInfo
         && recon.ok
         && !duplicateOf
-        && (ageDays == null || ageDays <= MAX_BON_AGE_DAYS)
-          ? tierFor(eligibleItemCount, config.tiers)
-          : 0;
+        && (ageDays == null || ageDays <= MAX_BON_AGE_DAYS);
 
-      // 6b) Monats-Limit (nur wenn config.monthlyMaxCents > 0). Cappt
-      // cashbackCents auf die verbleibende Monats-Headroom (Kalendermonat
-      // des Bon-Datums). 0 Headroom → cashbackCents 0 → status 'rejected'
-      // mit reason 'monthly_cap_reached'. Default 0 = kein Limit.
-      let monthlyCapped = false;
-      if (config.monthlyMaxCents > 0 && cashbackCents > 0) {
-        const month = (ocr.parsed.bonDate || todayBerlin()).slice(0, 7); // YYYY-MM
-        let earnedThisMonth = 0;
-        try {
-          const uSnap = await db.doc(`users/${uid}`).get();
-          earnedThisMonth = uSnap.exists
-            ? uSnap.data()?.cashback_monthly?.[month]?.earnedCents || 0
-            : 0;
-        } catch (e) {
-          logger.warn('monthly-read-failed', { cashbackId, err: e.message });
-        }
-        const headroom = Math.max(0, config.monthlyMaxCents - earnedThisMonth);
-        if (cashbackCents > headroom) {
-          cashbackCents = headroom;
-          monthlyCapped = true;
-        }
-      }
+      let cashbackCents = 0;
+      let selectedCampaign = null;
+      // no_active_campaign | below_min_items | weekly_cap_reached |
+      // per_user_cap_reached | campaign_budget_exhausted | monthly_cap_reached
+      let zeroReason = null;
 
-      // 6c) Aktions-Modus (config.campaignsEnabled). Cashback nur während
-      // einer aktiven Kampagne; sonst 0 (Bon wird trotzdem verarbeitet +
-      // Produkte getrackt). Mit Kampagne: cappen auf verbleibendes
-      // Aktions-Budget. Budget wird transaktional im Ledger dekrementiert.
-      let activeCampaign = null;
-      let noActiveCampaign = false;
-      let budgetExhausted = false;
-      if (config.campaignsEnabled && cashbackCents > 0) {
-        activeCampaign = await loadActiveCampaign();
-        if (!activeCampaign) {
+      if (config.campaignsEnabled) {
+        const cid = receipt.campaignId || null;
+        selectedCampaign = gatesOk && cid ? await loadCampaignById(cid) : null;
+        const nowMs = Date.now();
+        const inWindow =
+          selectedCampaign
+          && selectedCampaign.active === true
+          && toMs(selectedCampaign.startAt) <= nowMs
+          && nowMs <= toMs(selectedCampaign.endAt);
+
+        if (!gatesOk) {
+          cashbackCents = 0; // harter Gate (Merchant/recon/dup/alt) → Section 7
+        } else if (!cid || !selectedCampaign || !inWindow) {
           cashbackCents = 0;
-          noActiveCampaign = true;
+          zeroReason = 'no_active_campaign';
         } else {
-          const remaining = Number.isFinite(activeCampaign.budgetRemainingCents)
-            ? activeCampaign.budgetRemainingCents
-            : 0;
-          if (cashbackCents > remaining) {
-            cashbackCents = Math.max(0, remaining);
-            if (cashbackCents === 0) budgetExhausted = true;
+          let reward = campaignRewardCents(eligibleItemCount, selectedCampaign, config);
+          if (reward <= 0) {
+            zeroReason = 'below_min_items';
+          } else {
+            // Frische User-Zähler für Wochen-/Per-User-Cap.
+            let uData = {};
+            try {
+              const uSnap = await db.doc(`users/${uid}`).get();
+              uData = uSnap.exists ? uSnap.data() : {};
+            } catch (e) {
+              logger.warn('campaign-counters-read-failed', { cashbackId, err: e.message });
+            }
+            // Wochenlimit der Aktion (pro User, Mo–So Berlin).
+            const weeklyCap = Number(selectedCampaign.weeklyBonCap) || 0;
+            if (weeklyCap > 0) {
+              const wk = isoWeekKey(ocr.parsed.bonDate || todayBerlin());
+              const used = (((uData.cashback_campaign_weekly || {})[cid] || {})[wk] || {}).count || 0;
+              if (used >= weeklyCap) {
+                reward = 0;
+                zeroReason = 'weekly_cap_reached';
+              }
+            }
+            // Per-User-Gesamtdeckel der Aktion (cappt auf Headroom).
+            if (reward > 0) {
+              const perUserCap = Number(selectedCampaign.maxPerUserCents) || 0;
+              if (perUserCap > 0) {
+                const earned = (uData.cashback_campaign_totals || {})[cid] || 0;
+                const headroom = Math.max(0, perUserCap - earned);
+                if (reward > headroom) {
+                  reward = headroom;
+                  if (reward === 0) zeroReason = 'per_user_cap_reached';
+                }
+              }
+            }
+            // Verbleibendes Aktions-Budget (cappt; 0 → erschöpft).
+            if (reward > 0) {
+              const remaining = Number.isFinite(selectedCampaign.budgetRemainingCents)
+                ? selectedCampaign.budgetRemainingCents
+                : 0;
+              if (reward > remaining) {
+                reward = Math.max(0, remaining);
+                if (reward === 0) zeroReason = 'campaign_budget_exhausted';
+              }
+            }
+            cashbackCents = reward;
+          }
+        }
+      } else {
+        // ── Dauer-Cashback (bisheriges Verhalten): globale Tiers ──
+        cashbackCents = gatesOk ? tierFor(eligibleItemCount, config.tiers) : 0;
+
+        // Monats-Limit nur im Dauer-Modus (im Aktions-Modus gilt der
+        // Per-User-Cap der Aktion statt eines globalen Monatslimits).
+        if (config.monthlyMaxCents > 0 && cashbackCents > 0) {
+          const month = (ocr.parsed.bonDate || todayBerlin()).slice(0, 7); // YYYY-MM
+          let earnedThisMonth = 0;
+          try {
+            const uSnap = await db.doc(`users/${uid}`).get();
+            earnedThisMonth = uSnap.exists
+              ? uSnap.data()?.cashback_monthly?.[month]?.earnedCents || 0
+              : 0;
+          } catch (e) {
+            logger.warn('monthly-read-failed', { cashbackId, err: e.message });
+          }
+          const headroom = Math.max(0, config.monthlyMaxCents - earnedThisMonth);
+          if (cashbackCents > headroom) {
+            cashbackCents = headroom; // Teilbetrag bleibt approved
+            if (cashbackCents === 0) zeroReason = 'monthly_cap_reached';
           }
         }
       }
@@ -1010,16 +1108,15 @@ exports.processCashback = onMessagePublished(
         status = 'review';
         rejectReason = 'reconciliation_delta';
       } else if (cashbackCents === 0) {
-        // Bon ist gültig (würde qualifizieren), aber 0 Vergütung wegen
-        // fehlender/erschöpfter Aktion → 'no_reward' (NICHT rejected): Bon
-        // wird angenommen + Produkte getrackt, nur ohne Geld.
-        if (noActiveCampaign) {
+        // Gültiger Bon, aber 0 Vergütung.
+        // • Aktions-Modus: IMMER 'no_reward' → Bon wird angenommen +
+        //   Positionen getrackt (Ausgabenübersicht), nur ohne Geld.
+        // • Dauer-Modus: bisheriges Verhalten (Monats-Cap → no_reward,
+        //   sonst below_min_items → rejected).
+        if (config.campaignsEnabled) {
           status = 'no_reward';
-          rejectReason = 'no_active_campaign';
-        } else if (budgetExhausted) {
-          status = 'no_reward';
-          rejectReason = 'campaign_budget_exhausted';
-        } else if (monthlyCapped) {
+          rejectReason = zeroReason || 'below_min_items';
+        } else if (zeroReason === 'monthly_cap_reached') {
           status = 'no_reward';
           rejectReason = 'monthly_cap_reached';
         } else {
@@ -1144,7 +1241,7 @@ exports.processCashback = onMessagePublished(
         status,
         cashbackCents,
         ocr.parsed.bonDate,
-        activeCampaign?.id || null,
+        selectedCampaign?.id || null,
       );
 
       // 7a) Produkt-Tracking ist UNABHÄNGIG von der Vergütung: jeder gültige

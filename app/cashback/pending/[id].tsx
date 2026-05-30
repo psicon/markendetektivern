@@ -53,7 +53,7 @@ import journeyTrackingService from '@/lib/services/journeyTrackingService';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-type ViewState = 'unknown' | 'uploading' | 'upload_failed' | 'pending' | 'review' | 'approved' | 'rejected' | 'not_found';
+type ViewState = 'unknown' | 'uploading' | 'upload_failed' | 'pending' | 'review' | 'approved' | 'no_reward' | 'rejected' | 'not_found';
 
 interface MirrorItem {
   name: string;
@@ -108,6 +108,8 @@ function viewStateFor(status?: string | null): ViewState {
     case 'approved':
     case 'paid':
       return 'approved';
+    case 'no_reward':
+      return 'no_reward';
     case 'rejected':
       return 'rejected';
     case 'superseded':
@@ -428,6 +430,32 @@ export default function CashbackPendingScreen() {
         cashback: doc?.cashbackCents ? `+${formatCents(doc.cashbackCents)}` : null,
       };
     }
+    if (state === 'no_reward') {
+      // Bon angenommen + gespeichert (Ausgabenübersicht), aber 0 Vergütung —
+      // aktions-bedingt. Konkreten Grund zeigen.
+      const reason = (doc?.rejectReason as string) ?? '';
+      const body =
+        reason === 'no_active_campaign'
+          ? 'Dieser Bon wurde ohne aktive Aktion eingereicht. Er ist gespeichert und zählt zu deiner Ausgabenübersicht — Vergütung gibt es nur mit einer Aktion.'
+          : reason === 'below_min_items'
+          ? 'Für diese Aktion brauchst du mehr anrechenbare Artikel auf dem Bon. Der Bon ist gespeichert, aber ohne Vergütung.'
+          : reason === 'weekly_cap_reached'
+          ? 'Du hast das Wochenlimit dieser Aktion erreicht. Der Bon ist gespeichert — diese Woche gibt es dafür keine Vergütung mehr.'
+          : reason === 'per_user_cap_reached'
+          ? 'Du hast für diese Aktion bereits das Maximum erhalten. Der Bon ist gespeichert, aber ohne weitere Vergütung.'
+          : reason === 'campaign_budget_exhausted'
+          ? 'Das Budget dieser Aktion ist aufgebraucht. Der Bon ist gespeichert, aber ohne Vergütung.'
+          : reason === 'monthly_cap_reached'
+          ? 'Du hast dein Monatslimit erreicht. Der Bon ist gespeichert — diesen Monat gibt es keine weitere Vergütung.'
+          : 'Für diesen Bon gab es keine Vergütung. Er ist gespeichert und zählt zu deiner Ausgabenübersicht.';
+      return {
+        icon: <MaterialCommunityIcons name="information-outline" size={42} color={yellow} />,
+        bg: '#f1c40f30',
+        title: 'Bon gespeichert',
+        body,
+        cashback: null,
+      };
+    }
     if (state === 'rejected') {
       // T17.30: Konkreten Reject-Grund zeigen — Backend emittiert
       // duplicate_content_self/_cross_user und pubsub_publish_failed
@@ -638,7 +666,7 @@ export default function CashbackPendingScreen() {
         ) : null}
 
         {/* ─── Merchant hero — large logo + bold name + date below ─── */}
-        {(doc?.merchantName || doc?.merchant) && (state === 'approved' || state === 'rejected' || state === 'review') ? (
+        {(doc?.merchantName || doc?.merchant) && (state === 'approved' || state === 'no_reward' || state === 'rejected' || state === 'review') ? (
           <View
             style={{
               marginHorizontal: 16,
@@ -714,7 +742,7 @@ export default function CashbackPendingScreen() {
         ) : null}
 
         {/* ─── Items list ─── */}
-        {items.length > 0 && (state === 'approved' || state === 'rejected' || state === 'review') ? (
+        {items.length > 0 && (state === 'approved' || state === 'no_reward' || state === 'rejected' || state === 'review') ? (
           <View style={{ marginHorizontal: 16, marginTop: 18 }}>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
               <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6 }}>
@@ -847,7 +875,7 @@ export default function CashbackPendingScreen() {
         ) : null}
 
         {/* ─── Bon image (below the parsed details) ─── */}
-        {imageUrl && (state === 'approved' || state === 'rejected' || state === 'review') ? (
+        {imageUrl && (state === 'approved' || state === 'no_reward' || state === 'rejected' || state === 'review') ? (
           <View style={{ marginHorizontal: 16, marginTop: 18 }}>
             <Text
               style={{
