@@ -744,7 +744,7 @@ function RedeemTab() {
           User wählt beim Einreichen die Aktion). Sitzt unter den
           Aktions-Buttons (Schnellzugriff/Bons/Einlösen). ── */}
       {campaigns.length > 0 ? (
-        <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
+        <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
           <SectionHeader
             title="Aktive Aktionen"
             sub={`${campaigns.length} ${campaigns.length === 1 ? 'Aktion' : 'Aktionen'}`}
@@ -756,7 +756,7 @@ function RedeemTab() {
           </View>
         </View>
       ) : campaignsEnabled ? (
-        <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
+        <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
           <SectionHeader title="Aktive Aktionen" />
           <View
             style={{
