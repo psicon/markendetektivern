@@ -88,45 +88,75 @@ async function callCloudVision(imageBytes) {
 // ─── Gemini Flash: text → structured Receipt JSON ───────────────────
 
 async function callGeminiTextParser(ocrText, model) {
-  const started = Date.now();
-  const response = await getGenAIClient().models.generateContent({
-    model,
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: buildUserPrompt(ocrText) }],
-      },
-    ],
-    config: {
-      systemInstruction: SYSTEM_PROMPT,
-      temperature: 0.0,
-      // Note: @google/genai doesn't always honor `seed`, but keeping
-      // temperature=0 is what matters for determinism here.
-      responseMimeType: 'application/json',
-      responseSchema: RESPONSE_SCHEMA,
-    },
-  });
-  const latencyMs = Date.now() - started;
+  // Guard gegen Riesen-Inputs: Cloud Vision kann bei Mehrseiten-Fotos /
+  // Garbage sehr viel Text liefern → Gemini produziert eine riesige
+  // Antwort. Echte Bons sind << 20k Zeichen.
+  const safeText = String(ocrText || '').slice(0, 20000);
 
-  const raw = response.text || '';
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    const err = new Error(`cv_hybrid_json_decode: ${e.message}`);
-    err.code = 'cv_hybrid_json_decode';
-    err.raw = raw;
-    throw err;
+  const callOnce = async () => {
+    const started = Date.now();
+    const response = await getGenAIClient().models.generateContent({
+      model,
+      contents: [{ role: 'user', parts: [{ text: buildUserPrompt(safeText) }] }],
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
+        temperature: 0.0,
+        responseMimeType: 'application/json',
+        responseSchema: RESPONSE_SCHEMA,
+        // WICHTIG: ohne explizites Limit greift der Default (8192) → lange
+        // Bons werden mittendrin abgeschnitten → kaputtes JSON →
+        // cv_hybrid_json_decode. gemini-2.5-flash kann deutlich mehr.
+        maxOutputTokens: 32768,
+      },
+    });
+    const latencyMs = Date.now() - started;
+    // Defensive: evtl. Markdown-Code-Fences entfernen.
+    const raw = (response.text || '')
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '');
+    const usage = response.usageMetadata || {};
+    const finishReason = response.candidates?.[0]?.finishReason ?? null;
+    return {
+      raw,
+      latencyMs,
+      finishReason,
+      inputTokens: usage.promptTokenCount ?? null,
+      outputTokens: usage.candidatesTokenCount ?? null,
+    };
+  };
+
+  // Bis zu 2 Versuche — fängt transiente Fehler + gelegentliche
+  // Fehlgenerationen ab.
+  let last = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    last = await callOnce();
+    try {
+      const parsed = JSON.parse(last.raw);
+      return {
+        parsed,
+        latencyMs: last.latencyMs,
+        inputTokens: last.inputTokens,
+        outputTokens: last.outputTokens,
+        raw: last.raw,
+      };
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('cv-hybrid-json-retry', {
+        attempt,
+        finishReason: last.finishReason,
+        rawLen: last.raw.length,
+        err: e.message,
+      });
+    }
   }
 
-  const usage = response.usageMetadata || {};
-  return {
-    parsed,
-    latencyMs,
-    inputTokens: usage.promptTokenCount ?? null,
-    outputTokens: usage.candidatesTokenCount ?? null,
-    raw,
-  };
+  const err = new Error(
+    `cv_hybrid_json_decode: parse failed after retries (finish=${last?.finishReason}, len=${last?.raw?.length})`,
+  );
+  err.code = 'cv_hybrid_json_decode';
+  err.raw = last?.raw;
+  throw err;
 }
 
 // ─── Public entry point ─────────────────────────────────────────────
