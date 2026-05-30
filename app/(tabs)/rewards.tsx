@@ -549,7 +549,7 @@ function RedeemTab() {
                 fontFamily,
                 fontWeight: fontWeight.medium,
                 fontSize: 11,
-                color: theme.textMuted,
+                color: 'rgba(255,255,255,0.8)',
                 textAlign: 'center',
                 marginTop: 8,
               }}
@@ -561,28 +561,38 @@ function RedeemTab() {
               aus ist — es ist eine echte Aktion). Die "keine Aktion"-Warnung
               nur im echten Aktions-Modus (campaignsEnabled). */}
           {campaign ? (
-            <Text
+            <View
               style={{
-                fontFamily,
-                fontWeight: fontWeight.bold as any,
-                fontSize: 11,
-                color: theme.primary ?? theme.text,
-                textAlign: 'center',
-                marginTop: 8,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+                marginTop: 10,
               }}
             >
-              {campaign.title ? `${campaign.title} · ` : ''}
-              läuft noch {campaignDaysLeft} {campaignDaysLeft === 1 ? 'Tag' : 'Tage'}
-            </Text>
+              <MaterialCommunityIcons name="clock-outline" size={12} color="#fff" />
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.bold as any,
+                  fontSize: 11,
+                  color: '#fff',
+                  letterSpacing: 0.1,
+                }}
+              >
+                {campaign.title ? `${campaign.title} · ` : 'Aktion '}läuft noch {campaignDaysLeft}{' '}
+                {campaignDaysLeft === 1 ? 'Tag' : 'Tage'}
+              </Text>
+            </View>
           ) : campaignsEnabled ? (
             <Text
               style={{
                 fontFamily,
                 fontWeight: fontWeight.medium,
                 fontSize: 11,
-                color: theme.textMuted,
+                color: 'rgba(255,255,255,0.8)',
                 textAlign: 'center',
-                marginTop: 8,
+                marginTop: 10,
               }}
             >
               Aktuell keine Cashback-Aktion — Bons einreichen geht weiter, Vergütung gibt es mit der nächsten Aktion.
