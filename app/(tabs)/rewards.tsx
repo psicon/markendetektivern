@@ -29,6 +29,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
+import { getCashbackConfig } from '@/lib/services/cashbackService';
 import { useWeeklyReceiptCount } from '@/lib/hooks/useWeeklyReceiptCount';
 
 // ─── Cashback fallback ─────────────────────────────────────────────────
@@ -318,6 +319,26 @@ function RedeemTab() {
   const cashbackEur = cashback.uid
     ? cashback.balanceCents / 100
     : CASHBACK_FALLBACK_EUR;
+  // Auszahlungs-Schwelle + Monatslimit aus dem remote-konfigurierbaren
+  // cashback_config/v1 (Fallback = Default-Konstanten). So lässt sich die
+  // Schwelle ohne App-Update ändern.
+  const [payoutThreshold, setPayoutThreshold] = useState(PAYOUT_THRESHOLD);
+  const [monthlyMaxCents, setMonthlyMaxCents] = useState(0);
+  React.useEffect(() => {
+    let alive = true;
+    getCashbackConfig()
+      .then((c) => {
+        if (!alive) return;
+        if (typeof c.payoutThresholdCents === 'number') {
+          setPayoutThreshold(c.payoutThresholdCents / 100);
+        }
+        if (typeof c.monthlyMaxCents === 'number') setMonthlyMaxCents(c.monthlyMaxCents);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   // T17.24: Echter Wochen-Counter aus Firestore — ersetzt die
   // hardcoded fake-Werte.
   const weeklyReceiptCount = useWeeklyReceiptCount();
@@ -333,10 +354,10 @@ function RedeemTab() {
   const redeemAnchor = useCoachmarkAnchor(REWARDS_ANCHOR_REDEEM);
   const pct = Math.min(
     100,
-    Math.round((cashbackEur / PAYOUT_THRESHOLD) * 100),
+    Math.round((cashbackEur / payoutThreshold) * 100),
   );
-  const canRedeem = cashbackEur >= PAYOUT_THRESHOLD;
-  const gapEur = (PAYOUT_THRESHOLD - cashbackEur)
+  const canRedeem = cashbackEur >= payoutThreshold;
+  const gapEur = (payoutThreshold - cashbackEur)
     .toFixed(2)
     .replace('.', ',');
 
@@ -507,9 +528,23 @@ function RedeemTab() {
               canRedeem ? 'Bereit zur Auszahlung' : 'Auszahlungs-Schwelle'
             }
             current={`${cashbackEur.toFixed(2).replace('.', ',')} €`}
-            required={`${PAYOUT_THRESHOLD.toFixed(2).replace('.', ',')} €`}
+            required={`${payoutThreshold.toFixed(2).replace('.', ',')} €`}
             pct={pct}
           />
+          {monthlyMaxCents > 0 ? (
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 11,
+                color: theme.textMuted,
+                textAlign: 'center',
+                marginTop: 8,
+              }}
+            >
+              Monatslimit: max. {(monthlyMaxCents / 100).toFixed(2).replace('.', ',')} € Cashback pro Monat
+            </Text>
+          ) : null}
           </View>
         </LinearGradient>
         </View>
@@ -684,7 +719,7 @@ function RedeemTab() {
           >
             {canRedeem
               ? 'Tausche deine Cashback-Taler bei unseren Partnern gegen Gutscheine (Amazon, Rewe, Apple…), PayPal-Auszahlung, Visa-Prepaid oder Spenden ein.'
-              : `Sobald du die ${PAYOUT_THRESHOLD.toFixed(2).replace('.', ',')} €-Schwelle erreichst, kannst du deine Taler hier einlösen — bei Gutschein-Partnern, PayPal, Visa-Prepaid oder als Spende.`}
+              : `Sobald du die ${payoutThreshold.toFixed(2).replace('.', ',')} €-Schwelle erreichst, kannst du deine Taler hier einlösen — bei Gutschein-Partnern, PayPal, Visa-Prepaid oder als Spende.`}
           </Text>
 
           <Pressable

@@ -122,6 +122,12 @@ const DEFAULT_CONFIG = {
   autoApproveThreshold: 0.85,
   kycRequiredAt: 2000,
   consentVersion: 'v1.0-2026-05',
+  // Auszahlung erst ab diesem Guthaben (Cent). 1000 = 10 €.
+  payoutThresholdCents: 1000,
+  // Max. Cashback pro Kalendermonat (Cent). 0 = KEIN Limit (Default).
+  // >0 aktiviert die serverseitige Monats-Begrenzung (cappt cashbackCents
+  // auf die verbleibende Monats-Headroom).
+  monthlyMaxCents: 0,
 };
 
 async function loadConfig() {
@@ -242,6 +248,18 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
     const u = userSnap.exists ? userSnap.data() : {};
     const balance = u.cashback_balance_cents || 0;
     const lifetime = u.cashback_lifetime_cents || 0;
+    // Kalendermonat des Bons → Monats-Zähler (für Monats-Limit + Anzeige).
+    const monthKey = (bonDateIso || todayBerlin()).slice(0, 7); // YYYY-MM
+    const inc = admin.firestore.FieldValue.increment;
+    const monthlyDelta = (cents, bons) => ({
+      cashback_monthly: {
+        [monthKey]: {
+          earnedCents: inc(cents),
+          bonsCount: inc(bons),
+          lastBonAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+      },
+    });
 
     if (wantApproved && netActive === 0) {
       // First-time approval (or reapproval after a reverse).
@@ -259,6 +277,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
           cashback_balance_cents: balance + cashbackCents,
           cashback_lifetime_cents: lifetime + cashbackCents,
           cashback_last_bon_date: bonDateIso || todayBerlin(),
+          ...monthlyDelta(cashbackCents, 1),
         },
         { merge: true },
       );
@@ -281,6 +300,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
           {
             cashback_balance_cents: balance + delta,
             cashback_lifetime_cents: lifetime + Math.max(0, delta),
+            ...monthlyDelta(delta, 0),
           },
           { merge: true },
         );
@@ -302,6 +322,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
         {
           cashback_balance_cents: Math.max(0, balance - netActive),
           cashback_lifetime_cents: Math.max(0, lifetime - netActive),
+          ...monthlyDelta(-netActive, -1),
         },
         { merge: true },
       );
@@ -866,13 +887,36 @@ exports.processCashback = onMessagePublished(
 
       // 6) Eligibility + tier (only computed if all gates pass)
       const eligibleItemCount = countEligibleItems(ocr.parsed);
-      const cashbackCents =
+      let cashbackCents =
         merchantInfo
         && recon.ok
         && !duplicateOf
         && (ageDays == null || ageDays <= MAX_BON_AGE_DAYS)
           ? tierFor(eligibleItemCount, config.tiers)
           : 0;
+
+      // 6b) Monats-Limit (nur wenn config.monthlyMaxCents > 0). Cappt
+      // cashbackCents auf die verbleibende Monats-Headroom (Kalendermonat
+      // des Bon-Datums). 0 Headroom → cashbackCents 0 → status 'rejected'
+      // mit reason 'monthly_cap_reached'. Default 0 = kein Limit.
+      let monthlyCapped = false;
+      if (config.monthlyMaxCents > 0 && cashbackCents > 0) {
+        const month = (ocr.parsed.bonDate || todayBerlin()).slice(0, 7); // YYYY-MM
+        let earnedThisMonth = 0;
+        try {
+          const uSnap = await db.doc(`users/${uid}`).get();
+          earnedThisMonth = uSnap.exists
+            ? uSnap.data()?.cashback_monthly?.[month]?.earnedCents || 0
+            : 0;
+        } catch (e) {
+          logger.warn('monthly-read-failed', { cashbackId, err: e.message });
+        }
+        const headroom = Math.max(0, config.monthlyMaxCents - earnedThisMonth);
+        if (cashbackCents > headroom) {
+          cashbackCents = headroom;
+          monthlyCapped = true;
+        }
+      }
 
       // 7) Decide status (priority: not-a-receipt > unknown-merchant >
       //                  too-old > duplicate > recon > below-min)
@@ -901,7 +945,7 @@ exports.processCashback = onMessagePublished(
         rejectReason = 'reconciliation_delta';
       } else if (cashbackCents === 0) {
         status = 'rejected';
-        rejectReason = 'below_min_items';
+        rejectReason = monthlyCapped ? 'monthly_cap_reached' : 'below_min_items';
       } else {
         status = 'approved';
       }

@@ -29,6 +29,11 @@ export interface CashbackConfigDoc {
   autoApproveThreshold: number;
   kycRequiredAt: number;
   consentVersion: string;
+  /** Mindest-Guthaben (in Cent) ab dem ausgezahlt werden darf. Default 1000 = 10 €. */
+  payoutThresholdCents: number;
+  /** Max. Cashback pro Kalendermonat (in Cent). 0 = KEIN Limit (Default).
+   *  >0 aktiviert die serverseitige Monats-Begrenzung. */
+  monthlyMaxCents: number;
 }
 
 export const DEFAULT_CASHBACK_CONFIG: CashbackConfigDoc = {
@@ -46,6 +51,8 @@ export const DEFAULT_CASHBACK_CONFIG: CashbackConfigDoc = {
   autoApproveThreshold: 0.85,
   kycRequiredAt: 2000,
   consentVersion: 'v1.0-2026-05',
+  payoutThresholdCents: 1000, // 10 €
+  monthlyMaxCents: 0, // 0 = kein Limit (opt-in via Config-Doc)
 };
 
 // ─── User-side state ────────────────────────────────────────────────
