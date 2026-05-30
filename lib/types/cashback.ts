@@ -34,6 +34,22 @@ export interface CashbackConfigDoc {
   /** Max. Cashback pro Kalendermonat (in Cent). 0 = KEIN Limit (Default).
    *  >0 aktiviert die serverseitige Monats-Begrenzung. */
   monthlyMaxCents: number;
+  /** Aktions-Modus: wenn true, gibt es Cashback NUR während einer aktiven
+   *  Kampagne (cashback_campaigns). Keine Aktion → Bon wird verarbeitet +
+   *  Produkte getrackt, aber 0 Vergütung. Default false = Dauer-Cashback. */
+  campaignsEnabled: boolean;
+}
+
+/** Eine zeitlich begrenzte Cashback-Aktion mit Gesamt-Budget. */
+export interface CashbackCampaign {
+  active: boolean;
+  startAt: Timestamp;
+  endAt: Timestamp;
+  budgetTotalCents: number;       // „max verfügbar" gesamt
+  budgetRemainingCents: number;   // live, transaktional dekrementiert
+  maxPerUserCents?: number;       // optionaler Override (sonst config.monthlyMaxCents)
+  title?: string;
+  description?: string;
 }
 
 export const DEFAULT_CASHBACK_CONFIG: CashbackConfigDoc = {
@@ -53,6 +69,7 @@ export const DEFAULT_CASHBACK_CONFIG: CashbackConfigDoc = {
   consentVersion: 'v1.0-2026-05',
   payoutThresholdCents: 1000, // 10 €
   monthlyMaxCents: 0, // 0 = kein Limit (opt-in via Config-Doc)
+  campaignsEnabled: false, // false = Dauer-Cashback (opt-in via Config-Doc)
 };
 
 // ─── User-side state ────────────────────────────────────────────────

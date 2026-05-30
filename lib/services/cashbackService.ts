@@ -9,17 +9,20 @@
  * See CASHBACK_ARCHITECTURE.md §3 for the schema and §11 for hard rules.
  */
 
-import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc, type Unsubscribe } from '@react-native-firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, type Unsubscribe } from '@react-native-firebase/firestore';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 import { db } from '@/lib/firebase';
 import {
   DEFAULT_CASHBACK_CONFIG,
+  type CashbackCampaign,
   type CashbackConfigDoc,
   type CashbackConsentState,
   type CashbackUserFields,
 } from '@/lib/types/cashback';
+
+export type ActiveCampaign = CashbackCampaign & { id: string; endMs: number };
 
 const CONFIG_DOC_PATH = 'cashback_config/v1';
 
@@ -50,6 +53,37 @@ export async function getCashbackConfig(forceRefresh = false): Promise<CashbackC
   } catch (error) {
     console.warn('⚠️ getCashbackConfig failed, using defaults:', error);
     return DEFAULT_CASHBACK_CONFIG;
+  }
+}
+
+let campaignCache: { value: ActiveCampaign | null; fetchedAt: number } | null = null;
+
+/**
+ * Aktuell laufende Cashback-Aktion (active==true UND jetzt in [startAt,endAt]).
+ * null = keine Aktion läuft → keine Vergütung (Einreichen geht trotzdem).
+ * 5-Min-Cache. Read-only; Quelle der Wahrheit ist der Cloud-Function-Pfad.
+ */
+export async function getActiveCashbackCampaign(forceRefresh = false): Promise<ActiveCampaign | null> {
+  if (!forceRefresh && campaignCache && Date.now() - campaignCache.fetchedAt < CONFIG_TTL_MS) {
+    return campaignCache.value;
+  }
+  try {
+    const snap = await getDocs(query(collection(db, 'cashback_campaigns'), where('active', '==', true)));
+    const now = Date.now();
+    let best: ActiveCampaign | null = null;
+    snap.forEach((d: any) => {
+      const c = d.data() || {};
+      const startMs = c.startAt?.toMillis?.() ?? 0;
+      const endMs = c.endAt?.toMillis?.() ?? 0;
+      if (now >= startMs && now <= endMs && (!best || endMs < best.endMs)) {
+        best = { id: d.id, ...c, endMs } as ActiveCampaign;
+      }
+    });
+    campaignCache = { value: best, fetchedAt: Date.now() };
+    return best;
+  } catch (e) {
+    console.warn('⚠️ getActiveCashbackCampaign failed:', e);
+    return null;
   }
 }
 

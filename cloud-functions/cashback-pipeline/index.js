@@ -128,7 +128,35 @@ const DEFAULT_CONFIG = {
   // >0 aktiviert die serverseitige Monats-Begrenzung (cappt cashbackCents
   // auf die verbleibende Monats-Headroom).
   monthlyMaxCents: 0,
+  // Aktions-Modus: true → Cashback NUR während aktiver Kampagne
+  // (cashback_campaigns). Keine Aktion → Bon verarbeitet + Produkte
+  // getrackt, aber 0 Vergütung. Default false = Dauer-Cashback (kein Change).
+  campaignsEnabled: false,
 };
+
+const CAMPAIGNS_COL = 'cashback_campaigns';
+
+// Aktuell laufende Aktion laden (active==true UND now in [startAt, endAt]).
+// Bei mehreren: die mit dem frühesten Ende (läuft zuerst aus). null = keine.
+async function loadActiveCampaign() {
+  try {
+    const now = Date.now();
+    const snap = await db.collection(CAMPAIGNS_COL).where('active', '==', true).get();
+    let best = null;
+    snap.forEach((d) => {
+      const c = d.data() || {};
+      const startMs = c.startAt?.toMillis ? c.startAt.toMillis() : 0;
+      const endMs = c.endAt?.toMillis ? c.endAt.toMillis() : 0;
+      if (now >= startMs && now <= endMs) {
+        if (!best || endMs < best._endMs) best = { id: d.id, ...c, _startMs: startMs, _endMs: endMs };
+      }
+    });
+    return best;
+  } catch (e) {
+    logger.warn('campaign-load-failed', { err: e.message });
+    return null;
+  }
+}
 
 async function loadConfig() {
   try {
@@ -227,7 +255,7 @@ async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo) {
  *
  * Runs in a transaction so concurrent re-publishes can't race.
  */
-async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, bonDateIso) {
+async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, bonDateIso, campaignId) {
   const ledgerCol = userRef.collection('cashback_ledger');
 
   await db.runTransaction(async (tx) => {
@@ -260,6 +288,16 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
         },
       },
     });
+    // Aktions-Budget transaktional anpassen (merge+increment → race-frei,
+    // sicher auch wenn Feld fehlt). Negativ = verbraucht, positiv = Refund.
+    const adjustBudget = (cid, cents) => {
+      if (!cid || !cents) return;
+      tx.set(
+        db.collection(CAMPAIGNS_COL).doc(cid),
+        { budgetRemainingCents: inc(cents) },
+        { merge: true },
+      );
+    };
 
     if (wantApproved && netActive === 0) {
       // First-time approval (or reapproval after a reverse).
@@ -268,6 +306,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
         type: 'earn',
         cents: cashbackCents,
         receiptId: cashbackId,
+        campaignId: campaignId || null, // für Budget-Refund beim Reverse
         balanceAfterCents: balance + cashbackCents,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
@@ -281,6 +320,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
         },
         { merge: true },
       );
+      adjustBudget(campaignId, -cashbackCents);
     } else if (wantApproved && netActive > 0) {
       // Already credited (PubSub redelivery). Noop unless cents changed.
       if (netActive !== cashbackCents) {
@@ -304,6 +344,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
           },
           { merge: true },
         );
+        adjustBudget(earns.docs[0]?.data()?.campaignId || campaignId, -delta);
       }
     } else if (!wantApproved && netActive > 0) {
       // Was approved, now isn't (reprocess flipped to rejected/review).
@@ -326,6 +367,8 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
         },
         { merge: true },
       );
+      // Budget zurück an die Kampagne, die ursprünglich gutgeschrieben hat.
+      adjustBudget(earns.docs[0]?.data()?.campaignId || campaignId, netActive);
     }
     // else: not approved + no prior earn — noop.
   });
@@ -918,6 +961,29 @@ exports.processCashback = onMessagePublished(
         }
       }
 
+      // 6c) Aktions-Modus (config.campaignsEnabled). Cashback nur während
+      // einer aktiven Kampagne; sonst 0 (Bon wird trotzdem verarbeitet +
+      // Produkte getrackt). Mit Kampagne: cappen auf verbleibendes
+      // Aktions-Budget. Budget wird transaktional im Ledger dekrementiert.
+      let activeCampaign = null;
+      let noActiveCampaign = false;
+      let budgetExhausted = false;
+      if (config.campaignsEnabled && cashbackCents > 0) {
+        activeCampaign = await loadActiveCampaign();
+        if (!activeCampaign) {
+          cashbackCents = 0;
+          noActiveCampaign = true;
+        } else {
+          const remaining = Number.isFinite(activeCampaign.budgetRemainingCents)
+            ? activeCampaign.budgetRemainingCents
+            : 0;
+          if (cashbackCents > remaining) {
+            cashbackCents = Math.max(0, remaining);
+            if (cashbackCents === 0) budgetExhausted = true;
+          }
+        }
+      }
+
       // 7) Decide status (priority: not-a-receipt > unknown-merchant >
       //                  too-old > duplicate > recon > below-min)
       let status = 'matched';
@@ -944,8 +1010,22 @@ exports.processCashback = onMessagePublished(
         status = 'review';
         rejectReason = 'reconciliation_delta';
       } else if (cashbackCents === 0) {
-        status = 'rejected';
-        rejectReason = monthlyCapped ? 'monthly_cap_reached' : 'below_min_items';
+        // Bon ist gültig (würde qualifizieren), aber 0 Vergütung wegen
+        // fehlender/erschöpfter Aktion → 'no_reward' (NICHT rejected): Bon
+        // wird angenommen + Produkte getrackt, nur ohne Geld.
+        if (noActiveCampaign) {
+          status = 'no_reward';
+          rejectReason = 'no_active_campaign';
+        } else if (budgetExhausted) {
+          status = 'no_reward';
+          rejectReason = 'campaign_budget_exhausted';
+        } else if (monthlyCapped) {
+          status = 'no_reward';
+          rejectReason = 'monthly_cap_reached';
+        } else {
+          status = 'rejected';
+          rejectReason = 'below_min_items';
+        }
       } else {
         status = 'approved';
       }
@@ -1058,15 +1138,24 @@ exports.processCashback = onMessagePublished(
       // re-process. Either way: at most ONE active earn per receiptId.
       // If reprocess flips approved→rejected, we reverse the earlier earn.
       const userRef = db.doc(`users/${uid}`);
-      await syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, ocr.parsed.bonDate);
+      await syncLedgerForReceipt(
+        userRef,
+        cashbackId,
+        status,
+        cashbackCents,
+        ocr.parsed.bonDate,
+        activeCampaign?.id || null,
+      );
+
+      // 7a) Produkt-Tracking ist UNABHÄNGIG von der Vergütung: jeder gültige
+      // Bon (approved ODER no_reward = angenommen, aber keine Aktion/0 €)
+      // schreibt seine Positionen — fürs Matching/Tracking. „Einreichung
+      // geht immer", auch ohne laufende Aktion.
+      if (status === 'approved' || status === 'no_reward') {
+        await writePurchasedProducts(uid, cashbackId, ocr.parsed, merchantInfo);
+      }
 
       if (status === 'approved' && cashbackCents > 0) {
-        // 7a) Per-user purchased products audit (architecture §3.2).
-        // One doc per item-name × bon — gives an at-a-glance "what did
-        // I buy here" trail under the user. We use a deterministic
-        // doc id so reprocessing doesn't multiply entries.
-        await writePurchasedProducts(uid, cashbackId, ocr.parsed, merchantInfo);
-
         // 8) Push (currently stub-logs)
         await sendCashbackReady(uid, {
           title: '🎉 Cashback bereit!',

@@ -29,7 +29,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
-import { getCashbackConfig } from '@/lib/services/cashbackService';
+import { getActiveCashbackCampaign, getCashbackConfig, type ActiveCampaign } from '@/lib/services/cashbackService';
 import { useWeeklyReceiptCount } from '@/lib/hooks/useWeeklyReceiptCount';
 
 // ─── Cashback fallback ─────────────────────────────────────────────────
@@ -324,6 +324,8 @@ function RedeemTab() {
   // Schwelle ohne App-Update ändern.
   const [payoutThreshold, setPayoutThreshold] = useState(PAYOUT_THRESHOLD);
   const [monthlyMaxCents, setMonthlyMaxCents] = useState(0);
+  const [campaignsEnabled, setCampaignsEnabled] = useState(false);
+  const [campaign, setCampaign] = useState<ActiveCampaign | null>(null);
   React.useEffect(() => {
     let alive = true;
     getCashbackConfig()
@@ -333,12 +335,22 @@ function RedeemTab() {
           setPayoutThreshold(c.payoutThresholdCents / 100);
         }
         if (typeof c.monthlyMaxCents === 'number') setMonthlyMaxCents(c.monthlyMaxCents);
+        setCampaignsEnabled(Boolean(c.campaignsEnabled));
+      })
+      .catch(() => {});
+    getActiveCashbackCampaign()
+      .then((c) => {
+        if (alive) setCampaign(c);
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
   }, []);
+  // Restlaufzeit der aktuellen Aktion (ganze Tage, min. „heute").
+  const campaignDaysLeft = campaign
+    ? Math.max(0, Math.ceil((campaign.endMs - Date.now()) / 86_400_000))
+    : 0;
   // T17.24: Echter Wochen-Counter aus Firestore — ersetzt die
   // hardcoded fake-Werte.
   const weeklyReceiptCount = useWeeklyReceiptCount();
@@ -543,6 +555,22 @@ function RedeemTab() {
               }}
             >
               Monatslimit: max. {(monthlyMaxCents / 100).toFixed(2).replace('.', ',')} € Cashback pro Monat
+            </Text>
+          ) : null}
+          {campaignsEnabled ? (
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: campaign ? fontWeight.bold : fontWeight.medium,
+                fontSize: 11,
+                color: campaign ? (theme.primary ?? theme.text) : theme.textMuted,
+                textAlign: 'center',
+                marginTop: 8,
+              }}
+            >
+              {campaign
+                ? `Aktion läuft noch ${campaignDaysLeft} ${campaignDaysLeft === 1 ? 'Tag' : 'Tage'}`
+                : 'Aktuell keine Cashback-Aktion — Bons einreichen geht weiter, Vergütung gibt es mit der nächsten Aktion.'}
             </Text>
           ) : null}
           </View>
