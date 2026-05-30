@@ -1374,6 +1374,8 @@ exports.requestPayout = onRequest(
 
     const config = await loadConfig();
     const threshold = Number.isFinite(config.payoutThresholdCents) ? config.payoutThresholdCents : 1000;
+    // Gewünschter Teil-Betrag (optional). Fehlt/ungültig → ganze Balance.
+    const requestedCents = Math.round(Number((req.body || {}).amountCents));
 
     try {
       const result = await db.runTransaction(async (tx) => {
@@ -1386,7 +1388,14 @@ exports.requestPayout = onRequest(
           return { error: 'below_threshold', balanceCents: balance, thresholdCents: threshold };
         }
 
-        const amountCents = balance; // ganze Balance
+        // Betrag: gewünschter Teil-Betrag (auf Balance gedeckelt) oder ganze
+        // Balance. Muss >= Schwelle sein. Debit passiert atomar im selben
+        // tx → konkurrierende Anfragen werden serialisiert.
+        let amountCents =
+          Number.isFinite(requestedCents) && requestedCents > 0 ? Math.min(requestedCents, balance) : balance;
+        if (amountCents < threshold) {
+          return { error: 'below_min_amount', thresholdCents: threshold, balanceCents: balance };
+        }
         const payoutRef = db.collection('cashback_payouts').doc();
         const ledgerRef = userRef.collection('cashback_ledger').doc();
         const ts = admin.firestore.FieldValue.serverTimestamp();

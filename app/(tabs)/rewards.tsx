@@ -12,6 +12,7 @@ import {
   Pressable,
   ScrollView,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
@@ -44,6 +45,13 @@ import { requestPayout, setSelectedCampaignId, subscribePayout } from '@/lib/ser
 // CASHBACK_ARCHITECTURE.md §3.3 (User-Felder).
 const CASHBACK_FALLBACK_EUR = 0.0;
 const PAYOUT_THRESHOLD = 10.0;
+
+// Auszahl-Betrag Helpers: Cent ↔ de-DE-Euro-String.
+const eurStr = (cents: number) => (cents / 100).toFixed(2).replace('.', ',');
+const parseEurToCents = (s: string): number => {
+  const n = parseFloat(String(s).replace(/[^\d,.]/g, '').replace(',', '.'));
+  return Number.isFinite(n) ? Math.round(n * 100) : NaN;
+};
 
 // The reward catalogue (15+ partner brands) was previously rendered
 // inline as a 2-column grid here. Per-product UX moved to a single
@@ -382,6 +390,7 @@ function RedeemTab() {
   const [campaignPickerOpen, setCampaignPickerOpen] = useState(false);
   const [payoutOpen, setPayoutOpen] = useState(false);
   const [payoutBusy, setPayoutBusy] = useState(false);
+  const [payoutAmountText, setPayoutAmountText] = useState('');
   const earnActions = React.useMemo(
     () => buildEarnActions(weeklyReceiptCount, campaignsEnabled, receiptCampaigns.length),
     [weeklyReceiptCount, campaignsEnabled, receiptCampaigns.length],
@@ -400,6 +409,14 @@ function RedeemTab() {
   const gapEur = (payoutThreshold - cashbackEur)
     .toFixed(2)
     .replace('.', ',');
+
+  // Auszahl-Betrag: frei eingebbar, geclampt auf [Schwelle, Guthaben].
+  const balanceCents = cashback.uid ? cashback.balanceCents : 0;
+  const thresholdCents = Math.round(payoutThreshold * 100);
+  const clampPayout = (c: number) =>
+    Math.max(thresholdCents, Math.min(balanceCents, Math.round(c || 0)));
+  const payoutCents = clampPayout(parseEurToCents(payoutAmountText));
+  const stepPayout = (delta: number) => setPayoutAmountText(eurStr(clampPayout(payoutCents + delta)));
 
   // Bon-Scan starten — merkt sich die gewählte Aktion (oder null =
   // nur Ausgabenübersicht) und routet durch den Consent-Gate. Hat der
@@ -451,9 +468,10 @@ function RedeemTab() {
 
   const handlePayout = useCallback(async () => {
     if (payoutBusy) return;
+    const cents = Math.max(thresholdCents, Math.min(balanceCents, parseEurToCents(payoutAmountText) || 0));
     setPayoutBusy(true);
     try {
-      const r = await requestPayout();
+      const r = await requestPayout(cents);
       const payoutId = r.payoutId;
       if (!payoutId) throw new Error('no_payout_id');
 
@@ -496,7 +514,7 @@ function RedeemTab() {
           : 'Auszahlung konnte nicht angefragt werden. Bitte versuch es später nochmal.';
       showInfoToast(msg, 'error', scheme);
     }
-  }, [payoutBusy, scheme, cleanupPayoutWait]);
+  }, [payoutBusy, scheme, cleanupPayoutWait, payoutAmountText, balanceCents, thresholdCents]);
 
   return (
     <>
@@ -806,6 +824,7 @@ function RedeemTab() {
           accessibilityLabel="Cashback einlösen"
           onPress={() => {
             if (canRedeem) {
+              setPayoutAmountText(eurStr(balanceCents));
               setPayoutOpen(true);
             } else {
               showInfoToast(
@@ -1012,9 +1031,83 @@ function RedeemTab() {
             >
               <MaterialCommunityIcons name="gift-outline" size={28} color={theme.primary ?? '#0d8575'} />
             </View>
-            <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 28, letterSpacing: -0.6, color: theme.text }}>
-              {cashbackEur.toFixed(2).replace('.', ',')} €
-            </Text>
+            {/* Betrag wählen — − [Eingabe] + , Max, Hinweis */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <Pressable
+                onPress={() => stepPayout(-100)}
+                hitSlop={6}
+                style={({ pressed }) => ({
+                  width: 40,
+                  height: 40,
+                  borderRadius: 20,
+                  backgroundColor: theme.surfaceAlt ?? theme.surface,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <MaterialCommunityIcons name="minus" size={20} color={theme.text} />
+              </Pressable>
+
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center' }}>
+                <TextInput
+                  value={payoutAmountText}
+                  onChangeText={setPayoutAmountText}
+                  onBlur={() => setPayoutAmountText(eurStr(payoutCents))}
+                  keyboardType="decimal-pad"
+                  selectTextOnFocus
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold as any,
+                    fontSize: 30,
+                    letterSpacing: -0.6,
+                    color: theme.text,
+                    textAlign: 'right',
+                    minWidth: 84,
+                    padding: 0,
+                  }}
+                />
+                <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 22, color: theme.text, marginLeft: 4 }}>
+                  €
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={() => stepPayout(100)}
+                hitSlop={6}
+                style={({ pressed }) => ({
+                  width: 40,
+                  height: 40,
+                  borderRadius: 20,
+                  backgroundColor: theme.surfaceAlt ?? theme.surface,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <MaterialCommunityIcons name="plus" size={20} color={theme.text} />
+              </Pressable>
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 }}>
+              <Pressable
+                onPress={() => setPayoutAmountText(eurStr(balanceCents))}
+                style={({ pressed }) => ({
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 999,
+                  backgroundColor: (theme.primary ?? '#0d8575') + '18',
+                  opacity: pressed ? 0.8 : 1,
+                })}
+              >
+                <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 12, color: theme.primary ?? '#0d8575' }}>
+                  Max · {eurStr(balanceCents)} €
+                </Text>
+              </Pressable>
+              <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 11, color: theme.textMuted }}>
+                min. {eurStr(thresholdCents)} €
+              </Text>
+            </View>
             <Text
               style={{
                 fontFamily,
@@ -1087,7 +1180,7 @@ function RedeemTab() {
             ) : (
               <>
                 <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 16, color: '#fff', letterSpacing: 0.2 }}>
-                  Jetzt auszahlen
+                  {eurStr(payoutCents)} € auszahlen
                 </Text>
                 <MaterialCommunityIcons name="arrow-right" size={18} color="#fff" />
               </>
