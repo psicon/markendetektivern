@@ -600,51 +600,6 @@ function RedeemTab() {
 
       </View>
 
-      {/* ── Aktive Aktionen — echte Liste (mehrere gleichzeitig möglich,
-          User wählt beim Einreichen die Aktion) ── */}
-      {campaigns.length > 0 ? (
-        <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
-          <SectionHeader
-            title="Aktive Aktionen"
-            sub={`${campaigns.length} ${campaigns.length === 1 ? 'Aktion' : 'Aktionen'}`}
-          />
-          <View style={{ gap: 10, marginTop: 10 }}>
-            {campaigns.map((c) => (
-              <CampaignListItem key={c.id} campaign={c} onScanBon={onScanBon} scheme={scheme} />
-            ))}
-          </View>
-        </View>
-      ) : campaignsEnabled ? (
-        <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
-          <SectionHeader title="Aktive Aktionen" />
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 10,
-              marginTop: 10,
-              padding: 14,
-              borderRadius: 16,
-              backgroundColor: theme.surface,
-            }}
-          >
-            <MaterialCommunityIcons name="tag-off-outline" size={20} color={theme.textMuted} />
-            <Text
-              style={{
-                flex: 1,
-                fontFamily,
-                fontWeight: fontWeight.medium,
-                fontSize: 12,
-                color: theme.textMuted,
-                lineHeight: 17,
-              }}
-            >
-              Aktuell läuft keine Cashback-Aktion. Bons einreichen geht weiter — Vergütung gibt es mit der nächsten Aktion.
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
       {/* ── Quick actions row ── */}
       <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
         {/* T17.27: Anchor um Section-Title + Card-Row, NICHT
@@ -784,6 +739,52 @@ function RedeemTab() {
           </View>
         </Pressable>
       </View>
+
+      {/* ── Aktive Aktionen — echte Liste (mehrere gleichzeitig möglich,
+          User wählt beim Einreichen die Aktion). Sitzt unter den
+          Aktions-Buttons (Schnellzugriff/Bons/Einlösen). ── */}
+      {campaigns.length > 0 ? (
+        <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
+          <SectionHeader
+            title="Aktive Aktionen"
+            sub={`${campaigns.length} ${campaigns.length === 1 ? 'Aktion' : 'Aktionen'}`}
+          />
+          <View style={{ gap: 10, marginTop: 10 }}>
+            {campaigns.map((c) => (
+              <CampaignListItem key={c.id} campaign={c} onScanBon={onScanBon} scheme={scheme} />
+            ))}
+          </View>
+        </View>
+      ) : campaignsEnabled ? (
+        <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
+          <SectionHeader title="Aktive Aktionen" />
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              marginTop: 10,
+              padding: 14,
+              borderRadius: 16,
+              backgroundColor: theme.surface,
+            }}
+          >
+            <MaterialCommunityIcons name="tag-off-outline" size={20} color={theme.textMuted} />
+            <Text
+              style={{
+                flex: 1,
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 12,
+                color: theme.textMuted,
+                lineHeight: 17,
+              }}
+            >
+              Aktuell läuft keine Cashback-Aktion. Bons einreichen geht weiter — Vergütung gibt es mit der nächsten Aktion.
+            </Text>
+          </View>
+        </View>
+      ) : null}
 
       {/* Aktions-Auswahl beim Bon-Scan (nur wenn >1 Kassenbon-Aktion läuft) */}
       <FilterSheet
