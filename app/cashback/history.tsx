@@ -467,7 +467,7 @@ export default function CashbackHistoryScreen() {
         gap: 8,
       }}
     >
-      <MaterialCommunityIcons name="receipt-text-outline" size={48} color={theme.textMuted ?? theme.textSub} />
+      <MaterialCommunityIcons name="script-text-outline" size={48} color={theme.textMuted ?? theme.textSub} />
       <Text
         style={{
           color: theme.text,
@@ -518,10 +518,12 @@ export default function CashbackHistoryScreen() {
         title="Bons-Verlauf"
         onBack={() => router.back()}
         right={
-          entries && entries.length > 0 ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {/* Ausgabenstatistik */}
             <Pressable
-              onPress={() => setShowFilter(true)}
+              onPress={() => router.push('/cashback/spending')}
               hitSlop={6}
+              accessibilityLabel="Ausgaben-Statistik"
               style={({ pressed }) => ({
                 width: 36,
                 height: 36,
@@ -532,37 +534,54 @@ export default function CashbackHistoryScreen() {
                 opacity: pressed ? 0.7 : 1,
               })}
             >
-              <MaterialCommunityIcons name="tune-vertical" size={18} color={theme.textMuted} />
-              {activeFilterCount > 0 ? (
-                <View
-                  style={{
-                    position: 'absolute',
-                    top: -2,
-                    right: -2,
-                    minWidth: 16,
-                    height: 16,
-                    borderRadius: 8,
-                    paddingHorizontal: 4,
-                    backgroundColor: primary,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Text
+              <MaterialCommunityIcons name="chart-box-outline" size={18} color={theme.textMuted} />
+            </Pressable>
+            {entries && entries.length > 0 ? (
+              <Pressable
+                onPress={() => setShowFilter(true)}
+                hitSlop={6}
+                style={({ pressed }) => ({
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  backgroundColor: theme.surfaceAlt ?? theme.surface,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: pressed ? 0.7 : 1,
+                })}
+              >
+                <MaterialCommunityIcons name="tune-vertical" size={18} color={theme.textMuted} />
+                {activeFilterCount > 0 ? (
+                  <View
                     style={{
-                      fontFamily: fontFamilyVariants.heading,
-                      fontWeight: fontWeight.extraBold as any,
-                      fontSize: 10,
-                      color: '#fff',
-                      lineHeight: 14,
+                      position: 'absolute',
+                      top: -2,
+                      right: -2,
+                      minWidth: 16,
+                      height: 16,
+                      borderRadius: 8,
+                      paddingHorizontal: 4,
+                      backgroundColor: primary,
+                      alignItems: 'center',
+                      justifyContent: 'center',
                     }}
                   >
-                    {activeFilterCount}
-                  </Text>
-                </View>
-              ) : null}
-            </Pressable>
-          ) : null
+                    <Text
+                      style={{
+                        fontFamily: fontFamilyVariants.heading,
+                        fontWeight: fontWeight.extraBold as any,
+                        fontSize: 10,
+                        color: '#fff',
+                        lineHeight: 14,
+                      }}
+                    >
+                      {activeFilterCount}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            ) : null}
+          </View>
         }
       />
       {entries === null ? (

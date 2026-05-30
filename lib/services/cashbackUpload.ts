@@ -15,6 +15,7 @@ import {
   collection,
   doc,
   getCountFromServer,
+  getDocs,
   limit as fsLimit,
   onSnapshot,
   orderBy,
@@ -507,6 +508,23 @@ export async function getCashbackCount(): Promise<number> {
   } catch (e) {
     console.warn('⚠️ getCashbackCount error:', (e as any)?.message);
     return 0;
+  }
+}
+
+/**
+ * Einmaliger Voll-Fetch aller Bon-Status-Docs des Users für die
+ * Ausgabenstatistik. Kein Realtime — die Statistik ist eine Momentaufnahme.
+ * Aggregation (Händler/Monat/Summe) passiert client-seitig im Screen.
+ */
+export async function fetchAllCashbackEntries(): Promise<CashbackStatusEntry[]> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return [];
+  try {
+    const qs = await getDocs(collection(db, `users/${uid}/cashback_status`));
+    return qs.docs.map((d: any) => ({ id: d.id, ...(d.data() as any) }));
+  } catch (e) {
+    console.warn('⚠️ fetchAllCashbackEntries error:', (e as any)?.message);
+    return [];
   }
 }
 
