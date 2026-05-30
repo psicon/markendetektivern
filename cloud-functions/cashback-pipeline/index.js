@@ -1531,7 +1531,11 @@ exports.processPayout = onDocumentCreated(
             {
               value: { denomination: Number((amountCents / 100).toFixed(2)), currency_code: 'EUR' },
               campaign_id: TREMENDOUS_CAMPAIGN_ID,
-              delivery: { method: 'EMAIL' },
+              // LINK statt EMAIL: Tremendous liefert den Redemption-Link in
+              // der Antwort (delivery.link) → App öffnet ihn direkt in-app +
+              // persistiert ihn (Statusseite „Meine Auszahlungen"). EMAIL
+              // gäbe keinen API-Link zurück.
+              delivery: { method: 'LINK' },
               recipient: { name, email },
             },
           ],

@@ -752,6 +752,49 @@ function RedeemTab() {
         </Pressable>
       </View>
 
+      {/* ── Auszahlungen row ── */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Meine Auszahlungen öffnen"
+          onPress={() => router.push('/cashback/payouts')}
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: theme.surface,
+            borderRadius: 14,
+            borderWidth: 1,
+            borderColor: theme.border,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            gap: 12,
+            opacity: pressed ? 0.9 : 1,
+          })}
+        >
+          <View
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 19,
+              backgroundColor: (theme.primary ?? '#0d8575') + '18',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <MaterialCommunityIcons name="cash-multiple" size={20} color={theme.primary ?? '#0d8575'} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: theme.text }}>
+              Meine Auszahlungen
+            </Text>
+            <Text style={{ fontFamily, fontSize: 12, color: theme.textSub, marginTop: 2 }} numberOfLines={1}>
+              Status & Auszahlungsseite erneut öffnen
+            </Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textMuted} />
+        </Pressable>
+      </View>
+
       {/* ── Einlösen — ein Button, kein eigener Screen. Primary-getönt,
           gleiche Zeilen-Form wie „Meine Bons" darüber → die beiden
           Buttons sitzen dicht gruppiert. Partner-Auszahlung folgt. */}
@@ -987,48 +1030,39 @@ function RedeemTab() {
               Die Auszahlungsseite öffnet sich gleich direkt hier. Dort wählst du die Auszahlungsart (Gutschein, PayPal, Überweisung u. a.).
             </Text>
 
-            {/* Ziel-E-Mail */}
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 8,
-                marginTop: 14,
-                paddingHorizontal: 12,
-                paddingVertical: 10,
-                borderRadius: 12,
-                backgroundColor: theme.surfaceAlt ?? theme.surface,
-                alignSelf: 'stretch',
-              }}
-            >
-              <MaterialCommunityIcons name="email-outline" size={16} color={theme.textMuted} />
-              <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 12, color: theme.textMuted }}>
-                Auch per E-Mail an:
-              </Text>
-              <Text numberOfLines={1} style={{ flex: 1, fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.text }}>
-                {payoutEmail ?? '— keine E-Mail hinterlegt —'}
-              </Text>
-            </View>
-
-            {/* Warnhinweis */}
+            {/* Hinweis: Link bleibt erreichbar / oder fehlende E-Mail */}
             <View
               style={{
                 flexDirection: 'row',
                 alignItems: 'flex-start',
                 gap: 8,
-                marginTop: 8,
+                marginTop: 14,
                 paddingHorizontal: 12,
                 paddingVertical: 10,
                 borderRadius: 12,
-                backgroundColor: '#f59e0b1c',
+                backgroundColor: payoutEmail ? theme.surfaceAlt ?? theme.surface : '#f59e0b1c',
                 alignSelf: 'stretch',
               }}
             >
-              <MaterialCommunityIcons name="alert-outline" size={16} color="#b8860b" style={{ marginTop: 1 }} />
-              <Text style={{ flex: 1, fontFamily, fontWeight: fontWeight.bold as any, fontSize: 12, color: '#8a6d00', lineHeight: 17 }}>
+              <MaterialCommunityIcons
+                name={payoutEmail ? 'information-outline' : 'alert-outline'}
+                size={16}
+                color={payoutEmail ? theme.textMuted : '#b8860b'}
+                style={{ marginTop: 1 }}
+              />
+              <Text
+                style={{
+                  flex: 1,
+                  fontFamily,
+                  fontWeight: payoutEmail ? fontWeight.medium : (fontWeight.bold as any),
+                  fontSize: 12,
+                  color: payoutEmail ? theme.textMuted : '#8a6d00',
+                  lineHeight: 17,
+                }}
+              >
                 {payoutEmail
-                  ? 'Zusätzlich kommt eine E-Mail an diese Adresse. Stelle sicher, dass du Zugriff auf dieses Postfach hast — sonst ist dein Cashback weg.'
-                  : 'Du hast keine E-Mail hinterlegt. Füge zuerst in deinem Profil eine E-Mail hinzu — sonst kann der Reward nicht zugestellt werden.'}
+                  ? 'Den Link findest du jederzeit wieder unter „Meine Auszahlungen" — auch wenn du die Seite zu früh schließt.'
+                  : 'Du hast keine E-Mail hinterlegt. Füge zuerst in deinem Profil eine E-Mail hinzu, dann kannst du auszahlen.'}
               </Text>
             </View>
           </View>

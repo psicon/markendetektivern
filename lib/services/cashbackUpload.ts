@@ -22,6 +22,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  where,
   type Unsubscribe,
 } from '@react-native-firebase/firestore';
 // L Migration: putFile statt uploadBytesResumable. RNFirebase Storage
@@ -458,7 +459,35 @@ export interface PayoutDoc {
   redemptionLink?: string | null;
   tremendousOrderId?: string | null;
   recipientEmail?: string | null;
+  // Redeem-Status (sobald von Tremendous gesynct):
+  redeemedForm?: string | null; // z.B. 'PayPal', 'Amazon.de'
+  redeemedAt?: any;
   error?: string | null;
+  createdAt?: any;
+}
+
+/**
+ * Live-Liste aller Auszahlungen des Users (für die Status-Seite). Sortiert
+ * client-seitig nach createdAt desc (kein Composite-Index nötig).
+ */
+export function subscribeUserPayouts(onChange: (rows: PayoutDoc[]) => void): Unsubscribe {
+  const uid = auth.currentUser?.uid;
+  if (!uid) {
+    onChange([]);
+    return () => {};
+  }
+  return onSnapshot(
+    query(collection(db, 'cashback_payouts'), where('userId', '==', uid)),
+    (qs: any) => {
+      const rows: PayoutDoc[] = qs.docs.map((d: any) => ({ id: d.id, ...(d.data() as any) }));
+      rows.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+      onChange(rows);
+    },
+    (e) => {
+      console.warn('⚠️ subscribeUserPayouts error:', (e as any)?.message);
+      onChange([]);
+    },
+  );
 }
 
 /**
