@@ -47,9 +47,13 @@ const { logger } = require('firebase-functions');
 const { defineSecret } = require('firebase-functions/params');
 const { onRequest } = require('firebase-functions/v2/https');
 const { onMessagePublished } = require('firebase-functions/v2/pubsub');
+const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { PubSub } = require('@google-cloud/pubsub');
 
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
+// Tremendous-API-Key (Sandbox ODER Production — je nach env TREMENDOUS_ENV).
+// Secret setzen: firebase functions:secrets:set TREMENDOUS_API_KEY
+const TREMENDOUS_API_KEY = defineSecret('TREMENDOUS_API_KEY');
 
 const { extractReceipt, reconcile, countEligibleItems, tierFor, DEFAULT_MODEL } = require('./lib/ocr');
 const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
@@ -1416,6 +1420,152 @@ exports.requestPayout = onRequest(
     } catch (e) {
       logger.error('requestPayout-failed', { uid, err: e.message });
       res.status(500).json({ code: 'internal' });
+    }
+  },
+);
+
+// ─── processPayout (Tremendous) ─────────────────────────────────────
+//
+// Firestore-Trigger auf cashback_payouts/{id}. Erstellt für jede
+// 'requested'-Anfrage eine Tremendous-ORDER mit delivery=EMAIL +
+// campaign_id → Tremendous mailt dem User die fertige Redeem-Seite
+// (User wählt DORT die Auszahlungsart, wir bauen keine UI dafür).
+//
+// Idempotent: external_id = payoutId → Tremendous dedupt; zusätzlich
+// Status-Guard (nur 'requested' wird verarbeitet). Bei Fehler:
+// Guthaben transaktional zurückbuchen (refund) + status 'failed'.
+//
+// env: TREMENDOUS_ENV=production → Live-API; sonst Sandbox (testflight).
+//      TREMENDOUS_CAMPAIGN_ID überschreibt die Default-Campaign.
+const TREMENDOUS_BASE =
+  process.env.TREMENDOUS_ENV === 'production'
+    ? 'https://api.tremendous.com/api/v2'
+    : 'https://testflight.tremendous.com/api/v2';
+const TREMENDOUS_CAMPAIGN_ID = process.env.TREMENDOUS_CAMPAIGN_ID || 'FPJPQK8WTF8O';
+
+/** Fehlgeschlagene Auszahlung → Guthaben transaktional zurückbuchen. */
+async function refundFailedPayout(uid, payoutId, amountCents) {
+  if (!uid || !amountCents) return;
+  const userRef = db.doc(`users/${uid}`);
+  await db.runTransaction(async (tx) => {
+    // Idempotenz: nur zurückbuchen, wenn für diese payoutId noch kein
+    // Refund existiert.
+    const existing = await tx.get(
+      userRef.collection('cashback_ledger').where('payoutId', '==', payoutId).where('type', '==', 'admin_adjust'),
+    );
+    if (!existing.empty) return;
+    const userSnap = await tx.get(userRef);
+    const balance = userSnap.exists ? userSnap.data().cashback_balance_cents || 0 : 0;
+    tx.set(userRef.collection('cashback_ledger').doc(), {
+      type: 'admin_adjust',
+      cents: amountCents,
+      payoutId,
+      balanceAfterCents: balance + amountCents,
+      reason: 'payout_failed_refund',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    tx.set(userRef, { cashback_balance_cents: balance + amountCents }, { merge: true });
+  });
+}
+
+exports.processPayout = onDocumentCreated(
+  {
+    document: 'cashback_payouts/{payoutId}',
+    region: REGION,
+    timeoutSeconds: 30,
+    secrets: [TREMENDOUS_API_KEY],
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const payout = snap.data() || {};
+    if (payout.status !== 'requested') return; // nur frische Anfragen
+    const payoutId = event.params.payoutId;
+    const uid = payout.userId;
+    const amountCents = Number(payout.amountCents) || 0;
+
+    const apiKey = TREMENDOUS_API_KEY.value();
+    if (!apiKey) {
+      logger.error('payout-no-api-key', { payoutId });
+      await snap.ref.update({ status: 'failed', error: 'no_api_key', updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      return;
+    }
+
+    // Empfänger-E-Mail aus Firebase Auth (für EMAIL-Delivery zwingend).
+    let email = null;
+    let name = 'MarkenDetektive';
+    try {
+      const u = await admin.auth().getUser(uid);
+      email = u.email || null;
+      name = u.displayName || name;
+    } catch (e) {
+      logger.warn('payout-auth-lookup-failed', { payoutId, err: e.message });
+    }
+    if (!email) {
+      await refundFailedPayout(uid, payoutId, amountCents);
+      await snap.ref.update({ status: 'failed', error: 'no_email', updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      return;
+    }
+
+    try {
+      // Funding-Source dynamisch holen (Sandbox hat eine Default-Balance).
+      const fsRes = await fetch(`${TREMENDOUS_BASE}/funding_sources`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      const fsJson = await fsRes.json();
+      const sources = fsJson?.funding_sources || [];
+      const fundingSourceId = (sources.find((f) => f.method === 'balance') || sources[0])?.id;
+      if (!fundingSourceId) {
+        await refundFailedPayout(uid, payoutId, amountCents);
+        await snap.ref.update({ status: 'failed', error: 'no_funding_source', updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+        return;
+      }
+
+      const orderRes = await fetch(`${TREMENDOUS_BASE}/orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          external_id: payoutId, // Idempotenz gegen Doppel-Order
+          payment: { funding_source_id: fundingSourceId },
+          rewards: [
+            {
+              value: { denomination: Number((amountCents / 100).toFixed(2)), currency_code: 'EUR' },
+              campaign_id: TREMENDOUS_CAMPAIGN_ID,
+              delivery: { method: 'EMAIL' },
+              recipient: { name, email },
+            },
+          ],
+        }),
+      });
+      const orderJson = await orderRes.json();
+      if (!orderRes.ok) {
+        logger.error('tremendous-order-failed', { payoutId, status: orderRes.status, body: orderJson });
+        await refundFailedPayout(uid, payoutId, amountCents);
+        await snap.ref.update({
+          status: 'failed',
+          error: orderJson?.errors?.message || `tremendous_http_${orderRes.status}`,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+
+      const orderId = orderJson?.order?.id || null;
+      const rewardId = orderJson?.order?.rewards?.[0]?.id || null;
+      await snap.ref.update({
+        status: 'sent',
+        tremendousOrderId: orderId,
+        tremendousRewardId: rewardId,
+        recipientEmail: email,
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      logger.info('payout-sent', { payoutId, orderId, env: TREMENDOUS_BASE });
+    } catch (e) {
+      logger.error('processPayout-failed', { payoutId, err: e.message });
+      await refundFailedPayout(uid, payoutId, amountCents);
+      await snap.ref
+        .update({ status: 'failed', error: e.message, updatedAt: admin.firestore.FieldValue.serverTimestamp() })
+        .catch(() => {});
     }
   },
 );
