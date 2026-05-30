@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { LinearTransition } from 'react-native-reanimated';
 
 import {
   REWARDS_ANCHOR_EARN,
@@ -31,6 +32,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { getActiveCashbackCampaigns, getCashbackConfig, type ActiveCampaign } from '@/lib/services/cashbackService';
 import { useWeeklyReceiptCount } from '@/lib/hooks/useWeeklyReceiptCount';
+import { showInfoToast } from '@/lib/services/ui/toast';
 
 // ─── Cashback fallback ─────────────────────────────────────────────────
 // Wenn kein User eingeloggt ist (oder das Cashback-Backend offline)
@@ -306,6 +308,7 @@ export default function RewardsScreen() {
 
 function RedeemTab() {
   const { theme } = useTokens();
+  const scheme = useColorScheme() ?? 'light';
   // Live cashback state from Firestore. Falls back to 0,00 € when
   // the user isn't signed in or the backend hasn't seeded the field
   // yet (Phase 1 deploys the fields lazy via the Cloud Function).
@@ -559,7 +562,7 @@ function RedeemTab() {
           />
           <View style={{ gap: 10, marginTop: 10 }}>
             {campaigns.map((c) => (
-              <CampaignListItem key={c.id} campaign={c} />
+              <CampaignListItem key={c.id} campaign={c} onScanBon={onScanBon} scheme={scheme} />
             ))}
           </View>
         </View>
@@ -575,8 +578,6 @@ function RedeemTab() {
               padding: 14,
               borderRadius: 16,
               backgroundColor: theme.surface,
-              borderWidth: 1,
-              borderColor: theme.border,
             }}
           >
             <MaterialCommunityIcons name="tag-off-outline" size={20} color={theme.textMuted} />
@@ -627,7 +628,7 @@ function RedeemTab() {
       </View>
 
       {/* ── Bons-Verlauf row ── */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
+      <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Bons-Verlauf öffnen"
@@ -692,25 +693,30 @@ function RedeemTab() {
         </Pressable>
       </View>
 
-      {/* ── Einlösen — kompakter Einstieg, Details auf eigener Seite
-          (/cashback/redeem). Hält den Tab schlank; die Partner-Auswahl
-          (Gutscheine/PayPal/Visa/Spende) + Konto-Hero leben drüben.
-          Primary-getönt, damit's als Haupt-Aktion klar raussticht. */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 8 }}>
+      {/* ── Einlösen — ein Button, kein eigener Screen. Primary-getönt,
+          gleiche Zeilen-Form wie „Meine Bons" darüber → die beiden
+          Buttons sitzen dicht gruppiert. Partner-Auszahlung folgt. */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 8 }}>
         <Pressable
           ref={redeemAnchor.ref}
           onLayout={redeemAnchor.onLayout}
           accessibilityRole="button"
           accessibilityLabel="Cashback einlösen"
-          onPress={() => router.push('/cashback/redeem')}
+          onPress={() =>
+            showInfoToast(
+              canRedeem
+                ? 'Auszahlung wird bald über unseren Partner verfügbar sein.'
+                : `Noch ${gapEur} € bis zur ${payoutThreshold.toFixed(2).replace('.', ',')} €-Schwelle.`,
+              'info',
+              scheme,
+            )
+          }
           style={({ pressed }) => ({
             flexDirection: 'row',
             alignItems: 'center',
             gap: 12,
             backgroundColor: theme.primaryContainer ?? theme.surface,
             borderRadius: 14,
-            borderWidth: 1,
-            borderColor: theme.primary ?? theme.border,
             paddingHorizontal: 14,
             paddingVertical: 12,
             opacity: pressed ? 0.9 : 1,
@@ -741,7 +747,6 @@ function RedeemTab() {
                 : `Noch ${gapEur} € bis zur ${payoutThreshold.toFixed(2).replace('.', ',')} €-Schwelle`}
             </Text>
           </View>
-          <MaterialCommunityIcons name="chevron-right" size={20} color={theme.primary ?? theme.textMuted} />
         </Pressable>
       </View>
     </>
@@ -749,11 +754,41 @@ function RedeemTab() {
 }
 
 // ─── Aktive-Aktion Listen-Item ──────────────────────────────────────────
-// Kompakte Zeilen-Card für die „Aktive Aktionen"-Liste: Icon + Titel +
-// Sub (Vergütung/Mindestartikel falls konfiguriert) + Restlaufzeit-Pill +
-// dünner Budget-Balken. Mehrere stapeln sich vertikal als echte Liste.
-function CampaignListItem({ campaign }: { campaign: ActiveCampaign }) {
+// Ausklappbare Card für die „Aktive Aktionen"-Liste. Eingeklappt:
+// typ-Icon + Name (umbricht, wird NICHT abgeschnitten) + Sub-Beschreibung
+// + Restlaufzeit-Pill + Verfügbarkeits-Balken. Ausgeklappt zusätzlich:
+// volle Beschreibung, verfügbare Märkte + Aktions-Button (Kassenbon /
+// Produktbilder / Umfrage — je nach `campaign.kind`). Kein grauer Rand.
+const AnimatedCampaignCard = Animated.createAnimatedComponent(Pressable);
+
+const CAMPAIGN_KINDS: Record<
+  NonNullable<ActiveCampaign['kind']>,
+  { icon: string; accent: string; cta: string }
+> = {
+  receipt: { icon: 'receipt-text-outline', accent: '#10a18a', cta: 'Kassenbon scannen' },
+  product_photos: { icon: 'camera-outline', accent: '#2563eb', cta: 'Produktbilder einreichen' },
+  survey: { icon: 'chart-bar', accent: '#7c3aed', cta: 'Umfrage starten' },
+};
+
+function capitalizeMerchant(slug: string): string {
+  return slug.charAt(0).toUpperCase() + slug.slice(1);
+}
+
+function CampaignListItem({
+  campaign,
+  onScanBon,
+  scheme,
+}: {
+  campaign: ActiveCampaign;
+  onScanBon: () => void;
+  scheme: 'light' | 'dark';
+}) {
   const { theme } = useTokens();
+  const [expanded, setExpanded] = useState(false);
+
+  const kind = campaign.kind ?? 'receipt';
+  const meta = CAMPAIGN_KINDS[kind];
+
   const daysLeft = Math.max(0, Math.ceil((campaign.endMs - Date.now()) / 86_400_000));
   const pct =
     campaign.budgetTotalCents > 0
@@ -761,31 +796,38 @@ function CampaignListItem({ campaign }: { campaign: ActiveCampaign }) {
       : 0;
   const budgetColor = pct > 50 ? '#10a18a' : pct > 15 ? '#f59e0b' : '#ef4444';
 
-  // Sub-Zeile aus den (optionalen) Aktion-Feldern ableiten.
-  const subParts: string[] = [];
-  if (typeof campaign.cashbackPerBonCents === 'number' && campaign.cashbackPerBonCents > 0) {
-    subParts.push(`${(campaign.cashbackPerBonCents / 100).toFixed(2).replace('.', ',')} € pro Bon`);
-  }
-  if (typeof campaign.minItems === 'number' && campaign.minItems > 0) {
-    subParts.push(`ab ${campaign.minItems} Artikeln`);
-  }
-  const sub = subParts.length > 0 ? subParts.join(' · ') : 'Cashback auf deinen Einkauf';
+  const description = (campaign.description || '').trim() || 'Cashback auf deinen Einkauf';
+  const markets =
+    campaign.eligibleMerchants && campaign.eligibleMerchants.length > 0
+      ? campaign.eligibleMerchants.map(capitalizeMerchant)
+      : null; // null = alle Märkte
 
   const fmtEur = (cents: number) =>
     (cents / 100).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
+  const onAction = () => {
+    if (kind === 'receipt') {
+      onScanBon();
+    } else if (kind === 'product_photos') {
+      showInfoToast('Produktbilder-Einreichung ist bald verfügbar.', 'info', scheme);
+    } else {
+      showInfoToast('Aktuell ist keine Umfrage verfügbar.', 'info', scheme);
+    }
+  };
+
   return (
-    <View
+    <AnimatedCampaignCard
+      layout={LinearTransition.duration(220)}
+      onPress={() => setExpanded((v) => !v)}
       style={{
         padding: 14,
         borderRadius: 16,
         backgroundColor: theme.surface,
-        borderWidth: 1,
-        borderColor: theme.border,
+        overflow: 'hidden',
       }}
     >
-      {/* Kopf: Icon | Titel + Sub | Restlaufzeit-Pill */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      {/* Kopf: typ-Icon | Name (umbricht) + Beschreibung | Restlaufzeit + Chevron */}
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
         <View
           style={{
             width: 38,
@@ -793,14 +835,13 @@ function CampaignListItem({ campaign }: { campaign: ActiveCampaign }) {
             borderRadius: 19,
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: '#10a18a18',
+            backgroundColor: meta.accent + '1c',
           }}
         >
-          <MaterialCommunityIcons name="tag-multiple" size={19} color="#10a18a" />
+          <MaterialCommunityIcons name={meta.icon as any} size={19} color={meta.accent} />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text
-            numberOfLines={1}
             style={{
               fontFamily,
               fontWeight: fontWeight.extraBold,
@@ -812,39 +853,45 @@ function CampaignListItem({ campaign }: { campaign: ActiveCampaign }) {
             {campaign.title || 'Cashback-Aktion'}
           </Text>
           <Text
-            numberOfLines={1}
+            numberOfLines={expanded ? undefined : 1}
             style={{
               fontFamily,
               fontWeight: fontWeight.medium,
               fontSize: 11,
               color: theme.textMuted,
-              marginTop: 1,
+              marginTop: 2,
+              lineHeight: 15,
             }}
           >
-            {sub}
+            {description}
           </Text>
         </View>
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 4,
-            paddingHorizontal: 9,
-            paddingVertical: 5,
-            borderRadius: 999,
-            backgroundColor: theme.surfaceAlt ?? theme.bg,
-            borderWidth: 1,
-            borderColor: theme.border,
-          }}
-        >
-          <MaterialCommunityIcons name="clock-outline" size={12} color={theme.textMuted} />
-          <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, color: theme.text }}>
-            {daysLeft === 0 ? 'Letzter Tag' : `noch ${daysLeft} ${daysLeft === 1 ? 'Tag' : 'Tage'}`}
-          </Text>
+        <View style={{ alignItems: 'flex-end', gap: 6 }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 4,
+              paddingHorizontal: 9,
+              paddingVertical: 5,
+              borderRadius: 999,
+              backgroundColor: theme.surfaceAlt ?? theme.bg,
+            }}
+          >
+            <MaterialCommunityIcons name="clock-outline" size={12} color={theme.textMuted} />
+            <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, color: theme.text }}>
+              {daysLeft === 0 ? 'Letzter Tag' : `noch ${daysLeft} ${daysLeft === 1 ? 'Tag' : 'Tage'}`}
+            </Text>
+          </View>
+          <MaterialCommunityIcons
+            name={expanded ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color={theme.textMuted}
+          />
         </View>
       </View>
 
-      {/* Budget-Balken: Label-Zeile + dünner Track + Fill */}
+      {/* Verfügbarkeits-Balken (immer sichtbar) */}
       <View style={{ marginTop: 12 }}>
         <View
           style={{
@@ -865,6 +912,104 @@ function CampaignListItem({ campaign }: { campaign: ActiveCampaign }) {
           <View style={{ width: `${pct}%`, height: '100%', borderRadius: 3, backgroundColor: budgetColor }} />
         </View>
       </View>
+
+      {/* Ausgeklappt: Märkte + Details + Aktions-Button */}
+      {expanded ? (
+        <View style={{ marginTop: 14, gap: 12 }}>
+          {/* Konfigurierte Eckdaten als Chips */}
+          {(typeof campaign.cashbackPerBonCents === 'number' && campaign.cashbackPerBonCents > 0) ||
+          (typeof campaign.minItems === 'number' && campaign.minItems > 0) ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {typeof campaign.cashbackPerBonCents === 'number' && campaign.cashbackPerBonCents > 0 ? (
+                <CampaignChip
+                  theme={theme}
+                  icon="cash"
+                  label={`${(campaign.cashbackPerBonCents / 100).toFixed(2).replace('.', ',')} € pro Bon`}
+                />
+              ) : null}
+              {typeof campaign.minItems === 'number' && campaign.minItems > 0 ? (
+                <CampaignChip theme={theme} icon="basket-outline" label={`ab ${campaign.minItems} Artikeln`} />
+              ) : null}
+            </View>
+          ) : null}
+
+          {/* Verfügbare Märkte */}
+          <View>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold as any,
+                fontSize: 11,
+                color: theme.textMuted,
+                textTransform: 'uppercase',
+                letterSpacing: 0.4,
+                marginBottom: 6,
+              }}
+            >
+              Verfügbare Märkte
+            </Text>
+            {markets ? (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                {markets.map((m) => (
+                  <CampaignChip key={m} theme={theme} icon="storefront-outline" label={m} />
+                ))}
+              </View>
+            ) : (
+              <CampaignChip theme={theme} icon="storefront-outline" label="Alle Märkte" />
+            )}
+          </View>
+
+          {/* Aktions-Button — je nach Aktions-Typ */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={meta.cta}
+            onPress={onAction}
+            style={({ pressed }) => ({
+              height: 46,
+              borderRadius: 12,
+              backgroundColor: meta.accent,
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexDirection: 'row',
+              gap: 8,
+              opacity: pressed ? 0.9 : 1,
+            })}
+          >
+            <MaterialCommunityIcons name={meta.icon as any} size={18} color="#fff" />
+            <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: '#fff', letterSpacing: 0.2 }}>
+              {meta.cta}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </AnimatedCampaignCard>
+  );
+}
+
+// Kleiner getönter Chip für Aktions-Eckdaten + Märkte.
+function CampaignChip({
+  theme,
+  icon,
+  label,
+}: {
+  theme: ReturnType<typeof useTokens>['theme'];
+  icon: string;
+  label: string;
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 9,
+        paddingVertical: 5,
+        borderRadius: 999,
+        backgroundColor: theme.surfaceAlt ?? theme.bg,
+      }}
+    >
+      <MaterialCommunityIcons name={icon as any} size={12} color={theme.textMuted} />
+      <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, color: theme.text }}>{label}</Text>
     </View>
   );
 }

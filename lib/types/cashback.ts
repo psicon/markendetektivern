@@ -61,6 +61,10 @@ export interface CashbackCampaign {
   maxPerUserCents?: number;       // optionaler Override (sonst config.monthlyMaxCents)
   title?: string;
   description?: string;
+  /** Art der Einreich-Aktion → steuert Icon + Button-Ziel auf der Karte.
+   *  'receipt' = Kassenbon scannen (Default), 'product_photos' =
+   *  Produktbilder einreichen, 'survey' = Umfrage. */
+  kind?: 'receipt' | 'product_photos' | 'survey';
   // ── Pro-Aktion konfigurierbar (Override der globalen Config) ──
   /** Cashback (in Cent) pro qualifiziertem Bon dieser Aktion. Wenn
    *  gesetzt, ersetzt es die Tier-Tabelle für diese Aktion (Flat-Rate).
