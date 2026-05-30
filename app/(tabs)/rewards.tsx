@@ -755,7 +755,7 @@ function RedeemTab() {
             ))}
           </View>
         </View>
-      ) : campaignsEnabled ? (
+      ) : (
         <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
           <SectionHeader title="Aktive Aktionen" />
           <View
@@ -780,11 +780,11 @@ function RedeemTab() {
                 lineHeight: 17,
               }}
             >
-              Aktuell läuft keine Cashback-Aktion. Bons einreichen geht weiter — Vergütung gibt es mit der nächsten Aktion.
+              Aktuell ist keine Cashback-Aktion aktiv. Du kannst Bons trotzdem einreichen — sie zählen zu deiner Ausgabenübersicht, aber ohne Vergütung.
             </Text>
           </View>
         </View>
-      ) : null}
+      )}
 
       {/* Aktions-Auswahl beim Bon-Scan (nur wenn >1 Kassenbon-Aktion läuft) */}
       <FilterSheet

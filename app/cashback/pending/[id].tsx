@@ -392,7 +392,7 @@ export default function CashbackPendingScreen() {
     }
     if (state === 'upload_failed') {
       return {
-        icon: <MaterialCommunityIcons name="cloud-alert-outline" size={42} color={warn} />,
+        icon: <MaterialCommunityIcons name="cloud-alert" size={42} color={warn} />,
         bg: warn + '22',
         title: 'Upload fehlgeschlagen',
         body: doc?.uploadError || uploadError || 'Verbindung abgebrochen. Tippe auf „Erneut versuchen", um den Upload neu zu starten.',
@@ -436,7 +436,7 @@ export default function CashbackPendingScreen() {
       const reason = (doc?.rejectReason as string) ?? '';
       const body =
         reason === 'no_active_campaign'
-          ? 'Dieser Bon wurde ohne aktive Aktion eingereicht. Er ist gespeichert und zählt zu deiner Ausgabenübersicht — Vergütung gibt es nur mit einer Aktion.'
+          ? 'Dieser Bon wurde ohne aktive Cashback-Aktion eingereicht. Er ist gespeichert und zählt zu deiner Ausgabenübersicht — Vergütung gibt es nur, wenn eine Aktion läuft. Nachträglich vergütet wird er nicht.'
           : reason === 'below_min_items'
           ? 'Für diese Aktion brauchst du mehr anrechenbare Artikel auf dem Bon. Der Bon ist gespeichert, aber ohne Vergütung.'
           : reason === 'weekly_cap_reached'
