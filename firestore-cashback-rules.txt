@@ -23,6 +23,15 @@ match /cashback_config/{configId} {
   allow write: if false;
 }
 
+// Cashback campaigns — public read (the app shows the running
+// campaign + its remaining time on the Belohnungen screen),
+// admin-only write. Budget is decremented transactionally by the
+// Cloud Function (Admin SDK), never by the client.
+match /cashback_campaigns/{campaignId} {
+  allow read: if true;
+  allow write: if false;
+}
+
 // Receipts — user can read their own, no client writes.
 match /receipts/{receiptId} {
   allow read: if request.auth != null

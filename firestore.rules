@@ -1,0 +1,625 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /hersteller_new/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if false;
+    }
+ 
+    match /{path=**}/journeys/{journeyId} {
+  allow read, list, get: if true;  // ✅ Für Analytics
+}
+
+match /users/{parent}/journeys/{document} {
+  allow create, write: if request.auth != null;
+  allow read, list: if true;  // ✅ Für Analytics
+}
+    match /onboardingspendings/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+    
+        match /reweapify/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if false;
+    }
+    
+       match /onboardingResultsV5/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if false;
+    }
+    
+    match /productRatings/{document} {
+  allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if request.auth != null;
+      allow delete: if request.auth != null;
+    }
+
+    match /onboardingwherefrom/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+    
+      match /paywallCounter/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if false;
+    }
+
+
+    match /onboardingresults/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+
+    match /appSettings/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+
+    match /userFeedbacks/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+
+    match /vetnummernat/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+
+    match /abopreise/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+    
+    match /aldiscrapedproducts/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+
+    match /fehler/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+
+    match /neuesGeheimnis/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+
+    match /produktvorschlaege/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+
+    match /vetnummern/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+
+    match /users/{parent}/einkaufswagen/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+    
+    
+    match /users/{parent}/favorites/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if request.auth != null;
+      allow delete: if request.auth != null;
+    }
+    
+  // === EXISTING RULES (behalten) ===
+    match /users/{parent}/journeys/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if request.auth != null;
+      allow delete: if request.auth != null;
+    }
+    
+    // === KRITISCH: collectionGroup RULES HINZUFÜGEN ===
+    // Diese Rules ermöglichen collectionGroup('journeys') Queries
+    match /{path=**}/journeys/{journeyId} {
+      allow read: if true; // Für Analytics-Dashboard
+      allow list: if true; // Für collectionGroup Queries
+    }
+    
+    // === OPTIONAL: Spezifische User-basierte Rules ===
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      
+      match /journeys/{journeyId} {
+        allow create: if request.auth != null;
+        allow read: if true; // Analytics braucht Read-Access
+        allow write: if request.auth != null && request.auth.uid == userId;
+        allow delete: if request.auth != null && request.auth.uid == userId;
+        allow list: if true; // Für Analytics-Queries
+      }
+    }
+
+   
+
+match /users/{parent}/purchases/{document} {
+  allow create: if request.auth != null;
+  allow read: if request.auth != null && request.auth.uid == parent;
+  allow write: if request.auth != null && request.auth.uid == parent;
+  allow delete: if request.auth != null && request.auth.uid == parent;
+}
+
+match /{path=**}/purchases/{document} {
+  allow read: if request.auth != null;
+}
+    
+    match /users/{parent}/scanHistory/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if request.auth != null;
+      allow delete: if request.auth != null;
+    }
+
+    match /{path=**}/scanHistory/{document} {
+      allow read: if true;
+    }
+
+
+    
+    match /users/{parent}/searchHistory/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if request.auth != null;
+      allow delete: if request.auth != null;
+    }
+
+    match /{path=**}/searchHistory/{document} {
+      allow read: if true;
+    }
+
+
+    
+
+    match /discounter/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+
+    match /handelsmarken/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+
+    match /hersteller/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+     match /pennyscrapedproducts/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+     match /pennyscrapedproduct_text/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+ match /lidlscrapedproducts/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+     match /lidlscrapedproduct_text/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+     match /scraped_products/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+    match /hersteller_new_formatch/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+    
+    match /packungstypen/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+    
+
+match /markenProdukte/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+            allow update: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+    match /produkte/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow update: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if request.auth.token.email.matches("firebase@flutterflow.io");
+    }
+
+    match /kategorien/{document} {
+      allow create: if request.auth != null;
+      allow read: if true;
+      allow write: if false;
+      allow delete: if false;
+    }
+
+match /users/{userId} {
+  // Jeder User darf nur SEIN EIGENES Profil lesen und schreiben
+  allow read, write: if request.auth != null && request.auth.uid == userId;
+  
+  // Erstellen erlauben (wichtig für Registrierung)
+  allow create: if request.auth != null && request.auth.uid == userId;
+}
+    
+    
+    
+    // WICHTIG: Anonyme User können ihr eigenes Profil verwalten!
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      match /{subcollection}/{document} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+    
+      
+    // Produkte können alle lesen
+    match /produkte/{productId} {
+      allow read: if true;
+      
+      // Bewertungen von authentifizierten Usern (inkl. anonym)
+      match /ratings/{ratingId} {
+        allow read: if true;
+        allow create: if request.auth != null;
+        allow update, delete: if request.auth != null && 
+          request.auth.uid == resource.data.userID;
+      }
+    }
+    
+    // Gleiche Regeln für Markenprodukte
+    match /markenprodukte/{productId} {
+      allow read: if true;
+      
+      match /ratings/{ratingId} {
+        allow read: if true;
+        allow create: if request.auth != null;
+        allow update, delete: if request.auth != null && 
+          request.auth.uid == resource.data.userID;
+      }
+    }
+    
+
+    
+    // Handelsmarken & Discounter
+    match /handelsmarken/{document} {
+      allow read: if true;
+    }
+    
+    match /discounter/{document} {
+      allow read: if true;
+    }
+    
+    
+    
+  // ============================================
+// GAMIFICATION SECURITY RULES - ZUM HINZUFÜGEN
+// ============================================
+
+// 1. GAMIFICATION CONFIG (Read-Only für alle authentifizierten User)
+// NEUE STRUKTUR OHNE config SUBCOLLECTION!
+match /gamification/{document} {
+  allow read: if request.auth != null;
+  allow write: if false; // Nur über Admin-Console/Cloud Functions
+}
+
+// Levels Subcollection
+match /gamification/levels/items/{levelId} {
+  allow read: if request.auth != null;
+  allow write: if false; // Nur über Admin-Console/Cloud Functions
+}
+
+// 2. ACHIEVEMENTS COLLECTION (Global, Read-Only)
+match /achievements/{achievementId} {
+  allow read: if true; // Jeder kann Achievement-Definitionen sehen
+  allow write: if false; // Nur über Admin-Console
+}
+
+// 3. USER LEDGER (Punkte-Transaktionen)
+// WICHTIG: Idealerweise nur Server-Side schreiben!
+match /users/{userId}/ledger/{transactionId} {
+  // Lesen: Nur eigene Transaktionen
+  allow read: if true;
+  //request.auth != null && request.auth.uid == userId;
+  
+  // Schreiben: Nur wenn authentifiziert und eigener User
+  // ZUSÄTZLICHE VALIDIERUNG für Anti-Abuse
+  allow create: if request.auth != null && 
+    request.auth.uid == userId &&
+    // Transaction muss timestamp haben
+    request.resource.data.keys().hasAll(['timestamp', 'action', 'points']) &&
+    // Timestamp muss aktuell sein (±5 Minuten)
+    request.resource.data.timestamp is timestamp &&
+    math.abs(request.resource.data.timestamp.seconds() - request.time.seconds()) < 300 &&
+    // Points müssen positiv sein
+    request.resource.data.points is number &&
+    request.resource.data.points > 0 &&
+    // Action muss string sein
+    request.resource.data.action is string;
+  
+  // Updates und Deletes verbieten (append-only)
+  allow update: if false;
+  allow delete: if false;
+}
+
+
+match /users/{userId} {
+  // Erlaube User-Erstellung für ALLE authentifizierten User (auch anonyme)
+  allow create: if request.auth != null && request.auth.uid == userId;
+  
+  // Lesen und Updates nur für eigenen User
+  allow read, update: if request.auth != null && request.auth.uid == userId;
+  
+  // Löschungen verbieten
+  allow delete: if false;
+}
+
+// 4. USER ACHIEVEMENTS PROGRESS (Subcollection)
+match /users/{userId}/achievements/{achievementId} {
+  // Lesen: Nur eigene Achievement-Progress
+  allow read: if request.auth != null && request.auth.uid == userId;
+  
+  // Schreiben: Nur Server/Cloud Functions sollte das updaten
+  // Falls Client-Write nötig (nicht empfohlen):
+  allow write: if request.auth != null && 
+    request.auth.uid == userId &&
+    // Nur progress, completed, completedAt, lastUpdated erlaubt
+    request.resource.data.keys().hasAll(['progress', 'completed', 'lastUpdated']) &&
+    // Progress muss >= 0 sein
+    request.resource.data.progress >= 0;
+}
+
+// 5. USER STATS ERWEITERT
+// (Bereits durch bestehende /users/{userId} Regel abgedeckt,
+// aber hier explizit für stats-Felder wenn gewünscht)
+match /users/{userId} {
+  // Stats-Updates mit Validierung
+  allow update: if request.auth != null && 
+    request.auth.uid == userId &&
+    // Verhindere dass User direkt Level manipuliert
+    (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stats.currentLevel']) ||
+     // Oder erlaube nur Erhöhung um 1
+     request.resource.data.stats.currentLevel == resource.data.stats.currentLevel + 1) &&
+    // Points/Savings dürfen nur erhöht werden
+    request.resource.data.stats.pointsTotal >= resource.data.stats.pointsTotal &&
+    request.resource.data.stats.savingsTotal >= resource.data.stats.savingsTotal;
+}
+
+// 6. MISSIONS (Für spätere Erweiterung)
+match /missions/{missionId} {
+  allow read: if request.auth != null;
+  allow write: if false;
+}
+
+match /userfeedback/{document} {
+  allow read: if true;
+  allow write: if true; // Nur über Admin-Console/Cloud Functions
+}
+
+match /users/{userId}/missions/{missionId} {
+  allow read: if request.auth != null && request.auth.uid == userId;
+  allow write: if request.auth != null && request.auth.uid == userId;
+}
+// === MDM CORE COLLECTIONS ===
+match /master_manufacturers/{document} {
+  allow create: if true;
+  allow read: if true;
+  allow write: if true;
+  allow delete: if true;
+}
+
+match /master_brands/{document} {
+  allow create: if true;
+  allow read: if true;
+  allow write: if true;
+  allow delete: if true;
+}
+
+// === ALIAS SYSTEM ===
+match /manufacturer_aliases/{document} {
+  allow create: if true;
+  allow read: if true;
+  allow write: if true;
+  allow delete: if true;
+}
+
+match /brand_aliases/{document} {
+  allow create: if true;
+  allow read: if true;
+  allow write: if true;
+  allow delete: if true;
+}
+
+// === PROCESSING & AUDIT ===
+match /manufacturer_clusters/{document} {
+  allow create: if true;
+  allow read: if true;
+  allow write: if true;
+  allow delete: if true;
+}
+
+match /mdm_analytics/{document} {
+  allow create: if true;
+  allow read: if true;
+  allow write: if true;
+  allow delete: if true;
+}
+
+match /mdm_migration_log/{document} {
+  allow create: if true;
+  allow read: if true;
+  allow write: if true;
+  allow delete: if true;
+}
+
+
+
+ // Analytics Cache - Read für alle authentifizierten, Write nur für Admin
+    match /analytics-cache/{cacheId} {
+   allow read: if true;  // ✅ Für Analytics-Dashboard
+  allow write: if true; // ✅ Später auf Admin einschränken
+
+    }
+    
+    match /custom-regions/{document} {
+  allow create: if true;
+  allow read: if true;
+  allow write: if true;
+  allow delete: if true;
+}
+
+    match /polls/{document} {
+  allow create: if true;
+  allow read: if true;
+  allow write: if true;
+  allow delete: if true;
+}
+
+    match /poll_responses/{document} {
+  allow create: if true;
+  allow read: if true;
+  allow write: if true;
+  allow delete: if true;
+}
+
+match /prlists/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+ // Leaderboard rules
+    match /leaderboards/{userId} {
+      allow read: if true;  // Jeder kann Bestenlisten lesen
+      allow write: if true; // Nur Cloud Functions können schreiben
+    }
+    
+    // Leaderboard metadata
+    match /leaderboard_metadata/{document} {
+      allow read: if true;
+      allow write: if true; // Nur Cloud Functions
+    }
+   
+    // ── Leaderboard Aggregat ─────────────────────────────────────
+// Pre-computed Bestenlisten-Snapshot (16 Bundesländer +
+// Top-50 Städte + Top-50 User). Wird nur von der Cloud
+// Function `aggregateLeaderboard` geschrieben (Admin-SDK
+// umgeht Rules); Client liest readonly.
+match /aggregates/{document} {
+  allow read: if true;
+  allow write: if false;
+}
+
+    // ── Cashback / Kassenbon System ──────────────────────────────
+    // Public-read config + laufende Aktionen (App zeigt Tiers, Cap,
+    // laufende Aktion + Restlaufzeit + Budget). Schreiben NUR via
+    // Cloud Function (Admin SDK umgeht Rules). Geld-Logik ist immer
+    // serverseitig — der Client liest nur.
+    match /cashback_config/{configId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /cashback_campaigns/{campaignId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    // Eigene Bons + Auszahlungen lesbar, keine Client-Writes.
+    match /receipts/{receiptId} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+    match /cashback_payouts/{payoutId} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+    // Merchants — public read (Logo + kanonischer Name), admin-only write.
+    match /merchants/{merchantId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    // Review-Queue + Monats-Verbrauch — nie client-lesbar.
+    match /cashback_review_queue/{queueId} {
+      allow read: if false;
+      allow write: if false;
+    }
+    match /cashback_consumption/{month} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+// LAST PIECE
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

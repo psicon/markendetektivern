@@ -38,9 +38,20 @@ export interface CashbackConfigDoc {
    *  Kampagne (cashback_campaigns). Keine Aktion → Bon wird verarbeitet +
    *  Produkte getrackt, aber 0 Vergütung. Default false = Dauer-Cashback. */
   campaignsEnabled: boolean;
+  /** GLOBALES Wochen-Limit: max. Bons PRO WOCHE die ein User insgesamt
+   *  (über ALLE Aktionen zusammen) für Cashback einreichen darf.
+   *  Hard-Ceiling über allem — jeder vergütete Bon zählt dagegen,
+   *  egal welche Aktion gewählt wurde. 0 = kein globales Limit (Default).
+   *  Die Aktion hat ZUSÄTZLICH ihr eigenes `weeklyBonCap`; es gilt das
+   *  jeweils strengere. Server-enforced (TODO: cashback-pipeline). */
+  weeklyBonCap: number;
 }
 
-/** Eine zeitlich begrenzte Cashback-Aktion mit Gesamt-Budget. */
+/** Eine zeitlich begrenzte Cashback-Aktion mit Gesamt-Budget.
+ *  Es können mehrere gleichzeitig aktiv sein — der User WÄHLT beim
+ *  Einreichen die Aktion. Jeder vergütete Bon zählt sowohl gegen das
+ *  pro-Aktion-`weeklyBonCap` als auch gegen das globale
+ *  `config.weeklyBonCap`. Geld-/Budget-Logik ist immer serverseitig. */
 export interface CashbackCampaign {
   active: boolean;
   startAt: Timestamp;
@@ -50,6 +61,21 @@ export interface CashbackCampaign {
   maxPerUserCents?: number;       // optionaler Override (sonst config.monthlyMaxCents)
   title?: string;
   description?: string;
+  // ── Pro-Aktion konfigurierbar (Override der globalen Config) ──
+  /** Cashback (in Cent) pro qualifiziertem Bon dieser Aktion. Wenn
+   *  gesetzt, ersetzt es die Tier-Tabelle für diese Aktion (Flat-Rate).
+   *  Wenn nicht gesetzt → `tiers` der globalen Config. */
+  cashbackPerBonCents?: number;
+  /** Mindestanzahl anrechenbarer Artikel damit ein Bon dieser Aktion
+   *  vergütet wird. Override von `config.minItemsForPayout`. */
+  minItems?: number;
+  /** Max. Bons PRO WOCHE die ein User in DIESER Aktion einreichen darf.
+   *  Unabhängig vom globalen `config.weeklyBonCap` — es gilt das
+   *  strengere der beiden. 0/undefined = nur das globale Limit greift. */
+  weeklyBonCap?: number;
+  /** Optionaler Override der anrechenbaren Märkte (sonst global /
+   *  discounter.cashbackEligible). Slugs der `discounter`-Collection. */
+  eligibleMerchants?: string[];
 }
 
 export const DEFAULT_CASHBACK_CONFIG: CashbackConfigDoc = {
@@ -70,6 +96,7 @@ export const DEFAULT_CASHBACK_CONFIG: CashbackConfigDoc = {
   payoutThresholdCents: 1000, // 10 €
   monthlyMaxCents: 0, // 0 = kein Limit (opt-in via Config-Doc)
   campaignsEnabled: false, // false = Dauer-Cashback (opt-in via Config-Doc)
+  weeklyBonCap: 0, // 0 = kein globales Wochen-Limit (opt-in via Config-Doc)
 };
 
 // ─── User-side state ────────────────────────────────────────────────

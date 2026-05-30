@@ -351,6 +351,17 @@ function RedeemTab() {
   const campaignDaysLeft = campaign
     ? Math.max(0, Math.ceil((campaign.endMs - Date.now()) / 86_400_000))
     : 0;
+  // Verbleibendes Budget der Aktion in % (0–100).
+  const campaignBudgetPct =
+    campaign && campaign.budgetTotalCents > 0
+      ? Math.max(
+          0,
+          Math.min(100, Math.round((campaign.budgetRemainingCents / campaign.budgetTotalCents) * 100)),
+        )
+      : 0;
+  // Budget-Farbe: grün viel übrig → amber knapp → rot fast leer.
+  const campaignBudgetColor =
+    campaignBudgetPct > 50 ? '#10a18a' : campaignBudgetPct > 15 ? '#f59e0b' : '#ef4444';
   // T17.24: Echter Wochen-Counter aus Firestore — ersetzt die
   // hardcoded fake-Werte.
   const weeklyReceiptCount = useWeeklyReceiptCount();
@@ -557,50 +568,194 @@ function RedeemTab() {
               Monatslimit: max. {(monthlyMaxCents / 100).toFixed(2).replace('.', ',')} € Cashback pro Monat
             </Text>
           ) : null}
-          {/* Laufende Aktion IMMER anzeigen (auch wenn der Enforcement-Modus
-              aus ist — es ist eine echte Aktion). Die "keine Aktion"-Warnung
-              nur im echten Aktions-Modus (campaignsEnabled). */}
-          {campaign ? (
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 5,
-                marginTop: 10,
-              }}
-            >
-              <MaterialCommunityIcons name="clock-outline" size={12} color="#fff" />
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.bold as any,
-                  fontSize: 11,
-                  color: '#fff',
-                  letterSpacing: 0.1,
-                }}
-              >
-                {campaign.title ? `${campaign.title} · ` : 'Aktion '}läuft noch {campaignDaysLeft}{' '}
-                {campaignDaysLeft === 1 ? 'Tag' : 'Tage'}
-              </Text>
-            </View>
-          ) : campaignsEnabled ? (
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.medium,
-                fontSize: 11,
-                color: 'rgba(255,255,255,0.8)',
-                textAlign: 'center',
-                marginTop: 10,
-              }}
-            >
-              Aktuell keine Cashback-Aktion — Bons einreichen geht weiter, Vergütung gibt es mit der nächsten Aktion.
-            </Text>
-          ) : null}
           </View>
         </LinearGradient>
         </View>
+
+        {/* Laufende Aktion — eigenständige Card UNTER dem Hero
+            (nicht im Hero-Card, sonst clippt es an HERO_HEIGHT).
+            Card IMMER zeigen wenn eine Aktion läuft. Die "keine
+            Aktion"-Card nur im echten Aktions-Modus (campaignsEnabled). */}
+        {campaign ? (
+          <View
+            style={{
+              marginTop: 12,
+              padding: 14,
+              borderRadius: 16,
+              backgroundColor: theme.surface,
+              borderWidth: 1,
+              borderColor: theme.border,
+            }}
+          >
+            {/* Kopf: Icon-Kreis | Eyebrow + Titel | Restlaufzeit-Pill */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 20,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: '#10a18a22',
+                }}
+              >
+                <MaterialCommunityIcons name="tag-multiple" size={20} color="#10a18a" />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.bold as any,
+                    fontSize: 10,
+                    letterSpacing: 0.6,
+                    color: '#10a18a',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Aktive Cashback-Aktion
+                </Text>
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 15,
+                    color: theme.text,
+                    letterSpacing: -0.2,
+                    marginTop: 1,
+                  }}
+                >
+                  {campaign.title || 'Cashback-Aktion'}
+                </Text>
+              </View>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingHorizontal: 9,
+                  paddingVertical: 5,
+                  borderRadius: 999,
+                  backgroundColor: theme.surfaceAlt ?? theme.bg,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                }}
+              >
+                <MaterialCommunityIcons name="clock-outline" size={12} color={theme.textMuted} />
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.bold as any,
+                    fontSize: 11,
+                    color: theme.text,
+                  }}
+                >
+                  {campaignDaysLeft === 0
+                    ? 'Letzter Tag'
+                    : `noch ${campaignDaysLeft} ${campaignDaysLeft === 1 ? 'Tag' : 'Tage'}`}
+                </Text>
+              </View>
+            </View>
+
+            {/* Budget-Balken: Label-Zeile + Track + Fill */}
+            <View style={{ marginTop: 14 }}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'baseline',
+                  marginBottom: 6,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.bold as any,
+                    fontSize: 12,
+                    color: theme.textMuted,
+                  }}
+                >
+                  Verfügbares Budget
+                </Text>
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 12,
+                    color: campaignBudgetColor,
+                  }}
+                >
+                  {campaignBudgetPct}% übrig
+                </Text>
+              </View>
+              <View
+                style={{
+                  height: 8,
+                  borderRadius: 4,
+                  backgroundColor: theme.surfaceAlt ?? theme.border,
+                  overflow: 'hidden',
+                }}
+              >
+                <View
+                  style={{
+                    width: `${campaignBudgetPct}%`,
+                    height: '100%',
+                    borderRadius: 4,
+                    backgroundColor: campaignBudgetColor,
+                  }}
+                />
+              </View>
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 11,
+                  color: theme.textMuted,
+                  marginTop: 6,
+                }}
+              >
+                {(campaign.budgetRemainingCents / 100).toLocaleString('de-DE', {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 0,
+                })}{' '}
+                € von{' '}
+                {(campaign.budgetTotalCents / 100).toLocaleString('de-DE', {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 0,
+                })}{' '}
+                € verfügbar
+              </Text>
+            </View>
+          </View>
+        ) : campaignsEnabled ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              marginTop: 12,
+              padding: 14,
+              borderRadius: 16,
+              backgroundColor: theme.surface,
+              borderWidth: 1,
+              borderColor: theme.border,
+            }}
+          >
+            <MaterialCommunityIcons name="tag-off-outline" size={20} color={theme.textMuted} />
+            <Text
+              style={{
+                flex: 1,
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 12,
+                color: theme.textMuted,
+                lineHeight: 17,
+              }}
+            >
+              Aktuell läuft keine Cashback-Aktion. Bons einreichen geht weiter — Vergütung gibt es mit der nächsten Aktion.
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       {/* ── Quick actions row ── */}
