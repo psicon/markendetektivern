@@ -557,20 +557,35 @@ function RedeemTab() {
               Monatslimit: max. {(monthlyMaxCents / 100).toFixed(2).replace('.', ',')} € Cashback pro Monat
             </Text>
           ) : null}
-          {campaignsEnabled ? (
+          {/* Laufende Aktion IMMER anzeigen (auch wenn der Enforcement-Modus
+              aus ist — es ist eine echte Aktion). Die "keine Aktion"-Warnung
+              nur im echten Aktions-Modus (campaignsEnabled). */}
+          {campaign ? (
             <Text
               style={{
                 fontFamily,
-                fontWeight: campaign ? fontWeight.bold : fontWeight.medium,
+                fontWeight: fontWeight.bold as any,
                 fontSize: 11,
-                color: campaign ? (theme.primary ?? theme.text) : theme.textMuted,
+                color: theme.primary ?? theme.text,
                 textAlign: 'center',
                 marginTop: 8,
               }}
             >
-              {campaign
-                ? `Aktion läuft noch ${campaignDaysLeft} ${campaignDaysLeft === 1 ? 'Tag' : 'Tage'}`
-                : 'Aktuell keine Cashback-Aktion — Bons einreichen geht weiter, Vergütung gibt es mit der nächsten Aktion.'}
+              {campaign.title ? `${campaign.title} · ` : ''}
+              läuft noch {campaignDaysLeft} {campaignDaysLeft === 1 ? 'Tag' : 'Tage'}
+            </Text>
+          ) : campaignsEnabled ? (
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 11,
+                color: theme.textMuted,
+                textAlign: 'center',
+                marginTop: 8,
+              }}
+            >
+              Aktuell keine Cashback-Aktion — Bons einreichen geht weiter, Vergütung gibt es mit der nächsten Aktion.
             </Text>
           ) : null}
           </View>
