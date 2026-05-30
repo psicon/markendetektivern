@@ -65,6 +65,10 @@ export interface CashbackCampaign {
    *  'receipt' = Kassenbon scannen (Default), 'product_photos' =
    *  Produktbilder einreichen, 'survey' = Umfrage. */
   kind?: 'receipt' | 'product_photos' | 'survey';
+  /** Optionale Tier-Tabelle (mehr Artikel = mehr Cashback) PRO AKTION.
+   *  Wenn gesetzt, gewinnt sie über `cashbackPerBonCents` (Flat-Rate).
+   *  Beides leer → keine Vergütung (Aktion fehlkonfiguriert). */
+  tiers?: CashbackTier[];
   // ── Pro-Aktion konfigurierbar (Override der globalen Config) ──
   /** Cashback (in Cent) pro qualifiziertem Bon dieser Aktion. Wenn
    *  gesetzt, ersetzt es die Tier-Tabelle für diese Aktion (Flat-Rate).
@@ -314,6 +318,10 @@ export interface EnqueueCashbackRequest {
   capturedAt: number;
   perceptualHash?: string;
   source: 'live_camera' | 'upload';
+  /** Vom User gewählte Aktion, gegen die dieser Bon geprüft + vergütet
+   *  wird. null/fehlt → keine Aktion (Bon nur zur Ausgabenübersicht,
+   *  0 Vergütung). Server ist autoritativ. */
+  campaignId?: string | null;
 }
 
 export interface EnqueueCashbackResponse {
@@ -345,6 +353,31 @@ export function tierFor(eligibleItemCount: number, config: CashbackConfigDoc): n
     if (eligibleItemCount >= tier.minItems) {
       return tier.cents;
     }
+  }
+  return 0;
+}
+
+/**
+ * Bruttto-Cashback (in Cent) für einen Bon im Kontext EINER Aktion,
+ * VOR Wochenlimit / Per-User-Cap / Budget-Deckelung.
+ *
+ * - Aktion mit `tiers` → Tier-Tabelle (mehr Artikel = mehr).
+ * - sonst Flat `cashbackPerBonCents`, sofern `minItems` erreicht.
+ * - Mindestartikel: campaign.minItems ?? config.minItemsForPayout.
+ * Gibt 0 zurück wenn unter Mindestartikel oder Aktion fehlkonfiguriert.
+ */
+export function campaignReward(
+  eligibleItemCount: number,
+  campaign: Pick<CashbackCampaign, 'tiers' | 'cashbackPerBonCents' | 'minItems'>,
+  config: Pick<CashbackConfigDoc, 'minItemsForPayout'>,
+): number {
+  const minItems = campaign.minItems ?? config.minItemsForPayout;
+  if (eligibleItemCount < minItems) return 0;
+  if (campaign.tiers && campaign.tiers.length > 0) {
+    return tierFor(eligibleItemCount, { tiers: campaign.tiers } as CashbackConfigDoc);
+  }
+  if (typeof campaign.cashbackPerBonCents === 'number' && campaign.cashbackPerBonCents > 0) {
+    return campaign.cashbackPerBonCents;
   }
   return 0;
 }

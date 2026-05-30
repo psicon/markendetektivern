@@ -41,6 +41,7 @@ import { storage } from '@/lib/firebase';
 import {
   deletePendingMirror,
   enqueueCashback,
+  getSelectedCampaignId,
   setPendingMirrorError,
   setPendingMirrorProgress,
   subscribeReceipt,
@@ -207,6 +208,7 @@ export default function CashbackPendingScreen() {
         bytesHash: String(params.uploadHash ?? ''),
         capturedAt: Number(params.uploadCapturedAt ?? Date.now()),
         source: (params.uploadSource as any) || 'live_camera',
+        campaignId: getSelectedCampaignId(),
         journey,
       });
 

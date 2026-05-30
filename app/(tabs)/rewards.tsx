@@ -33,6 +33,7 @@ import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { getActiveCashbackCampaigns, getCashbackConfig, type ActiveCampaign } from '@/lib/services/cashbackService';
 import { useWeeklyReceiptCount } from '@/lib/hooks/useWeeklyReceiptCount';
 import { showInfoToast } from '@/lib/services/ui/toast';
+import { setSelectedCampaignId } from '@/lib/services/cashbackUpload';
 
 // ─── Cashback fallback ─────────────────────────────────────────────────
 // Wenn kein User eingeloggt ist (oder das Cashback-Backend offline)
@@ -74,8 +75,31 @@ type EarnAction = {
   progress?: number; // 0..1 — undefined for survey (no weekly counter)
 };
 
-function buildEarnActions(weeklyReceiptCount: number): EarnAction[] {
+function buildEarnActions(
+  weeklyReceiptCount: number,
+  campaignsEnabled: boolean,
+  receiptCampaignCount: number,
+): EarnAction[] {
   const receiptAvailable = weeklyReceiptCount < RECEIPT_LIMIT.perWeek;
+  // Aktions-Modus: der globale Wochenzähler (x/6) entfällt — Limits
+  // hängen an der jeweiligen Aktion. Tile zeigt stattdessen die Anzahl
+  // wählbarer Aktionen bzw. „Nur Übersicht" wenn keine läuft.
+  const receiptStatus = campaignsEnabled
+    ? {
+        available: true,
+        statusLabel:
+          receiptCampaignCount > 0
+            ? `${receiptCampaignCount} Aktion${receiptCampaignCount > 1 ? 'en' : ''}`
+            : 'Nur Übersicht',
+        progress: undefined as number | undefined,
+      }
+    : {
+        available: receiptAvailable,
+        statusLabel: receiptAvailable
+          ? `${weeklyReceiptCount}/${RECEIPT_LIMIT.perWeek} Woche`
+          : 'Limit erreicht',
+        progress: weeklyReceiptCount / RECEIPT_LIMIT.perWeek,
+      };
   return [
     {
       k: 'receipt',
@@ -84,11 +108,9 @@ function buildEarnActions(weeklyReceiptCount: number): EarnAction[] {
       bg: '#0d8575',
       dark: true,
       reward: `${RECEIPT_LIMIT.eurEach.toFixed(2).replace('.', ',')} €`,
-      available: receiptAvailable,
-      statusLabel: receiptAvailable
-        ? `${weeklyReceiptCount}/${RECEIPT_LIMIT.perWeek} Woche`
-        : 'Limit erreicht',
-      progress: weeklyReceiptCount / RECEIPT_LIMIT.perWeek,
+      available: receiptStatus.available,
+      statusLabel: receiptStatus.statusLabel,
+      progress: receiptStatus.progress,
     },
     {
       k: 'photo',
@@ -347,9 +369,16 @@ function RedeemTab() {
   // T17.24: Echter Wochen-Counter aus Firestore — ersetzt die
   // hardcoded fake-Werte.
   const weeklyReceiptCount = useWeeklyReceiptCount();
+  // Nur Aktionen vom Typ Kassenbon sind über das Schnellzugriff-Tile
+  // wählbar (photo/survey haben eigene Tiles / Flows).
+  const receiptCampaigns = React.useMemo(
+    () => campaigns.filter((c) => (c.kind ?? 'receipt') === 'receipt'),
+    [campaigns],
+  );
+  const [campaignPickerOpen, setCampaignPickerOpen] = useState(false);
   const earnActions = React.useMemo(
-    () => buildEarnActions(weeklyReceiptCount),
-    [weeklyReceiptCount],
+    () => buildEarnActions(weeklyReceiptCount, campaignsEnabled, receiptCampaigns.length),
+    [weeklyReceiptCount, campaignsEnabled, receiptCampaigns.length],
   );
 
   // T17.26: Anchors für den Spotlight-Walkthrough — Cashback-Hero,
@@ -366,20 +395,39 @@ function RedeemTab() {
     .toFixed(2)
     .replace('.', ',');
 
-  // Tap target for "Bon scannen" — routes through consent gate first.
-  // If the user already accepted the current consent version we skip
-  // straight to the capture screen.
-  const onScanBon = useCallback(() => {
-    if (!cashback.uid) {
-      router.push('/auth/login');
+  // Bon-Scan starten — merkt sich die gewählte Aktion (oder null =
+  // nur Ausgabenübersicht) und routet durch den Consent-Gate. Hat der
+  // User den aktuellen Consent schon, geht's direkt zur Kamera.
+  const onScanBon = useCallback(
+    (campaignId: string | null) => {
+      setSelectedCampaignId(campaignId);
+      if (!cashback.uid) {
+        router.push('/auth/login');
+        return;
+      }
+      if (cashback.hasConsent) {
+        router.push('/cashback/capture');
+      } else {
+        router.push('/cashback/consent');
+      }
+    },
+    [cashback.uid, cashback.hasConsent],
+  );
+
+  // Schnellzugriff-Tile „Kassenbon scannen": Aktions-Auswahl je nach
+  // Lage. Ohne Aktions-Modus → wie bisher (keine Aktion). Mit Modus:
+  // 0 Aktionen → nur Übersicht, 1 → direkt vorgewählt, >1 → Auswahl-Sheet.
+  const startReceiptScan = useCallback(() => {
+    if (!campaignsEnabled || receiptCampaigns.length === 0) {
+      onScanBon(null);
       return;
     }
-    if (cashback.hasConsent) {
-      router.push('/cashback/capture');
-    } else {
-      router.push('/cashback/consent');
+    if (receiptCampaigns.length === 1) {
+      onScanBon(receiptCampaigns[0].id);
+      return;
     }
-  }, [cashback.uid, cashback.hasConsent]);
+    setCampaignPickerOpen(true);
+  }, [campaignsEnabled, receiptCampaigns, onScanBon]);
 
   return (
     <>
@@ -607,7 +655,7 @@ function RedeemTab() {
             <QuickActionTile
               key={a.k}
               action={a}
-              onCashbackTap={a.k === 'receipt' ? onScanBon : undefined}
+              onCashbackTap={a.k === 'receipt' ? startReceiptScan : undefined}
             />
           ))}
         </View>
@@ -736,6 +784,100 @@ function RedeemTab() {
           </View>
         </Pressable>
       </View>
+
+      {/* Aktions-Auswahl beim Bon-Scan (nur wenn >1 Kassenbon-Aktion läuft) */}
+      <FilterSheet
+        visible={campaignPickerOpen}
+        title="Aktion wählen"
+        onClose={() => setCampaignPickerOpen(false)}
+      >
+        <View style={{ gap: 8, paddingBottom: 4 }}>
+          <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 13, color: theme.textMuted, marginBottom: 2 }}>
+            Für welche Aktion soll dieser Bon zählen?
+          </Text>
+          {receiptCampaigns.map((c) => {
+            const days = Math.max(0, Math.ceil((c.endMs - Date.now()) / 86_400_000));
+            return (
+              <Pressable
+                key={c.id}
+                onPress={() => {
+                  setCampaignPickerOpen(false);
+                  onScanBon(c.id);
+                }}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: 14,
+                  borderRadius: 14,
+                  backgroundColor: theme.surface,
+                  opacity: pressed ? 0.9 : 1,
+                })}
+              >
+                <View
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    backgroundColor: '#0d857518',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <MaterialCommunityIcons name="receipt" size={18} color="#0d8575" />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: theme.text }}>
+                    {c.title || 'Cashback-Aktion'}
+                  </Text>
+                  <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 11, color: theme.textMuted, marginTop: 1 }}>
+                    noch {days} {days === 1 ? 'Tag' : 'Tage'}
+                  </Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={18} color={theme.textMuted} />
+              </Pressable>
+            );
+          })}
+          {/* Ohne Aktion einreichen → nur Ausgabenübersicht, keine Vergütung */}
+          <Pressable
+            onPress={() => {
+              setCampaignPickerOpen(false);
+              onScanBon(null);
+            }}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              padding: 14,
+              borderRadius: 14,
+              backgroundColor: theme.surfaceAlt ?? theme.surface,
+              opacity: pressed ? 0.9 : 1,
+            })}
+          >
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                backgroundColor: theme.border,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <MaterialCommunityIcons name="clipboard-text-outline" size={18} color={theme.textMuted} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: theme.text }}>
+                Ohne Aktion (nur Übersicht)
+              </Text>
+              <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 11, color: theme.textMuted, marginTop: 1 }}>
+                Bon wird gespeichert, aber nicht vergütet
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={18} color={theme.textMuted} />
+          </Pressable>
+        </View>
+      </FilterSheet>
     </>
   );
 }
@@ -766,7 +908,7 @@ function CampaignListItem({
   scheme,
 }: {
   campaign: ActiveCampaign;
-  onScanBon: () => void;
+  onScanBon: (campaignId: string | null) => void;
   scheme: 'light' | 'dark';
 }) {
   const { theme } = useTokens();
@@ -792,7 +934,7 @@ function CampaignListItem({
 
   const onAction = () => {
     if (kind === 'receipt') {
-      onScanBon();
+      onScanBon(campaign.id);
     } else if (kind === 'product_photos') {
       showInfoToast('Produktbilder-Einreichung ist bald verfügbar.', 'info', scheme);
     } else {

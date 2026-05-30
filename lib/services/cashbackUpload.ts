@@ -298,6 +298,9 @@ export interface EnqueueArgs {
   capturedAt: number;
   perceptualHash?: string;
   source: 'live_camera' | 'upload';
+  /** Vom User gewählte Aktion (cashback_campaigns/{id}), gegen die dieser
+   *  Bon geprüft + vergütet wird. null → keine Aktion (nur Übersicht). */
+  campaignId?: string | null;
   /** Best-effort journey snapshot at upload time — gets stored on the
    *  receipt doc so the admin audit + future B2B analytics see what
    *  the user was doing in-app right before submitting. */
@@ -317,6 +320,21 @@ export interface EnqueueResult {
   status: string;
   estimatedReadyBy?: number;
   duplicate?: boolean;
+}
+
+// ─── Selected-campaign holder ──────────────────────────────────────
+// Der Scan-Flow läuft über mehrere Screens (rewards → consent → capture
+// → review → pending). Statt die campaignId brüchig durch 4 Routen-Params
+// zu fädeln (consent macht router.replace OHNE Params), halten wir die
+// beim Scan-Start gewählte Aktion hier modul-lokal. Bei jedem Scan-Start
+// frisch gesetzt (oder null), beim enqueue gelesen. Reload mitten im
+// Flow → verloren, dann startet der User den Scan eh neu.
+let _selectedCampaignId: string | null = null;
+export function setSelectedCampaignId(id: string | null): void {
+  _selectedCampaignId = id;
+}
+export function getSelectedCampaignId(): string | null {
+  return _selectedCampaignId;
 }
 
 export async function enqueueCashback(args: EnqueueArgs): Promise<EnqueueResult> {
