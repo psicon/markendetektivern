@@ -602,19 +602,6 @@ function RedeemTab() {
         {/* T17.27: Anchor um Section-Title + Card-Row, NICHT
             am padding-Wrapper. */}
         <View ref={earnAnchor.ref} onLayout={earnAnchor.onLayout}>
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.bold,
-            fontSize: 11,
-            color: theme.textMuted,
-            textTransform: 'uppercase',
-            letterSpacing: 0.8,
-            marginBottom: 8,
-          }}
-        >
-          Schnellzugriff · Mehr Taler & Punkte sammeln
-        </Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           {earnActions.map((a) => (
             <QuickActionTile
@@ -761,13 +748,16 @@ function RedeemTab() {
 // Produktbilder / Umfrage — je nach `campaign.kind`). Kein grauer Rand.
 const AnimatedCampaignCard = Animated.createAnimatedComponent(Pressable);
 
+// Farbe + Icon je Aktions-Typ — 1:1 aus den Schnellzugriff-Tiles
+// (buildEarnActions). `dark` = farbiges Tile mit weißer fg; Umfrage ist
+// hell-grau mit dunkler fg. Siehe CLAUDE.md „Earn-Action-Farben".
 const CAMPAIGN_KINDS: Record<
   NonNullable<ActiveCampaign['kind']>,
-  { icon: string; accent: string; cta: string }
+  { icon: keyof typeof MaterialCommunityIcons.glyphMap; bg: string; dark: boolean; cta: string }
 > = {
-  receipt: { icon: 'receipt-text-outline', accent: '#10a18a', cta: 'Kassenbon scannen' },
-  product_photos: { icon: 'camera-outline', accent: '#2563eb', cta: 'Produktbilder einreichen' },
-  survey: { icon: 'chart-bar', accent: '#7c3aed', cta: 'Umfrage starten' },
+  receipt: { icon: 'receipt', bg: '#0d8575', dark: true, cta: 'Kassenbon scannen' },
+  product_photos: { icon: 'camera-plus-outline', bg: '#5b4f9c', dark: true, cta: 'Produktbilder einreichen' },
+  survey: { icon: 'poll', bg: '#dde2e4', dark: false, cta: 'Umfrage starten' },
 };
 
 function capitalizeMerchant(slug: string): string {
@@ -788,8 +778,11 @@ function CampaignListItem({
 
   const kind = campaign.kind ?? 'receipt';
   const meta = CAMPAIGN_KINDS[kind];
+  const fg = meta.dark ? '#fff' : '#191c1d';
 
   const daysLeft = Math.max(0, Math.ceil((campaign.endMs - Date.now()) / 86_400_000));
+  // Dringlichkeit: ≤1 Tag rot, ≤3 Tage gelb, sonst neutral.
+  const urgentColor = daysLeft <= 1 ? '#ef4444' : daysLeft <= 3 ? '#f59e0b' : null;
   const pct =
     campaign.budgetTotalCents > 0
       ? Math.max(0, Math.min(100, Math.round((campaign.budgetRemainingCents / campaign.budgetTotalCents) * 100)))
@@ -835,10 +828,10 @@ function CampaignListItem({
             borderRadius: 19,
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: meta.accent + '1c',
+            backgroundColor: meta.bg,
           }}
         >
-          <MaterialCommunityIcons name={meta.icon as any} size={19} color={meta.accent} />
+          <MaterialCommunityIcons name={meta.icon} size={19} color={fg} />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text
@@ -875,11 +868,11 @@ function CampaignListItem({
               paddingHorizontal: 9,
               paddingVertical: 5,
               borderRadius: 999,
-              backgroundColor: theme.surfaceAlt ?? theme.bg,
+              backgroundColor: urgentColor ? urgentColor + '1c' : theme.surfaceAlt ?? theme.bg,
             }}
           >
-            <MaterialCommunityIcons name="clock-outline" size={12} color={theme.textMuted} />
-            <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, color: theme.text }}>
+            <MaterialCommunityIcons name="clock-outline" size={12} color={urgentColor ?? theme.textMuted} />
+            <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, color: urgentColor ?? theme.text }}>
               {daysLeft === 0 ? 'Letzter Tag' : `noch ${daysLeft} ${daysLeft === 1 ? 'Tag' : 'Tage'}`}
             </Text>
           </View>
@@ -967,7 +960,7 @@ function CampaignListItem({
             style={({ pressed }) => ({
               height: 46,
               borderRadius: 12,
-              backgroundColor: meta.accent,
+              backgroundColor: meta.bg,
               alignItems: 'center',
               justifyContent: 'center',
               flexDirection: 'row',
@@ -975,8 +968,8 @@ function CampaignListItem({
               opacity: pressed ? 0.9 : 1,
             })}
           >
-            <MaterialCommunityIcons name={meta.icon as any} size={18} color="#fff" />
-            <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: '#fff', letterSpacing: 0.2 }}>
+            <MaterialCommunityIcons name={meta.icon} size={18} color={fg} />
+            <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: fg, letterSpacing: 0.2 }}>
               {meta.cta}
             </Text>
           </Pressable>

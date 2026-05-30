@@ -561,6 +561,22 @@ These are the rules established while building the Belohnungen +
 Errungenschaften screens. Every new screen should reuse these
 components/values 1:1 — no parallel re-inventing.
 
+### Earn-Action-Farben + Icons (Schnellzugriff = Single Source)
+
+Die drei Verdien-/Einreich-Aktionen haben app-weit FESTE Farbe +
+Icon, definiert in `buildEarnActions()` (`app/(tabs)/rewards.tsx`).
+Überall wo eine dieser Aktionen visuell auftaucht (Schnellzugriff-
+Tiles, Cashback-Aktion-Cards mit `campaign.kind`, künftige Stellen)
+EXAKT diese Werte nehmen — nicht neu erfinden:
+
+- **Kassenbon scannen** (`receipt`): grün `#0d8575`, Icon `receipt`, dark tile (weiße fg)
+- **Produkte einreichen** (`product_photos` / `photo`): lila `#5b4f9c`, Icon `camera-plus-outline`, dark tile (weiße fg)
+- **Umfragen** (`survey`): grau `#dde2e4`, Icon `poll`, light tile (dunkle fg `#191c1d`)
+
+User-Vorgabe 2026-05-30. Icon-Kreis + Aktions-Button einer Aktion-
+Card spiegeln das Tile: bg = Aktionsfarbe, fg = weiß (dark) bzw.
+`#191c1d` (light/Umfrage). NIE eigene Icons/Farben pro Aktion setzen.
+
 ### Tab switches → swipeable pills + PagerView
 
 Whenever a screen has internal tabs (Stöbern's Eigenmarken/Marken,
