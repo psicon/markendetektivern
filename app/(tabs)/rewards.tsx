@@ -760,10 +760,6 @@ const CAMPAIGN_KINDS: Record<
   survey: { icon: 'poll', bg: '#dde2e4', dark: false, cta: 'Umfrage starten' },
 };
 
-function capitalizeMerchant(slug: string): string {
-  return slug.charAt(0).toUpperCase() + slug.slice(1);
-}
-
 function CampaignListItem({
   campaign,
   onScanBon,
@@ -790,10 +786,6 @@ function CampaignListItem({
   const budgetColor = pct > 50 ? '#10a18a' : pct > 15 ? '#f59e0b' : '#ef4444';
 
   const description = (campaign.description || '').trim() || 'Cashback auf deinen Einkauf';
-  const markets =
-    campaign.eligibleMerchants && campaign.eligibleMerchants.length > 0
-      ? campaign.eligibleMerchants.map(capitalizeMerchant)
-      : null; // null = alle Märkte
 
   const fmtEur = (cents: number) =>
     (cents / 100).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -925,32 +917,6 @@ function CampaignListItem({
               ) : null}
             </View>
           ) : null}
-
-          {/* Verfügbare Märkte */}
-          <View>
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold as any,
-                fontSize: 11,
-                color: theme.textMuted,
-                textTransform: 'uppercase',
-                letterSpacing: 0.4,
-                marginBottom: 6,
-              }}
-            >
-              Verfügbare Märkte
-            </Text>
-            {markets ? (
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                {markets.map((m) => (
-                  <CampaignChip key={m} theme={theme} icon="storefront-outline" label={m} />
-                ))}
-              </View>
-            ) : (
-              <CampaignChip theme={theme} icon="storefront-outline" label="Alle Märkte" />
-            )}
-          </View>
 
           {/* Aktions-Button — je nach Aktions-Typ */}
           <Pressable
