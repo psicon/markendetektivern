@@ -3,16 +3,13 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import * as WebBrowser from 'expo-web-browser';
+import React, { useCallback, useState } from 'react';
 import {
-  ActivityIndicator,
   Image as RNImage,
   Platform,
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
@@ -36,7 +33,7 @@ import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { getActiveCashbackCampaigns, getCashbackConfig, type ActiveCampaign } from '@/lib/services/cashbackService';
 import { useWeeklyReceiptCount } from '@/lib/hooks/useWeeklyReceiptCount';
 import { showInfoToast } from '@/lib/services/ui/toast';
-import { requestPayout, setSelectedCampaignId, subscribePayout } from '@/lib/services/cashbackUpload';
+import { setSelectedCampaignId } from '@/lib/services/cashbackUpload';
 
 // ─── Cashback fallback ─────────────────────────────────────────────────
 // Wenn kein User eingeloggt ist (oder das Cashback-Backend offline)
@@ -45,13 +42,6 @@ import { requestPayout, setSelectedCampaignId, subscribePayout } from '@/lib/ser
 // CASHBACK_ARCHITECTURE.md §3.3 (User-Felder).
 const CASHBACK_FALLBACK_EUR = 0.0;
 const PAYOUT_THRESHOLD = 10.0;
-
-// Auszahl-Betrag Helpers: Cent ↔ de-DE-Euro-String.
-const eurStr = (cents: number) => (cents / 100).toFixed(2).replace('.', ',');
-const parseEurToCents = (s: string): number => {
-  const n = parseFloat(String(s).replace(/[^\d,.]/g, '').replace(',', '.'));
-  return Number.isFinite(n) ? Math.round(n * 100) : NaN;
-};
 
 // The reward catalogue (15+ partner brands) was previously rendered
 // inline as a 2-column grid here. Per-product UX moved to a single
@@ -341,8 +331,6 @@ export default function RewardsScreen() {
 function RedeemTab() {
   const { theme } = useTokens();
   const scheme = useColorScheme() ?? 'light';
-  const { user } = useAuth();
-  const payoutEmail = user?.email ?? null;
   // Live cashback state from Firestore. Falls back to 0,00 € when
   // the user isn't signed in or the backend hasn't seeded the field
   // yet (Phase 1 deploys the fields lazy via the Cloud Function).
@@ -388,9 +376,6 @@ function RedeemTab() {
     [campaigns],
   );
   const [campaignPickerOpen, setCampaignPickerOpen] = useState(false);
-  const [payoutOpen, setPayoutOpen] = useState(false);
-  const [payoutBusy, setPayoutBusy] = useState(false);
-  const [payoutAmountText, setPayoutAmountText] = useState('');
   const earnActions = React.useMemo(
     () => buildEarnActions(weeklyReceiptCount, campaignsEnabled, receiptCampaigns.length),
     [weeklyReceiptCount, campaignsEnabled, receiptCampaigns.length],
@@ -410,13 +395,6 @@ function RedeemTab() {
     .toFixed(2)
     .replace('.', ',');
 
-  // Auszahl-Betrag: frei eingebbar, geclampt auf [Schwelle, Guthaben].
-  const balanceCents = cashback.uid ? cashback.balanceCents : 0;
-  const thresholdCents = Math.round(payoutThreshold * 100);
-  const clampPayout = (c: number) =>
-    Math.max(thresholdCents, Math.min(balanceCents, Math.round(c || 0)));
-  const payoutCents = clampPayout(parseEurToCents(payoutAmountText));
-  const stepPayout = (delta: number) => setPayoutAmountText(eurStr(clampPayout(payoutCents + delta)));
 
   // Bon-Scan starten — merkt sich die gewählte Aktion (oder null =
   // nur Ausgabenübersicht) und routet durch den Consent-Gate. Hat der
@@ -451,70 +429,6 @@ function RedeemTab() {
     }
     setCampaignPickerOpen(true);
   }, [campaignsEnabled, receiptCampaigns, onScanBon]);
-
-  // Auszahlung: requestPayout debitiert + legt die Anfrage an; der
-  // processPayout-Trigger erstellt dann die Tremendous-Order. Wir warten
-  // per Subscription auf das Ergebnis und öffnen den Redemption-Link direkt
-  // im In-App-Browser (Mail kommt zusätzlich als Backup).
-  const payoutUnsubRef = useRef<null | (() => void)>(null);
-  const payoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cleanupPayoutWait = useCallback(() => {
-    payoutUnsubRef.current?.();
-    payoutUnsubRef.current = null;
-    if (payoutTimerRef.current) clearTimeout(payoutTimerRef.current);
-    payoutTimerRef.current = null;
-  }, []);
-  useEffect(() => cleanupPayoutWait, [cleanupPayoutWait]);
-
-  const handlePayout = useCallback(async () => {
-    if (payoutBusy) return;
-    const cents = Math.max(thresholdCents, Math.min(balanceCents, parseEurToCents(payoutAmountText) || 0));
-    setPayoutBusy(true);
-    try {
-      const r = await requestPayout(cents);
-      const payoutId = r.payoutId;
-      if (!payoutId) throw new Error('no_payout_id');
-
-      // Auf den Trigger warten (Order-Erstellung ~1–3 s). Spinner läuft.
-      payoutUnsubRef.current = subscribePayout(payoutId, async (p) => {
-        if (!p) return;
-        if (p.status === 'sent') {
-          cleanupPayoutWait();
-          setPayoutBusy(false);
-          setPayoutOpen(false);
-          if (p.redemptionLink) {
-            try {
-              await WebBrowser.openBrowserAsync(p.redemptionLink);
-            } catch {
-              showInfoToast('Auszahlung läuft — check zusätzlich deine E-Mail.', 'info', scheme);
-            }
-          } else {
-            showInfoToast('Auszahlung angefragt — wir haben dir eine E-Mail mit deinem Reward geschickt.', 'info', scheme);
-          }
-        } else if (p.status === 'failed') {
-          cleanupPayoutWait();
-          setPayoutBusy(false);
-          showInfoToast('Auszahlung fehlgeschlagen — dein Guthaben wurde zurückgebucht.', 'error', scheme);
-        }
-      });
-
-      // Fallback, falls der Trigger ungewöhnlich lange braucht.
-      payoutTimerRef.current = setTimeout(() => {
-        cleanupPayoutWait();
-        setPayoutBusy(false);
-        setPayoutOpen(false);
-        showInfoToast('Auszahlung läuft — du bekommst gleich eine E-Mail mit deinem Reward.', 'info', scheme);
-      }, 20000);
-    } catch (e: any) {
-      cleanupPayoutWait();
-      setPayoutBusy(false);
-      const msg =
-        e?.code === 'below_threshold'
-          ? 'Dein Guthaben reicht noch nicht für eine Auszahlung.'
-          : 'Auszahlung konnte nicht angefragt werden. Bitte versuch es später nochmal.';
-      showInfoToast(msg, 'error', scheme);
-    }
-  }, [payoutBusy, scheme, cleanupPayoutWait, payoutAmountText, balanceCents, thresholdCents]);
 
   return (
     <>
@@ -824,8 +738,7 @@ function RedeemTab() {
           accessibilityLabel="Cashback einlösen"
           onPress={() => {
             if (canRedeem) {
-              setPayoutAmountText(eurStr(balanceCents));
-              setPayoutOpen(true);
+              router.push('/cashback/payout');
             } else {
               showInfoToast(
                 `Noch ${gapEur} € bis zur ${payoutThreshold.toFixed(2).replace('.', ',')} €-Schwelle.`,
@@ -1013,181 +926,6 @@ function RedeemTab() {
         </View>
       </FilterSheet>
 
-      {/* Auszahlung — Bestätigung (zahlt die ganze Balance aus). Die
-          Auszahlungsart wählt der User auf der Tremendous-Reward-Seite. */}
-      <FilterSheet visible={payoutOpen} title="Auszahlung" onClose={() => setPayoutOpen(false)}>
-        <View style={{ paddingBottom: 4 }}>
-          <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-            <View
-              style={{
-                width: 56,
-                height: 56,
-                borderRadius: 28,
-                backgroundColor: (theme.primary ?? '#0d8575') + '18',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: 12,
-              }}
-            >
-              <MaterialCommunityIcons name="gift-outline" size={28} color={theme.primary ?? '#0d8575'} />
-            </View>
-            {/* Betrag wählen — − [Eingabe] + , Max, Hinweis */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Pressable
-                onPress={() => stepPayout(-100)}
-                hitSlop={6}
-                style={({ pressed }) => ({
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
-                  backgroundColor: theme.surfaceAlt ?? theme.surface,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: pressed ? 0.6 : 1,
-                })}
-              >
-                <MaterialCommunityIcons name="minus" size={20} color={theme.text} />
-              </Pressable>
-
-              <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center' }}>
-                <TextInput
-                  value={payoutAmountText}
-                  onChangeText={setPayoutAmountText}
-                  onBlur={() => setPayoutAmountText(eurStr(payoutCents))}
-                  keyboardType="decimal-pad"
-                  selectTextOnFocus
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.extraBold as any,
-                    fontSize: 30,
-                    letterSpacing: -0.6,
-                    color: theme.text,
-                    textAlign: 'right',
-                    minWidth: 84,
-                    padding: 0,
-                  }}
-                />
-                <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 22, color: theme.text, marginLeft: 4 }}>
-                  €
-                </Text>
-              </View>
-
-              <Pressable
-                onPress={() => stepPayout(100)}
-                hitSlop={6}
-                style={({ pressed }) => ({
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
-                  backgroundColor: theme.surfaceAlt ?? theme.surface,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: pressed ? 0.6 : 1,
-                })}
-              >
-                <MaterialCommunityIcons name="plus" size={20} color={theme.text} />
-              </Pressable>
-            </View>
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 }}>
-              <Pressable
-                onPress={() => setPayoutAmountText(eurStr(balanceCents))}
-                style={({ pressed }) => ({
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  borderRadius: 999,
-                  backgroundColor: (theme.primary ?? '#0d8575') + '18',
-                  opacity: pressed ? 0.8 : 1,
-                })}
-              >
-                <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 12, color: theme.primary ?? '#0d8575' }}>
-                  Max · {eurStr(balanceCents)} €
-                </Text>
-              </Pressable>
-              <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 11, color: theme.textMuted }}>
-                min. {eurStr(thresholdCents)} €
-              </Text>
-            </View>
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.medium,
-                fontSize: 13,
-                color: theme.textMuted,
-                textAlign: 'center',
-                marginTop: 8,
-                lineHeight: 19,
-                paddingHorizontal: 8,
-              }}
-            >
-              Die Auszahlungsseite öffnet sich gleich direkt hier. Dort wählst du die Auszahlungsart (Gutschein, PayPal, Überweisung u. a.).
-            </Text>
-
-            {/* Hinweis: Link bleibt erreichbar / oder fehlende E-Mail */}
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'flex-start',
-                gap: 8,
-                marginTop: 14,
-                paddingHorizontal: 12,
-                paddingVertical: 10,
-                borderRadius: 12,
-                backgroundColor: payoutEmail ? theme.surfaceAlt ?? theme.surface : '#f59e0b1c',
-                alignSelf: 'stretch',
-              }}
-            >
-              <MaterialCommunityIcons
-                name={payoutEmail ? 'information-outline' : 'alert-outline'}
-                size={16}
-                color={payoutEmail ? theme.textMuted : '#b8860b'}
-                style={{ marginTop: 1 }}
-              />
-              <Text
-                style={{
-                  flex: 1,
-                  fontFamily,
-                  fontWeight: payoutEmail ? fontWeight.medium : (fontWeight.bold as any),
-                  fontSize: 12,
-                  color: payoutEmail ? theme.textMuted : '#8a6d00',
-                  lineHeight: 17,
-                }}
-              >
-                {payoutEmail
-                  ? 'Den Link findest du jederzeit wieder unter „Meine Auszahlungen" — auch wenn du die Seite zu früh schließt.'
-                  : 'Du hast keine E-Mail hinterlegt. Füge zuerst in deinem Profil eine E-Mail hinzu, dann kannst du auszahlen.'}
-              </Text>
-            </View>
-          </View>
-
-          <Pressable
-            disabled={payoutBusy || !payoutEmail}
-            onPress={handlePayout}
-            style={({ pressed }) => ({
-              marginTop: 12,
-              height: 54,
-              borderRadius: 14,
-              backgroundColor: theme.primary ?? '#0d8575',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexDirection: 'row',
-              gap: 8,
-              opacity: payoutBusy || !payoutEmail ? 0.6 : pressed ? 0.9 : 1,
-            })}
-          >
-            {payoutBusy ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <>
-                <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 16, color: '#fff', letterSpacing: 0.2 }}>
-                  {eurStr(payoutCents)} € auszahlen
-                </Text>
-                <MaterialCommunityIcons name="arrow-right" size={18} color="#fff" />
-              </>
-            )}
-          </Pressable>
-        </View>
-      </FilterSheet>
     </>
   );
 }
