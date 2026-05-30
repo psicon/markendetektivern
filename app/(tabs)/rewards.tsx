@@ -29,7 +29,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
-import { getActiveCashbackCampaign, getCashbackConfig, type ActiveCampaign } from '@/lib/services/cashbackService';
+import { getActiveCashbackCampaigns, getCashbackConfig, type ActiveCampaign } from '@/lib/services/cashbackService';
 import { useWeeklyReceiptCount } from '@/lib/hooks/useWeeklyReceiptCount';
 
 // ─── Cashback fallback ─────────────────────────────────────────────────
@@ -39,12 +39,6 @@ import { useWeeklyReceiptCount } from '@/lib/hooks/useWeeklyReceiptCount';
 // CASHBACK_ARCHITECTURE.md §3.3 (User-Felder).
 const CASHBACK_FALLBACK_EUR = 0.0;
 const PAYOUT_THRESHOLD = 10.0;
-
-// Shared height for both hero cards (Cashback in Einlösen +
-// StatusHero in Bestenliste). Fixed so the page geometry doesn't
-// jump on tab swipe. Tuned to fit a TopRow (52 px avatar) +
-// gap + up to two ProgressBars + breathing room.
-const HERO_HEIGHT = 144;
 
 // The reward catalogue (15+ partner brands) was previously rendered
 // inline as a 2-column grid here. Per-product UX moved to a single
@@ -325,7 +319,7 @@ function RedeemTab() {
   const [payoutThreshold, setPayoutThreshold] = useState(PAYOUT_THRESHOLD);
   const [monthlyMaxCents, setMonthlyMaxCents] = useState(0);
   const [campaignsEnabled, setCampaignsEnabled] = useState(false);
-  const [campaign, setCampaign] = useState<ActiveCampaign | null>(null);
+  const [campaigns, setCampaigns] = useState<ActiveCampaign[]>([]);
   React.useEffect(() => {
     let alive = true;
     getCashbackConfig()
@@ -338,30 +332,15 @@ function RedeemTab() {
         setCampaignsEnabled(Boolean(c.campaignsEnabled));
       })
       .catch(() => {});
-    getActiveCashbackCampaign()
+    getActiveCashbackCampaigns()
       .then((c) => {
-        if (alive) setCampaign(c);
+        if (alive) setCampaigns(c);
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
   }, []);
-  // Restlaufzeit der aktuellen Aktion (ganze Tage, min. „heute").
-  const campaignDaysLeft = campaign
-    ? Math.max(0, Math.ceil((campaign.endMs - Date.now()) / 86_400_000))
-    : 0;
-  // Verbleibendes Budget der Aktion in % (0–100).
-  const campaignBudgetPct =
-    campaign && campaign.budgetTotalCents > 0
-      ? Math.max(
-          0,
-          Math.min(100, Math.round((campaign.budgetRemainingCents / campaign.budgetTotalCents) * 100)),
-        )
-      : 0;
-  // Budget-Farbe: grün viel übrig → amber knapp → rot fast leer.
-  const campaignBudgetColor =
-    campaignBudgetPct > 50 ? '#10a18a' : campaignBudgetPct > 15 ? '#f59e0b' : '#ef4444';
   // T17.24: Echter Wochen-Counter aus Firestore — ersetzt die
   // hardcoded fake-Werte.
   const weeklyReceiptCount = useWeeklyReceiptCount();
@@ -427,16 +406,12 @@ function RedeemTab() {
             paddingHorizontal: 14,
             paddingVertical: 12,
             overflow: 'hidden',
-            // Fixed hero height — locks the Cashback hero (Einlösen
-            // tab) and the StatusHero (Bestenliste tab) to the SAME
-            // total height so the layout doesn't jump on tab swipe.
-            // Content inside uses `justifyContent: space-between` so
-            // the TopRow sits at the top and the progress bar(s)
-            // sit at the bottom, regardless of how much content
-            // each card actually has.
-            height: HERO_HEIGHT,
+            // Natürliche Höhe (kein fixes HERO_HEIGHT mehr): die
+            // Bestenliste lebt jetzt unter Errungenschaften, es gibt
+            // hier kein Pager-Geschwister mehr, mit dem die Höhe matchen
+            // müsste. Tighter = weniger toter Whitespace.
           }}
-        ><View style={{ flex: 1, justifyContent: 'space-between' }}>
+        ><View style={{ gap: 12 }}>
           {/* Top row: 52 px money-icon-circle | title + status chip
               | big balance + currency pill — mirrors StatusHero's
               "avatar | name+level chip | big pts + label" layout. */}
@@ -572,168 +547,31 @@ function RedeemTab() {
         </LinearGradient>
         </View>
 
-        {/* Laufende Aktion — eigenständige Card UNTER dem Hero
-            (nicht im Hero-Card, sonst clippt es an HERO_HEIGHT).
-            Card IMMER zeigen wenn eine Aktion läuft. Die "keine
-            Aktion"-Card nur im echten Aktions-Modus (campaignsEnabled). */}
-        {campaign ? (
-          <View
-            style={{
-              marginTop: 12,
-              padding: 14,
-              borderRadius: 16,
-              backgroundColor: theme.surface,
-              borderWidth: 1,
-              borderColor: theme.border,
-            }}
-          >
-            {/* Kopf: Icon-Kreis | Eyebrow + Titel | Restlaufzeit-Pill */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <View
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: '#10a18a22',
-                }}
-              >
-                <MaterialCommunityIcons name="tag-multiple" size={20} color="#10a18a" />
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.bold as any,
-                    fontSize: 10,
-                    letterSpacing: 0.6,
-                    color: '#10a18a',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  Aktive Cashback-Aktion
-                </Text>
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.extraBold,
-                    fontSize: 15,
-                    color: theme.text,
-                    letterSpacing: -0.2,
-                    marginTop: 1,
-                  }}
-                >
-                  {campaign.title || 'Cashback-Aktion'}
-                </Text>
-              </View>
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 4,
-                  paddingHorizontal: 9,
-                  paddingVertical: 5,
-                  borderRadius: 999,
-                  backgroundColor: theme.surfaceAlt ?? theme.bg,
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                }}
-              >
-                <MaterialCommunityIcons name="clock-outline" size={12} color={theme.textMuted} />
-                <Text
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.bold as any,
-                    fontSize: 11,
-                    color: theme.text,
-                  }}
-                >
-                  {campaignDaysLeft === 0
-                    ? 'Letzter Tag'
-                    : `noch ${campaignDaysLeft} ${campaignDaysLeft === 1 ? 'Tag' : 'Tage'}`}
-                </Text>
-              </View>
-            </View>
+      </View>
 
-            {/* Budget-Balken: Label-Zeile + Track + Fill */}
-            <View style={{ marginTop: 14 }}>
-              <View
-                style={{
-                  flexDirection: 'row',
-                  justifyContent: 'space-between',
-                  alignItems: 'baseline',
-                  marginBottom: 6,
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.bold as any,
-                    fontSize: 12,
-                    color: theme.textMuted,
-                  }}
-                >
-                  Verfügbares Budget
-                </Text>
-                <Text
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.extraBold,
-                    fontSize: 12,
-                    color: campaignBudgetColor,
-                  }}
-                >
-                  {campaignBudgetPct}% übrig
-                </Text>
-              </View>
-              <View
-                style={{
-                  height: 8,
-                  borderRadius: 4,
-                  backgroundColor: theme.surfaceAlt ?? theme.border,
-                  overflow: 'hidden',
-                }}
-              >
-                <View
-                  style={{
-                    width: `${campaignBudgetPct}%`,
-                    height: '100%',
-                    borderRadius: 4,
-                    backgroundColor: campaignBudgetColor,
-                  }}
-                />
-              </View>
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.medium,
-                  fontSize: 11,
-                  color: theme.textMuted,
-                  marginTop: 6,
-                }}
-              >
-                {(campaign.budgetRemainingCents / 100).toLocaleString('de-DE', {
-                  minimumFractionDigits: 0,
-                  maximumFractionDigits: 0,
-                })}{' '}
-                € von{' '}
-                {(campaign.budgetTotalCents / 100).toLocaleString('de-DE', {
-                  minimumFractionDigits: 0,
-                  maximumFractionDigits: 0,
-                })}{' '}
-                € verfügbar
-              </Text>
-            </View>
+      {/* ── Aktive Aktionen — echte Liste (mehrere gleichzeitig möglich,
+          User wählt beim Einreichen die Aktion) ── */}
+      {campaigns.length > 0 ? (
+        <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
+          <SectionHeader
+            title="Aktive Aktionen"
+            sub={`${campaigns.length} ${campaigns.length === 1 ? 'Aktion' : 'Aktionen'}`}
+          />
+          <View style={{ gap: 10, marginTop: 10 }}>
+            {campaigns.map((c) => (
+              <CampaignListItem key={c.id} campaign={c} />
+            ))}
           </View>
-        ) : campaignsEnabled ? (
+        </View>
+      ) : campaignsEnabled ? (
+        <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
+          <SectionHeader title="Aktive Aktionen" />
           <View
             style={{
               flexDirection: 'row',
               alignItems: 'center',
               gap: 10,
-              marginTop: 12,
+              marginTop: 10,
               padding: 14,
               borderRadius: 16,
               backgroundColor: theme.surface,
@@ -755,8 +593,8 @@ function RedeemTab() {
               Aktuell läuft keine Cashback-Aktion. Bons einreichen geht weiter — Vergütung gibt es mit der nächsten Aktion.
             </Text>
           </View>
-        ) : null}
-      </View>
+        </View>
+      ) : null}
 
       {/* ── Quick actions row ── */}
       <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
@@ -854,136 +692,180 @@ function RedeemTab() {
         </Pressable>
       </View>
 
-      {/* ── Einlösen CTA ──
-          Single tile, no in-app catalogue. The actual partner picker
-          (gift cards / PayPal / Visa / charity) lives on a 3rd-party
-          provider page that this button will route to once the
-          integration exists. The button is disabled until the user
-          has hit the PAYOUT_THRESHOLD; the disabled copy explains
-          how much is still missing so the user gets actionable
-          feedback instead of a dead CTA. */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 28, paddingBottom: 8 }}>
-        {/* T17.27: Anchor um die echte Card, NICHT am padding-Wrapper. */}
-        <View
+      {/* ── Einlösen — kompakter Einstieg, Details auf eigener Seite
+          (/cashback/redeem). Hält den Tab schlank; die Partner-Auswahl
+          (Gutscheine/PayPal/Visa/Spende) + Konto-Hero leben drüben.
+          Primary-getönt, damit's als Haupt-Aktion klar raussticht. */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 8 }}>
+        <Pressable
           ref={redeemAnchor.ref}
           onLayout={redeemAnchor.onLayout}
-          style={{
-            backgroundColor: theme.surface,
-            borderRadius: 18,
-            padding: 18,
+          accessibilityRole="button"
+          accessibilityLabel="Cashback einlösen"
+          onPress={() => router.push('/cashback/redeem')}
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+            backgroundColor: theme.primaryContainer ?? theme.surface,
+            borderRadius: 14,
             borderWidth: 1,
-            borderColor: theme.border,
-          }}
+            borderColor: theme.primary ?? theme.border,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            opacity: pressed ? 0.9 : 1,
+          })}
         >
-          {/* Icon + title in one row — kills the dead whitespace
-              that the stacked 56-px-block-above-title layout caused.
-              Description stays on its own row underneath so it can
-              wrap to 2-3 lines without colliding with the icon. */}
           <View
             style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 12,
-            }}
-          >
-            <View
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 12,
-                backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <MaterialCommunityIcons
-                name="gift-outline"
-                size={22}
-                color={theme.primary}
-              />
-            </View>
-            <Text
-              style={{
-                flex: 1,
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 20,
-                color: theme.text,
-                letterSpacing: -0.3,
-              }}
-            >
-              Cashback einlösen
-            </Text>
-          </View>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.medium,
-              fontSize: 13,
-              lineHeight: 19,
-              color: theme.textSub,
-              marginTop: 10,
-            }}
-          >
-            {canRedeem
-              ? 'Tausche deine Cashback-Taler bei unseren Partnern gegen Gutscheine (Amazon, Rewe, Apple…), PayPal-Auszahlung, Visa-Prepaid oder Spenden ein.'
-              : `Sobald du die ${payoutThreshold.toFixed(2).replace('.', ',')} €-Schwelle erreichst, kannst du deine Taler hier einlösen — bei Gutschein-Partnern, PayPal, Visa-Prepaid oder als Spende.`}
-          </Text>
-
-          <Pressable
-            disabled={!canRedeem}
-            onPress={() => {
-              // 3rd-party provider integration goes here.
-            }}
-            style={({ pressed }) => ({
-              marginTop: 18,
-              height: 52,
-              borderRadius: 14,
-              backgroundColor: canRedeem ? theme.primary : theme.surfaceAlt,
+              width: 38,
+              height: 38,
+              borderRadius: 19,
+              backgroundColor: (theme.primary ?? '#0d8575') + '22',
               alignItems: 'center',
               justifyContent: 'center',
-              flexDirection: 'row',
-              gap: 8,
-              opacity: pressed && canRedeem ? 0.9 : 1,
-            })}
+            }}
           >
+            <MaterialCommunityIcons name="gift-outline" size={20} color={theme.primary} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: theme.text }}>
+              Cashback einlösen
+            </Text>
             <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 15,
-                color: canRedeem ? '#fff' : theme.textMuted,
-                letterSpacing: 0.2,
-              }}
+              style={{ fontFamily, fontSize: 12, color: theme.textSub, marginTop: 2 }}
+              numberOfLines={1}
             >
               {canRedeem
-                ? 'Jetzt einlösen'
-                : `Noch ${gapEur} € sammeln`}
+                ? 'Bereit — Gutscheine, PayPal, Visa-Prepaid oder Spende'
+                : `Noch ${gapEur} € bis zur ${payoutThreshold.toFixed(2).replace('.', ',')} €-Schwelle`}
             </Text>
-            {canRedeem ? (
-              <MaterialCommunityIcons
-                name="arrow-right"
-                size={18}
-                color="#fff"
-              />
-            ) : null}
-          </Pressable>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={20} color={theme.primary ?? theme.textMuted} />
+        </Pressable>
+      </View>
+    </>
+  );
+}
 
+// ─── Aktive-Aktion Listen-Item ──────────────────────────────────────────
+// Kompakte Zeilen-Card für die „Aktive Aktionen"-Liste: Icon + Titel +
+// Sub (Vergütung/Mindestartikel falls konfiguriert) + Restlaufzeit-Pill +
+// dünner Budget-Balken. Mehrere stapeln sich vertikal als echte Liste.
+function CampaignListItem({ campaign }: { campaign: ActiveCampaign }) {
+  const { theme } = useTokens();
+  const daysLeft = Math.max(0, Math.ceil((campaign.endMs - Date.now()) / 86_400_000));
+  const pct =
+    campaign.budgetTotalCents > 0
+      ? Math.max(0, Math.min(100, Math.round((campaign.budgetRemainingCents / campaign.budgetTotalCents) * 100)))
+      : 0;
+  const budgetColor = pct > 50 ? '#10a18a' : pct > 15 ? '#f59e0b' : '#ef4444';
+
+  // Sub-Zeile aus den (optionalen) Aktion-Feldern ableiten.
+  const subParts: string[] = [];
+  if (typeof campaign.cashbackPerBonCents === 'number' && campaign.cashbackPerBonCents > 0) {
+    subParts.push(`${(campaign.cashbackPerBonCents / 100).toFixed(2).replace('.', ',')} € pro Bon`);
+  }
+  if (typeof campaign.minItems === 'number' && campaign.minItems > 0) {
+    subParts.push(`ab ${campaign.minItems} Artikeln`);
+  }
+  const sub = subParts.length > 0 ? subParts.join(' · ') : 'Cashback auf deinen Einkauf';
+
+  const fmtEur = (cents: number) =>
+    (cents / 100).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+  return (
+    <View
+      style={{
+        padding: 14,
+        borderRadius: 16,
+        backgroundColor: theme.surface,
+        borderWidth: 1,
+        borderColor: theme.border,
+      }}
+    >
+      {/* Kopf: Icon | Titel + Sub | Restlaufzeit-Pill */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 19,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: '#10a18a18',
+          }}
+        >
+          <MaterialCommunityIcons name="tag-multiple" size={19} color="#10a18a" />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
           <Text
+            numberOfLines={1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 15,
+              color: theme.text,
+              letterSpacing: -0.2,
+            }}
+          >
+            {campaign.title || 'Cashback-Aktion'}
+          </Text>
+          <Text
+            numberOfLines={1}
             style={{
               fontFamily,
               fontWeight: fontWeight.medium,
               fontSize: 11,
               color: theme.textMuted,
-              marginTop: 10,
-              textAlign: 'center',
+              marginTop: 1,
             }}
           >
-            Auswahl der Belohnungen erfolgt extern bei unserem Partner.
+            {sub}
+          </Text>
+        </View>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 4,
+            paddingHorizontal: 9,
+            paddingVertical: 5,
+            borderRadius: 999,
+            backgroundColor: theme.surfaceAlt ?? theme.bg,
+            borderWidth: 1,
+            borderColor: theme.border,
+          }}
+        >
+          <MaterialCommunityIcons name="clock-outline" size={12} color={theme.textMuted} />
+          <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, color: theme.text }}>
+            {daysLeft === 0 ? 'Letzter Tag' : `noch ${daysLeft} ${daysLeft === 1 ? 'Tag' : 'Tage'}`}
           </Text>
         </View>
       </View>
-    </>
+
+      {/* Budget-Balken: Label-Zeile + dünner Track + Fill */}
+      <View style={{ marginTop: 12 }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'baseline',
+            marginBottom: 6,
+          }}
+        >
+          <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, color: theme.textMuted }}>
+            {fmtEur(campaign.budgetRemainingCents)} € von {fmtEur(campaign.budgetTotalCents)} € übrig
+          </Text>
+          <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 11, color: budgetColor }}>
+            {pct}%
+          </Text>
+        </View>
+        <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.surfaceAlt ?? theme.border, overflow: 'hidden' }}>
+          <View style={{ width: `${pct}%`, height: '100%', borderRadius: 3, backgroundColor: budgetColor }} />
+        </View>
+      </View>
+    </View>
   );
 }
 

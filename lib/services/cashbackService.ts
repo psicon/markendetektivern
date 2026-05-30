@@ -56,35 +56,47 @@ export async function getCashbackConfig(forceRefresh = false): Promise<CashbackC
   }
 }
 
-let campaignCache: { value: ActiveCampaign | null; fetchedAt: number } | null = null;
+let campaignsCache: { value: ActiveCampaign[]; fetchedAt: number } | null = null;
 
 /**
- * Aktuell laufende Cashback-Aktion (active==true UND jetzt in [startAt,endAt]).
- * null = keine Aktion läuft → keine Vergütung (Einreichen geht trotzdem).
- * 5-Min-Cache. Read-only; Quelle der Wahrheit ist der Cloud-Function-Pfad.
+ * ALLE aktuell laufenden Cashback-Aktionen (active==true UND jetzt in
+ * [startAt,endAt]), sortiert nach Restlaufzeit (soonest-ending first).
+ * Leeres Array = keine Aktion läuft → keine Vergütung (Einreichen geht
+ * trotzdem). 5-Min-Cache. Read-only; Quelle der Wahrheit ist der
+ * Cloud-Function-Pfad.
  */
-export async function getActiveCashbackCampaign(forceRefresh = false): Promise<ActiveCampaign | null> {
-  if (!forceRefresh && campaignCache && Date.now() - campaignCache.fetchedAt < CONFIG_TTL_MS) {
-    return campaignCache.value;
+export async function getActiveCashbackCampaigns(forceRefresh = false): Promise<ActiveCampaign[]> {
+  if (!forceRefresh && campaignsCache && Date.now() - campaignsCache.fetchedAt < CONFIG_TTL_MS) {
+    return campaignsCache.value;
   }
   try {
     const snap = await getDocs(query(collection(db, 'cashback_campaigns'), where('active', '==', true)));
     const now = Date.now();
-    let best: ActiveCampaign | null = null;
+    const list: ActiveCampaign[] = [];
     snap.forEach((d: any) => {
       const c = d.data() || {};
       const startMs = c.startAt?.toMillis?.() ?? 0;
       const endMs = c.endAt?.toMillis?.() ?? 0;
-      if (now >= startMs && now <= endMs && (!best || endMs < best.endMs)) {
-        best = { id: d.id, ...c, endMs } as ActiveCampaign;
+      if (now >= startMs && now <= endMs) {
+        list.push({ id: d.id, ...c, endMs } as ActiveCampaign);
       }
     });
-    campaignCache = { value: best, fetchedAt: Date.now() };
-    return best;
+    list.sort((a, b) => a.endMs - b.endMs);
+    campaignsCache = { value: list, fetchedAt: Date.now() };
+    return list;
   } catch (e) {
-    console.warn('⚠️ getActiveCashbackCampaign failed:', e);
-    return null;
+    console.warn('⚠️ getActiveCashbackCampaigns failed:', e);
+    return [];
   }
+}
+
+/**
+ * Die EINE relevanteste laufende Aktion (soonest-ending). null = keine.
+ * Dünner Wrapper über {@link getActiveCashbackCampaigns}.
+ */
+export async function getActiveCashbackCampaign(forceRefresh = false): Promise<ActiveCampaign | null> {
+  const list = await getActiveCashbackCampaigns(forceRefresh);
+  return list[0] ?? null;
 }
 
 // ─── Consent ────────────────────────────────────────────────────────
@@ -219,4 +231,5 @@ export function isLikelyOverDailyCap(lastBonDate: string | null): boolean {
  */
 export function _resetCashbackCache() {
   configCache = null;
+  campaignsCache = null;
 }
