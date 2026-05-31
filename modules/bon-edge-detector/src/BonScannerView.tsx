@@ -25,6 +25,36 @@ export interface BonScannerCaptureResult {
   height: number;
 }
 
+/** Live-tunable scanner parameters (must mirror Swift ScannerTuning). */
+export interface ScannerTuning {
+  liveMinConfidence: number;
+  captureMinConfidence: number;
+  persistenceFrames: number;
+  visionHz: number;
+  minAspect: number;
+  maxAspect: number;
+  minSize: number;
+  quadratureTolerance: number;
+  maxObservations: number;
+  continuityRadius: number;
+  smoothing: number;
+}
+
+/** Defaults = the shipped Swift values. */
+export const DEFAULT_SCANNER_TUNING: ScannerTuning = {
+  liveMinConfidence: 0.25,
+  captureMinConfidence: 0.6,
+  persistenceFrames: 22,
+  visionHz: 15,
+  minAspect: 0.2,
+  maxAspect: 1.0,
+  minSize: 0.2,
+  quadratureTolerance: 25,
+  maxObservations: 6,
+  continuityRadius: 0.22,
+  smoothing: 0.5,
+};
+
 interface NativeCaptureEvent {
   nativeEvent: BonScannerCaptureResult;
 }
@@ -40,6 +70,7 @@ interface NativeProps {
   isActive?: boolean;
   torch?: boolean;
   captureSignal?: number;
+  tuning?: ScannerTuning;
   onCapture?: (e: NativeCaptureEvent) => void;
   onError?: (e: NativeErrorEvent) => void;
   onEdgesDetected?: (e: NativeEdgesEvent) => void;
@@ -68,6 +99,8 @@ export interface BonScannerProps {
   isActive?: boolean;
   /** Torch on/off. */
   torch?: boolean;
+  /** Live tuning (omit → native defaults). */
+  tuning?: ScannerTuning;
   /** Fired when the live edge overlay appears/disappears (arm the shutter). */
   onEdges?: (visible: boolean) => void;
   /** Fired on a fatal camera error (e.g. no camera). */
@@ -75,7 +108,7 @@ export interface BonScannerProps {
 }
 
 export const BonScanner = React.forwardRef<BonScannerHandle, BonScannerProps>(
-  function BonScanner({ style, isActive = true, torch = false, onEdges, onError }, ref) {
+  function BonScanner({ style, isActive = true, torch = false, tuning, onEdges, onError }, ref) {
     const [signal, setSignal] = React.useState(0);
     const pending = React.useRef<{
       resolve: (r: BonScannerCaptureResult) => void;
@@ -111,6 +144,7 @@ export const BonScanner = React.forwardRef<BonScannerHandle, BonScannerProps>(
         style={style}
         isActive={isActive}
         torch={torch}
+        tuning={tuning}
         captureSignal={signal}
         onCapture={(e) => {
           pending.current?.resolve(e.nativeEvent);

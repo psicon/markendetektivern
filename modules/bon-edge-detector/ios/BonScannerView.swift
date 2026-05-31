@@ -4,6 +4,39 @@ import Vision
 import CoreImage
 import UIKit
 
+/// Runtime-tunable scanner parameters (passed live from JS so the open
+/// scanner can be tuned without a rebuild). Defaults = the shipped values.
+struct ScannerTuning: Record {
+  @Field var liveMinConfidence: Double = 0.25
+  @Field var captureMinConfidence: Double = 0.6
+  @Field var persistenceFrames: Int = 22
+  @Field var visionHz: Double = 15
+  @Field var minAspect: Double = 0.2
+  @Field var maxAspect: Double = 1.0
+  @Field var minSize: Double = 0.2
+  @Field var quadratureTolerance: Double = 25
+  @Field var maxObservations: Int = 6
+  @Field var continuityRadius: Double = 0.22
+  @Field var smoothing: Double = 0.5
+
+  func liveParams() -> BonVision.RectParams {
+    BonVision.RectParams(
+      minConfidence: Float(liveMinConfidence),
+      minAspect: Float(minAspect),
+      maxAspect: Float(maxAspect),
+      minSize: Float(minSize),
+      quadratureTolerance: Float(quadratureTolerance),
+      maxObservations: maxObservations
+    )
+  }
+
+  func captureParams() -> BonVision.RectParams {
+    var p = liveParams()
+    p.minConfidence = Float(captureMinConfidence)
+    return p
+  }
+}
+
 /**
  * BonScannerView — live receipt scanner with manual shutter.
  *
@@ -45,21 +78,16 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   private var lastSignal = 0
   private var pendingCapture = false
 
+  // All knobs live here, settable live from JS (see ScannerTuning).
+  private var tuning = ScannerTuning()
+
   // Vision throttle for the live overlay (capture is unthrottled).
   private var lastVisionTime: CFTimeInterval = 0
-  private let visionInterval: CFTimeInterval = 0.066 // ~15 Hz
-
-  // Live detection is lenient (low-contrast preview frames) — capture
-  // stays at 0.6 via BonVision.detectRectangle.
-  private let liveMinConfidence: VNConfidence = 0.25
 
   // Overlay smoothing + visibility.
   private var smoothed: [CGPoint]? = nil
   private var framesWithoutQuad = 0
   private var edgesVisible = false
-  // Persistence: hold the last good quad for ~1.5 s of dropped frames
-  // (at ~15 Hz) so "hold still on a low-contrast bon" doesn't blink out.
-  private let persistenceFrames = 22
   // Last detected bounding-box center (normalized) for temporal
   // continuity — prefer the candidate nearest the previous one so the
   // mark doesn't jump to a competing rectangle (table edge etc).
@@ -120,6 +148,11 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
         dev.unlockForConfiguration()
       } catch { /* torch toggle is best-effort */ }
     }
+  }
+
+  /// Live tuning from JS (no rebuild needed). Applied on the next frame.
+  func applyTuning(_ t: ScannerTuning) {
+    tuning = t
   }
 
   /// JS bumps an incrementing signal to request a capture. We grab the
@@ -192,16 +225,15 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
       return
     }
 
+    let t = tuning
     let now = CACurrentMediaTime()
-    if now - lastVisionTime < visionInterval { return }
+    if now - lastVisionTime < 1.0 / max(t.visionHz, 1.0) { return }
     lastVisionTime = now
 
     let bufW = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
     let bufH = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
-    let candidates = BonVision.detectRectangles(
-      pixelBuffer: pixelBuffer, minConfidence: liveMinConfidence
-    )
-    let obs = pickStable(candidates)
+    let candidates = BonVision.detectRectangles(pixelBuffer: pixelBuffer, params: t.liveParams())
+    let obs = pickStable(candidates, radius: CGFloat(t.continuityRadius))
     DispatchQueue.main.async { [weak self] in
       self?.updateOverlay(obs, bufferW: bufW, bufferH: bufH)
     }
@@ -211,11 +243,11 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   /// to the last accepted one (within a normalized radius); otherwise
   /// the highest-confidence/largest. Keeps the mark from hopping between
   /// the bon and competing rectangles when confidence is low.
-  private func pickStable(_ list: [VNRectangleObservation]) -> VNRectangleObservation? {
+  private func pickStable(_ list: [VNRectangleObservation], radius: CGFloat) -> VNRectangleObservation? {
     guard !list.isEmpty else { return nil }
     if let prev = lastCenter {
       let nearest = list.min(by: { centerDistance($0, prev) < centerDistance($1, prev) })
-      if let nearest = nearest, centerDistance(nearest, prev) < 0.22 {
+      if let nearest = nearest, centerDistance(nearest, prev) < radius {
         return nearest
       }
     }
@@ -230,7 +262,7 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   // ── Capture: warp the frozen frame flat ────────────────────────────
   private func handleCapture(pixelBuffer: CVPixelBuffer) {
     let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-    let obs = BonVision.detectRectangle(pixelBuffer: pixelBuffer)
+    let obs = BonVision.detectRectangle(pixelBuffer: pixelBuffer, params: tuning.captureParams())
     let result: [String: Any]?
     if let obs = obs {
       result = BonVision.warpAndWriteJPEG(ciImage: ciImage, observation: obs)
@@ -261,7 +293,7 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
       framesWithoutQuad += 1
       // Hold the last good quad through brief dropouts (persistence);
       // only clear after a sustained miss.
-      if framesWithoutQuad > persistenceFrames {
+      if framesWithoutQuad > tuning.persistenceFrames {
         smoothed = nil
         lastCenter = nil
         CATransaction.begin()
@@ -310,7 +342,11 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
 
     let pts: [CGPoint]
     if let prev = smoothed, prev.count == raw.count {
-      pts = zip(prev, raw).map { CGPoint(x: $0.x * 0.5 + $1.x * 0.5, y: $0.y * 0.5 + $1.y * 0.5) }
+      // smoothing = weight on previous (higher = smoother but laggier).
+      let s = CGFloat(min(max(tuning.smoothing, 0), 0.95))
+      pts = zip(prev, raw).map {
+        CGPoint(x: $0.x * s + $1.x * (1 - s), y: $0.y * s + $1.y * (1 - s))
+      }
     } else {
       pts = raw
     }

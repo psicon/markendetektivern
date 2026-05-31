@@ -51,9 +51,11 @@ export async function detectAndCropDocument(
 export {
   BonScanner,
   isBonScannerAvailable,
+  DEFAULT_SCANNER_TUNING,
   type BonScannerHandle,
   type BonScannerProps,
   type BonScannerCaptureResult,
+  type ScannerTuning,
 } from './BonScannerView';
 
 export default { detectAndCropDocument };

@@ -32,6 +32,7 @@ import {
   NativeModules,
   Platform,
   Pressable,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -42,8 +43,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   BonScanner,
+  DEFAULT_SCANNER_TUNING,
   isBonScannerAvailable,
   type BonScannerHandle,
+  type ScannerTuning,
 } from 'bon-edge-detector';
 
 import { fontFamilyVariants, fontWeight } from '@/constants/tokens';
@@ -58,6 +61,30 @@ const FRAME_WIDTH = SCREEN_W * 0.82;
 const FRAME_HEIGHT = SCREEN_H * 0.55;
 const CORNER_LEN = 28;
 const CORNER_THICK = 3;
+
+// In-scanner live-tuning fields (debug). Defaults come from
+// DEFAULT_SCANNER_TUNING; changes are pushed to the native view as the
+// `tuning` prop in real time — no rebuild needed.
+const TUNING_FIELDS: {
+  key: keyof ScannerTuning;
+  label: string;
+  step: number;
+  min: number;
+  max: number;
+  digits: number;
+}[] = [
+  { key: 'liveMinConfidence', label: 'Live-Confidence', step: 0.05, min: 0.05, max: 0.95, digits: 2 },
+  { key: 'captureMinConfidence', label: 'Capture-Confidence', step: 0.05, min: 0.1, max: 0.95, digits: 2 },
+  { key: 'persistenceFrames', label: 'Persistenz (Frames)', step: 2, min: 0, max: 60, digits: 0 },
+  { key: 'visionHz', label: 'Erkennung (Hz)', step: 1, min: 3, max: 30, digits: 0 },
+  { key: 'minAspect', label: 'Min Seitenverhältnis', step: 0.05, min: 0.05, max: 1, digits: 2 },
+  { key: 'maxAspect', label: 'Max Seitenverhältnis', step: 0.05, min: 0.2, max: 1.5, digits: 2 },
+  { key: 'minSize', label: 'Min Größe', step: 0.05, min: 0.05, max: 0.9, digits: 2 },
+  { key: 'quadratureTolerance', label: 'Schräglage (°)', step: 5, min: 5, max: 45, digits: 0 },
+  { key: 'maxObservations', label: 'Max Kandidaten', step: 1, min: 1, max: 12, digits: 0 },
+  { key: 'continuityRadius', label: 'Kontinuität-Radius', step: 0.02, min: 0.04, max: 0.6, digits: 2 },
+  { key: 'smoothing', label: 'Glättung', step: 0.1, min: 0, max: 0.9, digits: 1 },
+];
 
 /**
  * Probe whether the DocumentScanner native module is registered with
@@ -122,6 +149,8 @@ export default function CashbackCaptureScreen() {
   const [flashOn, setFlashOn] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [edgesVisible, setEdgesVisible] = useState(false);
+  const [tuning, setTuning] = useState<ScannerTuning>(DEFAULT_SCANNER_TUNING);
+  const [showTuning, setShowTuning] = useState(false);
   // 'unknown' = haven't decided yet. 'available' = native Apple doc
   // scanner (auto-shutter). 'live' = our own live-edge scanner with a
   // manual shutter. 'unavailable' = basic expo-camera fallback UI.
@@ -519,6 +548,7 @@ export default function CashbackCaptureScreen() {
             style={StyleSheet.absoluteFill}
             isActive
             torch={flashOn}
+            tuning={tuning}
             onEdges={setEdgesVisible}
           />
         ) : (
@@ -535,6 +565,17 @@ export default function CashbackCaptureScreen() {
               {edgesVisible ? 'Ränder erkannt · jetzt auslösen' : 'Bon flach in den Rahmen legen'}
             </Text>
           </View>
+          <Pressable
+            onPress={() => setShowTuning((v) => !v)}
+            style={styles.iconButton}
+            hitSlop={10}
+          >
+            <MaterialCommunityIcons
+              name="tune-variant"
+              size={22}
+              color={showTuning ? '#5ee0a0' : '#fff'}
+            />
+          </Pressable>
           <Pressable onPress={() => setFlashOn((v) => !v)} style={styles.iconButton} hitSlop={10}>
             <MaterialCommunityIcons
               name={flashOn ? 'flash' : 'flash-off'}
@@ -543,6 +584,57 @@ export default function CashbackCaptureScreen() {
             />
           </Pressable>
         </View>
+
+        {showTuning ? (
+          <View
+            style={[
+              styles.tuningPanel,
+              { bottom: insets.bottom + 104, maxHeight: SCREEN_H * 0.5 },
+            ]}
+          >
+            <View style={styles.tuningHeader}>
+              <Text style={styles.tuningTitle}>Scanner-Tuning</Text>
+              <Pressable onPress={() => setTuning(DEFAULT_SCANNER_TUNING)} hitSlop={8}>
+                <Text style={styles.tuningReset}>Zurücksetzen</Text>
+              </Pressable>
+            </View>
+            <ScrollView
+              style={{ flexGrow: 0 }}
+              contentContainerStyle={{ paddingBottom: 6 }}
+              showsVerticalScrollIndicator={false}
+            >
+              {TUNING_FIELDS.map((f) => {
+                const val = tuning[f.key];
+                const set = (next: number) => {
+                  const clamped = Math.min(f.max, Math.max(f.min, Number(next.toFixed(4))));
+                  setTuning((t) => ({ ...t, [f.key]: clamped }));
+                };
+                return (
+                  <View key={f.key} style={styles.tuningRow}>
+                    <Text style={styles.tuningLabel} numberOfLines={1}>
+                      {f.label}
+                    </Text>
+                    <Pressable
+                      onPress={() => set(val - f.step)}
+                      style={styles.tuningStep}
+                      hitSlop={6}
+                    >
+                      <MaterialCommunityIcons name="minus" size={18} color="#fff" />
+                    </Pressable>
+                    <Text style={styles.tuningValue}>{val.toFixed(f.digits)}</Text>
+                    <Pressable
+                      onPress={() => set(val + f.step)}
+                      style={styles.tuningStep}
+                      hitSlop={6}
+                    >
+                      <MaterialCommunityIcons name="plus" size={18} color="#fff" />
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </View>
+        ) : null}
 
         <View style={styles.helperWrap} pointerEvents="none">
           <View style={styles.helperBubble}>
@@ -769,5 +861,62 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  tuningPanel: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    backgroundColor: 'rgba(10,12,14,0.86)',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  tuningHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  tuningTitle: {
+    color: '#fff',
+    fontFamily: fontFamilyVariants.heading,
+    fontWeight: fontWeight.bold as any,
+    fontSize: 14,
+  },
+  tuningReset: {
+    color: '#5ee0a0',
+    fontFamily: fontFamilyVariants.body,
+    fontWeight: fontWeight.bold as any,
+    fontSize: 12,
+  },
+  tuningRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 5,
+  },
+  tuningLabel: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.85)',
+    fontFamily: fontFamilyVariants.body,
+    fontSize: 12.5,
+  },
+  tuningStep: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tuningValue: {
+    width: 46,
+    textAlign: 'center',
+    color: '#fff',
+    fontFamily: fontFamilyVariants.body,
+    fontWeight: fontWeight.bold as any,
+    fontSize: 13,
   },
 });

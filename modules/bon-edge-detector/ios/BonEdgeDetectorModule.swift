@@ -39,6 +39,9 @@ public class BonEdgeDetectorModule: Module {
       Prop("captureSignal") { (view: BonScannerView, signal: Int) in
         view.requestCapture(signal: signal)
       }
+      Prop("tuning") { (view: BonScannerView, tuning: ScannerTuning) in
+        view.applyTuning(tuning)
+      }
     }
   }
 
