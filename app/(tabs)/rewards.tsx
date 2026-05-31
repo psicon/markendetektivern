@@ -1,7 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as WebBrowser from 'expo-web-browser';
@@ -60,9 +60,7 @@ const eurStr = (cents: number) => (cents / 100).toFixed(2).replace('.', ',');
 // „später"). Counter wird jetzt live aus useWeeklyReceiptCount
 // hydratiert, Photo-Card sagt ehrlich „Bald verfügbar".
 const RECEIPT_LIMIT = { perWeek: 6, eurEach: 0.08 };
-const PHOTO_LIMIT = { perWeek: 20, eurEach: 0.1 };
 const SURVEY_AVAILABLE = false;
-const PHOTO_SUBMISSION_AVAILABLE = false;
 
 // Single source of truth for the three earn-action cards. The same
 // data feeds the Schnellzugriff tile + (formerly) the "Taler verdienen"
@@ -80,11 +78,42 @@ type EarnAction = {
   progress?: number; // 0..1 — undefined for survey (no weekly counter)
 };
 
+function fmtCents(cents: number): string {
+  return `${(cents / 100).toFixed(2).replace('.', ',')} €`;
+}
+
+// Reward chip copy for a kind, derived from its ACTIVE campaigns: the flat
+// per-bon reward or the tier range. Empty string when no campaign of that
+// kind runs → caller hides the chip (no hardcoded amount).
+function campaignRewardLabel(
+  campaigns: ActiveCampaign[],
+  kind: 'receipt' | 'product_photos' | 'survey',
+): string {
+  const ofKind = campaigns.filter((c) => (c.kind ?? 'receipt') === kind);
+  if (ofKind.length === 0) return '';
+  const amounts: number[] = [];
+  for (const c of ofKind) {
+    if (typeof c.cashbackPerBonCents === 'number' && c.cashbackPerBonCents > 0) {
+      amounts.push(c.cashbackPerBonCents);
+    } else if (c.tiers && c.tiers.length > 0) {
+      for (const t of c.tiers) if (t.cents > 0) amounts.push(t.cents);
+    }
+  }
+  if (amounts.length === 0) return '';
+  const min = Math.min(...amounts);
+  const max = Math.max(...amounts);
+  return min === max
+    ? fmtCents(min)
+    : `${(min / 100).toFixed(2).replace('.', ',')}–${fmtCents(max)}`;
+}
+
 function buildEarnActions(
   weeklyReceiptCount: number,
   campaignsEnabled: boolean,
-  receiptCampaignCount: number,
+  campaigns: ActiveCampaign[],
 ): EarnAction[] {
+  const receiptCount = campaigns.filter((c) => (c.kind ?? 'receipt') === 'receipt').length;
+  const photoCount = campaigns.filter((c) => (c.kind ?? 'receipt') === 'product_photos').length;
   const receiptAvailable = weeklyReceiptCount < RECEIPT_LIMIT.perWeek;
   // Aktions-Modus: der globale Wochenzähler (x/6) entfällt — Limits
   // hängen an der jeweiligen Aktion. Tile zeigt stattdessen die Anzahl
@@ -93,8 +122,8 @@ function buildEarnActions(
     ? {
         available: true,
         statusLabel:
-          receiptCampaignCount > 0
-            ? `${receiptCampaignCount} Aktion${receiptCampaignCount > 1 ? 'en' : ''}`
+          receiptCount > 0
+            ? `${receiptCount} Aktion${receiptCount > 1 ? 'en' : ''}`
             : 'Nur Übersicht',
         progress: undefined as number | undefined,
       }
@@ -105,6 +134,17 @@ function buildEarnActions(
           : 'Limit erreicht',
         progress: weeklyReceiptCount / RECEIPT_LIMIT.perWeek,
       };
+
+  // Adaptive Reward-Chips: im Aktions-Modus NUR die Belohnung der
+  // laufenden Aktion der jeweiligen Art (nichts, wenn keine läuft). Im
+  // Dauer-Modus behält der Bon seine Dauer-Vergütung; Produkte/Umfragen
+  // haben keine Dauer-Vergütung → leer.
+  const receiptReward = campaignsEnabled
+    ? campaignRewardLabel(campaigns, 'receipt')
+    : fmtCents(Math.round(RECEIPT_LIMIT.eurEach * 100));
+  const photoReward = campaignsEnabled ? campaignRewardLabel(campaigns, 'product_photos') : '';
+  const surveyReward = campaignsEnabled ? campaignRewardLabel(campaigns, 'survey') : '';
+
   return [
     {
       k: 'receipt',
@@ -112,7 +152,7 @@ function buildEarnActions(
       label: 'Kassenbon\nscannen',
       bg: '#0d8575',
       dark: true,
-      reward: `${RECEIPT_LIMIT.eurEach.toFixed(2).replace('.', ',')} €`,
+      reward: receiptReward,
       available: receiptStatus.available,
       statusLabel: receiptStatus.statusLabel,
       progress: receiptStatus.progress,
@@ -123,10 +163,12 @@ function buildEarnActions(
       label: 'Produkte\neinreichen',
       bg: '#5b4f9c',
       dark: true,
-      reward: `${PHOTO_LIMIT.eurEach.toFixed(2).replace('.', ',')} €`,
-      available: PHOTO_SUBMISSION_AVAILABLE,
-      statusLabel: PHOTO_SUBMISSION_AVAILABLE ? `0/${PHOTO_LIMIT.perWeek} Woche` : 'Bald verfügbar',
-      // Kein Progress solange Feature nicht aktiv ist.
+      reward: photoReward,
+      available: true,
+      statusLabel:
+        campaignsEnabled && photoCount > 0
+          ? `${photoCount} Aktion${photoCount > 1 ? 'en' : ''}`
+          : 'Datensatz sammeln',
       progress: undefined,
     },
     {
@@ -135,7 +177,7 @@ function buildEarnActions(
       label: 'Umfragen',
       bg: '#dde2e4',
       dark: false,
-      reward: '0,20-2,50 €',
+      reward: surveyReward,
       available: SURVEY_AVAILABLE,
       statusLabel: SURVEY_AVAILABLE ? 'Verfügbar' : 'Aktuell keine',
     },
@@ -352,6 +394,7 @@ function RedeemTab() {
   const [monthlyMaxCents, setMonthlyMaxCents] = useState(0);
   const [campaignsEnabled, setCampaignsEnabled] = useState(false);
   const [campaigns, setCampaigns] = useState<ActiveCampaign[]>([]);
+  const [campaignsLoaded, setCampaignsLoaded] = useState(false);
   React.useEffect(() => {
     let alive = true;
     getCashbackConfig()
@@ -368,7 +411,10 @@ function RedeemTab() {
       .then((c) => {
         if (alive) setCampaigns(c);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setCampaignsLoaded(true);
+      });
     return () => {
       alive = false;
     };
@@ -387,8 +433,8 @@ function RedeemTab() {
   const [payoutBusy, setPayoutBusy] = useState(false);
   const [payoutAmountCents, setPayoutAmountCents] = useState(0);
   const earnActions = React.useMemo(
-    () => buildEarnActions(weeklyReceiptCount, campaignsEnabled, receiptCampaigns.length),
-    [weeklyReceiptCount, campaignsEnabled, receiptCampaigns.length],
+    () => buildEarnActions(weeklyReceiptCount, campaignsEnabled, campaigns),
+    [weeklyReceiptCount, campaignsEnabled, campaigns],
   );
 
   // T17.26: Anchors für den Spotlight-Walkthrough — Cashback-Hero,
@@ -506,6 +552,23 @@ function RedeemTab() {
     }
     setCampaignPickerOpen(true);
   }, [campaignsEnabled, receiptCampaigns, onScanBon]);
+
+  // Deep-link from Home's "Kassenbon scannen" (Bug 86ca24dk4): when an
+  // action choice is required, Home routes here with ?scan=1 so the user
+  // picks the action via the same flow. Run only once campaigns are
+  // loaded (else startReceiptScan would see 0 and skip the picker).
+  const params = useLocalSearchParams<{ scan?: string }>();
+  const scanHandledRef = useRef(false);
+  useEffect(() => {
+    if (params.scan !== '1') {
+      scanHandledRef.current = false;
+      return;
+    }
+    if (!campaignsLoaded || scanHandledRef.current) return;
+    scanHandledRef.current = true;
+    router.setParams({ scan: undefined } as any);
+    startReceiptScan();
+  }, [params.scan, campaignsLoaded, startReceiptScan]);
 
   return (
     <>
@@ -679,7 +742,7 @@ function RedeemTab() {
       </View>
 
       {/* ── Quick actions row ── */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
+      <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
         {/* T17.27: Anchor um Section-Title + Card-Row, NICHT
             am padding-Wrapper. */}
         <View ref={earnAnchor.ref} onLayout={earnAnchor.onLayout}>
@@ -688,7 +751,13 @@ function RedeemTab() {
             <QuickActionTile
               key={a.k}
               action={a}
-              onCashbackTap={a.k === 'receipt' ? startReceiptScan : undefined}
+              onCashbackTap={
+                a.k === 'receipt'
+                  ? startReceiptScan
+                  : a.k === 'photo'
+                    ? () => router.push('/product-submit')
+                    : undefined
+              }
             />
           ))}
         </View>
@@ -905,7 +974,7 @@ function RedeemTab() {
                 lineHeight: 17,
               }}
             >
-              Aktuell ist keine Cashback-Aktion aktiv. Du kannst Bons trotzdem einreichen — sie zählen zu deiner Ausgabenübersicht, aber ohne Vergütung.
+              Aktuell ist keine Cashback-Aktion aktiv. Du kannst Bons trotzdem einreichen — sie zählen zu deiner Ausgabenübersicht.
             </Text>
           </View>
         </View>
@@ -1203,7 +1272,7 @@ function CampaignListItem({
     if (kind === 'receipt') {
       onScanBon(campaign.id);
     } else if (kind === 'product_photos') {
-      showInfoToast('Produktbilder-Einreichung ist bald verfügbar.', 'info', scheme);
+      router.push('/product-submit');
     } else {
       showInfoToast('Aktuell ist keine Umfrage verfügbar.', 'info', scheme);
     }
@@ -1591,13 +1660,10 @@ function QuickActionTile({
   return (
     <Pressable
       onPress={() => {
-        // 'receipt' = Bon-Scan via Cashback-Flow (Consent → Capture →
-        // Review → Pending). NOT the barcode scanner — that's a
-        // completely separate Stöbern-flow for product lookup.
-        if (action.k === 'receipt') {
-          onCashbackTap?.();
-        }
-        // photo + survey wire up later
+        // The parent passes the right handler per kind via onCashbackTap
+        // ('receipt' → Bon-Scan-Flow, 'photo' → Produkt-Wizard). Survey
+        // has none yet (undefined → no-op).
+        onCashbackTap?.();
       }}
       style={({ pressed }) => ({
         flex: 1,
@@ -1618,28 +1684,30 @@ function QuickActionTile({
         }}
       >
         <MaterialCommunityIcons name={action.icon} size={22} color={fg} />
-        <View
-          style={{
-            paddingHorizontal: 6,
-            paddingVertical: 2,
-            borderRadius: 4,
-            backgroundColor: action.dark
-              ? 'rgba(255,255,255,0.2)'
-              : 'rgba(13,133,117,0.14)',
-          }}
-        >
-          <Text
+        {action.reward ? (
+          <View
             style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 9,
-              letterSpacing: 0.4,
-              color: action.dark ? '#fff' : '#0d8575',
+              paddingHorizontal: 6,
+              paddingVertical: 2,
+              borderRadius: 4,
+              backgroundColor: action.dark
+                ? 'rgba(255,255,255,0.2)'
+                : 'rgba(13,133,117,0.14)',
             }}
           >
-            {action.reward}
-          </Text>
-        </View>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 9,
+                letterSpacing: 0.4,
+                color: action.dark ? '#fff' : '#0d8575',
+              }}
+            >
+              {action.reward}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <View>

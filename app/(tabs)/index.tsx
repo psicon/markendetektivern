@@ -55,6 +55,7 @@ import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
+import { startReceiptScanFlow } from '@/lib/services/cashbackScanStart';
 import { useShoppingCartCount } from '@/lib/hooks/useShoppingCartCount';
 import { achievementService } from '@/lib/services/achievementService';
 import { AlgoliaService } from '@/lib/services/algolia';
@@ -85,20 +86,12 @@ export default function HomeScreen() {
   // Shared mit FloatingShoppingListButton — gleicher Listener-Wert.
   const { count: cartCount } = useShoppingCartCount();
 
-  // Tap target for "Kassenbon scannen" — same flow as Belohnungen tab.
-  // Routes through the consent gate first; if consent is already
-  // accepted we skip straight to capture.
-  const onScanBon = useCallback(() => {
-    if (!cashback.uid) {
-      router.push('/auth/login');
-      return;
-    }
-    if (cashback.hasConsent) {
-      router.push('/cashback/capture');
-    } else {
-      router.push('/cashback/consent');
-    }
-  }, [cashback.uid, cashback.hasConsent]);
+  // Tap target for "Kassenbon scannen" — campaign-aware scan start
+  // (shared with "Meine Bons"). Bug 86ca24dk4.
+  const onScanBon = useCallback(
+    () => startReceiptScanFlow(cashback.uid, cashback.hasConsent),
+    [cashback.uid, cashback.hasConsent],
+  );
 
   // Coachmark — per-Screen-Erklär-Overlay, fires nur beim ersten
   // Mount eines Users (siehe useCoachmark für die Hard-Block-Logik
@@ -793,7 +786,7 @@ export default function HomeScreen() {
   // tick.
   const schnellzugriff = useMemo(() => [
     { icon: 'receipt' as const, label: 'Kassenbon\nscannen', background: '#0d8575', dark: true as const,  onPress: onScanBon },
-    { icon: 'camera-plus-outline'  as const, label: 'Produkte\neinreichen', background: '#5b4f9c', dark: true as const,  onPress: () => safePush('/achievements' as any) },
+    { icon: 'camera-plus-outline'  as const, label: 'Produkte\neinreichen', background: '#5b4f9c', dark: true as const,  onPress: () => safePush('/product-submit' as any) },
     // Cart-Glyph (gefüllt) — entspricht dem `cart.fill` der alten
     // Homepage und matcht den schwebenden Einkaufszettel-FAB rechts
     // unten, sodass Schnellzugriff + FAB visuell verbunden sind.

@@ -13,7 +13,7 @@
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router, useNavigation } from 'expo-router';
-import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -32,6 +32,7 @@ import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
+import { startReceiptScanFlow } from '@/lib/services/cashbackScanStart';
 import {
   getCashbackCount,
   subscribeUserCashbackHistoryPaged,
@@ -156,7 +157,14 @@ export default function CashbackHistoryScreen() {
   const [dateFilter, setDateFilter] = useState<string>('all');
   const [showFilter, setShowFilter] = useState(false);
 
-  const { lifetimeCents } = useCashbackUserState();
+  const { lifetimeCents, uid, hasConsent } = useCashbackUserState();
+
+  // Campaign-aware scan start — same flow as Home (Bug 86ca24dk4): no
+  // "Neuer Bon" entry may skip the action selection.
+  const onScanBon = useCallback(
+    () => startReceiptScanFlow(uid, hasConsent),
+    [uid, hasConsent],
+  );
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -425,7 +433,7 @@ export default function CashbackHistoryScreen() {
         </Text>
       </View>
       <Pressable
-        onPress={() => router.replace('/cashback/consent')}
+        onPress={onScanBon}
         style={({ pressed }) => ({
           backgroundColor: primary,
           paddingHorizontal: 14,
@@ -491,7 +499,7 @@ export default function CashbackHistoryScreen() {
         Lade nach deinem nächsten Einkauf einen Kassenbon hoch und sammle Cashback.
       </Text>
       <Pressable
-        onPress={() => router.replace('/cashback/consent')}
+        onPress={onScanBon}
         style={({ pressed }) => ({
           marginTop: 8,
           backgroundColor: primary,
