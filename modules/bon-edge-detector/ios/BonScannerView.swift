@@ -7,10 +7,10 @@ import UIKit
 /// Runtime-tunable scanner parameters (passed live from JS so the open
 /// scanner can be tuned without a rebuild). Defaults = the shipped values.
 struct ScannerTuning: Record {
-  @Field var liveMinConfidence: Double = 0.25
+  @Field var liveMinConfidence: Double = 0.45
   @Field var captureMinConfidence: Double = 0.6
-  @Field var persistenceFrames: Int = 22
-  @Field var visionHz: Double = 15
+  @Field var persistenceFrames: Int = 50
+  @Field var visionHz: Double = 30
   @Field var minAspect: Double = 0.2
   @Field var maxAspect: Double = 1.0
   @Field var minSize: Double = 0.2
@@ -20,7 +20,7 @@ struct ScannerTuning: Record {
   @Field var smoothing: Double = 0.5
   /// Min mean interior brightness (0..1) for a candidate to count as
   /// paper — rejects dark high-contrast rects (logos, barcodes).
-  @Field var minLuma: Double = 0.45
+  @Field var minLuma: Double = 0.35
 
   func liveParams() -> BonVision.RectParams {
     BonVision.RectParams(

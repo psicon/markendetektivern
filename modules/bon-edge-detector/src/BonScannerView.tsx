@@ -43,10 +43,10 @@ export interface ScannerTuning {
 
 /** Defaults = the shipped Swift values. */
 export const DEFAULT_SCANNER_TUNING: ScannerTuning = {
-  liveMinConfidence: 0.25,
+  liveMinConfidence: 0.45,
   captureMinConfidence: 0.6,
-  persistenceFrames: 22,
-  visionHz: 15,
+  persistenceFrames: 50,
+  visionHz: 30,
   minAspect: 0.2,
   maxAspect: 1.0,
   minSize: 0.2,
@@ -54,7 +54,7 @@ export const DEFAULT_SCANNER_TUNING: ScannerTuning = {
   maxObservations: 6,
   continuityRadius: 0.22,
   smoothing: 0.5,
-  minLuma: 0.45,
+  minLuma: 0.35,
 };
 
 interface NativeCaptureEvent {
