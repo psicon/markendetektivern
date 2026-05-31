@@ -40,6 +40,12 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import {
+  BonScanner,
+  isBonScannerAvailable,
+  type BonScannerHandle,
+} from 'bon-edge-detector';
+
 import { fontFamilyVariants, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -115,10 +121,14 @@ export default function CashbackCaptureScreen() {
   const [cameraReady, setCameraReady] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
   const [capturing, setCapturing] = useState(false);
-  // 'unknown' = haven't tried scanner yet. 'available' = use native.
-  // 'unavailable' = drop to expo-camera fallback UI.
-  const [scannerState, setScannerState] = useState<'unknown' | 'available' | 'unavailable'>('unknown');
+  const [edgesVisible, setEdgesVisible] = useState(false);
+  // 'unknown' = haven't decided yet. 'available' = native Apple doc
+  // scanner (auto-shutter). 'live' = our own live-edge scanner with a
+  // manual shutter. 'unavailable' = basic expo-camera fallback UI.
+  const [scannerState, setScannerState] =
+    useState<'unknown' | 'available' | 'live' | 'unavailable'>('unknown');
   const cameraRef = useRef<CameraView>(null);
+  const scannerRef = useRef<BonScannerHandle>(null);
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -194,7 +204,9 @@ export default function CashbackCaptureScreen() {
       }
       if (!alive) return;
       if (forceManual) {
-        setScannerState('unavailable');
+        // Prefer our live-edge scanner (manual shutter + overlay). If the
+        // native view isn't in this binary, drop to the basic camera.
+        setScannerState(isBonScannerAvailable ? 'live' : 'unavailable');
         return;
       }
       setScannerState(isDocumentScannerLinked() ? 'available' : 'unavailable');
@@ -250,6 +262,15 @@ export default function CashbackCaptureScreen() {
     return false;
   }, [requestPermission]);
 
+  // Live scanner uses a native AVCaptureSession → it needs camera
+  // permission too. Request it when we enter live mode (the basic
+  // expo-camera branch handles its own gate below).
+  useEffect(() => {
+    if (scannerState !== 'live') return;
+    if (permission?.granted) return;
+    ensurePermission();
+  }, [scannerState, permission?.granted, ensurePermission]);
+
   const handleCaptureFallback = useCallback(async () => {
     if (capturing || !cameraRef.current) return;
     setCapturing(true);
@@ -279,6 +300,23 @@ export default function CashbackCaptureScreen() {
       await goReview(outUri, 'live_camera');
     } catch (error: any) {
       console.warn('⚠️ Bon capture failed:', error);
+      Alert.alert('Aufnahme fehlgeschlagen', 'Bitte versuch es noch einmal.');
+    } finally {
+      setCapturing(false);
+    }
+  }, [capturing, goReview]);
+
+  // Live-scanner shutter: the native view warps the frozen frame flat
+  // (using the live-detected quad) and hands back a ready-to-OCR JPEG.
+  const handleLiveCapture = useCallback(async () => {
+    if (capturing || !scannerRef.current) return;
+    setCapturing(true);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      const res = await scannerRef.current.capture();
+      if (res?.uri) await goReview(res.uri, 'live_camera');
+    } catch (error: any) {
+      console.warn('⚠️ Live capture failed:', error?.message);
       Alert.alert('Aufnahme fehlgeschlagen', 'Bitte versuch es noch einmal.');
     } finally {
       setCapturing(false);
@@ -441,6 +479,111 @@ export default function CashbackCaptureScreen() {
               Aus Galerie wählen
             </Text>
           </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // ─── Live scanner: our own camera with live edges + manual shutter ─
+
+  if (scannerState === 'live') {
+    if (!permission || !permission.granted) {
+      return (
+        <View style={styles.permGate}>
+          <StatusBar barStyle="light-content" />
+          <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+            <Pressable onPress={handleBack} style={styles.iconButton} hitSlop={10}>
+              <MaterialCommunityIcons name="close" size={26} color="#fff" />
+            </Pressable>
+          </View>
+          <View style={styles.permCenter}>
+            <MaterialCommunityIcons name="camera-off-outline" size={56} color="#fff" />
+            <Text style={styles.permTitle}>Kamera-Zugriff fehlt</Text>
+            <Text style={styles.permBody}>
+              Wir brauchen Zugriff auf deine Kamera, um deinen Bon zu scannen.
+            </Text>
+            <Pressable onPress={ensurePermission} style={styles.primaryButton}>
+              <Text style={styles.primaryButtonText}>Zugriff erlauben</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.root}>
+        <StatusBar barStyle="light-content" />
+        {cameraReady ? (
+          <BonScanner
+            ref={scannerRef}
+            style={StyleSheet.absoluteFill}
+            isActive
+            torch={flashOn}
+            onEdges={setEdgesVisible}
+          />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
+        )}
+
+        <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+          <Pressable onPress={handleBack} style={styles.iconButton} hitSlop={10}>
+            <MaterialCommunityIcons name="close" size={26} color="#fff" />
+          </Pressable>
+          <View style={styles.titleBlock}>
+            <Text style={styles.title}>Bon scannen</Text>
+            <Text style={styles.subtitle}>
+              {edgesVisible ? 'Ränder erkannt · jetzt auslösen' : 'Bon flach in den Rahmen legen'}
+            </Text>
+          </View>
+          <Pressable onPress={() => setFlashOn((v) => !v)} style={styles.iconButton} hitSlop={10}>
+            <MaterialCommunityIcons
+              name={flashOn ? 'flash' : 'flash-off'}
+              size={24}
+              color={flashOn ? '#ffd44b' : '#fff'}
+            />
+          </Pressable>
+        </View>
+
+        <View style={styles.helperWrap} pointerEvents="none">
+          <View style={styles.helperBubble}>
+            <MaterialCommunityIcons
+              name={edgesVisible ? 'check-circle-outline' : 'information-outline'}
+              size={14}
+              color={edgesVisible ? '#5ee0a0' : '#fff'}
+            />
+            <Text style={styles.helperText}>
+              {edgesVisible
+                ? 'Bon erkannt — tippe auf den Auslöser'
+                : 'Alle 4 Ecken sichtbar · Reflexionen vermeiden'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
+          <Pressable onPress={handlePickFromGallery} style={styles.iconButton} hitSlop={12}>
+            <MaterialCommunityIcons name="image-outline" size={26} color="#fff" />
+          </Pressable>
+          <Pressable
+            onPress={handleLiveCapture}
+            disabled={capturing || !cameraReady}
+            style={({ pressed }) => [
+              styles.shutter,
+              edgesVisible && { borderColor: '#5ee0a0' },
+              (pressed || capturing) && { transform: [{ scale: 0.94 }] },
+              (capturing || !cameraReady) && { opacity: 0.7 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Bon fotografieren"
+          >
+            <View style={styles.shutterInner}>
+              {capturing ? (
+                <ActivityIndicator color="#0d8575" />
+              ) : (
+                <MaterialCommunityIcons name="camera-outline" size={28} color="#0d8575" />
+              )}
+            </View>
+          </Pressable>
+          <View style={styles.iconButton} />
         </View>
       </View>
     );

@@ -47,4 +47,13 @@ export async function detectAndCropDocument(
   }
 }
 
+// Live scanner (manual shutter + per-frame edge overlay).
+export {
+  BonScanner,
+  isBonScannerAvailable,
+  type BonScannerHandle,
+  type BonScannerProps,
+  type BonScannerCaptureResult,
+} from './BonScannerView';
+
 export default { detectAndCropDocument };
