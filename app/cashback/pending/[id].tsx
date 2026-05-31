@@ -476,6 +476,10 @@ export default function CashbackPendingScreen() {
           ? `Dieser Bon ist zu alt — wir nehmen nur Bons der letzten 5 Tage an.${typeof doc?.bonAgeDays === 'number' ? ` Dieser Bon ist ${doc.bonAgeDays} Tage alt.` : ''}`
           : reason === 'not_a_receipt'
           ? 'Das Foto sieht nicht nach einem Kassenbon aus. Bitte versuche es nochmal mit einem klar lesbaren Bon.'
+          : reason === 'no_bon_date'
+          ? 'Wir konnten kein Datum auf dem Bon erkennen. Bitte fotografiere den Bon vollständig und gut lesbar (Datum muss sichtbar sein).'
+          : reason === 'reconciliation_delta'
+          ? 'Die erkannten Artikel ergeben nicht den Endbetrag. Bitte fotografiere den Bon vollständig und gut lesbar.'
           : reason === 'process_error'
           ? 'Bei der Auswertung ist etwas schiefgegangen. Versuche es nochmal mit einem schärferen Foto.'
           : reason === 'pubsub_publish_failed'

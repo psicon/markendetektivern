@@ -1123,8 +1123,8 @@ exports.processCashback = onMessagePublished(
         status = 'rejected';
         rejectReason = 'bon_too_old';
       } else if (ageDays == null) {
-        // Bon-Datum fehlt komplett → manuell prüfen
-        status = 'review';
+        // Bon-Datum nicht erkannt → ABLEHNEN (keine manuelle Prüfung).
+        status = 'rejected';
         rejectReason = 'no_bon_date';
       } else if (duplicateOf) {
         status = 'rejected';
@@ -1132,7 +1132,8 @@ exports.processCashback = onMessagePublished(
           ? 'duplicate_content_self'
           : 'duplicate_content_cross_user';
       } else if (!recon.ok) {
-        status = 'review';
+        // Σ Items ≠ Total → ABLEHNEN (nie 'review' / manuelle Prüfung).
+        status = 'rejected';
         rejectReason = 'reconciliation_delta';
       } else if (cashbackCents === 0) {
         // Gültiger Bon, aber 0 Vergütung.
