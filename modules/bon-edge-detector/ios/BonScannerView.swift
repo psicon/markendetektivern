@@ -185,8 +185,12 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     if now - lastVisionTime < visionInterval { return }
     lastVisionTime = now
 
+    let bufW = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
+    let bufH = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
     let obs = BonVision.detectRectangle(pixelBuffer: pixelBuffer)
-    DispatchQueue.main.async { [weak self] in self?.updateOverlay(obs) }
+    DispatchQueue.main.async { [weak self] in
+      self?.updateOverlay(obs, bufferW: bufW, bufferH: bufH)
+    }
   }
 
   // ── Capture: warp the frozen frame flat ────────────────────────────
@@ -211,7 +215,14 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   }
 
   // ── Live overlay ───────────────────────────────────────────────────
-  private func updateOverlay(_ obs: VNRectangleObservation?) {
+  //
+  // We map Vision's normalized corners to screen points OURSELVES via
+  // aspect-fill math (the preview uses .resizeAspectFill) rather than
+  // `previewLayer.layerPointConverted(fromCaptureDevicePoint:)`, which
+  // expects sensor-space (landscape) coords and mis-rotates our
+  // portrait-rotated frames. Deterministic and matches what the user
+  // sees frame-for-frame.
+  private func updateOverlay(_ obs: VNRectangleObservation?, bufferW: CGFloat, bufferH: CGFloat) {
     guard let obs = obs else {
       framesWithoutQuad += 1
       if framesWithoutQuad > 5 {
@@ -229,12 +240,35 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     }
     framesWithoutQuad = 0
 
-    // Vision normalized (origin bottom-left) → AVF metadata (origin
-    // top-left): flip Y. layerPointConverted then handles gravity.
-    let raw = [obs.topLeft, obs.topRight, obs.bottomRight, obs.bottomLeft].map { p -> CGPoint in
-      let meta = CGPoint(x: p.x, y: 1 - p.y)
-      return previewLayer.layerPointConverted(fromCaptureDevicePoint: meta)
+    let viewW = bounds.width
+    let viewH = bounds.height
+    guard viewW > 0, viewH > 0, bufferW > 0, bufferH > 0 else { return }
+
+    // Aspect-fill the (portrait) buffer into the view: fill the view,
+    // crop the overflowing dimension, center the rest.
+    let imgAspect = bufferW / bufferH
+    let viewAspect = viewW / viewH
+    let drawW: CGFloat
+    let drawH: CGFloat
+    let offX: CGFloat
+    let offY: CGFloat
+    if imgAspect > viewAspect {
+      drawH = viewH
+      drawW = viewH * imgAspect
+      offX = (viewW - drawW) / 2
+      offY = 0
+    } else {
+      drawW = viewW
+      drawH = viewW / imgAspect
+      offX = 0
+      offY = (viewH - drawH) / 2
     }
+
+    // Vision normalized, origin bottom-left → screen (origin top-left).
+    let map = { (p: CGPoint) -> CGPoint in
+      CGPoint(x: offX + p.x * drawW, y: offY + (1 - p.y) * drawH)
+    }
+    let raw = [obs.topLeft, obs.topRight, obs.bottomRight, obs.bottomLeft].map(map)
 
     let pts: [CGPoint]
     if let prev = smoothed, prev.count == raw.count {
