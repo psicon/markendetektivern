@@ -598,13 +598,7 @@ export default function CashbackCaptureScreen() {
           </Pressable>
           <View style={styles.titleBlock}>
             <Text style={styles.title}>Bon scannen</Text>
-            <Text style={styles.subtitle}>
-              {quality === 'ok'
-                ? 'Lesbar · jetzt auslösen'
-                : quality === 'far'
-                  ? 'Näher ran · Schrift noch zu klein'
-                  : 'Bon flach in den Rahmen legen'}
-            </Text>
+            <Text style={styles.subtitle}>Alle 4 Ecken sichtbar · Reflexionen vermeiden</Text>
           </View>
           {canTune ? (
             <Pressable
@@ -679,8 +673,11 @@ export default function CashbackCaptureScreen() {
           </View>
         ) : null}
 
-        <View style={styles.helperWrap} pointerEvents="none">
-          <View style={styles.helperBubble}>
+        <View
+          style={[styles.liveHelperWrap, { bottom: insets.bottom + 168 }]}
+          pointerEvents="none"
+        >
+          <View style={styles.liveHelperBubble}>
             <MaterialCommunityIcons
               name={
                 quality === 'ok'
@@ -689,15 +686,15 @@ export default function CashbackCaptureScreen() {
                     ? 'arrow-up-circle-outline'
                     : 'information-outline'
               }
-              size={14}
+              size={22}
               color={quality === 'ok' ? '#5ee0a0' : quality === 'far' ? '#ffd44b' : '#fff'}
             />
-            <Text style={styles.helperText}>
+            <Text style={styles.liveHelperText}>
               {quality === 'ok'
-                ? 'Lesbar — tippe auf den Auslöser'
+                ? 'Lesbar — jetzt auslösen'
                 : quality === 'far'
                   ? 'Näher ran — Schrift noch zu klein'
-                  : 'Alle 4 Ecken sichtbar · Reflexionen vermeiden'}
+                  : 'Bon flach in den Rahmen halten'}
             </Text>
           </View>
         </View>
@@ -883,6 +880,29 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   helperText: { color: '#fff', fontFamily: fontFamilyVariants.body, fontSize: 12 },
+  // Live-scanner readability pill — bigger + anchored low (above shutter).
+  liveHelperWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  liveHelperBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    backgroundColor: 'rgba(0,0,0,0.62)',
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    borderRadius: 999,
+  },
+  liveHelperText: {
+    color: '#fff',
+    fontFamily: fontFamilyVariants.body,
+    fontWeight: fontWeight.bold as any,
+    fontSize: 16,
+  },
   bottomBar: {
     position: 'absolute',
     bottom: 0,
