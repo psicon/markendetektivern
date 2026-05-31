@@ -62,6 +62,12 @@ const FRAME_HEIGHT = SCREEN_H * 0.55;
 const CORNER_LEN = 28;
 const CORNER_THICK = 3;
 
+// Debug gate (mirror app/profile.tsx): the in-scanner tuning panel is
+// only available in DEV builds or for a whitelisted owner email — so the
+// owner can re-tune on a live TestFlight device, but normal users never
+// see it.
+const DEBUG_WHITELIST = ['patrickvfbfan@web.de'];
+
 // In-scanner live-tuning fields (debug). Defaults come from
 // DEFAULT_SCANNER_TUNING; changes are pushed to the native view as the
 // `tuning` prop in real time — no rebuild needed.
@@ -152,6 +158,8 @@ export default function CashbackCaptureScreen() {
   const [edgesVisible, setEdgesVisible] = useState(false);
   const [tuning, setTuning] = useState<ScannerTuning>(DEFAULT_SCANNER_TUNING);
   const [showTuning, setShowTuning] = useState(false);
+  const canTune =
+    __DEV__ || (!!user?.email && DEBUG_WHITELIST.includes(user.email.toLowerCase()));
   // 'unknown' = haven't decided yet. 'available' = native Apple doc
   // scanner (auto-shutter). 'live' = our own live-edge scanner with a
   // manual shutter. 'unavailable' = basic expo-camera fallback UI.
@@ -566,17 +574,19 @@ export default function CashbackCaptureScreen() {
               {edgesVisible ? 'Ränder erkannt · jetzt auslösen' : 'Bon flach in den Rahmen legen'}
             </Text>
           </View>
-          <Pressable
-            onPress={() => setShowTuning((v) => !v)}
-            style={styles.iconButton}
-            hitSlop={10}
-          >
-            <MaterialCommunityIcons
-              name="tune-variant"
-              size={22}
-              color={showTuning ? '#5ee0a0' : '#fff'}
-            />
-          </Pressable>
+          {canTune ? (
+            <Pressable
+              onPress={() => setShowTuning((v) => !v)}
+              style={styles.iconButton}
+              hitSlop={10}
+            >
+              <MaterialCommunityIcons
+                name="tune-variant"
+                size={22}
+                color={showTuning ? '#5ee0a0' : '#fff'}
+              />
+            </Pressable>
+          ) : null}
           <Pressable onPress={() => setFlashOn((v) => !v)} style={styles.iconButton} hitSlop={10}>
             <MaterialCommunityIcons
               name={flashOn ? 'flash' : 'flash-off'}
@@ -586,7 +596,7 @@ export default function CashbackCaptureScreen() {
           </Pressable>
         </View>
 
-        {showTuning ? (
+        {showTuning && canTune ? (
           <View
             style={[
               styles.tuningPanel,
