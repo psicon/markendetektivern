@@ -30,6 +30,7 @@ import {
   InteractionManager,
   Linking,
   NativeModules,
+  Platform,
   Pressable,
   StatusBar,
   StyleSheet,
@@ -42,7 +43,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fontFamilyVariants, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { hasValidCashbackConsent } from '@/lib/services/cashbackService';
+import { getCashbackConfig, hasValidCashbackConsent } from '@/lib/services/cashbackService';
 import { buildCapturedBon } from '@/lib/utils/cashbackImage';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -169,13 +170,38 @@ export default function CashbackCaptureScreen() {
     [],
   );
 
-  // On mount: just probe for the native scanner so we know which UI
-  // to render. We do NOT auto-launch — that bites the navigation
-  // animation (capture page slides in from rewards while the native
-  // modal opens, leading to a confusing reveal on cancel).
+  // On mount: decide which capture UI to render. We do NOT auto-launch
+  // the native scanner — that bites the navigation animation (capture
+  // page slides in from rewards while the native modal opens, leading
+  // to a confusing reveal on cancel).
+  //
+  // Config-gated capture mode (iOS only): `cashback_config.captureMode`
+  // = 'apple' (default) uses Apple VisionKit's auto-shutter scanner;
+  // 'manual' forces our own expo-camera UI (the 'unavailable' branch)
+  // for users who find the auto-shutter too twitchy. Android always
+  // uses the ML-Kit scanner (it has no auto-shutter issue), so the flag
+  // is iOS-only. Falls back to the native scanner on any config error.
   useEffect(() => {
     if (scannerState !== 'unknown') return;
-    setScannerState(isDocumentScannerLinked() ? 'available' : 'unavailable');
+    let alive = true;
+    (async () => {
+      let forceManual = false;
+      try {
+        const config = await getCashbackConfig();
+        forceManual = Platform.OS === 'ios' && config.captureMode === 'manual';
+      } catch {
+        forceManual = false;
+      }
+      if (!alive) return;
+      if (forceManual) {
+        setScannerState('unavailable');
+        return;
+      }
+      setScannerState(isDocumentScannerLinked() ? 'available' : 'unavailable');
+    })();
+    return () => {
+      alive = false;
+    };
   }, [scannerState]);
 
   const launchScannerAgain = useCallback(async () => {
@@ -235,7 +261,22 @@ export default function CashbackCaptureScreen() {
         exif: false,
       });
       if (!photo?.uri) throw new Error('takePictureAsync returned no URI');
-      await goReview(photo.uri, 'live_camera');
+
+      // Manual-capture path: there's no native auto-perspective-
+      // correction (that's the whole point of this mode), so run the
+      // bon-edge-detector ourselves. On a clean quad it ships a flat,
+      // cropped bon; on null (no clear quad / Android stub / detect
+      // error) we send the RAW frame — Gemini OCR copes with
+      // backgrounds, and we never bounce the user through a manual crop.
+      let outUri = photo.uri;
+      try {
+        const { detectAndCropDocument } = await import('bon-edge-detector');
+        const auto = await detectAndCropDocument(photo.uri);
+        if (auto) outUri = auto.uri;
+      } catch (e: any) {
+        console.warn('⚠️ auto-crop unavailable, sending raw frame:', e?.message);
+      }
+      await goReview(outUri, 'live_camera');
     } catch (error: any) {
       console.warn('⚠️ Bon capture failed:', error);
       Alert.alert('Aufnahme fehlgeschlagen', 'Bitte versuch es noch einmal.');

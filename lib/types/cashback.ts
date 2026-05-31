@@ -45,6 +45,16 @@ export interface CashbackConfigDoc {
    *  Die Aktion hat ZUSÄTZLICH ihr eigenes `weeklyBonCap`; es gilt das
    *  jeweils strengere. Server-enforced (TODO: cashback-pipeline). */
   weeklyBonCap: number;
+  /** Bon-Aufnahme-Modus (nur iOS relevant).
+   *  - 'apple' (Default): Apple VisionKit Document-Scanner mit
+   *    Auto-Shutter (snappt automatisch wenn der Bon stabil im Rahmen
+   *    ist). Beste Kantenerkennung, aber kein manueller Auslöser.
+   *  - 'manual': eigener expo-camera-Stack mit manuellem Auslöser +
+   *    nachgelagerter Kantenerkennung (bon-edge-detector). Für User
+   *    die den Auto-Shutter als zu hektisch empfinden.
+   *  Android nutzt immer den ML-Kit-Scanner (kein Auto-Shutter-Problem),
+   *  dieser Flag wird dort ignoriert. */
+  captureMode?: 'apple' | 'manual';
 }
 
 /** Eine zeitlich begrenzte Cashback-Aktion mit Gesamt-Budget.
@@ -105,6 +115,7 @@ export const DEFAULT_CASHBACK_CONFIG: CashbackConfigDoc = {
   monthlyMaxCents: 0, // 0 = kein Limit (opt-in via Config-Doc)
   campaignsEnabled: false, // false = Dauer-Cashback (opt-in via Config-Doc)
   weeklyBonCap: 0, // 0 = kein globales Wochen-Limit (opt-in via Config-Doc)
+  captureMode: 'apple', // 'apple' = VisionKit Auto-Shutter (iOS), 'manual' = expo-camera
 };
 
 // ─── User-side state ────────────────────────────────────────────────
