@@ -18,6 +18,7 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Camera, CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -68,6 +69,9 @@ const CORNER_THICK = 3;
 // see it.
 const DEBUG_WHITELIST = ['patrickvfbfan@web.de'];
 
+// Persist the owner's tuning between sessions (v2 = geometric schema).
+const TUNING_STORAGE_KEY = 'cashback_scanner_tuning_v2';
+
 // In-scanner live-tuning fields (debug). Defaults come from
 // DEFAULT_SCANNER_TUNING; changes are pushed to the native view as the
 // `tuning` prop in real time — no rebuild needed.
@@ -79,8 +83,10 @@ const TUNING_FIELDS: {
   max: number;
   digits: number;
 }[] = [
-  { key: 'liveMinConfidence', label: 'Doc-Confidence (live)', step: 0.05, min: 0, max: 0.95, digits: 2 },
-  { key: 'captureMinConfidence', label: 'Doc-Confidence (Aufnahme)', step: 0.05, min: 0, max: 0.95, digits: 2 },
+  { key: 'docMinArea', label: 'Min Fläche (Bon)', step: 0.02, min: 0, max: 0.5, digits: 2 },
+  { key: 'docMaxArea', label: 'Max Fläche', step: 0.02, min: 0.3, max: 1, digits: 2 },
+  { key: 'docMaxWHRatio', label: 'Max Breite/Höhe', step: 0.05, min: 0.2, max: 2, digits: 2 },
+  { key: 'docMinConfidence', label: 'Doc-Confidence', step: 0.05, min: 0, max: 0.95, digits: 2 },
   { key: 'persistenceFrames', label: 'Persistenz (Frames)', step: 2, min: 0, max: 80, digits: 0 },
   { key: 'visionHz', label: 'Erkennung (Hz)', step: 1, min: 3, max: 30, digits: 0 },
   { key: 'smoothing', label: 'Glättung', step: 0.1, min: 0, max: 0.9, digits: 1 },
@@ -153,6 +159,33 @@ export default function CashbackCaptureScreen() {
   const [showTuning, setShowTuning] = useState(false);
   const canTune =
     __DEV__ || (!!user?.email && DEBUG_WHITELIST.includes(user.email.toLowerCase()));
+
+  // Load/persist tuning for the owner so values survive re-opens.
+  useEffect(() => {
+    if (!canTune) return;
+    let alive = true;
+    AsyncStorage.getItem(TUNING_STORAGE_KEY).then((raw) => {
+      if (!alive || !raw) return;
+      try {
+        const saved = JSON.parse(raw);
+        const merged = { ...DEFAULT_SCANNER_TUNING };
+        (Object.keys(DEFAULT_SCANNER_TUNING) as (keyof ScannerTuning)[]).forEach((k) => {
+          if (typeof saved[k] === 'number') merged[k] = saved[k];
+        });
+        setTuning(merged);
+      } catch {
+        // ignore corrupt persisted tuning
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [canTune]);
+
+  useEffect(() => {
+    if (!canTune) return;
+    AsyncStorage.setItem(TUNING_STORAGE_KEY, JSON.stringify(tuning)).catch(() => {});
+  }, [tuning, canTune]);
   // 'unknown' = haven't decided yet. 'available' = native Apple doc
   // scanner (auto-shutter). 'live' = our own live-edge scanner with a
   // manual shutter. 'unavailable' = basic expo-camera fallback UI.

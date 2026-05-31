@@ -83,20 +83,42 @@ enum BonVision {
   // ONE document with corner points (same VNRectangleObservation shape),
   // so there's no logo/barcode/table false-positive to disambiguate.
 
-  static func detectDocument(pixelBuffer: CVPixelBuffer, minConfidence: VNConfidence) -> VNRectangleObservation? {
+  /// Acceptance criteria for a segmented document. The segmenter ALWAYS
+  /// returns its best guess (often the whole table) with high confidence,
+  /// so confidence alone is a useless gate. We instead require the quad
+  /// to look like a bon: a sensible area fraction (not tiny, not nearly
+  /// the whole frame) and a tall-ish aspect (receipts are portrait).
+  struct DocParams {
+    var minConfidence: VNConfidence = 0.2
+    var minArea: CGFloat = 0.06   // ≥6% of frame
+    var maxArea: CGFloat = 0.90   // <90% (reject "the whole surface")
+    var maxWHRatio: CGFloat = 0.85 // width/height — reject wide/square
+  }
+
+  private static func accept(_ obs: VNRectangleObservation, _ p: DocParams) -> Bool {
+    if obs.confidence < p.minConfidence { return false }
+    let bb = obs.boundingBox
+    let area = bb.width * bb.height
+    if area < p.minArea || area > p.maxArea { return false }
+    let wh = bb.height > 0 ? bb.width / bb.height : 999
+    if wh > p.maxWHRatio { return false }
+    return true
+  }
+
+  static func detectDocument(pixelBuffer: CVPixelBuffer, params: DocParams) -> VNRectangleObservation? {
     let request = VNDetectDocumentSegmentationRequest()
     let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
     do { try handler.perform([request]) } catch { return nil }
     guard let obs = request.results?.first else { return nil }
-    return obs.confidence >= minConfidence ? obs : nil
+    return accept(obs, params) ? obs : nil
   }
 
-  static func detectDocument(cgImage: CGImage, minConfidence: VNConfidence) -> VNRectangleObservation? {
+  static func detectDocument(cgImage: CGImage, params: DocParams) -> VNRectangleObservation? {
     let request = VNDetectDocumentSegmentationRequest()
     let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
     do { try handler.perform([request]) } catch { return nil }
     guard let obs = request.results?.first else { return nil }
-    return obs.confidence >= minConfidence ? obs : nil
+    return accept(obs, params) ? obs : nil
   }
 
   /// Warp the four corners of `observation` flat (axis-aligned) and

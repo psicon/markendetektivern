@@ -7,9 +7,13 @@ import UIKit
 /// Runtime-tunable scanner parameters (passed live from JS so the open
 /// scanner can be tuned without a rebuild). Defaults = the shipped values.
 struct ScannerTuning: Record {
-  // Document-segmentation confidence floors (primary detector).
-  @Field var liveMinConfidence: Double = 0.3
-  @Field var captureMinConfidence: Double = 0.3
+  // Document-segmenter acceptance for the LIVE overlay. Confidence is a
+  // weak gate (segmenter is almost always confident), so the real levers
+  // are area + aspect of the detected quad.
+  @Field var docMinConfidence: Double = 0.2
+  @Field var docMinArea: Double = 0.06
+  @Field var docMaxArea: Double = 0.90
+  @Field var docMaxWHRatio: Double = 0.85
   @Field var persistenceFrames: Int = 50
   @Field var visionHz: Double = 20
   @Field var smoothing: Double = 0.5
@@ -20,21 +24,24 @@ struct ScannerTuning: Record {
   @Field var quadratureTolerance: Double = 25
   @Field var maxObservations: Int = 6
 
-  func liveParams() -> BonVision.RectParams {
+  func docParamsLive() -> BonVision.DocParams {
+    BonVision.DocParams(
+      minConfidence: VNConfidence(docMinConfidence),
+      minArea: CGFloat(docMinArea),
+      maxArea: CGFloat(docMaxArea),
+      maxWHRatio: CGFloat(docMaxWHRatio)
+    )
+  }
+
+  func rectFallbackParams() -> BonVision.RectParams {
     BonVision.RectParams(
-      minConfidence: Float(liveMinConfidence),
+      minConfidence: 0.4,
       minAspect: Float(minAspect),
       maxAspect: Float(maxAspect),
       minSize: Float(minSize),
       quadratureTolerance: Float(quadratureTolerance),
       maxObservations: maxObservations
     )
-  }
-
-  func captureParams() -> BonVision.RectParams {
-    var p = liveParams()
-    p.minConfidence = Float(captureMinConfidence)
-    return p
   }
 }
 
@@ -229,12 +236,9 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
 
     let bufW = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
     let bufH = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
-    // ML document segmenter: returns exactly one document, no
-    // logo/barcode/table false-positives to disambiguate.
-    let obs = BonVision.detectDocument(
-      pixelBuffer: pixelBuffer,
-      minConfidence: VNConfidence(t.liveMinConfidence)
-    )
+    // ML document segmenter, gated on area+aspect so we only mark a
+    // real bon (not the table the segmenter would otherwise return).
+    let obs = BonVision.detectDocument(pixelBuffer: pixelBuffer, params: t.docParamsLive())
     DispatchQueue.main.async { [weak self] in
       self?.updateOverlay(obs, bufferW: bufW, bufferH: bufH)
     }
@@ -244,12 +248,11 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   private func handleCapture(pixelBuffer: CVPixelBuffer) {
     let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
     let t = tuning
-    // Same ML segmenter as the live overlay (rectangle detector as
-    // fallback) so the crop matches what the user saw marked.
-    let obs = BonVision.detectDocument(
-      pixelBuffer: pixelBuffer,
-      minConfidence: VNConfidence(t.captureMinConfidence)
-    ) ?? BonVision.detectRectangle(pixelBuffer: pixelBuffer, params: t.captureParams())
+    // Capture is lenient — the user is pointing at a bon and tapped, so
+    // accept whatever document fills the frame (rectangle as fallback).
+    let lenient = BonVision.DocParams(minConfidence: 0.0, minArea: 0.02, maxArea: 0.99, maxWHRatio: 3.0)
+    let obs = BonVision.detectDocument(pixelBuffer: pixelBuffer, params: lenient)
+      ?? BonVision.detectRectangle(pixelBuffer: pixelBuffer, params: t.rectFallbackParams())
     let result: [String: Any]?
     if let obs = obs {
       result = BonVision.warpAndWriteJPEG(ciImage: ciImage, observation: obs)

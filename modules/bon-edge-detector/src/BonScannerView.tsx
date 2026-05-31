@@ -27,9 +27,11 @@ export interface BonScannerCaptureResult {
 
 /** Live-tunable scanner parameters (must mirror Swift ScannerTuning). */
 export interface ScannerTuning {
-  /** Document-segmentation confidence floors (primary ML detector). */
-  liveMinConfidence: number;
-  captureMinConfidence: number;
+  /** Document-segmenter acceptance for the live overlay. */
+  docMinConfidence: number;
+  docMinArea: number;
+  docMaxArea: number;
+  docMaxWHRatio: number;
   persistenceFrames: number;
   visionHz: number;
   smoothing: number;
@@ -43,8 +45,10 @@ export interface ScannerTuning {
 
 /** Defaults = the shipped Swift values. */
 export const DEFAULT_SCANNER_TUNING: ScannerTuning = {
-  liveMinConfidence: 0.3,
-  captureMinConfidence: 0.3,
+  docMinConfidence: 0.2,
+  docMinArea: 0.06,
+  docMaxArea: 0.9,
+  docMaxWHRatio: 0.85,
   persistenceFrames: 50,
   visionHz: 20,
   smoothing: 0.5,

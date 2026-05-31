@@ -52,8 +52,10 @@ public class BonEdgeDetectorModule: Module {
     let context = CIContext()
     guard let cg = context.createCGImage(inputImage, from: inputImage.extent) else { return nil }
     // ML document segmenter first (robust on low-contrast paper),
-    // rectangle detector as fallback.
-    let rect = BonVision.detectDocument(cgImage: cg, minConfidence: 0.3)
+    // rectangle detector as fallback. Lenient gate — a picked/captured
+    // still IS a bon, so accept whatever document fills it.
+    let lenient = BonVision.DocParams(minConfidence: 0.0, minArea: 0.02, maxArea: 0.99, maxWHRatio: 3.0)
+    let rect = BonVision.detectDocument(cgImage: cg, params: lenient)
       ?? BonVision.detectRectangle(cgImage: cg)
     guard let rect = rect else { return nil }
     return BonVision.warpAndWriteJPEG(ciImage: inputImage, observation: rect)
