@@ -59,21 +59,6 @@ enum BonVision {
     return pickBestRectangle(results)
   }
 
-  /// Best receipt rectangle directly on a pixel buffer (cheap — no
-  /// CGImage render). Buffer must already be upright (.portrait frames).
-  static func detectRectangle(pixelBuffer: CVPixelBuffer, params: RectParams = RectParams()) -> VNRectangleObservation? {
-    return pickBestRectangle(detectRectangles(pixelBuffer: pixelBuffer, params: params))
-  }
-
-  /// All plausible receipt rectangles on a pixel buffer (rectangle
-  /// detector — kept as a fallback for the ML document segmenter).
-  static func detectRectangles(pixelBuffer: CVPixelBuffer, params: RectParams) -> [VNRectangleObservation] {
-    let request = makeRectangleRequest(params)
-    let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
-    do { try handler.perform([request]) } catch { return [] }
-    return (request.results as? [VNRectangleObservation]) ?? []
-  }
-
   // ─── ML document segmentation (primary detector) ──────────────────
   //
   // VNDetectDocumentSegmentationRequest is ML-based (Neural Engine),

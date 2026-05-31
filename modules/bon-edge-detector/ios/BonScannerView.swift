@@ -2,6 +2,7 @@ import ExpoModulesCore
 import AVFoundation
 import Vision
 import CoreImage
+import ImageIO
 import UIKit
 
 /// Runtime-tunable scanner parameters (passed live from JS so the open
@@ -67,7 +68,7 @@ struct ScannerTuning: Record {
  * Shared detection/warp logic lives in BonVision so the live overlay
  * and the final crop agree, and the static gallery path is unchanged.
  */
-public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDelegate {
+public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
 
   // ── JS events ──────────────────────────────────────────────────────
   let onCapture = EventDispatcher()
@@ -81,6 +82,7 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   private let session = AVCaptureSession()
   private var previewLayer: AVCaptureVideoPreviewLayer!
   private let videoOutput = AVCaptureVideoDataOutput()
+  private let photoOutput = AVCapturePhotoOutput()
   private let overlayLayer = CAShapeLayer()
   private var device: AVCaptureDevice?
 
@@ -90,7 +92,6 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   private var configured = false
   private var wantActive = false
   private var lastSignal = 0
-  private var pendingCapture = false
 
   // All knobs live here, settable live from JS (see ScannerTuning).
   private var tuning = ScannerTuning()
@@ -165,12 +166,17 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     tuning = t
   }
 
-  /// JS bumps an incrementing signal to request a capture. We grab the
-  /// next delivered frame (guarantees a valid pixel buffer) and warp it.
+  /// JS bumps an incrementing signal to request a capture. We take a
+  /// full-resolution still via AVCapturePhotoOutput (delegate below).
   func requestCapture(signal: Int) {
     guard signal > 0, signal != lastSignal else { return }
     lastSignal = signal
-    pendingCapture = true
+    sessionQueue.async { [weak self] in
+      guard let self = self, self.configured, self.session.isRunning else { return }
+      let settings = AVCapturePhotoSettings()
+      settings.isHighResolutionPhotoEnabled = true
+      self.photoOutput.capturePhoto(with: settings, delegate: self)
+    }
   }
 
   // ── Session configuration ─────────────────────────────────────────
@@ -206,6 +212,17 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
         conn.videoOrientation = .portrait
       }
 
+      // Full-resolution still output for the actual capture (the live
+      // overlay stays on the lower-res video stream). ~12MP vs ~2MP →
+      // materially better OCR on fine receipt print.
+      if self.session.canAddOutput(self.photoOutput) {
+        self.session.addOutput(self.photoOutput)
+        self.photoOutput.isHighResolutionCaptureEnabled = true
+        if let pconn = self.photoOutput.connection(with: .video), pconn.isVideoOrientationSupported {
+          pconn.videoOrientation = .portrait
+        }
+      }
+
       self.session.commitConfiguration()
       self.configured = true
 
@@ -228,12 +245,6 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     from connection: AVCaptureConnection
   ) {
     guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
-    if pendingCapture {
-      pendingCapture = false
-      handleCapture(pixelBuffer: pixelBuffer)
-      return
-    }
 
     let t = tuning
     let now = CACurrentMediaTime()
@@ -264,22 +275,42 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     onQuality(["status": status])
   }
 
-  // ── Capture: warp the frozen frame flat ────────────────────────────
-  private func handleCapture(pixelBuffer: CVPixelBuffer) {
-    let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-    let t = tuning
-    // Capture is lenient — the user is pointing at a bon and tapped, so
-    // accept whatever document fills the frame (rectangle as fallback).
-    let lenient = BonVision.DocParams(minConfidence: 0.0, minArea: 0.02, maxArea: 0.99, maxWHRatio: 3.0)
-    let obs = BonVision.detectDocument(pixelBuffer: pixelBuffer, params: lenient)
-      ?? BonVision.detectRectangle(pixelBuffer: pixelBuffer, params: t.rectFallbackParams())
-    let result: [String: Any]?
-    if let obs = obs {
-      result = BonVision.warpAndWriteJPEG(ciImage: ciImage, observation: obs)
-    } else {
-      // No clear quad → ship the raw (upright) frame; OCR copes.
-      result = BonVision.renderJPEG(ciImage: ciImage)
+  // ── Capture: full-res still → segment → warp flat ──────────────────
+  public func photoOutput(
+    _ output: AVCapturePhotoOutput,
+    didFinishProcessingPhoto photo: AVCapturePhoto,
+    error: Error?
+  ) {
+    if error != nil {
+      DispatchQueue.main.async { [weak self] in self?.onError(["message": "capture_failed"]) }
+      return
     }
+    guard let cg = photo.cgImageRepresentation() else {
+      DispatchQueue.main.async { [weak self] in self?.onError(["message": "capture_failed"]) }
+      return
+    }
+    // Apply the still's EXIF orientation so we work upright, matching the
+    // portrait live frames.
+    let rawOrientation = (photo.metadata[String(kCGImagePropertyOrientation)] as? NSNumber)?.uint32Value ?? 1
+    let cgOrientation = CGImagePropertyOrientation(rawValue: rawOrientation) ?? .up
+    let oriented = CIImage(cgImage: cg).oriented(cgOrientation)
+
+    // Lenient — the user is pointing at a bon and tapped; accept whatever
+    // document fills the still (rectangle detector as fallback).
+    let t = tuning
+    let result: [String: Any]?
+    let context = CIContext()
+    if let uprightCG = context.createCGImage(oriented, from: oriented.extent) {
+      let lenient = BonVision.DocParams(minConfidence: 0.0, minArea: 0.02, maxArea: 0.99, maxWHRatio: 3.0)
+      let obs = BonVision.detectDocument(cgImage: uprightCG, params: lenient)
+        ?? BonVision.detectRectangle(cgImage: uprightCG, params: t.rectFallbackParams())
+      result = obs != nil
+        ? BonVision.warpAndWriteJPEG(ciImage: oriented, observation: obs!)
+        : BonVision.renderJPEG(ciImage: oriented)
+    } else {
+      result = BonVision.renderJPEG(ciImage: oriented)
+    }
+
     DispatchQueue.main.async { [weak self] in
       guard let self = self else { return }
       if let r = result {
