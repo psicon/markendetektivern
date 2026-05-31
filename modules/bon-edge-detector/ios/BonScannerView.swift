@@ -18,6 +18,9 @@ struct ScannerTuning: Record {
   @Field var maxObservations: Int = 6
   @Field var continuityRadius: Double = 0.22
   @Field var smoothing: Double = 0.5
+  /// Min mean interior brightness (0..1) for a candidate to count as
+  /// paper — rejects dark high-contrast rects (logos, barcodes).
+  @Field var minLuma: Double = 0.45
 
   func liveParams() -> BonVision.RectParams {
     BonVision.RectParams(
@@ -233,25 +236,50 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     let bufW = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
     let bufH = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
     let candidates = BonVision.detectRectangles(pixelBuffer: pixelBuffer, params: t.liveParams())
-    let obs = pickStable(candidates, radius: CGFloat(t.continuityRadius))
+    let obs = selectBon(
+      candidates,
+      pixelBuffer: pixelBuffer,
+      minLuma: CGFloat(t.minLuma),
+      continuityRadius: CGFloat(t.continuityRadius),
+      useContinuity: true
+    )
     DispatchQueue.main.async { [weak self] in
       self?.updateOverlay(obs, bufferW: bufW, bufferH: bufH)
     }
   }
 
-  /// Temporal continuity: prefer the candidate whose center is closest
-  /// to the last accepted one (within a normalized radius); otherwise
-  /// the highest-confidence/largest. Keeps the mark from hopping between
-  /// the bon and competing rectangles when confidence is low.
-  private func pickStable(_ list: [VNRectangleObservation], radius: CGFloat) -> VNRectangleObservation? {
+  /// Pick the bon. VNDetectRectangles is geometry-only, so dark
+  /// high-contrast rects (logos, barcodes) score high on confidence —
+  /// we reject them by interior brightness (paper is bright). Then:
+  /// prefer continuity with the last mark, else the LARGEST bright
+  /// rectangle (= the whole bon, not an inner box). Falls back to the
+  /// brightest candidate so we never blank out entirely.
+  private func selectBon(
+    _ list: [VNRectangleObservation],
+    pixelBuffer: CVPixelBuffer,
+    minLuma: CGFloat,
+    continuityRadius: CGFloat,
+    useContinuity: Bool
+  ) -> VNRectangleObservation? {
     guard !list.isEmpty else { return nil }
-    if let prev = lastCenter {
-      let nearest = list.min(by: { centerDistance($0, prev) < centerDistance($1, prev) })
-      if let nearest = nearest, centerDistance(nearest, prev) < radius {
-        return nearest
+    let scored = list.map {
+      ($0, BonVision.meanLuma(pixelBuffer: pixelBuffer, boundingBox: $0.boundingBox))
+    }
+    var bright = scored.filter { $0.1 >= minLuma }
+    if bright.isEmpty, let brightest = scored.max(by: { $0.1 < $1.1 }) {
+      bright = [brightest]
+    }
+    if useContinuity, let prev = lastCenter {
+      let nearest = bright.min(by: { centerDistance($0.0, prev) < centerDistance($1.0, prev) })
+      if let nearest = nearest, centerDistance(nearest.0, prev) < continuityRadius {
+        return nearest.0
       }
     }
-    return BonVision.pickBestRectangle(list)
+    return bright.max(by: { area($0.0) < area($1.0) })?.0
+  }
+
+  private func area(_ obs: VNRectangleObservation) -> CGFloat {
+    obs.boundingBox.width * obs.boundingBox.height
   }
 
   private func centerDistance(_ obs: VNRectangleObservation, _ p: CGPoint) -> CGFloat {
@@ -262,7 +290,17 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   // ── Capture: warp the frozen frame flat ────────────────────────────
   private func handleCapture(pixelBuffer: CVPixelBuffer) {
     let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-    let obs = BonVision.detectRectangle(pixelBuffer: pixelBuffer, params: tuning.captureParams())
+    let t = tuning
+    let candidates = BonVision.detectRectangles(pixelBuffer: pixelBuffer, params: t.captureParams())
+    // Same brightness-first selection as the live overlay so the crop
+    // matches what the user saw marked (largest bright rectangle).
+    let obs = selectBon(
+      candidates,
+      pixelBuffer: pixelBuffer,
+      minLuma: CGFloat(t.minLuma),
+      continuityRadius: 0,
+      useContinuity: false
+    )
     let result: [String: Any]?
     if let obs = obs {
       result = BonVision.warpAndWriteJPEG(ciImage: ciImage, observation: obs)

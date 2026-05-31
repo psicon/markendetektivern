@@ -38,6 +38,7 @@ export interface ScannerTuning {
   maxObservations: number;
   continuityRadius: number;
   smoothing: number;
+  minLuma: number;
 }
 
 /** Defaults = the shipped Swift values. */
@@ -53,6 +54,7 @@ export const DEFAULT_SCANNER_TUNING: ScannerTuning = {
   maxObservations: 6,
   continuityRadius: 0.22,
   smoothing: 0.5,
+  minLuma: 0.45,
 };
 
 interface NativeCaptureEvent {

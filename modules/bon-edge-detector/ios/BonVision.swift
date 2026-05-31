@@ -74,6 +74,46 @@ enum BonVision {
     return (request.results as? [VNRectangleObservation]) ?? []
   }
 
+  /// Mean luminance (0..1) inside a normalized bounding box, sampled
+  /// cheaply on a grid directly from the BGRA pixel buffer (no Core
+  /// Image). Used to bias selection toward bright paper bons and away
+  /// from dark high-contrast rectangles (logos, barcodes).
+  ///
+  /// VNRectangleObservation boundingBox is normalized with origin
+  /// BOTTOM-LEFT; buffer rows run TOP-down, so we flip Y.
+  static func meanLuma(pixelBuffer: CVPixelBuffer, boundingBox: CGRect) -> CGFloat {
+    CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+    defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+    guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return 0 }
+    let width = CVPixelBufferGetWidth(pixelBuffer)
+    let height = CVPixelBufferGetHeight(pixelBuffer)
+    let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+    let ptr = base.assumingMemoryBound(to: UInt8.self)
+
+    let px0 = max(0, Int(boundingBox.minX * CGFloat(width)))
+    let px1 = min(width - 1, Int(boundingBox.maxX * CGFloat(width)))
+    let pyTop = max(0, Int((1 - boundingBox.maxY) * CGFloat(height)))
+    let pyBot = min(height - 1, Int((1 - boundingBox.minY) * CGFloat(height)))
+    guard px1 > px0, pyBot > pyTop else { return 0 }
+
+    let steps = 6
+    var sum: CGFloat = 0
+    var count = 0
+    for i in 0...steps {
+      for j in 0...steps {
+        let x = px0 + (px1 - px0) * i / steps
+        let y = pyTop + (pyBot - pyTop) * j / steps
+        let off = y * bytesPerRow + x * 4
+        let b = CGFloat(ptr[off])
+        let g = CGFloat(ptr[off + 1])
+        let r = CGFloat(ptr[off + 2])
+        sum += (0.114 * b + 0.587 * g + 0.299 * r) / 255.0
+        count += 1
+      }
+    }
+    return count > 0 ? sum / CGFloat(count) : 0
+  }
+
   /// Warp the four corners of `observation` flat (axis-aligned) and
   /// write a JPEG to the cache dir. Returns { uri, width, height }.
   ///

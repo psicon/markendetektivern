@@ -84,6 +84,7 @@ const TUNING_FIELDS: {
   { key: 'maxObservations', label: 'Max Kandidaten', step: 1, min: 1, max: 12, digits: 0 },
   { key: 'continuityRadius', label: 'Kontinuität-Radius', step: 0.02, min: 0.04, max: 0.6, digits: 2 },
   { key: 'smoothing', label: 'Glättung', step: 0.1, min: 0, max: 0.9, digits: 1 },
+  { key: 'minLuma', label: 'Min Helligkeit (Papier)', step: 0.05, min: 0, max: 1, digits: 2 },
 ];
 
 /**
