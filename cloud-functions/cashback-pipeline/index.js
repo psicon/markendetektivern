@@ -70,7 +70,25 @@ const {
   deriveForensicFlags,
   computeContentHash,
   computeTransactionHash,
+  computeItemsHash,
 } = require('./lib/forensics');
+
+// Parse "HH:MM[:SS]" → minutes-of-day, else null.
+function parseHHMM(t) {
+  if (typeof t !== 'string') return null;
+  const m = /^(\d{1,2}):(\d{2})/.exec(t.trim());
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+// True when two bonTimes are within `maxMinutes`. When either time is
+// missing we can't apply the window → block conservatively (same items +
+// market + day is already a very strong duplicate signal).
+function bonTimesWithin(a, b, maxMinutes) {
+  const pa = parseHHMM(a);
+  const pb = parseHHMM(b);
+  if (pa == null || pb == null) return true;
+  return Math.abs(pa - pb) <= maxMinutes;
+}
 
 // OCR engine selection. Default = cv-hybrid (Cloud Vision + Gemini Flash
 // text-parser, validated as the winner in Phase 0). Override per-deploy
@@ -950,7 +968,18 @@ exports.processCashback = onMessagePublished(
         ocr.parsed.totalCents,
       );
 
-      const LIVE_STATUSES = new Set(['approved', 'review', 'matched', 'ocr_pending']);
+      // Jeder bereits ANGENOMMENE Bon blockt ein Re-Submit — egal ob
+      // vergütet (approved/paid) oder angenommen-ohne-Vergütung
+      // (no_reward, z.B. Aktions-Modus). Nur 'rejected'/'superseded'
+      // blocken NICHT (legitimer Neuversuch nach Ablehnung).
+      const LIVE_STATUSES = new Set([
+        'approved', 'paid', 'no_reward', 'review', 'matched', 'ocr_pending',
+      ]);
+      const itemsHash = computeItemsHash(
+        merchantInfo?.id,
+        ocr.parsed.bonDate,
+        ocr.parsed.items,
+      );
       let duplicateOf = null;
 
       // Per-user check
@@ -1003,6 +1032,34 @@ exports.processCashback = onMessagePublished(
           }
         } catch (e) {
           logger.warn('content-dedup-cross-failed', { cashbackId, err: e.message });
+        }
+      }
+
+      // Items-Fingerprint (User-Regel 2): gleicher Markt + gleiche
+      // Produkte + gleiches Datum, Uhrzeit ≤5min auseinander → Duplikat.
+      // Robuster als contentHash, weil unabhängig vom (OCR-schwankenden)
+      // Total — fängt Neu-Abfotografieren auch bei Total-Jitter.
+      // (userId== + itemsHash== sind zwei Equality-Filter → Firestore
+      // bedient das per Zigzag-Merge ohne Composite-Index.)
+      if (!duplicateOf && itemsHash) {
+        try {
+          const dupQ = await db.collection('receipts')
+            .where('userId', '==', uid)
+            .where('itemsHash', '==', itemsHash)
+            .limit(5).get();
+          for (const doc of dupQ.docs) {
+            if (doc.id === cashbackId) continue;
+            if (!LIVE_STATUSES.has(doc.get('status'))) continue;
+            if (!bonTimesWithin(ocr.parsed.bonTime, doc.get('bonTime'), 5)) continue;
+            duplicateOf = {
+              receiptId: doc.id,
+              sameUser: true,
+              priorStatus: doc.get('status'),
+            };
+            break;
+          }
+        } catch (e) {
+          logger.warn('items-dedup-failed', { cashbackId, err: e.message });
         }
       }
 
@@ -1267,6 +1324,7 @@ exports.processCashback = onMessagePublished(
         bonTotalCents: ocr.parsed.totalCents ?? null,
         contentHash: contentHash ?? null,
         transactionHash: transactionHash ?? null,
+        itemsHash: itemsHash ?? null,
         duplicateOf: duplicateOf ?? null,
         items: Array.isArray(ocr.parsed.items)
           ? ocr.parsed.items.map((it) => ({

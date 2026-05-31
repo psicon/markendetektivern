@@ -256,6 +256,41 @@ function computeTransactionHash(merchantId, bonDate, bonTime, totalCents) {
   return crypto.createHash('sha256').update(sig).digest('hex').slice(0, 16);
 }
 
+/**
+ * `itemsHash` (merchant + date + normalized item set) — robust against
+ * total/merchant OCR jitter that breaks `contentHash`. Catches the same
+ * physical bon re-photographed (new scanner → different bytes / dHash /
+ * total rounding) as long as the merchant, date and the set of items
+ * match.
+ *
+ * Items are normalized (lowercased, collapsed whitespace) as
+ * `name#priceCents#qty`, then sorted so order doesn't matter. The caller
+ * additionally guards with a ±N-minute bonTime window so two legitimately
+ * identical baskets bought hours apart on the same day aren't blocked.
+ *
+ * Returns 16-char hex; null when merchant/date missing or no usable items.
+ */
+function computeItemsHash(merchantId, bonDate, items) {
+  if (!merchantId || typeof merchantId !== 'string') return null;
+  if (!bonDate || typeof bonDate !== 'string') return null;
+  if (!Array.isArray(items) || items.length === 0) return null;
+  const norm = items
+    .map((it) => {
+      const name = String(it && it.name != null ? it.name : '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+      const price = Number.isFinite(it && it.priceCents) ? it.priceCents : 0;
+      const qty = Number.isFinite(it && it.qty) ? it.qty : 1;
+      return `${name}#${price}#${qty}`;
+    })
+    .filter((s) => s.length > 2)
+    .sort();
+  if (norm.length === 0) return null;
+  const sig = `${merchantId.toLowerCase()}|${bonDate}|${norm.join('~')}`;
+  return crypto.createHash('sha256').update(sig).digest('hex').slice(0, 16);
+}
+
 module.exports = {
   computeDHash,
   hammingDistance,
@@ -263,4 +298,5 @@ module.exports = {
   deriveForensicFlags,
   computeContentHash,
   computeTransactionHash,
+  computeItemsHash,
 };
