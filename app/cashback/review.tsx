@@ -26,12 +26,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import { ImageZoom } from '@likashefqet/react-native-image-zoom';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { height: SCREEN_H } = Dimensions.get('window');
@@ -74,8 +69,10 @@ const CHECK_ITEMS: { key: 'corners' | 'date' | 'items'; label: string; sub: stri
 ];
 
 /**
- * Fullscreen pinch-to-zoom + pan viewer to verify the bon is legible.
- * Double-tap toggles 1× / 2.5×. Reanimated 3 on the UI thread.
+ * Fullscreen gallery-style pinch-to-zoom viewer to verify the bon is
+ * legible. Uses the battle-tested @likashefqet/react-native-image-zoom
+ * (focal-point pinch, momentum pan, double-tap) instead of a hand-rolled
+ * gesture stack.
  */
 function ZoomableImageModal({
   uri,
@@ -87,75 +84,23 @@ function ZoomableImageModal({
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const scale = useSharedValue(1);
-  const savedScale = useSharedValue(1);
-  const tx = useSharedValue(0);
-  const ty = useSharedValue(0);
-  const savedTx = useSharedValue(0);
-  const savedTy = useSharedValue(0);
-
-  const reset = () => {
-    'worklet';
-    scale.value = withTiming(1);
-    savedScale.value = 1;
-    tx.value = withTiming(0);
-    ty.value = withTiming(0);
-    savedTx.value = 0;
-    savedTy.value = 0;
-  };
-
-  const pinch = Gesture.Pinch()
-    .onUpdate((e) => {
-      scale.value = Math.max(1, savedScale.value * e.scale);
-    })
-    .onEnd(() => {
-      savedScale.value = scale.value;
-      if (scale.value <= 1) reset();
-    });
-
-  const pan = Gesture.Pan()
-    .onUpdate((e) => {
-      tx.value = savedTx.value + e.translationX;
-      ty.value = savedTy.value + e.translationY;
-    })
-    .onEnd(() => {
-      savedTx.value = tx.value;
-      savedTy.value = ty.value;
-    });
-
-  const doubleTap = Gesture.Tap()
-    .numberOfTaps(2)
-    .onEnd(() => {
-      if (scale.value > 1) {
-        reset();
-      } else {
-        scale.value = withTiming(2.5);
-        savedScale.value = 2.5;
-      }
-    });
-
-  const composed = Gesture.Exclusive(doubleTap, Gesture.Simultaneous(pinch, pan));
-
-  const imgStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: tx.value },
-      { translateY: ty.value },
-      { scale: scale.value },
-    ],
-  }));
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: '#000' }}>
-        <GestureDetector gesture={composed}>
-          <Animated.View style={{ flex: 1 }}>
-            <Animated.Image
-              source={{ uri }}
-              style={[{ flex: 1 }, imgStyle]}
-              resizeMode="contain"
-            />
-          </Animated.View>
-        </GestureDetector>
+        {uri ? (
+          <ImageZoom
+            uri={uri}
+            style={{ flex: 1 }}
+            resizeMode="contain"
+            minScale={1}
+            maxScale={8}
+            doubleTapScale={3}
+            isDoubleTapEnabled
+            isPinchEnabled
+            isPanEnabled
+          />
+        ) : null}
         <Pressable
           onPress={onClose}
           hitSlop={12}
