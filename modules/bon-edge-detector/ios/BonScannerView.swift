@@ -71,8 +71,9 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   }
 
   deinit {
-    sessionQueue.async { [session] in
-      if session.isRunning { session.stopRunning() }
+    let capturedSession = session
+    sessionQueue.async {
+      if capturedSession.isRunning { capturedSession.stopRunning() }
     }
   }
 
