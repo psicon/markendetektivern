@@ -47,6 +47,7 @@ import {
   DEFAULT_SCANNER_TUNING,
   isBonScannerAvailable,
   type BonScannerHandle,
+  type BonScannerQuality,
   type ScannerTuning,
 } from 'bon-edge-detector';
 
@@ -86,6 +87,7 @@ const TUNING_FIELDS: {
   { key: 'docMinArea', label: 'Min Fläche (Bon)', step: 0.02, min: 0, max: 0.5, digits: 2 },
   { key: 'docMaxArea', label: 'Max Fläche', step: 0.02, min: 0.3, max: 1, digits: 2 },
   { key: 'docMaxWHRatio', label: 'Max Breite/Höhe', step: 0.05, min: 0.2, max: 2, digits: 2 },
+  { key: 'minReadableHeight', label: 'Min Größe „lesbar"', step: 0.05, min: 0.2, max: 0.95, digits: 2 },
   { key: 'docMinConfidence', label: 'Doc-Confidence', step: 0.05, min: 0, max: 0.95, digits: 2 },
   { key: 'persistenceFrames', label: 'Persistenz (Frames)', step: 2, min: 0, max: 80, digits: 0 },
   { key: 'visionHz', label: 'Erkennung (Hz)', step: 1, min: 3, max: 30, digits: 0 },
@@ -154,7 +156,7 @@ export default function CashbackCaptureScreen() {
   const [cameraReady, setCameraReady] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
   const [capturing, setCapturing] = useState(false);
-  const [edgesVisible, setEdgesVisible] = useState(false);
+  const [quality, setQuality] = useState<BonScannerQuality>('none');
   const [tuning, setTuning] = useState<ScannerTuning>(DEFAULT_SCANNER_TUNING);
   const [showTuning, setShowTuning] = useState(false);
   const canTune =
@@ -584,7 +586,7 @@ export default function CashbackCaptureScreen() {
             isActive
             torch={flashOn}
             tuning={tuning}
-            onEdges={setEdgesVisible}
+            onQuality={setQuality}
           />
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
@@ -597,7 +599,11 @@ export default function CashbackCaptureScreen() {
           <View style={styles.titleBlock}>
             <Text style={styles.title}>Bon scannen</Text>
             <Text style={styles.subtitle}>
-              {edgesVisible ? 'Ränder erkannt · jetzt auslösen' : 'Bon flach in den Rahmen legen'}
+              {quality === 'ok'
+                ? 'Lesbar · jetzt auslösen'
+                : quality === 'far'
+                  ? 'Näher ran · Schrift noch zu klein'
+                  : 'Bon flach in den Rahmen legen'}
             </Text>
           </View>
           {canTune ? (
@@ -676,14 +682,22 @@ export default function CashbackCaptureScreen() {
         <View style={styles.helperWrap} pointerEvents="none">
           <View style={styles.helperBubble}>
             <MaterialCommunityIcons
-              name={edgesVisible ? 'check-circle-outline' : 'information-outline'}
+              name={
+                quality === 'ok'
+                  ? 'check-circle-outline'
+                  : quality === 'far'
+                    ? 'arrow-up-circle-outline'
+                    : 'information-outline'
+              }
               size={14}
-              color={edgesVisible ? '#5ee0a0' : '#fff'}
+              color={quality === 'ok' ? '#5ee0a0' : quality === 'far' ? '#ffd44b' : '#fff'}
             />
             <Text style={styles.helperText}>
-              {edgesVisible
-                ? 'Bon erkannt — tippe auf den Auslöser'
-                : 'Alle 4 Ecken sichtbar · Reflexionen vermeiden'}
+              {quality === 'ok'
+                ? 'Lesbar — tippe auf den Auslöser'
+                : quality === 'far'
+                  ? 'Näher ran — Schrift noch zu klein'
+                  : 'Alle 4 Ecken sichtbar · Reflexionen vermeiden'}
             </Text>
           </View>
         </View>
@@ -697,7 +711,7 @@ export default function CashbackCaptureScreen() {
             disabled={capturing || !cameraReady}
             style={({ pressed }) => [
               styles.shutter,
-              edgesVisible && { borderColor: '#5ee0a0' },
+              quality === 'ok' && { borderColor: '#5ee0a0' },
               (pressed || capturing) && { transform: [{ scale: 0.94 }] },
               (capturing || !cameraReady) && { opacity: 0.7 },
             ]}

@@ -147,7 +147,8 @@ enum BonVision {
     let context = CIContext()
     guard let cg = context.createCGImage(ciImage, from: ciImage.extent) else { return nil }
     let image = UIImage(cgImage: cg)
-    guard let data = image.jpegData(compressionQuality: 0.9) else { return nil }
+    // High quality — receipts have fine print; OCR benefits from detail.
+    guard let data = image.jpegData(compressionQuality: 0.95) else { return nil }
     let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
     let outURL = dir.appendingPathComponent("bon-cropped-\(UUID().uuidString).jpg")
     do { try data.write(to: outURL, options: .atomic) } catch { return nil }

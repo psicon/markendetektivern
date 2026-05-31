@@ -32,6 +32,8 @@ export interface ScannerTuning {
   docMinArea: number;
   docMaxArea: number;
   docMaxWHRatio: number;
+  /** Bon height fraction needed to call the text readable ("näher ran"). */
+  minReadableHeight: number;
   persistenceFrames: number;
   visionHz: number;
   smoothing: number;
@@ -49,6 +51,7 @@ export const DEFAULT_SCANNER_TUNING: ScannerTuning = {
   docMinArea: 0.06,
   docMaxArea: 0.9,
   docMaxWHRatio: 0.85,
+  minReadableHeight: 0.55,
   persistenceFrames: 50,
   visionHz: 20,
   smoothing: 0.5,
@@ -68,6 +71,12 @@ interface NativeErrorEvent {
 interface NativeEdgesEvent {
   nativeEvent: { visible: boolean };
 }
+interface NativeQualityEvent {
+  nativeEvent: { status: BonScannerQuality };
+}
+
+/** Live readability status: no bon / too far to read / good. */
+export type BonScannerQuality = 'none' | 'far' | 'ok';
 
 interface NativeProps {
   style?: StyleProp<ViewStyle>;
@@ -78,6 +87,7 @@ interface NativeProps {
   onCapture?: (e: NativeCaptureEvent) => void;
   onError?: (e: NativeErrorEvent) => void;
   onEdgesDetected?: (e: NativeEdgesEvent) => void;
+  onQuality?: (e: NativeQualityEvent) => void;
 }
 
 const NativeView: React.ComponentType<NativeProps> | null = (() => {
@@ -107,12 +117,17 @@ export interface BonScannerProps {
   tuning?: ScannerTuning;
   /** Fired when the live edge overlay appears/disappears (arm the shutter). */
   onEdges?: (visible: boolean) => void;
+  /** Fired when live readability changes: 'none' | 'far' | 'ok'. */
+  onQuality?: (status: BonScannerQuality) => void;
   /** Fired on a fatal camera error (e.g. no camera). */
   onError?: (message: string) => void;
 }
 
 export const BonScanner = React.forwardRef<BonScannerHandle, BonScannerProps>(
-  function BonScanner({ style, isActive = true, torch = false, tuning, onEdges, onError }, ref) {
+  function BonScanner(
+    { style, isActive = true, torch = false, tuning, onEdges, onQuality, onError },
+    ref,
+  ) {
     const [signal, setSignal] = React.useState(0);
     const pending = React.useRef<{
       resolve: (r: BonScannerCaptureResult) => void;
@@ -160,6 +175,7 @@ export const BonScanner = React.forwardRef<BonScannerHandle, BonScannerProps>(
           onError?.(e.nativeEvent.message);
         }}
         onEdgesDetected={(e) => onEdges?.(e.nativeEvent.visible)}
+        onQuality={(e) => onQuality?.(e.nativeEvent.status)}
       />
     );
   },

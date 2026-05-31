@@ -55,6 +55,7 @@ export {
   type BonScannerHandle,
   type BonScannerProps,
   type BonScannerCaptureResult,
+  type BonScannerQuality,
   type ScannerTuning,
 } from './BonScannerView';
 

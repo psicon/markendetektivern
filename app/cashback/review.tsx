@@ -18,6 +18,7 @@ import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
+  Modal,
   Pressable,
   ScrollView,
   StatusBar,
@@ -25,6 +26,12 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { height: SCREEN_H } = Dimensions.get('window');
@@ -66,6 +73,130 @@ const CHECK_ITEMS: { key: 'corners' | 'date' | 'items'; label: string; sub: stri
   },
 ];
 
+/**
+ * Fullscreen pinch-to-zoom + pan viewer to verify the bon is legible.
+ * Double-tap toggles 1× / 2.5×. Reanimated 3 on the UI thread.
+ */
+function ZoomableImageModal({
+  uri,
+  visible,
+  onClose,
+}: {
+  uri: string;
+  visible: boolean;
+  onClose: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const tx = useSharedValue(0);
+  const ty = useSharedValue(0);
+  const savedTx = useSharedValue(0);
+  const savedTy = useSharedValue(0);
+
+  const reset = () => {
+    'worklet';
+    scale.value = withTiming(1);
+    savedScale.value = 1;
+    tx.value = withTiming(0);
+    ty.value = withTiming(0);
+    savedTx.value = 0;
+    savedTy.value = 0;
+  };
+
+  const pinch = Gesture.Pinch()
+    .onUpdate((e) => {
+      scale.value = Math.max(1, savedScale.value * e.scale);
+    })
+    .onEnd(() => {
+      savedScale.value = scale.value;
+      if (scale.value <= 1) reset();
+    });
+
+  const pan = Gesture.Pan()
+    .onUpdate((e) => {
+      tx.value = savedTx.value + e.translationX;
+      ty.value = savedTy.value + e.translationY;
+    })
+    .onEnd(() => {
+      savedTx.value = tx.value;
+      savedTy.value = ty.value;
+    });
+
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      if (scale.value > 1) {
+        reset();
+      } else {
+        scale.value = withTiming(2.5);
+        savedScale.value = 2.5;
+      }
+    });
+
+  const composed = Gesture.Exclusive(doubleTap, Gesture.Simultaneous(pinch, pan));
+
+  const imgStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: tx.value },
+      { translateY: ty.value },
+      { scale: scale.value },
+    ],
+  }));
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: '#000' }}>
+        <GestureDetector gesture={composed}>
+          <Animated.View style={{ flex: 1 }}>
+            <Animated.Image
+              source={{ uri }}
+              style={[{ flex: 1 }, imgStyle]}
+              resizeMode="contain"
+            />
+          </Animated.View>
+        </GestureDetector>
+        <Pressable
+          onPress={onClose}
+          hitSlop={12}
+          style={{
+            position: 'absolute',
+            top: insets.top + 8,
+            right: 14,
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <MaterialCommunityIcons name="close" size={24} color="#fff" />
+        </Pressable>
+        <View
+          style={{
+            position: 'absolute',
+            bottom: insets.bottom + 20,
+            alignSelf: 'center',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            paddingHorizontal: 12,
+            paddingVertical: 7,
+            borderRadius: 999,
+          }}
+        >
+          <MaterialCommunityIcons name="gesture-spread" size={14} color="#fff" />
+          <Text style={{ color: '#fff', fontFamily: fontFamilyVariants.body, fontSize: 12 }}>
+            Zwei Finger zum Zoomen · Doppeltipp
+          </Text>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function CashbackReviewScreen() {
   const params = useLocalSearchParams<{
     uri: string;
@@ -88,6 +219,7 @@ export default function CashbackReviewScreen() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [zoomOpen, setZoomOpen] = useState(false);
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -307,20 +439,45 @@ export default function CashbackReviewScreen() {
         <View style={styles.iconButton} />
       </View>
 
-      {/* Image preview — fixed height, never overlapped by chrome. */}
-      <View style={styles.imageBlock}>
+      {/* Image preview — tap to zoom & verify legibility. */}
+      <Pressable
+        style={styles.imageBlock}
+        onPress={() => bon.uri && setZoomOpen(true)}
+        disabled={!bon.uri}
+      >
         {bon.uri ? (
-          <Image
-            source={{ uri: bon.uri }}
-            style={StyleSheet.absoluteFillObject}
-            contentFit="contain"
-          />
+          <>
+            <Image
+              source={{ uri: bon.uri }}
+              style={StyleSheet.absoluteFillObject}
+              contentFit="contain"
+            />
+            <View
+              style={{
+                position: 'absolute',
+                bottom: 10,
+                right: 12,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                backgroundColor: 'rgba(0,0,0,0.55)',
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                borderRadius: 999,
+              }}
+            >
+              <MaterialCommunityIcons name="magnify-plus-outline" size={14} color="#fff" />
+              <Text style={{ color: '#fff', fontFamily: fontFamilyVariants.body, fontSize: 12 }}>
+                Tippen zum Zoomen
+              </Text>
+            </View>
+          </>
         ) : (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
             <ActivityIndicator color="#fff" />
           </View>
         )}
-      </View>
+      </Pressable>
 
       {/* Bottom: theme-aware sheet — flex:1 so labels are clearly visible */}
       <View style={styles.sheet}>
@@ -394,6 +551,12 @@ export default function CashbackReviewScreen() {
           </Pressable>
         </View>
       </View>
+
+      <ZoomableImageModal
+        uri={bon.uri}
+        visible={zoomOpen}
+        onClose={() => setZoomOpen(false)}
+      />
     </View>
   );
 }

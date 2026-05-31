@@ -14,6 +14,9 @@ struct ScannerTuning: Record {
   @Field var docMinArea: Double = 0.06
   @Field var docMaxArea: Double = 0.90
   @Field var docMaxWHRatio: Double = 0.85
+  /// Min bon height fraction to call the text "readable" (close enough);
+  /// below this we hint "näher ran".
+  @Field var minReadableHeight: Double = 0.55
   @Field var persistenceFrames: Int = 50
   @Field var visionHz: Double = 20
   @Field var smoothing: Double = 0.5
@@ -70,6 +73,9 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   let onCapture = EventDispatcher()
   let onError = EventDispatcher()
   let onEdgesDetected = EventDispatcher()
+  // Live readability/quality: "none" | "far" | "ok" (fired on change).
+  let onQuality = EventDispatcher()
+  private var lastQualityStatus = ""
 
   // ── Capture stack ──────────────────────────────────────────────────
   private let session = AVCaptureSession()
@@ -239,9 +245,23 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     // ML document segmenter, gated on area+aspect so we only mark a
     // real bon (not the table the segmenter would otherwise return).
     let obs = BonVision.detectDocument(pixelBuffer: pixelBuffer, params: t.docParamsLive())
+    // Readability: bon height fraction → "far" (too small to read) vs "ok".
+    let status: String
+    if let obs = obs {
+      status = obs.boundingBox.height >= CGFloat(t.minReadableHeight) ? "ok" : "far"
+    } else {
+      status = "none"
+    }
     DispatchQueue.main.async { [weak self] in
       self?.updateOverlay(obs, bufferW: bufW, bufferH: bufH)
+      self?.emitQuality(status)
     }
+  }
+
+  private func emitQuality(_ status: String) {
+    guard status != lastQualityStatus else { return }
+    lastQualityStatus = status
+    onQuality(["status": status])
   }
 
   // ── Capture: warp the frozen frame flat ────────────────────────────
