@@ -28,6 +28,17 @@ service firebase.storage {
       allow read: if request.auth != null && request.auth.uid == userId;
     }
 
+    // Product-photo crowd uploads ("voller Datensatz" wizard) — user can
+    // write + read their own product photos. Cloud Functions process the
+    // structured data via Admin SDK.
+    match /crowduploads/{userId}/{file=**} {
+      allow write: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.size < 8 * 1024 * 1024
+                    && request.resource.contentType.matches('image/.*');
+      allow read: if request.auth != null && request.auth.uid == userId;
+    }
+
     // Default fallback — public-read, no client write (preserves
     // production behaviour for markenprodukte/, productimagesclean/, …).
     match /{allPaths=**} {

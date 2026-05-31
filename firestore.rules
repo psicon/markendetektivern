@@ -617,6 +617,16 @@ match /aggregates/{document} {
       allow write: if false;
     }
 
+    // Produkt-Foto Crowd-Uploads ("voller Datensatz" Wizard) — der User
+    // legt eigene Pending-Einträge an + liest sie; Review/Vergütung läuft
+    // serverseitig (Admin SDK umgeht Rules).
+    match /crowd_uploads/{uploadId} {
+      allow create: if request.auth != null
+                     && request.resource.data.userId == request.auth.uid;
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
 // LAST PIECE
     match /{document=**} {
       allow read, write: if false;
