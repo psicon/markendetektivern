@@ -223,7 +223,7 @@ export default function SpendingScreen() {
                   lineHeight: 19,
                 }}
               >
-                Noch keine Ausgaben im gewählten Zeitraum. Reiche Bons ein — sie zählen hier zur Übersicht, auch ohne Vergütung.
+                Noch keine Ausgaben im gewählten Zeitraum. Reiche Bons ein — sie zählen hier zur Übersicht.
               </Text>
             </View>
           ) : (

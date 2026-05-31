@@ -1174,6 +1174,25 @@ built it used full capsule (PILL_HEIGHT/2 = 29), then an arbitrary
 "unfinished design", not "intentional variation". Lock to the
 token tier, neighbours will match automatically.
 
+### Copy-Ton: NIE Frustration texten (User-Vorgabe, app-weit)
+
+Niemals negativ/abwertend formulieren — keine „ohne Cashback", „ohne
+Vergütung", „keine Vergütung", „nachträglich nicht vergütet" o.ä.
+Stattdessen IMMER positiv + vorwärts-gewandt: was der User DAVON hat +
+was als Nächstes geht. Beispiele:
+- ❌ „Dieser Bon wurde ohne aktive Aktion eingereicht … nachträglich
+  vergütet wird er nicht." → ✅ „Dein Bon ist gespeichert und zählt zu
+  deiner Ausgabenübersicht. Sobald eine Aktion läuft, gibt's beim
+  nächsten Mal etwas obendrauf."
+- ❌ „Aktuell ohne Cashback." → ✅ Zeile weglassen ODER den Nutzen nennen
+  („du hilfst, die Datenbank zu vervollständigen").
+- Limits/Caps: nicht „keine Vergütung mehr", sondern „diese Woche schon
+  am Ziel — nächste Woche geht's weiter".
+Gilt für Bons, Produkt-Einreichung, Umfragen, Payout — überall. Wenn ein
+Zustand faktisch 0 € bedeutet, framing auf „gespeichert/zählt/nächstes
+Mal", nie auf den Mangel. User-Vorgabe 2026-05-31: „nie frustration
+hervorrufen".
+
 ### Toasts → ONE library, one helper-set
 
 ALL toasts go through `lib/services/ui/toast.tsx` (built on
