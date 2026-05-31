@@ -7,20 +7,18 @@ import UIKit
 /// Runtime-tunable scanner parameters (passed live from JS so the open
 /// scanner can be tuned without a rebuild). Defaults = the shipped values.
 struct ScannerTuning: Record {
-  @Field var liveMinConfidence: Double = 0.45
-  @Field var captureMinConfidence: Double = 0.6
+  // Document-segmentation confidence floors (primary detector).
+  @Field var liveMinConfidence: Double = 0.3
+  @Field var captureMinConfidence: Double = 0.3
   @Field var persistenceFrames: Int = 50
-  @Field var visionHz: Double = 30
+  @Field var visionHz: Double = 20
+  @Field var smoothing: Double = 0.5
+  // Rectangle-detector fallback params (not surfaced in the panel).
   @Field var minAspect: Double = 0.2
   @Field var maxAspect: Double = 1.0
   @Field var minSize: Double = 0.2
   @Field var quadratureTolerance: Double = 25
   @Field var maxObservations: Int = 6
-  @Field var continuityRadius: Double = 0.22
-  @Field var smoothing: Double = 0.5
-  /// Min mean interior brightness (0..1) for a candidate to count as
-  /// paper — rejects dark high-contrast rects (logos, barcodes).
-  @Field var minLuma: Double = 0.35
 
   func liveParams() -> BonVision.RectParams {
     BonVision.RectParams(
@@ -91,10 +89,6 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   private var smoothed: [CGPoint]? = nil
   private var framesWithoutQuad = 0
   private var edgesVisible = false
-  // Last detected bounding-box center (normalized) for temporal
-  // continuity — prefer the candidate nearest the previous one so the
-  // mark doesn't jump to a competing rectangle (table edge etc).
-  private var lastCenter: CGPoint? = nil
 
   // ── Init / layout ──────────────────────────────────────────────────
   public required init(appContext: AppContext? = nil) {
@@ -235,72 +229,27 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
 
     let bufW = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
     let bufH = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
-    let candidates = BonVision.detectRectangles(pixelBuffer: pixelBuffer, params: t.liveParams())
-    let obs = selectBon(
-      candidates,
+    // ML document segmenter: returns exactly one document, no
+    // logo/barcode/table false-positives to disambiguate.
+    let obs = BonVision.detectDocument(
       pixelBuffer: pixelBuffer,
-      minLuma: CGFloat(t.minLuma),
-      continuityRadius: CGFloat(t.continuityRadius),
-      useContinuity: true
+      minConfidence: VNConfidence(t.liveMinConfidence)
     )
     DispatchQueue.main.async { [weak self] in
       self?.updateOverlay(obs, bufferW: bufW, bufferH: bufH)
     }
   }
 
-  /// Pick the bon. VNDetectRectangles is geometry-only, so dark
-  /// high-contrast rects (logos, barcodes) score high on confidence —
-  /// we reject them by interior brightness (paper is bright). Then:
-  /// prefer continuity with the last mark, else the LARGEST bright
-  /// rectangle (= the whole bon, not an inner box). Falls back to the
-  /// brightest candidate so we never blank out entirely.
-  private func selectBon(
-    _ list: [VNRectangleObservation],
-    pixelBuffer: CVPixelBuffer,
-    minLuma: CGFloat,
-    continuityRadius: CGFloat,
-    useContinuity: Bool
-  ) -> VNRectangleObservation? {
-    guard !list.isEmpty else { return nil }
-    let scored = list.map {
-      ($0, BonVision.meanLuma(pixelBuffer: pixelBuffer, boundingBox: $0.boundingBox))
-    }
-    var bright = scored.filter { $0.1 >= minLuma }
-    if bright.isEmpty, let brightest = scored.max(by: { $0.1 < $1.1 }) {
-      bright = [brightest]
-    }
-    if useContinuity, let prev = lastCenter {
-      let nearest = bright.min(by: { centerDistance($0.0, prev) < centerDistance($1.0, prev) })
-      if let nearest = nearest, centerDistance(nearest.0, prev) < continuityRadius {
-        return nearest.0
-      }
-    }
-    return bright.max(by: { area($0.0) < area($1.0) })?.0
-  }
-
-  private func area(_ obs: VNRectangleObservation) -> CGFloat {
-    obs.boundingBox.width * obs.boundingBox.height
-  }
-
-  private func centerDistance(_ obs: VNRectangleObservation, _ p: CGPoint) -> CGFloat {
-    let c = CGPoint(x: obs.boundingBox.midX, y: obs.boundingBox.midY)
-    return hypot(c.x - p.x, c.y - p.y)
-  }
-
   // ── Capture: warp the frozen frame flat ────────────────────────────
   private func handleCapture(pixelBuffer: CVPixelBuffer) {
     let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
     let t = tuning
-    let candidates = BonVision.detectRectangles(pixelBuffer: pixelBuffer, params: t.captureParams())
-    // Same brightness-first selection as the live overlay so the crop
-    // matches what the user saw marked (largest bright rectangle).
-    let obs = selectBon(
-      candidates,
+    // Same ML segmenter as the live overlay (rectangle detector as
+    // fallback) so the crop matches what the user saw marked.
+    let obs = BonVision.detectDocument(
       pixelBuffer: pixelBuffer,
-      minLuma: CGFloat(t.minLuma),
-      continuityRadius: 0,
-      useContinuity: false
-    )
+      minConfidence: VNConfidence(t.captureMinConfidence)
+    ) ?? BonVision.detectRectangle(pixelBuffer: pixelBuffer, params: t.captureParams())
     let result: [String: Any]?
     if let obs = obs {
       result = BonVision.warpAndWriteJPEG(ciImage: ciImage, observation: obs)
@@ -333,7 +282,6 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
       // only clear after a sustained miss.
       if framesWithoutQuad > tuning.persistenceFrames {
         smoothed = nil
-        lastCenter = nil
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         overlayLayer.path = nil
@@ -346,7 +294,6 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
       return
     }
     framesWithoutQuad = 0
-    lastCenter = CGPoint(x: obs.boundingBox.midX, y: obs.boundingBox.midY)
 
     let viewW = bounds.width
     let viewH = bounds.height

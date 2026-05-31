@@ -79,18 +79,11 @@ const TUNING_FIELDS: {
   max: number;
   digits: number;
 }[] = [
-  { key: 'liveMinConfidence', label: 'Live-Confidence', step: 0.05, min: 0.05, max: 0.95, digits: 2 },
-  { key: 'captureMinConfidence', label: 'Capture-Confidence', step: 0.05, min: 0.1, max: 0.95, digits: 2 },
-  { key: 'persistenceFrames', label: 'Persistenz (Frames)', step: 2, min: 0, max: 60, digits: 0 },
+  { key: 'liveMinConfidence', label: 'Doc-Confidence (live)', step: 0.05, min: 0, max: 0.95, digits: 2 },
+  { key: 'captureMinConfidence', label: 'Doc-Confidence (Aufnahme)', step: 0.05, min: 0, max: 0.95, digits: 2 },
+  { key: 'persistenceFrames', label: 'Persistenz (Frames)', step: 2, min: 0, max: 80, digits: 0 },
   { key: 'visionHz', label: 'Erkennung (Hz)', step: 1, min: 3, max: 30, digits: 0 },
-  { key: 'minAspect', label: 'Min Seitenverhältnis', step: 0.05, min: 0.05, max: 1, digits: 2 },
-  { key: 'maxAspect', label: 'Max Seitenverhältnis', step: 0.05, min: 0.2, max: 1.5, digits: 2 },
-  { key: 'minSize', label: 'Min Größe', step: 0.05, min: 0.05, max: 0.9, digits: 2 },
-  { key: 'quadratureTolerance', label: 'Schräglage (°)', step: 5, min: 5, max: 45, digits: 0 },
-  { key: 'maxObservations', label: 'Max Kandidaten', step: 1, min: 1, max: 12, digits: 0 },
-  { key: 'continuityRadius', label: 'Kontinuität-Radius', step: 0.02, min: 0.04, max: 0.6, digits: 2 },
   { key: 'smoothing', label: 'Glättung', step: 0.1, min: 0, max: 0.9, digits: 1 },
-  { key: 'minLuma', label: 'Min Helligkeit (Papier)', step: 0.05, min: 0, max: 1, digits: 2 },
 ];
 
 /**

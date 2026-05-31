@@ -27,34 +27,32 @@ export interface BonScannerCaptureResult {
 
 /** Live-tunable scanner parameters (must mirror Swift ScannerTuning). */
 export interface ScannerTuning {
+  /** Document-segmentation confidence floors (primary ML detector). */
   liveMinConfidence: number;
   captureMinConfidence: number;
   persistenceFrames: number;
   visionHz: number;
+  smoothing: number;
+  /** Rectangle-detector fallback params (not surfaced in the panel). */
   minAspect: number;
   maxAspect: number;
   minSize: number;
   quadratureTolerance: number;
   maxObservations: number;
-  continuityRadius: number;
-  smoothing: number;
-  minLuma: number;
 }
 
 /** Defaults = the shipped Swift values. */
 export const DEFAULT_SCANNER_TUNING: ScannerTuning = {
-  liveMinConfidence: 0.45,
-  captureMinConfidence: 0.6,
+  liveMinConfidence: 0.3,
+  captureMinConfidence: 0.3,
   persistenceFrames: 50,
-  visionHz: 30,
+  visionHz: 20,
+  smoothing: 0.5,
   minAspect: 0.2,
   maxAspect: 1.0,
   minSize: 0.2,
   quadratureTolerance: 25,
   maxObservations: 6,
-  continuityRadius: 0.22,
-  smoothing: 0.5,
-  minLuma: 0.35,
 };
 
 interface NativeCaptureEvent {
