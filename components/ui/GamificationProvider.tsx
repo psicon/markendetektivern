@@ -1,6 +1,8 @@
+import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { subscribeUserCashbackHistoryPaged } from '@/lib/services/cashbackUpload';
 import {
   achievementService,
   setAchievementUnlockHandler,
@@ -12,9 +14,9 @@ import { CoachmarkService } from '@/lib/services/coachmarkService';
 import { gamificationSettingsService } from '@/lib/services/gamificationSettingsService';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
 import { RATING_POLL_INTERVAL_MS } from '@/lib/perfFlags';
-import { showPointsToast, showStreakToast as showStreakToastNew } from '@/lib/services/ui/toast';
+import { showInfoToast, showPointsToast, showStreakToast as showStreakToastNew } from '@/lib/services/ui/toast';
 import { Achievement } from '@/lib/types/achievements';
-import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { type BannerData } from './AchievementUnlockBanner';
 import { AppRatingModal } from './AppRatingModal';
 
@@ -215,6 +217,34 @@ export function bannerDataFromCashbackPayout(cashbackCents: number): BannerData 
     },
   };
 }
+
+// Kurze Toast-Texte für abgelehnte Bons (die ausführliche Begründung
+// steht im pending/[id]-Screen). Klein wie eine Fehlermeldung.
+function cashbackRejectToastMsg(reason?: string | null): string {
+  switch (reason) {
+    case 'below_min_items':
+      return 'Bon abgelehnt: zu wenige Artikel erkannt.';
+    case 'duplicate_content_self':
+    case 'duplicate_content_cross_user':
+      return 'Bon abgelehnt: bereits eingereicht.';
+    case 'unknown_merchant':
+      return 'Bon abgelehnt: Markt nicht unterstützt.';
+    case 'bon_too_old':
+      return 'Bon abgelehnt: zu alt (max. 5 Tage).';
+    case 'not_a_receipt':
+      return 'Bon abgelehnt: kein Kassenbon erkannt.';
+    case 'no_bon_date':
+      return 'Bon abgelehnt: kein Datum erkennbar.';
+    case 'reconciliation_delta':
+      return 'Bon abgelehnt: Artikel passen nicht zum Endbetrag.';
+    case 'process_error':
+      return 'Bon abgelehnt: Auswertung fehlgeschlagen.';
+    default:
+      return 'Bon abgelehnt — tippe unter „Meine Bons" für Details.';
+  }
+}
+
+const CASHBACK_TERMINAL = ['approved', 'paid', 'rejected', 'no_reward'];
 
 // ─── GamificationContext ─────────────────────────────────────────
 //
@@ -487,6 +517,63 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
       setBannerData(data);
     }
   }, []);
+
+  // ─── Globaler Cashback-Status-Watcher ───────────────────────────
+  //
+  // Feuert Genehmigungs-Banner (mit EdgeGlow) + Ablehnungs-Toast GLOBAL,
+  // egal auf welchem Screen der User gerade ist — der pending/[id]-Screen
+  // muss dafür NICHT gemountet sein (Bug-Fix 86ca1xx90: vorher kam nichts
+  // wenn man weg navigierte). Nur LIVE-Transitionen feiern: erster
+  // Snapshot = Baseline (kein Feuern für bereits-terminale Bons beim
+  // App-Start). Ein Bon feuert nur, wenn er aus einem NICHT-terminalen
+  // Zustand (uploading/pending/review) heraus kippt.
+  const cashbackSeenRef = useRef<Map<string, string>>(new Map());
+  const cashbackBaselineRef = useRef(false);
+  useEffect(() => {
+    if (!user?.uid) {
+      cashbackSeenRef.current = new Map();
+      cashbackBaselineRef.current = false;
+      return;
+    }
+    const seen = new Map<string, string>();
+    cashbackSeenRef.current = seen;
+    cashbackBaselineRef.current = false;
+
+    const unsub = subscribeUserCashbackHistoryPaged(15, (entries) => {
+      if (!cashbackBaselineRef.current) {
+        entries.forEach((e) => {
+          if (e.status) seen.set(e.id, e.status);
+        });
+        cashbackBaselineRef.current = true;
+        return;
+      }
+      entries.forEach((e) => {
+        const cur = e.status;
+        if (!cur) return;
+        const prev = seen.get(e.id);
+        if (prev === cur) return;
+        seen.set(e.id, cur);
+        // Nur echte Transition aus einem nicht-terminalen Zustand feiern.
+        if (prev === undefined || CASHBACK_TERMINAL.includes(prev)) return;
+
+        if (cur === 'approved' || cur === 'paid') {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+          showBanner(bannerDataFromCashbackPayout(e.cashbackCents ?? 0));
+        } else if (cur === 'rejected') {
+          showInfoToast(cashbackRejectToastMsg(e.rejectReason), 'error', colorScheme || 'light');
+        } else if (cur === 'no_reward') {
+          showInfoToast(
+            'Bon gespeichert — zählt zu deiner Ausgabenübersicht.',
+            'info',
+            colorScheme || 'light',
+          );
+        }
+      });
+    });
+    return () => {
+      unsub();
+    };
+  }, [user?.uid, colorScheme, showBanner]);
 
   // Context-Value memoisiert — sonst wird auf JEDEM Provider-Render
   // ein neues Object erstellt → alle useGamification()-Consumer

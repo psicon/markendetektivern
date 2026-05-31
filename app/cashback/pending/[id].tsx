@@ -14,11 +14,11 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import * as Haptics from 'expo-haptics';
 import { Image as ExpoImage } from 'expo-image';
+import LottieView from 'lottie-react-native';
 import { getDownloadURL, ref as storageRef } from '@react-native-firebase/storage';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -33,10 +33,11 @@ import {
   DetailHeader,
   DETAIL_HEADER_ROW_HEIGHT,
 } from '@/components/design/DetailHeader';
-import { bannerDataFromCashbackPayout, useGamification } from '@/components/ui/GamificationProvider';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
+import { startReceiptScanFlow } from '@/lib/services/cashbackScanStart';
 import { storage } from '@/lib/firebase';
 import {
   deletePendingMirror,
@@ -142,7 +143,14 @@ export default function CashbackPendingScreen() {
   const navigation = useNavigation();
   const { theme, shadows } = useTokens();
   const { user } = useAuth();
-  const { showBanner } = useGamification();
+  const cb = useCashbackUserState();
+
+  // "Neuer Bon" — campaign-aware scan start (shared with Home / Meine
+  // Bons): 1 Aktion → sofort scannen, mehrere → Picker. Bug 86ca24dk4.
+  const onScanBon = useCallback(
+    () => startReceiptScanFlow(cb.uid, cb.hasConsent),
+    [cb.uid, cb.hasConsent],
+  );
 
   const [doc, setDoc] = useState<MirrorDoc | null>(null);
   const [hasResponded, setHasResponded] = useState(false);
@@ -329,33 +337,9 @@ export default function CashbackPendingScreen() {
     return viewStateFor(doc.status);
   }, [doc, hasResponded, uploadStep]);
 
-  // T17.22: Approval-Celebration. Wenn der Bon LIVE während der User
-  // auf dem Screen ist von pending/review/uploading → approved
-  // transitioniert, feuern wir Banner mit money-Lottie + Success-
-  // Haptik. NICHT feuern wenn der Screen direkt mit state=approved
-  // geöffnet wird (z.B. via History) — dann hat der User die News
-  // schon „verstanden", die Animation wäre stale.
-  const prevStateRef = useRef<ViewState | null>(null);
-  const celebratedIdRef = useRef<string | null>(null);
-  // Nur LIVE-Approvals feiern: der User muss eine laufende Verarbeitung
-  // (uploading/pending/review) → approved erlebt haben. Initiales Laden
-  // (null/unknown → approved, z.B. Bon ERNEUT aus der History öffnen)
-  // feuert NICHT — die News ist dann „alt".
-  const CELEBRATABLE_PREV: ViewState[] = ['uploading', 'pending', 'review'];
-  useEffect(() => {
-    const prev = prevStateRef.current;
-    prevStateRef.current = state;
-    if (state !== 'approved') return;
-    if (!prev || !CELEBRATABLE_PREV.includes(prev)) return;
-    // Nur einmal pro Bon-Id celebrieren.
-    const currentId = String(params.id ?? '');
-    if (celebratedIdRef.current === currentId) return;
-    celebratedIdRef.current = currentId;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    const cents = typeof doc?.cashbackCents === 'number' ? doc.cashbackCents : 0;
-    showBanner(bannerDataFromCashbackPayout(cents));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, doc?.cashbackCents, params.id, showBanner]);
+  // Approval-Celebration + Reject-Toast laufen jetzt GLOBAL über den
+  // GamificationProvider-Watcher (feuern auch wenn der User von dieser
+  // Seite weg navigiert). Hier kein lokaler Trigger mehr.
 
   const primary = theme.primary ?? '#0d8575';
   const warn = '#d6603a';
@@ -370,7 +354,15 @@ export default function CashbackPendingScreen() {
       const pct =
         typeof doc?.uploadProgress === 'number' ? doc.uploadProgress : null;
       return {
-        icon: <ActivityIndicator size="large" color={primary} />,
+        icon: (
+          <LottieView
+            source={require('@/assets/lottie/uploadgreen3.json')}
+            autoPlay
+            loop
+            speed={0.9}
+            style={{ width: 88, height: 88 }}
+          />
+        ),
         bg: primary + '18',
         title: 'Bon wird hochgeladen',
         body:
@@ -382,7 +374,15 @@ export default function CashbackPendingScreen() {
     }
     if (state === 'pending') {
       return {
-        icon: <ActivityIndicator size="large" color={primary} />,
+        icon: (
+          <LottieView
+            source={require('@/assets/lottie/search.json')}
+            autoPlay
+            loop
+            speed={0.9}
+            style={{ width: 88, height: 88 }}
+          />
+        ),
         bg: primary + '18',
         title: 'Bon wird geprüft',
         body:
@@ -434,20 +434,21 @@ export default function CashbackPendingScreen() {
       // Bon angenommen + gespeichert (Ausgabenübersicht), aber 0 Vergütung —
       // aktions-bedingt. Konkreten Grund zeigen.
       const reason = (doc?.rejectReason as string) ?? '';
+      const SAVED = 'Dein Bon ist gespeichert und zählt zu deiner Ausgabenübersicht.';
       const body =
         reason === 'no_active_campaign'
-          ? 'Dieser Bon wurde ohne aktive Cashback-Aktion eingereicht. Er ist gespeichert und zählt zu deiner Ausgabenübersicht — Vergütung gibt es nur, wenn eine Aktion läuft. Nachträglich vergütet wird er nicht.'
+          ? `${SAVED} Sobald eine passende Cashback-Aktion läuft, gibt's beim nächsten Mal etwas obendrauf.`
           : reason === 'below_min_items'
-          ? 'Für diese Aktion brauchst du mehr anrechenbare Artikel auf dem Bon. Der Bon ist gespeichert, aber ohne Vergütung.'
+          ? `${SAVED} Für Cashback braucht diese Aktion ein paar anrechenbare Artikel mehr auf dem Bon.`
           : reason === 'weekly_cap_reached'
-          ? 'Du hast das Wochenlimit dieser Aktion erreicht. Der Bon ist gespeichert — diese Woche gibt es dafür keine Vergütung mehr.'
+          ? `${SAVED} Für diese Aktion bist du diese Woche schon am Ziel — nächste Woche geht's weiter.`
           : reason === 'per_user_cap_reached'
-          ? 'Du hast für diese Aktion bereits das Maximum erhalten. Der Bon ist gespeichert, aber ohne weitere Vergütung.'
+          ? `${SAVED} Für diese Aktion hast du dein Maximum bereits erreicht.`
           : reason === 'campaign_budget_exhausted'
-          ? 'Das Budget dieser Aktion ist aufgebraucht. Der Bon ist gespeichert, aber ohne Vergütung.'
+          ? `${SAVED} Das Budget dieser Aktion ist gerade ausgeschöpft — schau bei den nächsten Aktionen vorbei.`
           : reason === 'monthly_cap_reached'
-          ? 'Du hast dein Monatslimit erreicht. Der Bon ist gespeichert — diesen Monat gibt es keine weitere Vergütung.'
-          : 'Für diesen Bon gab es keine Vergütung. Er ist gespeichert und zählt zu deiner Ausgabenübersicht.';
+          ? `${SAVED} Dein Monatsziel ist erreicht — nächsten Monat geht's weiter.`
+          : SAVED;
       return {
         icon: <MaterialCommunityIcons name="information-outline" size={42} color={yellow} />,
         bg: '#f1c40f30',
@@ -467,7 +468,7 @@ export default function CashbackPendingScreen() {
         reason === 'below_min_items'
           ? 'Auf dem Bon konnten wir weniger als 4 Artikel erkennen — für Cashback brauchen wir mindestens 4.'
           : reason === 'duplicate_content_self'
-          ? 'Diesen Bon hattest du schon einmal eingereicht. Pro Bon gibt es nur einmal Cashback.'
+          ? 'Dieser Bon wurde bereits eingereicht. Pro Bon gibt es nur einmal Cashback.'
           : reason === 'duplicate_content_cross_user'
           ? 'Dieser Bon wurde bereits eingereicht. Pro Bon gibt es nur einmal Cashback.'
           : reason === 'unknown_merchant'
@@ -562,12 +563,13 @@ export default function CashbackPendingScreen() {
           >
             <View
               style={{
-                width: 72,
-                height: 72,
-                borderRadius: 36,
+                width: state === 'uploading' || state === 'pending' ? 88 : 72,
+                height: state === 'uploading' || state === 'pending' ? 88 : 72,
+                borderRadius: state === 'uploading' || state === 'pending' ? 44 : 36,
                 backgroundColor: banner.bg,
                 alignItems: 'center',
                 justifyContent: 'center',
+                marginTop: state === 'uploading' || state === 'pending' ? 12 : 0,
                 marginBottom: 4,
               }}
             >
@@ -973,7 +975,7 @@ export default function CashbackPendingScreen() {
         <Pressable
           onPress={() =>
             state === 'rejected' || state === 'not_found'
-              ? router.replace('/cashback/capture')
+              ? onScanBon()
               : router.replace('/(tabs)/rewards')
           }
           style={({ pressed }) => ({
