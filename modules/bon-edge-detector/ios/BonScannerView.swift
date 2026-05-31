@@ -47,12 +47,23 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
 
   // Vision throttle for the live overlay (capture is unthrottled).
   private var lastVisionTime: CFTimeInterval = 0
-  private let visionInterval: CFTimeInterval = 0.1 // ~10 Hz
+  private let visionInterval: CFTimeInterval = 0.066 // ~15 Hz
+
+  // Live detection is lenient (low-contrast preview frames) — capture
+  // stays at 0.6 via BonVision.detectRectangle.
+  private let liveMinConfidence: VNConfidence = 0.25
 
   // Overlay smoothing + visibility.
   private var smoothed: [CGPoint]? = nil
   private var framesWithoutQuad = 0
   private var edgesVisible = false
+  // Persistence: hold the last good quad for ~1.5 s of dropped frames
+  // (at ~15 Hz) so "hold still on a low-contrast bon" doesn't blink out.
+  private let persistenceFrames = 22
+  // Last detected bounding-box center (normalized) for temporal
+  // continuity — prefer the candidate nearest the previous one so the
+  // mark doesn't jump to a competing rectangle (table edge etc).
+  private var lastCenter: CGPoint? = nil
 
   // ── Init / layout ──────────────────────────────────────────────────
   public required init(appContext: AppContext? = nil) {
@@ -187,10 +198,33 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
 
     let bufW = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
     let bufH = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
-    let obs = BonVision.detectRectangle(pixelBuffer: pixelBuffer)
+    let candidates = BonVision.detectRectangles(
+      pixelBuffer: pixelBuffer, minConfidence: liveMinConfidence
+    )
+    let obs = pickStable(candidates)
     DispatchQueue.main.async { [weak self] in
       self?.updateOverlay(obs, bufferW: bufW, bufferH: bufH)
     }
+  }
+
+  /// Temporal continuity: prefer the candidate whose center is closest
+  /// to the last accepted one (within a normalized radius); otherwise
+  /// the highest-confidence/largest. Keeps the mark from hopping between
+  /// the bon and competing rectangles when confidence is low.
+  private func pickStable(_ list: [VNRectangleObservation]) -> VNRectangleObservation? {
+    guard !list.isEmpty else { return nil }
+    if let prev = lastCenter {
+      let nearest = list.min(by: { centerDistance($0, prev) < centerDistance($1, prev) })
+      if let nearest = nearest, centerDistance(nearest, prev) < 0.22 {
+        return nearest
+      }
+    }
+    return BonVision.pickBestRectangle(list)
+  }
+
+  private func centerDistance(_ obs: VNRectangleObservation, _ p: CGPoint) -> CGFloat {
+    let c = CGPoint(x: obs.boundingBox.midX, y: obs.boundingBox.midY)
+    return hypot(c.x - p.x, c.y - p.y)
   }
 
   // ── Capture: warp the frozen frame flat ────────────────────────────
@@ -225,8 +259,11 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   private func updateOverlay(_ obs: VNRectangleObservation?, bufferW: CGFloat, bufferH: CGFloat) {
     guard let obs = obs else {
       framesWithoutQuad += 1
-      if framesWithoutQuad > 5 {
+      // Hold the last good quad through brief dropouts (persistence);
+      // only clear after a sustained miss.
+      if framesWithoutQuad > persistenceFrames {
         smoothed = nil
+        lastCenter = nil
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         overlayLayer.path = nil
@@ -239,6 +276,7 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
       return
     }
     framesWithoutQuad = 0
+    lastCenter = CGPoint(x: obs.boundingBox.midX, y: obs.boundingBox.midY)
 
     let viewW = bounds.width
     let viewH = bounds.height

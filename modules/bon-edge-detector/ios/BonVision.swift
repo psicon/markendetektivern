@@ -18,13 +18,18 @@ enum BonVision {
 
   /// Receipt-tuned rectangle request. Bons are tall (≈0.25 width:height),
   /// usually fill most of the frame, may be up to 25° off-square.
-  static func makeRectangleRequest() -> VNDetectRectanglesRequest {
+  ///
+  /// `minConfidence` defaults to 0.6 (the proven value for static/capture
+  /// frames). The live overlay passes a lower value because per-frame
+  /// preview detection on low-contrast scenes (white bon on light wood)
+  /// is borderline and would otherwise flicker.
+  static func makeRectangleRequest(minConfidence: VNConfidence = 0.6) -> VNDetectRectanglesRequest {
     let request = VNDetectRectanglesRequest()
     request.minimumAspectRatio = 0.2
     request.maximumAspectRatio = 1.0
     request.minimumSize = 0.2
-    request.maximumObservations = 4
-    request.minimumConfidence = 0.6
+    request.maximumObservations = 6
+    request.minimumConfidence = minConfidence
     request.quadratureTolerance = 25.0
     return request
   }
@@ -54,11 +59,20 @@ enum BonVision {
   /// (cheap — no CGImage render). Buffer must already be upright
   /// (we deliver frames in .portrait), so orientation is .up.
   static func detectRectangle(pixelBuffer: CVPixelBuffer) -> VNRectangleObservation? {
-    let request = makeRectangleRequest()
+    return pickBestRectangle(detectRectangles(pixelBuffer: pixelBuffer, minConfidence: 0.6))
+  }
+
+  /// All plausible receipt rectangles on a pixel buffer at a given
+  /// confidence floor — used by the live overlay, which then applies
+  /// temporal continuity to pick a stable one.
+  static func detectRectangles(
+    pixelBuffer: CVPixelBuffer,
+    minConfidence: VNConfidence
+  ) -> [VNRectangleObservation] {
+    let request = makeRectangleRequest(minConfidence: minConfidence)
     let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
-    do { try handler.perform([request]) } catch { return nil }
-    guard let results = request.results as? [VNRectangleObservation] else { return nil }
-    return pickBestRectangle(results)
+    do { try handler.perform([request]) } catch { return [] }
+    return (request.results as? [VNRectangleObservation]) ?? []
   }
 
   /// Warp the four corners of `observation` flat (axis-aligned) and
