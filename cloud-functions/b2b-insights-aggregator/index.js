@@ -115,12 +115,17 @@ async function aggregate() {
   const osSplit = {}; // os → { users:Set, journeys, decisions:{noname,marke} }
   const appVersions = {}; // "os version (build)" → Set(users)
 
-  const journeysSnap = await db
+  // STREAM (not .get()): journey docs carry large viewedProducts arrays;
+  // materialising the whole collectionGroup at once OOMs a 1GB instance.
+  // for-await over .stream() processes one doc at a time, GC'd as we go.
+  let journeysScanned = 0;
+  const journeysStream = db
     .collectionGroup('journeys')
     .select('viewedProducts', 'activeFilters', 'app')
-    .get();
+    .stream();
 
-  journeysSnap.forEach((doc) => {
+  for await (const doc of journeysStream) {
+    journeysScanned += 1;
     const uid = userIdFromSubcollectionDoc(doc);
     const vps = doc.get('viewedProducts');
     const af = doc.get('activeFilters') || {};
@@ -183,7 +188,7 @@ async function aggregate() {
       const vk = `${os} ${app.version}${app.build ? ` (${app.build})` : ''}`;
       (appVersions[vk] = appVersions[vk] || new Set()).add(uid || `anon_${Math.random()}`);
     }
-  });
+  }
 
   // Suppress quality-aware-switching buckets below k-anonymity threshold.
   const qualityAwareSwitching = {};
@@ -210,12 +215,14 @@ async function aggregate() {
   const discCounts = {}; // discId → { count, users:Set }
   const prices = [];
 
-  const purchasesSnap = await db
+  let purchasesScanned = 0;
+  const purchasesStream = db
     .collectionGroup('purchases')
     .select('discounter', 'savings', 'preis', 'kategorie')
-    .get();
+    .stream();
 
-  purchasesSnap.forEach((doc) => {
+  for await (const doc of purchasesStream) {
+    purchasesScanned += 1;
     const uid = userIdFromSubcollectionDoc(doc);
     const catId = refId(doc.get('kategorie'));
     const discId = refId(doc.get('discounter'));
@@ -233,7 +240,7 @@ async function aggregate() {
       d.count += 1;
       if (uid) d.users.add(uid);
     }
-  });
+  }
 
   const categoryDemand = Object.entries(catCounts)
     .filter(([, c]) => c.users.size >= MIN_USERS)
@@ -295,8 +302,8 @@ async function aggregate() {
     osBreakdown,
     appVersionDist,
     computeMs: Date.now() - startedAt,
-    journeysScanned: journeysSnap.size,
-    purchasesScanned: purchasesSnap.size,
+    journeysScanned,
+    purchasesScanned,
   };
 
   await db.collection('aggregates').doc('b2b_insights_v1').set(payload, { merge: false });
@@ -305,7 +312,7 @@ async function aggregate() {
 
 exports.aggregateB2bInsights = functions
   .region('europe-west1')
-  .runWith({ timeoutSeconds: 540, memory: '1GB' })
+  .runWith({ timeoutSeconds: 540, memory: '2GB' })
   .pubsub.schedule('every day 04:00')
   .timeZone('Europe/Berlin')
   .onRun(async () => {
@@ -318,7 +325,7 @@ exports.aggregateB2bInsights = functions
 // so the expensive full scan can't be triggered by anyone with the URL.
 exports.aggregateB2bInsightsManual = functions
   .region('europe-west1')
-  .runWith({ timeoutSeconds: 540, memory: '1GB', secrets: ['NUTRITION_SCRAPER_TRIGGER_KEY'] })
+  .runWith({ timeoutSeconds: 540, memory: '2GB', secrets: ['NUTRITION_SCRAPER_TRIGGER_KEY'] })
   .https.onRequest(async (req, res) => {
     const expected = process.env.NUTRITION_SCRAPER_TRIGGER_KEY;
     if (!expected || (req.query.key || '') !== expected) {
