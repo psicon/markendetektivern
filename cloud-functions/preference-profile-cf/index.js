@@ -228,10 +228,17 @@ exports.decayPreferenceProfiles = functions
     return null;
   });
 
+// KEY-gated (?key=<NUTRITION_SCRAPER_TRIGGER_KEY>) — schreibt sonst über ALLE
+// Profile; darf nicht offen aufrufbar sein.
 exports.decayPreferenceProfilesManual = functions
   .region('europe-west1')
-  .runWith({ timeoutSeconds: 540, memory: '1GB' })
+  .runWith({ timeoutSeconds: 540, memory: '1GB', secrets: ['NUTRITION_SCRAPER_TRIGGER_KEY'] })
   .https.onRequest(async (req, res) => {
+    const expected = process.env.NUTRITION_SCRAPER_TRIGGER_KEY;
+    if (!expected || (req.query.key || '') !== expected) {
+      res.status(403).json({ ok: false, error: 'forbidden' });
+      return;
+    }
     try {
       res.json({ ok: true, ...(await run()) });
     } catch (e) {

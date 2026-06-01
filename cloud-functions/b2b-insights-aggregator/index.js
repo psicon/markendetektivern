@@ -314,11 +314,17 @@ exports.aggregateB2bInsights = functions
     return null;
   });
 
-// Manual trigger for testing/backfill.
+// Manual trigger for testing/backfill — KEY-gated (?key=<NUTRITION_SCRAPER_TRIGGER_KEY>)
+// so the expensive full scan can't be triggered by anyone with the URL.
 exports.aggregateB2bInsightsManual = functions
   .region('europe-west1')
-  .runWith({ timeoutSeconds: 540, memory: '1GB' })
+  .runWith({ timeoutSeconds: 540, memory: '1GB', secrets: ['NUTRITION_SCRAPER_TRIGGER_KEY'] })
   .https.onRequest(async (req, res) => {
+    const expected = process.env.NUTRITION_SCRAPER_TRIGGER_KEY;
+    if (!expected || (req.query.key || '') !== expected) {
+      res.status(403).json({ ok: false, error: 'forbidden' });
+      return;
+    }
     try {
       const r = await aggregate();
       res.json({ ok: true, ...r });
