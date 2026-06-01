@@ -949,7 +949,14 @@ export default function ProductComparisonScreen() {
     (mp?.hersteller as any)?.herstellername
     ?? (mp?.hersteller as any)?.name
     ?? '';
-  const brandLogoUri = (mp?.hersteller as any)?.bild as string | undefined;
+  // Logo im Hero-/Morph-Title = MARKE (mp.marke.bild, z.B. Castello), NICHT der
+  // echte Hersteller (mp.hersteller = hersteller_new, z.B. Arla → trägt das alte
+  // MUH-Logo). Gleiche Quelle wie das Hersteller-Info-Sheet (marke?.bild).
+  // Fallback auf hersteller.bild nur wenn es keine Marke gibt (productData.
+  // hersteller zeigt dann direkt auf einen hersteller_new). Bug 86ca2r04g.
+  const brandLogoUri = ((mp as any)?.marke?.bild ?? (mp?.hersteller as any)?.bild) as
+    | string
+    | undefined;
 
   const brandPackInfo = mp
     ? formatPack(
