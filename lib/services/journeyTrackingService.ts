@@ -292,8 +292,20 @@ class JourneyTrackingService {
       if (obj instanceof Date) return obj;
       // DocumentReference unverändert lassen (hat id/path Eigenschaften oft)
       if ((obj as any).path || (obj as any).id && (obj as any).type === 'document') return obj;
-      // Firebase FieldValue wird meist als object mit internen Symbolen repräsentiert → nicht anfassen
-      if (protoName.includes('FieldValue')) return obj;
+      // Firebase FieldValue (z.B. serverTimestamp) NICHT anfassen — sonst wird
+      // der Sentinel zu {_type:'timestamp'} enumeriert und Firestore löst ihn
+      // nie auf. RN-Firebase liefert hier [object Object], daher zusätzlich
+      // Konstruktor-Name + _type-Marker prüfen (BUGFIX 86ca1h3fk).
+      const ctorName = (obj as any).constructor && (obj as any).constructor.name;
+      const fvType = (obj as any)._type;
+      if (
+        protoName.includes('FieldValue') ||
+        (typeof ctorName === 'string' && /FieldValue/i.test(ctorName)) ||
+        (typeof fvType === 'string' &&
+          ['timestamp', 'serverTimestamp', 'arrayUnion', 'arrayRemove', 'increment', 'delete'].includes(fvType))
+      ) {
+        return obj;
+      }
     }
 
     if (Array.isArray(obj)) {
@@ -1808,7 +1820,17 @@ class JourneyTrackingService {
           if (product.comparisonResult) {
             cleanProduct.comparisonResult = product.comparisonResult;
           }
-          
+
+          // Slice A (BUGFIX): qualityEngagement + aiVerdict MÜSSEN mit
+          // persistiert werden — sonst wird das Detail-Engagement beim Write
+          // verworfen (Whitelist-Mapping). Pro-Produkt-Felder, additiv.
+          if (product.qualityEngagement) {
+            cleanProduct.qualityEngagement = product.qualityEngagement;
+          }
+          if (product.aiVerdict) {
+            cleanProduct.aiVerdict = product.aiVerdict;
+          }
+
           return cleanProduct;
         }),
         viewedProductsCount: journey.viewedProducts.length,
@@ -1867,6 +1889,10 @@ class JourneyTrackingService {
 
       // Rekursiv alle undefined entfernen
       const cleanedJourneyData = this.removeUndefinedValues(journeyData);
+      // BUGFIX 86ca1h3fk: den serverTimestamp()-Sentinel NACH dem Cleaning
+      // frisch setzen — so kann ihn keine Heuristik mehr zu {_type:'timestamp'}
+      // verstümmeln; Firestore löst lastUpdated serverseitig korrekt auf.
+      cleanedJourneyData.lastUpdated = serverTimestamp();
       // Diag: wenn der synchrone Block mehr als 50 ms läuft, ist es
       // der Hauptverdächtige für tap-burst freezes.
       if (!journey.firestoreDocId) {
@@ -1961,6 +1987,11 @@ class JourneyTrackingService {
       if (journeyToFinalize.firestoreDocId) {
         const docRef = doc(db, 'users', userId, 'journeys', journeyToFinalize.firestoreDocId);
         const cleanedFinalData = this.removeUndefinedValues(finalData);
+        // BUGFIX 86ca1h3fk: serverTimestamp()-Sentinels NACH dem Cleaning
+        // frisch setzen → completedAt + lastUpdated werden serverseitig
+        // korrekt aufgelöst (vorher {_type:'timestamp'}).
+        cleanedFinalData.completedAt = serverTimestamp();
+        cleanedFinalData.lastUpdated = serverTimestamp();
         try {
           await updateDoc(docRef, cleanedFinalData);
           console.log(`🏁 Journey finalized in Firestore: ${journeyToFinalize.firestoreDocId}`);
