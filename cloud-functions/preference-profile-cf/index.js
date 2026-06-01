@@ -62,14 +62,17 @@ async function run() {
   // priceBand) + #3-rest (stufenTrust = Stufen-Vertrauen, activity/churn).
   const userFactCounts = {}; // uid → { petOwner, hasBaby, alcoholBuyer, veggie }
   const userAgg = {}; // uid → { cats:{}, brands:{}, prices:[], stufeSum, stufeN, lastTs }
+  // NOTE: purchase docs store the category as a DocumentReference nested at
+  // productData.kategorie (NOT top-level `kategorie`), and the timestamp field
+  // is `purchasedAt` (NOT `createdAt`). hersteller/preis/stufe ARE top-level.
   const purchasesSnap = await db
     .collectionGroup('purchases')
-    .select('kategorie', 'hersteller', 'preis', 'stufe', 'createdAt')
+    .select('productData.kategorie', 'hersteller', 'preis', 'stufe', 'purchasedAt')
     .get();
   purchasesSnap.forEach((doc) => {
     const uid = doc.ref.parent.parent ? doc.ref.parent.parent.id : null;
     if (!uid) return;
-    const catId = refId(doc.get('kategorie'));
+    const catId = refId(doc.get('productData.kategorie'));
     const fact = catIdToFact[catId];
     if (fact) {
       const u = (userFactCounts[uid] = userFactCounts[uid] || {});
@@ -86,7 +89,7 @@ async function run() {
       a.stufeSum += stufe;
       a.stufeN += 1;
     }
-    const ts = doc.get('createdAt');
+    const ts = doc.get('purchasedAt');
     const ms = ts && ts.toMillis ? ts.toMillis() : 0;
     if (ms > a.lastTs) a.lastTs = ms;
   });

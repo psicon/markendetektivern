@@ -216,15 +216,18 @@ async function aggregate() {
   const prices = [];
 
   let purchasesScanned = 0;
+  // NOTE: purchase docs store the category as a DocumentReference nested at
+  // productData.kategorie (NOT a top-level `kategorie` field). discounter/
+  // savings/preis ARE top-level.
   const purchasesStream = db
     .collectionGroup('purchases')
-    .select('discounter', 'savings', 'preis', 'kategorie')
+    .select('discounter', 'savings', 'preis', 'productData.kategorie')
     .stream();
 
   for await (const doc of purchasesStream) {
     purchasesScanned += 1;
     const uid = userIdFromSubcollectionDoc(doc);
-    const catId = refId(doc.get('kategorie'));
+    const catId = refId(doc.get('productData.kategorie'));
     const discId = refId(doc.get('discounter'));
     const savings = Number(doc.get('savings')) || 0;
     const preis = Number(doc.get('preis'));
