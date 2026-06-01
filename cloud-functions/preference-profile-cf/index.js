@@ -91,6 +91,26 @@ async function run() {
     if (ms > a.lastTs) a.lastTs = ms;
   });
 
+  // #2: declared-Daten (vom User explizit angegeben) — ein Bulk-Scan der
+  // users-Collection. Aktuell existiert favoriteMarket; dietary/caresAbout
+  // folgen, sobald es dafür eine App-UI gibt. declared > inferred wird beim
+  // Konsum angewandt (mergeDeclared im Client).
+  const declaredByUser = {};
+  try {
+    const usersSnap = await db.collection('users').select('favoriteMarket', 'favoriteMarketName', 'dietary', 'caresAbout').get();
+    usersSnap.forEach((d) => {
+      const v = d.data() || {};
+      const declared = {};
+      if (v.favoriteMarket) declared.favoriteMarket = v.favoriteMarket;
+      if (v.favoriteMarketName) declared.favoriteMarketName = v.favoriteMarketName;
+      if (Array.isArray(v.dietary) && v.dietary.length) declared.dietary = v.dietary;
+      if (Array.isArray(v.caresAbout) && v.caresAbout.length) declared.caresAbout = v.caresAbout;
+      if (Object.keys(declared).length) declaredByUser[d.id] = declared;
+    });
+  } catch (e) {
+    console.warn('users declared scan failed', e && e.message);
+  }
+
   const topN = (counts, n) =>
     Object.entries(counts)
       .map(([id, c]) => ({ id, score: c }))
@@ -174,6 +194,9 @@ async function run() {
         update.daysSinceLastPurchase = Math.floor((now - agg.lastTs) / 86400000);
       }
     }
+
+    // #2: declared-Override-Quelle ins Profil (Consume wendet declared>inferred an).
+    if (declaredByUser[uid]) update.declared = declaredByUser[uid];
 
     if (Object.keys(update).length) batchWrites.push({ ref: doc.ref, update });
   });
