@@ -1796,6 +1796,13 @@ export default function ExploreScreen() {
         (p as any).name ?? 'NoName',
         index,
       );
+      // Gap 3: just-started journey bekommt sofort die aktuellen Filter
+      // (Filter VOR dem ersten View würden sonst nie in activeFilters landen).
+      try {
+        analytics.updateJourneyFilters?.(buildJourneyActiveFilters());
+      } catch {
+        /* fire-and-forget */
+      }
       // Algolia Insights — fire-and-forget click event. Only when
       // we're actually in search mode (not browse), because Insights
       // expects events tied to a queryID. Position is 1-indexed.
@@ -1822,7 +1829,7 @@ export default function ExploreScreen() {
         safePush(`/product-comparison/${p.id}?type=noname` as any);
       }
     },
-    [analytics, searchActiveQuery, searchQueryIdEigen, userProfile?.uid],
+    [analytics, searchActiveQuery, searchQueryIdEigen, userProfile?.uid, buildJourneyActiveFilters],
   );
 
   const openBrand = useCallback(
@@ -1833,6 +1840,12 @@ export default function ExploreScreen() {
         (m as any).name ?? 'Marke',
         index,
       );
+      // Gap 3: just-started journey bekommt sofort die aktuellen Filter.
+      try {
+        analytics.updateJourneyFilters?.(buildJourneyActiveFilters());
+      } catch {
+        /* fire-and-forget */
+      }
       if (searchActiveQuery && searchQueryIdMarken) {
         AlgoliaService.trackClickAfterSearch({
           index: 'markenProdukte',
@@ -1845,7 +1858,7 @@ export default function ExploreScreen() {
       FirestoreService.prefetchComparisonData(m.id, true);
       safePush(`/product-comparison/${m.id}?type=markenprodukt` as any);
     },
-    [analytics, searchActiveQuery, searchQueryIdMarken, userProfile?.uid],
+    [analytics, searchActiveQuery, searchQueryIdMarken, userProfile?.uid, buildJourneyActiveFilters],
   );
 
   // ─── Render ────────────────────────────────────────────────────────────
