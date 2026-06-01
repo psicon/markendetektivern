@@ -62,12 +62,13 @@ async function run() {
   // priceBand) + #3-rest (stufenTrust = Stufen-Vertrauen, activity/churn).
   const userFactCounts = {}; // uid → { petOwner, hasBaby, alcoholBuyer, veggie }
   const userAgg = {}; // uid → { cats:{}, brands:{}, prices:[], stufeSum, stufeN, lastTs }
-  // NOTE: purchase docs store the category as a DocumentReference nested at
-  // productData.kategorie (NOT top-level `kategorie`), and the timestamp field
-  // is `purchasedAt` (NOT `createdAt`). hersteller/preis/stufe ARE top-level.
+  // NOTE: purchase docs store category + maker as DocumentReferences nested in
+  // productData (productData.kategorie / productData.hersteller); top-level
+  // `kategorie` is absent and top-level `hersteller` is null. The timestamp
+  // field is `purchasedAt` (NOT `createdAt`). preis/stufe ARE top-level.
   const purchasesSnap = await db
     .collectionGroup('purchases')
-    .select('productData.kategorie', 'hersteller', 'preis', 'stufe', 'purchasedAt')
+    .select('productData.kategorie', 'productData.hersteller', 'preis', 'stufe', 'purchasedAt')
     .get();
   purchasesSnap.forEach((doc) => {
     const uid = doc.ref.parent.parent ? doc.ref.parent.parent.id : null;
@@ -80,7 +81,7 @@ async function run() {
     }
     const a = (userAgg[uid] = userAgg[uid] || { cats: {}, brands: {}, prices: [], stufeSum: 0, stufeN: 0, lastTs: 0 });
     if (catId) a.cats[catId] = (a.cats[catId] || 0) + 1;
-    const brandId = refId(doc.get('hersteller'));
+    const brandId = refId(doc.get('productData.hersteller'));
     if (brandId) a.brands[brandId] = (a.brands[brandId] || 0) + 1;
     const preis = Number(doc.get('preis'));
     if (Number.isFinite(preis) && preis > 0) a.prices.push(preis);

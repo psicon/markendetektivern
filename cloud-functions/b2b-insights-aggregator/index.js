@@ -221,7 +221,7 @@ async function aggregate() {
   // savings/preis ARE top-level.
   const purchasesStream = db
     .collectionGroup('purchases')
-    .select('discounter', 'savings', 'preis', 'productData.kategorie')
+    .select('discounter', 'productData.ersparnis', 'preis', 'productData.kategorie')
     .stream();
 
   for await (const doc of purchasesStream) {
@@ -229,7 +229,9 @@ async function aggregate() {
     const uid = userIdFromSubcollectionDoc(doc);
     const catId = refId(doc.get('productData.kategorie'));
     const discId = refId(doc.get('discounter'));
-    const savings = Number(doc.get('savings')) || 0;
+    // savings: top-level `savings` is always 0; the real value is the embedded
+    // productData.ersparnis (€ saved vs the brand product).
+    const savings = Number(doc.get('productData.ersparnis')) || 0;
     const preis = Number(doc.get('preis'));
     if (Number.isFinite(preis) && preis > 0) prices.push(preis);
     if (catId) {
