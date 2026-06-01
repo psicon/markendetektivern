@@ -58,17 +58,46 @@ async function run() {
     if (FACT_CATEGORY_NAMES[name]) catIdToFact[d.id] = FACT_CATEGORY_NAMES[name];
   });
 
-  // Per-user category-purchase counts (for facts).
-  const userFactCounts = {}; // uid → { petOwner:n, hasBaby:n, alcoholBuyer:n, veggie:n }
-  const purchasesSnap = await db.collectionGroup('purchases').select('kategorie').get();
+  // Per-user purchase aggregation: facts + #4 (topCategories/topBrands/
+  // priceBand) + #3-rest (stufenTrust = Stufen-Vertrauen, activity/churn).
+  const userFactCounts = {}; // uid → { petOwner, hasBaby, alcoholBuyer, veggie }
+  const userAgg = {}; // uid → { cats:{}, brands:{}, prices:[], stufeSum, stufeN, lastTs }
+  const purchasesSnap = await db
+    .collectionGroup('purchases')
+    .select('kategorie', 'hersteller', 'preis', 'stufe', 'createdAt')
+    .get();
   purchasesSnap.forEach((doc) => {
     const uid = doc.ref.parent.parent ? doc.ref.parent.parent.id : null;
     if (!uid) return;
-    const fact = catIdToFact[refId(doc.get('kategorie'))];
-    if (!fact) return;
-    const u = (userFactCounts[uid] = userFactCounts[uid] || {});
-    u[fact] = (u[fact] || 0) + 1;
+    const catId = refId(doc.get('kategorie'));
+    const fact = catIdToFact[catId];
+    if (fact) {
+      const u = (userFactCounts[uid] = userFactCounts[uid] || {});
+      u[fact] = (u[fact] || 0) + 1;
+    }
+    const a = (userAgg[uid] = userAgg[uid] || { cats: {}, brands: {}, prices: [], stufeSum: 0, stufeN: 0, lastTs: 0 });
+    if (catId) a.cats[catId] = (a.cats[catId] || 0) + 1;
+    const brandId = refId(doc.get('hersteller'));
+    if (brandId) a.brands[brandId] = (a.brands[brandId] || 0) + 1;
+    const preis = Number(doc.get('preis'));
+    if (Number.isFinite(preis) && preis > 0) a.prices.push(preis);
+    const stufe = parseInt(String(doc.get('stufe') || '0'), 10);
+    if (stufe >= 1 && stufe <= 5) {
+      a.stufeSum += stufe;
+      a.stufeN += 1;
+    }
+    const ts = doc.get('createdAt');
+    const ms = ts && ts.toMillis ? ts.toMillis() : 0;
+    if (ms > a.lastTs) a.lastTs = ms;
   });
+
+  const topN = (counts, n) =>
+    Object.entries(counts)
+      .map(([id, c]) => ({ id, score: c }))
+      .sort((x, y) => y.score - x.score)
+      .slice(0, n);
+  const percentile = (sorted, p) =>
+    sorted.length ? +sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))].toFixed(2) : null;
 
   // Walk all profiles: decay dimensions + write facts. The profile lives at
   // users/{uid}/profile/preferences → collection 'profile', doc 'preferences'.
@@ -124,6 +153,25 @@ async function run() {
       if (Object.keys(facts).length) {
         update.facts = facts;
         factsWritten += 1;
+      }
+    }
+
+    // 3) #4 + #3-rest: topCategories / topBrands / priceBand / stufenTrust /
+    //    activity (Aktivität-Churn) aus den aggregierten Käufen.
+    const agg = userAgg[uid];
+    if (agg && agg.prices.length + Object.keys(agg.cats).length > 0) {
+      update.topCategories = topN(agg.cats, 5);
+      update.topBrands = topN(agg.brands, 5);
+      const sorted = agg.prices.slice().sort((x, y) => x - y);
+      if (sorted.length) {
+        update.priceBand = { p25: percentile(sorted, 0.25), p50: percentile(sorted, 0.5), p75: percentile(sorted, 0.75), n: sorted.length };
+      }
+      // Stufen-Vertrauen: durchschnittliche Ähnlichkeitsstufe der Käufe (1..5).
+      if (agg.stufeN > 0) update.stufenTrust = +(agg.stufeSum / agg.stufeN).toFixed(2);
+      // Aktivität/Churn: Tage seit letztem Kauf.
+      if (agg.lastTs > 0) {
+        update.lastPurchaseAt = agg.lastTs;
+        update.daysSinceLastPurchase = Math.floor((now - agg.lastTs) / 86400000);
       }
     }
 
