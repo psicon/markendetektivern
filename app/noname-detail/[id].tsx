@@ -69,6 +69,8 @@ import {
   type NaehrwerteShape,
 } from '@/lib/utils/productNutrition';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
+import { scoreToVerdict } from '@/lib/utils/aiVerdict';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
@@ -180,6 +182,19 @@ export default function NoNameDetailScreen() {
   const onTabChange = (next: Tab) => {
     collapseCartPill();
     setTab(next);
+    // Slice A: Tab-Öffnen = Qualitäts-Engagement (qualityEngaged pro Produkt).
+    if (next === 'nutrition' || next === 'ingredients') {
+      try {
+        journeyTrackingService.trackQualityEngagement(
+          String(id),
+          next === 'nutrition' ? 'tab_nutrition' : 'tab_ingredients',
+          scoreToVerdict((p as any)?.aiComparison?.score),
+          user?.uid,
+        );
+      } catch {
+        /* fire-and-forget */
+      }
+    }
   };
   const [isFav, setIsFav] = useState(false);
   // Sync isFav mit echtem Server-Status sobald die productId bekannt
@@ -1635,7 +1650,22 @@ export default function NoNameDetailScreen() {
                 (User-Vorgabe 2026-05-28). Comparison wenn MP-Link da,
                 sonst Standalone-Assessment. Beide returnen null wenn
                 keine Daten → andere Sections rücken automatisch nach. */}
-            <AiComparisonScale aiComparison={(p as any)?.aiComparison ?? null} />
+            <AiComparisonScale
+              aiComparison={(p as any)?.aiComparison ?? null}
+              onExpand={() => {
+                // Slice A: KI-Analyse aufgeklappt = Qualitäts-Engagement.
+                try {
+                  journeyTrackingService.trackQualityEngagement(
+                    String(id),
+                    'ai_expanded',
+                    scoreToVerdict((p as any)?.aiComparison?.score),
+                    user?.uid,
+                  );
+                } catch {
+                  /* fire-and-forget */
+                }
+              }}
+            />
             {(p as any)?.aiComparison?.score ? null : (
               <AiHealthScale aiAssessment={(p as any)?.aiAssessment ?? null} />
             )}

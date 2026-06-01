@@ -39,6 +39,9 @@ interface Props {
   /** Optional. Wird in der Headline benutzt z.B. "Bewertung". */
   title?: string;
   style?: ViewStyle;
+  /** Tracking-Hook (ClickUp 86ca1h3fk): feuert beim ERSTEN Aufklappen des
+   *  Detailtexts = bewusstes "genauer anschauen"-Signal (qualityEngaged). */
+  onExpand?: () => void;
 }
 
 // 5-Tier Farb-Gradient — User-Vorgabe 2026-05-28:
@@ -56,6 +59,7 @@ export function AiComparisonScale({
   aiComparison,
   title = 'KI-Qualitäts- & Inhaltsanalyse',
   style,
+  onExpand,
 }: Props) {
   const { theme } = useTokens();
   // Detailtext standardmäßig eingeklappt. Das Aufklappen ist später der
@@ -82,7 +86,12 @@ export function AiComparisonScale({
       // gibt den Akkordeon-Effekt.
       layout={LinearTransition.duration(220)}
       onPress={() => {
-        if (isLong) setExpanded((v) => !v);
+        if (isLong) {
+          setExpanded((v) => {
+            if (!v) onExpand?.(); // nur beim Aufklappen feuern
+            return !v;
+          });
+        }
       }}
       disabled={!isLong}
       style={[

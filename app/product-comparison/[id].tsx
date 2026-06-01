@@ -76,6 +76,8 @@ import {
 } from '@/lib/utils/productNutrition';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
+import { scoreToVerdict } from '@/lib/utils/aiVerdict';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
@@ -432,6 +434,19 @@ export default function ProductComparisonScreen() {
   const onTabChange = (next: Tab) => {
     collapseAllPills();
     setTab(next);
+    // Slice A: Tab-Öffnen = Qualitäts-Engagement (qualityEngaged pro Produkt).
+    if (next === 'nutrition' || next === 'ingredients') {
+      try {
+        journeyTrackingService.trackQualityEngagement(
+          String(id),
+          next === 'nutrition' ? 'tab_nutrition' : 'tab_ingredients',
+          scoreToVerdict((picked as any)?.aiComparison?.score),
+          user?.uid,
+        );
+      } catch {
+        /* fire-and-forget */
+      }
+    }
   };
   // Swipe zwischen Inhaltsstoffe ↔ Nährwerte — NUR im Tab-Content-Bereich
   // (die GestureDetector-Region), damit der Rest der Seite normal scrollt.
@@ -2565,7 +2580,22 @@ export default function ProductComparisonScreen() {
             platzieren (vorher war's drüber). Component returnt null
             wenn kein Score → Alternativen-Liste rückt automatisch
             nach. */}
-        <AiComparisonScale aiComparison={(picked as any)?.aiComparison ?? null} />
+        <AiComparisonScale
+          aiComparison={(picked as any)?.aiComparison ?? null}
+          onExpand={() => {
+            // Slice A: KI-Analyse aufgeklappt = Qualitäts-Engagement.
+            try {
+              journeyTrackingService.trackQualityEngagement(
+                String(id),
+                'ai_expanded',
+                scoreToVerdict((picked as any)?.aiComparison?.score),
+                user?.uid,
+              );
+            } catch {
+              /* fire-and-forget */
+            }
+          }}
+        />
         {/* Fallback: wenn kein echter Vergleich möglich war (z.B. das
             verknüpfte Markenprodukt hat noch keine Nährwerte/Zutaten),
             bewertet die KI das NoName standalone kategorie-relativ. Dann

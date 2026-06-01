@@ -165,6 +165,22 @@ export interface JourneyContext {
       priceRange: { min: number; max: number }; // Preisspanne der Alternativen
       savingsRange: { min: number; max: number }; // Ersparnisse der Alternativen
     };
+
+    // NEU (Slice A): Qualitäts-Engagement PRO PRODUKT. Gesetzt, wenn der User
+    // auf der Detailseite Qualität tatsächlich angeschaut hat (KI-Analyse
+    // aufgeklappt, Nährwerte/Zutaten-Tab geöffnet, Hersteller-Info, oder
+    // Scroll-Dwell-Lesen). Das ist das Gate aus dem Task: die KI-Verdikt-
+    // Wertung zählt nur, wenn engaged=true. Additiv — nichts Bestehendes
+    // hängt davon ab; der Profil-Producer (Slice B) liest dies + actions[].
+    qualityEngagement?: {
+      engaged: boolean;
+      sources: { [kind: string]: boolean }; // ai_expanded | tab_nutrition | tab_ingredients | manufacturer_opened | section_read
+      lastAt: number;
+    };
+    // NEU (Slice A): KI-Verdikt dieses Produkts zum Zeitpunkt der Ansicht,
+    // gemappt aus aiComparison.score (4–5 besser, 3 gleichwertig, 1–2
+    // schlechter). Nur bei NoName gesetzt (Marke hat keinen Verdikt).
+    aiVerdict?: 'besser' | 'gleichwertig' | 'schlechter';
   }[];
   
   // ENTFERNT: Alte Arrays - alles ist jetzt in viewedProducts[].actions
@@ -323,6 +339,45 @@ class JourneyTrackingService {
     }
     
     return null;
+  }
+
+  /**
+   * NEU (Slice A): Qualitäts-Engagement auf der Detailseite festhalten.
+   *
+   * Wird vom Detail-Screen aufgerufen, wenn der User Qualität tatsächlich
+   * anschaut (KI-Analyse aufgeklappt, Nährwerte/Zutaten-Tab geöffnet,
+   * Hersteller-Info, Scroll-Dwell). Setzt qualityEngaged=true PRO PRODUKT
+   * und merkt die Quelle. Optional wird das KI-Verdikt (aus aiComparison.score
+   * gemappt) am Produkt hinterlegt, damit der Profil-Producer Entscheidung ×
+   * Verdikt × Engagement zusammenführen kann.
+   *
+   * Vollständig additiv + fire-and-forget: kein bestehender Pfad hängt davon
+   * ab; wenn keine Journey aktiv ist oder das Produkt (noch) nicht in
+   * viewedProducts steht, passiert nichts (no-op).
+   */
+  trackQualityEngagement(
+    productId: string,
+    kind: 'ai_expanded' | 'tab_nutrition' | 'tab_ingredients' | 'manufacturer_opened' | 'section_read',
+    aiVerdict?: 'besser' | 'gleichwertig' | 'schlechter',
+    userId?: string,
+  ): void {
+    try {
+      if (!productId || !this.currentJourney?.viewedProducts) return;
+      const vp = this.currentJourney.viewedProducts.find((p) => p.productId === productId);
+      if (!vp) return; // Produkt wurde noch nicht als "viewed" erfasst → no-op
+      if (!vp.qualityEngagement) {
+        vp.qualityEngagement = { engaged: true, sources: {}, lastAt: Date.now() };
+      }
+      vp.qualityEngagement.engaged = true;
+      vp.qualityEngagement.sources[kind] = true;
+      vp.qualityEngagement.lastAt = Date.now();
+      if (aiVerdict && !vp.aiVerdict) vp.aiVerdict = aiVerdict;
+      const uid = userId || this.lastUserId || undefined;
+      if (uid) this.persistJourneyToFirestore(uid);
+    } catch (e) {
+      // fire-and-forget: Tracking darf nie die UI beeinflussen
+      console.warn('trackQualityEngagement failed (ignored)', (e as any)?.message);
+    }
   }
 
   /**
@@ -1516,7 +1571,9 @@ class JourneyTrackingService {
    * den eigentlichen Write).
    */
   private persistJourneyCallCount = 0;
+  private lastUserId: string | null = null; // letzter bekannter uid (für additive Fire-and-forget-Calls)
   private persistJourneyToFirestore(userId: string): void {
+    if (userId) this.lastUserId = userId;
     this.persistPendingUserId = userId;
     this.persistJourneyCallCount += 1;
     if (this.persistDebounceTimer) {
