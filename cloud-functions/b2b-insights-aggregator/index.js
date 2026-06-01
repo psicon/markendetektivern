@@ -72,6 +72,26 @@ function decisionOf(vp) {
 async function aggregate() {
   const startedAt = Date.now();
 
+  // #6: Marken-Namen → id (Collection 'hersteller' = Marken) für die
+  // Suche→Marke-Intent-Erkennung (ergänzt den activeFilters.brandId-Pfad).
+  // Nur Namen >= 4 Zeichen, um triviale Teiltreffer zu vermeiden.
+  const brandNameToId = [];
+  try {
+    const brandsSnap = await db.collection('hersteller').select('name').get();
+    brandsSnap.forEach((d) => {
+      const name = String(d.data().name || '').toLowerCase().trim();
+      if (name.length >= 4) brandNameToId.push({ name, id: d.id });
+    });
+  } catch (e) {
+    console.warn('brand-name map load failed (search-intent leakage skipped)', e && e.message);
+  }
+  const brandIdFromSearch = (sq) => {
+    if (!sq) return null;
+    const q = String(sq).toLowerCase();
+    const hit = brandNameToId.find((b) => q.includes(b.name));
+    return hit ? hit.id : null;
+  };
+
   // ── 1–3: scan journeys ───────────────────────────────────────────────
   const funnel = { viewed: 0, compared: 0, cart: 0, purchased: 0 };
   const decisionSplit = { noname: 0, marke: 0 };
@@ -138,9 +158,11 @@ async function aggregate() {
     if (af.labels && af.labels.vegetarian) bumpFilter('label:vegetarian', uid);
     if (af.kiQuality && af.kiQuality !== 'off') bumpFilter(`ki:${af.kiQuality}`, uid);
 
-    // Gap 5: brand leakage — brand-intent (Marken-Filter aktiv) + outcome.
-    if (af.brandId) {
-      const b = (brandLeak[af.brandId] = brandLeak[af.brandId] || { leaked: 0, kept: 0, users: new Set() });
+    // Gap 5 + #6: brand leakage — brand-intent aus Marken-Filter (brandId)
+    // ODER aus der Suche (searchQuery enthält Markennamen) + outcome.
+    const intentBrandId = af.brandId || brandIdFromSearch(af.searchQuery);
+    if (intentBrandId) {
+      const b = (brandLeak[intentBrandId] = brandLeak[intentBrandId] || { leaked: 0, kept: 0, users: new Set() });
       if (journeyChoseNoName) b.leaked += 1;
       else if (journeyChoseMarke) b.kept += 1;
       if (uid) b.users.add(uid);
