@@ -1494,6 +1494,16 @@ class JourneyTrackingService {
     if (userId && journeyToFinalize) {
       this.finalizeJourneyInFirestore(userId, reason, journeyToFinalize);
     }
+
+    // Slice B: Präferenz-Profil aus der abgeschlossenen Journey aktualisieren
+    // (Client-EWMA, 1×/Session). Fire-and-forget — darf completeJourney nie
+    // beeinflussen. Lazy-Import vermeidet jegliche Zyklus-/Init-Reihenfolge.
+    const profileUid = userId || this.lastUserId;
+    if (profileUid && journeyToFinalize) {
+      import('./preferenceProfileService')
+        .then((m) => m.updateFromJourney(profileUid, journeyToFinalize))
+        .catch(() => {});
+    }
   }
 
   /**
