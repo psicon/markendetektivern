@@ -57,6 +57,7 @@ import { useTokens } from '@/hooks/useTokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { usePreferenceProfile, dominantDimension } from '@/hooks/usePreferenceProfile';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { db } from '@/lib/firebase';
 import { PERF } from '@/lib/perfFlags';
@@ -357,6 +358,10 @@ export default function ExploreScreen() {
   const { user, userProfile } = useAuth();
   const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
+  // Slice D: Präferenz-Profil (read-once) → sanfter Default-Bias (s. u.).
+  const prefProfile = usePreferenceProfile();
+  const userTouchedSortRef = useRef(false);
+  const sortBiasAppliedRef = useRef(false);
 
   // T16: Age-Lookup für Alkohol-Kategorie-Gating. Aus userProfile
   // mit Legacy-Fallback auf birthDate (alte User-Docs vor T12).
@@ -503,6 +508,22 @@ export default function ExploreScreen() {
     if (cf.vegetarian) n++;
     return n;
   }, [contentFilters]);
+
+  // Slice D: sanfter Default-Bias. Wenn das Profil klar preis-dominant ist
+  // (genug Confidence) UND der User den Sort in dieser Session noch NICHT
+  // angefasst hat, wird der Default-Sort von 'name' auf 'preis' gekippt.
+  // Reine REIHENFOLGE — keine Inhalte werden ausgeblendet (kein Risiko für
+  // die Liste); jederzeit vom User überschreibbar; feuert genau EINMAL.
+  useEffect(() => {
+    if (sortBiasAppliedRef.current || userTouchedSortRef.current) return;
+    if (sort !== 'name') return;
+    const dom = dominantDimension(prefProfile);
+    if (dom && dom.dim === 'price' && dom.value >= 0.3 && dom.confidence >= 0.3) {
+      sortBiasAppliedRef.current = true;
+      setSort('preis');
+    }
+  }, [prefProfile, sort]);
+
   const [sheet, setSheet] = useState<SheetKey>(null);
   // Marken-Info-Sheet — getriggered vom (i)-Icon auf einer BrandCard.
   // null = zu, Object = sichtbar mit den jeweiligen Daten.
@@ -3628,6 +3649,7 @@ export default function ExploreScreen() {
             ['preis', 'Preis (aufsteigend)'],
           ] as const}
           onChange={(v) => {
+            userTouchedSortRef.current = true; // Slice D: User-Wahl gewinnt immer
             setSort(v);
             setSheet(null);
           }}
