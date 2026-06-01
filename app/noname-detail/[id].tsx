@@ -799,7 +799,7 @@ export default function NoNameDetailScreen() {
         false,
         'comparison',
         { screenName: 'noname-detail' },
-        { price: p.preis ?? 0, savings: 0 },
+        { price: p.preis ?? 0, savings: (p as any).ersparnis ?? 0 },
       );
     } catch (e) {
       console.error('Cart add failed:', e);
@@ -839,7 +839,7 @@ export default function NoNameDetailScreen() {
         false,
         'comparison',
         { screenName: 'noname-detail' },
-        { price: p.preis ?? 0, savings: 0 },
+        { price: p.preis ?? 0, savings: (p as any).ersparnis ?? 0 },
       );
     } catch (e) {
       console.error('Cart increment failed:', e);
@@ -1722,7 +1722,25 @@ export default function NoNameDetailScreen() {
             />
             </View>
             {(p as any)?.aiComparison?.score ? null : (
-              <AiHealthScale aiAssessment={(p as any)?.aiAssessment ?? null} />
+              <View ref={aiSectionRef} collapsable={false}>
+                <AiHealthScale
+                  aiAssessment={(p as any)?.aiAssessment ?? null}
+                  onExpand={() => {
+                    // Slice A: Auch das Aufklappen der Standalone-KI-Analyse
+                    // (aiAssessment) = Qualitäts-Engagement (kein Verdikt).
+                    try {
+                      journeyTrackingService.trackQualityEngagement(
+                        String(id),
+                        'ai_expanded',
+                        undefined,
+                        user?.uid,
+                      );
+                    } catch {
+                      /* fire-and-forget */
+                    }
+                  }}
+                />
+              </View>
             )}
             {/* Hersteller-Einschätzung (Info-Karte, kein Score). */}
             <AiManufacturerCard

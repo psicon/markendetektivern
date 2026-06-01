@@ -2623,7 +2623,16 @@ export default function ProductComparisonScreen() {
             bewertet die KI das NoName standalone kategorie-relativ. Dann
             zeigen wir die Einzel-Bewertung statt gar nichts. */}
         {(picked as any)?.aiComparison?.score ? null : (
-          <AiHealthScale aiAssessment={(picked as any)?.aiAssessment ?? null} />
+          <AiHealthScale
+            aiAssessment={(picked as any)?.aiAssessment ?? null}
+            onExpand={() => {
+              try {
+                journeyTrackingService.trackQualityEngagement(String(id), 'ai_expanded', undefined, user?.uid);
+              } catch {
+                /* fire-and-forget */
+              }
+            }}
+          />
         )}
           </View>
         </Crossfade>

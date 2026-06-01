@@ -34,6 +34,8 @@ interface Props {
   /** Optional. Default 'KI-Qualitäts- & Inhaltsanalyse'. */
   title?: string;
   style?: ViewStyle;
+  /** Tracking-Hook (ClickUp 86ca1h3fk): feuert beim ERSTEN Aufklappen. */
+  onExpand?: () => void;
 }
 
 // Identische Palette wie AiComparisonScale — Score 3 bereits grün.
@@ -43,6 +45,7 @@ export function AiHealthScale({
   aiAssessment,
   title = 'KI-Qualitäts- & Inhaltsanalyse',
   style,
+  onExpand,
 }: Props) {
   const { theme } = useTokens();
   const [expanded, setExpanded] = useState(false);
@@ -89,7 +92,13 @@ export function AiHealthScale({
     <AnimatedPressable
       layout={LinearTransition.duration(220)}
       onPress={() => {
-        if (isLong) setExpanded((v) => !v);
+        if (isLong) {
+          setExpanded((v) => {
+            if (!v) onExpand?.();
+            return !v;
+          });
+          return;
+        }
       }}
       disabled={!isLong}
       style={[
