@@ -3,6 +3,7 @@ import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Dimensions,
   Image,
   InteractionManager,
   Pressable,
@@ -157,6 +158,11 @@ export default function NoNameDetailScreen() {
   // erklärt"-Anker an.
   const contextAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_CONTEXT);
   const detailScrollRef = useRef<ScrollView>(null);
+  // Gap 2b: Scroll-Stop & Lesen der KI-Analyse-Sektion (measure() = echte
+  // Screen-Koordinaten, kein Container-Math → kein False-Positiv-Rauschen).
+  const aiSectionRef = useRef<View>(null);
+  const sectionReadFiredRef = useRef(false);
+  const sectionDwellTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ─── Data state ──────────────────────────────────────────────────
   // One fetch, one state slot. We deliberately wait for the FULL
@@ -207,6 +213,39 @@ export default function NoNameDetailScreen() {
       user?.uid,
     );
   }, [id, product, user?.uid]);
+
+  // Gap 2b: bei Scroll-Stopp prüfen, ob die KI-Analyse-Sektion sichtbar ist
+  // (≥1,2 s ruhig) → als "gelesen" werten. Feuert genau EINMAL pro Produkt.
+  useEffect(() => {
+    sectionReadFiredRef.current = false; // Reset bei Produktwechsel
+  }, [id]);
+  useEffect(() => () => {
+    if (sectionDwellTimer.current) clearTimeout(sectionDwellTimer.current);
+  }, []);
+  const scheduleSectionRead = useCallback(() => {
+    if (sectionReadFiredRef.current) return;
+    if (sectionDwellTimer.current) clearTimeout(sectionDwellTimer.current);
+    sectionDwellTimer.current = setTimeout(() => {
+      const node = aiSectionRef.current as any;
+      if (!node?.measure || sectionReadFiredRef.current) return;
+      node.measure((_x: number, _y: number, _w: number, h: number, _px: number, py: number) => {
+        const winH = Dimensions.get('window').height;
+        const visible = py + Math.min(h, 120) <= winH - 60 && py + h >= insets.top + 60;
+        if (!visible || sectionReadFiredRef.current) return;
+        sectionReadFiredRef.current = true;
+        try {
+          journeyTrackingService.trackQualityEngagement(
+            String(id),
+            'section_read',
+            scoreToVerdict((product as any)?.aiComparison?.score),
+            user?.uid,
+          );
+        } catch {
+          /* fire-and-forget */
+        }
+      });
+    }, 1200);
+  }, [id, product, user?.uid, insets.top]);
 
   const [isFav, setIsFav] = useState(false);
   // Sync isFav mit echtem Server-Status sobald die productId bekannt
@@ -959,6 +998,8 @@ export default function NoNameDetailScreen() {
       <Animated.ScrollView
         ref={detailScrollRef}
         onScroll={scrollHandler}
+        onMomentumScrollEnd={scheduleSectionRead}
+        onScrollEndDrag={scheduleSectionRead}
         scrollEventThrottle={16}
         contentContainerStyle={{
           paddingTop: insets.top + DETAIL_HEADER_ROW_HEIGHT,
@@ -1662,6 +1703,7 @@ export default function NoNameDetailScreen() {
                 (User-Vorgabe 2026-05-28). Comparison wenn MP-Link da,
                 sonst Standalone-Assessment. Beide returnen null wenn
                 keine Daten → andere Sections rücken automatisch nach. */}
+            <View ref={aiSectionRef} collapsable={false}>
             <AiComparisonScale
               aiComparison={(p as any)?.aiComparison ?? null}
               onExpand={() => {
@@ -1678,6 +1720,7 @@ export default function NoNameDetailScreen() {
                 }
               }}
             />
+            </View>
             {(p as any)?.aiComparison?.score ? null : (
               <AiHealthScale aiAssessment={(p as any)?.aiAssessment ?? null} />
             )}
