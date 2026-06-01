@@ -490,10 +490,14 @@ class JourneyTrackingService {
    * fire-and-forget — eine fehlende/leere Eigenschaft wird einfach ausgelassen,
    * die Journey funktioniert auch ohne. Wird NICHT pro Event neu gelesen.
    */
+  private consumerProfileResolved = false; // 86ca2ruh9: pro Journey 1× versucht
   private async addConsumerProfileToJourney(userId?: string): Promise<void> {
     if (!this.currentJourney || !userId) return;
-    // Idempotent: einmal gesetzt, nicht erneut lesen (z.B. bei Resume).
-    if (this.currentJourney.consumerProfile) return;
+    // Idempotent: einmal gesetzt/versucht, nicht erneut lesen (z.B. bei Resume
+    // oder bei jedem debounced Persist). resolved wird in startJourney je neuer
+    // Journey zurückgesetzt; bei einem echten Fehler unten wieder freigegeben.
+    if (this.currentJourney.consumerProfile || this.consumerProfileResolved) return;
+    this.consumerProfileResolved = true; // up-front → dedupe paralleler Persist-Calls
 
     try {
       const snap = await getDoc(doc(db, 'users', userId));
@@ -531,7 +535,9 @@ class JourneyTrackingService {
       this.currentJourney.consumerProfile = profile;
       if (userId) this.persistJourneyToFirestore(userId);
     } catch (error) {
-      // fire-and-forget: darf die Journey nie beeinflussen
+      // fire-and-forget: darf die Journey nie beeinflussen. Bei echtem Fehler
+      // (z.B. Netz) wieder freigeben, damit ein späterer Persist neu versucht.
+      this.consumerProfileResolved = false;
       console.warn('addConsumerProfileToJourney failed (ignored)', (error as any)?.message);
     }
   }
@@ -598,6 +604,10 @@ class JourneyTrackingService {
         // Race) die stale firestoreDocId nicht in den falschen User-
         // Pfad schreibt.
         this.currentJourneyUserId = userId;
+        // 86ca2ruh9: hat die geladene Journey schon ein consumerProfile, nicht
+        // neu lesen; fehlt es (Alt-Journey), darf der nächste Persist es 1×
+        // nachfüllen.
+        this.consumerProfileResolved = !!data.consumerProfile;
         
         // Stelle sicher, dass alle Arrays initialisiert sind (für ältere Journeys)
         if (!this.currentJourney.viewedProducts) this.currentJourney.viewedProducts = [];
@@ -671,7 +681,10 @@ class JourneyTrackingService {
 
     // NEU: Location asynchron hinzufügen (non-blocking)
     this.addLocationToJourney(userId);
-    // NEU (86ca2ruh9): Verbraucher-Eigenschaften einmalig anhängen (non-blocking)
+    // NEU (86ca2ruh9): Verbraucher-Eigenschaften einmalig anhängen (non-blocking).
+    // Falls beim Start noch keine userId da ist, holt der persist-Chokepoint
+    // (persistJourneyToFirestore) das nach, sobald der User bekannt ist.
+    this.consumerProfileResolved = false;
     this.addConsumerProfileToJourney(userId);
 
     console.log(`🎯 Journey Started: ${discoveryMethod} auf ${screenName}`, {
@@ -1698,6 +1711,12 @@ class JourneyTrackingService {
   private lastUserId: string | null = null; // letzter bekannter uid (für additive Fire-and-forget-Calls)
   private persistJourneyToFirestore(userId: string): void {
     if (userId) this.lastUserId = userId;
+    // 86ca2ruh9: sobald die userId bekannt ist (oft erst NACH startJourney, weil
+    // Auth später auflöst), die Verbraucher-Eigenschaften nachholen. Methode ist
+    // idempotent + dedupet sich selbst, läuft also höchstens 1× pro Journey.
+    if (userId && this.currentJourney && !this.currentJourney.consumerProfile) {
+      this.addConsumerProfileToJourney(userId);
+    }
     this.persistPendingUserId = userId;
     this.persistJourneyCallCount += 1;
     if (this.persistDebounceTimer) {
