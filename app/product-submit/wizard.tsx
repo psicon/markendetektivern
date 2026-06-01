@@ -16,6 +16,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   Linking,
   Pressable,
   ScrollView,
@@ -27,6 +28,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import {
+  BonScanner,
+  DEFAULT_SCANNER_TUNING,
+  isBonScannerAvailable,
+  type BonScannerHandle,
+  type BonScannerQuality,
+  type ScannerTuning,
+} from 'bon-edge-detector';
+
 import { MarketSelector } from '@/components/ui/MarketSelector';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -36,6 +46,7 @@ import {
   PRODUCT_PHOTO_STEPS,
   getActiveProductCampaign,
   newSessionId,
+  sanitizeForFilename,
   submitProduct,
   uploadProductImage,
   type ActiveProductCampaign,
@@ -44,6 +55,23 @@ import {
 import { showInfoToast } from '@/lib/services/ui/toast';
 
 const PURPLE = '#5b4f9c';
+const SCREEN_W = Dimensions.get('window').width;
+
+// Readability tuning for PRODUCT LABELS (not receipts). The shipped defaults
+// only accept tall, receipt-shaped documents (docMaxWHRatio 0.85) and demand
+// the doc fill 55% of the frame height — a wide/square nutrition panel never
+// qualifies, so the hint would be stuck on "Näher ran". These params accept
+// any orientation and trigger "lesbar" once the label reasonably fills the
+// frame. Device-independent (JS-driven), so the hint behaves the same on all
+// phones.
+const LABEL_TUNING: ScannerTuning = {
+  ...DEFAULT_SCANNER_TUNING,
+  docMinConfidence: 0.15,
+  docMinArea: 0.1,
+  docMaxArea: 0.99,
+  docMaxWHRatio: 3.0,
+  minReadableHeight: 0.44,
+};
 
 type Phase = 'market' | 'intro' | 'capture' | 'review' | 'uploading';
 
@@ -55,11 +83,16 @@ export default function ProductWizardScreen() {
   const { user } = useAuth();
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
+  const docScannerRef = useRef<BonScannerHandle>(null);
+  const barcodeHandledRef = useRef(false);
+  const chipsScrollRef = useRef<ScrollView>(null);
+  const chipXRef = useRef<number[]>([]);
 
   const [phase, setPhase] = useState<Phase>('market');
   const [sessionId] = useState(() => newSessionId());
   const [marketName, setMarketName] = useState('');
   const [marketId, setMarketId] = useState<string | null>(null);
+  const [marketLand, setMarketLand] = useState<string | null>(null);
   const [productIndex, setProductIndex] = useState(1);
   const [productName, setProductName] = useState('');
   const [photos, setPhotos] = useState<Partial<Record<ProductPhotoStep, string>>>({});
@@ -68,6 +101,18 @@ export default function ProductWizardScreen() {
   const [flashOn, setFlashOn] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
   const [campaign, setCampaign] = useState<ActiveProductCampaign | null>(null);
+  const [quality, setQuality] = useState<BonScannerQuality>('none');
+  const [eanCode, setEanCode] = useState<string | null>(null);
+  // True when the capture screen was opened to RE-shoot one photo from the
+  // review grid — capturing then returns straight to review (no advancing),
+  // and the top-left button reads "Abbrechen".
+  const [editingFromReview, setEditingFromReview] = useState(false);
+  // Camera-stack handoff guard: the doc-scanner (BonScanner, own
+  // AVCaptureSession) and the expo-camera CameraView (front/back/EAN) can't
+  // hold the back camera at the same time. When we switch between the two
+  // stacks we unmount the old one, wait for it to release, then mount the
+  // new one — otherwise the incoming camera gets a black/frozen session.
+  const [camMounted, setCamMounted] = useState(true);
   // MarketSelector calls onClose AFTER onSelect too — guard so a real
   // selection doesn't trigger the cancel (router.back) path.
   const marketChosenRef = useRef(false);
@@ -91,6 +136,52 @@ export default function ProductWizardScreen() {
   const step = PRODUCT_PHOTO_STEPS[stepIdx];
   const capturedCount = Object.keys(photos).length;
   const allCaptured = PRODUCT_PHOTO_STEPS.every((s) => photos[s.key]);
+  // Native scanner camera for everything EXCEPT the EAN step (it needs the
+  // expo-camera barcode scanner). The native view has continuous autofocus,
+  // which expo-camera's "focus-once-then-lock" lacks — so front/back stay
+  // sharp too. rawCapture keeps it a plain photo (no doc overlay/crop).
+  const useNativeCam = step.mode !== 'barcode' && isBonScannerAvailable;
+  // The readability hint pill is only meaningful for flat text labels.
+  const showReadability = step.mode === 'document' && useNativeCam;
+
+  // Re-arm the barcode scanner + reset the live hint whenever the step
+  // changes (so re-entering the EAN step can scan again).
+  useEffect(() => {
+    barcodeHandledRef.current = false;
+    setQuality('none');
+  }, [stepIdx]);
+
+  // Keep the active step's pill scrolled into view (centered) so the user
+  // always sees where they are in the strip.
+  useEffect(() => {
+    if (phase !== 'capture') return;
+    const x = chipXRef.current[stepIdx];
+    if (x == null) return;
+    chipsScrollRef.current?.scrollTo({ x: Math.max(0, x - SCREEN_W / 2 + 50), animated: true });
+  }, [stepIdx, phase]);
+
+  // Clean camera-stack handoff. When the step switches between a doc-scanner
+  // step and an expo-camera step, briefly unmount any camera so the old
+  // AVCaptureSession releases the device before the new one starts.
+  const prevDocRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (phase !== 'capture') {
+      prevDocRef.current = null;
+      return;
+    }
+    if (prevDocRef.current === null) {
+      // First frame of the capture phase — mount directly.
+      prevDocRef.current = useNativeCam;
+      setCamMounted(true);
+      return;
+    }
+    if (prevDocRef.current !== useNativeCam) {
+      prevDocRef.current = useNativeCam;
+      setCamMounted(false);
+      const t = setTimeout(() => setCamMounted(true), 450);
+      return () => clearTimeout(t);
+    }
+  }, [phase, useNativeCam]);
 
   const close = useCallback(() => {
     if (capturedCount > 0) {
@@ -120,21 +211,31 @@ export default function ProductWizardScreen() {
 
   const startCapture = useCallback(async () => {
     if (!(await ensurePermission())) return;
+    setEditingFromReview(false);
     // Resume at the first missing step.
     const firstMissing = PRODUCT_PHOTO_STEPS.findIndex((s) => !photos[s.key]);
     setStepIdx(firstMissing === -1 ? 0 : firstMissing);
     setPhase('capture');
   }, [ensurePermission, photos]);
 
-  const shoot = useCallback(async () => {
-    if (capturing || !cameraRef.current) return;
-    setCapturing(true);
-    try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7, skipProcessing: false });
-      if (!photo?.uri) throw new Error('no-uri');
-      setPhotos((p) => ({ ...p, [step.key]: photo.uri }));
-      // Advance to the next missing step, else go to review.
+  // Jump to a specific step (from a thumbnail/pill tap) during the normal
+  // capture flow. If it's already captured, an overwrite hint shows inline.
+  const goToStep = useCallback((i: number) => {
+    setStepIdx(i);
+    setPhase('capture');
+  }, []);
+
+  // Store the captured uri for the current step. In edit-from-review mode we
+  // go straight back to review; otherwise advance to the next missing step
+  // (or review when nothing is missing).
+  const onCaptured = useCallback(
+    (uri: string) => {
+      setPhotos((p) => ({ ...p, [step.key]: uri }));
+      if (editingFromReview) {
+        setEditingFromReview(false);
+        setPhase('review');
+        return;
+      }
       const next = PRODUCT_PHOTO_STEPS.findIndex((s, i) => i > stepIdx && !photos[s.key]);
       if (next === -1) {
         const anyMissing = PRODUCT_PHOTO_STEPS.findIndex((s) => s.key !== step.key && !photos[s.key]);
@@ -143,12 +244,60 @@ export default function ProductWizardScreen() {
       } else {
         setStepIdx(next);
       }
+    },
+    [step, stepIdx, photos, editingFromReview],
+  );
+
+  const shootCamera = useCallback(async () => {
+    if (!cameraRef.current) return;
+    setCapturing(true);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7, skipProcessing: false });
+      if (!photo?.uri) throw new Error('no-uri');
+      onCaptured(photo.uri);
     } catch {
       Alert.alert('Aufnahme fehlgeschlagen', 'Bitte versuch es noch einmal.');
     } finally {
       setCapturing(false);
     }
-  }, [capturing, step, stepIdx, photos]);
+  }, [onCaptured]);
+
+  // Shutter dispatches by capture mode: document → native doc scanner
+  // (flat OCR-friendly crop), else the plain camera.
+  const onShutter = useCallback(async () => {
+    if (capturing) return;
+    if (useNativeCam) {
+      if (!docScannerRef.current) return;
+      setCapturing(true);
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        const res = await docScannerRef.current.capture();
+        if (res?.uri) onCaptured(res.uri);
+      } catch {
+        Alert.alert('Aufnahme fehlgeschlagen', 'Bitte versuch es noch einmal.');
+      } finally {
+        setCapturing(false);
+      }
+    } else {
+      await shootCamera();
+    }
+  }, [capturing, useNativeCam, onCaptured, shootCamera]);
+
+  // EAN/barcode auto-capture: on the first valid scan of the EAN step,
+  // store the code + grab the frame (the code rides into the filename).
+  const handleBarcode = useCallback(
+    async (e: { data?: string }) => {
+      if (step.key !== 'ean' || barcodeHandledRef.current || capturing) return;
+      const code = (e?.data || '').trim();
+      if (!code) return;
+      barcodeHandledRef.current = true;
+      setEanCode(code);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      await shootCamera();
+    },
+    [step.key, capturing, shootCamera],
+  );
 
   // ─── Submit ───────────────────────────────────────────────────────
   const doSubmit = useCallback(async () => {
@@ -162,7 +311,11 @@ export default function ProductWizardScreen() {
         const s = steps[i];
         const local = photos[s.key];
         if (!local) continue;
+        // EAN image filename carries the scanned code.
+        const fileName =
+          s.key === 'ean' && eanCode ? `ean_${sanitizeForFilename(eanCode)}.jpg` : undefined;
         const path = await uploadProductImage(local, user.uid, sessionId, productIndex, s.key, {
+          fileName,
           onProgress: (pct) => {
             // Overall progress across all steps.
             setUploadPct(Math.round(((i + pct / 100) / steps.length) * 100));
@@ -175,7 +328,9 @@ export default function ProductWizardScreen() {
         productIndex,
         marketId,
         marketName,
+        marketLand,
         productName: productName.trim() || null,
+        ean: eanCode,
         campaignId: campaign?.campaignId ?? null,
         images: uploaded,
       });
@@ -197,6 +352,7 @@ export default function ProductWizardScreen() {
           onPress: () => {
             setPhotos({});
             setProductName('');
+            setEanCode(null);
             setProductIndex((n) => n + 1);
             setStepIdx(0);
             setPhase('intro');
@@ -208,7 +364,7 @@ export default function ProductWizardScreen() {
       showInfoToast('Einreichen fehlgeschlagen — Verbindung prüfen.', 'error');
       setPhase('review');
     }
-  }, [user?.uid, allCaptured, photos, sessionId, productIndex, marketName, productName, campaign?.campaignId]);
+  }, [user?.uid, allCaptured, photos, sessionId, productIndex, marketId, marketName, marketLand, productName, eanCode, campaign?.campaignId]);
 
   // ─── Render ───────────────────────────────────────────────────────
 
@@ -246,6 +402,7 @@ export default function ProductWizardScreen() {
             marketChosenRef.current = true;
             setMarketName(m.name);
             setMarketId(m.id);
+            setMarketLand((m as any).land ?? null);
             setPhase('intro');
           }}
         />
@@ -311,45 +468,162 @@ export default function ProductWizardScreen() {
         </View>
       );
     }
+    const captured = !!photos[step.key];
+    let subText: string;
+    let subColor: string;
+    if (step.mode === 'barcode') {
+      if (captured) {
+        subText = `Neuaufnahme — bisher EAN ${eanCode ?? '—'}. Neuen Barcode einlesen.`;
+        subColor = '#ffd44b';
+      } else if (eanCode) {
+        subText = `EAN erkannt: ${eanCode}`;
+        subColor = '#5ee0a0';
+      } else {
+        subText = 'Über den EAN-Barcode heben, bis er automatisch eingelesen wird.';
+        subColor = 'rgba(255,255,255,0.82)';
+      }
+    } else if (captured) {
+      subText = 'Neuaufnahme — überschreibt das bisherige Bild';
+      subColor = '#ffd44b';
+    } else if (showReadability) {
+      // Static guidance in the subtitle; the live readability state is shown
+      // as its own pill (below) so this never reads like a doc scanner.
+      subText = step.hint;
+      subColor = 'rgba(255,255,255,0.82)';
+    } else {
+      subText = step.hint;
+      subColor = 'rgba(255,255,255,0.82)';
+    }
+
     return (
       <View style={styles.camRoot}>
         <StatusBar barStyle="light-content" />
-        <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing={'back' as CameraType} enableTorch={flashOn} />
+        {!camMounted ? (
+          // Brief black gap while the previous camera stack releases the device.
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
+        ) : useNativeCam ? (
+          <BonScanner
+            ref={docScannerRef}
+            style={StyleSheet.absoluteFill}
+            isActive
+            torch={flashOn}
+            rawCapture
+            tuning={LABEL_TUNING}
+            onQuality={setQuality}
+          />
+        ) : (
+          <CameraView
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            facing={'back' as CameraType}
+            autofocus="on"
+            enableTorch={flashOn}
+            barcodeScannerSettings={
+              step.mode === 'barcode'
+                ? { barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'] }
+                : undefined
+            }
+            onBarcodeScanned={step.mode === 'barcode' ? handleBarcode : undefined}
+          />
+        )}
 
         {/* top bar */}
         <View style={[styles.camTop, { paddingTop: insets.top + 8 }]}>
-          <Pressable onPress={() => setPhase('intro')} style={styles.iconBtn} hitSlop={10}>
-            <MaterialCommunityIcons name="arrow-left" size={24} color="#fff" />
-          </Pressable>
+          {editingFromReview ? (
+            <Pressable
+              onPress={() => {
+                setEditingFromReview(false);
+                setPhase('review');
+              }}
+              hitSlop={10}
+              style={styles.cancelBtn}
+            >
+              <Text style={styles.cancelText}>Abbrechen</Text>
+            </Pressable>
+          ) : (
+            <Pressable onPress={() => setPhase('intro')} style={styles.iconBtn} hitSlop={10}>
+              <MaterialCommunityIcons name="arrow-left" size={24} color="#fff" />
+            </Pressable>
+          )}
           <View style={{ flex: 1, alignItems: 'center' }}>
             <Text style={styles.camTitle}>{step.label}</Text>
-            <Text style={styles.camSub}>{step.hint}</Text>
+            <Text style={[styles.camSub, { color: subColor }]}>{subText}</Text>
           </View>
           <Pressable onPress={() => setFlashOn((v) => !v)} style={styles.iconBtn} hitSlop={10}>
             <MaterialCommunityIcons name={flashOn ? 'flash' : 'flash-off'} size={22} color={flashOn ? '#ffd44b' : '#fff'} />
           </Pressable>
         </View>
 
-        {/* frame */}
-        <View pointerEvents="none" style={styles.frameWrap}>
-          <View style={styles.frame}>
-            <View style={[styles.corner, styles.cTL]} />
-            <View style={[styles.corner, styles.cTR]} />
-            <View style={[styles.corner, styles.cBL]} />
-            <View style={[styles.corner, styles.cBR]} />
+        {/* framing guide — a rectangle for label steps (panel-shaped) and a
+            smaller horizontal one for the EAN step (barcode-shaped). Anchored
+            between the header and the thumbnail strip so it never sits behind
+            the pills, on any screen size. NOT shown for front/back. */}
+        {step.mode === 'document' || step.mode === 'barcode' ? (
+          <View
+            pointerEvents="none"
+            style={[styles.guideWrap, { top: insets.top + 72, bottom: insets.bottom + 278 }]}
+          >
+            <View style={step.mode === 'barcode' ? styles.guideBarcode : styles.guideDoc} />
           </View>
-        </View>
+        ) : null}
 
-        {/* step chips */}
-        <View style={[styles.chipsRow, { bottom: insets.bottom + 116 }]}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }}>
+        {/* readability pill — ONLY for text/label steps. A plain hint of
+            whether the label is big/clear enough; NOT a doc scanner. */}
+        {showReadability && !captured ? (
+          <View pointerEvents="none" style={[styles.readPillWrap, { bottom: insets.bottom + 232 }]}>
+            <View
+              style={[
+                styles.readPill,
+                { backgroundColor: quality === 'ok' ? 'rgba(46,170,120,0.94)' : 'rgba(0,0,0,0.62)' },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={quality === 'ok' ? 'check-circle' : 'image-filter-center-focus-weak'}
+                size={15}
+                color="#fff"
+              />
+              <Text style={styles.readPillText}>
+                {quality === 'ok' ? 'Gut lesbar' : 'Näher ran — Label größer'}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {/* step thumbnails + pills — preview above each pill, tap to (re)shoot */}
+        <View style={[styles.chipsRow, { bottom: insets.bottom + 112 }]}>
+          <ScrollView ref={chipsScrollRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 16, alignItems: 'flex-end' }}>
             {PRODUCT_PHOTO_STEPS.map((s, i) => {
               const done = !!photos[s.key];
               const active = i === stepIdx;
               return (
-                <Pressable key={s.key} onPress={() => setStepIdx(i)} style={[styles.stepChip, { backgroundColor: active ? PURPLE : done ? 'rgba(91,79,156,0.55)' : 'rgba(0,0,0,0.5)' }]}>
-                  {done ? <MaterialCommunityIcons name="check" size={12} color="#fff" /> : null}
-                  <Text style={styles.stepChipText}>{s.label}</Text>
+                <Pressable
+                  key={s.key}
+                  onPress={() => goToStep(i)}
+                  onLayout={(e) => {
+                    chipXRef.current[i] = e.nativeEvent.layout.x;
+                  }}
+                  style={{ alignItems: 'center', gap: 5 }}
+                >
+                  <View
+                    style={[
+                      styles.chipThumb,
+                      { borderColor: active ? '#fff' : done ? PURPLE : 'rgba(255,255,255,0.3)' },
+                    ]}
+                  >
+                    {done ? (
+                      <ExpoImage source={{ uri: photos[s.key] }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+                    ) : (
+                      <MaterialCommunityIcons name={s.icon as any} size={20} color="rgba(255,255,255,0.6)" />
+                    )}
+                    {done ? (
+                      <View style={styles.chipThumbCheck}>
+                        <MaterialCommunityIcons name="check" size={10} color="#fff" />
+                      </View>
+                    ) : null}
+                  </View>
+                  <View style={[styles.stepChip, { backgroundColor: active ? PURPLE : done ? 'rgba(91,79,156,0.55)' : 'rgba(0,0,0,0.5)' }]}>
+                    <Text style={styles.stepChipText}>{s.label}</Text>
+                  </View>
                 </Pressable>
               );
             })}
@@ -362,9 +636,14 @@ export default function ProductWizardScreen() {
             <MaterialCommunityIcons name="view-grid-outline" size={26} color={capturedCount === 0 ? 'rgba(255,255,255,0.4)' : '#fff'} />
           </Pressable>
           <Pressable
-            onPress={shoot}
+            onPress={onShutter}
             disabled={capturing}
-            style={({ pressed }) => [styles.shutter, (pressed || capturing) && { transform: [{ scale: 0.94 }] }]}
+            style={({ pressed }) => [
+              styles.shutter,
+              captured && { borderColor: '#ffd44b' },
+              quality === 'ok' && { borderColor: '#5ee0a0' },
+              (pressed || capturing) && { transform: [{ scale: 0.94 }] },
+            ]}
           >
             <View style={styles.shutterInner}>
               {capturing ? <ActivityIndicator color={PURPLE} /> : <MaterialCommunityIcons name="camera-outline" size={28} color={PURPLE} />}
@@ -389,6 +668,7 @@ export default function ProductWizardScreen() {
                 <Pressable
                   key={s.key}
                   onPress={() => {
+                    setEditingFromReview(true);
                     setStepIdx(PRODUCT_PHOTO_STEPS.findIndex((x) => x.key === s.key));
                     setPhase('capture');
                   }}
@@ -415,10 +695,7 @@ export default function ProductWizardScreen() {
           </View>
         </ScrollView>
         <View style={[styles.footer, { paddingBottom: insets.bottom + 12, backgroundColor: theme.bg, borderColor: theme.border }]}>
-          <Pressable onPress={() => setPhase('capture')} style={[styles.cta, styles.ctaOutline, { borderColor: PURPLE, flex: 1 }]}>
-            <Text style={[styles.ctaText, { color: PURPLE }]}>Fotos</Text>
-          </Pressable>
-          <Pressable onPress={doSubmit} disabled={!allCaptured} style={[styles.cta, { backgroundColor: allCaptured ? PURPLE : theme.borderStrong ?? '#ccc', flex: 1.6 }]}>
+          <Pressable onPress={doSubmit} disabled={!allCaptured} style={[styles.cta, { backgroundColor: allCaptured ? PURPLE : theme.borderStrong ?? '#ccc', flex: 1 }]}>
             <MaterialCommunityIcons name="cloud-upload-outline" size={18} color="#fff" />
             <Text style={styles.ctaText}>{allCaptured ? 'Produkt einreichen' : `Noch ${PRODUCT_PHOTO_STEPS.length - capturedCount}`}</Text>
           </Pressable>
@@ -429,13 +706,23 @@ export default function ProductWizardScreen() {
 
   // uploading
   return (
-    <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 32 }}>
+    <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center', gap: 18, padding: 32 }}>
       <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
-      <ActivityIndicator size="large" color={PURPLE} />
+      <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(91,79,156,0.12)', alignItems: 'center', justifyContent: 'center' }}>
+        <MaterialCommunityIcons name="cloud-upload-outline" size={32} color={PURPLE} />
+      </View>
       <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.heading, fontWeight: fontWeight.bold as any, fontSize: 18 }}>
         Produkt wird hochgeladen
       </Text>
-      <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 14 }}>{uploadPct} %</Text>
+      {/* purple progress bar in our UI */}
+      <View style={{ width: '100%', maxWidth: 320, gap: 8 }}>
+        <View style={{ height: 10, borderRadius: 5, backgroundColor: theme.surfaceAlt ?? 'rgba(0,0,0,0.08)', overflow: 'hidden' }}>
+          <View style={{ width: `${Math.max(3, Math.min(100, uploadPct))}%`, height: '100%', borderRadius: 5, backgroundColor: PURPLE }} />
+        </View>
+        <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 13, textAlign: 'center' }}>
+          {uploadPct} %
+        </Text>
+      </View>
     </View>
   );
 }
@@ -448,8 +735,12 @@ const styles = StyleSheet.create({
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 48, borderRadius: 12, borderWidth: 1, paddingHorizontal: 12 },
   chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, borderWidth: 1 },
   cta: { height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
-  ctaOutline: { borderWidth: 1, backgroundColor: 'transparent' },
   ctaText: { color: '#fff', fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 15 },
+  cancelBtn: { height: 40, paddingHorizontal: 6, alignItems: 'flex-start', justifyContent: 'center' },
+  cancelText: { color: '#fff', fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 15 },
+  readPillWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
+  readPill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999 },
+  readPillText: { color: '#fff', fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 13 },
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 12, borderWidth: 1 },
   stepNum: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   // camera
@@ -458,17 +749,15 @@ const styles = StyleSheet.create({
   camTop: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingBottom: 12, backgroundColor: 'rgba(0,0,0,0.45)' },
   camTitle: { color: '#fff', fontFamily: fontFamilyVariants.heading, fontWeight: fontWeight.bold as any, fontSize: 16 },
   camSub: { color: 'rgba(255,255,255,0.8)', fontFamily: fontFamilyVariants.body, fontSize: 12, marginTop: 2, textAlign: 'center' },
-  frameWrap: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
-  frame: { width: '78%', height: '52%' },
-  corner: { position: 'absolute', width: 26, height: 26, borderColor: '#fff' },
-  cTL: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3 },
-  cTR: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3 },
-  cBL: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3 },
-  cBR: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3 },
+  guideWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
+  guideDoc: { width: '80%', height: '64%', borderWidth: 2.5, borderColor: 'rgba(255,255,255,0.9)', borderRadius: 16 },
+  guideBarcode: { width: '74%', height: 92, borderWidth: 2.5, borderColor: 'rgba(255,255,255,0.9)', borderRadius: 12 },
   chipsRow: { position: 'absolute', left: 0, right: 0 },
   stepChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999 },
   stepChipText: { color: '#fff', fontFamily: fontFamilyVariants.body, fontSize: 12, fontWeight: fontWeight.medium as any },
   camBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 16, backgroundColor: 'rgba(0,0,0,0.45)' },
+  chipThumb: { width: 42, height: 56, borderRadius: 7, overflow: 'hidden', borderWidth: 2, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
+  chipThumbCheck: { position: 'absolute', top: 2, right: 2, width: 15, height: 15, borderRadius: 8, backgroundColor: PURPLE, alignItems: 'center', justifyContent: 'center' },
   shutter: { width: 76, height: 76, borderRadius: 38, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center', borderWidth: 4, borderColor: '#fff' },
   shutterInner: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
   // review

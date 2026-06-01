@@ -70,7 +70,9 @@ class RemoteConfigService {
       this.isInitialized = true;
 
     } catch (error) {
-      console.error('❌ Remote Config initialization failed:', error);
+      // Nicht-fatal: wird sauber abgefangen → Defaults/Cache greifen.
+      // Daher warn statt error (kein roter LogBox-Screen in DEV).
+      console.warn('⚠️ Remote Config init failed (handled, using defaults):', error);
       // Fallback zu Expo Go Modus
       this.isExpoGo = true;
       this.isInitialized = true;
@@ -95,7 +97,8 @@ class RemoteConfigService {
       const activated = await fetchAndActivate(this.remoteConfig);
       console.log('🔄 Remote Config updated:', activated ? 'New values' : 'No changes');
     } catch (error) {
-      console.error('❌ Error fetching Remote Config:', error);
+      // Nicht-fatal: Cache/Defaults bleiben gültig → warn statt error.
+      console.warn('⚠️ Error fetching Remote Config (handled, keeping cache/defaults):', error);
     }
   }
 

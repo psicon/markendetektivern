@@ -93,6 +93,11 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   private var wantActive = false
   private var lastSignal = 0
 
+  // When true, capture() returns the full upright frame WITHOUT perspective
+  // warp/crop — the live overlay + readability hint still run, but the saved
+  // photo is a normal picture (used for product labels, not bon scanning).
+  private var rawCapture = false
+
   // All knobs live here, settable live from JS (see ScannerTuning).
   private var tuning = ScannerTuning()
 
@@ -166,6 +171,12 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     tuning = t
   }
 
+  /// Capture mode: false (default) = deskew/warp to a flat document (bon).
+  /// true = keep the full upright photo, overlay/hint stay as guidance only.
+  func setRawCapture(_ v: Bool) {
+    rawCapture = v
+  }
+
   /// JS bumps an incrementing signal to request a capture. We take a
   /// full-resolution still via AVCapturePhotoOutput (delegate below).
   func requestCapture(signal: Int) {
@@ -186,8 +197,25 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
       self.session.beginConfiguration()
       self.session.sessionPreset = .photo
 
+      // Prefer a virtual camera that auto-switches to the ultra-wide lens
+      // for macro (triple → dual-wide), so close-up labels actually focus;
+      // fall back to the plain wide-angle on phones without those. The
+      // camera-stack handoff to expo-camera (EAN step) is handled JS-side
+      // with a release gap so this doesn't cause a frozen session.
+      let preferred: [AVCaptureDevice.DeviceType] = [
+        .builtInTripleCamera,
+        .builtInDualWideCamera,
+        .builtInWideAngleCamera,
+      ]
+      var picked: AVCaptureDevice?
+      for type in preferred {
+        if let d = AVCaptureDevice.default(type, for: .video, position: .back) {
+          picked = d
+          break
+        }
+      }
       guard
-        let dev = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+        let dev = picked,
         let input = try? AVCaptureDeviceInput(device: dev),
         self.session.canAddInput(input)
       else {
@@ -197,6 +225,29 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
       }
       self.device = dev
       self.session.addInput(input)
+
+      // Continuous autofocus across the full range so the user can hold a
+      // label close and it stays sharp (wide-angle focuses to ~10cm — no
+      // extreme macro, but a clear win over no focus config at all).
+      do {
+        try dev.lockForConfiguration()
+        if dev.isFocusModeSupported(.continuousAutoFocus) {
+          dev.focusMode = .continuousAutoFocus
+        }
+        if dev.isSmoothAutoFocusSupported {
+          dev.isSmoothAutoFocusEnabled = true
+        }
+        if dev.isAutoFocusRangeRestrictionSupported {
+          dev.autoFocusRangeRestriction = .none
+        }
+        dev.isSubjectAreaChangeMonitoringEnabled = true
+        if dev.isExposureModeSupported(.continuousAutoExposure) {
+          dev.exposureMode = .continuousAutoExposure
+        }
+        dev.unlockForConfiguration()
+      } catch {
+        // Focus tuning is best-effort; the camera still works without it.
+      }
 
       self.videoOutput.videoSettings = [
         kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
@@ -295,6 +346,18 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     let cgOrientation = CGImagePropertyOrientation(rawValue: rawOrientation) ?? .up
     let oriented = CIImage(cgImage: cg).oriented(cgOrientation)
 
+    // Raw mode (product labels): no segmentation/warp — just the upright
+    // full-frame photo. The live overlay + readability hint already guided
+    // the user; we don't want a deskewed doc-scanner crop here.
+    if rawCapture {
+      let r = BonVision.renderJPEG(ciImage: oriented)
+      DispatchQueue.main.async { [weak self] in
+        guard let self = self else { return }
+        if let r = r { self.onCapture(r) } else { self.onError(["message": "capture_failed"]) }
+      }
+      return
+    }
+
     // Lenient — the user is pointing at a bon and tapped; accept whatever
     // document fills the still (rectangle detector as fallback).
     let t = tuning
@@ -330,6 +393,18 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   // portrait-rotated frames. Deterministic and matches what the user
   // sees frame-for-frame.
   private func updateOverlay(_ obs: VNRectangleObservation?, bufferW: CGFloat, bufferH: CGFloat) {
+    // Raw mode (product labels): never draw the document polygon — it reads
+    // like a doc scanner. The readability hint (emitQuality) still runs; this
+    // view just stays a plain camera with a text hint.
+    if rawCapture {
+      if overlayLayer.path != nil {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        overlayLayer.path = nil
+        CATransaction.commit()
+      }
+      return
+    }
     guard let obs = obs else {
       framesWithoutQuad += 1
       // Hold the last good quad through brief dropouts (persistence);

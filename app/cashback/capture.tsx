@@ -770,6 +770,7 @@ export default function CashbackCaptureScreen() {
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           facing={'back' as CameraType}
+          autofocus="on"
           enableTorch={flashOn}
         />
       ) : (

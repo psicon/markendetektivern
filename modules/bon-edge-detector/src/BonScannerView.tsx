@@ -82,6 +82,7 @@ interface NativeProps {
   style?: StyleProp<ViewStyle>;
   isActive?: boolean;
   torch?: boolean;
+  rawCapture?: boolean;
   captureSignal?: number;
   tuning?: ScannerTuning;
   onCapture?: (e: NativeCaptureEvent) => void;
@@ -113,6 +114,10 @@ export interface BonScannerProps {
   isActive?: boolean;
   /** Torch on/off. */
   torch?: boolean;
+  /** Capture mode. false (default) = deskew/warp to a flat document (bon
+   *  scanning). true = keep the full upright photo; the live overlay +
+   *  readability hint act as guidance only (product labels). */
+  rawCapture?: boolean;
   /** Live tuning (omit → native defaults). */
   tuning?: ScannerTuning;
   /** Fired when the live edge overlay appears/disappears (arm the shutter). */
@@ -125,7 +130,7 @@ export interface BonScannerProps {
 
 export const BonScanner = React.forwardRef<BonScannerHandle, BonScannerProps>(
   function BonScanner(
-    { style, isActive = true, torch = false, tuning, onEdges, onQuality, onError },
+    { style, isActive = true, torch = false, rawCapture = false, tuning, onEdges, onQuality, onError },
     ref,
   ) {
     const [signal, setSignal] = React.useState(0);
@@ -163,6 +168,7 @@ export const BonScanner = React.forwardRef<BonScannerHandle, BonScannerProps>(
         style={style}
         isActive={isActive}
         torch={torch}
+        rawCapture={rawCapture}
         tuning={tuning}
         captureSignal={signal}
         onCapture={(e) => {

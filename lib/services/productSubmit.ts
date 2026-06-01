@@ -36,23 +36,32 @@ export type ProductPhotoStep =
   | 'zutaten'
   | 'preis';
 
+/** Capture mode per step:
+ *  - 'photo'    plain camera (whole 3D product).
+ *  - 'document' live readability assist (BonScanner with rawCapture) —
+ *               live overlay + "näher/lesbar" hint for text panels, but
+ *               saves a NORMAL photo (no deskew/crop), ideal for labels.
+ *  - 'barcode'  live EAN/barcode scanner. */
+export type ProductCaptureMode = 'photo' | 'document' | 'barcode';
+
 export interface ProductPhotoStepDef {
   key: ProductPhotoStep;
   label: string;
   hint: string;
   icon: string; // MaterialCommunityIcons name
+  mode: ProductCaptureMode;
 }
 
 /** User-defined order: front, back, manufacturer, EAN, nutrition,
  *  ingredients, price (market is chosen separately at session start). */
 export const PRODUCT_PHOTO_STEPS: ProductPhotoStepDef[] = [
-  { key: 'front', label: 'Produktfront', hint: 'Vorderseite — Produktname gut lesbar.', icon: 'package-variant-closed' },
-  { key: 'rueckseite', label: 'Rückseite', hint: 'Rückseite der Verpackung.', icon: 'package-variant' },
-  { key: 'hersteller', label: 'Hersteller', hint: 'Hersteller-/Adressangabe auf der Verpackung.', icon: 'factory' },
-  { key: 'ean', label: 'EAN / Barcode', hint: 'Strichcode scharf und vollständig im Bild.', icon: 'barcode' },
-  { key: 'naehrwerte', label: 'Nährwerte', hint: 'Nährwerttabelle vollständig.', icon: 'nutrition' },
-  { key: 'zutaten', label: 'Zutaten', hint: 'Zutatenliste vollständig.', icon: 'format-list-bulleted' },
-  { key: 'preis', label: 'Preisschild', hint: 'Preisschild am Regal.', icon: 'tag' },
+  { key: 'front', label: 'Produktfront', hint: 'Vorderseite — Produktname gut lesbar.', icon: 'package-variant-closed', mode: 'photo' },
+  { key: 'rueckseite', label: 'Rückseite', hint: 'Rückseite der Verpackung.', icon: 'package-variant', mode: 'photo' },
+  { key: 'hersteller', label: 'Hersteller', hint: 'Hersteller-/Adressangabe auf der Verpackung.', icon: 'factory', mode: 'document' },
+  { key: 'ean', label: 'EAN / Barcode', hint: 'Strichcode in den Rahmen halten.', icon: 'barcode', mode: 'barcode' },
+  { key: 'naehrwerte', label: 'Nährwerte', hint: 'Nährwerttabelle vollständig.', icon: 'nutrition', mode: 'document' },
+  { key: 'zutaten', label: 'Zutaten', hint: 'Zutatenliste vollständig.', icon: 'format-list-bulleted', mode: 'document' },
+  { key: 'preis', label: 'Preisschild', hint: 'Preisschild am Regal.', icon: 'tag', mode: 'document' },
 ];
 
 export const REQUIRED_STEPS: ProductPhotoStep[] = PRODUCT_PHOTO_STEPS.map((s) => s.key);
@@ -70,13 +79,20 @@ export function newSessionId(): string {
   return [...buf].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** Sanitize an EAN (or any code) for use inside a storage filename. */
+export function sanitizeForFilename(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
+}
+
 export function productImagePath(
   uid: string,
   sessionId: string,
   index: number,
   step: ProductPhotoStep,
+  fileName?: string,
 ): string {
-  return `crowduploads/${uid}/${sessionId}/produkt_${index}/images/${step}.jpg`;
+  const name = fileName || `${step}.jpg`;
+  return `crowduploads/${uid}/${sessionId}/produkt_${index}/images/${name}`;
 }
 
 // ─── Campaign gating ────────────────────────────────────────────────
@@ -121,6 +137,8 @@ function codeErr(code: string, message?: string): Error {
 export interface UploadOpts {
   onProgress?: (pct: number) => void;
   timeoutMs?: number;
+  /** Override the filename (e.g. `ean_4012345678901.jpg` for the EAN step). */
+  fileName?: string;
 }
 
 /** Upload one product photo, return its storage path. */
@@ -135,7 +153,7 @@ export async function uploadProductImage(
   if (!auth.currentUser) throw codeErr('not_authenticated');
   if (!localUri) throw codeErr('upload_no_uri');
 
-  const storagePath = productImagePath(uid, sessionId, index, step);
+  const storagePath = productImagePath(uid, sessionId, index, step, opts?.fileName);
   const ref = storageRef(storage, storagePath);
 
   await new Promise<void>((resolve, reject) => {
@@ -177,7 +195,11 @@ export interface ProductSubmissionInput {
   productIndex: number;
   marketId: string | null;
   marketName: string | null;
+  /** Market country (e.g. "Deutschland" / "DE"), for display. */
+  marketLand?: string | null;
   productName?: string | null;
+  /** Scanned EAN/barcode (null if not captured). */
+  ean?: string | null;
   /** Active product-photo campaign this dataset counts toward (null =
    *  collected without cashback). Server is authoritative for the reward. */
   campaignId?: string | null;
@@ -196,7 +218,9 @@ export async function submitProduct(
     productIndex: input.productIndex,
     marketId: input.marketId ?? null,
     marketName: input.marketName ?? null,
+    marketLand: input.marketLand ?? null,
     productName: input.productName ?? null,
+    ean: input.ean ?? null,
     campaignId: input.campaignId ?? null,
     images: input.images,
     stepCount: Object.keys(input.images).length,
@@ -215,7 +239,10 @@ export interface ProductSubmissionEntry {
   productIndex?: number;
   marketId?: string | null;
   marketName?: string | null;
+  marketLand?: string | null;
   productName?: string | null;
+  ean?: string | null;
+  campaignId?: string | null;
   images?: Partial<Record<ProductPhotoStep, string>>;
   stepCount?: number;
   status?: 'pending' | 'approved' | 'rejected';

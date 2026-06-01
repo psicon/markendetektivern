@@ -36,6 +36,9 @@ public class BonEdgeDetectorModule: Module {
       Prop("torch") { (view: BonScannerView, on: Bool) in
         view.setTorch(on)
       }
+      Prop("rawCapture") { (view: BonScannerView, raw: Bool) in
+        view.setRawCapture(raw)
+      }
       Prop("captureSignal") { (view: BonScannerView, signal: Int) in
         view.requestCapture(signal: signal)
       }
