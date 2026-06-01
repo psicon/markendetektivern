@@ -393,6 +393,28 @@ Projekt keine Option.
 
 ### versionCode / buildNumber
 
+**PFLICHT-CHECK VOR JEDEM iOS-BUILD (mehrfach in dieselbe Falle gelaufen):**
+Die committete/Working-Tree-`buildNumber` ist NICHT die Wahrheit — sie hinkt
+hinterher (durch den Entitlements-Hack-Workflow + Branch-Drift bleibt sie
+veraltet). Wenn man blind baut, kommt eine NIEDRIGERE Nummer raus als die
+zuletzt hochgeladene → **Apple lehnt jeden Build ≤ der letzten ab**. Passiert:
+committed stand auf 1190, letzter TestFlight war 1202, Build kam als 1191 raus
+= wertlos.
+
+IMMER ZUERST die echte letzte Nummer holen, NICHT der lokalen Datei vertrauen:
+```bash
+eas build:list --platform ios --limit 5 --non-interactive --json \
+  | python3 -c "import sys,json;[print(b.get('appBuildVersion'),b.get('status')) for b in json.load(sys.stdin)]"
+```
+Höchste FINISHED-Nummer = LATEST. Dann `app.json` → `expo.ios.buildNumber` UND
+`Info.plist` → `CFBundleVersion` auf **LATEST** setzen → autoIncrement macht
+LATEST+1. (Analog Android: `eas build:list --platform android` → höchste
+`appBuildVersion` = versionCode-Stand.)
+
+Nach dem Build die Working-Tree-Nummer NICHT wieder auf eine alte zurückfallen
+lassen (z.B. beim Restore des Entitlements-Hacks) — `buildNumber` gehört NICHT
+in den Hack; nach Restore sofort wieder auf die aktuelle Nummer setzen.
+
 `eas.json` hat `production.autoIncrement: true` mit
 `appVersionSource: "local"`. Das bedeutet:
 - EAS liest die Version aus `app.json` + `Info.plist` /
