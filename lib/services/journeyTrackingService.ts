@@ -1,5 +1,5 @@
 import { db } from '@/lib/firebase';
-import { addDoc, collection, doc, DocumentReference, serverTimestamp, updateDoc } from '@react-native-firebase/firestore';
+import { addDoc, collection, doc, DocumentReference, getDoc, serverTimestamp, updateDoc } from '@react-native-firebase/firestore';
 import * as Application from 'expo-application';
 import { Platform } from 'react-native';
 import { analyticsService } from './analyticsService';
@@ -240,6 +240,20 @@ export interface JourneyContext {
     timestamp: number;
     resultCount?: number;
   }>;
+
+  // NEU (86ca2ruh9): Verbraucher-Eigenschaften — EINMALIG beim Journey-Start
+  // aus dem User-Doc gelesen (Lieblingsmarkt, Geschlecht, Alter, Gamification-
+  // Level, bisherige Ersparnis). Snapshot zum Start, wird in der Journey NICHT
+  // mehr aktualisiert. Nur gesetzte Felder werden geschrieben (keine null/
+  // undefined-Rauschwerte). Quelle: users/{uid}.
+  consumerProfile?: {
+    favoriteMarket?: string;       // Discounter-Id
+    favoriteMarketName?: string;
+    gender?: string;
+    age?: number;                  // auf "jetzt" hochgerechnet (ageReportedYear)
+    level?: number;                // stats.currentLevel
+    savingsTotal?: number;         // stats.savingsTotal (€ bisher gespart)
+  };
 }
 
 class JourneyTrackingService {
@@ -470,6 +484,58 @@ class JourneyTrackingService {
     }
   }
 
+  /**
+   * 86ca2ruh9: Liest die Verbraucher-Eigenschaften EINMALIG beim Journey-Start
+   * aus users/{uid} und hängt sie als Snapshot an die Journey. Additiv +
+   * fire-and-forget — eine fehlende/leere Eigenschaft wird einfach ausgelassen,
+   * die Journey funktioniert auch ohne. Wird NICHT pro Event neu gelesen.
+   */
+  private async addConsumerProfileToJourney(userId?: string): Promise<void> {
+    if (!this.currentJourney || !userId) return;
+    // Idempotent: einmal gesetzt, nicht erneut lesen (z.B. bei Resume).
+    if (this.currentJourney.consumerProfile) return;
+
+    try {
+      const snap = await getDoc(doc(db, 'users', userId));
+      if (!this.currentJourney || !snap.exists()) return;
+      const data = snap.data() as any;
+
+      const profile: NonNullable<JourneyContext['consumerProfile']> = {};
+
+      if (data.favoriteMarket) profile.favoriteMarket = String(data.favoriteMarket);
+      if (data.favoriteMarketName) profile.favoriteMarketName = String(data.favoriteMarketName);
+      if (data.gender && String(data.gender).trim()) profile.gender = String(data.gender);
+
+      // Alter: gemeldetes age + (heute − Meldejahr) hochrechnen; Legacy-Fallback
+      // birthDate. Quelle-Felder gespiegelt aus edit-profile.tsx.
+      let age: number | null = null;
+      if (typeof data.age === 'number') {
+        age =
+          typeof data.ageReportedYear === 'number'
+            ? data.age + Math.max(0, new Date().getFullYear() - data.ageReportedYear)
+            : data.age;
+      } else if (data.birthDate?.toDate) {
+        const bd = data.birthDate.toDate();
+        age = Math.floor((Date.now() - bd.getTime()) / (365.25 * 24 * 3600 * 1000));
+      }
+      if (typeof age === 'number' && age > 0 && age < 120) profile.age = age;
+
+      const stats = data.stats || {};
+      const level = stats.currentLevel ?? data.level;
+      if (typeof level === 'number') profile.level = level;
+      const savings = stats.savingsTotal ?? stats.totalSavings ?? data.totalSavings;
+      if (typeof savings === 'number') profile.savingsTotal = savings;
+
+      if (Object.keys(profile).length === 0) return; // nichts gesetzt → kein Write
+
+      this.currentJourney.consumerProfile = profile;
+      if (userId) this.persistJourneyToFirestore(userId);
+    } catch (error) {
+      // fire-and-forget: darf die Journey nie beeinflussen
+      console.warn('addConsumerProfileToJourney failed (ignored)', (error as any)?.message);
+    }
+  }
+
   // ENTFERNT: updateOriginalJourney - alles wird direkt in viewedProducts[].actions getrackt
 
   /**
@@ -522,6 +588,7 @@ class JourneyTrackingService {
           purchased: data.purchased,
           converted: data.converted || [], // NEU: Lade converted Array
           location: data.location, // NEU: Location-Daten laden
+          consumerProfile: data.consumerProfile, // 86ca2ruh9: Snapshot beibehalten (nicht neu lesen)
           abandoned: data.abandoned,
           persistedToFirestore: true,
           firestoreDocId: journeyDoc.id
@@ -604,6 +671,8 @@ class JourneyTrackingService {
 
     // NEU: Location asynchron hinzufügen (non-blocking)
     this.addLocationToJourney(userId);
+    // NEU (86ca2ruh9): Verbraucher-Eigenschaften einmalig anhängen (non-blocking)
+    this.addConsumerProfileToJourney(userId);
 
     console.log(`🎯 Journey Started: ${discoveryMethod} auf ${screenName}`, {
       filters: activeFilters,
@@ -1740,7 +1809,10 @@ class JourneyTrackingService {
         
         // NEU: Location-Daten (nur wenn vorhanden)
         ...(journey.location && { location: journey.location }),
-        
+
+        // NEU (86ca2ruh9): Verbraucher-Eigenschaften (nur wenn vorhanden)
+        ...(journey.consumerProfile && { consumerProfile: journey.consumerProfile }),
+
         // Filter Context
         activeFilters: cleanActiveFilters,
         filterMetrics: journey.filterMetrics || {},
