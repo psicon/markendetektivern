@@ -480,7 +480,7 @@ class AnalyticsService {
   }
 
   async trackFilterChanged(
-    filterType: 'market' | 'category' | 'price' | 'bio' | 'vegan' | 'ingredients' | 'nutrition' | 'allergen' | 'nutrition_range',
+    filterType: 'market' | 'category' | 'price' | 'bio' | 'vegan' | 'vegetarian' | 'ingredients' | 'nutrition' | 'allergen' | 'nutrition_range' | 'quality',
     filterValue: string,
     action: 'added' | 'removed',
     screenName: string,
@@ -524,7 +524,7 @@ class AnalyticsService {
   private getMotivationFromFilter(filterType: string, filterValue: string): string {
     if (filterType === 'price' || filterValue.toLowerCase().includes('günstig')) {
       return 'price';
-    } else if (filterType === 'bio' || filterType === 'vegan' || filterType === 'ingredients' || filterType === 'nutrition' || filterType === 'allergen' || filterType === 'nutrition_range') {
+    } else if (filterType === 'bio' || filterType === 'vegan' || filterType === 'vegetarian' || filterType === 'ingredients' || filterType === 'nutrition' || filterType === 'allergen' || filterType === 'nutrition_range' || filterType === 'quality') {
       return 'content'; // Gesundheits- und Inhaltsstoffe-bezogene Motivation
     } else if (filterValue.toLowerCase().includes('bio') || filterValue.toLowerCase().includes('vegan') || filterValue.toLowerCase().includes('gluten')) {
       return 'content';

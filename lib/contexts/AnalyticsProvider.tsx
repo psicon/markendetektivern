@@ -26,7 +26,7 @@ interface AnalyticsContextType {
   
   // 💡 MOTIVATION ANALYSIS
   trackSortChanged: (sortBy: 'name' | 'price' | 'savings', screenName: string, additionalData?: any) => void;
-  trackFilterChanged: (filterType: 'market' | 'category' | 'price' | 'bio' | 'vegan' | 'ingredients' | 'nutrition' | 'allergen' | 'nutrition_range', filterValue: string, action: 'added' | 'removed', screenName: string, additionalData?: any) => void;
+  trackFilterChanged: (filterType: 'market' | 'category' | 'price' | 'bio' | 'vegan' | 'vegetarian' | 'ingredients' | 'nutrition' | 'allergen' | 'nutrition_range' | 'quality', filterValue: string, action: 'added' | 'removed', screenName: string, additionalData?: any) => void;
   trackSavingsWidgetClicked: (widgetType: 'total_savings' | 'potential_savings' | 'comparison_savings', savingsAmount: number, screenName: string) => void;
   
   // 🎯 JOURNEY TRACKING
@@ -272,7 +272,7 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
   }, [user?.uid]);
 
   const trackFilterChanged = useCallback((
-    filterType: 'market' | 'category' | 'price' | 'bio' | 'vegan' | 'ingredients' | 'nutrition' | 'allergen' | 'nutrition_range',
+    filterType: 'market' | 'category' | 'price' | 'bio' | 'vegan' | 'vegetarian' | 'ingredients' | 'nutrition' | 'allergen' | 'nutrition_range' | 'quality',
     filterValue: string,
     action: 'added' | 'removed',
     screenName: string,

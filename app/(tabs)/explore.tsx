@@ -97,7 +97,59 @@ const PAGE_AT_TAB: Record<Tab, number> = {
   eigen: 1,
   marken: 2,
 };
-type SheetKey = 'markt' | 'handels' | 'kategorie' | 'stufe' | 'marke' | 'sort' | null;
+type SheetKey = 'markt' | 'handels' | 'kategorie' | 'stufe' | 'marke' | 'sort' | 'inhalt' | null;
+
+// ─── Slice C: Inhalt & Qualität — Filter (additiv, default-AUS) ──────────
+// Client-seitige Post-Filter auf die BROWSE-Listen (Firestore-Produkte haben
+// nutr_*/attr_*/aiComparison zuverlässig; Algolia-Such-Hits NICHT → im
+// Suchmodus werden diese Filter NICHT angewendet). Default-AUS = Pass-Through,
+// d.h. bestehendes Stöbern-Verhalten bleibt unverändert.
+type KiQualityFilter = 'off' | 'equiv' | 'better';
+interface ContentFilters {
+  ki: KiQualityFilter;
+  lowSugar: boolean;
+  lowFat: boolean;
+  lowSalt: boolean;
+  highProtein: boolean;
+  allergens: string[]; // normalisierte Codes, "frei von"
+  bio: boolean;
+  vegan: boolean;
+  vegetarian: boolean;
+}
+const EMPTY_CONTENT_FILTERS: ContentFilters = {
+  ki: 'off',
+  lowSugar: false,
+  lowFat: false,
+  lowSalt: false,
+  highProtein: false,
+  allergens: [],
+  bio: false,
+  vegan: false,
+  vegetarian: false,
+};
+// EU-Nährwertclaim-Schwellen pro 100 g (Solids) — defensive Defaults.
+const NUTRI_THRESHOLDS = { lowSugar: 5, lowFat: 3, lowSalt: 0.3, highProtein: 10 } as const;
+// Allergen-Auswahl + Normalisierung (DB-Codes sind inkonsistent: EI vs EIER).
+const ALLERGEN_OPTIONS: { code: string; label: string; aliases: string[] }[] = [
+  { code: 'GLUTEN', label: 'Gluten', aliases: ['GLUTEN', 'WEIZEN', 'GERSTE', 'ROGGEN', 'DINKEL'] },
+  { code: 'MILCH', label: 'Milch / Laktose', aliases: ['MILCH', 'LAKTOSE', 'MILK'] },
+  { code: 'EI', label: 'Ei', aliases: ['EI', 'EIER', 'EGG'] },
+  { code: 'SOJA', label: 'Soja', aliases: ['SOJA', 'SOY'] },
+  { code: 'NUESSE', label: 'Nüsse', aliases: ['SCHALENFRUECHTE', 'NUSS', 'NUESSE', 'HASELNUSS', 'MANDEL', 'WALNUSS'] },
+  { code: 'ERDNUSS', label: 'Erdnuss', aliases: ['ERDNUSS', 'PEANUT'] },
+  { code: 'SELLERIE', label: 'Sellerie', aliases: ['SELLERIE'] },
+  { code: 'SENF', label: 'Senf', aliases: ['SENF'] },
+  { code: 'SESAM', label: 'Sesam', aliases: ['SESAM'] },
+  { code: 'FISCH', label: 'Fisch', aliases: ['FISCH', 'FISH'] },
+];
+function normalizeAllergenToken(raw: string): string | null {
+  const up = String(raw || '').toUpperCase().trim();
+  if (!up) return null;
+  for (const opt of ALLERGEN_OPTIONS) {
+    if (opt.aliases.some((a) => up.includes(a))) return opt.code;
+  }
+  return up;
+}
 
 type SortKey = 'name' | 'preis';
 
@@ -108,6 +160,7 @@ const SHEET_TITLES: Record<Exclude<SheetKey, null>, string> = {
   stufe: 'Ähnlichkeitsstufen',
   marke: 'Marke',
   sort: 'Sortieren',
+  inhalt: 'Inhalt & Qualität',
 };
 
 // Country code mapping for discounter.land (German names → ISO-like 2-letter codes).
@@ -421,6 +474,35 @@ export default function ExploreScreen() {
   const [stufeSelection, setStufeSelection] = useState<number[]>([]);
   const [brandId, setBrandId] = useState<string>('all');
   const [sort, setSort] = useState<SortKey>('name');
+  // Slice C: Inhalt & Qualität — additiv, default-AUS (Pass-Through).
+  const [contentFilters, setContentFilters] = useState<ContentFilters>(EMPTY_CONTENT_FILTERS);
+  const contentFiltersActive = useMemo(
+    () =>
+      contentFilters.ki !== 'off' ||
+      contentFilters.lowSugar ||
+      contentFilters.lowFat ||
+      contentFilters.lowSalt ||
+      contentFilters.highProtein ||
+      contentFilters.allergens.length > 0 ||
+      contentFilters.bio ||
+      contentFilters.vegan ||
+      contentFilters.vegetarian,
+    [contentFilters],
+  );
+  const contentActiveCount = useMemo(() => {
+    const cf = contentFilters;
+    let n = 0;
+    if (cf.ki !== 'off') n++;
+    if (cf.lowSugar) n++;
+    if (cf.lowFat) n++;
+    if (cf.lowSalt) n++;
+    if (cf.highProtein) n++;
+    n += cf.allergens.length;
+    if (cf.bio) n++;
+    if (cf.vegan) n++;
+    if (cf.vegetarian) n++;
+    return n;
+  }, [contentFilters]);
   const [sheet, setSheet] = useState<SheetKey>(null);
   // Marken-Info-Sheet — getriggered vom (i)-Icon auf einer BrandCard.
   // null = zu, Object = sichtbar mit den jeweiligen Daten.
@@ -1362,6 +1444,7 @@ export default function ExploreScreen() {
     setCat('all');
     setStufeSelection([]);
     setBrandId('all');
+    setContentFilters(EMPTY_CONTENT_FILTERS);
     // Search auch beenden → Browse-Mode auf Firestore. Algolia ist
     // explizit nur für die SUCHE da, sobald 'Zurücksetzen' gedrückt
     // wird soll der User auf der unfiltered Firestore-Liste landen
@@ -1441,6 +1524,39 @@ export default function ExploreScreen() {
     }
   }, [market, handels, cat, brandId, stufeSelection, tab, analytics]);
 
+  // Slice C: content-filter change tracking — same analytics pipeline as the
+  // other filters (contentSignals → health/sustainability/contentQuality axes).
+  const lastContentRef = useRef<ContentFilters | null>(null);
+  useEffect(() => {
+    const prev = lastContentRef.current;
+    const cf = contentFilters;
+    lastContentRef.current = cf;
+    if (!prev || !analytics?.trackFilterChanged) return;
+    const source =
+      tab === 'eigen' ? 'explore_nonames' : tab === 'marken' ? 'explore_markenprodukte' : 'explore_alle';
+    if (prev.ki !== cf.ki) {
+      analytics.trackFilterChanged('quality', cf.ki === 'off' ? 'cleared' : `ki_${cf.ki}`, cf.ki === 'off' ? 'removed' : 'added', source);
+    }
+    const toggles: [keyof ContentFilters, 'nutrition' | 'bio' | 'vegan' | 'vegetarian', string][] = [
+      ['lowSugar', 'nutrition', 'lowSugar'],
+      ['lowFat', 'nutrition', 'lowFat'],
+      ['lowSalt', 'nutrition', 'lowSalt'],
+      ['highProtein', 'nutrition', 'highProtein'],
+      ['bio', 'bio', 'bio'],
+      ['vegan', 'vegan', 'vegan'],
+      ['vegetarian', 'vegetarian', 'vegetarian'],
+    ];
+    for (const [k, ftype, value] of toggles) {
+      if (prev[k] !== cf[k]) {
+        analytics.trackFilterChanged(ftype, value, cf[k] ? 'added' : 'removed', source);
+      }
+    }
+    const prevA = new Set(prev.allergens);
+    const curA = new Set(cf.allergens);
+    for (const a of curA) if (!prevA.has(a)) analytics.trackFilterChanged('allergen', a, 'added', source);
+    for (const a of prevA) if (!curA.has(a)) analytics.trackFilterChanged('allergen', a, 'removed', source);
+  }, [contentFilters, analytics, tab]);
+
   const toggleStufe = useCallback((n: number) => {
     setStufeSelection((prev) =>
       prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n],
@@ -1456,7 +1572,8 @@ export default function ExploreScreen() {
     (tab === 'eigen' &&
       (market !== 'all' || handels !== 'all' || stufeSelection.length > 0)) ||
     (tab === 'marken' && brandId !== 'all') ||
-    cat !== 'all';
+    cat !== 'all' ||
+    contentFiltersActive;
 
   // Chip label: "3" when 1 selected, "3, 4" when 2-3 selected, "3 Stufen"
   // when more. Keeps the rail compact while still showing what's active.
@@ -1712,6 +1829,15 @@ export default function ExploreScreen() {
       {anyFilter ? (
         <FilterChip icon="filter-remove-outline" label="Zurücksetzen" muted onPress={resetAll} />
       ) : null}
+      {/* Slice C: Inhalt & Qualität — auf allen Tabs verfügbar. */}
+      <FilterChip
+        icon="leaf"
+        label="Inhalt"
+        value={contentActiveCount > 0 ? String(contentActiveCount) : null}
+        strong={contentActiveCount > 0}
+        onPress={() => setSheet('inhalt')}
+        onClear={contentActiveCount > 0 ? () => setContentFilters(EMPTY_CONTENT_FILTERS) : null}
+      />
       {forTab === 'alle' ? (
         // 'Alle' tab — only filters that work across BOTH collections.
         // Markt / Stufe / Handelsmarke are NoName-only, Marke is
@@ -2432,18 +2558,83 @@ export default function ExploreScreen() {
     [alkoholAgeLocked, alkoholCategoryId],
   );
 
-  const dataAlle = useMemo(
-    () => (paused ? EMPTY_ARR : filterAlkohol(itemsForTab('alle'))),
-    [itemsForTab, paused, EMPTY_ARR, filterAlkohol],
+  // ─── Slice C: Inhalt-&-Qualität Post-Filter (client-seitig, default-AUS).
+  // Wird NUR im Browse-Modus angewendet (Firestore-Produkte haben die Felder;
+  // Algolia-Such-Hits nicht). Default-AUS → Pass-Through → bestehendes
+  // Verhalten unverändert. "Unbekannt ≠ ja": fehlt das Feld, wird das Produkt
+  // bei einem aktiven Filter ausgeschlossen (bei Allergenen sicherheitsrelevant).
+  // (contentFiltersActive ist oben bei der State-Deklaration definiert.)
+  const filterContent = useCallback(
+    (items: any[], forTab: Tab): any[] => {
+      if (!contentFiltersActive) return items;
+      const cf = contentFilters;
+      const num = (v: any): number | null =>
+        typeof v === 'number' && Number.isFinite(v) ? v : null;
+      return items.filter((p: any) => {
+        // KI-Qualität (nur sinnvoll für NoName; im Marken-Tab no-op).
+        if (cf.ki !== 'off' && forTab !== 'marken') {
+          const score = num(p?.aiComparison?.score);
+          if (score == null) return false; // kein Verdikt → raus
+          if (cf.ki === 'equiv' && score < 3) return false;
+          if (cf.ki === 'better' && score < 4) return false;
+        }
+        // Nährwerte (pro 100 g) — fehlt der Wert → raus.
+        if (cf.lowSugar) {
+          const v = num(p?.nutr_KohlenhydratedavonZucker_val);
+          if (v == null || v > NUTRI_THRESHOLDS.lowSugar) return false;
+        }
+        if (cf.lowFat) {
+          const v = num(p?.nutr_Fett_val);
+          if (v == null || v > NUTRI_THRESHOLDS.lowFat) return false;
+        }
+        if (cf.lowSalt) {
+          const v = num(p?.nutr_Salz_val);
+          if (v == null || v > NUTRI_THRESHOLDS.lowSalt) return false;
+        }
+        if (cf.highProtein) {
+          const v = num(p?.nutr_Eiwei_val);
+          if (v == null || v < NUTRI_THRESHOLDS.highProtein) return false;
+        }
+        // Allergene "frei von" — SICHERHEIT: unbekannt (kein Feld) → raus.
+        if (cf.allergens.length > 0) {
+          const tokens = [
+            ...(Array.isArray(p?.attr_allergene) ? p.attr_allergene : []),
+            ...(Array.isArray(p?.attr_spuren) ? p.attr_spuren : []),
+          ];
+          if (!Array.isArray(p?.attr_allergene)) return false; // keine Allergen-Daten → nicht als "frei von" zeigen
+          const present = new Set(
+            tokens.map((t: any) => normalizeAllergenToken(String(t))).filter(Boolean) as string[],
+          );
+          if (cf.allergens.some((code) => present.has(code))) return false;
+        }
+        // Bio / Vegan / Vegetarisch — nur bestätigte (true).
+        if (cf.bio && p?.attr_isBio !== true) return false;
+        if (cf.vegan && p?.attr_isVegan !== true) return false;
+        if (cf.vegetarian && p?.attr_isVegetarisch !== true) return false;
+        return true;
+      });
+    },
+    [contentFilters, contentFiltersActive],
   );
-  const dataEigen = useMemo(
-    () => (paused ? EMPTY_ARR : filterAlkohol(itemsForTab('eigen'))),
-    [itemsForTab, paused, EMPTY_ARR, filterAlkohol],
-  );
-  const dataMarken = useMemo(
-    () => (paused ? EMPTY_ARR : filterAlkohol(itemsForTab('marken'))),
-    [itemsForTab, paused, EMPTY_ARR, filterAlkohol],
-  );
+
+  // Slice C: content filters apply in BROWSE mode only (Algolia search hits
+  // lack nutr_*/attr_*/aiComparison). Default-AUS → filterContent is a
+  // pass-through, so browse behaviour is byte-identical when no filter is set.
+  const dataAlle = useMemo(() => {
+    if (paused) return EMPTY_ARR;
+    const base = filterAlkohol(itemsForTab('alle'));
+    return searchActiveQuery ? base : filterContent(base, 'alle');
+  }, [itemsForTab, paused, EMPTY_ARR, filterAlkohol, filterContent, searchActiveQuery]);
+  const dataEigen = useMemo(() => {
+    if (paused) return EMPTY_ARR;
+    const base = filterAlkohol(itemsForTab('eigen'));
+    return searchActiveQuery ? base : filterContent(base, 'eigen');
+  }, [itemsForTab, paused, EMPTY_ARR, filterAlkohol, filterContent, searchActiveQuery]);
+  const dataMarken = useMemo(() => {
+    if (paused) return EMPTY_ARR;
+    const base = filterAlkohol(itemsForTab('marken'));
+    return searchActiveQuery ? base : filterContent(base, 'marken');
+  }, [itemsForTab, paused, EMPTY_ARR, filterAlkohol, filterContent, searchActiveQuery]);
 
   // First-load scroll-to-top per tab: when data goes from empty to
   // populated (e.g. user opened Stöbern + switched tabs BEFORE the
@@ -3385,6 +3576,93 @@ export default function ExploreScreen() {
             setSheet(null);
           }}
         />
+      </FilterSheet>
+      ) : null}
+
+      {sheet === 'inhalt' ? (
+      <FilterSheet visible title={SHEET_TITLES.inhalt} onClose={() => setSheet(null)}>
+        <ScrollView style={{ maxHeight: 480 }} showsVerticalScrollIndicator={false}>
+          {/* KI-Qualität (Single-Select) */}
+          <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.textMuted, marginTop: 4, marginBottom: 6 }}>
+            KI-QUALITÄT
+          </Text>
+          {([['off', 'Aus'], ['equiv', 'Gleichwertig oder besser'], ['better', 'Sogar besser als die Marke']] as const).map(([v, label]) => (
+            <Pressable
+              key={v}
+              onPress={() => setContentFilters((c) => ({ ...c, ki: v }))}
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 }}
+            >
+              <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 15, color: theme.text, flex: 1 }}>{label}</Text>
+              <MaterialCommunityIcons
+                name={contentFilters.ki === v ? 'radiobox-marked' : 'radiobox-blank'}
+                size={22}
+                color={contentFilters.ki === v ? ((theme as any).primary ?? '#0d8575') : theme.textMuted}
+              />
+            </Pressable>
+          ))}
+          <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 12, color: theme.textMuted, marginBottom: 8 }}>
+            Wirkt auf Eigenmarken — Marken haben keinen KI-Vergleich.
+          </Text>
+
+          {/* Nährwerte + Eigenschaften + Frei von (Multi-Toggle) */}
+          {([
+            { section: 'NÄHRWERTE (pro 100 g)', rows: [['lowSugar', 'Wenig Zucker'], ['lowFat', 'Wenig Fett'], ['lowSalt', 'Wenig Salz'], ['highProtein', 'Proteinreich']] },
+            { section: 'EIGENSCHAFTEN', rows: [['bio', 'Bio'], ['vegan', 'Vegan'], ['vegetarian', 'Vegetarisch']] },
+          ] as const).map(({ section, rows }) => (
+            <View key={section}>
+              <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.textMuted, marginTop: 14, marginBottom: 2 }}>
+                {section}
+              </Text>
+              {rows.map(([k, label]) => {
+                const on = (contentFilters as any)[k] === true;
+                return (
+                  <Pressable
+                    key={k}
+                    onPress={() => setContentFilters((c) => ({ ...c, [k]: !(c as any)[k] }))}
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 }}
+                  >
+                    <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 15, color: theme.text, flex: 1 }}>{label}</Text>
+                    <MaterialCommunityIcons
+                      name={on ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                      size={22}
+                      color={on ? ((theme as any).primary ?? '#0d8575') : theme.textMuted}
+                    />
+                  </Pressable>
+                );
+              })}
+            </View>
+          ))}
+
+          {/* Frei von (Allergene, Multi-Select) */}
+          <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.textMuted, marginTop: 14, marginBottom: 2 }}>
+            FREI VON
+          </Text>
+          {ALLERGEN_OPTIONS.map((opt) => {
+            const on = contentFilters.allergens.includes(opt.code);
+            return (
+              <Pressable
+                key={opt.code}
+                onPress={() =>
+                  setContentFilters((c) => ({
+                    ...c,
+                    allergens: on ? c.allergens.filter((x) => x !== opt.code) : [...c.allergens, opt.code],
+                  }))
+                }
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 }}
+              >
+                <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 15, color: theme.text, flex: 1 }}>{opt.label}</Text>
+                <MaterialCommunityIcons
+                  name={on ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                  size={22}
+                  color={on ? ((theme as any).primary ?? '#0d8575') : theme.textMuted}
+                />
+              </Pressable>
+            );
+          })}
+          <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 12, color: theme.textMuted, marginTop: 8, marginBottom: 4 }}>
+            Sicherheit: Produkte ohne hinterlegte Allergen-Daten werden bei „Frei von" ausgeblendet.
+          </Text>
+        </ScrollView>
       </FilterSheet>
       ) : null}
 
