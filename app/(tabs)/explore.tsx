@@ -2657,6 +2657,41 @@ export default function ExploreScreen() {
     return searchActiveQuery ? base : filterContent(filterByCategory(base), 'marken');
   }, [itemsForTab, paused, EMPTY_ARR, filterAlkohol, filterByCategory, filterContent, searchActiveQuery]);
 
+  // ─── Auto-Fill bei aktiven (client-seitigen) Filtern ───────────────────
+  // Content-/Kategorie-Filter laufen client-seitig: eine Server-Seite (12)
+  // ergibt dann oft nur wenige SICHTBARE Treffer → die Liste wächst kaum →
+  // onEndReached re-armt nicht (FlatList/LegendList-Verhalten) → Items
+  // "ploppen" erst beim Hoch-/Runterscrollen nach. Hier laden wir
+  // proaktiv weitere Seiten, bis genug sichtbare Items da sind ODER keine
+  // Seite mehr kommt. NUR bei aktiven Filtern + Browse-Modus — der Default-
+  // Scroll (unfiltered) bleibt unverändert. nonames/markenprodukte-Länge in
+  // den Deps, damit auch eine Seite mit 0 sichtbaren Treffern den nächsten
+  // Load auslöst (sonst Endlos-Hänger bei dünnen Treffer-Seiten).
+  const FILL_TARGET = 16;
+  useEffect(() => {
+    if (searchActiveQuery) return;
+    if (!(contentFiltersActive || cat !== 'all')) return;
+    const wantEigen = tab === 'eigen' || tab === 'alle';
+    const wantMarken = tab === 'marken' || tab === 'alle';
+    const visible = tab === 'eigen' ? dataEigen.length : tab === 'marken' ? dataMarken.length : dataAlle.length;
+    if (visible >= FILL_TARGET) return;
+    if (wantEigen && nonameHasMoreRef.current && !nonameInflightRef.current) loadNonames(false);
+    if (wantMarken && markenHasMoreRef.current && !markenInflightRef.current) loadMarken(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    tab,
+    contentFiltersActive,
+    cat,
+    searchActiveQuery,
+    dataAlle.length,
+    dataEigen.length,
+    dataMarken.length,
+    nonames.length,
+    markenprodukte.length,
+    loadNonames,
+    loadMarken,
+  ]);
+
   // First-load scroll-to-top per tab: when data goes from empty to
   // populated (e.g. user opened Stöbern + switched tabs BEFORE the
   // Firestore fetch landed), snap that tab's list to 0. Without
