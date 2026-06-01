@@ -1,0 +1,14 @@
+{
+  "name": "preference-profile-cf",
+  "version": "1.0.0",
+  "description": "Nightly: half-life drift-decay of users' preference profiles + category-based lifestyle facts (petOwner, hasBaby, dietary, alcoholBuyer) from purchases.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}
