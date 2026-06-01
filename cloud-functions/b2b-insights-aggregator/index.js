@@ -111,10 +111,13 @@ async function aggregate() {
   // Gap 5: Brand-Leakage je Marke — activeFilters.brandId IST die hersteller-Id
   // (kein product→hersteller-Join nötig): Marken-Intent + NoName-Kauf = Leak.
   const brandLeak = {}; // brandId → { leaked, kept, users:Set }
+  // App-Split: pro OS Kennzahlen + Versions-Verteilung (k-anon).
+  const osSplit = {}; // os → { users:Set, journeys, decisions:{noname,marke} }
+  const appVersions = {}; // "os version (build)" → Set(users)
 
   const journeysSnap = await db
     .collectionGroup('journeys')
-    .select('viewedProducts', 'activeFilters')
+    .select('viewedProducts', 'activeFilters', 'app')
     .get();
 
   journeysSnap.forEach((doc) => {
@@ -166,6 +169,19 @@ async function aggregate() {
       if (journeyChoseNoName) b.leaked += 1;
       else if (journeyChoseMarke) b.kept += 1;
       if (uid) b.users.add(uid);
+    }
+
+    // App-Split (OS + Versions-Verteilung) aus journey.app.
+    const app = doc.get('app') || {};
+    const os = app.os || 'unknown';
+    const s = (osSplit[os] = osSplit[os] || { users: new Set(), journeys: 0, decisions: { noname: 0, marke: 0 } });
+    s.journeys += 1;
+    if (uid) s.users.add(uid);
+    if (journeyChoseNoName) s.decisions.noname += 1;
+    if (journeyChoseMarke) s.decisions.marke += 1;
+    if (app.version) {
+      const vk = `${os} ${app.version}${app.build ? ` (${app.build})` : ''}`;
+      (appVersions[vk] = appVersions[vk] || new Set()).add(uid || `anon_${Math.random()}`);
     }
   });
 
@@ -254,6 +270,16 @@ async function aggregate() {
     })
     .sort((a, b) => (b.leakRate || 0) - (a.leakRate || 0));
 
+  // App-Split (k-anon): Kennzahlen je OS + Versions-Verteilung.
+  const osBreakdown = Object.entries(osSplit)
+    .filter(([, s]) => s.users.size >= MIN_USERS)
+    .map(([os, s]) => ({ os, users: s.users.size, journeys: s.journeys, decisions: s.decisions }))
+    .sort((a, b) => b.journeys - a.journeys);
+  const appVersionDist = Object.entries(appVersions)
+    .filter(([, users]) => users.size >= MIN_USERS)
+    .map(([label, users]) => ({ build: label, users: users.size }))
+    .sort((a, b) => b.users - a.users);
+
   const payload = {
     version: 'b2b_insights_v1',
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -266,6 +292,8 @@ async function aggregate() {
     categoryDemand,
     discounterDemand,
     priceBand,
+    osBreakdown,
+    appVersionDist,
     computeMs: Date.now() - startedAt,
     journeysScanned: journeysSnap.size,
     purchasesScanned: purchasesSnap.size,
