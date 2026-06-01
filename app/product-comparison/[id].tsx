@@ -448,6 +448,17 @@ export default function ProductComparisonScreen() {
       }
     }
   };
+  // Gap 1: Produkt in die Journey aufnehmen (idempotent), damit Detail-
+  // Engagement auch bei Einstieg aus Favoriten/Verlauf/Deep-Link zählt.
+  useEffect(() => {
+    if (!id || !picked) return;
+    journeyTrackingService.ensureProductTracked(
+      String(id),
+      type === 'marken' ? 'brand' : 'noname',
+      (picked as any)?.name ?? 'Produkt',
+      user?.uid,
+    );
+  }, [id, picked, type, user?.uid]);
   // Swipe zwischen Inhaltsstoffe ↔ Nährwerte — NUR im Tab-Content-Bereich
   // (die GestureDetector-Region), damit der Rest der Seite normal scrollt.
   // activeOffsetX → Geste startet nur bei klar horizontalem Swipe;

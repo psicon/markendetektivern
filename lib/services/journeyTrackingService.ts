@@ -665,6 +665,29 @@ class JourneyTrackingService {
   /**
    * Trackt Product View mit Journey-Context
    */
+  /**
+   * NEU (Gap 1): stellt sicher, dass ein Produkt in der aktuellen Journey
+   * als viewed erfasst ist — idempotent. Wird vom Detail-Screen auf Mount
+   * aufgerufen, damit Detail-Engagement (qualityEngagement/aiVerdict) AUCH
+   * dann greift, wenn der Einstieg NICHT über Stöbern/Home lief (Favoriten,
+   * Verlauf, Deep-Link). No-op wenn das Produkt schon in der Journey steht.
+   */
+  ensureProductTracked(
+    productId: string,
+    productType: 'brand' | 'noname',
+    productName: string,
+    userId?: string,
+  ): void {
+    try {
+      if (!productId) return;
+      const exists = this.currentJourney?.viewedProducts?.some((p) => p.productId === productId);
+      if (exists) return;
+      this.trackProductView(productId, productType, productName, undefined, userId);
+    } catch (e) {
+      console.warn('ensureProductTracked failed (ignored)', (e as any)?.message);
+    }
+  }
+
   trackProductView(
     productId: string,
     productType: 'brand' | 'noname',

@@ -38,7 +38,8 @@ export interface PreferenceProfile {
   sampleCount: number;
   halfLifeDays: number;
   dimensions: Record<ProfileDimension, number>; // 0..1 EWMA
-  confidence: Record<ProfileDimension, number>; // 0..1
+  confidence: Record<ProfileDimension, number>; // 0..1 (per-dim, evidenz-basiert)
+  evidence: Record<ProfileDimension, number>; // # Sessions mit Signal je Dim
 }
 
 const EWMA_ALPHA = 0.3; // Gewicht der aktuellen Session
@@ -168,17 +169,21 @@ export async function updateFromJourney(uid: string | null | undefined, journey:
     const prev = (snap.exists() ? (snap.data() as Partial<PreferenceProfile>) : null) ?? null;
 
     const prevDims = prev?.dimensions ?? null;
-    const prevConf = prev?.confidence ?? null;
+    const prevEvidence = prev?.evidence ?? null;
     const sampleCount = (prev?.sampleCount ?? 0) + 1;
 
     const dimensions = zeroDims();
     const confidence = zeroDims();
+    const evidence = zeroDims();
     for (const d of PROFILE_DIMENSIONS) {
       const old = typeof prevDims?.[d] === 'number' ? prevDims![d] : null;
       dimensions[d] = old == null ? sessionScore[d] : old * (1 - EWMA_ALPHA) + sessionScore[d] * EWMA_ALPHA;
-      // Confidence wächst mit Volumen (~20 Sessions → ~1).
-      confidence[d] = Math.min(1, sampleCount / 20);
-      void prevConf; // (per-dim confidence derzeit volumenbasiert, kein Decay hier)
+      // Logik-Fix #3: Confidence PRO DIMENSION aus der Evidenz — zählt nur
+      // Sessions, in denen DIESE Dimension tatsächlich ein Signal bekam
+      // (~8 Sessions mit Signal → ~1). Eine Achse ohne Signal bleibt unsicher.
+      const ev = (typeof prevEvidence?.[d] === 'number' ? prevEvidence![d] : 0) + (pts[d] > 0 ? 1 : 0);
+      evidence[d] = ev;
+      confidence[d] = Math.min(1, ev / 8);
     }
 
     const out: PreferenceProfile = {
@@ -188,6 +193,7 @@ export async function updateFromJourney(uid: string | null | undefined, journey:
       halfLifeDays: HALF_LIFE_DAYS,
       dimensions,
       confidence,
+      evidence,
       updatedAt: serverTimestamp(),
     };
     await setDoc(ref, out, { merge: true });

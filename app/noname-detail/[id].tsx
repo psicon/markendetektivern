@@ -196,6 +196,18 @@ export default function NoNameDetailScreen() {
       }
     }
   };
+  // Gap 1: Produkt in die Journey aufnehmen (idempotent), damit Detail-
+  // Engagement auch bei Einstieg aus Favoriten/Verlauf/Deep-Link zählt.
+  useEffect(() => {
+    if (!id || !product) return;
+    journeyTrackingService.ensureProductTracked(
+      String(id),
+      'noname',
+      (product as any)?.name ?? 'Produkt',
+      user?.uid,
+    );
+  }, [id, product, user?.uid]);
+
   const [isFav, setIsFav] = useState(false);
   // Sync isFav mit echtem Server-Status sobald die productId bekannt
   // ist. Vorher: useState(false) initial → Heart blieb leer auch wenn
