@@ -1578,6 +1578,50 @@ export default function ExploreScreen() {
     for (const a of prevA) if (!curA.has(a)) analytics.trackFilterChanged('allergen', a, 'removed', source);
   }, [contentFilters, analytics, tab]);
 
+  // ─── Journey-Spiegelung der aktiven Filter ─────────────────────────────
+  // KRITISCH für Slice B/D + B2B: der Profil-Producer + Aggregator lesen
+  // journey.activeFilters — NICHT die GA4-Events. Ohne diese Spiegelung wären
+  // ALLE Filter-Signale (Markt/Kategorie/Stufe/Nährwerte/Allergene/Bio/KI)
+  // im Profil tot. Wir schreiben den VOLLEN aktiven Filtersatz (updateFilters
+  // ersetzt activeFilters komplett) immer wenn sich etwas ändert.
+  const buildJourneyActiveFilters = useCallback(() => {
+    const af: any = { sortBy: sort === 'preis' ? 'price' : 'name' };
+    if (market !== 'all') af.markets = [{ id: market, name: market }];
+    if (cat !== 'all') af.categories = [{ id: cat, name: cat }];
+    if (handels !== 'all') af.handelsmarke = handels;
+    if (brandId !== 'all') af.brandId = brandId;
+    if (stufeSelection.length) af.stufe = [...stufeSelection];
+    const nutrition: any[] = [];
+    if (contentFilters.lowSugar) nutrition.push({ key: 'lowSugar', name: 'Wenig Zucker', range: { max: NUTRI_THRESHOLDS.lowSugar } });
+    if (contentFilters.lowFat) nutrition.push({ key: 'lowFat', name: 'Wenig Fett', range: { max: NUTRI_THRESHOLDS.lowFat } });
+    if (contentFilters.lowSalt) nutrition.push({ key: 'lowSalt', name: 'Wenig Salz', range: { max: NUTRI_THRESHOLDS.lowSalt } });
+    if (contentFilters.highProtein) nutrition.push({ key: 'highProtein', name: 'Proteinreich', range: { min: NUTRI_THRESHOLDS.highProtein } });
+    if (nutrition.length) af.nutrition = nutrition;
+    if (contentFilters.allergens.length) af.allergens = contentFilters.allergens.map((c) => ({ key: c, name: c }));
+    if (contentFilters.bio || contentFilters.vegan || contentFilters.vegetarian) {
+      af.labels = { bio: contentFilters.bio, vegan: contentFilters.vegan, vegetarian: contentFilters.vegetarian };
+    }
+    if (contentFilters.ki !== 'off') af.kiQuality = contentFilters.ki;
+    return af;
+  }, [market, cat, handels, brandId, sort, stufeSelection, contentFilters]);
+
+  useEffect(() => {
+    const hasAny =
+      market !== 'all' ||
+      cat !== 'all' ||
+      handels !== 'all' ||
+      brandId !== 'all' ||
+      stufeSelection.length > 0 ||
+      contentFiltersActive ||
+      sort !== 'name';
+    if (!hasAny) return; // kein no-op-Spam ohne aktiven Filter / ohne Journey
+    try {
+      analytics?.updateJourneyFilters?.(buildJourneyActiveFilters());
+    } catch {
+      /* fire-and-forget */
+    }
+  }, [buildJourneyActiveFilters, analytics, market, cat, handels, brandId, stufeSelection, contentFiltersActive, sort]);
+
   const toggleStufe = useCallback((n: number) => {
     setStufeSelection((prev) =>
       prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n],

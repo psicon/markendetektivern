@@ -128,6 +128,10 @@ function sessionPoints(journey: Journey): Record<ProfileDimension, number> {
   }
   if (Array.isArray(af.allergens) && af.allergens.length > 0) add('health', 1);
   if (Array.isArray(af.stufe) && af.stufe.length > 0) add('exploration', 1);
+  // Label-/Qualitäts-Filter (von Stöbern in activeFilters gespiegelt).
+  if (af.labels?.bio) add('sustainability', 1);
+  if (af.labels?.vegan || af.labels?.vegetarian) add('health', 1);
+  if (af.kiQuality && af.kiQuality !== 'off') add('contentQuality', 1);
 
   const ms = journey?.motivationSignals ?? {};
   if ((ms.brandSignals ?? 0) > 0 || (af.searchQuery && String(af.searchQuery).trim())) brandIntent = true;
