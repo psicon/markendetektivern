@@ -527,8 +527,12 @@ class JourneyTrackingService {
       const stats = data.stats || {};
       const level = stats.currentLevel ?? data.level;
       if (typeof level === 'number') profile.level = level;
-      const savings = stats.savingsTotal ?? stats.totalSavings ?? data.totalSavings;
-      if (typeof savings === 'number') profile.savingsTotal = savings;
+      // Ersparnis: gespiegelt aus achievementService — userData.totalSavings ist
+      // das gepflegte Feld, stats.totalSavings hält denselben Wert; stats.
+      // savingsTotal ist (bug-historisch) IMMER 0. Daher || (überspringt 0en),
+      // nicht ?? (würde bei gespeicherter 0 stehenbleiben). Float-Rauschen wegrunden.
+      const savings = Number(data.totalSavings) || Number(stats.totalSavings) || Number(stats.savingsTotal) || 0;
+      if (savings > 0) profile.savingsTotal = Math.round(savings * 100) / 100;
 
       if (Object.keys(profile).length === 0) return; // nichts gesetzt → kein Write
 
