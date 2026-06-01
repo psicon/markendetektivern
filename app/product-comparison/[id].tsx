@@ -1571,6 +1571,17 @@ export default function ProductComparisonScreen() {
                 <Pressable
                   onPress={() => {
                     collapseAllPills();
+                    // Gap 2a: Hersteller-Info geöffnet = Qualitäts-Engagement.
+                    try {
+                      journeyTrackingService.trackQualityEngagement(
+                        String(id),
+                        'manufacturer_opened',
+                        scoreToVerdict((picked as any)?.aiComparison?.score),
+                        user?.uid,
+                      );
+                    } catch {
+                      /* fire-and-forget */
+                    }
                     setInfoSheet({
                       // Titel = MARKE-Name (z.B. "Bärenmarke"), NICHT die
                       // Hersteller-Entität ("Hochwald Foods GmbH").

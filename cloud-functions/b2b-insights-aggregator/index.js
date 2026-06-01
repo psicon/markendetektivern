@@ -82,34 +82,68 @@ async function aggregate() {
     schlechter: { noname: 0, marke: 0 },
   };
   const qaUsers = { besser: new Set(), gleichwertig: new Set(), schlechter: new Set() };
+  // Gap 4: Filter-Nachfrage (distinct users je Filter-Schlüssel).
+  const filterDemand = {}; // key → Set(users)
+  const bumpFilter = (key, uid) => {
+    if (!key) return;
+    (filterDemand[key] = filterDemand[key] || new Set()).add(uid || `anon_${Math.random()}`);
+  };
+  // Gap 5: Brand-Leakage je Marke — activeFilters.brandId IST die hersteller-Id
+  // (kein product→hersteller-Join nötig): Marken-Intent + NoName-Kauf = Leak.
+  const brandLeak = {}; // brandId → { leaked, kept, users:Set }
 
   const journeysSnap = await db
     .collectionGroup('journeys')
-    .select('viewedProducts')
+    .select('viewedProducts', 'activeFilters')
     .get();
 
   journeysSnap.forEach((doc) => {
     const uid = userIdFromSubcollectionDoc(doc);
     const vps = doc.get('viewedProducts');
-    if (!Array.isArray(vps)) return;
-    for (const vp of vps) {
-      const actions = Array.isArray(vp.actions) ? vp.actions : [];
-      if (actions.some((a) => a && a.type === 'viewed')) funnel.viewed += 1;
-      if (actions.some((a) => a && a.type === 'compared')) funnel.compared += 1;
-      const decision = decisionOf(vp);
-      if (decision === 'cart') funnel.cart += 1;
-      if (decision === 'purchased') funnel.purchased += 1;
-      if (!decision) continue;
+    const af = doc.get('activeFilters') || {};
+    let journeyChoseNoName = false;
+    let journeyChoseMarke = false;
+    if (Array.isArray(vps)) {
+      for (const vp of vps) {
+        const actions = Array.isArray(vp.actions) ? vp.actions : [];
+        if (actions.some((a) => a && a.type === 'viewed')) funnel.viewed += 1;
+        if (actions.some((a) => a && a.type === 'compared')) funnel.compared += 1;
+        const decision = decisionOf(vp);
+        if (decision === 'cart') funnel.cart += 1;
+        if (decision === 'purchased') funnel.purchased += 1;
+        if (!decision) continue;
 
-      const isNoName = vp.productType === 'noname' || decision === 'converted';
-      decisionSplit[isNoName ? 'noname' : 'marke'] += 1;
+        const isNoName = vp.productType === 'noname' || decision === 'converted';
+        decisionSplit[isNoName ? 'noname' : 'marke'] += 1;
+        if (isNoName) journeyChoseNoName = true;
+        else journeyChoseMarke = true;
 
-      const engaged = vp.qualityEngagement && vp.qualityEngagement.engaged === true;
-      const verdict = vp.aiVerdict;
-      if (engaged && qaSwitch[verdict]) {
-        qaSwitch[verdict][isNoName ? 'noname' : 'marke'] += 1;
-        if (uid) qaUsers[verdict].add(uid);
+        const engaged = vp.qualityEngagement && vp.qualityEngagement.engaged === true;
+        const verdict = vp.aiVerdict;
+        if (engaged && qaSwitch[verdict]) {
+          qaSwitch[verdict][isNoName ? 'noname' : 'marke'] += 1;
+          if (uid) qaUsers[verdict].add(uid);
+        }
       }
+    }
+
+    // Gap 4: filter-demand from this journey's active filters.
+    if (af.sortBy === 'price') bumpFilter('sort:price', uid);
+    if (Array.isArray(af.markets) && af.markets.length) bumpFilter('market', uid);
+    if (Array.isArray(af.categories)) af.categories.forEach((c) => bumpFilter(`category:${c && c.id}`, uid));
+    if (Array.isArray(af.nutrition)) af.nutrition.forEach((n) => bumpFilter(`nutrition:${n && n.key}`, uid));
+    if (Array.isArray(af.allergens)) af.allergens.forEach((a) => bumpFilter(`allergen:${a && a.key}`, uid));
+    if (af.labels && af.labels.bio) bumpFilter('label:bio', uid);
+    if (af.labels && af.labels.vegan) bumpFilter('label:vegan', uid);
+    if (af.labels && af.labels.vegetarian) bumpFilter('label:vegetarian', uid);
+    if (af.kiQuality && af.kiQuality !== 'off') bumpFilter(`ki:${af.kiQuality}`, uid);
+
+    // Gap 5: brand leakage — brand-intent (Marken-Filter aktiv) + outcome.
+    if (af.brandId) {
+      const b = (brandLeak[af.brandId] = brandLeak[af.brandId] || { leaked: 0, kept: 0, users: new Set() });
+      if (journeyChoseNoName) b.leaked += 1;
+      else if (journeyChoseMarke) b.kept += 1;
+      if (uid) b.users.add(uid);
     }
   });
 
@@ -177,6 +211,27 @@ async function aggregate() {
   const pct = (p) => (prices.length ? +prices[Math.min(prices.length - 1, Math.floor(p * prices.length))].toFixed(2) : null);
   const priceBand = prices.length ? { p25: pct(0.25), p50: pct(0.5), p75: pct(0.75), n: prices.length } : null;
 
+  // Gap 4: filter demand (k-anon).
+  const filterDemandOut = Object.entries(filterDemand)
+    .filter(([, users]) => users.size >= MIN_USERS)
+    .map(([key, users]) => ({ filter: key, users: users.size }))
+    .sort((a, b) => b.users - a.users);
+
+  // Gap 5: brand leakage index (k-anon). leakRate = NoName-Kauf trotz Marken-Intent.
+  const brandLeakage = Object.entries(brandLeak)
+    .filter(([, b]) => b.users.size >= MIN_USERS)
+    .map(([brandId, b]) => {
+      const total = b.leaked + b.kept;
+      return {
+        brandId,
+        leaked: b.leaked,
+        kept: b.kept,
+        leakRate: total ? +(b.leaked / total).toFixed(3) : null,
+        users: b.users.size,
+      };
+    })
+    .sort((a, b) => (b.leakRate || 0) - (a.leakRate || 0));
+
   const payload = {
     version: 'b2b_insights_v1',
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -184,6 +239,8 @@ async function aggregate() {
     funnel,
     decisionSplit,
     qualityAwareSwitching,
+    filterDemand: filterDemandOut,
+    brandLeakage,
     categoryDemand,
     discounterDemand,
     priceBand,
