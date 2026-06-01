@@ -130,17 +130,17 @@ const EMPTY_CONTENT_FILTERS: ContentFilters = {
 // EU-Nährwertclaim-Schwellen pro 100 g (Solids) — defensive Defaults.
 const NUTRI_THRESHOLDS = { lowSugar: 5, lowFat: 3, lowSalt: 0.3, highProtein: 10 } as const;
 // Allergen-Auswahl + Normalisierung (DB-Codes sind inkonsistent: EI vs EIER).
-const ALLERGEN_OPTIONS: { code: string; label: string; aliases: string[] }[] = [
-  { code: 'GLUTEN', label: 'Gluten', aliases: ['GLUTEN', 'WEIZEN', 'GERSTE', 'ROGGEN', 'DINKEL'] },
-  { code: 'MILCH', label: 'Milch / Laktose', aliases: ['MILCH', 'LAKTOSE', 'MILK'] },
-  { code: 'EI', label: 'Ei', aliases: ['EI', 'EIER', 'EGG'] },
-  { code: 'SOJA', label: 'Soja', aliases: ['SOJA', 'SOY'] },
-  { code: 'NUESSE', label: 'Nüsse', aliases: ['SCHALENFRUECHTE', 'NUSS', 'NUESSE', 'HASELNUSS', 'MANDEL', 'WALNUSS'] },
-  { code: 'ERDNUSS', label: 'Erdnuss', aliases: ['ERDNUSS', 'PEANUT'] },
-  { code: 'SELLERIE', label: 'Sellerie', aliases: ['SELLERIE'] },
-  { code: 'SENF', label: 'Senf', aliases: ['SENF'] },
-  { code: 'SESAM', label: 'Sesam', aliases: ['SESAM'] },
-  { code: 'FISCH', label: 'Fisch', aliases: ['FISCH', 'FISH'] },
+const ALLERGEN_OPTIONS: { code: string; label: string; icon: string; aliases: string[] }[] = [
+  { code: 'GLUTEN', label: 'Gluten', icon: 'barley', aliases: ['GLUTEN', 'WEIZEN', 'GERSTE', 'ROGGEN', 'DINKEL'] },
+  { code: 'MILCH', label: 'Milch / Laktose', icon: 'cup', aliases: ['MILCH', 'LAKTOSE', 'MILK'] },
+  { code: 'EI', label: 'Ei', icon: 'egg', aliases: ['EI', 'EIER', 'EGG'] },
+  { code: 'SOJA', label: 'Soja', icon: 'soy-sauce', aliases: ['SOJA', 'SOY'] },
+  { code: 'NUESSE', label: 'Nüsse', icon: 'peanut-outline', aliases: ['SCHALENFRUECHTE', 'NUSS', 'NUESSE', 'HASELNUSS', 'MANDEL', 'WALNUSS'] },
+  { code: 'ERDNUSS', label: 'Erdnuss', icon: 'peanut', aliases: ['ERDNUSS', 'PEANUT'] },
+  { code: 'SELLERIE', label: 'Sellerie', icon: 'sprout', aliases: ['SELLERIE'] },
+  { code: 'SENF', label: 'Senf', icon: 'shaker-outline', aliases: ['SENF'] },
+  { code: 'SESAM', label: 'Sesam', icon: 'grain', aliases: ['SESAM'] },
+  { code: 'FISCH', label: 'Fisch', icon: 'fish', aliases: ['FISCH', 'FISH'] },
 ];
 function normalizeAllergenToken(raw: string): string | null {
   const up = String(raw || '').toUpperCase().trim();
@@ -1829,15 +1829,6 @@ export default function ExploreScreen() {
       {anyFilter ? (
         <FilterChip icon="filter-remove-outline" label="Zurücksetzen" muted onPress={resetAll} />
       ) : null}
-      {/* Slice C: Inhalt & Qualität — auf allen Tabs verfügbar. */}
-      <FilterChip
-        icon="leaf"
-        label="Inhalt"
-        value={contentActiveCount > 0 ? String(contentActiveCount) : null}
-        strong={contentActiveCount > 0}
-        onPress={() => setSheet('inhalt')}
-        onClear={contentActiveCount > 0 ? () => setContentFilters(EMPTY_CONTENT_FILTERS) : null}
-      />
       {forTab === 'alle' ? (
         // 'Alle' tab — only filters that work across BOTH collections.
         // Markt / Stufe / Handelsmarke are NoName-only, Marke is
@@ -1899,6 +1890,15 @@ export default function ExploreScreen() {
           />
         </>
       )}
+      {/* Slice C: Inhalt & Qualität — NACH Kategorie, auf allen Tabs. */}
+      <FilterChip
+        icon="nutrition"
+        label="Inhalt"
+        value={contentActiveCount > 0 ? String(contentActiveCount) : null}
+        strong={contentActiveCount > 0}
+        onPress={() => setSheet('inhalt')}
+        onClear={contentActiveCount > 0 ? () => setContentFilters(EMPTY_CONTENT_FILTERS) : null}
+      />
     </ScrollView>
   );
 
@@ -3638,50 +3638,81 @@ export default function ExploreScreen() {
       {sheet === 'inhalt' ? (
       <FilterSheet visible title={SHEET_TITLES.inhalt} onClose={() => setSheet(null)}>
         <ScrollView style={{ maxHeight: 480 }} showsVerticalScrollIndicator={false}>
-          {/* KI-Qualität (Single-Select) */}
-          <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.textMuted, marginTop: 4, marginBottom: 6 }}>
-            KI-QUALITÄT
-          </Text>
-          {([['off', 'Aus'], ['equiv', 'Gleichwertig oder besser'], ['better', 'Sogar besser als die Marke']] as const).map(([v, label]) => (
-            <Pressable
-              key={v}
-              onPress={() => setContentFilters((c) => ({ ...c, ki: v }))}
-              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 }}
-            >
-              <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 15, color: theme.text, flex: 1 }}>{label}</Text>
-              <MaterialCommunityIcons
-                name={contentFilters.ki === v ? 'radiobox-marked' : 'radiobox-blank'}
-                size={22}
-                color={contentFilters.ki === v ? ((theme as any).primary ?? '#0d8575') : theme.textMuted}
-              />
-            </Pressable>
-          ))}
-          <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 12, color: theme.textMuted, marginBottom: 8 }}>
-            Wirkt auf Eigenmarken — Marken haben keinen KI-Vergleich.
-          </Text>
+          {/* KI-Qualität (Single-Select) — NICHT im Marken-Tab (Marken haben
+              keinen KI-Vergleich → dort weder sichtbar noch wirksam). */}
+          {tab !== 'marken' ? (
+            <View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, marginBottom: 6 }}>
+                <MaterialCommunityIcons name="robot-happy-outline" size={15} color={theme.textMuted} />
+                <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.textMuted }}>KI-QUALITÄT</Text>
+              </View>
+              {([
+                ['off', 'Aus', 'minus-circle-outline', theme.textMuted as string],
+                ['equiv', 'Gleichwertig oder besser', 'scale-balance', '#66bb6a'],
+                ['better', 'Sogar besser als die Marke', 'trophy-outline', '#2e7d32'],
+              ] as const).map(([v, label, icon, accent]) => {
+                const sel = contentFilters.ki === v;
+                return (
+                  <Pressable
+                    key={v}
+                    onPress={() => setContentFilters((c) => ({ ...c, ki: v }))}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 }}
+                  >
+                    <MaterialCommunityIcons name={icon as any} size={20} color={accent} />
+                    <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 15, color: theme.text, flex: 1 }}>{label}</Text>
+                    <MaterialCommunityIcons
+                      name={sel ? 'radiobox-marked' : 'radiobox-blank'}
+                      size={22}
+                      color={sel ? accent : theme.textMuted}
+                    />
+                  </Pressable>
+                );
+              })}
+              <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 12, color: theme.textMuted, marginBottom: 8 }}>
+                Bewertet Eigenmarken gegen die Marke.
+              </Text>
+            </View>
+          ) : null}
 
-          {/* Nährwerte + Eigenschaften + Frei von (Multi-Toggle) */}
+          {/* Eigenschaften (Nährwerte) + Label (Bio/Vegan/Veg) — Multi-Toggle */}
           {([
-            { section: 'NÄHRWERTE (pro 100 g)', rows: [['lowSugar', 'Wenig Zucker'], ['lowFat', 'Wenig Fett'], ['lowSalt', 'Wenig Salz'], ['highProtein', 'Proteinreich']] },
-            { section: 'EIGENSCHAFTEN', rows: [['bio', 'Bio'], ['vegan', 'Vegan'], ['vegetarian', 'Vegetarisch']] },
+            {
+              section: 'EIGENSCHAFTEN',
+              rows: [
+                ['lowSugar', 'Wenig Zucker', 'cube-outline'],
+                ['lowFat', 'Wenig Fett', 'oil'],
+                ['lowSalt', 'Wenig Salz', 'shaker-outline'],
+                ['highProtein', 'Proteinreich', 'dumbbell'],
+              ],
+            },
+            {
+              section: 'LABEL',
+              rows: [
+                ['bio', 'Bio', 'sprout'],
+                ['vegan', 'Vegan', 'leaf'],
+                ['vegetarian', 'Vegetarisch', 'carrot'],
+              ],
+            },
           ] as const).map(({ section, rows }) => (
             <View key={section}>
               <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.textMuted, marginTop: 14, marginBottom: 2 }}>
                 {section}
               </Text>
-              {rows.map(([k, label]) => {
+              {rows.map(([k, label, icon]) => {
                 const on = (contentFilters as any)[k] === true;
+                const accent = (theme as any).primary ?? '#0d8575';
                 return (
                   <Pressable
                     key={k}
                     onPress={() => setContentFilters((c) => ({ ...c, [k]: !(c as any)[k] }))}
-                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 }}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 }}
                   >
+                    <MaterialCommunityIcons name={icon as any} size={20} color={on ? accent : theme.textMuted} />
                     <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 15, color: theme.text, flex: 1 }}>{label}</Text>
                     <MaterialCommunityIcons
                       name={on ? 'checkbox-marked' : 'checkbox-blank-outline'}
                       size={22}
-                      color={on ? ((theme as any).primary ?? '#0d8575') : theme.textMuted}
+                      color={on ? accent : theme.textMuted}
                     />
                   </Pressable>
                 );
@@ -3695,6 +3726,7 @@ export default function ExploreScreen() {
           </Text>
           {ALLERGEN_OPTIONS.map((opt) => {
             const on = contentFilters.allergens.includes(opt.code);
+            const accent = (theme as any).primary ?? '#0d8575';
             return (
               <Pressable
                 key={opt.code}
@@ -3704,13 +3736,14 @@ export default function ExploreScreen() {
                     allergens: on ? c.allergens.filter((x) => x !== opt.code) : [...c.allergens, opt.code],
                   }))
                 }
-                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 }}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 }}
               >
+                <MaterialCommunityIcons name={opt.icon as any} size={20} color={on ? accent : theme.textMuted} />
                 <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 15, color: theme.text, flex: 1 }}>{opt.label}</Text>
                 <MaterialCommunityIcons
                   name={on ? 'checkbox-marked' : 'checkbox-blank-outline'}
                   size={22}
-                  color={on ? ((theme as any).primary ?? '#0d8575') : theme.textMuted}
+                  color={on ? accent : theme.textMuted}
                 />
               </Pressable>
             );
