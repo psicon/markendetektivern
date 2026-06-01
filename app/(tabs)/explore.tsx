@@ -2564,6 +2564,27 @@ export default function ExploreScreen() {
   // Verhalten unverändert. "Unbekannt ≠ ja": fehlt das Feld, wird das Produkt
   // bei einem aktiven Filter ausgeschlossen (bei Allergenen sicherheitsrelevant).
   // (contentFiltersActive ist oben bei der State-Deklaration definiert.)
+
+  // Client-seitiger Kategorie-Guard für die BROWSE-Listen. Der Server-Query
+  // filtert bereits nach Kategorie (where kategorie==ref); dies ist ein
+  // Sicherheitsnetz, falls eine veraltete/gemischte Liste durchrutscht
+  // (Symptom: "Kategorie gewählt, aber beim Scrollen kommen andere"). Spiegelt
+  // exakt den bestehenden Such-Pfad (filteredSearchEigen). No-op wenn cat='all'
+  // oder die Liste bereits sauber ist; unbekannte kategorie-Form → durchlassen.
+  const filterByCategory = useCallback(
+    (items: any[]): any[] => {
+      if (cat === 'all') return items;
+      return items.filter((p: any) => {
+        const directId = p?._kategorieId ?? p?.kategorie?.id;
+        if (typeof directId === 'string') return directId === cat;
+        const segs = p?.kategorie?._path?.segments;
+        const path = p?.kategorie?.path ?? (Array.isArray(segs) ? segs.join('/') : null);
+        if (typeof path === 'string') return path.endsWith(`/${cat}`);
+        return true; // unbekannte Form → nicht ausblenden (keine False-Empty)
+      });
+    },
+    [cat],
+  );
   const filterContent = useCallback(
     (items: any[], forTab: Tab): any[] => {
       if (!contentFiltersActive) return items;
@@ -2623,18 +2644,18 @@ export default function ExploreScreen() {
   const dataAlle = useMemo(() => {
     if (paused) return EMPTY_ARR;
     const base = filterAlkohol(itemsForTab('alle'));
-    return searchActiveQuery ? base : filterContent(base, 'alle');
-  }, [itemsForTab, paused, EMPTY_ARR, filterAlkohol, filterContent, searchActiveQuery]);
+    return searchActiveQuery ? base : filterContent(filterByCategory(base), 'alle');
+  }, [itemsForTab, paused, EMPTY_ARR, filterAlkohol, filterByCategory, filterContent, searchActiveQuery]);
   const dataEigen = useMemo(() => {
     if (paused) return EMPTY_ARR;
     const base = filterAlkohol(itemsForTab('eigen'));
-    return searchActiveQuery ? base : filterContent(base, 'eigen');
-  }, [itemsForTab, paused, EMPTY_ARR, filterAlkohol, filterContent, searchActiveQuery]);
+    return searchActiveQuery ? base : filterContent(filterByCategory(base), 'eigen');
+  }, [itemsForTab, paused, EMPTY_ARR, filterAlkohol, filterByCategory, filterContent, searchActiveQuery]);
   const dataMarken = useMemo(() => {
     if (paused) return EMPTY_ARR;
     const base = filterAlkohol(itemsForTab('marken'));
-    return searchActiveQuery ? base : filterContent(base, 'marken');
-  }, [itemsForTab, paused, EMPTY_ARR, filterAlkohol, filterContent, searchActiveQuery]);
+    return searchActiveQuery ? base : filterContent(filterByCategory(base), 'marken');
+  }, [itemsForTab, paused, EMPTY_ARR, filterAlkohol, filterByCategory, filterContent, searchActiveQuery]);
 
   // First-load scroll-to-top per tab: when data goes from empty to
   // populated (e.g. user opened Stöbern + switched tabs BEFORE the
