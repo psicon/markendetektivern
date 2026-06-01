@@ -2770,6 +2770,16 @@ export default function ExploreScreen() {
     loadMarken,
   ]);
 
+  // 86ca2rty8: Render-Window-Lever für den gefilterten Zustand.
+  // Bei aktiven Client-Filtern ist die SICHTBARE Liste oft kürzer als der
+  // Viewport. Wenn der Auto-Fill dann programmatisch Items nachlädt, rendert
+  // LegendList sie bei scrollY≈0 (drawDistance=250) erst, wenn der User scrollt
+  // → "Produkte ploppen beim Hin-/Herscrollen auf". Eine großzügige drawDistance
+  // im gefilterten Zustand hält die ganze (kurze) gefilterte Liste im Render-
+  // Window, also rendern sie sofort. Unfiltered bleibt 250 (Perf bei langer
+  // Liste — da macht der normale Scroll das Nachrendern).
+  const fillDrawDistance = contentFiltersActive || cat !== 'all' ? 3000 : 250;
+
   // First-load scroll-to-top per tab: when data goes from empty to
   // populated (e.g. user opened Stöbern + switched tabs BEFORE the
   // Firestore fetch landed), snap that tab's list to 0. Without
@@ -3377,6 +3387,7 @@ export default function ExploreScreen() {
             }
             numColumns={2}
             estimatedItemSize={290}
+            drawDistance={fillDrawDistance}
             onScroll={onScrollAlleProp}
             renderScrollComponent={renderScrollComponentProp}
             scrollEventThrottle={16}
@@ -3441,6 +3452,7 @@ export default function ExploreScreen() {
             }
             numColumns={2}
             estimatedItemSize={290}
+            drawDistance={fillDrawDistance}
             onScroll={onScrollEigenProp}
             renderScrollComponent={renderScrollComponentProp}
             scrollEventThrottle={16}
@@ -3498,6 +3510,7 @@ export default function ExploreScreen() {
             }
             numColumns={2}
             estimatedItemSize={290}
+            drawDistance={fillDrawDistance}
             onScroll={onScrollMarkenProp}
             renderScrollComponent={renderScrollComponentProp}
             scrollEventThrottle={16}
