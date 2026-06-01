@@ -219,6 +219,10 @@ export default function ProductComparisonScreen() {
   // Auf product-comparison zeigt Context auf den NoName-Carousel.
   const contextAnchor = useCoachmarkAnchor(PRODUCT_DETAIL_ANCHOR_CONTEXT);
   const detailScrollRef = useRef<ScrollView>(null);
+  // #5: Scroll-Stop-Lesen der KI-Sektion (measure(), kein Rauschen).
+  const aiSectionRef = useRef<View>(null);
+  const sectionReadFiredRef = useRef(false);
+  const sectionDwellTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Different callers across the app push either `?type=markenprodukt`
   // (home, explore, comparison-alternatives) or `?type=brand` (search-
@@ -459,6 +463,38 @@ export default function ProductComparisonScreen() {
       user?.uid,
     );
   }, [id, picked, type, user?.uid]);
+
+  // #5: Scroll-Stop-Lesen der KI-Sektion (1,2s ruhig + sichtbar via measure()).
+  useEffect(() => {
+    sectionReadFiredRef.current = false;
+  }, [id]);
+  useEffect(() => () => {
+    if (sectionDwellTimer.current) clearTimeout(sectionDwellTimer.current);
+  }, []);
+  const scheduleSectionRead = useCallback(() => {
+    if (sectionReadFiredRef.current) return;
+    if (sectionDwellTimer.current) clearTimeout(sectionDwellTimer.current);
+    sectionDwellTimer.current = setTimeout(() => {
+      const node = aiSectionRef.current as any;
+      if (!node?.measure || sectionReadFiredRef.current) return;
+      node.measure((_x: number, _y: number, _w: number, h: number, _px: number, py: number) => {
+        const winH = Dimensions.get('window').height;
+        const visible = py + Math.min(h, 120) <= winH - 60 && py + h >= insets.top + 60;
+        if (!visible || sectionReadFiredRef.current) return;
+        sectionReadFiredRef.current = true;
+        try {
+          journeyTrackingService.trackQualityEngagement(
+            String(id),
+            'section_read',
+            scoreToVerdict((picked as any)?.aiComparison?.score),
+            user?.uid,
+          );
+        } catch {
+          /* fire-and-forget */
+        }
+      });
+    }, 1200);
+  }, [id, picked, user?.uid, insets.top]);
   // Swipe zwischen Inhaltsstoffe ↔ Nährwerte — NUR im Tab-Content-Bereich
   // (die GestureDetector-Region), damit der Rest der Seite normal scrollt.
   // activeOffsetX → Geste startet nur bei klar horizontalem Swipe;
@@ -1363,6 +1399,8 @@ export default function ProductComparisonScreen() {
       <Animated.ScrollView
         ref={detailScrollRef}
         onScroll={scrollHandler}
+        onMomentumScrollEnd={scheduleSectionRead}
+        onScrollEndDrag={scheduleSectionRead}
         scrollEventThrottle={16}
         contentContainerStyle={{
           paddingTop: insets.top + DETAIL_HEADER_ROW_HEIGHT,
@@ -2602,6 +2640,7 @@ export default function ProductComparisonScreen() {
             platzieren (vorher war's drüber). Component returnt null
             wenn kein Score → Alternativen-Liste rückt automatisch
             nach. */}
+        <View ref={aiSectionRef} collapsable={false}>
         <AiComparisonScale
           aiComparison={(picked as any)?.aiComparison ?? null}
           onExpand={() => {
@@ -2618,6 +2657,7 @@ export default function ProductComparisonScreen() {
             }
           }}
         />
+        </View>
         {/* Fallback: wenn kein echter Vergleich möglich war (z.B. das
             verknüpfte Markenprodukt hat noch keine Nährwerte/Zutaten),
             bewertet die KI das NoName standalone kategorie-relativ. Dann
