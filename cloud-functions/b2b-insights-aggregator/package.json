@@ -1,0 +1,14 @@
+{
+  "name": "b2b-insights-aggregator",
+  "version": "1.0.0",
+  "description": "Nightly aggregator: anonymous B2B insight metrics (quality-aware switching, conversion funnel, category demand, price bands) into one Firestore doc. k-anonymity enforced; never per-user.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}
