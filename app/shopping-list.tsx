@@ -85,6 +85,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { usePreferenceProfile, dominantDimension } from '@/hooks/usePreferenceProfile';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import achievementService from '@/lib/services/achievementService';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
@@ -1298,6 +1299,8 @@ type BrandCardProps = {
   loadingDelete: boolean;
   loadingConvert: boolean;
   favoriteMarketId?: string;
+  /** #1: Profil ist preis-dominant → NoName-Alternativen preislich vorsortieren. */
+  priceDominant?: boolean;
   /** When false, expandable section is hidden (used in "Alle"-Tab to keep simple). */
   allowExpand?: boolean;
   /** Hersteller-`infos` Text — wenn vorhanden zeigt die Card ein
@@ -1325,13 +1328,21 @@ function BrandCard({
   loadingDelete,
   loadingConvert,
   favoriteMarketId,
+  priceDominant = false,
   allowExpand = true,
   infos,
   onInfoPress,
 }: BrandCardProps) {
   const { theme, brand } = useTokens();
   const product = item.product;
-  const alts: any[] = item.alternatives || [];
+  // #1: bei Preis-Dominanz Alternativen preislich sortieren — Lieblingsmarkt
+  // bleibt vorn (kein Widerspruch zum „Lieblingsmarkt wird bevorzugt"-Label).
+  const alts: any[] = useMemo(() => {
+    const base = item.alternatives || [];
+    if (!priceDominant || base.length < 2) return base;
+    const favRank = (x: any) => (favoriteMarketId && x?.discounter?.id === favoriteMarketId ? 0 : 1);
+    return [...base].sort((a, b) => favRank(a) - favRank(b) || ((a?.preis ?? 0) - (b?.preis ?? 0)));
+  }, [item.alternatives, priceDominant, favoriteMarketId]);
   const hasAlts = alts.length > 0;
   const selectedAlt = alts.find((a) => a.id === selectedAltId) || alts[0];
   const potential = item.potentialSavings || 0;
@@ -2182,6 +2193,15 @@ export default function ShoppingListScreen() {
   const analytics = useAnalytics();
 
   const favoriteMarketId: string | undefined = (userProfile as any)?.favoriteMarket;
+
+  // #1: Konsum — Preis-Dominanz aus dem Präferenz-Profil. Wenn ja, werden die
+  // NoName-Alternativen je Marken-Artikel preislich vorsortiert (Lieblingsmarkt
+  // bleibt vorn). Order-only, nur ein Tiebreak — versteckt nichts.
+  const prefProfile = usePreferenceProfile();
+  const priceDominant = useMemo(() => {
+    const d = dominantDimension(prefProfile);
+    return !!(d && d.dim === 'price' && d.value >= 0.3 && d.confidence >= 0.3);
+  }, [prefProfile]);
 
   // ─── Tab + pager ───────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<Tab>('brand');
@@ -3505,6 +3525,7 @@ export default function ShoppingListScreen() {
             loadingDelete={loadingDelete}
             loadingConvert={loadingConvert}
             favoriteMarketId={favoriteMarketId}
+            priceDominant={priceDominant}
             allowExpand={opts.allowExpand}
             infos={(item.product as any)?.marke?.infos ?? null}
             onInfoPress={() => {

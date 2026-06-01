@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRouter } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { usePreferenceProfile, dominantDimension } from '@/hooks/usePreferenceProfile';
 import {
   Image,
   Pressable,
@@ -144,6 +145,22 @@ export default function FavoritesScreen() {
     markets: string[];
     sortBy: SortBy;
   }>({ markets: [], sortBy: 'name' });
+
+  // #1: Konsum — sanfter Sortier-Hinweis aus dem Präferenz-Profil. Preis-
+  // dominant + genug Confidence + User hat Sort noch nicht angefasst →
+  // Default 'name' → 'price'. Order-only, jederzeit überschreibbar, 1×.
+  const prefProfile = usePreferenceProfile();
+  const sortTouchedRef = useRef(false);
+  const sortBiasAppliedRef = useRef(false);
+  useEffect(() => {
+    if (sortBiasAppliedRef.current || sortTouchedRef.current) return;
+    if (filters.sortBy !== 'name') return;
+    const dom = dominantDimension(prefProfile);
+    if (dom && dom.dim === 'price' && dom.value >= 0.3 && dom.confidence >= 0.3) {
+      sortBiasAppliedRef.current = true;
+      setFilters((prev) => ({ ...prev, sortBy: 'price' }));
+    }
+  }, [prefProfile, filters.sortBy]);
 
   const [batchLoaderState, setBatchLoaderState] = useState<{
     visible: boolean;
@@ -628,7 +645,10 @@ export default function FavoritesScreen() {
       >
         <FilterSheetBody
           sortBy={filters.sortBy}
-          onChangeSort={(s) => setFilters((prev) => ({ ...prev, sortBy: s }))}
+          onChangeSort={(s) => {
+            sortTouchedRef.current = true; // #1: User-Wahl gewinnt
+            setFilters((prev) => ({ ...prev, sortBy: s }));
+          }}
           markets={activeTab === 'brand' ? brandMarkets : noNameMarkets}
           selectedMarkets={filters.markets}
           onToggleMarket={toggleMarketFilter}
