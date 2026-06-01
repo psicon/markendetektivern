@@ -145,11 +145,11 @@ function sessionPoints(journey: Journey): Record<ProfileDimension, number> {
   if (af.labels?.vegan || af.labels?.vegetarian) add('health', 1);
   if (af.kiQuality && af.kiQuality !== 'off') add('contentQuality', 1);
 
-  const ms = journey?.motivationSignals ?? {};
-  if ((ms.brandSignals ?? 0) > 0 || (af.searchQuery && String(af.searchQuery).trim())) brandIntent = true;
-  if ((ms.priceSignals ?? 0) > 0) add('price', 1);
-  if ((ms.contentSignals ?? 0) > 0) add('contentQuality', 1);
-  if ((ms.marketSignals ?? 0) > 0) add('marketLoyalty', 1);
+  // ENTKOPPELT von den Legacy-motivationSignals (User-Entscheidung): die
+  // alten ms.{price,content,market}Signals würden DIESELBEN Filter doppelt
+  // zählen, die wir oben schon präzise aus activeFilters ableiten. Wir lesen
+  // sie daher NICHT mehr. brandIntent kommt aus den exakten Filtern.
+  brandIntent = !!(af.brandId || (af.searchQuery && String(af.searchQuery).trim()));
 
   // ── Intent-Outcome-Divergenz: Marken-Intent → NoName gewählt ───────
   if (brandIntent && choseNoName) {

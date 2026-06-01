@@ -1,7 +1,17 @@
 import { db } from '@/lib/firebase';
 import { addDoc, collection, doc, DocumentReference, serverTimestamp, updateDoc } from '@react-native-firebase/firestore';
+import * as Application from 'expo-application';
+import { Platform } from 'react-native';
 import { analyticsService } from './analyticsService';
 import { AnonymousLocationService } from './anonymousLocationService';
+
+// App-Kontext pro Journey (User-Vorgabe): Version + Build-Nr + OS. Einmal beim
+// Modul-Load gelesen (Application-Getter sind synchron; in Expo Go ggf. null).
+const APP_INFO = {
+  version: Application.nativeApplicationVersion ?? 'unknown',
+  build: Application.nativeBuildVersion ?? 'unknown',
+  os: Platform.OS as 'ios' | 'android' | string,
+};
 
 export interface JourneyContext {
   journeyId: string;
@@ -1720,7 +1730,10 @@ class JourneyTrackingService {
         journeyId: journey.journeyId,
         startTime: new Date(journey.startTime),
         lastUpdated: serverTimestamp(),
-        
+        // App-Kontext (Version + Build + OS) — pro Journey, für Auswertung
+        // nach App-Stand/Plattform.
+        app: APP_INFO,
+
         // Discovery Context
         discoveryMethod: journey.discoveryMethod,
         screenName: journey.screenName,
