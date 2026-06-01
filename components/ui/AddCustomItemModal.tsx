@@ -25,6 +25,7 @@ import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { FirestoreService } from '@/lib/services/firestore';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
 
 import { MarketSelector } from './MarketSelector';
 
@@ -156,6 +157,20 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
       };
 
       await FirestoreService.addCustomItemToShoppingCart(userId, customItem);
+      // 86ca2rt88: Freitext-Eintrag in der Journey festhalten (hinzugefügt).
+      try {
+        journeyTrackingService.trackCustomItem(
+          'added',
+          {
+            name: customItem.name,
+            type: customItem.type,
+            marketName: (customItem as any).marketName,
+          },
+          userId,
+        );
+      } catch {
+        /* fire-and-forget — Tracking darf den Add nie blockieren */
+      }
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => {},
       );

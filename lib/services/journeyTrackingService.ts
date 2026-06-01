@@ -241,6 +241,18 @@ export interface JourneyContext {
     resultCount?: number;
   }>;
 
+  // NEU (86ca2rt88): Freitext-/Custom-Einträge im Einkaufszettel (kein DB-Bezug,
+  // also nicht in viewedProducts). Append-Log: jede Aktion (added/purchased/
+  // deleted) erzeugt einen Eintrag, damit der ganze Lebenszyklus eines
+  // Freitext-Items in der Journey nachvollziehbar ist.
+  customItems?: Array<{
+    name: string;
+    type?: 'brand' | 'noname';
+    action: 'added' | 'purchased' | 'deleted';
+    marketName?: string;
+    timestamp: number;
+  }>;
+
   // NEU (86ca2ruh9): Verbraucher-Eigenschaften — EINMALIG beim Journey-Start
   // aus dem User-Doc gelesen (Lieblingsmarkt, Geschlecht, Alter, Gamification-
   // Level, bisherige Ersparnis). Snapshot zum Start, wird in der Journey NICHT
@@ -599,6 +611,7 @@ class JourneyTrackingService {
           converted: data.converted || [], // NEU: Lade converted Array
           location: data.location, // NEU: Location-Daten laden
           consumerProfile: data.consumerProfile, // 86ca2ruh9: Snapshot beibehalten (nicht neu lesen)
+          customItems: data.customItems, // 86ca2rt88: Freitext-Log beibehalten (sonst überschreibt ein Append nach Resume die alten Einträge)
           abandoned: data.abandoned,
           persistedToFirestore: true,
           firestoreDocId: journeyDoc.id
@@ -1983,8 +1996,12 @@ class JourneyTrackingService {
         ...(journey.scannedcodes && journey.scannedcodes.length > 0 && { 
           scannedcodes: journey.scannedcodes 
         }),
-        ...(journey.searchedproducts && journey.searchedproducts.length > 0 && { 
-          searchedproducts: journey.searchedproducts 
+        ...(journey.searchedproducts && journey.searchedproducts.length > 0 && {
+          searchedproducts: journey.searchedproducts
+        }),
+        // NEU (86ca2rt88): Freitext-/Custom-Einträge
+        ...(journey.customItems && journey.customItems.length > 0 && {
+          customItems: journey.customItems,
         })
       };
       
@@ -3171,6 +3188,60 @@ class JourneyTrackingService {
     }, userId);
 
     // Persistiere zu Firestore
+    if (userId) {
+      this.persistJourneyToFirestore(userId);
+    }
+  }
+
+  /**
+   * 86ca2rt88: Trackt einen Freitext-/Custom-Eintrag aus dem Einkaufszettel.
+   * action = 'added' | 'purchased' | 'deleted'. Wird auf Handler-Ebene
+   * aufgerufen, weil nur dort die Absicht (gekauft vs. gelöscht) eindeutig ist —
+   * der gemeinsame removeFromShoppingCart-Service kann beides nicht
+   * unterscheiden. Append-Log, fire-and-forget.
+   */
+  trackCustomItem(
+    action: 'added' | 'purchased' | 'deleted',
+    payload: { name: string; type?: 'brand' | 'noname'; marketName?: string },
+    userId?: string,
+  ): void {
+    if (!this.currentJourney) {
+      // Kein aktiver Kontext → Journey starten (analog trackScannedCode).
+      this.startJourney('browse', 'shopping-list', undefined, userId);
+      if (!this.currentJourney) return;
+    }
+
+    if (!this.currentJourney.customItems) {
+      this.currentJourney.customItems = [];
+    }
+
+    const entry: NonNullable<JourneyContext['customItems']>[number] = {
+      name: payload.name,
+      action,
+      timestamp: Date.now(),
+    };
+    if (payload.type) entry.type = payload.type;
+    if (payload.marketName) entry.marketName = payload.marketName;
+    this.currentJourney.customItems.push(entry);
+
+    console.log(`📝 Tracked custom item (${action}): "${payload.name}"`, {
+      type: payload.type,
+      total: this.currentJourney.customItems.length,
+    });
+
+    analyticsService.trackEvent(
+      {
+        event_name: 'custom_item_tracked',
+        event_category: 'user_action',
+        journey_id: this.currentJourney.journeyId,
+        custom_item_action: action,
+        custom_item_name: payload.name,
+        product_type: payload.type,
+        total_custom_items_in_journey: this.currentJourney.customItems.length,
+      },
+      userId,
+    );
+
     if (userId) {
       this.persistJourneyToFirestore(userId);
     }

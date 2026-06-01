@@ -90,6 +90,7 @@ import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import achievementService from '@/lib/services/achievementService';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { FirestoreService } from '@/lib/services/firestore';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import {
   showBulkConvertSuccessToast,
   showBulkPurchasedToast,
@@ -2865,6 +2866,18 @@ export default function ShoppingListScreen() {
           productType: matched.customType === 'brand' ? 'brand' : 'noname',
           isCustomItem: true,
         });
+        // 86ca2rt88: Freitext-Eintrag als GEKAUFT in der Journey festhalten.
+        // (Der gemeinsame removeFromShoppingCart kann gekauft/gelöscht nicht
+        // unterscheiden → Tracking hier, wo die Absicht eindeutig ist.)
+        try {
+          journeyTrackingService.trackCustomItem(
+            'purchased',
+            { name: matched.name ?? 'Custom item', type: matched.customType, marketName: (matched as any).market?.name },
+            user.uid,
+          );
+        } catch {
+          /* fire-and-forget */
+        }
       } else {
         await FirestoreService.markAsPurchased(user.uid, itemId);
       }
@@ -2963,6 +2976,18 @@ export default function ShoppingListScreen() {
           }
         : undefined;
       await FirestoreService.removeFromShoppingCart(user.uid, itemId, payload);
+      // 86ca2rt88: Freitext-Eintrag als GELÖSCHT in der Journey festhalten.
+      if (matched?.isCustom) {
+        try {
+          journeyTrackingService.trackCustomItem(
+            'deleted',
+            { name: matched.name ?? 'Custom item', type: matched.customType, marketName: (matched as any).market?.name },
+            user.uid,
+          );
+        } catch {
+          /* fire-and-forget */
+        }
+      }
       // Legacy-Dupes (cart-schema v1) auch löschen, sonst tauchen sie
       // beim nächsten Refresh wieder auf. Fire-and-forget, ohne
       // Tracking-Payload (kein zweites Tracking-Event).
@@ -3302,8 +3327,7 @@ export default function ShoppingListScreen() {
           }
         }
       }
-      // Custom items: simple removal — Fast-Path ohne getDoc (custom-items
-      // brauchen kein Journey-Tracking).
+      // Custom items: simple removal — Fast-Path ohne getDoc.
       if (customItems.length > 0) {
         promises.push(
           ...customItems.map((item) =>
@@ -3315,6 +3339,19 @@ export default function ShoppingListScreen() {
             }),
           ),
         );
+        // 86ca2rt88: jeder Freitext-Eintrag im Bulk-Kauf wird als GEKAUFT in
+        // der Journey festgehalten (fire-and-forget, je Eintrag ein Log).
+        for (const item of customItems) {
+          try {
+            journeyTrackingService.trackCustomItem(
+              'purchased',
+              { name: item.name ?? 'Custom item', type: item.customType, marketName: (item as any).market?.name },
+              user.uid,
+            );
+          } catch {
+            /* fire-and-forget */
+          }
+        }
       }
 
       setPurchaseLoaderState((prev) => ({
