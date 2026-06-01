@@ -40,6 +40,8 @@ export interface PreferenceProfile {
   dimensions: Record<ProfileDimension, number>; // 0..1 EWMA
   confidence: Record<ProfileDimension, number>; // 0..1 (per-dim, evidenz-basiert)
   evidence: Record<ProfileDimension, number>; // # Sessions mit Signal je Dim
+  // #3: Entdeckungs-Stil — kumulative Journey-Zähler je Methode.
+  discoveryStyle?: { browse: number; search: number; scan: number };
 }
 
 const EWMA_ALPHA = 0.3; // Gewicht der aktuellen Session
@@ -90,6 +92,12 @@ function sessionPoints(journey: Journey): Record<ProfileDimension, number> {
     const isNoName = vp?.productType === 'noname';
 
     if (engaged) add('thoroughness', 1);
+    // #3: lange Betrachtungsdauer (viewDuration auf einer view-Action) =
+    // Gründlichkeit, auch ohne explizites Aufklappen.
+    const actions: any[] = Array.isArray(vp?.actions) ? vp.actions : [];
+    if (actions.some((a) => a && typeof a.viewDuration === 'number' && a.viewDuration >= 8)) {
+      add('thoroughness', 1);
+    }
 
     if (decision === 'converted') {
       add('price', 2);
@@ -128,6 +136,9 @@ function sessionPoints(journey: Journey): Record<ProfileDimension, number> {
     add('contentQuality', 1);
   }
   if (Array.isArray(af.allergens) && af.allergens.length > 0) add('health', 1);
+  // #3: Marken-Filter aktiv = Marken-Interesse; Suche = aktive Exploration.
+  if (af.brandId) add('brandLoyalty', 1);
+  if (af.searchQuery && String(af.searchQuery).trim()) add('exploration', 1);
   if (Array.isArray(af.stufe) && af.stufe.length > 0) add('exploration', 1);
   // Label-/Qualitäts-Filter (von Stöbern in activeFilters gespiegelt).
   if (af.labels?.bio) add('sustainability', 1);
@@ -186,6 +197,17 @@ export async function updateFromJourney(uid: string | null | undefined, journey:
       confidence[d] = Math.min(1, ev / 8);
     }
 
+    // #3: Entdeckungs-Stil fortschreiben.
+    const prevStyle = (prev as any)?.discoveryStyle ?? { browse: 0, search: 0, scan: 0 };
+    const dm = journey?.discoveryMethod;
+    const styleKey = dm === 'search' ? 'search' : dm === 'scan' ? 'scan' : 'browse';
+    const discoveryStyle = {
+      browse: prevStyle.browse ?? 0,
+      search: prevStyle.search ?? 0,
+      scan: prevStyle.scan ?? 0,
+    };
+    discoveryStyle[styleKey] += 1;
+
     const out: PreferenceProfile = {
       method: 'hybrid',
       windowStart: prev?.windowStart ?? Date.now(),
@@ -194,6 +216,7 @@ export async function updateFromJourney(uid: string | null | undefined, journey:
       dimensions,
       confidence,
       evidence,
+      discoveryStyle,
       updatedAt: serverTimestamp(),
     };
     await setDoc(ref, out, { merge: true });
