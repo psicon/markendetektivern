@@ -1742,7 +1742,8 @@ export default function NoNameDetailScreen() {
                 />
               </View>
             )}
-            {/* Hersteller-Einschätzung (Info-Karte, kein Score). */}
+            {/* Hersteller-Einschätzung (Info-Karte, kein Score). Ausklappbar;
+                Aufklappen = herkunftsorientiertes Engagement (86c9jkj6y). */}
             <AiManufacturerCard
               aiHersteller={(p as any)?.hersteller?.aiHersteller ?? null}
               herstellerName={
@@ -1750,6 +1751,18 @@ export default function NoNameDetailScreen() {
                 (p as any)?.hersteller?.herstellername ||
                 null
               }
+              onExpand={() => {
+                try {
+                  journeyTrackingService.trackQualityEngagement(
+                    String(id),
+                    'manufacturer_origin',
+                    undefined,
+                    user?.uid,
+                  );
+                } catch {
+                  /* fire-and-forget */
+                }
+              }}
             />
           </View>
         </Crossfade>

@@ -184,7 +184,7 @@ export interface JourneyContext {
     // hängt davon ab; der Profil-Producer (Slice B) liest dies + actions[].
     qualityEngagement?: {
       engaged: boolean;
-      sources: { [kind: string]: boolean }; // ai_expanded | tab_nutrition | tab_ingredients | manufacturer_opened | section_read
+      sources: { [kind: string]: boolean }; // ai_expanded | tab_nutrition | tab_ingredients | manufacturer_opened | manufacturer_origin | section_read
       lastAt: number;
     };
     // NEU (Slice A): KI-Verdikt dieses Produkts zum Zeitpunkt der Ansicht,
@@ -405,7 +405,7 @@ class JourneyTrackingService {
    */
   trackQualityEngagement(
     productId: string,
-    kind: 'ai_expanded' | 'tab_nutrition' | 'tab_ingredients' | 'manufacturer_opened' | 'section_read',
+    kind: 'ai_expanded' | 'tab_nutrition' | 'tab_ingredients' | 'manufacturer_opened' | 'manufacturer_origin' | 'section_read',
     aiVerdict?: 'besser' | 'gleichwertig' | 'schlechter',
     userId?: string,
   ): void {
