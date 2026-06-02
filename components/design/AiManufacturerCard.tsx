@@ -87,7 +87,7 @@ export function AiManufacturerCard({
       style={[
         {
           marginHorizontal: 20,
-          marginTop: 12,
+          marginTop: 20,
           padding: 14,
           paddingHorizontal: 16,
           borderRadius: radii.lg - 2,
@@ -124,7 +124,7 @@ export function AiManufacturerCard({
           style={{
             alignSelf: 'flex-start',
             flexDirection: 'row',
-            alignItems: 'center',
+            alignItems: 'flex-start', // bei Umbruch sitzt das Icon an der 1. Zeile, nicht mittig
             gap: 5,
             paddingHorizontal: 9,
             paddingVertical: 4,
@@ -133,9 +133,10 @@ export function AiManufacturerCard({
             marginBottom: 10,
           }}
         >
-          <MaterialCommunityIcons name="map-marker-outline" size={12} color={accent} />
+          <MaterialCommunityIcons name="map-marker-outline" size={12} color={accent} style={{ marginTop: 1 }} />
           <Text
             style={{
+              flexShrink: 1, // wrappt INNERHALB der Card → rechts gleicher Abstand wie links
               fontFamily,
               fontWeight: fontWeight.bold as any,
               fontSize: 11,

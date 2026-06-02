@@ -97,7 +97,7 @@ export function AiComparisonScale({
       style={[
         {
           marginHorizontal: 20,
-          marginTop: 20,
+          marginTop: 12,
           padding: 14,
           paddingHorizontal: 16,
           borderRadius: radii.lg - 2,
