@@ -127,6 +127,43 @@ const DHASH_DUPLICATE_THRESHOLD = 3;
 // power users (50 days @ 1 bon/day, or 50 last bons of any cadence).
 const DHASH_DEDUP_LOOKBACK = 50;
 
+// 86ca0wbg7 — B: zusätzlich zur Count-Grenze den Fuzzy-Dedup-Scan auf ein
+// ZEITFENSTER bounden (createdAt), damit die Prüfung auch bei Tausenden Bons
+// klein bleibt. Großzügig (länger als jedes plausible maxAgeDays), damit die
+// Dedup-Abdeckung praktisch nicht leidet — nur unbegrenztes Wachstum verhindert.
+const DHASH_DEDUP_LOOKBACK_DAYS = 120;
+
+// 86ca0wbg7 — A: Max. Verarbeitungs-Versuche pro Bon. Nach so vielen
+// fehlgeschlagenen Retries wird der Bon endgültig abgelehnt (poison message),
+// statt bis zur PubSub-TTL (~7 Tage) immer wieder (teuer) verarbeitet zu werden.
+const MAX_PROCESS_ATTEMPTS = 5;
+
+/**
+ * 86ca0wbg7 — Baut das `ocr`-Feld fürs Bon-Doc. Einmal definiert, damit der
+ * frühe Idempotenz-Persist (nach der OCR) und der finale Write identisch sind.
+ */
+function buildOcrField(ocr, recon, escalation) {
+  return {
+    model: ocr.model,
+    engine: ocr.engine ?? null,
+    promptVersion: ocr.promptVersion,
+    latencyMs: ocr.latencyMs,
+    cvLatencyMs: ocr.cvLatencyMs ?? null,
+    geminiLatencyMs: ocr.geminiLatencyMs ?? null,
+    parsed: ocr.parsed,
+    confidence: ocr.parsed.ocrConfidence ?? null,
+    escalation: escalation?.fired ? escalation : null,
+    reconciliation: {
+      ok: recon.ok,
+      sumItemsCents: recon.sumItemsCents,
+      totalCents: ocr.parsed.totalCents ?? null,
+      deltaCents: recon.deltaCents,
+      signedDeltaCents: recon.signedDeltaCents,
+      direction: recon.direction,
+    },
+  };
+}
+
 // In-memory PubSub publisher (re-used across invocations).
 const pubsub = new PubSub();
 
@@ -641,9 +678,16 @@ exports.enqueueCashback = onRequest(
         // Hamming-distance scan: pull last N receipts that have a
         // server-dHash, compute distance client-side. This is bounded
         // by DHASH_DEDUP_LOOKBACK so cost is predictable.
+        // 86ca0wbg7 (B): zusätzlich zur Count-Grenze auf ein Zeitfenster bounden
+        // (range auf dem ohnehin sortierten createdAt → KEIN neuer Index nötig),
+        // damit der Scan auch bei Tausenden Bons pro User klein bleibt.
+        const dedupCutoff = admin.firestore.Timestamp.fromMillis(
+          Date.now() - DHASH_DEDUP_LOOKBACK_DAYS * 86400000,
+        );
         const recentSnap = await db
           .collection('receipts')
           .where('userId', '==', uid)
+          .where('createdAt', '>=', dedupCutoff)
           .orderBy('createdAt', 'desc')
           .limit(DHASH_DEDUP_LOOKBACK)
           .get();
@@ -873,64 +917,94 @@ exports.processCashback = onMessagePublished(
 
       // 2) Primary OCR — engine selected via CASHBACK_OCR_ENGINE env var
       //    (default: cv-hybrid, the Phase-0 validated winner).
+      // 86ca0wbg7 (A): Idempotenz — hat ein früherer Versuch die OCR schon
+      // gemacht (am Doc gespeichert), wiederverwenden statt erneut (teuer)
+      // Gemini/DocAI zu rufen. Spart bei Retries die OCR-Kosten komplett.
       let ocr;
-      if (OCR_ENGINE === 'cv-hybrid') {
-        ocr = await extractReceiptCVHybrid(bytes, mimeType, { model: config.ocrModel });
-      } else {
-        // Legacy path — direct Gemini-on-image. Less stable, kept for rollback.
-        ocr = await extractReceipt(bytes, mimeType, { model: config.ocrModel });
-        ocr.engine = ocr.engine || 'gemini-direct';
-        ocr.cvLatencyMs = 0;
-        ocr.geminiLatencyMs = ocr.latencyMs;
-        ocr.ocrText = '';
-      }
-
-      // 3) Reconciliation — asymmetric tolerance (Σ < total: ±200¢ for
-      //    Pfand; Σ > total: only ±50¢ — that's the suspicious direction).
-      let recon = reconcile(ocr.parsed);
-
-      // 3a) Escalation: if primary failed recon AND DocAI is configured,
-      //     re-run the bon through DocAI Expense Parser. Take whichever
-      //     result has the smaller |signedDelta| (or DocAI if it passes
-      //     and primary doesn't).
+      let recon;
       let escalation = { fired: false };
-      if (
-        !recon.ok
-        && ESCALATE_ON_RECON_FAIL
-        && isDocAIConfigured()
-        && ocr.parsed?.isReceipt !== false
-      ) {
-        try {
-          const docai = await extractReceiptDocAI(bytes, mimeType);
-          if (docai && docai.parsed) {
-            const docaiRecon = reconcile(docai.parsed);
-            const primaryAbsDelta = recon.deltaCents == null ? Infinity : recon.deltaCents;
-            const docaiAbsDelta = docaiRecon.deltaCents == null ? Infinity : docaiRecon.deltaCents;
-            const swap =
-              docaiRecon.ok && !recon.ok
-                ? true
-                : docaiAbsDelta < primaryAbsDelta;
-            escalation = {
-              fired: true,
-              swapped: swap,
-              primaryEngine: ocr.engine,
-              primaryDeltaCents: recon.deltaCents,
-              primaryDirection: recon.direction,
-              docaiDeltaCents: docaiRecon.deltaCents,
-              docaiDirection: docaiRecon.direction,
-              docaiLatencyMs: docai.latencyMs,
-            };
-            if (swap) {
-              ocr = docai;
-              recon = docaiRecon;
-            }
-          } else {
-            escalation = { fired: true, swapped: false, reason: 'docai_no_result' };
-          }
-        } catch (e) {
-          logger.warn('escalation-failed', { cashbackId, err: e.message });
-          escalation = { fired: true, swapped: false, reason: e.message };
+      const cachedOcr = receipt.ocr && receipt.ocr.parsed ? receipt.ocr : null;
+      if (cachedOcr) {
+        ocr = {
+          parsed: cachedOcr.parsed,
+          engine: cachedOcr.engine ?? null,
+          model: cachedOcr.model ?? null,
+          promptVersion: cachedOcr.promptVersion ?? null,
+          latencyMs: cachedOcr.latencyMs ?? null,
+          cvLatencyMs: cachedOcr.cvLatencyMs ?? null,
+          geminiLatencyMs: cachedOcr.geminiLatencyMs ?? null,
+          ocrText: '',
+        };
+        recon =
+          cachedOcr.reconciliation && typeof cachedOcr.reconciliation.ok === 'boolean'
+            ? cachedOcr.reconciliation
+            : reconcile(ocr.parsed);
+        escalation = cachedOcr.escalation || { fired: false };
+      } else {
+        if (OCR_ENGINE === 'cv-hybrid') {
+          ocr = await extractReceiptCVHybrid(bytes, mimeType, { model: config.ocrModel });
+        } else {
+          // Legacy path — direct Gemini-on-image. Less stable, kept for rollback.
+          ocr = await extractReceipt(bytes, mimeType, { model: config.ocrModel });
+          ocr.engine = ocr.engine || 'gemini-direct';
+          ocr.cvLatencyMs = 0;
+          ocr.geminiLatencyMs = ocr.latencyMs;
+          ocr.ocrText = '';
         }
+
+        // 3) Reconciliation — asymmetric tolerance (Σ < total: ±200¢ for
+        //    Pfand; Σ > total: only ±50¢ — that's the suspicious direction).
+        recon = reconcile(ocr.parsed);
+
+        // 3a) Escalation: if primary failed recon AND DocAI is configured,
+        //     re-run the bon through DocAI Expense Parser. Take whichever
+        //     result has the smaller |signedDelta| (or DocAI if it passes
+        //     and primary doesn't).
+        if (
+          !recon.ok
+          && ESCALATE_ON_RECON_FAIL
+          && isDocAIConfigured()
+          && ocr.parsed?.isReceipt !== false
+        ) {
+          try {
+            const docai = await extractReceiptDocAI(bytes, mimeType);
+            if (docai && docai.parsed) {
+              const docaiRecon = reconcile(docai.parsed);
+              const primaryAbsDelta = recon.deltaCents == null ? Infinity : recon.deltaCents;
+              const docaiAbsDelta = docaiRecon.deltaCents == null ? Infinity : docaiRecon.deltaCents;
+              const swap =
+                docaiRecon.ok && !recon.ok
+                  ? true
+                  : docaiAbsDelta < primaryAbsDelta;
+              escalation = {
+                fired: true,
+                swapped: swap,
+                primaryEngine: ocr.engine,
+                primaryDeltaCents: recon.deltaCents,
+                primaryDirection: recon.direction,
+                docaiDeltaCents: docaiRecon.deltaCents,
+                docaiDirection: docaiRecon.direction,
+                docaiLatencyMs: docai.latencyMs,
+              };
+              if (swap) {
+                ocr = docai;
+                recon = docaiRecon;
+              }
+            } else {
+              escalation = { fired: true, swapped: false, reason: 'docai_no_result' };
+            }
+          } catch (e) {
+            logger.warn('escalation-failed', { cashbackId, err: e.message });
+            escalation = { fired: true, swapped: false, reason: e.message };
+          }
+        }
+
+        // 86ca0wbg7 (A): OCR-Ergebnis SOFORT persistieren (vor Gates/Dedup/
+        // Merchant). Schlägt ein späterer Schritt fehl, nutzt der Retry diese
+        // OCR und ruft Gemini/DocAI NICHT erneut.
+        await docRef
+          .update({ ocr: buildOcrField(ocr, recon, escalation), updatedAt: now })
+          .catch(() => {});
       }
 
       // 4) Bon-Datum freshness check (server-side, Berlin-anchored).
@@ -1308,25 +1382,7 @@ exports.processCashback = onMessagePublished(
       await docRef.update({
         status,
         rejectReason,
-        ocr: {
-          model: ocr.model,
-          engine: ocr.engine ?? null,
-          promptVersion: ocr.promptVersion,
-          latencyMs: ocr.latencyMs,
-          cvLatencyMs: ocr.cvLatencyMs ?? null,
-          geminiLatencyMs: ocr.geminiLatencyMs ?? null,
-          parsed: ocr.parsed,
-          confidence: ocr.parsed.ocrConfidence ?? null,
-          escalation: escalation?.fired ? escalation : null,
-          reconciliation: {
-            ok: recon.ok,
-            sumItemsCents: recon.sumItemsCents,
-            totalCents: ocr.parsed.totalCents ?? null,
-            deltaCents: recon.deltaCents,
-            signedDeltaCents: recon.signedDeltaCents,
-            direction: recon.direction,
-          },
-        },
+        ocr: buildOcrField(ocr, recon, escalation),
         merchant: merchantInfo
           ? {
               id: merchantInfo.id,
@@ -1397,29 +1453,30 @@ exports.processCashback = onMessagePublished(
         duplicateSameUser: duplicateOf?.sameUser ?? null,
       });
     } catch (err) {
-      logger.error('process-failed', { cashbackId, err: err.message, stack: err.stack });
-      await docRef
-        .update({
-          status: 'rejected',
-          rejectReason: err.code || 'process_error',
-          updatedAt: now,
-        })
-        .catch(() => {});
-      // Also update the user-side mirror so the app's pending screen
-      // and history page reflect the failure (otherwise it stays
-      // stuck on "wird geprüft" forever).
-      await db
-        .doc(`users/${uid}/cashback_status/${cashbackId}`)
-        .set(
-          {
-            status: 'rejected',
-            rejectReason: err.code || 'process_error',
-            updatedAt: now,
-          },
-          { merge: true },
-        )
-        .catch(() => {});
-      throw err; // let PubSub retry policy take over
+      // 86ca0wbg7 (A): transienten Fehler NICHT voreilig als 'rejected' zeigen
+      // (sonst sieht der User „abgelehnt", obwohl gleich ein Retry läuft). Nur
+      // attempts/lastError tracken + werfen → PubSub redelivert; der Retry nutzt
+      // die bereits persistierte OCR (kein erneuter Gemini-Call). Erst nach
+      // MAX_PROCESS_ATTEMPTS endgültig ablehnen (poison message) → kein weiterer
+      // (teurer) Retry bis zur PubSub-TTL.
+      const attempts = (receipt.attempts || 0) + 1;
+      const lastError = String(err && err.message ? err.message : err).slice(0, 300);
+      logger.error('process-failed', { cashbackId, err: err.message, attempts });
+      if (attempts >= MAX_PROCESS_ATTEMPTS) {
+        await docRef
+          .update({ status: 'rejected', rejectReason: 'max_retries_exceeded', attempts, lastError, updatedAt: now })
+          .catch(() => {});
+        await db
+          .doc(`users/${uid}/cashback_status/${cashbackId}`)
+          .set({ status: 'rejected', rejectReason: 'max_retries_exceeded', attempts, updatedAt: now }, { merge: true })
+          .catch(() => {});
+        return; // ack → stoppt den PubSub-Retry (kein throw)
+      }
+      // Unter dem Limit: in-progress lassen (Mirror NICHT auf 'rejected' setzen,
+      // App zeigt weiter „wird geprüft"), nur Zähler/Fehler festhalten, dann
+      // werfen → PubSub-Retry.
+      await docRef.update({ attempts, lastError, updatedAt: now }).catch(() => {});
+      throw err;
     }
   },
 );
