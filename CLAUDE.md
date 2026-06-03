@@ -1510,4 +1510,110 @@ Bonus: Match-Precision lässt sich direkt an den bereits gesammelten
     - `gamification/config/levels` — Level catalogue (loaded via
       `achievementService.getAllLevels()`)
     - `achievements/*` — Achievement catalogue
+
+## iOS Dev-Client aufs PHYSISCHE iPhone (install + launch + Metro)
+
+Lokale JS-Tests → Metro (siehe oben). Wenn die App auf dem physischen
+iPhone NICHT installiert ist ODER ein NATIVE/Swift/Pod-Change getestet
+werden muss (mehrfach durchexerziert, sonst 1 h verloren):
+1. Device: `xcrun devicectl list devices` → UUID. Bundle-ID
+   `de.markendetektive` (Dev + Prod teilen sie → nur EINE gleichzeitig
+   installierbar; ein TestFlight-Build überschreibt den Dev-Client).
+2. Bauen+installieren (NUR bei Native-Change; JS reicht Metro):
+   `npx expo run:ios --device <udid> --configuration Debug`. Build klappt
+   meist, aber **Expos Install-Schritt flaket oft mit „Error: null"** →
+   dann manuell: `xcrun devicectl device install app --device <id>
+   ~/Library/Developer/Xcode/DerivedData/MarkenDetektive-*/Build/Products/Debug-iphoneos/MarkenDetektive.app`.
+3. App MIT Metro-Verbindung starten (Dev-Client-Deep-Link):
+   `xcrun devicectl device process launch --terminate-existing --device <id>
+   --payload-url "markendetektivern://expo-development-client/?url=http://<LAN-IP>:8081" de.markendetektive`.
+   Scheme = `markendetektivern` (mit n!), LAN-IP via `ipconfig getifaddr en0`.
+   **iPhone muss ENTSPERRT sein** (sonst „device was not unlocked").
+4. Fehler „[runtime not ready]: Exception in HostFunction … EXDevMenuApp"
+   = Dev-Client-Hänger (oft nach Fast-Refresh / Metro mit `--clear` mitten
+   im Rebuild), KEIN Bundle-Fehler. Fix: Metro warm neu starten + Launch
+   aus Schritt 3 (terminate-existing).
+5. JS hot-reloadet über den verbundenen Dev-Client; nur Native (`modules/*`,
+   Pods, Info.plist) braucht den Rebuild.
+
+## Admin-SDK / Firestore lokal + CF-Deploy
+
+- Firestore-Admin lokal: `/tmp/sa.json` (Firestore-berechtigter Service-
+  Account). Skripte aus einem CF-Ordner MIT `firebase-admin` laufen lassen
+  (z.B. `cloud-functions/preference-profile-cf`), `node --check` vorher.
+  Die Play-Store-SA `markendetektive-895f7-ee3923910ddd.json` hat KEINE
+  Firestore-Rechte.
+- CF-Deploy (Node 22, firebase-tools ≥15.15):
+  `PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH" npx firebase-tools@15.15.0
+  deploy --only "functions:<codebase>" --project markendetektive-895f7 --non-interactive`.
+  Bei kombiniertem Multi-Codebase-Deploy flaket Gen1 reproduzierbar beim
+  Cold-Load („Function … is not defined") → einzelne Codebase solo redeployen
+  geht durch.
+- Gemini: Secret `GEMINI_API_KEY` + `@google/genai`, Modell
+  `gemini-3.5-flash`, Setup in `cloud-functions/ai-product-comparison`
+  (wiederverwendbar). Key lesen: `firebase-tools functions:secrets:access`.
+
+## Cashback-Pipeline — Architektur-Map + Learnings (Task 86ca0wbg7)
+
+Flow: `enqueueCashback` (https.onRequest; billige Pre-OCR-Dedups: Byte-Hash
+`capture.hash` + Perceptual-dHash mit count+zeit-bounded Hamming-Scan) →
+PubSub → `processCashback` (onMessagePublished; OCR → Reconciliation →
+DocAI-Eskalation → Dedup → Gates → Ledger). Region `europe-west3`.
+
+Docs/Collections:
+- `receipts/{id}` = Haupt-Bon-Doc (OCR, capture, journey, nested
+  `merchant:{id(slug),discounterId,land,name,raw,matchedScore}`).
+  **Dedup prüft NUR gegen `receipts`** (contentHash/transactionHash/itemsHash =
+  indizierte Equality, schließen sich selbst via `doc.id===cashbackId` aus).
+- `users/{uid}/cashback_status/{id}` = schlanker Mirror — **das liest die APP**
+  (Meine Bons + Ausgaben).
+- `users/{uid}/purchased_products/*` = OCR-Artikel pro Bon (fürs Matching;
+  Kategorie liegt unter `productData.kategorie`, Ersparnis `productData.ersparnis`,
+  Hersteller `productData.hersteller` — Top-Level ist leer/0/null).
+- `users/{uid}/cashback_ledger/*` = Geld-Ledger (earn/reverse/payout),
+  idempotent per `receiptId`. Balance `cashback_balance_cents`/
+  `cashback_lifetime_cents`; Counter `cashback_monthly`/`cashback_campaign_weekly`/
+  `cashback_campaign_totals`.
+- `cashback_campaigns/{slug}` = Aktionen. Feld `maxAgeDays` (Bon-Alter-Limit,
+  global Default `MAX_BON_AGE_DAYS=9999`), `budgetRemainingCents`/`budgetTotalCents`,
+  `cashbackPerBonCents`/`tiers`/`weeklyBonCap`/`maxPerUserCents`.
+
+Gotchas:
+- **Markt-ID-Bruch:** `produkte.discounter` = zufällige `discounter`-DocID,
+  `merchantId` = Slug („edeka"). Resolver (lib/merchant.js) gibt jetzt
+  `discounterId` (echte DocID) zurück → Markt-Matching + App-Logo. Frontend
+  löst land-aware auf (discounterId → Slug/Name-Fallback) via
+  `FirestoreService.getDiscounter()`.
+- **Pfand zählt NICHT** als eligible: `isPfandItem()` in lib/ocr.js
+  (`category==='Pfand'` ODER name~pfand/leergut) → in `countEligibleItems`
+  + beide per-Item-`eligible`-Flags. Reconciliation UNBERÜHRT.
+- **Retry app-level (KEIN PubSub-Dead-Letter):** `MAX_PROCESS_ATTEMPTS=5`;
+  transient → NICHT voreilig „rejected" (Mirror bleibt in-progress), nur
+  `attempts`/`lastError` + throw; nach Max → `max_retries_exceeded`.
+  **OCR-Idempotenz:** OCR sofort am Doc persistieren (`buildOcrField`), Retry
+  nutzt sie → kein erneuter Gemini-Call.
+- **Test-Reset eines Users:** NUR `receipts` löschen reicht NICHT (→ Doppel-
+  Gutschrift, Geister-Historie, Budget-Leck). Sauber = `receipts`(des Users) +
+  `cashback_status` + `purchased_products` + `cashback_ledger` löschen +
+  User-Cashback-Felder zurücksetzen + `budgetRemainingCents` je Kampagne um den
+  vom User verbrauchten Betrag (Ledger `earn`−`reverse` je `campaignId`) zurückgeben.
+- **App-Reject-Texte ohne Hardcode:** Pipeline schreibt angewandte `maxAgeDays`
+  in den Mirror, App zeigt die echte Zahl (pending/[id].tsx + GamificationProvider).
+- **Scanner-Crop** (modules/bon-edge-detector/ios/BonVision.swift,
+  `warpAndWriteJPEG`): KEIN uniformes Skalieren um den Schwerpunkt (über-padded
+  bei langen schmalen Bons oben/unten). Kanten-spezifisch: `warpLeftPad=0.012`.
+
+## Bon→Produkt-Matching — validierter Ansatz (Task 86ca0wbg7)
+
+KI-Matcher = **markt-gefilterte Shortlist → Gemini-3.5-flash-Pick →
+selbstlernendes Alias-Lexikon (`receiptAliases`)**. An 251 echten
+`purchased_products`-Zeilen bewiesen: KI löst Eigenmarken-Kürzel (G&G/KLC/GL/
+KB) + Markt+Preis brillant (avg conf 0,92), Pfand/Frische-Eligibility
+out-of-the-box. **map-rate 26% — Flaschenhals ist NICHT die KI**, sondern
+Katalog-Abdeckung (NoName Aldi/Lidl/Kaufland-lastig, EDEKA/Netto/Hofer dünn)
++ Retrieval-Recall. Die Lücken = Nachfrage-Signal für 86ca33pum (bezahlte
+Erfassung). **Kosten:** KI pro NEUEM String (alias-gecacht), nicht pro Bon-Zeile
+→ ~gratis bei Skalierung. Nächster Bau-Schritt: Production-Matcher-CF
+(`receipt-matcher`, Trigger pro Bon → Lexikon-Lookup → Shortlist → Gemini-Pick
+→ receiptAlias/receiptMatch + Journey-Closure).
 </content>
