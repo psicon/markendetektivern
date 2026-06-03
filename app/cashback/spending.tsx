@@ -33,7 +33,11 @@ import { formatCents } from '@/lib/types/cashback';
 // Bons, sowie nicht-finale/Fehler-Zustände. So tauchen auch „andere Händler"
 // auf, die hochgeladen wurden (z.B. MPREIS).
 const NON_SPEND_STATUS = new Set(['uploading', 'upload_failed', 'superseded', 'ocr_pending', 'failed']);
-const JUNK_REJECT_REASON = /duplicate|not_a_receipt/i;
+// not_a_receipt = kein echter Kauf → IMMER raus.
+const NOT_A_RECEIPT_REASON = /not_a_receipt/i;
+// Duplikate (gleicher Kauf mehrfach hochgeladen) → toggle-bar: Default
+// ausgeblendet (sonst Doppelzählung), aber einblendbar.
+const DUPLICATE_REASON = /duplicate/i;
 
 // Zeitraum-Presets (Tage; 0 = alles).
 const PERIODS: [string, string][] = [
@@ -130,7 +134,9 @@ export default function SpendingScreen() {
         typeof e.bonDate === 'string' &&
         /^\d{4}-\d{2}-\d{2}/.test(e.bonDate!) &&
         !NON_SPEND_STATUS.has(e.status ?? '') &&
-        !(e.rejectReason && JUNK_REJECT_REASON.test(e.rejectReason)),
+        !(e.rejectReason && NOT_A_RECEIPT_REASON.test(e.rejectReason)),
+      // Duplikate bleiben im Basis-Set → werden erst in visibleSpend per
+      // Toggle aus-/eingeblendet.
     );
     const days = parseInt(period, 10);
     if (Number.isFinite(days) && days > 0) {
@@ -144,9 +150,22 @@ export default function SpendingScreen() {
   // auflösbar). Aus → auch unbekannte/nicht-akzeptierte Märkte. Filtert die
   // ganze Sicht (Total + Chart + Händler), damit die Zahlen konsistent bleiben.
   const [knownOnly, setKnownOnly] = useState(false);
+  // Toggle: Duplikate (gleicher Kauf mehrfach hochgeladen) ausblenden. Default
+  // AN → korrekte Summe ohne Doppelzählung; aus → Duplikate fließen mit ein.
+  const [hideDuplicates, setHideDuplicates] = useState(true);
+  const isDup = useCallback(
+    (e: CashbackStatusEntry) => !!(e.rejectReason && DUPLICATE_REASON.test(e.rejectReason)),
+    [],
+  );
+  const hasDuplicates = useMemo(() => spend.some(isDup), [spend, isDup]);
   const visibleSpend = useMemo(
-    () => (knownOnly ? spend.filter((e) => !!resolveDiscounter(e)) : spend),
-    [spend, knownOnly, resolveDiscounter],
+    () =>
+      spend.filter(
+        (e) =>
+          (!knownOnly || !!resolveDiscounter(e)) &&
+          (!hideDuplicates || !isDup(e)),
+      ),
+    [spend, knownOnly, hideDuplicates, resolveDiscounter, isDup],
   );
 
   const totalCents = useMemo(() => visibleSpend.reduce((s, e) => s + (e.bonTotalCents ?? 0), 0), [visibleSpend]);
@@ -325,37 +344,66 @@ export default function SpendingScreen() {
 
               {/* Nach Händler */}
               <View style={{ paddingHorizontal: 20, paddingTop: 24 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 8 }}>
                   <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 20, color: theme.text, letterSpacing: -0.2 }}>
                     Nach Händler
                   </Text>
-                  {hasUnknown ? (
-                    <Pressable
-                      onPress={() => setKnownOnly((v) => !v)}
-                      hitSlop={8}
-                      style={({ pressed }) => ({
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 5,
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                        borderRadius: 999,
-                        backgroundColor: knownOnly ? (theme.primaryContainer ?? theme.surfaceAlt) : theme.surface,
-                        borderWidth: 1,
-                        borderColor: knownOnly ? primary : (theme.border ?? 'rgba(0,0,0,0.08)'),
-                        opacity: pressed ? 0.7 : 1,
-                      })}
-                    >
-                      <MaterialCommunityIcons
-                        name={knownOnly ? 'eye-off-outline' : 'eye-outline'}
-                        size={14}
-                        color={knownOnly ? primary : theme.textMuted}
-                      />
-                      <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, color: knownOnly ? primary : theme.textMuted }}>
-                        {knownOnly ? 'Unbekannte aus' : 'Unbekannte ein'}
-                      </Text>
-                    </Pressable>
-                  ) : null}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {hasUnknown ? (
+                      <Pressable
+                        onPress={() => setKnownOnly((v) => !v)}
+                        hitSlop={8}
+                        style={({ pressed }) => ({
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 5,
+                          paddingHorizontal: 10,
+                          paddingVertical: 6,
+                          borderRadius: 999,
+                          backgroundColor: knownOnly ? (theme.primaryContainer ?? theme.surfaceAlt) : theme.surface,
+                          borderWidth: 1,
+                          borderColor: knownOnly ? primary : (theme.border ?? 'rgba(0,0,0,0.08)'),
+                          opacity: pressed ? 0.7 : 1,
+                        })}
+                      >
+                        <MaterialCommunityIcons
+                          name={knownOnly ? 'eye-off-outline' : 'eye-outline'}
+                          size={14}
+                          color={knownOnly ? primary : theme.textMuted}
+                        />
+                        <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, color: knownOnly ? primary : theme.textMuted }}>
+                          {knownOnly ? 'Unbekannte aus' : 'Unbekannte ein'}
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                    {hasDuplicates ? (
+                      <Pressable
+                        onPress={() => setHideDuplicates((v) => !v)}
+                        hitSlop={8}
+                        style={({ pressed }) => ({
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 5,
+                          paddingHorizontal: 10,
+                          paddingVertical: 6,
+                          borderRadius: 999,
+                          backgroundColor: hideDuplicates ? (theme.primaryContainer ?? theme.surfaceAlt) : theme.surface,
+                          borderWidth: 1,
+                          borderColor: hideDuplicates ? primary : (theme.border ?? 'rgba(0,0,0,0.08)'),
+                          opacity: pressed ? 0.7 : 1,
+                        })}
+                      >
+                        <MaterialCommunityIcons
+                          name="content-copy"
+                          size={13}
+                          color={hideDuplicates ? primary : theme.textMuted}
+                        />
+                        <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, color: hideDuplicates ? primary : theme.textMuted }}>
+                          {hideDuplicates ? 'Duplikate aus' : 'Duplikate ein'}
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
                 </View>
                 <View style={{ gap: 12 }}>
                   {byMerchant.map((m) => {
