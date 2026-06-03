@@ -2,10 +2,12 @@
  * Ausgaben — Spending-Statistik aus den eingereichten Bons.
  *
  * Quelle: /users/{uid}/cashback_status/* (der Mirror, den der Verlauf
- * eh nutzt). Gezählt werden NUR echte Käufe (approved + no_reward +
- * paid) über `bonTotalCents` — Duplikate / Nicht-Bons fließen NICHT ein,
- * also kein Doppelzählen. Aggregation client-seitig: Gesamtsumme,
- * pro Händler, Monatsverlauf, mit Zeitraum-Filter.
+ * eh nutzt). Gezählt werden ALLE echten Käufe über `bonTotalCents` —
+ * inkl. Nicht-Partner-Märkte (unknown_merchant), gecappte + zu alte Bons;
+ * NUR Duplikate / Nicht-Bons / Fehler-Zustände fließen NICHT ein (kein
+ * Doppelzählen). Händler kanonisch aus der `discounter`-Stammliste (Logo +
+ * Name + Land). Aggregation client-seitig: Gesamtsumme, pro Händler,
+ * Monatsverlauf, mit Zeitraum-Filter.
  *
  * Kategorie-Aufschlüsselung („für was") kommt später mit dem
  * Produkt-Matching — Roh-Artikelnamen lassen sich vorher nicht sauber
@@ -14,18 +16,24 @@
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router, useNavigation } from 'expo-router';
-import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { fetchAllCashbackEntries, type CashbackStatusEntry } from '@/lib/services/cashbackUpload';
+import { FirestoreService } from '@/lib/services/firestore';
 import { formatCents } from '@/lib/types/cashback';
 
-// Nur diese Status sind echte, abgeschlossene Käufe → zählen als Ausgabe.
-const SPEND_STATUSES = new Set(['approved', 'no_reward', 'paid']);
+// Ausgaben-Sicht (86ca0wbg7): ALLE echten Käufe zählen — auch Nicht-Partner-
+// Märkte (unknown_merchant), gecappte (campaign_budget/monthly_cap) und zu alte
+// Bons. NUR offensichtlicher Junk raus: Duplikate (sonst Doppelzählung), Nicht-
+// Bons, sowie nicht-finale/Fehler-Zustände. So tauchen auch „andere Händler"
+// auf, die hochgeladen wurden (z.B. MPREIS).
+const NON_SPEND_STATUS = new Set(['uploading', 'upload_failed', 'superseded', 'ocr_pending', 'failed']);
+const JUNK_REJECT_REASON = /duplicate|not_a_receipt/i;
 
 // Zeitraum-Presets (Tage; 0 = alles).
 const PERIODS: [string, string][] = [
@@ -70,15 +78,57 @@ export default function SpendingScreen() {
   const headerOffset = insets.top + DETAIL_HEADER_ROW_HEIGHT;
   const primary = theme.primary ?? '#0d8575';
 
+  // 86ca0wbg7 — kanonische Discounter (Stammliste), gecacht. Markt wird per
+  // discounterId (exakt) → Fallback Slug/Name + Land aufgelöst → korrekte
+  // Logos/Namen/Länder, neue Märkte automatisch.
+  const [discounters, setDiscounters] = useState<any[]>([]);
+  useEffect(() => {
+    let alive = true;
+    FirestoreService.getDiscounter()
+      .then((d) => { if (alive) setDiscounters(d as any[]); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const discIndex = useMemo(() => {
+    const normD = (s: string) =>
+      String(s || '').toLowerCase()
+        .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+        .replace(/[^a-z0-9]/g, '');
+    const byId = new Map<string, any>();
+    const byName: { n: string; d: any }[] = [];
+    discounters.forEach((d) => { byId.set(d.id, d); byName.push({ n: normD(d.name), d }); });
+    return { byId, byName, normD };
+  }, [discounters]);
+  const resolveDiscounter = useCallback(
+    (e: CashbackStatusEntry): any | null => {
+      const dId = (e as any).discounterId;
+      if (dId && discIndex.byId.has(dId)) return discIndex.byId.get(dId);
+      const cand = discIndex.normD((e as any).merchantId || e.merchantName || e.merchant || '');
+      if (!cand) return null;
+      const matches = discIndex.byName
+        .filter(({ n }) => n && (n.includes(cand) || cand.includes(n)))
+        .map((x) => x.d);
+      if (!matches.length) return null;
+      const want = String((e as any).merchantLand || '').toUpperCase();
+      return (
+        matches.find((d) => String(d.land || '').toUpperCase() === want) ||
+        matches.find((d) => String(d.land || '').toUpperCase() === 'DE') ||
+        matches[0]
+      );
+    },
+    [discIndex],
+  );
+
   // Nur Käufe mit bekanntem Datum + Betrag; nach Zeitraum gefiltert.
   const spend = useMemo(() => {
     const rows = (entries ?? []).filter(
       (e) =>
-        SPEND_STATUSES.has(e.status ?? '') &&
         typeof e.bonTotalCents === 'number' &&
         e.bonTotalCents! > 0 &&
         typeof e.bonDate === 'string' &&
-        /^\d{4}-\d{2}-\d{2}/.test(e.bonDate!),
+        /^\d{4}-\d{2}-\d{2}/.test(e.bonDate!) &&
+        !NON_SPEND_STATUS.has(e.status ?? '') &&
+        !(e.rejectReason && JUNK_REJECT_REASON.test(e.rejectReason)),
     );
     const days = parseInt(period, 10);
     if (Number.isFinite(days) && days > 0) {
@@ -92,17 +142,22 @@ export default function SpendingScreen() {
 
   // Pro Händler: Summe + Bon-Anzahl, absteigend nach Summe.
   const byMerchant = useMemo(() => {
-    const map = new Map<string, { label: string; cents: number; count: number }>();
+    const map = new Map<string, { label: string; cents: number; count: number; logoUrl: string | null }>();
     for (const e of spend) {
-      const label = merchantLabel(e);
-      const key = e.merchantId || label;
-      const cur = map.get(key) ?? { label, cents: 0, count: 0 };
+      const disc = resolveDiscounter(e);
+      const discLand = disc?.land ? String(disc.land).toUpperCase() : null;
+      const label = disc
+        ? (discLand ? `${disc.name} (${discLand})` : disc.name)
+        : merchantLabel(e);
+      const key = disc?.id || e.merchantId || label;
+      const logoUrl: string | null = disc?.bild || (e as any).merchantLogoUrl || null;
+      const cur = map.get(key) ?? { label, cents: 0, count: 0, logoUrl };
       cur.cents += e.bonTotalCents ?? 0;
       cur.count += 1;
       map.set(key, cur);
     }
     return Array.from(map.values()).sort((a, b) => b.cents - a.cents);
-  }, [spend]);
+  }, [spend, resolveDiscounter]);
 
   // Monatsverlauf: letzte ≤12 Monate mit Daten, aufsteigend.
   const byMonth = useMemo(() => {
@@ -263,21 +318,35 @@ export default function SpendingScreen() {
                   {byMerchant.map((m) => {
                     const pct = Math.max(4, Math.round((m.cents / maxMerchant) * 100));
                     return (
-                      <View key={m.label}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
-                          <Text numberOfLines={1} style={{ flex: 1, fontFamily, fontWeight: fontWeight.bold as any, fontSize: 13, color: theme.text }}>
-                            {m.label}
-                          </Text>
-                          <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.text, marginLeft: 8 }}>
-                            {formatCents(m.cents)}
+                      <View key={m.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        {/* Discounter-Logo (kanonisch) — Fallback: Storefront-Icon
+                            für nicht-im-Stamm Märkte. Padding, damit das Logo nicht
+                            vom Kreis angeschnitten wird. */}
+                        {m.logoUrl ? (
+                          <View style={{ width: 36, height: 36, borderRadius: 18, overflow: 'hidden', backgroundColor: '#ffffff', borderWidth: 1, borderColor: theme.border ?? 'rgba(0,0,0,0.06)', alignItems: 'center', justifyContent: 'center', padding: 6 }}>
+                            <Image source={{ uri: m.logoUrl }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
+                          </View>
+                        ) : (
+                          <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: theme.surfaceAlt ?? theme.border, alignItems: 'center', justifyContent: 'center' }}>
+                            <MaterialCommunityIcons name="storefront-outline" size={18} color={theme.textMuted} />
+                          </View>
+                        )}
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+                            <Text numberOfLines={1} style={{ flex: 1, fontFamily, fontWeight: fontWeight.bold as any, fontSize: 13, color: theme.text }}>
+                              {m.label}
+                            </Text>
+                            <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.text, marginLeft: 8 }}>
+                              {formatCents(m.cents)}
+                            </Text>
+                          </View>
+                          <View style={{ height: 8, borderRadius: 4, backgroundColor: theme.surfaceAlt ?? theme.border, overflow: 'hidden' }}>
+                            <View style={{ width: `${pct}%`, height: '100%', borderRadius: 4, backgroundColor: primary }} />
+                          </View>
+                          <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 11, color: theme.textMuted, marginTop: 3 }}>
+                            {m.count} {m.count === 1 ? 'Bon' : 'Bons'}
                           </Text>
                         </View>
-                        <View style={{ height: 8, borderRadius: 4, backgroundColor: theme.surfaceAlt ?? theme.border, overflow: 'hidden' }}>
-                          <View style={{ width: `${pct}%`, height: '100%', borderRadius: 4, backgroundColor: primary }} />
-                        </View>
-                        <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 11, color: theme.textMuted, marginTop: 3 }}>
-                          {m.count} {m.count === 1 ? 'Bon' : 'Bons'}
-                        </Text>
                       </View>
                     );
                   })}
