@@ -17,6 +17,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } fro
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   Pressable,
   Text,
   View,
@@ -33,6 +34,7 @@ import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { startReceiptScanFlow } from '@/lib/services/cashbackScanStart';
+import { FirestoreService } from '@/lib/services/firestore';
 import {
   getCashbackCount,
   subscribeUserCashbackHistoryPaged,
@@ -200,6 +202,42 @@ export default function CashbackHistoryScreen() {
   // bei Pagination) statt aus der geladenen Teilmenge summiert.
   const totalEarned = lifetimeCents ?? 0;
 
+  // 86ca0wbg7 — kanonische Discounter aus der `discounter`-Collection (gecacht,
+  // ~20 Docs). Die Bon-Liste orientiert sich an DIESER Stammliste: neue Merchants
+  // tauchen automatisch auf, Logo/Name immer aktuell. Auflösung: discounterId
+  // bevorzugt (exakt) → Fallback über merchantId-Slug/merchantName (Altbestand
+  // ohne discounterId). Reine Anzeige bleibt schnell (1 cached Load, kein
+  // Read pro Bon).
+  const [discounters, setDiscounters] = useState<any[]>([]);
+  useEffect(() => {
+    let alive = true;
+    FirestoreService.getDiscounter()
+      .then((d) => { if (alive) setDiscounters(d as any[]); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const discIndex = useMemo(() => {
+    const normD = (s: string) =>
+      String(s || '').toLowerCase()
+        .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+        .replace(/[^a-z0-9]/g, '');
+    const byId = new Map<string, any>();
+    const byName: { n: string; d: any }[] = [];
+    discounters.forEach((d) => { byId.set(d.id, d); byName.push({ n: normD(d.name), d }); });
+    return { byId, byName, normD };
+  }, [discounters]);
+  const resolveDiscounter = useCallback(
+    (e: CashbackStatusEntry): any | null => {
+      const dId = (e as any).discounterId;
+      if (dId && discIndex.byId.has(dId)) return discIndex.byId.get(dId);
+      const cand = discIndex.normD((e as any).merchantId || e.merchantName || e.merchant || '');
+      if (!cand) return null;
+      const hit = discIndex.byName.find(({ n }) => n && (n.includes(cand) || cand.includes(n)));
+      return hit ? hit.d : null;
+    },
+    [discIndex],
+  );
+
   const merchantKey = (e: CashbackStatusEntry) =>
     String(e.merchantId || e.merchant || e.merchantName || '');
 
@@ -210,11 +248,12 @@ export default function CashbackHistoryScreen() {
       const id = merchantKey(e);
       if (!id) return;
       if (!map.has(id)) {
-        map.set(id, e.merchantDisplayName || e.merchantName || e.merchant || id);
+        const disc = resolveDiscounter(e);
+        map.set(id, disc?.name || e.merchantDisplayName || e.merchantName || e.merchant || id);
       }
     });
     return [['all', 'Alle Märkte'], ...Array.from(map.entries())];
-  }, [entries]);
+  }, [entries, resolveDiscounter]);
 
   const dateCutoff = useMemo(() => {
     const days = parseInt(dateFilter, 10);
@@ -243,7 +282,12 @@ export default function CashbackHistoryScreen() {
   const renderItem = ({ item }: { item: CashbackStatusEntry }) => {
     const v = statusVisual(item.status, primary);
     const bonDateStr = formatBonDate(item.bonDate);
-    const merchant = item.merchantDisplayName || item.merchantName || item.merchant || item.merchantRaw || 'Unbekannte Filiale';
+    // Kanonischer Discounter (discounter-Collection) bevorzugt → Name + Logo
+    // immer aktuell, auch bei neu hinzugefügten Märkten. Fallback: denormalisierte
+    // Felder vom Bon-Doc.
+    const disc = resolveDiscounter(item);
+    const merchant = disc?.name || item.merchantDisplayName || item.merchantName || item.merchant || item.merchantRaw || 'Unbekannte Filiale';
+    const logoUrl: string | null = disc?.bild || (item as any).merchantLogoUrl || null;
     const cashback = item.cashbackCents ? formatCents(item.cashbackCents) : null;
 
     return (
@@ -269,19 +313,42 @@ export default function CashbackHistoryScreen() {
           opacity: pressed ? 0.85 : 1,
         })}
       >
-        {/* Status icon block */}
-        <View
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 22,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: v.bg,
-          }}
-        >
-          <MaterialCommunityIcons name={v.icon as any} size={22} color={v.color} />
-        </View>
+        {/* Avatar: Discounter-Logo (kanonisch) wenn vorhanden, sonst Status-Icon.
+            Der Status bleibt über den Status-Chip in der Mitte sichtbar. */}
+        {logoUrl ? (
+          <View
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              overflow: 'hidden',
+              backgroundColor: '#ffffff',
+              borderWidth: 1,
+              borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Image
+              source={{ uri: logoUrl }}
+              style={{ width: '100%', height: '100%' }}
+              resizeMode="contain"
+            />
+          </View>
+        ) : (
+          <View
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: v.bg,
+            }}
+          >
+            <MaterialCommunityIcons name={v.icon as any} size={22} color={v.color} />
+          </View>
+        )}
 
         {/* Middle: merchant + date + status chip */}
         <View style={{ flex: 1, minWidth: 0 }}>
