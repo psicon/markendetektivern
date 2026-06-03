@@ -257,6 +257,10 @@ async function resolveMerchant(rawMerchant, bonCountry) {
 
   return {
     id: aliasId || normalize(baseName).replace(/\s+/g, '-'),
+    // Echte Firestore-DocID aus der `discounter`-Sammlung (= dieselbe ID, auf
+    // die produkte.discounter zeigt). Damit matcht das Bon-Matching den Markt
+    // DIREKT per ID, ohne Slug↔ID-Brücke. (86ca0wbg7)
+    discounterId: doc.docId || null,
     name: baseName,
     displayName,
     logoUrl: doc.bild || null,

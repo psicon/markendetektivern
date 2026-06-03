@@ -281,6 +281,8 @@ async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo) {
           receiptId: cashbackId,
           bonDate: parsed.bonDate || null,
           merchantId: merchantInfo?.id || null,
+          // 86ca0wbg7: echte discounter-DocID → direktes Markt-Matching gegen produkte.discounter
+          discounterId: merchantInfo?.discounterId || null,
           merchantName: merchantInfo?.name || null,
           merchantLand: merchantInfo?.land || null,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1264,6 +1266,7 @@ exports.processCashback = onMessagePublished(
             eligibleItemCount,
             merchantRaw: ocr.parsed.merchant ?? null,
             merchantId: merchantInfo?.id ?? null,
+            discounterId: merchantInfo?.discounterId ?? null, // 86ca0wbg7
             merchantName: merchantInfo?.name ?? null,
             merchantDisplayName: merchantInfo?.displayName ?? null,
             merchantLogoUrl: merchantInfo?.logoUrl ?? null,
