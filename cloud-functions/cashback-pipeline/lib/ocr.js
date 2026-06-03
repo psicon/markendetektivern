@@ -182,10 +182,29 @@ function reconcile(parsed) {
  * with positive price as "eligible" so the tier formula has data to
  * work with.
  */
+/**
+ * Pfand/Leergut ist KEIN anrechenbarer Artikel (kein Produktkauf, nur
+ * Flaschenpfand). 86ca0wbg7: zählt NICHT für Cashback + Item-Eligibility.
+ * Erkennung: OCR-`category === 'Pfand'` ODER Name/raw enthält pfand/leergut.
+ * (Reconciliation bleibt unberührt — Pfand bleibt für die Summen-Prüfung im
+ *  items-Array, nur die Eligibility ändert sich.)
+ */
+function isPfandItem(it) {
+  if (!it) return false;
+  if (typeof it.category === 'string' && it.category.trim().toLowerCase() === 'pfand') return true;
+  const n = String(it.name ?? it.raw ?? '').toLowerCase();
+  return /pfand|leergut/.test(n);
+}
+
 function countEligibleItems(parsed) {
   if (!parsed || !Array.isArray(parsed.items)) return 0;
   return parsed.items.filter(
-    (it) => it && typeof it.name === 'string' && Number.isFinite(it.priceCents) && it.priceCents > 0,
+    (it) =>
+      it &&
+      typeof it.name === 'string' &&
+      Number.isFinite(it.priceCents) &&
+      it.priceCents > 0 &&
+      !isPfandItem(it),
   ).length;
 }
 
@@ -200,4 +219,4 @@ function tierFor(eligibleItemCount, tiers) {
   return 0;
 }
 
-module.exports = { extractReceipt, reconcile, countEligibleItems, tierFor, DEFAULT_MODEL };
+module.exports = { extractReceipt, reconcile, countEligibleItems, tierFor, isPfandItem, DEFAULT_MODEL };

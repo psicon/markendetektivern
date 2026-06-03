@@ -58,7 +58,7 @@ const TREMENDOUS_API_KEY = defineSecret('TREMENDOUS_API_KEY');
 // Webhook-Signing-Key (Tremendous „Private key") für die Signaturprüfung.
 const TREMENDOUS_WEBHOOK_SECRET = defineSecret('TREMENDOUS_WEBHOOK_SECRET');
 
-const { extractReceipt, reconcile, countEligibleItems, tierFor, DEFAULT_MODEL } = require('./lib/ocr');
+const { extractReceipt, reconcile, countEligibleItems, tierFor, isPfandItem, DEFAULT_MODEL } = require('./lib/ocr');
 const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
 const { extractReceiptDocAI, isConfigured: isDocAIConfigured } = require('./lib/ocr_docai');
 const { resolveMerchant } = require('./lib/merchant');
@@ -1335,7 +1335,7 @@ exports.processCashback = onMessagePublished(
             name: String(it.name ?? ''),
             qty: Number.isFinite(it.qty) ? it.qty : 1,
             priceCents: Number.isFinite(it.priceCents) ? it.priceCents : 0,
-            eligible: Number.isFinite(it.priceCents) && it.priceCents > 0,
+            eligible: Number.isFinite(it.priceCents) && it.priceCents > 0 && !isPfandItem(it),
           }))
         : [];
 
@@ -1413,7 +1413,7 @@ exports.processCashback = onMessagePublished(
               raw: it.name,
               qty: it.qty ?? 1,
               priceCents: it.priceCents,
-              eligible: Number.isFinite(it.priceCents) && it.priceCents > 0,
+              eligible: Number.isFinite(it.priceCents) && it.priceCents > 0 && !isPfandItem(it),
             }))
           : [],
         eligibleItemCount,
