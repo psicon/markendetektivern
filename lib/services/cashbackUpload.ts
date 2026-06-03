@@ -529,6 +529,13 @@ export interface CashbackStatusEntry {
   // Legacy:
   merchant?: string | null;
   bonDate?: string | null;
+  bonAgeDays?: number | null;
+  /** 86ca0wbg7: angewandte Max-Alter-Grenze (Tage) — App zeigt die echte
+   *  Grenze in der „zu alt"-Meldung statt einer hardcodierten Zahl. */
+  maxAgeDays?: number | null;
+  // 86ca0wbg7: echte discounter-DocID (Markt direkt auflösbar).
+  discounterId?: string | null;
+  merchantLand?: string | null;
   bonTotalCents?: number | null;
   rejectReason?: string | null;
   createdAt?: any;

@@ -1359,6 +1359,10 @@ exports.processCashback = onMessagePublished(
             bonCountry: ocr.parsed.bonCountry ?? null,
             bonDate: ocr.parsed.bonDate || null,
             bonAgeDays: ageDays,
+            // 86ca0wbg7: angewandte Max-Alter-Grenze (Tage) → die App zeigt die
+            // ECHTE Grenze (z.B. 14) statt einer hardcodierten Zahl. null wenn
+            // kein effektives Limit greift (globaler 9999-Default).
+            maxAgeDays: effectiveMaxAgeDays < MAX_BON_AGE_DAYS ? effectiveMaxAgeDays : null,
             bonTotalCents: ocr.parsed.totalCents ?? null,
             items: slimItems,
             storageBucket: receipt.storage?.bucket ?? null,

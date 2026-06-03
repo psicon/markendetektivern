@@ -220,7 +220,7 @@ export function bannerDataFromCashbackPayout(cashbackCents: number): BannerData 
 
 // Kurze Toast-Texte für abgelehnte Bons (die ausführliche Begründung
 // steht im pending/[id]-Screen). Klein wie eine Fehlermeldung.
-function cashbackRejectToastMsg(reason?: string | null): string {
+function cashbackRejectToastMsg(reason?: string | null, maxAgeDays?: number | null): string {
   switch (reason) {
     case 'below_min_items':
       return 'Bon abgelehnt: zu wenige Artikel erkannt.';
@@ -230,7 +230,9 @@ function cashbackRejectToastMsg(reason?: string | null): string {
     case 'unknown_merchant':
       return 'Bon abgelehnt: Markt nicht unterstützt.';
     case 'bon_too_old':
-      return 'Bon abgelehnt: zu alt (max. 5 Tage).';
+      return typeof maxAgeDays === 'number'
+        ? `Bon abgelehnt: zu alt (max. ${maxAgeDays} Tage).`
+        : 'Bon abgelehnt: zu alt.';
     case 'not_a_receipt':
       return 'Bon abgelehnt: kein Kassenbon erkannt.';
     case 'no_bon_date':
@@ -560,7 +562,7 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
           showBanner(bannerDataFromCashbackPayout(e.cashbackCents ?? 0));
         } else if (cur === 'rejected') {
-          showInfoToast(cashbackRejectToastMsg(e.rejectReason), 'error', colorScheme || 'light');
+          showInfoToast(cashbackRejectToastMsg(e.rejectReason, (e as any).maxAgeDays), 'error', colorScheme || 'light');
         } else if (cur === 'no_reward') {
           showInfoToast(
             'Bon gespeichert — zählt zu deiner Ausgabenübersicht.',
