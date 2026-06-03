@@ -112,34 +112,29 @@ enum BonVision {
   /// VNRectangleObservation corners are normalized 0..1 with origin
   /// BOTTOM-LEFT (Vision), matching CIPerspectiveCorrection's BOTTOM-LEFT
   /// pixel space — so we just multiply by the extent.
-  /// Wie weit die erkannten Ecken vor dem Warp nach außen geschoben werden
-  /// (Skalierung um den Quad-Schwerpunkt). Verhindert, dass der Bon-Rand —
-  /// v.a. links — knapp abgeschnitten wird. ~6% gesamt ≈ 3% Rand pro Seite.
-  /// (86ca0wbg7) Etwas Hintergrund schadet der OCR nicht.
-  static let warpExpand: CGFloat = 1.06
+  /// Wie weit NUR die LINKE Kante vor dem Warp nach außen geschoben wird
+  /// (normalisiert, Anteil der Bildbreite). Der linke Bon-Rand wurde minimal
+  /// abgeschnitten; oben/unten/rechts bleiben EXAKT wie erkannt (kein
+  /// proportionales Skalieren → kein Über-Rand bei langen, schmalen Bons).
+  /// (86ca0wbg7)
+  static let warpLeftPad: CGFloat = 0.025
 
   static func warpAndWriteJPEG(ciImage: CIImage, observation: VNRectangleObservation) -> [String: Any]? {
     let extent = ciImage.extent
-    // Schwerpunkt der 4 Ecken (normalisiert 0..1).
-    let tl = observation.topLeft, tr = observation.topRight
-    let bl = observation.bottomLeft, br = observation.bottomRight
-    let cx = (tl.x + tr.x + bl.x + br.x) / 4
-    let cy = (tl.y + tr.y + bl.y + br.y) / 4
-    // Ecke vom Schwerpunkt weg skalieren + auf den Bildbereich clampen.
-    func expand(_ p: CGPoint) -> CGPoint {
-      let x = cx + (p.x - cx) * warpExpand
-      let y = cy + (p.y - cy) * warpExpand
-      return CGPoint(x: min(1, max(0, x)), y: min(1, max(0, y)))
-    }
     let toPixel = { (p: CGPoint) -> CGPoint in
       CGPoint(x: p.x * extent.width, y: p.y * extent.height)
     }
+    // Nur die linke Kante minimal nach außen (kleineres x = weiter links),
+    // auf den Bildrand geclampt. Rechts/oben/unten unverändert.
+    let nudgeLeft = { (p: CGPoint) -> CGPoint in
+      CGPoint(x: max(0, p.x - warpLeftPad), y: p.y)
+    }
     guard let filter = CIFilter(name: "CIPerspectiveCorrection") else { return nil }
     filter.setValue(ciImage, forKey: kCIInputImageKey)
-    filter.setValue(CIVector(cgPoint: toPixel(expand(tl))), forKey: "inputTopLeft")
-    filter.setValue(CIVector(cgPoint: toPixel(expand(tr))), forKey: "inputTopRight")
-    filter.setValue(CIVector(cgPoint: toPixel(expand(bl))), forKey: "inputBottomLeft")
-    filter.setValue(CIVector(cgPoint: toPixel(expand(br))), forKey: "inputBottomRight")
+    filter.setValue(CIVector(cgPoint: toPixel(nudgeLeft(observation.topLeft))), forKey: "inputTopLeft")
+    filter.setValue(CIVector(cgPoint: toPixel(observation.topRight)), forKey: "inputTopRight")
+    filter.setValue(CIVector(cgPoint: toPixel(nudgeLeft(observation.bottomLeft))), forKey: "inputBottomLeft")
+    filter.setValue(CIVector(cgPoint: toPixel(observation.bottomRight)), forKey: "inputBottomRight")
     guard let output = filter.outputImage else { return nil }
     return renderJPEG(ciImage: output)
   }
