@@ -46,7 +46,9 @@ const PERIODS: [string, string][] = [
 const MONTH_LABELS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 
 function merchantLabel(e: CashbackStatusEntry): string {
-  return e.merchantDisplayName || e.merchantName || e.merchant || 'Unbekannter Markt';
+  // merchantRaw = der vom OCR erkannte Markt-Name (auch bei Nicht-Partnern da)
+  // → so steht da der echte Name statt "Unbekannter Markt".
+  return e.merchantDisplayName || e.merchantName || e.merchant || e.merchantRaw || 'Unbekannter Markt';
 }
 
 export default function SpendingScreen() {
@@ -138,12 +140,21 @@ export default function SpendingScreen() {
     return rows;
   }, [entries, period]);
 
-  const totalCents = useMemo(() => spend.reduce((s, e) => s + (e.bonTotalCents ?? 0), 0), [spend]);
+  // Toggle: nur „bekannte"/akzeptierte Märkte (= in der discounter-Stammliste
+  // auflösbar). Aus → auch unbekannte/nicht-akzeptierte Märkte. Filtert die
+  // ganze Sicht (Total + Chart + Händler), damit die Zahlen konsistent bleiben.
+  const [knownOnly, setKnownOnly] = useState(false);
+  const visibleSpend = useMemo(
+    () => (knownOnly ? spend.filter((e) => !!resolveDiscounter(e)) : spend),
+    [spend, knownOnly, resolveDiscounter],
+  );
 
-  // Pro Händler: Summe + Bon-Anzahl, absteigend nach Summe.
+  const totalCents = useMemo(() => visibleSpend.reduce((s, e) => s + (e.bonTotalCents ?? 0), 0), [visibleSpend]);
+
+  // Pro Händler: Summe + Bon-Anzahl + known-Flag, absteigend nach Summe.
   const byMerchant = useMemo(() => {
-    const map = new Map<string, { label: string; cents: number; count: number; logoUrl: string | null }>();
-    for (const e of spend) {
+    const map = new Map<string, { label: string; cents: number; count: number; logoUrl: string | null; known: boolean }>();
+    for (const e of visibleSpend) {
       const disc = resolveDiscounter(e);
       const discLand = disc?.land ? String(disc.land).toUpperCase() : null;
       const label = disc
@@ -151,30 +162,33 @@ export default function SpendingScreen() {
         : merchantLabel(e);
       const key = disc?.id || e.merchantId || label;
       const logoUrl: string | null = disc?.bild || (e as any).merchantLogoUrl || null;
-      const cur = map.get(key) ?? { label, cents: 0, count: 0, logoUrl };
+      const cur = map.get(key) ?? { label, cents: 0, count: 0, logoUrl, known: !!disc };
       cur.cents += e.bonTotalCents ?? 0;
       cur.count += 1;
       map.set(key, cur);
     }
     return Array.from(map.values()).sort((a, b) => b.cents - a.cents);
-  }, [spend, resolveDiscounter]);
+  }, [visibleSpend, resolveDiscounter]);
 
   // Monatsverlauf: letzte ≤12 Monate mit Daten, aufsteigend.
   const byMonth = useMemo(() => {
     const map = new Map<string, number>();
-    for (const e of spend) {
+    for (const e of visibleSpend) {
       const m = (e.bonDate as string).slice(0, 7); // YYYY-MM
       map.set(m, (map.get(m) ?? 0) + (e.bonTotalCents ?? 0));
     }
     return Array.from(map.entries())
       .sort((a, b) => a[0].localeCompare(b[0]))
       .slice(-12);
-  }, [spend]);
+  }, [visibleSpend]);
+
+  // Gibt es überhaupt unbekannte Märkte? (steuert, ob der Toggle sinnvoll ist)
+  const hasUnknown = useMemo(() => spend.some((e) => !resolveDiscounter(e)), [spend, resolveDiscounter]);
 
   const maxMerchant = byMerchant[0]?.cents ?? 1;
   const maxMonth = byMonth.reduce((m, [, c]) => Math.max(m, c), 1);
   const loading = entries === null;
-  const empty = !loading && spend.length === 0;
+  const empty = !loading && visibleSpend.length === 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -311,9 +325,38 @@ export default function SpendingScreen() {
 
               {/* Nach Händler */}
               <View style={{ paddingHorizontal: 20, paddingTop: 24 }}>
-                <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 20, color: theme.text, letterSpacing: -0.2, marginBottom: 12 }}>
-                  Nach Händler
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 20, color: theme.text, letterSpacing: -0.2 }}>
+                    Nach Händler
+                  </Text>
+                  {hasUnknown ? (
+                    <Pressable
+                      onPress={() => setKnownOnly((v) => !v)}
+                      hitSlop={8}
+                      style={({ pressed }) => ({
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 5,
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        borderRadius: 999,
+                        backgroundColor: knownOnly ? (theme.primaryContainer ?? theme.surfaceAlt) : theme.surface,
+                        borderWidth: 1,
+                        borderColor: knownOnly ? primary : (theme.border ?? 'rgba(0,0,0,0.08)'),
+                        opacity: pressed ? 0.7 : 1,
+                      })}
+                    >
+                      <MaterialCommunityIcons
+                        name={knownOnly ? 'eye-off-outline' : 'eye-outline'}
+                        size={14}
+                        color={knownOnly ? primary : theme.textMuted}
+                      />
+                      <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, color: knownOnly ? primary : theme.textMuted }}>
+                        {knownOnly ? 'Unbekannte aus' : 'Unbekannte ein'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
                 <View style={{ gap: 12 }}>
                   {byMerchant.map((m) => {
                     const pct = Math.max(4, Math.round((m.cents / maxMerchant) * 100));
@@ -341,10 +384,11 @@ export default function SpendingScreen() {
                             </Text>
                           </View>
                           <View style={{ height: 8, borderRadius: 4, backgroundColor: theme.surfaceAlt ?? theme.border, overflow: 'hidden' }}>
-                            <View style={{ width: `${pct}%`, height: '100%', borderRadius: 4, backgroundColor: primary }} />
+                            {/* known/akzeptiert = grün (primary), unbekannt/nicht-akzeptiert = grau */}
+                            <View style={{ width: `${pct}%`, height: '100%', borderRadius: 4, backgroundColor: m.known ? primary : (theme.textMuted ?? '#9aa5a8') }} />
                           </View>
                           <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 11, color: theme.textMuted, marginTop: 3 }}>
-                            {m.count} {m.count === 1 ? 'Bon' : 'Bons'}
+                            {m.count} {m.count === 1 ? 'Bon' : 'Bons'}{m.known ? '' : ' · nicht akzeptiert'}
                           </Text>
                         </View>
                       </View>
