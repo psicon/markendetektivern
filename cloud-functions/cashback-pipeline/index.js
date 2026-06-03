@@ -1318,7 +1318,16 @@ exports.processCashback = onMessagePublished(
           },
         },
         merchant: merchantInfo
-          ? { id: merchantInfo.id, name: merchantInfo.name, raw: ocr.parsed.merchant ?? null, matchedScore: 1 }
+          ? {
+              id: merchantInfo.id,
+              // 86ca0wbg7: echte discounter-DocID (= produkte.discounter) + Land,
+              // direkt im merchant-Objekt des Haupt-Bon-Docs.
+              discounterId: merchantInfo.discounterId ?? null,
+              land: merchantInfo.land ?? null,
+              name: merchantInfo.name,
+              raw: ocr.parsed.merchant ?? null,
+              matchedScore: 1,
+            }
           : ocr.parsed.merchant
           ? { id: 'unknown', raw: ocr.parsed.merchant, matchedScore: 0 }
           : null,
