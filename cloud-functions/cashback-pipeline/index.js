@@ -1073,21 +1073,31 @@ exports.processCashback = onMessagePublished(
       //      Tiers/Flat, minItems, Wochenlimit, Per-User-Cap und Budget.
       //      Keine globalen Earning-Regeln mehr.
       const eligibleItemCount = countEligibleItems(ocr.parsed);
+
+      // Aktion FRÜH laden (vor dem Gate), damit ihr `maxAgeDays` bereits im
+      // Alters-Gate greift (Config aus cashback_campaigns). 86ca0wbg7.
+      const cid = config.campaignsEnabled ? (receipt.campaignId || null) : null;
+      let selectedCampaign = cid ? await loadCampaignById(cid) : null;
+      // Effektives Max-Bon-Alter in TAGEN (bezogen aufs Bon-Datum): der Aktions-
+      // Wert überschreibt den globalen Default; 0/undefined → globaler Default
+      // (kein Aktions-Limit).
+      const campaignMaxAge = Number(selectedCampaign?.maxAgeDays);
+      const effectiveMaxAgeDays =
+        Number.isFinite(campaignMaxAge) && campaignMaxAge > 0 ? campaignMaxAge : MAX_BON_AGE_DAYS;
+
       const gatesOk =
         merchantInfo
         && recon.ok
         && !duplicateOf
-        && (ageDays == null || ageDays <= MAX_BON_AGE_DAYS);
+        && (ageDays == null || ageDays <= effectiveMaxAgeDays);
 
       let cashbackCents = 0;
-      let selectedCampaign = null;
       // no_active_campaign | below_min_items | weekly_cap_reached |
       // per_user_cap_reached | campaign_budget_exhausted | monthly_cap_reached
       let zeroReason = null;
 
       if (config.campaignsEnabled) {
-        const cid = receipt.campaignId || null;
-        selectedCampaign = gatesOk && cid ? await loadCampaignById(cid) : null;
+        // cid + selectedCampaign bereits oben bestimmt (für das Alters-Gate).
         const nowMs = Date.now();
         const inWindow =
           selectedCampaign
@@ -1178,7 +1188,7 @@ exports.processCashback = onMessagePublished(
       } else if (!merchantInfo) {
         status = 'rejected';
         rejectReason = 'unknown_merchant';
-      } else if (ageDays != null && ageDays > MAX_BON_AGE_DAYS) {
+      } else if (ageDays != null && ageDays > effectiveMaxAgeDays) {
         status = 'rejected';
         rejectReason = 'bon_too_old';
       } else if (ageDays == null) {

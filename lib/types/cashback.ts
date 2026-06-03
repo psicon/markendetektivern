@@ -94,6 +94,11 @@ export interface CashbackCampaign {
   /** Optionaler Override der anrechenbaren Märkte (sonst global /
    *  discounter.cashbackEligible). Slugs der `discounter`-Collection. */
   eligibleMerchants?: string[];
+  /** Max. Bon-Alter in TAGEN (bezogen aufs Bon-Datum). Ein Bon wird nur
+   *  akzeptiert, wenn er nicht älter als `maxAgeDays` ist — sonst Reject
+   *  mit `bon_too_old`. Greift bereits im Eligibility-Gate. 0/undefined =
+   *  kein Aktions-Limit (globaler Default greift). */
+  maxAgeDays?: number;
 }
 
 export const DEFAULT_CASHBACK_CONFIG: CashbackConfigDoc = {
