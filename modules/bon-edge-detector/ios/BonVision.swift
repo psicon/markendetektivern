@@ -117,7 +117,7 @@ enum BonVision {
   /// abgeschnitten; oben/unten/rechts bleiben EXAKT wie erkannt (kein
   /// proportionales Skalieren → kein Über-Rand bei langen, schmalen Bons).
   /// (86ca0wbg7)
-  static let warpLeftPad: CGFloat = 0.025
+  static let warpLeftPad: CGFloat = 0.012
 
   static func warpAndWriteJPEG(ciImage: CIImage, observation: VNRectangleObservation) -> [String: Any]? {
     let extent = ciImage.extent
