@@ -232,8 +232,19 @@ export default function CashbackHistoryScreen() {
       if (dId && discIndex.byId.has(dId)) return discIndex.byId.get(dId);
       const cand = discIndex.normD((e as any).merchantId || e.merchantName || e.merchant || '');
       if (!cand) return null;
-      const hit = discIndex.byName.find(({ n }) => n && (n.includes(cand) || cand.includes(n)));
-      return hit ? hit.d : null;
+      // Alle gleichnamigen Discounter sammeln, dann LAND-AWARE wählen — sonst
+      // zieht z.B. ein DE-Lidl-Bon evtl. das LiDL-AT-Logo. Land vom Bon
+      // (merchantLand) → sonst DE → sonst erster Treffer.
+      const matches = discIndex.byName
+        .filter(({ n }) => n && (n.includes(cand) || cand.includes(n)))
+        .map((x) => x.d);
+      if (!matches.length) return null;
+      const want = String((e as any).merchantLand || '').toUpperCase();
+      return (
+        matches.find((d) => String(d.land || '').toUpperCase() === want) ||
+        matches.find((d) => String(d.land || '').toUpperCase() === 'DE') ||
+        matches[0]
+      );
     },
     [discIndex],
   );
@@ -286,7 +297,10 @@ export default function CashbackHistoryScreen() {
     // immer aktuell, auch bei neu hinzugefügten Märkten. Fallback: denormalisierte
     // Felder vom Bon-Doc.
     const disc = resolveDiscounter(item);
-    const merchant = disc?.name || item.merchantDisplayName || item.merchantName || item.merchant || item.merchantRaw || 'Unbekannte Filiale';
+    const discLand = disc?.land ? String(disc.land).toUpperCase() : null;
+    const merchant = disc
+      ? (discLand ? `${disc.name} (${discLand})` : disc.name)
+      : (item.merchantDisplayName || item.merchantName || item.merchant || item.merchantRaw || 'Unbekannte Filiale');
     const logoUrl: string | null = disc?.bild || (item as any).merchantLogoUrl || null;
     const cashback = item.cashbackCents ? formatCents(item.cashbackCents) : null;
 
@@ -327,6 +341,9 @@ export default function CashbackHistoryScreen() {
               borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
               alignItems: 'center',
               justifyContent: 'center',
+              // Padding: Logo liegt INNEN, damit ein quadratisches/eckiges Logo
+              // nicht von der Kreis-Maske an den Ecken angeschnitten wird.
+              padding: 8,
             }}
           >
             <Image
