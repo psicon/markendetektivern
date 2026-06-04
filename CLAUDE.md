@@ -303,6 +303,27 @@ Recent-Sessions.
   nötig wäre → eigener Camera-Stack mit `VNDetectRectanglesRequest`,
   nicht KVC-Trickserei.
 
+- **`firebase deploy --only firestore:indexes` wenn `firestore.indexes.json`
+  NICHT die Source-of-Truth ist.** In diesem Projekt werden Indizes über die
+  Firebase-Console + eine **Staging-DB** (`default-staging`) verwaltet, nicht
+  im lokalen File. Das committete `firestore.indexes.json` hatte nur 1 Index.
+  Ein `deploy --only firestore:indexes --force` hat daraufhin **75 produktive
+  Composite-Indizes auf `(default)` gelöscht** (alles was nicht im File stand) —
+  `--force` bestätigt die Löschung ohne Rückfrage. Recovery war nur möglich, weil
+  die Staging-DB die Indizes noch hatte:
+  `firebase firestore:indexes --database default-staging` exportiert sie im
+  exakten File-Format → mergen → wiederherstellen. Regeln:
+  (1) NIE `--force` bei `firestore:indexes`. (2) VOR jedem Index-Deploy zuerst
+  den Live-Stand exportieren (`firebase firestore:indexes [--database X]`) und
+  ins File mergen, damit das File ein Superset ist (Deploy erstellt dann nur,
+  löscht nichts). (3) firebase-Deploy bricht bei `409 index already exists` ab,
+  wenn Indizes noch `CREATING`/mid-delete sind → für idempotentes Anlegen die
+  Firestore-Admin-REST-API nutzen (`POST …/collectionGroups/{cg}/indexes`,
+  Bearer aus `gcloud auth print-access-token`, 409 = skip; `__name__`-Felder +
+  `density` vorm POST strippen; fieldOverrides via `PATCH …/fields/{fp}
+  ?updateMask=indexConfig`). gcloud ist als User-Account authed; Audit-Logs
+  (`CreateIndex` = admin activity) wären der letzte Fallback für Definitionen.
+
 ## Builds & deploys — niemals automatisch triggern
 
 **Regel**: niemals einen `eas build` oder `eas submit` aus eigener

@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MarkenDetektive — Bon-Matching Review</title>
+    <style>
+      :root {
+        --bg: #0f1214; --card: #1a1f23; --card2: #20262b; --line: #2c343a;
+        --text: #e7edf1; --muted: #9aa7b0; --brand: #0d8575; --brand2: #14b8a6;
+        --warn: #e0a106; --bad: #e0524b; --good: #2bb673; --tier2: #5b4f9c;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+      header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 14px; padding: 12px 20px; background: rgba(15,18,20,.92); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+      header h1 { font-size: 16px; margin: 0; font-weight: 800; letter-spacing: -.2px; }
+      .stats { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+      .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 5px 10px; font-size: 12px; }
+      .stat b { color: var(--brand2); font-size: 14px; }
+      button { font: inherit; cursor: pointer; border: 0; border-radius: 9px; padding: 8px 13px; background: var(--card2); color: var(--text); border: 1px solid var(--line); }
+      button:hover { border-color: var(--brand); }
+      button.primary { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 700; }
+      button.bad { background: transparent; border-color: var(--bad); color: var(--bad); }
+      button.ghost { background: transparent; }
+      .tabs { display: flex; gap: 8px; padding: 14px 20px 0; }
+      .tab { padding: 8px 14px; border-radius: 10px 10px 0 0; border: 1px solid var(--line); border-bottom: 0; background: var(--card); color: var(--muted); }
+      .tab.active { background: var(--card2); color: var(--text); font-weight: 700; }
+      main { padding: 14px 20px 60px; max-width: 1100px; margin: 0 auto; }
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+      .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .title { font-size: 17px; font-weight: 800; letter-spacing: -.2px; }
+      .chip { font-size: 11px; padding: 3px 8px; border-radius: 8px; background: var(--card2); border: 1px solid var(--line); color: var(--muted); }
+      .chip.price { color: var(--brand2); } .chip.hits { color: var(--warn); }
+      .chip.conf { color: #fff; background: var(--warn); border-color: var(--warn); }
+      .cands { margin-top: 12px; display: grid; gap: 6px; }
+      .cand { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--card2); cursor: pointer; }
+      .cand:hover { border-color: var(--brand); }
+      .cand.sel { border-color: var(--brand2); box-shadow: 0 0 0 1px var(--brand2) inset; }
+      .cand.suggest { border-color: var(--warn); }
+      .cand .nm { flex: 1; }
+      .thumb { width: 34px; height: 34px; border-radius: 7px; object-fit: contain; background: #fff; flex: 0 0 auto; }
+      .thumb.ph { background: var(--card); border: 1px dashed var(--line); }
+      .nm .brand { display: block; font-size: 11px; color: var(--muted); margin-top: 1px; }
+      .badge.nn { color: #f0c674; border-color: #6b5a2a; }
+      .badge.mk { color: #7fc7ff; border-color: #2a5a7a; }
+      .noSuggest { margin-top: 10px; color: var(--warn); font-size: 13px; font-weight: 600; }
+      .badge { font-size: 10px; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+      .badge.t1 { color: var(--good); border-color: var(--good); }
+      .badge.t2 { color: #b9aef0; border-color: var(--tier2); }
+      .actions { margin-top: 13px; display: flex; gap: 8px; flex-wrap: wrap; }
+      .search { margin-top: 10px; display: flex; gap: 8px; }
+      .search input { flex: 1; background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 9px; padding: 8px 11px; }
+      .muted { color: var(--muted); } .empty { color: var(--muted); padding: 40px; text-align: center; }
+      #login { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 80px 20px; }
+      .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--card2); border: 1px solid var(--brand); border-radius: 12px; padding: 10px 16px; opacity: 0; transition: opacity .2s; z-index: 10; }
+      .toast.show { opacity: 1; }
+      .hidden { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div id="login">
+      <h1>🧾 Bon-Matching Review</h1>
+      <p class="muted">Admin-Login</p>
+      <input id="loginEmail" type="email" placeholder="E-Mail" autocomplete="username" style="width:280px;max-width:90vw;background:#20262b;border:1px solid #2c343a;color:#e7edf1;border-radius:9px;padding:10px 12px" />
+      <input id="loginPw" type="password" placeholder="Passwort" autocomplete="current-password" style="width:280px;max-width:90vw;background:#20262b;border:1px solid #2c343a;color:#e7edf1;border-radius:9px;padding:10px 12px" />
+      <button class="primary" id="loginBtn" style="width:280px;max-width:90vw">Anmelden</button>
+      <p class="muted" id="loginMsg"></p>
+    </div>
+
+    <div id="app" class="hidden">
+      <header>
+        <h1>🧾 Bon-Matching Review</h1>
+        <div class="stats" id="stats"></div>
+        <button class="ghost" id="refreshBtn">↻ Neu laden</button>
+        <button class="ghost" id="logoutBtn" title="Abmelden">⏻</button>
+      </header>
+      <div class="tabs">
+        <div class="tab active" data-tab="review" id="tabReview">Review-Queue</div>
+        <div class="tab" data-tab="promotion" id="tabPromo">Promotion (reweapify)</div>
+      </div>
+      <main>
+        <div id="list"></div>
+      </main>
+    </div>
+    <div class="toast" id="toast"></div>
+
+    <script type="module">
+      import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+      import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+      import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js';
+
+      const app = initializeApp({
+        apiKey: 'AIzaSyCVQ-Y71TNexRKSWrVtu1HTP9uk_dSfUP0',
+        authDomain: 'markendetektive-895f7.firebaseapp.com',
+        projectId: 'markendetektive-895f7',
+        storageBucket: 'markendetektive-895f7.appspot.com',
+        messagingSenderId: '139509881339',
+        appId: '1:139509881339:web:d5d1f2b75d2b0258d6135e',
+      });
+      const auth = getAuth(app);
+      const fns = getFunctions(app, 'europe-west1');
+      const call = (name) => httpsCallable(fns, name);
+
+      const $ = (id) => document.getElementById(id);
+      let state = { tab: 'review', data: { review: [], promotion: [], stats: {} } };
+
+      function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2200); }
+
+      $('loginBtn').onclick = async () => {
+        $('loginMsg').textContent = '';
+        try { await signInWithEmailAndPassword(auth, $('loginEmail').value.trim(), $('loginPw').value); }
+        catch (e) { $('loginMsg').textContent = e.code === 'auth/invalid-credential' ? 'E-Mail oder Passwort falsch.' : e.message; }
+      };
+      $('loginPw').onkeydown = (e) => { if (e.key === 'Enter') $('loginBtn').click(); };
+      $('logoutBtn').onclick = () => signOut(auth);
+      $('refreshBtn').onclick = load;
+      $('tabReview').onclick = () => { state.tab = 'review'; render(); };
+      $('tabPromo').onclick = () => { state.tab = 'promotion'; render(); };
+
+      onAuthStateChanged(auth, async (user) => {
+        if (!user) { $('login').classList.remove('hidden'); $('app').classList.add('hidden'); return; }
+        const tok = await user.getIdTokenResult(true);
+        if (tok.claims.admin !== true) {
+          $('loginMsg').textContent = `${user.email} ist kein Admin. (Custom-Claim admin:true fehlt)`;
+          $('login').classList.remove('hidden'); $('app').classList.add('hidden');
+          await signOut(auth); return;
+        }
+        $('login').classList.add('hidden'); $('app').classList.remove('hidden');
+        load();
+      });
+
+      async function load() {
+        $('list').innerHTML = '<div class="empty">Lade…</div>';
+        try {
+          const res = await call('adminGetQueue')();
+          state.data = res.data;
+          render();
+        } catch (e) { $('list').innerHTML = `<div class="empty">Fehler: ${e.message}</div>`; }
+      }
+
+      function render() {
+        const s = state.data.stats || {};
+        $('stats').innerHTML =
+          `<div class="stat">Review <b>${s.openReview ?? 0}</b></div>` +
+          `<div class="stat">Promotion <b>${s.openPromotion ?? 0}</b></div>` +
+          `<div class="stat">Aliase <b>${(s.aliases ?? 0).toLocaleString('de-DE')}</b></div>`;
+        $('tabReview').classList.toggle('active', state.tab === 'review');
+        $('tabPromo').classList.toggle('active', state.tab === 'promotion');
+        $('list').innerHTML = '';
+        const items = state.tab === 'review' ? state.data.review : state.data.promotion;
+        if (!items || !items.length) { $('list').innerHTML = '<div class="empty">Nichts zu prüfen 🎉</div>'; return; }
+        items.forEach((it) => $('list').appendChild(state.tab === 'review' ? reviewCard(it) : promoCard(it)));
+      }
+
+      function euro(cents) { return cents != null ? (cents / 100).toFixed(2).replace('.', ',') + ' €' : '—'; }
+      function tierBadge(c) { return c.tier === 2 || c.source === 'reweapify' ? '<span class="badge t2">reweapify</span>' : '<span class="badge t1">Katalog</span>'; }
+      function typeBadge(c) { return c.type === 'noname' ? '<span class="badge nn">NoName</span>' : '<span class="badge mk">Marke</span>'; }
+      function thumbHtml(image) { return image ? `<img class="thumb" src="${esc(image)}" referrerpolicy="no-referrer" onerror="this.classList.add('ph');this.removeAttribute('src')"/>` : '<div class="thumb ph"></div>'; }
+      function anchorBadge(c) { return c.personal ? `<span class="badge" style="color:#f0c674;border-color:#6b5a2a">★ ${esc(c.reason || 'Zettel')}</span>` : ''; }
+      function candInner(c) { return thumbHtml(c.image) + `<span class="nm">${esc(c.name)}${c.brand ? `<span class="brand">${esc(c.brand)}</span>` : ''}</span>` + anchorBadge(c) + typeBadge(c) + tierBadge(c) + `<span class="muted">${c.preis != null ? Number(c.preis).toFixed(2) + '€' : ''}</span>`; }
+
+      function reviewCard(it) {
+        const el = document.createElement('div'); el.className = 'card';
+        let selected = null;
+        const cands = it.candidates || [];
+        el.innerHTML =
+          `<div class="row"><span class="title">${esc(it.sampleName || '')}</span>` +
+          `<span class="chip">${esc(it.marktSlug || '?')}</span>` +
+          `<span class="chip price">${euro(it.priceCents)}</span>` +
+          `<span class="chip hits">${it.hitCount || 1}× gesehen</span>` +
+          (it.confidence != null ? `<span class="chip conf">KI ${Math.round(it.confidence * 100)}%</span>` : '') +
+          `</div>`;
+        const hasSuggest = it.suggestionIdx != null && it.suggestionIdx >= 0;
+        if (!hasSuggest) { const w = document.createElement('div'); w.className = 'noSuggest'; w.textContent = '⚠ KI: kein sicherer Treffer — bitte manuell zuordnen oder „Kein Produkt".'; el.appendChild(w); }
+        const list = document.createElement('div'); list.className = 'cands';
+        cands.forEach((c, i) => {
+          const d = document.createElement('div');
+          d.className = 'cand' + (hasSuggest && i === it.suggestionIdx ? ' suggest' : '');
+          d.innerHTML = candInner(c);
+          d.onclick = () => { selected = { productId: c.id, productSource: c.source }; [...list.children, ...search.querySelectorAll('.cand')].forEach((x) => x.classList.remove('sel')); d.classList.add('sel'); };
+          list.appendChild(d);
+        });
+        el.appendChild(list);
+
+        const search = document.createElement('div');
+        search.innerHTML = `<div class="search"><input placeholder="Katalog durchsuchen (anderes Produkt)…"/><button>Suchen</button></div><div class="cands sres"></div>`;
+        const inp = search.querySelector('input'); const sres = search.querySelector('.sres');
+        const doSearch = async () => {
+          if (!inp.value.trim()) return;
+          sres.innerHTML = '<div class="muted">Suche…</div>';
+          try {
+            const r = await call('adminSearchProducts')({ query: inp.value.trim() });
+            sres.innerHTML = '';
+            (r.data.results || []).forEach((c) => {
+              const d = document.createElement('div'); d.className = 'cand';
+              d.innerHTML = candInner(c);
+              d.onclick = () => { selected = { productId: c.id, productSource: c.source }; [...list.children, ...sres.children].forEach((x) => x.classList.remove('sel')); d.classList.add('sel'); };
+              sres.appendChild(d);
+            });
+            if (!sres.children.length) sres.innerHTML = '<div class="muted">Keine Treffer.</div>';
+          } catch (e) { sres.innerHTML = `<div class="muted">Fehler: ${e.message}</div>`; }
+        };
+        search.querySelector('button').onclick = doSearch;
+        inp.onkeydown = (e) => { if (e.key === 'Enter') doSearch(); };
+        el.appendChild(search);
+
+        const act = document.createElement('div'); act.className = 'actions';
+        const assign = mkBtn('✓ Zuordnen', 'primary', async () => {
+          if (!selected) return toast('Erst einen Kandidaten wählen');
+          await resolve(it, { ...selected, lineType: 'product' }, el);
+        });
+        act.appendChild(assign);
+        act.appendChild(mkBtn('Kein Produkt', 'ghost', () => resolve(it, { productId: null, lineType: 'nonproduct' }, el)));
+        act.appendChild(mkBtn('Pfand', 'ghost', () => resolve(it, { productId: null, lineType: 'pfand' }, el)));
+        el.appendChild(act);
+        return el;
+      }
+
+      async function resolve(it, payload, el) {
+        try {
+          const r = await call('adminResolveReview')({ reviewId: it.id, ...payload });
+          toast(`Gespeichert · ${r.data.relinked} Bons rückwirkend verknüpft`);
+          el.remove(); state.data.review = state.data.review.filter((x) => x.id !== it.id);
+          state.data.stats.openReview = Math.max(0, (state.data.stats.openReview || 1) - 1); render();
+        } catch (e) { toast('Fehler: ' + e.message); }
+      }
+
+      function promoCard(it) {
+        const el = document.createElement('div'); el.className = 'card';
+        el.innerHTML =
+          `<div class="row">${thumbHtml(it.image)}<span class="title">${esc(it.name || it.sampleName || '')}</span>` +
+          `<span class="badge t2">reweapify</span>` +
+          `<span class="badge">${it.kind === 'noname' ? 'NoName→produkte' : 'Marke→markenProdukte'}</span>` +
+          (it.gtin ? `<span class="chip">EAN ${esc(it.gtin)}</span>` : '') +
+          `<span class="chip hits">${it.hitCount || 1}×</span>` +
+          (it.confidence != null ? `<span class="chip conf">KI ${Math.round(it.confidence * 100)}%</span>` : '') +
+          `</div>` +
+          `<div class="muted" style="margin-top:6px">Bon-Zeile: „${esc(it.sampleName || '')}" @ ${esc(it.marktSlug || '?')}</div>`;
+        const act = document.createElement('div'); act.className = 'actions';
+        act.appendChild(mkBtn('✓ In Katalog übernehmen', 'primary', async () => {
+          try { const r = await call('adminPromote')({ promotionId: it.id, approve: true });
+            toast(`Übernommen → ${r.data.targetCol} · ${r.data.relinked} Bons verknüpft`);
+            el.remove(); state.data.promotion = state.data.promotion.filter((x) => x.id !== it.id);
+            state.data.stats.openPromotion = Math.max(0, (state.data.stats.openPromotion || 1) - 1); render();
+          } catch (e) { toast('Fehler: ' + e.message); } }));
+        act.appendChild(mkBtn('Ablehnen', 'bad', async () => {
+          try { await call('adminPromote')({ promotionId: it.id, approve: false });
+            el.remove(); state.data.promotion = state.data.promotion.filter((x) => x.id !== it.id);
+            state.data.stats.openPromotion = Math.max(0, (state.data.stats.openPromotion || 1) - 1); render();
+          } catch (e) { toast('Fehler: ' + e.message); } }));
+        el.appendChild(act);
+        return el;
+      }
+
+      function mkBtn(label, cls, fn) { const b = document.createElement('button'); b.className = cls; b.textContent = label; b.onclick = fn; return b; }
+      function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+    </script>
+  </body>
+</html>
