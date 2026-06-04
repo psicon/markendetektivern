@@ -54,6 +54,22 @@ const refId = (v) => {
   return null;
 };
 
+// Cosine-Distanz (1 - cosine_similarity), kompatibel zu findNearest COSINE.
+function cosineDist(a, b) {
+  if (!a || !b) return 1;
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  const d = Math.sqrt(na) * Math.sqrt(nb);
+  return d ? 1 - dot / d : 1;
+}
+
 // Doc-Id fürs Alias-Lexikon (Markt + normKey, slash-safe).
 const aliasId = (marktSlug, normKey) => `${norm(marktSlug) || 'unknown'}__${normKey}`.slice(0, 1400);
 
@@ -348,7 +364,9 @@ async function fetchPersonalCandidates(userId) {
       .filter((d) => d.exists)
       .map((d) => {
         const x = d.data();
-        return { id: d.id, name: x.name, type: x.type, source: x.sourceCollection, preis: x.preis, tier: x.sourceCollection === 'reweapify' ? 2 : 1, personal: true, reason: reason[d.id] || 'persönlich' };
+        const vv = x.vector;
+        const _vec = vv && typeof vv.toArray === 'function' ? vv.toArray() : Array.isArray(vv) ? vv : null;
+        return { id: d.id, name: x.name, type: x.type, source: x.sourceCollection, preis: x.preis, tier: x.sourceCollection === 'reweapify' ? 2 : 1, personal: true, reason: reason[d.id] || 'persönlich', _vec };
       });
   }
   _personalCache.set(userId, { cands, ts: Date.now() });
@@ -414,12 +432,27 @@ async function matchLine(ctx, opts = {}) {
     return { status: 'error', reason: 'embed-failed' };
   }
   const catalogCands = await shortlist(qv, discounterId);
-  // Persönlicher Anker: Einkaufszettel/kürzliche Käufe vorn dazu (dedupe per id).
-  const personalCands = userId ? await fetchPersonalCandidates(userId) : [];
+  // Persönlicher Anker: Einkaufszettel/kürzliche Käufe nach ECHTER Ähnlichkeit zur
+  // Bon-Zeile scoren (Cosine) + moderaten Bonus geben — NICHT blind vornanstellen.
+  // So steigt nur ein WIRKLICH passendes Zettel-Item auf; irrelevante sinken unter
+  // die Katalog-Treffer und verdrängen sie nicht.
+  const PERSONAL_BONUS = 0.88; // ~12% Distanz-Bonus für eigene Absicht
+  const PERSONAL_MAX_DIST = 0.42; // nur Zettel-/Kauf-Items die WIRKLICH ähnlich sind dazunehmen
+  const personalScored = (userId ? await fetchPersonalCandidates(userId) : [])
+    .map((c) => {
+      const { _vec, ...rest } = c;
+      const raw = cosineDist(qv, _vec);
+      return { ...rest, _raw: raw, dist: raw * PERSONAL_BONUS };
+    })
+    .filter((c) => c._raw < PERSONAL_MAX_DIST) // irrelevante Zettel-Items raus (kein Display-Rauschen, kein Verdrängen)
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, 3) // max. 3 persönliche — der Katalog behält immer Plätze
+    .map(({ _raw, ...c }) => c);
   const seenIds = new Set();
-  const cands = [...personalCands, ...catalogCands]
+  const cands = [...personalScored, ...catalogCands]
     .filter((c) => (seenIds.has(c.id) ? false : seenIds.add(c.id)))
-    .slice(0, NONAME_K + MARKE_K + 8);
+    .sort((a, b) => (a.dist ?? 9) - (b.dist ?? 9))
+    .slice(0, NONAME_K + MARKE_K);
   if (!cands.length) {
     await bumpExternalMiss(marktSlug, normKey, itemName);
     await writePP({ matchStatus: 'unmapped', productId: null, lineType: 'product' });
