@@ -54,6 +54,14 @@ const refId = (v) => {
   return null;
 };
 
+// Größe/Menge aus einem Produkt-/Bon-String ziehen ("Goldmais 140g" → "140g",
+// "Cola 0,33l" → "0,33l", "6x0,33l", "250 ml", "1 kg", "10 Stück").
+function parseSize(s) {
+  const t = String(s || '');
+  const m = t.match(/(\d+\s?[x×]\s?)?\d+(?:[.,]\d+)?\s?(?:kg|g|ml|cl|l|stk|stück|stück\.|st\.|pck|er)\b/i);
+  return m ? m[0].replace(/\s+/g, ' ').trim() : null;
+}
+
 // Cosine-Distanz (1 - cosine_similarity), kompatibel zu findNearest COSINE.
 function cosineDist(a, b) {
   if (!a || !b) return 1;
@@ -161,6 +169,9 @@ async function shortlist(queryVec, discounterId) {
         tier: x.sourceCollection === 'reweapify' ? 2 : 1,
         preis: x.preis,
         gtin: x.gtin || null,
+        brand: x.brand || null, // Marke (markenProdukte) bzw. Handelsmarke (produkte/NoName)
+        handelsmarke: x.handelsmarke || null, // Eigenmarke-Name (nur NoName)
+        size: x.size || null,
         dist: x._dist,
       });
     });
@@ -173,28 +184,35 @@ async function shortlist(queryVec, discounterId) {
     .slice(0, NONAME_K + MARKE_K);
 }
 
-const PICK_SYS = `Du bist ein extrem genauer Experte für deutsche/österreichische Kassenbons. Du ordnest EINE Bon-Zeile entweder GENAU EINEM Kandidaten zu (dessen Index) ODER gibst candidateIdx -1 zurück ("kein sicherer Treffer").
+const PICK_SYS = `Du bist Experte für deutsche/österreichische Kassenbons. Ordne EINE Bon-Zeile dem am besten passenden Kandidaten zu (dessen Index) ODER gib candidateIdx -1 ("kein passender Kandidat").
 
-GRUNDHALTUNG: Lieber -1 als ein falscher Treffer. Du RÄTST NICHT. Ein Treffer gilt NUR, wenn der Kandidat mit hoher Sicherheit DASSELBE Produkt ist (gleiche Marke/Sorte/Variante) — NICHT bloß dieselbe Kategorie oder ein zufällig gleiches Wort.
+ZUORDNEN HOLISTISCH über ALLE Signale gemeinsam — nicht über ein einzelnes Kriterium:
+- Produktname/Sorte (Hauptsignal)
+- Marke bzw. Handelsmarke (s.u.)
+- Markt (eine EDEKA-Eigenmarke gibt es nicht bei Lidl)
+- Preis (grob plausibel; Aktionspreise weichen ab)
+- Größe/Menge (z.B. 0,33l ≠ 1l, 140g ≠ 425g) — wenn angegeben, als Bestätigung nutzen, nicht als K.o. bei kleinen Abweichungen
+- ★-Anker (Einkaufszettel/zuletzt gekauft, s.u.)
 
-EIGENMARKEN (Handelsmarken) erkennen — diese Kürzel/Namen sind KEINE Marke, sondern NoName (Typ "noname") des jeweiligen Markts:
-- G&G / GUT&GÜNSTIG / GUT&GUENSTIG = EDEKA/Netto · JA! = REWE · K-CLASSIC/KLC = Kaufland
-- MILBONA/MILSANI/MILFINA = Lidl/Aldi · GUT BIO/BIO SONNE = Aldi/Netto · REWE BIO/REWE BESTE WAHL = REWE
-Eine Eigenmarken-Bon-Zeile (z.B. "G&G Süßstoff") darf NUR auf einen Kandidaten vom Typ "noname" DESSELBEN Markts gemappt werden. Gibt es keinen passenden NoName-Kandidaten → -1. NIEMALS auf ein Markenprodukt (Typ "marke") ausweichen, nur weil der Produktname zufällig passt.
-Umgekehrt: eine echte Marken-Bon-Zeile NUR auf einen "marke"-Kandidaten, nicht auf ein NoName.
+EIGENMARKEN / KÜRZEL auf dem Bon = Handelsmarke des Markts:
+G&G/GUT&GÜNSTIG=EDEKA/Netto · JA!=REWE · K-CLASSIC/KLC=Kaufland · MILBONA/MILSANI/MILFINA=Lidl/Aldi · GUT BIO/BIO SONNE=Aldi/Netto · REWE BIO/REWE BESTE WAHL=REWE · GUT&GERNE·EDEKA · usw.
+→ Ein Eigenmarken-Bon (z.B. "G&G Sonnenmais") passt am besten zu einem Kandidaten, dessen **Handelsmarke** dazu passt (z.B. Handelsmarke G&G). Solche Kandidaten STARK bevorzugen.
+→ Die NoName/Marke-Klassifikation im Katalog ist NICHT immer sauber. Wenn der beste Kandidat über Name+Größe+Preis+Markt klar dasselbe Produkt ist, ORDNE ZU — auch wenn das Typ-Label (NoName/Marke) nicht ideal passt. Das Typ-Label ist ein Hinweis, KEIN hartes Verbot.
 
-HARTE SIGNALE (müssen alle passen): Markt (eine EDEKA-Eigenmarke gibt es nicht bei Lidl) · Preis plausibel (0,99€ ≠ 4,99€) · Typ (noname/marke) passend zur Bon-Zeile.
+PERSÖNLICHER ANKER: ★[Einkaufszettel]/★[zuletzt gekauft] hatte DIESER Nutzer gerade/kürzlich — starker Hinweis. Bevorzugen, wenn Name/Markt/Preis/Größe plausibel passen.
 
-PERSÖNLICHER ANKER: Kandidaten mit ★[Einkaufszettel] / ★[zuletzt gekauft] hat GENAU DIESER Nutzer gerade auf dem Einkaufszettel oder kürzlich gekauft — ein STARKER Hinweis, dass die Bon-Zeile genau das ist. Bevorzuge einen ★-Kandidaten, SOFERN Markt/Preis/Typ plausibel passen, und vergib dann höhere confidence. ABER: ein klarer Widerspruch bei Markt/Preis/Typ schlägt den Anker (der Bon ist der Beweis, nicht die Absicht) → dann NICHT den ★-Kandidaten wählen.
+WICHTIG bei Namens-Übereinstimmung aber Marken-Abweichung: Wenn ein Kandidat in Produktname (+ ggf. Größe/Preis/Markt) klar dasselbe Produkt beschreibt, aber die Marke/Handelsmarke abweicht (z.B. Bon "G&G Sonnenmais" vs Kandidat "Sonnenmais" einer anderen Marke), dann NICHT -1, sondern diesen besten Kandidaten mit MITTLERER confidence (0.5–0.7) vorschlagen → der Mensch entscheidet. Nur bei reiner Kategorie-/Wortähnlichkeit ohne echte Produktgleichheit -1.
 
-FRISCHWARE ohne Marke (loses Obst/Gemüse/Theke: "Avocado","Banane","Hähnchenbrust","Gehacktes") → lineType "nonproduct", candidateIdx -1.
+NICHT zuordnen (candidateIdx -1):
+- Frischware ohne Marke (loses Obst/Gemüse/Theke: "Avocado","Banane","Hähnchenbrust") → lineType "nonproduct".
+- Wenn KEIN Kandidat plausibel dasselbe Produkt ist (nur Kategorie, z.B. "Cola" vs irgendeine andere Limo-Sorte) → -1.
 PFAND/LEERGUT → "pfand". RABATT/SUMME/ZAHLART/COUPON/PAYBACK → "nonproduct".
 
-CONFIDENCE ehrlich kalibrieren (es geht um "ist DASSELBE Produkt", nicht "klingt ähnlich"):
-- 0.95+  eindeutig dasselbe Produkt (Marke/Sorte/Typ/Markt/Preis stimmig)
-- 0.80–0.94  sehr wahrscheinlich, kleine Restunsicherheit
-- 0.50–0.79  plausibel aber unsicher → Mensch soll prüfen
-- <0.50 bzw. -1  kein überzeugender Treffer; bloße Kategorie-/Wortähnlichkeit ist KEIN Treffer
+CONFIDENCE ehrlich (wie sicher ist es DASSELBE Produkt):
+- 0.90+  klar dasselbe (Name/Größe + Marke/Handelsmarke + Markt + Preis stimmig)
+- 0.70–0.89  gut, kleine Restunsicherheit (z.B. Größe fehlt)
+- 0.50–0.69  plausibel aber unsicher → Mensch prüft
+- <0.50 / -1  kein überzeugender Treffer
 
 lineType: "product" | "pfand" | "discount" | "nonproduct".
 Antworte NUR mit JSON {"lineType":..,"candidateIdx":int,"confidence":0..1}.`;
@@ -209,14 +227,14 @@ const PICK_SCHEMA = {
   required: ['lineType', 'candidateIdx', 'confidence'],
 };
 
-async function geminiPick(itemName, marktSlug, priceCents, cands) {
+async function geminiPick(itemName, marktSlug, priceCents, cands, bonSize) {
   const user =
-    `Bon-Zeile: "${itemName}"\nMarkt: ${marktSlug}\nPreis: ${(priceCents / 100).toFixed(2)} €\n\nKandidaten:\n` +
+    `Bon-Zeile: "${itemName}"\nMarkt: ${marktSlug}\nPreis: ${(priceCents / 100).toFixed(2)} €${bonSize ? `\nGröße/Menge: ${bonSize}` : ''}\n\nKandidaten:\n` +
     cands
-      .map(
-        (c, i) =>
-          `[${i}] ${c.name} | ${c.type}${c.tier === 2 ? ' (reweapify)' : ''}${c.preis != null ? ` | ${Number(c.preis).toFixed(2)}€` : ''}${c.personal ? ` ★[${c.reason}]` : ''}`,
-      )
+      .map((c, i) => {
+        const brand = c.handelsmarke ? `Handelsmarke: ${c.handelsmarke}` : c.brand ? `Marke: ${c.brand}` : '';
+        return `[${i}] ${c.name} | ${c.type === 'noname' ? 'NoName' : 'Marke'}${brand ? ' · ' + brand : ''}${c.size ? ' · ' + c.size : ''}${c.preis != null ? ` · ${Number(c.preis).toFixed(2)}€` : ''}${c.tier === 2 ? ' · (reweapify)' : ''}${c.personal ? ` ★[${c.reason}]` : ''}`;
+      })
       .join('\n');
   const r = await ai().models.generateContent({
     model: PICK_MODEL,
@@ -366,7 +384,7 @@ async function fetchPersonalCandidates(userId) {
         const x = d.data();
         const vv = x.vector;
         const _vec = vv && typeof vv.toArray === 'function' ? vv.toArray() : Array.isArray(vv) ? vv : null;
-        return { id: d.id, name: x.name, type: x.type, source: x.sourceCollection, preis: x.preis, tier: x.sourceCollection === 'reweapify' ? 2 : 1, personal: true, reason: reason[d.id] || 'persönlich', _vec };
+        return { id: d.id, name: x.name, type: x.type, source: x.sourceCollection, preis: x.preis, brand: x.brand || null, handelsmarke: x.handelsmarke || null, size: x.size || null, tier: x.sourceCollection === 'reweapify' ? 2 : 1, personal: true, reason: reason[d.id] || 'persönlich', _vec };
       });
   }
   _personalCache.set(userId, { cands, ts: Date.now() });
@@ -459,10 +477,10 @@ async function matchLine(ctx, opts = {}) {
     return { status: 'unmapped', reason: 'no-candidates' };
   }
 
-  // 4) Gemini-Pick
+  // 4) Gemini-Pick (mit Bon-Größe als zusätzliches Signal)
   let pick;
   try {
-    pick = await geminiPick(itemName, marktSlug, priceCents, cands);
+    pick = await geminiPick(itemName, marktSlug, priceCents, cands, parseSize(itemName));
   } catch (e) {
     await writePP({ matchStatus: 'error', matchError: 'pick-failed' });
     return { status: 'error', reason: 'pick-failed', detail: e.message };
@@ -499,7 +517,7 @@ async function matchLine(ctx, opts = {}) {
   // Alles andere mit Kandidaten — Tier-1 unsicher ODER KI hat -1 / keinen klaren Treffer.
   // KI RÄT NICHT automatisch → Mensch entscheidet (Vorschlag + Confidence + Shortlist + Katalog-Suche).
   // (cands ist hier garantiert nicht leer — der no-candidates-Fall ist oben abgefangen.)
-  if (!dryRun) await enqueueReview({ marktSlug, normKey, sampleName: itemName, priceCents, candidates: cands.slice(0, 8), suggestionIdx: pick.candidateIdx, confidence: conf, ppId: ppRef && ppRef.id, userId, receiptId });
+  if (!dryRun) await enqueueReview({ marktSlug, normKey, sampleName: itemName, priceCents, bonSize: parseSize(itemName), candidates: cands.slice(0, 20), suggestionIdx: pick.candidateIdx, confidence: conf, ppId: ppRef && ppRef.id, userId, receiptId });
   await writePP({ matchStatus: 'needs_review', lineType: 'product', matchConfidence: conf, matchSource: 'ai' });
   return { status: 'needs_review', confidence: conf, suggestion: cand };
 }
@@ -543,37 +561,32 @@ function enqueuePromotion(p) {
 }
 
 /**
- * Kandidaten on-demand mit Bild + Marke/Handelsmarke anreichern (für die
- * Web-UI). Holt pro Quell-Collection die nötigen Felder per getAll —
- * KEINE Speicherung am Embedding nötig.
+ * Kandidaten on-demand NUR mit Bild anreichern (für die Web-UI). Marke/
+ * Handelsmarke/Größe liegen bereits am Kandidaten (aus productEmbeddings via
+ * shortlist). Holt pro Quell-Collection das Bild-Feld per getAll.
  *   image: bildClean → bildCleanHq → bild → image (reweapify)
- *   brand: handelsmarke (produkte/NoName) → marke/markenname (markenProdukte) → brandKey (reweapify)
  */
 async function enrichCandidates(cands) {
   const byCol = {};
   for (const c of cands) (byCol[c.source] = byCol[c.source] || []).push(c);
+  const asStr = (v) => (typeof v === 'string' ? v : null);
   for (const [col, list] of Object.entries(byCol)) {
     if (!col) continue;
     const refs = list.map((c) => db.collection(col).doc(String(c.id)));
     let docs = [];
     try {
-      docs = await db.getAll(...refs, { fieldMask: ['bildClean', 'bildCleanHq', 'bild', 'image', 'handelsmarke', 'marke', 'markenname', 'brandKey'] });
+      docs = await db.getAll(...refs, { fieldMask: ['bildClean', 'bildCleanHq', 'bild', 'image'] });
     } catch (e) {
       continue;
     }
     const map = {};
     docs.forEach((d) => (map[d.id] = d.exists ? d.data() : {}));
-    // Nur Strings durchreichen — manche Felder (z.B. marke/handelsmarke) sind
-    // Firestore-DocumentReferences; die im Callable-Response würden den Encoder
-    // in eine Endlos-Rekursion schicken ("Maximum call stack size exceeded").
-    const asStr = (v) => (typeof v === 'string' ? v : v && typeof v.id === 'string' ? v.id : null);
     for (const c of list) {
       const x = map[String(c.id)] || {};
-      c.image = asStr(x.bildClean || x.bildCleanHq || x.bild || x.image);
-      c.brand = asStr(x.handelsmarke) || asStr(x.marke) || asStr(x.markenname) || asStr(x.brandKey);
+      c.image = asStr(x.bildClean) || asStr(x.bildCleanHq) || asStr(x.bild) || asStr(x.image);
     }
   }
   return cands;
 }
 
-module.exports = { matchLine, norm, aliasId, embedQuery, shortlist, enrichCandidates, discounterIdForSlug, MATCH_VERSION };
+module.exports = { matchLine, norm, aliasId, parseSize, embedQuery, shortlist, enrichCandidates, discounterIdForSlug, MATCH_VERSION };

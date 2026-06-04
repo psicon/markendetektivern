@@ -32,7 +32,8 @@
       .chip { font-size: 11px; padding: 3px 8px; border-radius: 8px; background: var(--card2); border: 1px solid var(--line); color: var(--muted); }
       .chip.price { color: var(--brand2); } .chip.hits { color: var(--warn); }
       .chip.conf { color: #fff; background: var(--warn); border-color: var(--warn); }
-      .cands { margin-top: 12px; display: grid; gap: 6px; }
+      .cands { margin-top: 12px; display: grid; gap: 6px; max-height: 430px; overflow-y: auto; padding-right: 4px; }
+      .cands::-webkit-scrollbar { width: 8px; } .cands::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
       .cand { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--card2); cursor: pointer; }
       .cand:hover { border-color: var(--brand); }
       .cand.sel { border-color: var(--brand2); box-shadow: 0 0 0 1px var(--brand2) inset; }
@@ -157,7 +158,12 @@
       function typeBadge(c) { return c.type === 'noname' ? '<span class="badge nn">NoName</span>' : '<span class="badge mk">Marke</span>'; }
       function thumbHtml(image) { return image ? `<img class="thumb" src="${esc(image)}" referrerpolicy="no-referrer" onerror="this.classList.add('ph');this.removeAttribute('src')"/>` : '<div class="thumb ph"></div>'; }
       function anchorBadge(c) { return c.personal ? `<span class="badge" style="color:#f0c674;border-color:#6b5a2a">★ ${esc(c.reason || 'Zettel')}</span>` : ''; }
-      function candInner(c) { return thumbHtml(c.image) + `<span class="nm">${esc(c.name)}${c.brand ? `<span class="brand">${esc(c.brand)}</span>` : ''}</span>` + anchorBadge(c) + typeBadge(c) + tierBadge(c) + `<span class="muted">${c.preis != null ? Number(c.preis).toFixed(2) + '€' : ''}</span>`; }
+      function matchBadge(c) { if (c.dist == null) return ''; const p = Math.max(0, Math.round((1 - c.dist) * 100)); const col = p >= 80 ? '#2bb673' : p >= 60 ? '#e0a106' : '#9aa7b0'; return `<span class="badge" style="color:${col};border-color:${col}">${p}%</span>`; }
+      function candInner(c) {
+        const sub = c.handelsmarke || c.brand || '';
+        const subLine = sub || c.size ? `<span class="brand">${esc(sub)}${sub && c.size ? ' · ' : ''}${c.size ? esc(c.size) : ''}</span>` : '';
+        return thumbHtml(c.image) + `<span class="nm">${esc(c.name)}${subLine}</span>` + anchorBadge(c) + typeBadge(c) + tierBadge(c) + matchBadge(c) + `<span class="muted">${c.preis != null ? Number(c.preis).toFixed(2) + '€' : ''}</span>`;
+      }
 
       function reviewCard(it) {
         const el = document.createElement('div'); el.className = 'card';

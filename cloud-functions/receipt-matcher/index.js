@@ -109,13 +109,36 @@ async function embedTexts(texts) {
 // REWE-Discounter-DocId (für reweapify-Eigenmarken; Marken sind markt-agnostisch).
 const REWE_DISCOUNTER_ID = 'GzHmnRRIUbbhuG6b4YmE';
 
+// Referenz-Maps (id→Name) für Marke/Handelsmarke/Hersteller. ~10 min gecacht.
+//   handelsmarken.bezeichnung  (Eigenmarke, z.B. "Gut&Günstig")
+//   hersteller.name            (Marke der markenProdukte, z.B. "Aviko")
+//   hersteller_new.herstellername (echter Hersteller der produkte)
+const _refMaps = { handelsmarken: {}, hersteller: {}, herstellerNew: {}, ts: 0 };
+async function ensureRefMaps() {
+  if (_refMaps.ts && Date.now() - _refMaps.ts < 600000) return;
+  const [hm, h, hn] = await Promise.all([
+    db.collection('handelsmarken').select('bezeichnung').get(),
+    db.collection('hersteller').select('name').get(),
+    db.collection('hersteller_new').select('herstellername').get(),
+  ]);
+  const a = {};
+  hm.forEach((d) => (a[d.id] = d.data().bezeichnung || null));
+  const b = {};
+  h.forEach((d) => (b[d.id] = d.data().name || null));
+  const c = {};
+  hn.forEach((d) => (c[d.id] = d.data().herstellername || null));
+  _refMaps.handelsmarken = a;
+  _refMaps.hersteller = b;
+  _refMaps.herstellerNew = c;
+  _refMaps.ts = Date.now();
+}
+
 /**
- * Einheitliche Meta für alle drei Quell-Collections → { name, type,
- * discounterId, preis, gtin, nameNorm, sourceCollection } oder null (kein Name).
- *  - produkte        → type 'noname', discounterId aus data.discounter (Tier 1)
- *  - markenProdukte  → type 'marke',  discounterId null               (Tier 1)
- *  - reweapify       → brand_classification: 'eigenmarke' → noname@REWE,
- *                      sonst (markenprodukt/unclassified) → marke (markt-agnostisch) (Tier 2)
+ * Einheitliche Meta für alle drei Quell-Collections (ensureRefMaps muss vorher
+ * gelaufen sein) → { name, type, discounterId, preis, gtin, brand, handelsmarke,
+ * manufacturer, size, nameNorm, sourceCollection } oder null (kein Name).
+ *  brand = die für den Match relevante Marke: bei NoName die Handelsmarke
+ *          (G&G…), bei Marke der Hersteller-Markenname, bei reweapify brandKey.
  */
 function buildMeta(collection, data) {
   let name;
@@ -123,6 +146,9 @@ function buildMeta(collection, data) {
   let discounterId;
   let preis;
   let gtin;
+  let brand = null;
+  let handelsmarke = null;
+  let manufacturer = null;
   if (collection === 'reweapify') {
     name = String(data.productName || '').trim();
     const bc = String(data.brand_classification || '').toLowerCase();
@@ -135,20 +161,25 @@ function buildMeta(collection, data) {
     }
     preis = Number.isFinite(Number(data.price_current)) ? Number(data.price_current) : null;
     gtin = data.gtin ? String(data.gtin) : null;
+    brand = typeof data.brandKey === 'string' ? data.brandKey : null;
+    manufacturer = typeof data.merchant_company === 'string' ? data.merchant_company : null;
   } else {
     name = String(data.name || '').trim();
     type = collection === 'produkte' ? 'noname' : 'marke';
     discounterId = collection === 'produkte' ? refId(data.discounter) : null;
     preis = Number.isFinite(Number(data.preis)) ? Number(data.preis) : null;
-    gtin =
-      Array.isArray(data.EANs) && data.EANs.length
-        ? String(data.EANs[0])
-        : data.gtin
-          ? String(data.gtin)
-          : null;
+    gtin = Array.isArray(data.EANs) && data.EANs.length ? String(data.EANs[0]) : data.gtin ? String(data.gtin) : null;
+    if (collection === 'produkte') {
+      handelsmarke = _refMaps.handelsmarken[refId(data.handelsmarke)] || null;
+      manufacturer = _refMaps.herstellerNew[refId(data.hersteller)] || null;
+      brand = handelsmarke; // bei NoName ist die Handelsmarke die match-relevante Marke
+    } else {
+      brand = _refMaps.hersteller[refId(data.hersteller)] || null;
+      manufacturer = brand;
+    }
   }
   if (!name) return null;
-  return { name, type, discounterId, preis, gtin, nameNorm: norm(name), sourceCollection: collection };
+  return { name, type, discounterId, preis, gtin, brand, handelsmarke, manufacturer, size: matcher.parseSize(name), nameNorm: norm(name), sourceCollection: collection };
 }
 
 /** Embedding fehlt oder ist stale (Name/Version/Modell/Dim geändert)? */
@@ -174,6 +205,7 @@ async function handleWrite(collection, event) {
     if (before) await embRef.delete().catch(() => {});
     return;
   }
+  await ensureRefMaps();
   const meta = buildMeta(collection, after);
   if (!meta) return; // ohne Name kein Embedding
   const name = meta.name;
@@ -192,6 +224,10 @@ async function handleWrite(collection, event) {
           discounterId: meta.discounterId,
           preis: meta.preis,
           gtin: meta.gtin,
+          brand: meta.brand,
+          handelsmarke: meta.handelsmarke,
+          manufacturer: meta.manufacturer,
+          size: meta.size,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         { merge: true },
@@ -247,6 +283,7 @@ exports.backfillEmbeddingsManual = onRequest(
     const cursor = req.query.cursor || null;
 
     try {
+      await ensureRefMaps();
       let q = db.collection(collection).orderBy('__name__').limit(limit);
       if (cursor) q = q.startAfter(cursor);
       const snap = await q.get();
@@ -310,6 +347,10 @@ exports.backfillEmbeddingsManual = onRequest(
             discounterId: m.meta.discounterId,
             preis: m.meta.preis,
             gtin: m.meta.gtin,
+            brand: m.meta.brand,
+            handelsmarke: m.meta.handelsmarke,
+            manufacturer: m.meta.manufacturer,
+            size: m.meta.size,
             name: m.meta.name,
             nameNorm: m.meta.nameNorm,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -456,11 +497,25 @@ exports.adminSearchProducts = onCall({ ...COMMON }, async (req) => {
   }
   const q = String((req.data && req.data.query) || '').trim();
   if (!q) return { results: [] };
+  // Semantisch (Name) via Embedding + zusätzlich Marke/Handelsmarke per Prefix.
   const qv = await matcher.embedQuery(q);
-  if (!qv) return { results: [] };
-  const cands = (await matcher.shortlist(qv, (req.data && req.data.discounterId) || null)).filter((c) => c.tier === 1).slice(0, 15);
-  await matcher.enrichCandidates(cands);
+  const sem = qv ? (await matcher.shortlist(qv, (req.data && req.data.discounterId) || null)).filter((c) => c.tier === 1) : [];
+  const byField = async (field) => {
+    try {
+      const s = await db.collection('productEmbeddings').orderBy(field).startAt(q).endAt(q + String.fromCharCode(0xF8FF)).limit(12).get();
+      return s.docs.map((d) => {
+        const x = d.data();
+        return { id: d.id, name: x.name, type: x.type, source: x.sourceCollection, tier: x.sourceCollection === 'reweapify' ? 2 : 1, preis: x.preis, brand: x.brand || null, handelsmarke: x.handelsmarke || null, size: x.size || null };
+      });
+    } catch (e) {
+      return [];
+    }
+  };
+  const [byBrand, byHm] = await Promise.all([byField('brand'), byField('handelsmarke')]);
+  const seen = new Set();
+  const merged = [...byBrand, ...byHm, ...sem].filter((c) => (seen.has(c.id) ? false : seen.add(c.id))).slice(0, 20);
+  await matcher.enrichCandidates(merged);
   return {
-    results: cands.map((c) => ({ id: c.id, name: c.name, type: c.type, source: c.source, preis: c.preis, image: c.image || null, brand: c.brand || null })),
+    results: merged.map((c) => ({ id: c.id, name: c.name, type: c.type, source: c.source, preis: c.preis, brand: c.brand || null, handelsmarke: c.handelsmarke || null, size: c.size || null, image: c.image || null })),
   };
 });
