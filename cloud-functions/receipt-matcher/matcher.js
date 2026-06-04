@@ -563,10 +563,14 @@ async function enrichCandidates(cands) {
     }
     const map = {};
     docs.forEach((d) => (map[d.id] = d.exists ? d.data() : {}));
+    // Nur Strings durchreichen — manche Felder (z.B. marke/handelsmarke) sind
+    // Firestore-DocumentReferences; die im Callable-Response würden den Encoder
+    // in eine Endlos-Rekursion schicken ("Maximum call stack size exceeded").
+    const asStr = (v) => (typeof v === 'string' ? v : v && typeof v.id === 'string' ? v.id : null);
     for (const c of list) {
       const x = map[String(c.id)] || {};
-      c.image = x.bildClean || x.bildCleanHq || x.bild || x.image || null;
-      c.brand = x.handelsmarke || x.marke || x.markenname || x.brandKey || null;
+      c.image = asStr(x.bildClean || x.bildCleanHq || x.bild || x.image);
+      c.brand = asStr(x.handelsmarke) || asStr(x.marke) || asStr(x.markenname) || asStr(x.brandKey);
     }
   }
   return cands;
