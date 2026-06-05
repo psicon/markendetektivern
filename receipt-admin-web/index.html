@@ -82,6 +82,7 @@
       <div class="tabs">
         <div class="tab active" data-tab="review" id="tabReview">Review-Queue</div>
         <div class="tab" data-tab="promotion" id="tabPromo">Promotion (reweapify)</div>
+        <div class="tab" data-tab="matched" id="tabMatched">Zugeordnet</div>
       </div>
       <main>
         <div id="list"></div>
@@ -141,6 +142,7 @@
       $('refreshBtn').onclick = load;
       $('tabReview').onclick = () => { state.tab = 'review'; render(); };
       $('tabPromo').onclick = () => { state.tab = 'promotion'; render(); };
+      $('tabMatched').onclick = () => { state.tab = 'matched'; render(); };
 
       onAuthStateChanged(auth, async (user) => {
         if (!user) { $('login').classList.remove('hidden'); $('app').classList.add('hidden'); return; }
@@ -157,8 +159,10 @@
       async function load() {
         $('list').innerHTML = '<div class="empty">Lade…</div>';
         try {
-          const res = await call('adminGetQueue')();
-          state.data = res.data;
+          const [q, m] = await Promise.all([call('adminGetQueue')(), call('adminGetMatched')()]);
+          state.data = q.data;
+          state.data.matched = m.data.matched || [];
+          state.data.stats.matched = m.data.total || 0;
           render();
         } catch (e) { $('list').innerHTML = `<div class="empty">Fehler: ${e.message}</div>`; }
       }
@@ -168,13 +172,16 @@
         $('stats').innerHTML =
           `<div class="stat">Review <b>${s.openReview ?? 0}</b></div>` +
           `<div class="stat">Promotion <b>${s.openPromotion ?? 0}</b></div>` +
+          `<div class="stat">Zugeordnet <b>${s.matched ?? 0}</b></div>` +
           `<div class="stat">Aliase <b>${(s.aliases ?? 0).toLocaleString('de-DE')}</b></div>`;
         $('tabReview').classList.toggle('active', state.tab === 'review');
         $('tabPromo').classList.toggle('active', state.tab === 'promotion');
+        $('tabMatched').classList.toggle('active', state.tab === 'matched');
         $('list').innerHTML = '';
-        const items = state.tab === 'review' ? state.data.review : state.data.promotion;
-        if (!items || !items.length) { $('list').innerHTML = '<div class="empty">Nichts zu prüfen 🎉</div>'; return; }
-        items.forEach((it) => $('list').appendChild(state.tab === 'review' ? reviewCard(it) : promoCard(it)));
+        const items = state.tab === 'review' ? state.data.review : state.tab === 'promotion' ? state.data.promotion : state.data.matched;
+        if (!items || !items.length) { $('list').innerHTML = '<div class="empty">Nichts hier 🎉</div>'; return; }
+        const make = state.tab === 'review' ? reviewCard : state.tab === 'promotion' ? promoCard : matchedCard;
+        items.forEach((it) => $('list').appendChild(make(it)));
       }
 
       function euro(cents) { return cents != null ? (cents / 100).toFixed(2).replace('.', ',') + ' €' : '—'; }
@@ -289,6 +296,44 @@
         return el;
       }
 
+      function matchedCard(it) {
+        const el = document.createElement('div'); el.className = 'card';
+        let selected = null;
+        const p = it.product || {};
+        const rb = it.resolvedBy || '';
+        const byWho = rb.startsWith('admin') ? '👤 Mensch' : rb === 'alias' ? '↻ Lexikon' : rb === 'rule' ? 'Regel' : '🤖 KI';
+        el.innerHTML =
+          `<div class="row"><span class="title">${esc(it.sampleName || '')}</span>` +
+          `<span class="chip" title="Markt">🏬 ${esc(it.marktSlug || '?')}</span>` +
+          (it.confidence != null ? `<span class="chip conf">${Math.round(it.confidence * 100)}%</span>` : '') +
+          `<span class="chip">${byWho}</span>` +
+          `<span class="chip hits">${it.votes || 1}×</span>` +
+          `</div>`;
+        const prow = document.createElement('div'); prow.className = 'cands';
+        const pd = document.createElement('div'); pd.className = 'cand sel'; pd.style.cursor = 'default';
+        pd.innerHTML = `<span class="muted" style="flex:0 0 auto;font-weight:800">→</span>` + candInner(p);
+        prow.appendChild(pd); el.appendChild(prow);
+        const corr = document.createElement('div'); corr.className = 'hidden';
+        corr.innerHTML = `<div class="search"><input placeholder="Richtiges Produkt suchen (Name/Marke)…"/><button>Suchen</button></div><div class="cands sres"></div>`;
+        const inp = corr.querySelector('input'), sres = corr.querySelector('.sres');
+        const doSearch = async () => {
+          if (!inp.value.trim()) return; sres.innerHTML = '<div class="muted">Suche…</div>';
+          try { const r = await call('adminSearchProducts')({ query: inp.value.trim() }); sres.innerHTML = ''; (r.data.results || []).forEach((c) => { const d = document.createElement('div'); d.className = 'cand'; d.innerHTML = candInner(c); d.onclick = () => { selected = { productId: c.id, productSource: c.source }; [...sres.children].forEach((x) => x.classList.remove('sel')); d.classList.add('sel'); }; sres.appendChild(d); }); if (!sres.children.length) sres.innerHTML = '<div class="muted">Keine Treffer.</div>'; }
+          catch (e) { sres.innerHTML = `<div class="muted">Fehler: ${e.message}</div>`; }
+        };
+        corr.querySelector('button').onclick = doSearch; inp.onkeydown = (e) => { if (e.key === 'Enter') doSearch(); };
+        el.appendChild(corr);
+        const act = document.createElement('div'); act.className = 'actions';
+        act.appendChild(mkBtn('✎ Korrigieren', 'ghost', () => corr.classList.toggle('hidden')));
+        act.appendChild(mkBtn('✓ Neues Produkt übernehmen', 'primary', () => { if (!selected) return toast('Erst Produkt wählen'); correct(it, { ...selected, lineType: 'product' }, el); }));
+        act.appendChild(mkBtn('Falsch / kein Produkt', 'bad', () => correct(it, { productId: null, lineType: 'nonproduct' }, el)));
+        el.appendChild(act);
+        return el;
+      }
+      async function correct(it, payload, el) {
+        try { const r = await call('adminCorrectMatch')({ aliasId: it.aliasId, ...payload }); toast(`Aktualisiert · ${r.data.relinked} Bons rückwirkend`); el.remove(); state.data.matched = state.data.matched.filter((x) => x.aliasId !== it.aliasId); state.data.stats.matched = Math.max(0, (state.data.stats.matched || 1) - 1); render(); }
+        catch (e) { toast('Fehler: ' + e.message); }
+      }
       function mkBtn(label, cls, fn) { const b = document.createElement('button'); b.className = cls; b.textContent = label; b.onclick = fn; return b; }
       function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
     </script>

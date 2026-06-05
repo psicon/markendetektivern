@@ -210,3 +210,43 @@ exports.adminPromote = onCall({ region: REGION }, async (req) => {
   await ref.set({ status: 'promoted', productId, targetCol, resolvedBy: 'admin', resolvedAt: FieldValue.serverTimestamp() }, { merge: true });
   return { ok: true, productId, targetCol, relinked: rl.count, relinkError: rl.error || null };
 });
+
+// ─── Zugeordnet (Auto-Matches) anzeigen + korrigieren ────────────────
+// Alle gelockten Produkt-Aliase (= auto-/manuell-gematchte Bon-Strings) mit
+// aufgelöstem Produkt (Bild/Name/Marke). Zum Prüfen + Korrigieren der KI.
+exports.adminGetMatched = onCall({ region: REGION }, async (req) => {
+  assertAdmin(req);
+  const snap = await db.collection('receiptAliases').where('lineType', '==', 'product').limit(500).get();
+  const items = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((a) => a.productId);
+  items.sort((a, b) => (b.votes || 0) - (a.votes || 0));
+  const top = items.slice(0, 250);
+  const refs = top.map((a) => db.collection('productEmbeddings').doc(String(a.productId)));
+  const pe = refs.length ? await db.getAll(...refs) : [];
+  const peMap = {};
+  pe.forEach((d) => (peMap[d.id] = d.exists ? d.data() : {}));
+  const cands = top.map((a) => {
+    const x = peMap[String(a.productId)] || {};
+    return { id: String(a.productId), source: a.productSource || x.sourceCollection || null, name: x.name || null, type: x.type || null, brand: x.brand || null, handelsmarke: x.handelsmarke || null, size: x.size || null };
+  });
+  await enrichCandidates(cands);
+  return {
+    matched: top.map((a, i) => ({ aliasId: a.id, sampleName: a.sampleName || null, marktSlug: a.marktSlug || null, confidence: a.confidence ?? null, resolvedBy: a.resolvedBy || null, votes: a.votes || 0, product: cands[i] })),
+    total: items.length,
+  };
+});
+
+// Auto-Match korrigieren: Alias auf ein (anderes) Produkt setzen oder als
+// "kein Produkt" markieren + alle betroffenen Bons rückwirkend relinken.
+exports.adminCorrectMatch = onCall({ region: REGION }, async (req) => {
+  assertAdmin(req);
+  const { aliasId: aid, productId = null, productSource = null, lineType = null } = req.data || {};
+  if (!aid) throw new HttpsError('invalid-argument', 'aliasId fehlt');
+  const ref = db.collection('receiptAliases').doc(aid);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Alias nicht gefunden');
+  const a = snap.data();
+  const lt = lineType || (productId ? 'product' : 'nonproduct');
+  await ref.set({ productId: productId || null, productSource: productSource || null, lineType: lt, confidence: 1, resolvedBy: 'admin', lastSeen: FieldValue.serverTimestamp() }, { merge: true });
+  const rl = await relink(a.marktSlug, a.normKey, productId || null, productSource, { lineType: lt });
+  return { ok: true, relinked: rl.count, relinkError: rl.error || null };
+});
