@@ -397,7 +397,7 @@ async function fetchPersonalCandidates(userId) {
  * Gibt das Outcome-Objekt zurück (auch fürs Backlog-Benchmark ohne Writes via dryRun).
  */
 async function matchLine(ctx, opts = {}) {
-  const { itemName, marktSlug, priceCents = 0, userId = null, receiptId = null, ppRef = null } = ctx;
+  const { itemName, marktSlug, priceCents = 0, userId = null, receiptId = null, ppRef = null, merchantName = null, merchantLand = null } = ctx;
   const dryRun = !!opts.dryRun;
   const normKey = norm(itemName);
   const writePP = async (data) => {
@@ -509,7 +509,7 @@ async function matchLine(ctx, opts = {}) {
 
   // Tier-2 (reweapify) plausibel → Promotion-Queue (Mensch gibt frei, kein Auto-Katalog).
   if (cand && cand.tier === 2 && conf >= REVIEW_MIN) {
-    if (!dryRun) await enqueuePromotion({ reweapifyId: cand.id, name: cand.name, gtin: cand.gtin, kind: cand.type, marktSlug, normKey, sampleName: itemName, confidence: conf, ppId: ppRef && ppRef.id, userId, receiptId });
+    if (!dryRun) await enqueuePromotion({ reweapifyId: cand.id, name: cand.name, gtin: cand.gtin, kind: cand.type, marktSlug, normKey, sampleName: itemName, confidence: conf, ppId: ppRef && ppRef.id, userId, receiptId, merchantName, merchantLand });
     await writePP({ matchStatus: 'promotion_pending', reweapifyId: cand.id, lineType: 'product', matchConfidence: conf, matchSource: 'ai' });
     return { status: 'promotion_pending', tier: 2, reweapifyId: cand.id, confidence: conf };
   }
@@ -517,7 +517,7 @@ async function matchLine(ctx, opts = {}) {
   // Alles andere mit Kandidaten — Tier-1 unsicher ODER KI hat -1 / keinen klaren Treffer.
   // KI RÄT NICHT automatisch → Mensch entscheidet (Vorschlag + Confidence + Shortlist + Katalog-Suche).
   // (cands ist hier garantiert nicht leer — der no-candidates-Fall ist oben abgefangen.)
-  if (!dryRun) await enqueueReview({ marktSlug, normKey, sampleName: itemName, priceCents, bonSize: parseSize(itemName), candidates: cands.slice(0, 20), suggestionIdx: pick.candidateIdx, confidence: conf, ppId: ppRef && ppRef.id, userId, receiptId });
+  if (!dryRun) await enqueueReview({ marktSlug, normKey, sampleName: itemName, priceCents, bonSize: parseSize(itemName), candidates: cands.slice(0, 20), suggestionIdx: pick.candidateIdx, confidence: conf, ppId: ppRef && ppRef.id, userId, receiptId, merchantName, merchantLand });
   await writePP({ matchStatus: 'needs_review', lineType: 'product', matchConfidence: conf, matchSource: 'ai' });
   return { status: 'needs_review', confidence: conf, suggestion: cand };
 }
@@ -526,36 +526,48 @@ function writeReceiptMatch(m) {
   return db.collection('receiptMatches').add({ ...m, createdAt: FieldValue.serverTimestamp() });
 }
 
-function enqueueReview(r) {
+// Markt-Info für die Queue: echter Name + Land + Roh-Markttext (OCR, enthält
+// teils Filiale/Ort). Strukturierte Adresse existiert in den Daten nicht.
+async function marketInfo(receiptId, name, land) {
+  let raw = null;
+  if (receiptId) {
+    try {
+      const r = await db.collection('receipts').doc(receiptId).get();
+      if (r.exists) {
+        const m = r.data().merchant || {};
+        name = m.name || name;
+        land = m.land || land;
+        raw = m.raw || null;
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  return { name: name || null, land: land || null, raw: raw && raw !== name ? raw : null };
+}
+
+async function enqueueReview(r) {
+  const market = await marketInfo(r.receiptId, r.merchantName, r.merchantLand);
+  const { merchantName, merchantLand, ...rest } = r;
   // Dedupe per (Markt, normKey): EINE Review-Karte je unbekanntem String.
   return db
     .collection('receiptReviewQueue')
     .doc(aliasId(r.marktSlug, r.normKey))
     .set(
-      {
-        ...r,
-        status: 'open',
-        hitCount: FieldValue.increment(1),
-        updatedAt: FieldValue.serverTimestamp(),
-        createdAt: FieldValue.serverTimestamp(),
-      },
+      { ...rest, market, status: 'open', hitCount: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() },
       { merge: true },
     );
 }
 
-function enqueuePromotion(p) {
+async function enqueuePromotion(p) {
+  const market = await marketInfo(p.receiptId, p.merchantName, p.merchantLand);
+  const { merchantName, merchantLand, ...rest } = p;
   // Dedupe per reweapify-Produkt.
   return db
     .collection('promotionQueue')
     .doc(String(p.reweapifyId))
     .set(
-      {
-        ...p,
-        status: 'open',
-        hitCount: FieldValue.increment(1),
-        updatedAt: FieldValue.serverTimestamp(),
-        createdAt: FieldValue.serverTimestamp(),
-      },
+      { ...rest, market, status: 'open', hitCount: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() },
       { merge: true },
     );
 }

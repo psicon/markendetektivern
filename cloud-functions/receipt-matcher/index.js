@@ -404,6 +404,8 @@ exports.onPurchasedProductMatch = onDocumentCreated(
         userId: event.params.uid,
         receiptId: d.receiptId || null,
         ppRef: snap.ref,
+        merchantName: d.merchantName || null,
+        merchantLand: d.merchantLand || null,
       });
     } catch (e) {
       console.error('onPurchasedProductMatch failed', event.params, e);
@@ -433,7 +435,7 @@ exports.matchReceiptManual = onRequest(
           continue;
         }
         const r = await matcher.matchLine(
-          { itemName: d.itemName, marktSlug: d.merchantId, priceCents: d.priceCents || 0, userId: uid, receiptId: d.receiptId || null, ppRef: doc.ref },
+          { itemName: d.itemName, marktSlug: d.merchantId, priceCents: d.priceCents || 0, userId: uid, receiptId: d.receiptId || null, ppRef: doc.ref, merchantName: d.merchantName || null, merchantLand: d.merchantLand || null },
           { ignoreAlias: force },
         );
         tally[r.status] = (tally[r.status] || 0) + 1;
@@ -470,7 +472,7 @@ exports.matchBacklogManual = onRequest(
         }
         const uid = doc.ref.path.split('/')[1];
         const r = await matcher.matchLine(
-          { itemName: d.itemName, marktSlug: d.merchantId, priceCents: d.priceCents || 0, userId: uid, receiptId: d.receiptId || null, ppRef: doc.ref },
+          { itemName: d.itemName, marktSlug: d.merchantId, priceCents: d.priceCents || 0, userId: uid, receiptId: d.receiptId || null, ppRef: doc.ref, merchantName: d.merchantName || null, merchantLand: d.merchantLand || null },
           { dryRun, ignoreAlias: force || dryRun, noClose: true }, // Backlog: NIE retroaktiv Warenkörbe schließen
         );
         tally[r.status] = (tally[r.status] || 0) + 1;
