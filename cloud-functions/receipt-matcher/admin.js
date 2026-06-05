@@ -126,6 +126,53 @@ async function resolveSelection(productId, productSource) {
   return { productId: productId || null, productSource: productSource || null, promoted: false };
 }
 
+// Discounter-Map (norm(name) → {name,land}) zum Auflösen des genauen Markts.
+let _discMap = null;
+async function discMap() {
+  if (_discMap) return _discMap;
+  const m = {};
+  const s = await db.collection('discounter').get();
+  s.forEach((d) => {
+    const x = d.data();
+    m[norm(x.name)] = { name: x.name || null, land: x.land || null };
+  });
+  _discMap = m;
+  return _discMap;
+}
+function resolveMarket(marktSlug, bonMarket, dm) {
+  if (bonMarket && bonMarket.name) return { name: bonMarket.name, land: bonMarket.land || null, raw: bonMarket.raw || null };
+  const r = (dm && dm[norm(marktSlug)]) || {};
+  return { name: r.name || marktSlug || null, land: r.land || null, raw: (bonMarket && bonMarket.raw) || null };
+}
+
+// EANs mehrerer "Duplikat"-Produkte ins Hauptprodukt mergen (arrayUnion). Die
+// Duplikate werden mit mergedInto markiert. reweapify-Quellen liefern ihre gtin.
+async function mergeEansIntoMain(mainSource, mainId, mergeList) {
+  if (!mainSource || !mainId || !Array.isArray(mergeList) || !mergeList.length) return 0;
+  const eans = [];
+  for (const mp of mergeList) {
+    if (!mp || !mp.id || !mp.source || (String(mp.id) === String(mainId) && mp.source === mainSource)) continue;
+    try {
+      const d = await db.collection(mp.source).doc(String(mp.id)).get();
+      if (!d.exists) continue;
+      const x = d.data();
+      if (mp.source === 'reweapify') {
+        if (x.gtin) eans.push(String(x.gtin));
+      } else if (Array.isArray(x.EANs)) {
+        eans.push(...x.EANs.map(String));
+        await d.ref.set({ mergedInto: String(mainId), mergedAt: FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
+      } else if (x.gtin) {
+        eans.push(String(x.gtin));
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  const uniq = [...new Set(eans)].filter(Boolean);
+  if (uniq.length) await db.collection(mainSource).doc(String(mainId)).set({ EANs: FieldValue.arrayUnion(...uniq) }, { merge: true });
+  return uniq.length;
+}
+
 exports.adminGetQueue = onCall({ region: REGION }, async (req) => {
   assertAdmin(req);
   const [rev, promo, aliasCnt] = await Promise.all([
@@ -136,6 +183,10 @@ exports.adminGetQueue = onCall({ region: REGION }, async (req) => {
   const byHits = (a, b) => (b.hitCount || 0) - (a.hitCount || 0);
   const review = rev.docs.map((d) => ({ id: d.id, ...d.data(), createdAt: null, updatedAt: null })).sort(byHits);
   const promotion = promo.docs.map((d) => ({ id: d.id, ...d.data(), createdAt: null, updatedAt: null })).sort(byHits);
+
+  const dm = await discMap();
+  review.forEach((r) => (r.market = resolveMarket(r.marktSlug, r.market, dm)));
+  promotion.forEach((p) => (p.market = resolveMarket(p.marktSlug, p.market, dm)));
 
   // Review-Kandidaten mit Bild + Marke/Handelsmarke anreichern (in-place).
   await enrichCandidates(review.flatMap((r) => r.candidates || []));
@@ -162,7 +213,7 @@ exports.adminGetQueue = onCall({ region: REGION }, async (req) => {
 
 exports.adminResolveReview = onCall({ region: REGION }, async (req) => {
   assertAdmin(req);
-  const { reviewId, productId = null, productSource = null, lineType = null } = req.data || {};
+  const { reviewId, productId = null, productSource = null, lineType = null, mergeEanFrom = [] } = req.data || {};
   if (!reviewId) throw new HttpsError('invalid-argument', 'reviewId fehlt');
   const ref = db.collection('receiptReviewQueue').doc(reviewId);
   const snap = await ref.get();
@@ -189,8 +240,9 @@ exports.adminResolveReview = onCall({ region: REGION }, async (req) => {
       { merge: true },
     );
   const rl = await relink(r.marktSlug, r.normKey, sel.productId, sel.productSource, { lineType: lt });
+  const mergedEans = sel.productId ? await mergeEansIntoMain(sel.productSource, sel.productId, mergeEanFrom) : 0;
   await ref.set({ status: 'resolved', resolvedBy: 'admin', resolvedProductId: sel.productId, resolvedLineType: lt, resolvedAt: FieldValue.serverTimestamp() }, { merge: true });
-  return { ok: true, relinked: rl.count, relinkError: rl.error || null, promoted: sel.promoted };
+  return { ok: true, relinked: rl.count, relinkError: rl.error || null, promoted: sel.promoted, mergedEans };
 });
 
 exports.adminPromote = onCall({ region: REGION }, async (req) => {
@@ -251,8 +303,9 @@ exports.adminGetMatched = onCall({ region: REGION }, async (req) => {
     return { id: String(a.productId), source: a.productSource || x.sourceCollection || null, name: x.name || null, type: x.type || null, brand: x.brand || null, handelsmarke: x.handelsmarke || null, size: x.size || null, preis: x.preis ?? null, manufacturer: x.manufacturer || null, gtin: x.gtin || null };
   });
   await enrichCandidates(cands);
+  const dm = await discMap();
   return {
-    matched: top.map((a, i) => ({ aliasId: a.id, sampleName: a.sampleName || null, marktSlug: a.marktSlug || null, confidence: a.confidence ?? null, resolvedBy: a.resolvedBy || null, votes: a.votes || 0, bon: a.bon || null, product: cands[i] })),
+    matched: top.map((a, i) => ({ aliasId: a.id, sampleName: a.sampleName || null, marktSlug: a.marktSlug || null, market: resolveMarket(a.marktSlug, a.bon && a.bon.market, dm), confidence: a.confidence ?? null, resolvedBy: a.resolvedBy || null, votes: a.votes || 0, bon: a.bon || null, product: cands[i] })),
     total: items.length,
   };
 });
@@ -261,7 +314,7 @@ exports.adminGetMatched = onCall({ region: REGION }, async (req) => {
 // "kein Produkt" markieren + alle betroffenen Bons rückwirkend relinken.
 exports.adminCorrectMatch = onCall({ region: REGION }, async (req) => {
   assertAdmin(req);
-  const { aliasId: aid, productId = null, productSource = null, lineType = null } = req.data || {};
+  const { aliasId: aid, productId = null, productSource = null, lineType = null, mergeEanFrom = [] } = req.data || {};
   if (!aid) throw new HttpsError('invalid-argument', 'aliasId fehlt');
   const ref = db.collection('receiptAliases').doc(aid);
   const snap = await ref.get();
@@ -271,5 +324,6 @@ exports.adminCorrectMatch = onCall({ region: REGION }, async (req) => {
   const lt = lineType || (sel.productId ? 'product' : 'nonproduct');
   await ref.set({ productId: sel.productId, productSource: sel.productSource, lineType: lt, confidence: 1, resolvedBy: 'admin', lastSeen: FieldValue.serverTimestamp() }, { merge: true });
   const rl = await relink(a.marktSlug, a.normKey, sel.productId, sel.productSource, { lineType: lt });
-  return { ok: true, relinked: rl.count, relinkError: rl.error || null, promoted: sel.promoted };
+  const mergedEans = sel.productId ? await mergeEansIntoMain(sel.productSource, sel.productId, mergeEanFrom) : 0;
+  return { ok: true, relinked: rl.count, relinkError: rl.error || null, promoted: sel.promoted, mergedEans };
 });

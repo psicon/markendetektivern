@@ -50,6 +50,12 @@
       .kv { display: grid; grid-template-columns: 150px 1fr; gap: 4px 10px; font-size: 13px; }
       .kv .k { color: var(--muted); } .kv .v { color: var(--text); word-break: break-word; }
       .hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+      .filterpills { display: flex; gap: 6px; margin-top: 8px; }
+      .fp { font-size: 12px; padding: 4px 11px; border-radius: 8px; border: 1px solid var(--line); color: var(--muted); cursor: pointer; }
+      .fp.active { background: var(--card2); color: var(--text); border-color: var(--brand); font-weight: 700; }
+      .eanbtn { font-size: 11px; padding: 4px 9px; border-radius: 7px; border: 1px solid var(--line); background: transparent; color: var(--muted); flex: 0 0 auto; cursor: pointer; }
+      .eanbtn.on { color: var(--brand2); border-color: var(--brand2); background: rgba(20,184,166,.1); }
+      .mergeinfo { font-size: 12px; margin-top: 8px; }
       .badge { font-size: 10px; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
       .badge.t1 { color: var(--good); border-color: var(--good); }
       .badge.t2 { color: #b9aef0; border-color: var(--tier2); }
@@ -229,38 +235,18 @@
           marketRaw(it);
         const hasSuggest = it.suggestionIdx != null && it.suggestionIdx >= 0;
         if (!hasSuggest) { const w = document.createElement('div'); w.className = 'noSuggest'; w.textContent = '⚠ KI: kein sicherer Treffer — bitte manuell zuordnen oder „Kein Produkt".'; el.appendChild(w); }
+        const picker = searchPicker();
         const list = document.createElement('div'); list.className = 'cands';
         cands.forEach((c, i) => {
           const d = document.createElement('div');
           d.className = 'cand' + (hasSuggest && i === it.suggestionIdx ? ' suggest' : '');
-          d.innerHTML = candInner(c);
-          d.onclick = () => { selected = { productId: c.id, productSource: c.source }; [...list.children, ...search.querySelectorAll('.cand')].forEach((x) => x.classList.remove('sel')); d.classList.add('sel'); };
+          d.innerHTML = candInner(c) + `<button class="eanbtn">+EAN</button>`;
+          d.querySelector('.eanbtn').onclick = (e) => { e.stopPropagation(); const m = picker.getMerge(); const has = m.some((x) => x.id === c.id); picker.setMerge(c, !has); d.querySelector('.eanbtn').classList.toggle('on', !has); };
+          d.onclick = () => { picker.setMain({ productId: c.id, productSource: c.source, name: c.name }); [...list.children].forEach((x) => x.classList.remove('sel')); d.classList.add('sel'); };
           list.appendChild(d);
         });
         el.appendChild(list);
-
-        const search = document.createElement('div');
-        search.innerHTML = `<div class="search"><input placeholder="Katalog durchsuchen (anderes Produkt)…"/><button>Suchen</button></div><div class="cands sres"></div>`;
-        const inp = search.querySelector('input'); const sres = search.querySelector('.sres');
-        const doSearch = async () => {
-          if (!inp.value.trim()) return;
-          sres.innerHTML = '<div class="muted">Suche…</div>';
-          try {
-            const r = await call('adminSearchProducts')({ query: inp.value.trim() });
-            sres.innerHTML = '';
-            (r.data.results || []).forEach((c) => {
-              const d = document.createElement('div'); d.className = 'cand';
-              d.innerHTML = candInner(c);
-              d.onclick = () => { selected = { productId: c.id, productSource: c.source }; [...list.children, ...sres.children].forEach((x) => x.classList.remove('sel')); d.classList.add('sel'); };
-              sres.appendChild(d);
-            });
-            if (!sres.children.length) sres.innerHTML = '<div class="muted">Keine Treffer.</div>';
-          } catch (e) { sres.innerHTML = `<div class="muted">Fehler: ${e.message}</div>`; }
-        };
-        search.querySelector('button').onclick = doSearch;
-        inp.onkeydown = (e) => { if (e.key === 'Enter') doSearch(); };
-        search.insertAdjacentHTML('beforeend', '<div class="hint">reweapify-Treffer werden beim Zuordnen automatisch in den Katalog angelegt (Marke/Eigenmarke getrennt).</div>');
-        el.appendChild(search);
+        el.appendChild(picker.el);
 
         detailsToggle(el, 'Details', kv([
           ['Bon-Zeile', it.sampleName], ['Markt', marketLabelPlain(it)], ['Filiale', (it.market || {}).raw],
@@ -271,8 +257,9 @@
 
         const act = document.createElement('div'); act.className = 'actions';
         const assign = mkBtn('✓ Zuordnen', 'primary', async () => {
-          if (!selected) return toast('Erst einen Kandidaten wählen');
-          await resolve(it, { ...selected, lineType: 'product' }, el);
+          const main = picker.getMain();
+          if (!main) return toast('Erst ein Hauptprodukt wählen (Kandidat anklicken oder suchen)');
+          await resolve(it, { productId: main.productId, productSource: main.productSource, lineType: 'product', mergeEanFrom: picker.getMerge() }, el);
         });
         act.appendChild(assign);
         act.appendChild(mkBtn('Kein Produkt', 'ghost', () => resolve(it, { productId: null, lineType: 'nonproduct' }, el)));
@@ -284,7 +271,7 @@
       async function resolve(it, payload, el) {
         try {
           const r = await call('adminResolveReview')({ reviewId: it.id, ...payload });
-          toast(`Gespeichert · ${r.data.relinked} Bons rückwirkend verknüpft`);
+          toast(`Gespeichert · ${r.data.relinked} Bons${r.data.promoted ? ' · Produkt angelegt' : ''}${r.data.mergedEans ? ` · ${r.data.mergedEans} EAN(s) ergänzt` : ''}`);
           el.remove(); state.data.review = state.data.review.filter((x) => x.id !== it.id);
           state.data.stats.openReview = Math.max(0, (state.data.stats.openReview || 1) - 1); render();
         } catch (e) { toast('Fehler: ' + e.message); }
@@ -327,29 +314,23 @@
         const byWho = rb.startsWith('admin') ? '👤 Mensch' : rb === 'alias' ? '↻ Lexikon' : rb === 'rule' ? 'Regel' : '🤖 KI';
         el.innerHTML =
           `<div class="row"><span class="title">${esc(it.sampleName || '')}</span>` +
-          `<span class="chip" title="Markt">🏬 ${esc(it.marktSlug || '?')}</span>` +
+          `<span class="chip" title="Markt">🏬 ${marketLabel(it)}</span>` +
           (it.confidence != null ? `<span class="chip conf">${Math.round(it.confidence * 100)}%</span>` : '') +
           `<span class="chip">${byWho}</span>` +
           `<span class="chip hits">${it.votes || 1}×</span>` +
-          `</div>`;
+          `</div>` +
+          marketRaw(it);
         const prow = document.createElement('div'); prow.className = 'cands';
         const pd = document.createElement('div'); pd.className = 'cand sel'; pd.style.cursor = 'default';
         pd.innerHTML = `<span class="muted" style="flex:0 0 auto;font-weight:800">→</span>` + candInner(p);
         prow.appendChild(pd); el.appendChild(prow);
+        const picker = searchPicker();
         const corr = document.createElement('div'); corr.className = 'hidden';
-        corr.innerHTML = `<div class="search"><input placeholder="Richtiges Produkt suchen (Name/Marke)…"/><button>Suchen</button></div><div class="cands sres"></div>`;
-        const inp = corr.querySelector('input'), sres = corr.querySelector('.sres');
-        const doSearch = async () => {
-          if (!inp.value.trim()) return; sres.innerHTML = '<div class="muted">Suche…</div>';
-          try { const r = await call('adminSearchProducts')({ query: inp.value.trim() }); sres.innerHTML = ''; (r.data.results || []).forEach((c) => { const d = document.createElement('div'); d.className = 'cand'; d.innerHTML = candInner(c); d.onclick = () => { selected = { productId: c.id, productSource: c.source }; [...sres.children].forEach((x) => x.classList.remove('sel')); d.classList.add('sel'); }; sres.appendChild(d); }); if (!sres.children.length) sres.innerHTML = '<div class="muted">Keine Treffer.</div>'; }
-          catch (e) { sres.innerHTML = `<div class="muted">Fehler: ${e.message}</div>`; }
-        };
-        corr.querySelector('button').onclick = doSearch; inp.onkeydown = (e) => { if (e.key === 'Enter') doSearch(); };
-        corr.insertAdjacentHTML('beforeend', '<div class="hint">reweapify-Treffer werden beim Übernehmen automatisch in den Katalog angelegt (Marke/Eigenmarke getrennt).</div>');
+        corr.appendChild(picker.el);
         el.appendChild(corr);
         const b = it.bon || {};
         detailsToggle(el, 'Details', kv([
-          ['Bon-Zeile', it.sampleName], ['Markt', (b.market && b.market.name) || it.marktSlug], ['Filiale', b.market && b.market.raw],
+          ['Bon-Zeile', it.sampleName], ['Markt', marketLabelPlain(it)], ['Filiale', (it.market || {}).raw],
           ['Bon-Preis', b.priceCents != null ? euro(b.priceCents) : null], ['Bon-Größe', b.bonSize], ['Bon-Datum', fmtDate(b.bonDate)],
           ['Produkt', p.name], ['Marke/Handelsmarke', p.handelsmarke || p.brand], ['Hersteller', p.manufacturer], ['Größe', p.size],
           ['Katalog-Preis', p.preis != null ? Number(p.preis).toFixed(2).replace('.', ',') + ' €' : null], ['EAN', p.gtin],
@@ -358,14 +339,49 @@
         ]));
         const act = document.createElement('div'); act.className = 'actions';
         act.appendChild(mkBtn('✎ Korrigieren', 'ghost', () => corr.classList.toggle('hidden')));
-        act.appendChild(mkBtn('✓ Neues Produkt übernehmen', 'primary', () => { if (!selected) return toast('Erst Produkt wählen'); correct(it, { ...selected, lineType: 'product' }, el); }));
+        act.appendChild(mkBtn('✓ Neues Produkt übernehmen', 'primary', () => { const m = picker.getMain(); if (!m) return toast('Erst ein Hauptprodukt suchen + wählen'); correct(it, { productId: m.productId, productSource: m.productSource, lineType: 'product', mergeEanFrom: picker.getMerge() }, el); }));
         act.appendChild(mkBtn('Falsch / kein Produkt', 'bad', () => correct(it, { productId: null, lineType: 'nonproduct' }, el)));
         el.appendChild(act);
         return el;
       }
       async function correct(it, payload, el) {
-        try { const r = await call('adminCorrectMatch')({ aliasId: it.aliasId, ...payload }); toast(`Aktualisiert · ${r.data.relinked} Bons rückwirkend`); el.remove(); state.data.matched = state.data.matched.filter((x) => x.aliasId !== it.aliasId); state.data.stats.matched = Math.max(0, (state.data.stats.matched || 1) - 1); render(); }
+        try { const r = await call('adminCorrectMatch')({ aliasId: it.aliasId, ...payload }); toast(`Aktualisiert · ${r.data.relinked} Bons${r.data.promoted ? ' · Produkt angelegt' : ''}${r.data.mergedEans ? ` · ${r.data.mergedEans} EAN(s) ergänzt` : ''}`); el.remove(); state.data.matched = state.data.matched.filter((x) => x.aliasId !== it.aliasId); state.data.stats.matched = Math.max(0, (state.data.stats.matched || 1) - 1); render(); }
         catch (e) { toast('Fehler: ' + e.message); }
+      }
+      // Gemeinsamer Such-Picker: Filter (Alle/NoName/Marke) · Klick = Hauptprodukt ·
+      // „+EAN" = nur EAN(s) eines Duplikats zum Hauptprodukt mergen.
+      function searchPicker() {
+        let main = null; const merge = new Map(); let results = []; let filter = 'all';
+        const el = document.createElement('div');
+        el.innerHTML =
+          `<div class="search"><input placeholder="Richtiges Produkt suchen (Name/Marke)…"/><button>Suchen</button></div>` +
+          `<div class="filterpills"><span class="fp active" data-f="all">Alle</span><span class="fp" data-f="noname">NoName</span><span class="fp" data-f="marke">Marke</span></div>` +
+          `<div class="hint">reweapify-Treffer werden beim Zuordnen automatisch angelegt (Marke→markenProdukte, Eigenmarke→produkte). „+EAN" fügt nur die EAN(s) eines Duplikats zum Hauptprodukt hinzu.</div>` +
+          `<div class="cands sres"></div><div class="mergeinfo"></div>`;
+        const inp = el.querySelector('input'), sres = el.querySelector('.sres'), info = el.querySelector('.mergeinfo');
+        const renderInfo = () => {
+          const m = [...merge.values()];
+          info.innerHTML = (main ? `Hauptprodukt: <b>${esc(main.name || '?')}</b>` : '<span style="color:var(--warn)">Noch kein Hauptprodukt gewählt</span>') + (m.length ? ` · <span class="muted">+EAN von:</span> ${m.map((x) => esc(x.name || '?')).join(', ')}` : '');
+        };
+        const renderResults = () => {
+          sres.innerHTML = '';
+          const list = results.filter((c) => filter === 'all' || (filter === 'noname' ? c.type === 'noname' : c.type !== 'noname'));
+          if (!list.length) { sres.innerHTML = '<div class="muted">Keine Treffer.</div>'; return; }
+          list.forEach((c) => {
+            const row = document.createElement('div'); row.className = 'cand';
+            if (main && main.productId === c.id) row.classList.add('sel');
+            row.innerHTML = candInner(c) + `<button class="eanbtn${merge.has(c.id) ? ' on' : ''}">+EAN</button>`;
+            row.querySelector('.eanbtn').onclick = (e) => { e.stopPropagation(); merge.has(c.id) ? merge.delete(c.id) : merge.set(c.id, { id: c.id, source: c.source, name: c.name }); renderResults(); renderInfo(); };
+            row.onclick = () => { main = { productId: c.id, productSource: c.source, name: c.name }; renderResults(); renderInfo(); };
+            sres.appendChild(row);
+          });
+        };
+        const doSearch = async () => { if (!inp.value.trim()) return; sres.innerHTML = '<div class="muted">Suche…</div>'; try { const r = await call('adminSearchProducts')({ query: inp.value.trim() }); results = r.data.results || []; renderResults(); } catch (e) { sres.innerHTML = `<div class="muted">Fehler: ${e.message}</div>`; } };
+        el.querySelector('button').onclick = doSearch;
+        inp.onkeydown = (e) => { if (e.key === 'Enter') doSearch(); };
+        el.querySelectorAll('.fp').forEach((p) => (p.onclick = () => { filter = p.dataset.f; el.querySelectorAll('.fp').forEach((x) => x.classList.toggle('active', x === p)); renderResults(); }));
+        renderInfo();
+        return { el, getMain: () => main, getMerge: () => [...merge.values()], setMain: (m) => { main = m; renderResults(); renderInfo(); }, setMerge: (c, on) => { on ? merge.set(c.id, { id: c.id, source: c.source, name: c.name }) : merge.delete(c.id); renderResults(); renderInfo(); } };
       }
       function mkBtn(label, cls, fn) { const b = document.createElement('button'); b.className = cls; b.textContent = label; b.onclick = fn; return b; }
       function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
