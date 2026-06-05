@@ -31,8 +31,8 @@ const EMB_DIM = 768;
 const PICK_MODEL = 'gemini-3.5-flash';
 const MATCH_VERSION = 1; // Bump → erzwingt Re-Match (Idempotenz-Gate)
 
-const NONAME_K = 12;
-const MARKE_K = 8;
+const NONAME_K = 16;
+const MARKE_K = 10;
 const AUTO_LOCK = 0.9; // ≥ → automatisch locken (Tier-1) bzw. Promotion (Tier-2)
 const REVIEW_MIN = 0.7; // [REVIEW_MIN, AUTO_LOCK) → Mensch-Review
 
@@ -117,70 +117,81 @@ async function embedQuery(text) {
   return null;
 }
 
-// Slug → discounter-DocId Bridge (einmal pro warmer Instanz gecacht).
+// Discounter-Cache (einmal pro warmer Instanz): id → { name, land, nn }.
 let _discCache = null;
-async function discounterIdForSlug(slug) {
-  if (!_discCache) {
-    _discCache = {};
-    const ds = await db.collection('discounter').get();
-    ds.forEach((d) => {
-      _discCache[d.id] = norm(d.data().name || '');
-    });
-  }
-  const s = norm(slug);
-  if (!s) return null;
-  // exakter/teilweiser Namensabgleich
-  for (const [id, nn] of Object.entries(_discCache)) {
-    if (nn && (nn === s || nn.includes(s) || s.includes(nn))) return id;
-  }
-  return null;
+async function ensureDiscounters() {
+  if (_discCache) return _discCache;
+  const byId = {};
+  const ds = await db.collection('discounter').get();
+  ds.forEach((d) => {
+    const x = d.data();
+    byId[d.id] = { name: x.name || null, land: x.land || null, nn: norm(x.name) };
+  });
+  _discCache = { byId };
+  return _discCache;
 }
 
-/** findNearest Shortlist: NoName@Markt ∪ alle Marken (Tier-1 + Tier-2 gemischt). */
-async function shortlist(queryVec, discounterId) {
+/**
+ * ALLE discounter-IDs zum Slug — ein Markt kann mehrfach existieren (z.B. LiDL
+ * DE + AT). Land-Match wird vorgezogen, damit der Markt-Bonus die richtige
+ * Filiale bevorzugt. Wird NICHT mehr als harter Filter genutzt (nur Bonus).
+ */
+async function discounterIdsForSlug(slug, land) {
+  const c = await ensureDiscounters();
+  const s = norm(slug);
+  if (!s) return [];
+  const matches = Object.entries(c.byId)
+    .filter(([, v]) => v.nn && (v.nn === s || v.nn.includes(s) || s.includes(v.nn)))
+    .map(([id, v]) => ({ id, land: v.land }));
+  if (land) matches.sort((a, b) => (b.land === land ? 1 : 0) - (a.land === land ? 1 : 0));
+  return matches.map((m) => m.id);
+}
+
+/**
+ * findNearest Shortlist — MARKT-AGNOSTISCH (kein harter Markt-Filter mehr, der
+ * an falscher Discounter-ID-Auflösung scheiterte). Sucht das semantisch beste
+ * NoName + Marke über den GANZEN Katalog; der Markt wird als Signal mitgegeben
+ * (market-Name) und gleicher Markt bekommt einen Ranking-Bonus. So wird das
+ * echte Produkt immer gefunden (wie eine Volltextsuche), die KI verfeinert.
+ */
+async function shortlist(queryVec, bonMarketIds) {
+  const c = await ensureDiscounters();
   const qv = FieldValue.vector(queryVec);
   const col = db.collection('productEmbeddings');
-  const tasks = [];
-  if (discounterId) {
-    tasks.push(
-      col
-        .where('type', '==', 'noname')
-        .where('discounterId', '==', discounterId)
-        .findNearest({ vectorField: 'vector', queryVector: qv, limit: NONAME_K, distanceMeasure: 'COSINE', distanceResultField: '_dist' })
-        .get(),
-    );
-  }
-  tasks.push(
-    col
-      .where('type', '==', 'marke')
-      .findNearest({ vectorField: 'vector', queryVector: qv, limit: MARKE_K, distanceMeasure: 'COSINE', distanceResultField: '_dist' })
-      .get(),
-  );
-  const snaps = await Promise.all(tasks);
+  const [nn, mk] = await Promise.all([
+    col.where('type', '==', 'noname').findNearest({ vectorField: 'vector', queryVector: qv, limit: NONAME_K, distanceMeasure: 'COSINE', distanceResultField: '_dist' }).get(),
+    col.where('type', '==', 'marke').findNearest({ vectorField: 'vector', queryVector: qv, limit: MARKE_K, distanceMeasure: 'COSINE', distanceResultField: '_dist' }).get(),
+  ]);
+  const marketSet = new Set(bonMarketIds || []);
   const out = [];
-  for (const snap of snaps) {
+  const collect = (snap) =>
     snap.forEach((doc) => {
       const x = doc.data();
+      const sameMarket = !!(x.discounterId && marketSet.has(x.discounterId));
       out.push({
         id: doc.id, // = produkte/markenProdukte/reweapify DocId
         name: x.name,
         type: x.type,
-        source: x.sourceCollection, // 'produkte' | 'markenProdukte' | 'reweapify'
+        source: x.sourceCollection,
         tier: x.sourceCollection === 'reweapify' ? 2 : 1,
         preis: x.preis,
         gtin: x.gtin || null,
-        brand: x.brand || null, // Marke (markenProdukte) bzw. Handelsmarke (produkte/NoName)
-        handelsmarke: x.handelsmarke || null, // Eigenmarke-Name (nur NoName)
+        brand: x.brand || null,
+        handelsmarke: x.handelsmarke || null,
         size: x.size || null,
-        dist: x._dist,
+        discounterId: x.discounterId || null,
+        market: x.discounterId && c.byId[x.discounterId] ? c.byId[x.discounterId].name : null,
+        sameMarket,
+        dist: x._dist, // ROH (für Match-%-Anzeige)
       });
     });
-  }
-  // beste (kleinste Distanz) zuerst, dedupe per id
+  collect(nn);
+  collect(mk);
+  // Ranking: nach Distanz, gleicher Markt mit Bonus (×0.9). Anzeige-dist bleibt roh.
   const seen = new Set();
   return out
-    .sort((a, b) => (a.dist ?? 9) - (b.dist ?? 9))
-    .filter((c) => (seen.has(c.id) ? false : seen.add(c.id)))
+    .sort((a, b) => (a.dist ?? 9) * (a.sameMarket ? 0.9 : 1) - (b.dist ?? 9) * (b.sameMarket ? 0.9 : 1))
+    .filter((x) => (seen.has(x.id) ? false : seen.add(x.id)))
     .slice(0, NONAME_K + MARKE_K);
 }
 
@@ -189,7 +200,7 @@ const PICK_SYS = `Du bist Experte für deutsche/österreichische Kassenbons. Ord
 ZUORDNEN HOLISTISCH über ALLE Signale gemeinsam — nicht über ein einzelnes Kriterium:
 - Produktname/Sorte (Hauptsignal)
 - Marke bzw. Handelsmarke (s.u.)
-- Markt (eine EDEKA-Eigenmarke gibt es nicht bei Lidl)
+- Markt: Jeder Kandidat zeigt seinen Markt; „✓(gleicher Markt wie Bon)" = im selben Markt verkauft. Eine Eigenmarke/NoName (Milbona, G&G, chef select…) gibt es NUR im eigenen Markt → bei Eigenmarken-/NoName-Bon-Zeilen einen ✓-Kandidaten STARK bevorzugen. Bei echten Marken ist der Markt unwichtig (gibt es überall).
 - Preis (grob plausibel; Aktionspreise weichen ab)
 - Größe/Menge (z.B. 0,33l ≠ 1l, 140g ≠ 425g) — wenn angegeben, als Bestätigung nutzen, nicht als K.o. bei kleinen Abweichungen
 - ★-Anker (Einkaufszettel/zuletzt gekauft, s.u.)
@@ -233,7 +244,8 @@ async function geminiPick(itemName, marktSlug, priceCents, cands, bonSize) {
     cands
       .map((c, i) => {
         const brand = c.handelsmarke ? `Handelsmarke: ${c.handelsmarke}` : c.brand ? `Marke: ${c.brand}` : '';
-        return `[${i}] ${c.name} | ${c.type === 'noname' ? 'NoName' : 'Marke'}${brand ? ' · ' + brand : ''}${c.size ? ' · ' + c.size : ''}${c.preis != null ? ` · ${Number(c.preis).toFixed(2)}€` : ''}${c.tier === 2 ? ' · (reweapify)' : ''}${c.personal ? ` ★[${c.reason}]` : ''}`;
+        const market = c.market ? ` · Markt: ${c.market}${c.sameMarket ? ' ✓(gleicher Markt wie Bon)' : ''}` : '';
+        return `[${i}] ${c.name} | ${c.type === 'noname' ? 'NoName' : 'Marke'}${brand ? ' · ' + brand : ''}${c.size ? ' · ' + c.size : ''}${c.preis != null ? ` · ${Number(c.preis).toFixed(2)}€` : ''}${market}${c.tier === 2 ? ' · (reweapify)' : ''}${c.personal ? ` ★[${c.reason}]` : ''}`;
       })
       .join('\n');
   const r = await ai().models.generateContent({
@@ -376,6 +388,7 @@ async function fetchPersonalCandidates(userId) {
 
   let cands = [];
   if (ids.size) {
+    const dc = await ensureDiscounters();
     const refs = [...ids].map((id) => db.collection('productEmbeddings').doc(String(id)));
     const docs = await db.getAll(...refs).catch(() => []);
     cands = docs
@@ -384,7 +397,7 @@ async function fetchPersonalCandidates(userId) {
         const x = d.data();
         const vv = x.vector;
         const _vec = vv && typeof vv.toArray === 'function' ? vv.toArray() : Array.isArray(vv) ? vv : null;
-        return { id: d.id, name: x.name, type: x.type, source: x.sourceCollection, preis: x.preis, brand: x.brand || null, handelsmarke: x.handelsmarke || null, size: x.size || null, tier: x.sourceCollection === 'reweapify' ? 2 : 1, personal: true, reason: reason[d.id] || 'persönlich', _vec };
+        return { id: d.id, name: x.name, type: x.type, source: x.sourceCollection, preis: x.preis, brand: x.brand || null, handelsmarke: x.handelsmarke || null, size: x.size || null, discounterId: x.discounterId || null, market: x.discounterId && dc.byId[x.discounterId] ? dc.byId[x.discounterId].name : null, tier: x.sourceCollection === 'reweapify' ? 2 : 1, personal: true, reason: reason[d.id] || 'persönlich', _vec };
       });
   }
   _personalCache.set(userId, { cands, ts: Date.now() });
@@ -442,14 +455,14 @@ async function matchLine(ctx, opts = {}) {
     }
   }
 
-  // 3) Embedding + Shortlist
-  const discounterId = await discounterIdForSlug(marktSlug);
+  // 3) Embedding + Shortlist (markt-agnostisch; Markt nur als Bonus/Signal)
+  const bonMarketIds = await discounterIdsForSlug(marktSlug, merchantLand);
   const qv = await embedQuery(itemName);
   if (!qv) {
     await writePP({ matchStatus: 'error', matchError: 'embed-failed' });
     return { status: 'error', reason: 'embed-failed' };
   }
-  const catalogCands = await shortlist(qv, discounterId);
+  const catalogCands = await shortlist(qv, bonMarketIds);
   // Persönlicher Anker: Einkaufszettel/kürzliche Käufe nach ECHTER Ähnlichkeit zur
   // Bon-Zeile scoren (Cosine) + moderaten Bonus geben — NICHT blind vornanstellen.
   // So steigt nur ein WIRKLICH passendes Zettel-Item auf; irrelevante sinken unter
@@ -601,4 +614,4 @@ async function enrichCandidates(cands) {
   return cands;
 }
 
-module.exports = { matchLine, norm, aliasId, parseSize, embedQuery, shortlist, enrichCandidates, discounterIdForSlug, MATCH_VERSION };
+module.exports = { matchLine, norm, aliasId, parseSize, embedQuery, shortlist, enrichCandidates, discounterIdsForSlug, MATCH_VERSION };

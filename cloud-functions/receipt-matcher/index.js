@@ -501,7 +501,7 @@ exports.adminSearchProducts = onCall({ ...COMMON }, async (req) => {
   if (!q) return { results: [] };
   // Semantisch (Name) via Embedding + zusätzlich Marke/Handelsmarke per Prefix.
   const qv = await matcher.embedQuery(q);
-  const sem = qv ? (await matcher.shortlist(qv, (req.data && req.data.discounterId) || null)).filter((c) => c.tier === 1) : [];
+  const sem = qv ? (await matcher.shortlist(qv, [])).filter((c) => c.tier === 1) : [];
   const byField = async (field) => {
     try {
       const s = await db.collection('productEmbeddings').orderBy(field).startAt(q).endAt(q + String.fromCharCode(0xF8FF)).limit(12).get();
