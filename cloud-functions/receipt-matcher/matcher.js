@@ -148,26 +148,33 @@ async function discounterIdsForSlug(slug, land) {
 }
 
 /**
- * findNearest Shortlist — MARKT-AGNOSTISCH (kein harter Markt-Filter mehr, der
- * an falscher Discounter-ID-Auflösung scheiterte). Sucht das semantisch beste
- * NoName + Marke über den GANZEN Katalog; der Markt wird als Signal mitgegeben
- * (market-Name) und gleicher Markt bekommt einen Ranking-Bonus. So wird das
- * echte Produkt immer gefunden (wie eine Volltextsuche), die KI verfeinert.
+ * findNearest Shortlist:
+ *  - MARKE: markt-agnostisch (Marken gibt es in jedem Markt).
+ *  - NoName/EIGENMARKE: NUR aus dem/den Markt-ID(s) des Bons — Eigenmarken sind
+ *    markt-EXKLUSIV (eine Penny-Eigenmarke gibt es nicht bei Lidl). Es wird über
+ *    ALLE IDs des Markt-Slugs gesucht (z.B. Lidl-DE UND -AT), damit die frühere
+ *    DE/AT-Falschauflösung nicht wieder das echte Produkt ausschließt.
+ *  - Markt unbekannt → Fallback markt-agnostisch (besser als keine Kandidaten).
  */
 async function shortlist(queryVec, bonMarketIds) {
   const c = await ensureDiscounters();
   const qv = FieldValue.vector(queryVec);
   const col = db.collection('productEmbeddings');
-  const [nn, mk] = await Promise.all([
-    col.where('type', '==', 'noname').findNearest({ vectorField: 'vector', queryVector: qv, limit: NONAME_K, distanceMeasure: 'COSINE', distanceResultField: '_dist' }).get(),
-    col.where('type', '==', 'marke').findNearest({ vectorField: 'vector', queryVector: qv, limit: MARKE_K, distanceMeasure: 'COSINE', distanceResultField: '_dist' }).get(),
-  ]);
-  const marketSet = new Set(bonMarketIds || []);
+  const near = (q, limit) => q.findNearest({ vectorField: 'vector', queryVector: qv, limit, distanceMeasure: 'COSINE', distanceResultField: '_dist' }).get();
+
+  const ids = bonMarketIds && bonMarketIds.length ? bonMarketIds : null;
+  const tasks = [near(col.where('type', '==', 'marke'), MARKE_K)];
+  if (ids) {
+    for (const id of ids) tasks.push(near(col.where('type', '==', 'noname').where('discounterId', '==', id), NONAME_K));
+  } else {
+    tasks.push(near(col.where('type', '==', 'noname'), NONAME_K)); // Markt unbekannt → agnostisch
+  }
+  const snaps = await Promise.all(tasks);
+
   const out = [];
-  const collect = (snap) =>
+  snaps.forEach((snap) =>
     snap.forEach((doc) => {
       const x = doc.data();
-      const sameMarket = !!(x.discounterId && marketSet.has(x.discounterId));
       out.push({
         id: doc.id, // = produkte/markenProdukte/reweapify DocId
         name: x.name,
@@ -181,16 +188,14 @@ async function shortlist(queryVec, bonMarketIds) {
         size: x.size || null,
         discounterId: x.discounterId || null,
         market: x.discounterId && c.byId[x.discounterId] ? c.byId[x.discounterId].name : null,
-        sameMarket,
-        dist: x._dist, // ROH (für Match-%-Anzeige)
+        sameMarket: x.type === 'noname', // NoName ist bereits markt-gefiltert
+        dist: x._dist,
       });
-    });
-  collect(nn);
-  collect(mk);
-  // Ranking: nach Distanz, gleicher Markt mit Bonus (×0.9). Anzeige-dist bleibt roh.
+    }),
+  );
   const seen = new Set();
   return out
-    .sort((a, b) => (a.dist ?? 9) * (a.sameMarket ? 0.9 : 1) - (b.dist ?? 9) * (b.sameMarket ? 0.9 : 1))
+    .sort((a, b) => (a.dist ?? 9) - (b.dist ?? 9))
     .filter((x) => (seen.has(x.id) ? false : seen.add(x.id)))
     .slice(0, NONAME_K + MARKE_K);
 }
