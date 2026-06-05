@@ -406,6 +406,7 @@ exports.onPurchasedProductMatch = onDocumentCreated(
         ppRef: snap.ref,
         merchantName: d.merchantName || null,
         merchantLand: d.merchantLand || null,
+        bonDate: d.bonDate || null,
       });
     } catch (e) {
       console.error('onPurchasedProductMatch failed', event.params, e);
@@ -435,7 +436,7 @@ exports.matchReceiptManual = onRequest(
           continue;
         }
         const r = await matcher.matchLine(
-          { itemName: d.itemName, marktSlug: d.merchantId, priceCents: d.priceCents || 0, userId: uid, receiptId: d.receiptId || null, ppRef: doc.ref, merchantName: d.merchantName || null, merchantLand: d.merchantLand || null },
+          { itemName: d.itemName, marktSlug: d.merchantId, priceCents: d.priceCents || 0, userId: uid, receiptId: d.receiptId || null, ppRef: doc.ref, merchantName: d.merchantName || null, merchantLand: d.merchantLand || null, bonDate: d.bonDate || null },
           { ignoreAlias: force },
         );
         tally[r.status] = (tally[r.status] || 0) + 1;
@@ -472,7 +473,7 @@ exports.matchBacklogManual = onRequest(
         }
         const uid = doc.ref.path.split('/')[1];
         const r = await matcher.matchLine(
-          { itemName: d.itemName, marktSlug: d.merchantId, priceCents: d.priceCents || 0, userId: uid, receiptId: d.receiptId || null, ppRef: doc.ref, merchantName: d.merchantName || null, merchantLand: d.merchantLand || null },
+          { itemName: d.itemName, marktSlug: d.merchantId, priceCents: d.priceCents || 0, userId: uid, receiptId: d.receiptId || null, ppRef: doc.ref, merchantName: d.merchantName || null, merchantLand: d.merchantLand || null, bonDate: d.bonDate || null },
           { dryRun, ignoreAlias: force || dryRun, noClose: true }, // Backlog: NIE retroaktiv Warenkörbe schließen
         );
         tally[r.status] = (tally[r.status] || 0) + 1;
@@ -501,13 +502,14 @@ exports.adminSearchProducts = onCall({ ...COMMON }, async (req) => {
   if (!q) return { results: [] };
   // Semantisch (Name) via Embedding + zusätzlich Marke/Handelsmarke per Prefix.
   const qv = await matcher.embedQuery(q);
-  const sem = qv ? (await matcher.shortlist(qv, [])).filter((c) => c.tier === 1) : [];
+  // inkl. reweapify (tier 2) — beim Auswählen wird es übernommen (Marke/Eigenmarke getrennt).
+  const sem = qv ? await matcher.shortlist(qv, []) : [];
   const byField = async (field) => {
     try {
-      const s = await db.collection('productEmbeddings').orderBy(field).startAt(q).endAt(q + String.fromCharCode(0xF8FF)).limit(12).get();
+      const s = await db.collection('productEmbeddings').orderBy(field).startAt(q).endAt(q + String.fromCharCode(0xf8ff)).limit(12).get();
       return s.docs.map((d) => {
         const x = d.data();
-        return { id: d.id, name: x.name, type: x.type, source: x.sourceCollection, tier: x.sourceCollection === 'reweapify' ? 2 : 1, preis: x.preis, brand: x.brand || null, handelsmarke: x.handelsmarke || null, size: x.size || null };
+        return { id: d.id, name: x.name, type: x.type, source: x.sourceCollection, tier: x.sourceCollection === 'reweapify' ? 2 : 1, preis: x.preis, brand: x.brand || null, handelsmarke: x.handelsmarke || null, size: x.size || null, gtin: x.gtin || null };
       });
     } catch (e) {
       return [];
@@ -515,9 +517,9 @@ exports.adminSearchProducts = onCall({ ...COMMON }, async (req) => {
   };
   const [byBrand, byHm] = await Promise.all([byField('brand'), byField('handelsmarke')]);
   const seen = new Set();
-  const merged = [...byBrand, ...byHm, ...sem].filter((c) => (seen.has(c.id) ? false : seen.add(c.id))).slice(0, 20);
+  const merged = [...byBrand, ...byHm, ...sem].filter((c) => (seen.has(c.id) ? false : seen.add(c.id))).slice(0, 24);
   await matcher.enrichCandidates(merged);
   return {
-    results: merged.map((c) => ({ id: c.id, name: c.name, type: c.type, source: c.source, preis: c.preis, brand: c.brand || null, handelsmarke: c.handelsmarke || null, size: c.size || null, image: c.image || null })),
+    results: merged.map((c) => ({ id: c.id, name: c.name, type: c.type, source: c.source, tier: c.tier, preis: c.preis, brand: c.brand || null, handelsmarke: c.handelsmarke || null, size: c.size || null, gtin: c.gtin || null, image: c.image || null })),
   };
 });

@@ -415,7 +415,7 @@ async function fetchPersonalCandidates(userId) {
  * Gibt das Outcome-Objekt zurück (auch fürs Backlog-Benchmark ohne Writes via dryRun).
  */
 async function matchLine(ctx, opts = {}) {
-  const { itemName, marktSlug, priceCents = 0, userId = null, receiptId = null, ppRef = null, merchantName = null, merchantLand = null } = ctx;
+  const { itemName, marktSlug, priceCents = 0, userId = null, receiptId = null, ppRef = null, merchantName = null, merchantLand = null, bonDate = null } = ctx;
   const dryRun = !!opts.dryRun;
   const normKey = norm(itemName);
   const writePP = async (data) => {
@@ -468,6 +468,9 @@ async function matchLine(ctx, opts = {}) {
     return { status: 'error', reason: 'embed-failed' };
   }
   const catalogCands = await shortlist(qv, bonMarketIds);
+  // Bon-Metadaten (Preis/Größe/Datum/Markt) einmal berechnen → an Alias + Queue.
+  const bonDateStr = bonDate && bonDate.toDate ? bonDate.toDate().toISOString() : typeof bonDate === 'string' ? bonDate : null;
+  const bonMeta = { priceCents, bonSize: parseSize(itemName), bonDate: bonDateStr, market: await marketInfo(receiptId, merchantName, merchantLand) };
   // Persönlicher Anker: Einkaufszettel/kürzliche Käufe nach ECHTER Ähnlichkeit zur
   // Bon-Zeile scoren (Cosine) + moderaten Bonus geben — NICHT blind vornanstellen.
   // So steigt nur ein WIRKLICH passendes Zettel-Item auf; irrelevante sinken unter
@@ -518,7 +521,7 @@ async function matchLine(ctx, opts = {}) {
   // starkes Signal ist — aber nur wenn die KI ihn trotz Markt/Preis/Typ wählt.
   const tier1Threshold = cand && cand.personal ? AUTO_LOCK - 0.1 : AUTO_LOCK;
   if (cand && cand.tier === 1 && conf >= tier1Threshold) {
-    if (!dryRun) await lockAlias(marktSlug, normKey, { productId: cand.id, productSource: cand.source, lineType: 'product', confidence: conf, resolvedBy: cand.personal ? 'ai-anchor' : 'ai-auto', sampleName: itemName });
+    if (!dryRun) await lockAlias(marktSlug, normKey, { productId: cand.id, productSource: cand.source, lineType: 'product', confidence: conf, resolvedBy: cand.personal ? 'ai-anchor' : 'ai-auto', sampleName: itemName, bon: bonMeta });
     await writePP({ matchStatus: 'matched', productId: cand.id, productSource: cand.source, lineType: 'product', matchConfidence: conf, matchSource: cand.personal ? 'ai-anchor' : 'ai' });
     if (!opts.noClose) await closeJourneyForProduct(userId, cand.id, receiptId);
     if (!dryRun && receiptId) await writeReceiptMatch({ receiptId, ppId: ppRef && ppRef.id, userId, productId: cand.id, productSource: cand.source, confidence: conf, source: 'ai', itemName, marktSlug });
@@ -527,7 +530,7 @@ async function matchLine(ctx, opts = {}) {
 
   // Tier-2 (reweapify) plausibel → Promotion-Queue (Mensch gibt frei, kein Auto-Katalog).
   if (cand && cand.tier === 2 && conf >= REVIEW_MIN) {
-    if (!dryRun) await enqueuePromotion({ reweapifyId: cand.id, name: cand.name, gtin: cand.gtin, kind: cand.type, marktSlug, normKey, sampleName: itemName, confidence: conf, ppId: ppRef && ppRef.id, userId, receiptId, merchantName, merchantLand });
+    if (!dryRun) await enqueuePromotion({ reweapifyId: cand.id, name: cand.name, gtin: cand.gtin, kind: cand.type, marktSlug, normKey, sampleName: itemName, confidence: conf, ppId: ppRef && ppRef.id, userId, receiptId, market: bonMeta.market, bonDate: bonMeta.bonDate, priceCents, bonSize: bonMeta.bonSize });
     await writePP({ matchStatus: 'promotion_pending', reweapifyId: cand.id, lineType: 'product', matchConfidence: conf, matchSource: 'ai' });
     return { status: 'promotion_pending', tier: 2, reweapifyId: cand.id, confidence: conf };
   }
@@ -535,7 +538,7 @@ async function matchLine(ctx, opts = {}) {
   // Alles andere mit Kandidaten — Tier-1 unsicher ODER KI hat -1 / keinen klaren Treffer.
   // KI RÄT NICHT automatisch → Mensch entscheidet (Vorschlag + Confidence + Shortlist + Katalog-Suche).
   // (cands ist hier garantiert nicht leer — der no-candidates-Fall ist oben abgefangen.)
-  if (!dryRun) await enqueueReview({ marktSlug, normKey, sampleName: itemName, priceCents, bonSize: parseSize(itemName), candidates: cands.slice(0, 20), suggestionIdx: pick.candidateIdx, confidence: conf, ppId: ppRef && ppRef.id, userId, receiptId, merchantName, merchantLand });
+  if (!dryRun) await enqueueReview({ marktSlug, normKey, sampleName: itemName, priceCents, bonSize: bonMeta.bonSize, bonDate: bonMeta.bonDate, market: bonMeta.market, candidates: cands.slice(0, 20), suggestionIdx: pick.candidateIdx, confidence: conf, ppId: ppRef && ppRef.id, userId, receiptId });
   await writePP({ matchStatus: 'needs_review', lineType: 'product', matchConfidence: conf, matchSource: 'ai' });
   return { status: 'needs_review', confidence: conf, suggestion: cand };
 }
@@ -564,28 +567,24 @@ async function marketInfo(receiptId, name, land) {
   return { name: name || null, land: land || null, raw: raw && raw !== name ? raw : null };
 }
 
-async function enqueueReview(r) {
-  const market = await marketInfo(r.receiptId, r.merchantName, r.merchantLand);
-  const { merchantName, merchantLand, ...rest } = r;
+function enqueueReview(r) {
   // Dedupe per (Markt, normKey): EINE Review-Karte je unbekanntem String.
   return db
     .collection('receiptReviewQueue')
     .doc(aliasId(r.marktSlug, r.normKey))
     .set(
-      { ...rest, market, status: 'open', hitCount: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() },
+      { ...r, status: 'open', hitCount: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() },
       { merge: true },
     );
 }
 
-async function enqueuePromotion(p) {
-  const market = await marketInfo(p.receiptId, p.merchantName, p.merchantLand);
-  const { merchantName, merchantLand, ...rest } = p;
+function enqueuePromotion(p) {
   // Dedupe per reweapify-Produkt.
   return db
     .collection('promotionQueue')
     .doc(String(p.reweapifyId))
     .set(
-      { ...rest, market, status: 'open', hitCount: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() },
+      { ...p, status: 'open', hitCount: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() },
       { merge: true },
     );
 }

@@ -45,6 +45,11 @@
       .badge.nn { color: #f0c674; border-color: #6b5a2a; }
       .badge.mk { color: #7fc7ff; border-color: #2a5a7a; }
       .noSuggest { margin-top: 10px; color: var(--warn); font-size: 13px; font-weight: 600; }
+      .dtoggle { margin-top: 10px; font-size: 12px; color: var(--brand2); cursor: pointer; user-select: none; }
+      .details { margin-top: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--card2); }
+      .kv { display: grid; grid-template-columns: 150px 1fr; gap: 4px 10px; font-size: 13px; }
+      .kv .k { color: var(--muted); } .kv .v { color: var(--text); word-break: break-word; }
+      .hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
       .badge { font-size: 10px; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
       .badge.t1 { color: var(--good); border-color: var(--good); }
       .badge.t2 { color: #b9aef0; border-color: var(--tier2); }
@@ -186,7 +191,17 @@
 
       function euro(cents) { return cents != null ? (cents / 100).toFixed(2).replace('.', ',') + ' €' : '—'; }
       function marketLabel(it) { const m = it.market || {}; const name = m.name || it.marktSlug || '?'; return esc(name + (m.land ? ' · ' + m.land : '')); }
+      function marketLabelPlain(it) { const m = it.market || {}; const name = m.name || it.marktSlug || '?'; return name + (m.land ? ' · ' + m.land : ''); }
       function marketRaw(it) { const m = it.market || {}; return m.raw ? `<div class="muted" style="margin-top:5px;font-size:12px">📍 ${esc(m.raw)}</div>` : ''; }
+      function fmtDate(d) { if (!d) return null; try { const dt = new Date(d); if (isNaN(dt)) return String(d); return dt.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch (e) { return String(d); } }
+      function kv(pairs) { const rows = pairs.filter(([, v]) => v != null && v !== '').map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>`).join(''); return `<div class="kv">${rows}</div>`; }
+      // Ausklappbarer Detail-Block.
+      function detailsToggle(el, label, html) {
+        const t = document.createElement('div'); t.className = 'dtoggle'; t.textContent = '▸ ' + label;
+        const d = document.createElement('div'); d.className = 'details hidden'; d.innerHTML = html;
+        t.onclick = () => { const open = d.classList.toggle('hidden'); t.textContent = (open ? '▸ ' : '▾ ') + label; };
+        el.appendChild(t); el.appendChild(d);
+      }
       function tierBadge(c) { return c.tier === 2 || c.source === 'reweapify' ? '<span class="badge t2">reweapify</span>' : '<span class="badge t1">Katalog</span>'; }
       function typeBadge(c) { return c.type === 'noname' ? '<span class="badge nn">NoName</span>' : '<span class="badge mk">Marke</span>'; }
       function thumbHtml(image) { return image ? `<img class="thumb" src="${esc(image)}" data-full="${esc(image)}" referrerpolicy="no-referrer" onerror="this.classList.add('ph');this.removeAttribute('src');this.removeAttribute('data-full')"/>` : '<div class="thumb ph"></div>'; }
@@ -244,7 +259,15 @@
         };
         search.querySelector('button').onclick = doSearch;
         inp.onkeydown = (e) => { if (e.key === 'Enter') doSearch(); };
+        search.insertAdjacentHTML('beforeend', '<div class="hint">reweapify-Treffer werden beim Zuordnen automatisch in den Katalog angelegt (Marke/Eigenmarke getrennt).</div>');
         el.appendChild(search);
+
+        detailsToggle(el, 'Details', kv([
+          ['Bon-Zeile', it.sampleName], ['Markt', marketLabelPlain(it)], ['Filiale', (it.market || {}).raw],
+          ['Preis', it.priceCents != null ? euro(it.priceCents) : null], ['Größe/Menge', it.bonSize], ['Bon-Datum', fmtDate(it.bonDate)],
+          ['KI-Confidence', it.confidence != null ? Math.round(it.confidence * 100) + '%' : null], ['Häufigkeit', (it.hitCount || 1) + '×'],
+          ['Kandidaten', (it.candidates || []).length], ['normKey', it.normKey],
+        ]));
 
         const act = document.createElement('div'); act.className = 'actions';
         const assign = mkBtn('✓ Zuordnen', 'primary', async () => {
@@ -322,7 +345,17 @@
           catch (e) { sres.innerHTML = `<div class="muted">Fehler: ${e.message}</div>`; }
         };
         corr.querySelector('button').onclick = doSearch; inp.onkeydown = (e) => { if (e.key === 'Enter') doSearch(); };
+        corr.insertAdjacentHTML('beforeend', '<div class="hint">reweapify-Treffer werden beim Übernehmen automatisch in den Katalog angelegt (Marke/Eigenmarke getrennt).</div>');
         el.appendChild(corr);
+        const b = it.bon || {};
+        detailsToggle(el, 'Details', kv([
+          ['Bon-Zeile', it.sampleName], ['Markt', (b.market && b.market.name) || it.marktSlug], ['Filiale', b.market && b.market.raw],
+          ['Bon-Preis', b.priceCents != null ? euro(b.priceCents) : null], ['Bon-Größe', b.bonSize], ['Bon-Datum', fmtDate(b.bonDate)],
+          ['Produkt', p.name], ['Marke/Handelsmarke', p.handelsmarke || p.brand], ['Hersteller', p.manufacturer], ['Größe', p.size],
+          ['Katalog-Preis', p.preis != null ? Number(p.preis).toFixed(2).replace('.', ',') + ' €' : null], ['EAN', p.gtin],
+          ['Typ', p.type === 'noname' ? 'NoName (Eigenmarke)' : 'Marke'], ['Quelle', p.source],
+          ['KI-Confidence', it.confidence != null ? Math.round(it.confidence * 100) + '%' : null], ['Zugeordnet von', it.resolvedBy], ['Häufigkeit', (it.votes || 1) + '×'],
+        ]));
         const act = document.createElement('div'); act.className = 'actions';
         act.appendChild(mkBtn('✎ Korrigieren', 'ghost', () => corr.classList.toggle('hidden')));
         act.appendChild(mkBtn('✓ Neues Produkt übernehmen', 'primary', () => { if (!selected) return toast('Erst Produkt wählen'); correct(it, { ...selected, lineType: 'product' }, el); }));

@@ -67,6 +67,65 @@ async function relink(marktSlug, normKey, productId, productSource, receiptMatch
   }
 }
 
+// reweapify-Produkt in den Katalog übernehmen (dedupe per EAN). Marke vs.
+// Eigenmarke wird GETRENNT: eigenmarke → produkte (NoName, discounter=REWE),
+// sonst → markenProdukte (Marke). Gibt { productId, targetCol } zurück.
+async function promoteReweapify(reweapifyId, kindHint, gtinHint) {
+  const rwSnap = await db.collection('reweapify').doc(String(reweapifyId)).get();
+  const r = rwSnap.exists ? rwSnap.data() : {};
+  const gtin = gtinHint || r.gtin || null;
+  let kind = kindHint;
+  if (!kind) {
+    const bc = String(r.brand_classification || '').toLowerCase();
+    kind = bc === 'eigenmarke' ? 'noname' : 'marke';
+  }
+  const targetCol = kind === 'noname' ? 'produkte' : 'markenProdukte';
+
+  let productId = null;
+  if (gtin) {
+    const dupe = await db.collection(targetCol).where('EANs', 'array-contains', String(gtin)).limit(1).get();
+    if (!dupe.empty) productId = dupe.docs[0].id;
+  }
+  if (!productId) {
+    const doc = {
+      name: r.productName || null,
+      preis: Number.isFinite(Number(r.price_current)) ? Number(r.price_current) : null,
+      EANs: gtin ? [String(gtin)] : [],
+      bild: r.image || null,
+      attr_ingredientStatement: r.attr_ingredientStatement || null,
+      bio: r.bio ?? null,
+      promotedFrom: String(reweapifyId),
+      promotedAt: FieldValue.serverTimestamp(),
+      needsCuration: true,
+      addedby: 'receipt-matcher-promotion',
+      created_at: FieldValue.serverTimestamp(),
+    };
+    for (const [k, v] of Object.entries(r)) if (k.startsWith('nutr_')) doc[k] = v;
+    if (r.attr_ingredientStatement) {
+      doc.ingredientsSource = 'rewe';
+      doc.ingredientsUpdatedAt = FieldValue.serverTimestamp();
+    }
+    if (doc.nutr_Energie_val !== undefined) {
+      doc.nutritionSource = 'rewe';
+      doc.nutritionUpdatedAt = FieldValue.serverTimestamp();
+    }
+    if (targetCol === 'produkte') doc.discounter = db.collection('discounter').doc(REWE_DISCOUNTER_ID);
+    const newRef = await db.collection(targetCol).add(doc);
+    productId = newRef.id;
+  }
+  return { productId, targetCol };
+}
+
+// Falls eine Admin-Auswahl ein reweapify-Produkt ist (productSource 'reweapify'),
+// erst übernehmen → echte produkte/markenProdukte-Id zurückgeben.
+async function resolveSelection(productId, productSource) {
+  if (productId && productSource === 'reweapify') {
+    const pr = await promoteReweapify(productId);
+    return { productId: pr.productId, productSource: pr.targetCol, promoted: true };
+  }
+  return { productId: productId || null, productSource: productSource || null, promoted: false };
+}
+
 exports.adminGetQueue = onCall({ region: REGION }, async (req) => {
   assertAdmin(req);
   const [rev, promo, aliasCnt] = await Promise.all([
@@ -109,7 +168,8 @@ exports.adminResolveReview = onCall({ region: REGION }, async (req) => {
   const snap = await ref.get();
   if (!snap.exists) throw new HttpsError('not-found', 'Review nicht gefunden');
   const r = snap.data();
-  const lt = lineType || (productId ? 'product' : 'nonproduct');
+  const sel = await resolveSelection(productId, productSource); // reweapify → erst übernehmen
+  const lt = lineType || (sel.productId ? 'product' : 'nonproduct');
   await db
     .collection('receiptAliases')
     .doc(aliasId(r.marktSlug, r.normKey))
@@ -117,8 +177,8 @@ exports.adminResolveReview = onCall({ region: REGION }, async (req) => {
       {
         marktSlug: norm(r.marktSlug),
         normKey: r.normKey,
-        productId: productId || null,
-        productSource: productSource || null,
+        productId: sel.productId,
+        productSource: sel.productSource,
         lineType: lt,
         confidence: 1,
         resolvedBy: 'admin',
@@ -128,9 +188,9 @@ exports.adminResolveReview = onCall({ region: REGION }, async (req) => {
       },
       { merge: true },
     );
-  const rl = await relink(r.marktSlug, r.normKey, productId || null, productSource, { lineType: lt });
-  await ref.set({ status: 'resolved', resolvedBy: 'admin', resolvedProductId: productId || null, resolvedLineType: lt, resolvedAt: FieldValue.serverTimestamp() }, { merge: true });
-  return { ok: true, relinked: rl.count, relinkError: rl.error || null };
+  const rl = await relink(r.marktSlug, r.normKey, sel.productId, sel.productSource, { lineType: lt });
+  await ref.set({ status: 'resolved', resolvedBy: 'admin', resolvedProductId: sel.productId, resolvedLineType: lt, resolvedAt: FieldValue.serverTimestamp() }, { merge: true });
+  return { ok: true, relinked: rl.count, relinkError: rl.error || null, promoted: sel.promoted };
 });
 
 exports.adminPromote = onCall({ region: REGION }, async (req) => {
@@ -147,45 +207,7 @@ exports.adminPromote = onCall({ region: REGION }, async (req) => {
     return { ok: true, rejected: true };
   }
 
-  const rwSnap = await db.collection('reweapify').doc(String(p.reweapifyId)).get();
-  const r = rwSnap.exists ? rwSnap.data() : {};
-  const gtin = p.gtin || r.gtin || null;
-  const targetCol = p.kind === 'noname' ? 'produkte' : 'markenProdukte';
-
-  // Dedupe: existiert schon ein Katalog-Produkt mit dieser EAN?
-  let productId = null;
-  if (gtin) {
-    const dupe = await db.collection(targetCol).where('EANs', 'array-contains', String(gtin)).limit(1).get();
-    if (!dupe.empty) productId = dupe.docs[0].id;
-  }
-
-  if (!productId) {
-    const doc = {
-      name: r.productName || p.name || p.sampleName,
-      preis: Number.isFinite(Number(r.price_current)) ? Number(r.price_current) : null,
-      EANs: gtin ? [String(gtin)] : [],
-      bild: r.image || null,
-      attr_ingredientStatement: r.attr_ingredientStatement || null,
-      bio: r.bio ?? null,
-      promotedFrom: String(p.reweapifyId),
-      promotedAt: FieldValue.serverTimestamp(),
-      needsCuration: true,
-      addedby: 'receipt-matcher-promotion',
-      created_at: FieldValue.serverTimestamp(),
-    };
-    for (const [k, v] of Object.entries(r)) if (k.startsWith('nutr_')) doc[k] = v;
-    if (r.attr_ingredientStatement) {
-      doc.ingredientsSource = 'rewe';
-      doc.ingredientsUpdatedAt = FieldValue.serverTimestamp();
-    }
-    if (doc.nutr_Energie_val !== undefined) {
-      doc.nutritionSource = 'rewe';
-      doc.nutritionUpdatedAt = FieldValue.serverTimestamp();
-    }
-    if (targetCol === 'produkte') doc.discounter = db.collection('discounter').doc(REWE_DISCOUNTER_ID);
-    const newRef = await db.collection(targetCol).add(doc);
-    productId = newRef.id;
-  }
+  const { productId, targetCol } = await promoteReweapify(p.reweapifyId, p.kind, p.gtin);
 
   // Alias auf das (nun) Tier-1-Produkt locken + retroaktiv relinken.
   await db
@@ -226,11 +248,11 @@ exports.adminGetMatched = onCall({ region: REGION }, async (req) => {
   pe.forEach((d) => (peMap[d.id] = d.exists ? d.data() : {}));
   const cands = top.map((a) => {
     const x = peMap[String(a.productId)] || {};
-    return { id: String(a.productId), source: a.productSource || x.sourceCollection || null, name: x.name || null, type: x.type || null, brand: x.brand || null, handelsmarke: x.handelsmarke || null, size: x.size || null };
+    return { id: String(a.productId), source: a.productSource || x.sourceCollection || null, name: x.name || null, type: x.type || null, brand: x.brand || null, handelsmarke: x.handelsmarke || null, size: x.size || null, preis: x.preis ?? null, manufacturer: x.manufacturer || null, gtin: x.gtin || null };
   });
   await enrichCandidates(cands);
   return {
-    matched: top.map((a, i) => ({ aliasId: a.id, sampleName: a.sampleName || null, marktSlug: a.marktSlug || null, confidence: a.confidence ?? null, resolvedBy: a.resolvedBy || null, votes: a.votes || 0, product: cands[i] })),
+    matched: top.map((a, i) => ({ aliasId: a.id, sampleName: a.sampleName || null, marktSlug: a.marktSlug || null, confidence: a.confidence ?? null, resolvedBy: a.resolvedBy || null, votes: a.votes || 0, bon: a.bon || null, product: cands[i] })),
     total: items.length,
   };
 });
@@ -245,8 +267,9 @@ exports.adminCorrectMatch = onCall({ region: REGION }, async (req) => {
   const snap = await ref.get();
   if (!snap.exists) throw new HttpsError('not-found', 'Alias nicht gefunden');
   const a = snap.data();
-  const lt = lineType || (productId ? 'product' : 'nonproduct');
-  await ref.set({ productId: productId || null, productSource: productSource || null, lineType: lt, confidence: 1, resolvedBy: 'admin', lastSeen: FieldValue.serverTimestamp() }, { merge: true });
-  const rl = await relink(a.marktSlug, a.normKey, productId || null, productSource, { lineType: lt });
-  return { ok: true, relinked: rl.count, relinkError: rl.error || null };
+  const sel = await resolveSelection(productId, productSource); // reweapify → erst übernehmen
+  const lt = lineType || (sel.productId ? 'product' : 'nonproduct');
+  await ref.set({ productId: sel.productId, productSource: sel.productSource, lineType: lt, confidence: 1, resolvedBy: 'admin', lastSeen: FieldValue.serverTimestamp() }, { merge: true });
+  const rl = await relink(a.marktSlug, a.normKey, sel.productId, sel.productSource, { lineType: lt });
+  return { ok: true, relinked: rl.count, relinkError: rl.error || null, promoted: sel.promoted };
 });
