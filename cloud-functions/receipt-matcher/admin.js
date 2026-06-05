@@ -325,7 +325,7 @@ exports.adminResolveReview = onCall({ region: REGION }, async (req) => {
 
 exports.adminPromote = onCall({ region: REGION }, async (req) => {
   assertAdmin(req);
-  const { promotionId, approve = true } = req.data || {};
+  const { promotionId, approve = true, mainProductId = null, mainProductSource = null, mergeEanFrom = [] } = req.data || {};
   if (!promotionId) throw new HttpsError('invalid-argument', 'promotionId fehlt');
   const ref = db.collection('promotionQueue').doc(promotionId);
   const snap = await ref.get();
@@ -337,7 +337,25 @@ exports.adminPromote = onCall({ region: REGION }, async (req) => {
     return { ok: true, rejected: true };
   }
 
-  const { productId, targetCol } = await promoteReweapify(p.reweapifyId, p.kind, p.gtin);
+  let productId;
+  let targetCol;
+  const extraMerge = [];
+  if (mainProductId) {
+    // Operator hat ein anderes Hauptprodukt gewählt (existierendes Katalog- oder
+    // anderes reweapify-Produkt). Die EAN DIESES reweapify-Treffers fließt nur in
+    // das gewählte Hauptprodukt — kein neues Doc für diesen reweapify-Treffer.
+    const sel = await resolveSelection(mainProductId, mainProductSource);
+    productId = sel.productId;
+    targetCol = sel.productSource;
+    extraMerge.push({ id: p.reweapifyId, source: 'reweapify' });
+  } else {
+    // Standard: DIESEN reweapify-Treffer als neues Hauptprodukt anlegen.
+    const pr = await promoteReweapify(p.reweapifyId, p.kind, p.gtin);
+    productId = pr.productId;
+    targetCol = pr.targetCol;
+  }
+
+  const mergedEans = await mergeEansIntoMain(targetCol, productId, [...extraMerge, ...mergeEanFrom]);
 
   // Alias auf das (nun) Tier-1-Produkt locken + retroaktiv relinken.
   await db
@@ -360,7 +378,7 @@ exports.adminPromote = onCall({ region: REGION }, async (req) => {
     );
   const rl = await relink(p.marktSlug, p.normKey, productId, targetCol);
   await ref.set({ status: 'promoted', productId, targetCol, resolvedBy: 'admin', resolvedAt: FieldValue.serverTimestamp() }, { merge: true });
-  return { ok: true, productId, targetCol, relinked: rl.count, relinkError: rl.error || null };
+  return { ok: true, productId, targetCol, relinked: rl.count, relinkError: rl.error || null, mergedEans };
 });
 
 // ─── Zugeordnet (Auto-Matches) anzeigen + korrigieren ────────────────

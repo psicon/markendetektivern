@@ -288,12 +288,21 @@
           (it.confidence != null ? `<span class="chip conf">KI ${Math.round(it.confidence * 100)}%</span>` : '') +
           `<span class="chip" title="Markt">🏬 ${marketLabel(it)}</span>` +
           `</div>` +
-          `<div class="muted" style="margin-top:6px">Bon-Zeile: „${esc(it.sampleName || '')}"</div>` +
+          `<div class="muted" style="margin-top:6px">Standard: wird als <b>neues ${it.kind === 'noname' ? 'NoName-Produkt (produkte)' : 'Marken-Produkt (markenProdukte)'}</b> angelegt. Bon-Zeile: „${esc(it.sampleName || '')}"</div>` +
           marketRaw(it);
+        const picker = searchPicker();
+        const corr = document.createElement('div'); corr.className = 'hidden';
+        corr.insertAdjacentHTML('afterbegin', '<div class="hint" style="margin-bottom:6px">Optional: ein <b>anderes Hauptprodukt</b> wählen (dann fließt nur die EAN dieses reweapify-Treffers dorthin), und/oder per „+EAN" weitere Duplikate zusammenführen.</div>');
+        corr.appendChild(picker.el);
+        el.appendChild(corr);
         const act = document.createElement('div'); act.className = 'actions';
+        act.appendChild(mkBtn('✎ Zusammenführen / anderes Hauptprodukt', 'ghost', () => corr.classList.toggle('hidden')));
         act.appendChild(mkBtn('✓ In Katalog übernehmen', 'primary', async () => {
-          try { const r = await call('adminPromote')({ promotionId: it.id, approve: true });
-            toast(`Übernommen → ${r.data.targetCol} · ${r.data.relinked} Bons verknüpft`);
+          const m = picker.getMain();
+          const payload = { promotionId: it.id, approve: true, mergeEanFrom: picker.getMerge() };
+          if (m) { payload.mainProductId = m.productId; payload.mainProductSource = m.productSource; }
+          try { const r = await call('adminPromote')(payload);
+            toast(`${m ? 'Zusammengeführt' : 'Übernommen'} → ${r.data.targetCol}${r.data.mergedEans ? ` · ${r.data.mergedEans} EAN(s)` : ''} · ${r.data.relinked} Bons`);
             el.remove(); state.data.promotion = state.data.promotion.filter((x) => x.id !== it.id);
             state.data.stats.openPromotion = Math.max(0, (state.data.stats.openPromotion || 1) - 1); render();
           } catch (e) { toast('Fehler: ' + e.message); } }));
