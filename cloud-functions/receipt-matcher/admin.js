@@ -67,12 +67,114 @@ async function relink(marktSlug, normKey, productId, productSource, receiptMatch
   }
 }
 
+// Marken-Ref-Maps (norm(name) → id) für die Auflösung beim Promoten.
+//   hersteller.name           → Marke (markenProdukte.hersteller)
+//   handelsmarken.bezeichnung → Eigenmarke (produkte.handelsmarke)
+//   hersteller_new.herstellername → echter Hersteller (produkte.hersteller)
+let _brandMaps = null;
+async function ensureBrandMaps() {
+  if (_brandMaps) return _brandMaps;
+  const [her, hm, hn] = await Promise.all([
+    db.collection('hersteller').select('name').get(),
+    db.collection('handelsmarken').select('bezeichnung').get(),
+    db.collection('hersteller_new').select('herstellername').get(),
+  ]);
+  const hersteller = {};
+  her.forEach((d) => { const k = norm(d.data().name); if (k) hersteller[k] = d.id; });
+  const handelsmarken = {};
+  hm.forEach((d) => { const k = norm(d.data().bezeichnung); if (k) handelsmarken[k] = d.id; });
+  const herstellerNew = {};
+  hn.forEach((d) => { const k = norm(d.data().herstellername); if (k) herstellerNew[k] = d.id; });
+  _brandMaps = { hersteller, handelsmarken, herstellerNew };
+  return _brandMaps;
+}
+
+// Baut das produkte/markenProdukte-Doc aus einem reweapify-Doc (ohne Schreiben).
+// Setzt alle ableitbaren Felder + löst Marke/Handelsmarke/Hersteller per Name auf.
+// Nicht ableitbar (→ needsCuration, von bestehenden CFs/Mensch ergänzt):
+// kategorie, packTyp/packSize, bildClean*, aiComparison/aiAssessment, sowie bei
+// Eigenmarken der echte hersteller_new (reweapify kennt nur die Eigenmarke).
+function buildPromotedDoc(r, kind, gtin, maps, now) {
+  const targetCol = kind === 'noname' ? 'produkte' : 'markenProdukte';
+  const bkNorm = norm(r.brandKey);
+  const doc = {
+    name: r.productName || null,
+    EANs: gtin ? [String(gtin)] : [],
+    preis: Number.isFinite(Number(r.price_current)) ? Number(r.price_current) : null,
+    preisDatum: now,
+    bild: r.image || null,
+    beschreibung: typeof r.brandKey === 'string' ? r.brandKey : '',
+    attr_ingredientStatement: r.attr_ingredientStatement || null,
+    attr_isBio: r.bio === true,
+    attr_allergene: [],
+    attr_spuren: [],
+    addedby: 'receipt-matcher-promotion',
+    promotedFrom: r._id || null,
+    promotedAt: now,
+    needsCuration: true,
+    same: false,
+    stufe: null,
+    created_at: now,
+    updatedAt: now,
+    rating: 0,
+    ratingCount: 0,
+    averageRatingOverall: 0,
+    averageRatingContent: 0,
+    averageRatingPriceValue: 0,
+    averageRatingSimilarity: 0,
+    averageRatingTasteFunction: 0,
+    ratingCountOverall: 0,
+    ratingCountContent: 0,
+    ratingCountPriceValue: 0,
+    ratingCountSimilarity: 0,
+    ratingCountTasteFunction: 0,
+    ratingSumOverall: 0,
+    ratingSumContent: 0,
+    ratingSumPriceValue: 0,
+    ratingSumSimilarity: 0,
+    ratingSumTasteFunction: 0,
+  };
+  for (const [k, v] of Object.entries(r)) if (k.startsWith('nutr_')) doc[k] = v;
+  if (r.attr_ingredientStatement) {
+    doc.ingredientsSource = 'rewe';
+    doc.ingredientsUpdatedAt = now;
+  }
+  if (doc.nutr_Energie_val !== undefined) {
+    doc.nutritionSource = 'rewe';
+    doc.nutritionUpdatedAt = now;
+  }
+  const refs = {};
+  if (targetCol === 'produkte') {
+    doc.discounter = db.collection('discounter').doc(REWE_DISCOUNTER_ID);
+    refs.discounter = 'discounter/' + REWE_DISCOUNTER_ID;
+    const hmId = maps.handelsmarken[bkNorm];
+    if (hmId) {
+      doc.handelsmarke = db.collection('handelsmarken').doc(hmId);
+      refs.handelsmarke = 'handelsmarken/' + hmId;
+    }
+    const hnId = maps.herstellerNew[bkNorm];
+    if (hnId) {
+      doc.hersteller = db.collection('hersteller_new').doc(hnId);
+      refs.hersteller = 'hersteller_new/' + hnId;
+    }
+    doc.markenProdukt = null;
+  } else {
+    const hId = maps.hersteller[bkNorm];
+    if (hId) {
+      doc.hersteller = db.collection('hersteller').doc(hId);
+      refs.hersteller = 'hersteller/' + hId;
+    }
+  }
+  return { doc, targetCol, refs };
+}
+
 // reweapify-Produkt in den Katalog übernehmen (dedupe per EAN). Marke vs.
-// Eigenmarke wird GETRENNT: eigenmarke → produkte (NoName, discounter=REWE),
+// Eigenmarke GETRENNT: eigenmarke → produkte (NoName, discounter=REWE),
 // sonst → markenProdukte (Marke). Gibt { productId, targetCol } zurück.
 async function promoteReweapify(reweapifyId, kindHint, gtinHint) {
   const rwSnap = await db.collection('reweapify').doc(String(reweapifyId)).get();
   const r = rwSnap.exists ? rwSnap.data() : {};
+  r._id = String(reweapifyId);
   const gtin = gtinHint || r.gtin || null;
   let kind = kindHint;
   if (!kind) {
@@ -81,39 +183,15 @@ async function promoteReweapify(reweapifyId, kindHint, gtinHint) {
   }
   const targetCol = kind === 'noname' ? 'produkte' : 'markenProdukte';
 
-  let productId = null;
+  // Dedupe per EAN → existiert schon, einfach verknüpfen (nicht doppelt anlegen).
   if (gtin) {
     const dupe = await db.collection(targetCol).where('EANs', 'array-contains', String(gtin)).limit(1).get();
-    if (!dupe.empty) productId = dupe.docs[0].id;
+    if (!dupe.empty) return { productId: dupe.docs[0].id, targetCol, deduped: true };
   }
-  if (!productId) {
-    const doc = {
-      name: r.productName || null,
-      preis: Number.isFinite(Number(r.price_current)) ? Number(r.price_current) : null,
-      EANs: gtin ? [String(gtin)] : [],
-      bild: r.image || null,
-      attr_ingredientStatement: r.attr_ingredientStatement || null,
-      bio: r.bio ?? null,
-      promotedFrom: String(reweapifyId),
-      promotedAt: FieldValue.serverTimestamp(),
-      needsCuration: true,
-      addedby: 'receipt-matcher-promotion',
-      created_at: FieldValue.serverTimestamp(),
-    };
-    for (const [k, v] of Object.entries(r)) if (k.startsWith('nutr_')) doc[k] = v;
-    if (r.attr_ingredientStatement) {
-      doc.ingredientsSource = 'rewe';
-      doc.ingredientsUpdatedAt = FieldValue.serverTimestamp();
-    }
-    if (doc.nutr_Energie_val !== undefined) {
-      doc.nutritionSource = 'rewe';
-      doc.nutritionUpdatedAt = FieldValue.serverTimestamp();
-    }
-    if (targetCol === 'produkte') doc.discounter = db.collection('discounter').doc(REWE_DISCOUNTER_ID);
-    const newRef = await db.collection(targetCol).add(doc);
-    productId = newRef.id;
-  }
-  return { productId, targetCol };
+  const maps = await ensureBrandMaps();
+  const { doc } = buildPromotedDoc(r, kind, gtin, maps, FieldValue.serverTimestamp());
+  const newRef = await db.collection(targetCol).add(doc);
+  return { productId: newRef.id, targetCol, created: true };
 }
 
 // Falls eine Admin-Auswahl ein reweapify-Produkt ist (productSource 'reweapify'),
