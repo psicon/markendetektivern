@@ -53,6 +53,7 @@
       .filterpills { display: flex; gap: 6px; margin-top: 8px; }
       .fp { font-size: 12px; padding: 4px 11px; border-radius: 8px; border: 1px solid var(--line); color: var(--muted); cursor: pointer; }
       .fp.active { background: var(--card2); color: var(--text); border-color: var(--brand); font-weight: 700; }
+      .brandfilter { font-size: 12px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card2); color: var(--text); max-width: 260px; cursor: pointer; }
       .eanbtn { font-size: 11px; padding: 4px 9px; border-radius: 7px; border: 1px solid var(--line); background: transparent; color: var(--muted); flex: 0 0 auto; cursor: pointer; }
       .eanbtn.on { color: var(--brand2); border-color: var(--brand2); background: rgba(20,184,166,.1); }
       .mergeinfo { font-size: 12px; margin-top: 8px; }
@@ -360,21 +361,28 @@
       // Gemeinsamer Such-Picker: Filter (Alle/NoName/Marke) · Klick = Hauptprodukt ·
       // „+EAN" = nur EAN(s) eines Duplikats zum Hauptprodukt mergen.
       function searchPicker() {
-        let main = null; const merge = new Map(); let results = []; let filter = 'all';
+        let main = null; const merge = new Map(); let results = []; let filter = 'all'; let brandFilter = '';
         const el = document.createElement('div');
         el.innerHTML =
           `<div class="search"><input placeholder="Richtiges Produkt suchen (Name/Marke)…"/><button>Suchen</button></div>` +
-          `<div class="filterpills"><span class="fp active" data-f="all">Alle</span><span class="fp" data-f="noname">NoName</span><span class="fp" data-f="marke">Marke</span></div>` +
+          `<div class="filterpills"><span class="fp active" data-f="all">Alle</span><span class="fp" data-f="noname">NoName</span><span class="fp" data-f="marke">Marke</span><select class="brandfilter"><option value="">Alle Marken/Handelsmarken</option></select></div>` +
           `<div class="hint">reweapify-Treffer werden beim Zuordnen automatisch angelegt (Marke→markenProdukte, Eigenmarke→produkte). „+EAN" fügt nur die EAN(s) eines Duplikats zum Hauptprodukt hinzu.</div>` +
           `<div class="cands sres"></div><div class="mergeinfo"></div>`;
-        const inp = el.querySelector('input'), sres = el.querySelector('.sres'), info = el.querySelector('.mergeinfo');
+        const inp = el.querySelector('input'), sres = el.querySelector('.sres'), info = el.querySelector('.mergeinfo'), bsel = el.querySelector('.brandfilter');
+        const brandOf = (c) => c.handelsmarke || c.brand || '';
+        const populateBrands = () => {
+          const brands = [...new Set(results.map(brandOf).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+          bsel.innerHTML = '<option value="">Alle Marken/Handelsmarken (' + brands.length + ')</option>' + brands.map((b) => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+          brandFilter = '';
+        };
+        bsel.onchange = () => { brandFilter = bsel.value; renderResults(); };
         const renderInfo = () => {
           const m = [...merge.values()];
           info.innerHTML = (main ? `Hauptprodukt: <b>${esc(main.name || '?')}</b>` : '<span style="color:var(--warn)">Noch kein Hauptprodukt gewählt</span>') + (m.length ? ` · <span class="muted">+EAN von:</span> ${m.map((x) => esc(x.name || '?')).join(', ')}` : '');
         };
         const renderResults = () => {
           sres.innerHTML = '';
-          const list = results.filter((c) => filter === 'all' || (filter === 'noname' ? c.type === 'noname' : c.type !== 'noname'));
+          const list = results.filter((c) => (filter === 'all' || (filter === 'noname' ? c.type === 'noname' : c.type !== 'noname')) && (!brandFilter || brandOf(c) === brandFilter));
           if (!list.length) { sres.innerHTML = '<div class="muted">Keine Treffer.</div>'; return; }
           list.forEach((c) => {
             const row = document.createElement('div'); row.className = 'cand';
@@ -385,7 +393,7 @@
             sres.appendChild(row);
           });
         };
-        const doSearch = async () => { if (!inp.value.trim()) return; sres.innerHTML = '<div class="muted">Suche…</div>'; try { const r = await call('adminSearchProducts')({ query: inp.value.trim() }); results = r.data.results || []; renderResults(); } catch (e) { sres.innerHTML = `<div class="muted">Fehler: ${e.message}</div>`; } };
+        const doSearch = async () => { if (!inp.value.trim()) return; sres.innerHTML = '<div class="muted">Suche…</div>'; try { const r = await call('adminSearchProducts')({ query: inp.value.trim() }); results = r.data.results || []; populateBrands(); renderResults(); } catch (e) { sres.innerHTML = `<div class="muted">Fehler: ${e.message}</div>`; } };
         el.querySelector('button').onclick = doSearch;
         inp.onkeydown = (e) => { if (e.key === 'Enter') doSearch(); };
         el.querySelectorAll('.fp').forEach((p) => (p.onclick = () => { filter = p.dataset.f; el.querySelectorAll('.fp').forEach((x) => x.classList.toggle('active', x === p)); renderResults(); }));
