@@ -13,10 +13,11 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router, useNavigation } from 'expo-router';
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
+import { Shimmer } from '@/components/design/Skeletons';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -42,6 +43,71 @@ const MISSED = '#d6603a'; // Akzent für verpasstes Sparpotenzial
 
 const formatEur = (n: number) => `${(n || 0).toFixed(2).replace('.', ',')} €`;
 
+// Modul-Cache: re-entry rendert sofort aus dem Cache (Skeleton nur beim ersten
+// Laden), danach Hintergrund-Revalidierung. RAM-only, TTL.
+const CACHE_TTL_MS = 5 * 60_000;
+let purchaseCache: { uid: string; data: PurchasedProduct[]; at: number } | null = null;
+function cachedFor(uid?: string | null): PurchasedProduct[] | null {
+  if (uid && purchaseCache && purchaseCache.uid === uid && Date.now() - purchaseCache.at < CACHE_TTL_MS) {
+    return purchaseCache.data;
+  }
+  return null;
+}
+
+/** Shimmer-Skeleton, das das Stats-Layout spiegelt (statt Blocking-Spinner). */
+function StatsSkeleton() {
+  const { theme } = useTokens();
+  const card = {
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 18,
+  } as const;
+  return (
+    <View>
+      <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 20 }}>
+        {[0, 1, 2].map((i) => (
+          <Shimmer key={i} height={34} radius={10} style={{ flex: 1 }} />
+        ))}
+      </View>
+      <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingTop: 8 }}>
+        {[0, 1, 2, 3].map((i) => (
+          <Shimmer key={i} height={30} radius={9} style={{ flex: 1 }} />
+        ))}
+      </View>
+      <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
+        <View style={[card, { padding: 18, gap: 9 }]}>
+          <Shimmer width={120} height={10} />
+          <Shimmer width={170} height={32} radius={7} />
+          <Shimmer width={90} height={10} />
+        </View>
+      </View>
+      <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
+        <View style={[card, { padding: 16, flexDirection: 'row', gap: 12, alignItems: 'center' }]}>
+          <Shimmer width={44} height={44} radius={22} />
+          <View style={{ flex: 1, gap: 7 }}>
+            <Shimmer width={150} height={10} />
+            <Shimmer width={120} height={24} radius={6} />
+            <Shimmer width="92%" height={10} />
+          </View>
+        </View>
+      </View>
+      <View style={{ paddingHorizontal: 20, paddingTop: 26, gap: 14 }}>
+        <Shimmer width={190} height={18} radius={6} />
+        {[0, 1].map((i) => (
+          <View key={i} style={{ gap: 6 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Shimmer width={80} height={11} />
+              <Shimmer width={60} height={11} />
+            </View>
+            <Shimmer height={10} radius={5} />
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 export default function PurchaseStatisticsScreen() {
   const { theme } = useTokens();
   const insets = useSafeAreaInsets();
@@ -52,23 +118,28 @@ export default function PurchaseStatisticsScreen() {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
-  const [purchases, setPurchases] = useState<PurchasedProduct[] | null>(null);
+  const [purchases, setPurchases] = useState<PurchasedProduct[] | null>(() => cachedFor(user?.uid));
   const [period, setPeriod] = useState('all');
   const [segment, setSegment] = useState<Segment>('all');
 
   useEffect(() => {
-    if (!user?.uid) {
+    const uid = user?.uid;
+    if (!uid) {
       setPurchases([]);
       return;
     }
+    // Stale-while-revalidate: Cache sofort zeigen, im Hintergrund neu laden.
+    const cached = cachedFor(uid);
+    if (cached) setPurchases(cached);
     let alive = true;
     purchaseHistoryService
-      .getUserPurchaseHistory(user.uid)
+      .getUserPurchaseHistory(uid)
       .then((rows) => {
+        purchaseCache = { uid, data: rows, at: Date.now() };
         if (alive) setPurchases(rows);
       })
       .catch(() => {
-        if (alive) setPurchases([]);
+        if (alive && !cached) setPurchases([]);
       });
     return () => {
       alive = false;
@@ -145,9 +216,13 @@ export default function PurchaseStatisticsScreen() {
       <DetailHeader title="Statistik" onBack={() => router.back()} />
 
       {loading ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={primary} />
-        </View>
+        <ScrollView
+          contentContainerStyle={{ paddingTop: headerOffset + 12, paddingBottom: insets.bottom + 32 }}
+          showsVerticalScrollIndicator={false}
+          scrollEnabled={false}
+        >
+          <StatsSkeleton />
+        </ScrollView>
       ) : (
         <ScrollView
           contentContainerStyle={{ paddingTop: headerOffset + 12, paddingBottom: insets.bottom + 32 }}
