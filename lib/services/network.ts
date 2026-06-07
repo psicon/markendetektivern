@@ -13,8 +13,32 @@
  * Used by the upload queue (skip uploads when offline, resume on reconnect)
  * and by the product-submit overview (offline hint banner).
  */
-import NetInfo, { type NetInfoState } from '@react-native-community/netinfo';
 import { useEffect, useState } from 'react';
+import type { NetInfoState } from '@react-native-community/netinfo';
+
+/**
+ * netinfo is a NATIVE module. Loading it touches the native bridge at
+ * module-eval time (it constructs a NativeEventEmitter), so on a stale binary
+ * that predates the dependency the IMPORT itself throws
+ * "NativeModule.RNCNetInfo is null" and white-screens the whole app. A
+ * connectivity helper must never do that — so we load it through a guarded
+ * require and degrade to "assume online" when it's missing. Real offline
+ * detection returns after a native rebuild that bundles the module.
+ */
+type NetInfoModule = typeof import('@react-native-community/netinfo').default;
+export let nativeNetInfoAvailable = true;
+let NetInfo: NetInfoModule | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  NetInfo = require('@react-native-community/netinfo').default as NetInfoModule;
+} catch (e) {
+  nativeNetInfoAvailable = false;
+  console.warn(
+    '[network] netinfo native module unavailable — assuming online. ' +
+      'Rebuild the dev client (npx expo run:ios) to enable offline detection.',
+    e,
+  );
+}
 
 export interface NetworkStatus {
   /** An interface (wifi/cellular) reports a connection. */
@@ -34,36 +58,22 @@ function derive(s: NetInfoState): NetworkStatus {
 let current: NetworkStatus = { connected: true, reachable: null, online: true };
 const listeners = new Set<(s: NetworkStatus) => void>();
 
-/**
- * netinfo is a NATIVE module. If the running binary was built BEFORE the
- * dependency was added (stale Dev-Client / sim), any call into it throws
- * "NativeModule.RNCNetInfo is null". A connectivity helper must NEVER take the
- * whole app down — so we guard the subscription and degrade to "assume online"
- * (the safe default: uploads still attempt, the queue still works, we just
- * don't auto-skip while offline). Real offline detection comes back after a
- * native rebuild that includes the module.
- */
-export let nativeNetInfoAvailable = true;
-
-try {
-  NetInfo.addEventListener((s) => {
-    current = derive(s);
-    listeners.forEach((fn) => {
-      try {
-        fn(current);
-      } catch {
-        /* ignore listener errors */
-      }
+if (NetInfo) {
+  try {
+    NetInfo.addEventListener((s) => {
+      current = derive(s);
+      listeners.forEach((fn) => {
+        try {
+          fn(current);
+        } catch {
+          /* ignore listener errors */
+        }
+      });
     });
-  });
-} catch (e) {
-  nativeNetInfoAvailable = false;
-  current = { connected: true, reachable: null, online: true };
-  console.warn(
-    '[network] netinfo native module unavailable — assuming online. ' +
-      'Rebuild the dev client (npx expo run:ios) to enable offline detection.',
-    e,
-  );
+  } catch (e) {
+    nativeNetInfoAvailable = false;
+    console.warn('[network] netinfo addEventListener failed — assuming online.', e);
+  }
 }
 
 export function getNetwork(): NetworkStatus {
@@ -85,6 +95,7 @@ export function subscribeNetwork(fn: (s: NetworkStatus) => void): () => void {
 /** Force a fresh reachability probe (the "kurz prüfen ob Internet da ist"
  *  check before we attempt uploads). Updates the shared state too. */
 export async function refreshNetwork(): Promise<NetworkStatus> {
+  if (!NetInfo) return current;
   try {
     const s = await NetInfo.refresh();
     current = derive(s);
