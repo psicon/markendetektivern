@@ -61,6 +61,34 @@ Was tun:
   hinzukommen: input-Parameter MUSS EAN sein, fail-fast wenn nicht
   vorhanden.
 
+## EAN-Storage: `EANs[]` (Array) ist die Source of Truth
+
+Auf `produkte/*` und `markenProdukte/*` ist **`EANs: string[]`** das
+kanonische EAN-Feld. Reale Daten tragen NUR `EANs[]` — KEIN singuläres
+`EAN: string`. Das TypeScript-Interface (`lib/types/firestore.ts`)
+deklariert zwar ein Legacy-`EAN: string`, aber das ist NICHT die
+Daten-Konvention. **Niemals dem Type/dem Graph blind trauen — gegen
+echte Daten gegenchecken.** (Mai 2026: einmal `EAN: gtin` in Promotion-
+Docs reingeschrieben weil der Type es hatte → wieder rausgenommen, weil
+reale Docs es nicht nutzen.)
+
+Was tun:
+- **Schreiben** (Promotion, Backfill, neue Produkte): NUR `EANs: [gtin]`
+  setzen. Kein singuläres `EAN`.
+- **Lesen**: über `extractEans(product)` gehen — der merged defensiv
+  `EAN, ean, gtin, GTIN` + `EANs[]` + `eans[]` + `moreInformation.EAN`,
+  dedupt, filtert auf ≥8 Zeichen. So sind Altdaten mit Legacy-Singles
+  abgedeckt OHNE dass neuer Code singuläre Felder schreiben muss.
+- Alle Pipelines greifen bereits auf `EANs[]` zu: nutrition-scraper
+  (openfood/serper-Suche), nutrition-backfill, receipt-matcher
+  (`buildMeta` liest `EANs[0]`), App-Nährwerte. EAN-Suche (Scraper/
+  openfood) iteriert ALLE Einträge aus `EANs[]`.
+- **Drift-Warnung:** `extractEans` existiert 3× kopiert
+  (`lib/utils/productNutrition.ts`, `cloud-functions/nutrition-backfill`,
+  `cloud-functions/nutrition-scraper` inline). Wenn die Logik geändert
+  werden muss → alle 3 nachziehen, oder zu einem geteilten Helper
+  refactoren.
+
 ## Meta-Regel: ClickUp-Tasks immer kommentieren + 'In Review' setzen
 
 Wenn ich an einem ClickUp-Task arbeite (egal ob Bug, Feature,
