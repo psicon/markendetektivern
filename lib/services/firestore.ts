@@ -4338,22 +4338,41 @@ export class FirestoreService {
             }
           }
           
-          // Berechne Ersparnis
+          // Ersparnis = Markenpreis − billigste NoName-Alternative ("verpasstes
+          // Sparpotenzial"). 1) schneller Pfad über denormalisierte
+          // relatedProdukteIDs, 2) AUTORITATIVE Quelle: produkte, die per
+          // markenProdukt-Ref auf dieses Markenprodukt zeigen — relatedProdukteIDs
+          // ist oft leer (sonst bleibt savings fälschlich 0).
           let savings = 0;
+          let cheapestPrice = Infinity;
           if (rawData.relatedProdukteIDs && rawData.relatedProdukteIDs.length > 0) {
-            let cheapestPrice = Infinity;
             for (const relatedId of rawData.relatedProdukteIDs) {
               const relatedDoc = await getDoc(doc(db, 'produkte', relatedId));
               if (relatedDoc.exists()) {
-                const relatedData = relatedDoc.data();
-                if (relatedData.preis && relatedData.preis < cheapestPrice) {
-                  cheapestPrice = relatedData.preis;
-                }
+                const p = (relatedDoc.data() as any)?.preis;
+                if (typeof p === 'number' && p < cheapestPrice) cheapestPrice = p;
               }
             }
-            if (cheapestPrice !== Infinity && rawData.preis) {
-              savings = Math.max(0, rawData.preis - cheapestPrice);
+          }
+          if (cheapestPrice === Infinity) {
+            try {
+              const altSnap = await getDocs(
+                query(
+                  collection(db, 'produkte'),
+                  where('markenProdukt', '==', doc(db, 'markenProdukte', productDoc.id)),
+                  limit(25),
+                ),
+              );
+              altSnap.forEach((d: any) => {
+                const p = (d.data() as any)?.preis;
+                if (typeof p === 'number' && p < cheapestPrice) cheapestPrice = p;
+              });
+            } catch (e) {
+              console.warn('[purchase] alt-query failed', (e as Error)?.message);
             }
+          }
+          if (cheapestPrice !== Infinity && typeof rawData.preis === 'number') {
+            savings = Math.max(0, rawData.preis - cheapestPrice);
           }
           
           purchaseData = {
