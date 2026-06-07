@@ -27,6 +27,7 @@ import { AppState } from 'react-native';
 
 import { isOnline, refreshNetwork, subscribeNetwork } from './network';
 import { submitProduct, uploadProductImage, type ProductPhotoStep } from './productSubmit';
+import { showInfoToast } from './ui/toast';
 
 const STORAGE_KEY = 'product_upload_queue_v1';
 const QUEUE_DIR = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? ''}upload_queue/`;
@@ -85,6 +86,9 @@ let jobs: UploadJob[] = [];
 let loaded = false;
 let processing = false;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
+// Successful uploads since the queue was last drained — used to confirm a
+// finished background batch with one toast (even if the user moved on).
+let completedInBatch = 0;
 const listeners = new Set<Listener>();
 
 // ─── internal state helpers ─────────────────────────────────────────
@@ -351,6 +355,7 @@ async function runJob(job: UploadJob) {
     jobs = jobs.filter((j) => j.id !== job.id);
     await persist();
     emit();
+    completedInBatch += 1;
   } catch (e: any) {
     const attempts = (getJob(job.id)?.attempts ?? job.attempts) + 1;
     setJob(job.id, { status: 'failed', attempts, lastError: e?.message ?? 'upload_failed' });
@@ -380,6 +385,17 @@ export async function processQueue(): Promise<void> {
     }
   } finally {
     processing = false;
+  }
+  // Batch drained → confirm completions once. Fires even if the user navigated
+  // away (the queue is module-level), closing the feedback loop.
+  if (completedInBatch > 0 && !jobs.some((j) => j.status === 'queued' || j.status === 'uploading')) {
+    const n = completedInBatch;
+    completedInBatch = 0;
+    try {
+      showInfoToast(n === 1 ? 'Produkt hochgeladen ✓' : `${n} Produkte hochgeladen ✓`, 'success');
+    } catch {
+      /* toast provider may not be mounted yet */
+    }
   }
 }
 

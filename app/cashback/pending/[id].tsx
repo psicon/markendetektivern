@@ -18,7 +18,7 @@ import { Image as ExpoImage } from 'expo-image';
 import LottieView from 'lottie-react-native';
 import { getDownloadURL, ref as storageRef } from '@react-native-firebase/storage';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -51,6 +51,7 @@ import {
 import { formatCents } from '@/lib/types/cashback';
 import { prepareForUpload } from '@/lib/utils/cashbackImage';
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
+import { useNetworkStatus } from '@/lib/services/network';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -341,10 +342,21 @@ export default function CashbackPendingScreen() {
   // GamificationProvider-Watcher (feuern auch wenn der User von dieser
   // Seite weg navigiert). Hier kein lokaler Trigger mehr.
 
+  const net = useNetworkStatus();
   const primary = theme.primary ?? '#0d8575';
   const warn = '#d6603a';
   const yellow = '#b08800';
   const headerOffset = insets.top + DETAIL_HEADER_ROW_HEIGHT;
+
+  // Bons offline-fähig: einen fehlgeschlagenen Upload bei Reconnect automatisch
+  // fortsetzen (event-getrieben über NetInfo, kein Tippen nötig). Nur auf der
+  // offline→online-Flanke, nicht im Dauer-Online-Zustand (kein Loop).
+  const prevOnlineRef = useRef(net.online);
+  useEffect(() => {
+    const reconnected = net.online && prevOnlineRef.current === false;
+    prevOnlineRef.current = net.online;
+    if (reconnected && state === 'upload_failed') runUpload();
+  }, [net.online, state, runUpload]);
 
   // ─── Status banner content ────────────────────────────────────────
 
@@ -391,6 +403,17 @@ export default function CashbackPendingScreen() {
       };
     }
     if (state === 'upload_failed') {
+      if (!net.online) {
+        // Offline → reassuring, positive framing (the upload auto-resumes on
+        // reconnect, see the effect below). Never frame it as an error.
+        return {
+          icon: <MaterialCommunityIcons name="wifi-off" size={42} color={yellow} />,
+          bg: yellow + '22',
+          title: 'Kein Internet',
+          body: 'Dein Bon ist gespeichert. Der Upload startet automatisch, sobald die Verbindung wieder da ist.',
+          cashback: null,
+        };
+      }
       return {
         icon: <MaterialCommunityIcons name="cloud-alert" size={42} color={warn} />,
         bg: warn + '22',
@@ -497,7 +520,7 @@ export default function CashbackPendingScreen() {
       };
     }
     return null;
-  }, [state, primary, doc]);
+  }, [state, primary, doc, uploadError, net.online]);
 
   const items = doc?.items ?? [];
   const sumItemsCents = items.reduce((acc, it) => acc + (it.priceCents || 0), 0);
@@ -635,8 +658,9 @@ export default function CashbackPendingScreen() {
               </View>
             ) : null}
 
-            {/* Retry button — only shown on upload_failed */}
-            {state === 'upload_failed' ? (
+            {/* Retry button — only when failed AND online; offline the banner
+                already explains the upload auto-resumes on reconnect. */}
+            {state === 'upload_failed' && net.online ? (
               <Pressable
                 onPress={runUpload}
                 style={({ pressed }) => ({

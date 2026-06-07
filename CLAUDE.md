@@ -219,6 +219,19 @@ werden sollten. Andere "Don't"-Regeln stehen verteilt im File
 `USE_FLYING_TABS`-Legacy etc.) — hier nur die Learnings aus
 Recent-Sessions.
 
+- **Upload-Bilder (Bon + Produkt) komprimieren/runterskalieren VOR dem Upload.**
+  Die Cloud-Pipelines brauchen VOLLE Bildqualität für die Analyse: OCR von
+  Nährwert-/Zutaten-Labels, Bon-Text-Erkennung, Produkt-Identifikation,
+  EAN-Lesbarkeit. Ein verkleinertes/stark JPEG-komprimiertes Bild macht kleine
+  Schrift unleserlich → OCR/Extraktion failt. `prepareForUpload`
+  (`lib/utils/cashbackImage.ts`) ist BEWUSST ein Pass-Through;
+  `expo-image-manipulator` NICHT zum Verkleinern vor Upload einsetzen — weder
+  für Produktfotos (`uploadProductImage`/`uploadQueue`) noch für Bons
+  (`uploadBonImage`). User-Vorgabe 2026-06: "volle qualität für die analyse,
+  egal ob bon oder produkt". Storage-Kosten sind sekundär; falls nötig
+  server-seitig NACH der Analyse archivieren/verkleinern, NIE client-seitig vor
+  Upload.
+
 - **Time-based Debouncing für "wait for async transition to complete"** —
   Wenn ein React-State-Wechsel ein async-Side-Effect-Window hat
   (z.B. `signOut()` → kurze Null-User-Phase → `signInAnonymously()`),
