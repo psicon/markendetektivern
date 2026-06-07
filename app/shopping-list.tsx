@@ -43,6 +43,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  Share,
   Text,
   View,
 } from 'react-native';
@@ -213,6 +214,52 @@ function formatPack(size?: number, unit?: string, price?: number): string | null
 
 const formatEur = (n: number) =>
   `${(n || 0).toFixed(2).replace('.', ',')} €`;
+
+// ─── Extern teilen: Einkaufszettel als schöner Text ──────────────────
+// (Produktname · Marke · Markt · Preis, mit Anzahl + Summe). Reine
+// Read-Side-Formatierung der bereits geladenen Items — kein Datenmodell.
+function shareItemLine(it: EnrichedItem): string {
+  const qty = it.anzahl ?? 1;
+  const name = it.name || it.product?.name || it.product?.produktName || 'Produkt';
+  const brand =
+    it.product?.marke?.name ||
+    it.product?.hersteller?.name ||
+    it.product?.handelsmarke?.bezeichnung ||
+    '';
+  const marketName = it.product?.discounter?.name || it.markt?.name || '';
+  const land = it.product?.discounter?.land || it.markt?.land || '';
+  const market = marketName ? `${marketName}${land ? ` (${land})` : ''}` : '';
+  const preis = typeof it.product?.preis === 'number' ? it.product.preis : null;
+  const meta = [brand, market, preis != null ? formatEur(preis) : '']
+    .filter(Boolean)
+    .join(' · ');
+  return `• ${qty}× ${name}${meta ? ` — ${meta}` : ''}`;
+}
+
+export function buildShoppingListShareText(
+  brand: EnrichedItem[],
+  noname: EnrichedItem[],
+): string {
+  const lines: string[] = ['🛒 Mein Einkaufszettel'];
+  const section = (title: string, arr: EnrichedItem[]) => {
+    if (!arr.length) return;
+    lines.push('', title);
+    for (const it of arr) lines.push(shareItemLine(it));
+  };
+  section('MARKEN', brand);
+  section('EIGENMARKEN', noname);
+
+  let totalQty = 0;
+  let totalEur = 0;
+  for (const it of [...brand, ...noname]) {
+    const qty = it.anzahl ?? 1;
+    totalQty += qty;
+    if (typeof it.product?.preis === 'number') totalEur += it.product.preis * qty;
+  }
+  lines.push('', `${totalQty} Artikel${totalEur > 0 ? ` · ca. ${formatEur(totalEur)}` : ''}`);
+  lines.push('', 'Geteilt aus der MarkenDetektive-App');
+  return lines.join('\n');
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // Skeletons
@@ -3842,6 +3889,29 @@ export default function ShoppingListScreen() {
         onBack={() => router.back()}
         right={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Pressable
+              onPress={() => {
+                if (!brandProducts.length && !noNameProducts.length) {
+                  showInfoToast('Dein Einkaufszettel ist noch leer.', 'info');
+                  return;
+                }
+                Share.share({
+                  message: buildShoppingListShareText(brandProducts, noNameProducts),
+                }).catch(() => {});
+              }}
+              hitSlop={6}
+              style={({ pressed }) => ({
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                backgroundColor: theme.surfaceAlt,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <MaterialCommunityIcons name="share-variant" size={18} color={theme.textMuted} />
+            </Pressable>
             <Pressable
               onPress={() => setShowFilter(true)}
               hitSlop={6}
