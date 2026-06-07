@@ -25,6 +25,9 @@ export interface PurchasedProduct {
     bild: string;
     land: string;
   };
+  /** Kategorie-Doc-ID (aus productData.kategorie-Ref) — für den Kategoriefilter
+   *  in der Statistik. Name wird im Screen via getKategorien() aufgelöst. */
+  kategorieId?: string | null;
   // Original cart data
   originalCartData?: any;
 }
@@ -125,6 +128,7 @@ class PurchaseHistoryService {
             hersteller: purchaseData.hersteller || null,
             handelsmarke: purchaseData.handelsmarke || null,
             discounter: purchaseData.discounter || null,
+            kategorieId: purchaseData.productData?.kategorie?.id ?? null,
             originalCartData: purchaseData.originalCartData || null
           };
 
@@ -177,6 +181,7 @@ class PurchaseHistoryService {
             hersteller: purchaseData.hersteller || null,
             handelsmarke: purchaseData.handelsmarke || null,
             discounter: purchaseData.discounter || null,
+            kategorieId: purchaseData.productData?.kategorie?.id ?? null,
             originalCartData: purchaseData.originalCartData || null
           };
 

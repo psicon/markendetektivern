@@ -23,6 +23,7 @@ import { Shimmer } from '@/components/design/Skeletons';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { FirestoreService } from '@/lib/services/firestore';
 import purchaseHistoryService, {
   type PurchasedProduct,
 } from '@/lib/services/purchaseHistoryService';
@@ -57,6 +58,9 @@ function cachedFor(uid?: string | null): PurchasedProduct[] | null {
   return null;
 }
 
+// Kategorien (id→name) — statisch, einmal pro App-Session geladen.
+let katCache: Record<string, string> | null = null;
+
 export default function PurchaseStatisticsScreen() {
   const { theme, shadows } = useTokens();
   const insets = useSafeAreaInsets();
@@ -70,6 +74,9 @@ export default function PurchaseStatisticsScreen() {
   const [purchases, setPurchases] = useState<PurchasedProduct[] | null>(() => cachedFor(user?.uid));
   const [period, setPeriod] = useState('all');
   const [segment, setSegment] = useState<Segment>('all');
+  const [marketId, setMarketId] = useState('all');
+  const [categoryId, setCategoryId] = useState('all');
+  const [katMap, setKatMap] = useState<Record<string, string>>(() => katCache ?? {});
   const [showFilter, setShowFilter] = useState(false);
 
   useEffect(() => {
@@ -95,6 +102,25 @@ export default function PurchaseStatisticsScreen() {
     };
   }, [user?.uid]);
 
+  // Kategorie-Namen für den Filter (einmal, gecacht).
+  useEffect(() => {
+    if (katCache) return;
+    let alive = true;
+    FirestoreService.getKategorien()
+      .then((docs: any[]) => {
+        const m: Record<string, string> = {};
+        docs.forEach((d) => {
+          if (d?.id) m[d.id] = d.bezeichnung || d.name || 'Kategorie';
+        });
+        katCache = m;
+        if (alive) setKatMap(m);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const primary = theme.primary ?? '#0d8575';
   const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT + TABS_ROW_HEIGHT;
 
@@ -107,11 +133,41 @@ export default function PurchaseStatisticsScreen() {
   }, [purchases, period]);
 
   const filtered = useMemo(() => {
-    if (segment === 'all') return periodFiltered;
-    return periodFiltered.filter((p) =>
-      segment === 'brand' ? p.type === 'markenprodukt' : p.type === 'noname',
-    );
-  }, [periodFiltered, segment]);
+    let rows = periodFiltered;
+    if (segment !== 'all') {
+      rows = rows.filter((p) => (segment === 'brand' ? p.type === 'markenprodukt' : p.type === 'noname'));
+    }
+    if (marketId !== 'all') rows = rows.filter((p) => p.discounter?.id === marketId);
+    if (categoryId !== 'all') rows = rows.filter((p) => p.kategorieId === categoryId);
+    return rows;
+  }, [periodFiltered, segment, marketId, categoryId]);
+
+  // Filter-Optionen aus den geladenen Käufen (distinct) für die FilterSheet.
+  const marketOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of purchases ?? []) {
+      if (p.discounter?.id && p.discounter?.name) {
+        m.set(p.discounter.id, `${p.discounter.name}${p.discounter.land ? ` (${p.discounter.land})` : ''}`);
+      }
+    }
+    return [['all', 'Alle Märkte'], ...Array.from(m.entries()).sort((a, b) => a[1].localeCompare(b[1]))] as readonly (readonly [
+      string,
+      string,
+    ])[];
+  }, [purchases]);
+
+  const categoryOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of purchases ?? []) {
+      if (p.kategorieId) m.set(p.kategorieId, katMap[p.kategorieId] || 'Kategorie');
+    }
+    return [['all', 'Alle Kategorien'], ...Array.from(m.entries()).sort((a, b) => a[1].localeCompare(b[1]))] as readonly (readonly [
+      string,
+      string,
+    ])[];
+  }, [purchases, katMap]);
+
+  const filtersActive = period !== 'all' || marketId !== 'all' || categoryId !== 'all';
 
   const stats = useMemo(() => {
     let totalEur = 0;
@@ -167,6 +223,13 @@ export default function PurchaseStatisticsScreen() {
     letterSpacing: 0.6,
     color: theme.textMuted,
     textTransform: 'uppercase',
+  } as const;
+  const filterLabelStyle = {
+    fontFamily,
+    fontWeight: fontWeight.extraBold,
+    fontSize: 13,
+    color: theme.textMuted,
+    marginBottom: 8,
   } as const;
 
   return (
@@ -318,7 +381,7 @@ export default function PurchaseStatisticsScreen() {
             })}
           >
             <MaterialCommunityIcons name="tune-vertical" size={18} color={theme.textMuted} />
-            {period !== 'all' ? (
+            {filtersActive ? (
               <View style={{ position: 'absolute', top: -1, right: -1, width: 10, height: 10, borderRadius: 5, backgroundColor: primary, borderWidth: 1.5, borderColor: theme.bg }} />
             ) : null}
           </Pressable>
@@ -330,8 +393,21 @@ export default function PurchaseStatisticsScreen() {
         }
       />
 
-      <FilterSheet visible={showFilter} title="Zeitraum" onClose={() => setShowFilter(false)}>
+      <FilterSheet visible={showFilter} title="Filter" onClose={() => setShowFilter(false)}>
+        <Text style={filterLabelStyle}>Zeitraum</Text>
         <OptionList value={period} options={PERIODS} onChange={(v) => setPeriod(v)} />
+        {marketOptions.length > 1 ? (
+          <>
+            <Text style={[filterLabelStyle, { marginTop: 18 }]}>Markt</Text>
+            <OptionList value={marketId} options={marketOptions} onChange={(v) => setMarketId(v)} />
+          </>
+        ) : null}
+        {categoryOptions.length > 1 ? (
+          <>
+            <Text style={[filterLabelStyle, { marginTop: 18 }]}>Kategorie</Text>
+            <OptionList value={categoryId} options={categoryOptions} onChange={(v) => setCategoryId(v)} />
+          </>
+        ) : null}
       </FilterSheet>
     </View>
   );
