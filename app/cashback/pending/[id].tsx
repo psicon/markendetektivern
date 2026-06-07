@@ -18,7 +18,7 @@ import { Image as ExpoImage } from 'expo-image';
 import LottieView from 'lottie-react-native';
 import { getDownloadURL, ref as storageRef } from '@react-native-firebase/storage';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -39,19 +39,16 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { startReceiptScanFlow } from '@/lib/services/cashbackScanStart';
 import { storage } from '@/lib/firebase';
+import { subscribeReceipt } from '@/lib/services/cashbackUpload';
 import {
-  deletePendingMirror,
-  enqueueCashback,
-  getSelectedCampaignId,
-  setPendingMirrorError,
-  setPendingMirrorProgress,
-  subscribeReceipt,
-  uploadBonImage,
-} from '@/lib/services/cashbackUpload';
+  getBonJob,
+  kickBonQueue,
+  retryBonJob,
+  subscribeBonQueue,
+  type BonJob,
+} from '@/lib/services/bonUploadQueue';
 import { formatCents } from '@/lib/types/cashback';
-import { prepareForUpload } from '@/lib/utils/cashbackImage';
-import journeyTrackingService from '@/lib/services/journeyTrackingService';
-import { isOnline, refreshNetwork, useNetworkStatus } from '@/lib/services/network';
+import { useNetworkStatus } from '@/lib/services/network';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -156,140 +153,33 @@ export default function CashbackPendingScreen() {
   const [doc, setDoc] = useState<MirrorDoc | null>(null);
   const [hasResponded, setHasResponded] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [uploadStep, setUploadStep] = useState<
-    'idle' | 'uploading' | 'enqueueing' | 'done' | 'error'
-  >('idle');
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  // The background upload queue (bonUploadQueue) owns the upload now; we just
+  // observe the in-flight job for this id (status + live progress).
+  const [bonJob, setBonJob] = useState<BonJob | null>(() => getBonJob(String(params.id ?? '')));
   const [showDuplicate, setShowDuplicate] = useState<boolean>(params.dup === '1');
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
-  // Upload+enqueue runner — extracted so the retry button can call it.
-  const runUpload = useCallback(async () => {
-    const localId = String(params.id ?? '');
-    if (!user?.uid || !params.uploadUri) return;
-
-    setUploadStep('uploading');
-    setUploadError(null);
-
-    // Offline → don't burn the 60s upload watchdog; surface the offline state
-    // immediately (the banner explains it auto-resumes). The reconnect effect
-    // re-runs runUpload the moment connectivity returns.
-    if (!isOnline()) {
-      await refreshNetwork();
-      if (!isOnline()) {
-        setUploadError(null);
-        setUploadStep('error');
-        return;
-      }
-    }
-
-    try {
-      const prepared = await prepareForUpload(
-        String(params.uploadUri),
-        2000,
-        Number(params.uploadWidth ?? 0),
-        Number(params.uploadHeight ?? 0),
-      );
-
-      // Throttle progress writes to mirror — every 5% only.
-      let lastWrittenPct = 0;
-      const upload = await uploadBonImage(prepared.uri, user.uid, {
-        onProgress: (pct) => {
-          if (pct - lastWrittenPct >= 5 || pct === 100) {
-            lastWrittenPct = pct;
-            setPendingMirrorProgress(user.uid!, localId, pct).catch(() => {});
-          }
-        },
-        timeoutMs: 60_000,
-      });
-
-      setUploadStep('enqueueing');
-
-      // Journey snapshot (geohash, motivation, viewedProducts) for audit.
-      let journey: any = null;
-      try {
-        const j = journeyTrackingService.getCurrentJourney?.();
-        if (j) {
-          journey = {
-            journeyId: j.journeyId,
-            discoveryMethod: j.discoveryMethod,
-            startedAt: j.startTime,
-            location: j.location ?? null,
-            motivationSignals: j.motivationSignals ?? null,
-            filterMetricsMotivation: j.filterMetrics?.motivation ?? null,
-            viewedProductsCount: j.viewedProducts?.length ?? 0,
-          };
-        }
-      } catch {}
-
-      const result = await enqueueCashback({
-        clientUploadId: localId,
-        storagePath: upload.storagePath,
-        bytesHash: String(params.uploadHash ?? ''),
-        capturedAt: Number(params.uploadCapturedAt ?? Date.now()),
-        source: (params.uploadSource as any) || 'live_camera',
-        campaignId: getSelectedCampaignId(),
-        journey,
-      });
-
-      setUploadStep('done');
-      if (result.duplicate && result.cashbackId !== localId) {
-        await deletePendingMirror(user.uid!, localId).catch(() => {});
-        router.replace({
-          pathname: '/cashback/pending/[id]' as any,
-          params: { id: result.cashbackId, dup: '1' } as any,
-        });
-      }
-      // Otherwise: same id, CF updates the same mirror doc.
-    } catch (e: any) {
-      const code = e?.code as string | undefined;
-      const message = e?.message as string | undefined;
-      const human =
-        code === 'upload_timeout'
-          ? 'Der Upload braucht zu lange. Prüfe deine Verbindung und versuch es erneut.'
-          : code === 'rate_limited'
-          ? 'Du hast heute schon einen Bon eingereicht. Morgen geht es weiter.'
-          : code === 'consent_missing'
-          ? 'Bitte bestätige zuerst die Cashback-Einwilligung.'
-          : code === 'unauthenticated' || code === 'not_authenticated'
-          ? 'Bitte melde dich an, um Bons einzureichen.'
-          : code?.startsWith('storage/')
-          ? `Upload abgelehnt: ${code}${message ? ' — ' + message : ''}`
-          : code?.startsWith('http_')
-          ? `Backend antwortet nicht (${code}). Verbindung okay?`
-          : `Einreichen fehlgeschlagen: ${code || message || 'unbekannter Fehler'}`;
-
-      setUploadError(human);
-      setUploadStep('error');
-      // Persist failure to the mirror (fire-and-forget — the Firestore write
-      // hangs offline and the local 'error' state above already drives the UI).
-      void setPendingMirrorError(user.uid!, localId, human).catch(() => {});
-    }
-  }, [
-    params.id,
-    params.uploadUri,
-    params.uploadHash,
-    params.uploadWidth,
-    params.uploadHeight,
-    params.uploadCapturedAt,
-    params.uploadSource,
-    user?.uid,
-  ]);
-
-  // Run the upload exactly once when we arrive with handoff params.
-  const hasUploadHandoff = !!params.uploadUri && uploadStep === 'idle';
+  // The background upload queue (lib/services/bonUploadQueue) owns the upload
+  // now — it persists the image, survives leaving this screen / an app kill,
+  // and auto-resumes on reconnect. Here we just OBSERVE the job for this id
+  // (in-flight status + live progress + the offline/failed signal).
   useEffect(() => {
-    if (!hasUploadHandoff) return;
-    if (!user?.uid) {
-      setUploadError('Bitte melde dich an, um Bons einzureichen.');
-      setUploadStep('error');
-      return;
-    }
-    runUpload();
-  }, [hasUploadHandoff, user?.uid, runUpload]);
+    const id = String(params.id ?? '');
+    const unsub = subscribeBonQueue((all) => {
+      setBonJob(all.find((j) => j.id === id) ?? null);
+    });
+    // Resume any leftover job (e.g. app was killed mid-upload).
+    kickBonQueue();
+    return unsub;
+  }, [params.id]);
+
+  // Manual retry of a failed background upload.
+  const retryUpload = useCallback(() => {
+    retryBonJob(String(params.id ?? ''));
+  }, [params.id]);
 
   // Live snapshot — the placeholder mirror exists from the moment the
   // user tapped "Einreichen", so subscribing immediately works for
@@ -331,57 +221,48 @@ export default function CashbackPendingScreen() {
     };
   }, [doc?.storagePath]);
 
+  const net = useNetworkStatus();
+
   const state: ViewState = useMemo(() => {
-    // A CLIENT upload/enqueue failure (uploadStep 'error') is a retryable
-    // 'upload_failed' — NOT a server 'rejected'. This drives the retry button
-    // (online) and the "Kein Internet" banner + auto-resume (offline). Real
-    // server rejections come from doc.status='rejected' below (reached only
-    // when uploadStep is 'done', i.e. the upload succeeded and the CF judged).
-    if (uploadStep === 'error') return 'upload_failed';
-    // Visual state is driven by the mirror doc's status. Upload-step is
-    // only used to override copy / show the "Einreichen fehlgeschlagen"
-    // banner — actual state comes from Firestore so the user gets the
-    // truth even after closing the app.
-    if (!hasResponded) return 'unknown';
-    if (!doc) {
-      // Placeholder might have been deleted (superseded after dedup) —
-      // most likely the user is now on a different doc. If we're still
-      // mid-upload, show 'uploading' (the mirror writes are eventually
-      // consistent and may not have hit yet).
-      return uploadStep === 'uploading' || uploadStep === 'enqueueing'
-        ? 'uploading'
-        : 'not_found';
+    // While a background upload job exists for this id, IT is authoritative for
+    // the in-flight visual (the queue owns upload + retry + reconnect-resume).
+    if (bonJob) {
+      if (bonJob.status === 'failed') return 'upload_failed';
+      // 'queued' while offline → render the "Kein Internet" state (the
+      // upload_failed banner branches on net.online, retry hidden offline).
+      // Otherwise we're actively uploading / next in line.
+      if (bonJob.status === 'queued' && !net.online) return 'upload_failed';
+      return 'uploading';
     }
+    if (!hasResponded) return 'unknown';
+    // Job gone but no mirror yet (eventually consistent) → not_found is the
+    // safe default; once the mirror lands viewStateFor takes over.
+    if (!doc) return 'not_found';
+    // Job done → the CF owns the lifecycle (ocr → review → approved/…) and
+    // real server 'rejected' comes from here.
     return viewStateFor(doc.status);
-  }, [doc, hasResponded, uploadStep]);
+  }, [bonJob, doc, hasResponded, net.online]);
 
   // Approval-Celebration + Reject-Toast laufen jetzt GLOBAL über den
   // GamificationProvider-Watcher (feuern auch wenn der User von dieser
   // Seite weg navigiert). Hier kein lokaler Trigger mehr.
 
-  const net = useNetworkStatus();
   const primary = theme.primary ?? '#0d8575';
   const warn = '#d6603a';
   const yellow = '#b08800';
   const headerOffset = insets.top + DETAIL_HEADER_ROW_HEIGHT;
-
-  // Bons offline-fähig: einen fehlgeschlagenen Upload bei Reconnect automatisch
-  // fortsetzen (event-getrieben über NetInfo, kein Tippen nötig). Nur auf der
-  // offline→online-Flanke, nicht im Dauer-Online-Zustand (kein Loop).
-  const prevOnlineRef = useRef(net.online);
-  useEffect(() => {
-    const reconnected = net.online && prevOnlineRef.current === false;
-    prevOnlineRef.current = net.online;
-    if (reconnected && state === 'upload_failed') runUpload();
-  }, [net.online, state, runUpload]);
 
   // ─── Status banner content ────────────────────────────────────────
 
   const banner = useMemo(() => {
     if (state === 'unknown') return null;
     if (state === 'uploading') {
-      const pct =
-        typeof doc?.uploadProgress === 'number' ? doc.uploadProgress : null;
+      // Prefer the live queue-job progress; fall back to the mirror doc.
+      const pct = bonJob
+        ? bonJob.progress
+        : typeof doc?.uploadProgress === 'number'
+          ? doc.uploadProgress
+          : null;
       return {
         icon: (
           <LottieView
@@ -435,7 +316,7 @@ export default function CashbackPendingScreen() {
         icon: <MaterialCommunityIcons name="cloud-alert" size={42} color={warn} />,
         bg: warn + '22',
         title: 'Upload fehlgeschlagen',
-        body: doc?.uploadError || uploadError || 'Verbindung abgebrochen. Tippe auf „Erneut versuchen", um den Upload neu zu starten.',
+        body: doc?.uploadError || bonJob?.lastError || 'Verbindung abgebrochen. Tippe auf „Erneut versuchen", um den Upload neu zu starten.',
         cashback: null,
       };
     }
@@ -537,7 +418,7 @@ export default function CashbackPendingScreen() {
       };
     }
     return null;
-  }, [state, primary, doc, uploadError, net.online]);
+  }, [state, primary, doc, bonJob, net.online]);
 
   const items = doc?.items ?? [];
   const sumItemsCents = items.reduce((acc, it) => acc + (it.priceCents || 0), 0);
@@ -667,7 +548,7 @@ export default function CashbackPendingScreen() {
               >
                 <View
                   style={{
-                    width: `${typeof doc?.uploadProgress === 'number' ? Math.max(2, doc.uploadProgress) : 8}%`,
+                    width: `${bonJob ? Math.max(2, bonJob.progress) : typeof doc?.uploadProgress === 'number' ? Math.max(2, doc.uploadProgress) : 8}%`,
                     height: '100%',
                     backgroundColor: primary,
                   }}
@@ -679,7 +560,7 @@ export default function CashbackPendingScreen() {
                 already explains the upload auto-resumes on reconnect. */}
             {state === 'upload_failed' && net.online ? (
               <Pressable
-                onPress={runUpload}
+                onPress={retryUpload}
                 style={({ pressed }) => ({
                   marginTop: 14,
                   paddingHorizontal: 20,

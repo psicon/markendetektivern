@@ -33,6 +33,7 @@ import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
+import { kickBonQueue } from '@/lib/services/bonUploadQueue';
 import { startReceiptScanFlow } from '@/lib/services/cashbackScanStart';
 import { FirestoreService } from '@/lib/services/firestore';
 import {
@@ -174,6 +175,12 @@ export default function CashbackHistoryScreen() {
 
   // Realtime + lazy: re-subscribe wenn pageLimit wächst. Bleibt live
   // (neue Bons + Status-Flips sofort), lädt aber nur pageLimit Docs.
+  // Resume any leftover background bon uploads (e.g. app killed mid-upload, or
+  // a cold start landing here) — "Meine Bons" is the natural place to nudge it.
+  useEffect(() => {
+    kickBonQueue();
+  }, []);
+
   useEffect(() => {
     if (!user?.uid) {
       setEntries([]);

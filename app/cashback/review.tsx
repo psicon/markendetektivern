@@ -34,21 +34,9 @@ const { height: SCREEN_H } = Dimensions.get('window');
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { createPendingMirror } from '@/lib/services/cashbackUpload';
+import { enqueueBon } from '@/lib/services/bonUploadQueue';
+import { getSelectedCampaignId } from '@/lib/services/cashbackUpload';
 import { verdictFor, type CapturedBon } from '@/lib/utils/cashbackImage';
-
-function newClientUploadId(): string {
-  // Compact UUID-ish (no dashes) — safe as a Firestore doc id.
-  const buf = new Uint8Array(16);
-  if (typeof globalThis.crypto?.getRandomValues === 'function') {
-    globalThis.crypto.getRandomValues(buf);
-  } else {
-    for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 256);
-  }
-  buf[6] = (buf[6] & 0x0f) | 0x40;
-  buf[8] = (buf[8] & 0x3f) | 0x80;
-  return [...buf].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 const CHECK_ITEMS: { key: 'corners' | 'date' | 'items'; label: string; sub: string }[] = [
   {
@@ -221,32 +209,38 @@ export default function CashbackReviewScreen() {
       setSubmitError('Bitte melde dich an, um Bons einzureichen.');
       return;
     }
-    const localId = newClientUploadId();
     setSubmitting(true);
-    // Fire-and-forget: a Firestore write resolves only on SERVER ack, so
-    // AWAITING it hangs forever offline (flight mode → stuck spinner). The
-    // local cache updates optimistically and the pending screen subscribes to
-    // it, so we navigate immediately and let that screen own the upload +
-    // offline auto-resume. Non-fatal if the placeholder write is delayed.
-    void createPendingMirror(user.uid, localId, {
-      merchantName: 'Wird hochgeladen …',
-    }).catch((e) => {
-      console.warn('⚠️ createPendingMirror failed', e);
-    });
-    // T17.22: Submit-Feedback — leichte Haptik damit der User
-    // bestätigt fühlt dass der Tap registriert wurde. Die volle
-    // Banner+Celebration kommt erst bei Approval in pending/[id].tsx.
+    // Hand the receipt to the persistent background upload queue: it copies
+    // the image to a durable dir + creates the placeholder mirror, then uploads
+    // in the background with NetInfo auto-resume. Survives LEAVING this screen
+    // and an app kill → no more zombie "Wird hochgeladen" docs. enqueueBon only
+    // does local work (file copy + AsyncStorage), so it never hangs offline.
+    let localId: string;
+    try {
+      localId = await enqueueBon({
+        uid: user.uid,
+        imageUri: bon.uri,
+        hash: bon.bytesHash,
+        width: bon.width,
+        height: bon.height,
+        capturedAt: bon.capturedAt,
+        source: ((params.source as string) || 'live_camera') as 'live_camera' | 'upload',
+        campaignId: getSelectedCampaignId(),
+      });
+    } catch (e) {
+      console.warn('⚠️ enqueueBon failed', e);
+      setSubmitError('Konnte nicht vorgemerkt werden — bitte nochmal.');
+      setSubmitting(false);
+      return;
+    }
+    // Submit-Feedback — leichte Haptik. Die volle Banner+Celebration kommt erst
+    // bei Approval (global über GamificationProvider).
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     router.replace({
       pathname: '/cashback/pending/[id]' as any,
       params: {
         id: localId,
-        uploadUri: bon.uri,
-        uploadHash: bon.bytesHash,
-        uploadWidth: String(bon.width),
-        uploadHeight: String(bon.height),
-        uploadCapturedAt: String(bon.capturedAt),
-        uploadSource: (params.source as string) || 'live_camera',
+        uploadUri: bon.uri, // local preview while the upload runs
       },
     });
   }, [bon, canSubmit, user?.uid, params.source]);
