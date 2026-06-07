@@ -15,6 +15,7 @@ import { router, useNavigation } from 'expo-router';
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Circle, G } from 'react-native-svg';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
@@ -60,6 +61,79 @@ function cachedFor(uid?: string | null): PurchasedProduct[] | null {
 
 // Kategorien (id→name) — statisch, einmal pro App-Session geladen.
 let katCache: Record<string, string> | null = null;
+
+// ─── Donut-Chart (Verteilung nach Kategorie / Markt) ─────────────────
+const PIE_COLORS = ['#0d8575', '#f5720e', '#5b4f9c', '#42a968', '#2196f3', '#b08800', '#d6603a', '#9e6b50'];
+const sliceColor = (name: string, i: number) =>
+  name === 'Sonstige' || name.startsWith('Ohne') ? '#c4ccce' : PIE_COLORS[i % PIE_COLORS.length];
+
+type Slice = { name: string; value: number };
+
+/** Ausgaben nach Schlüssel gruppieren (Σ preis), absteigend, Top-6 + Sonstige. */
+function aggregateSpend(
+  items: PurchasedProduct[],
+  keyOf: (p: PurchasedProduct) => string | null | undefined,
+  nameOf: (p: PurchasedProduct) => string,
+): Slice[] {
+  const m = new Map<string, Slice>();
+  for (const p of items) {
+    const preis = typeof p.preis === 'number' ? p.preis : 0;
+    if (preis <= 0) continue;
+    const k = keyOf(p) || '__none__';
+    const cur = m.get(k) ?? { name: nameOf(p), value: 0 };
+    cur.value += preis;
+    m.set(k, cur);
+  }
+  const arr = Array.from(m.values()).sort((a, b) => b.value - a.value);
+  const TOP = 6;
+  if (arr.length <= TOP + 1) return arr;
+  const rest = arr.slice(TOP).reduce((s, x) => s + x.value, 0);
+  return [...arr.slice(0, TOP), { name: 'Sonstige', value: rest }];
+}
+
+function Donut({
+  slices,
+  trackColor,
+  size = 128,
+  thickness = 20,
+}: {
+  slices: { color: string; value: number }[];
+  trackColor: string;
+  size?: number;
+  thickness?: number;
+}) {
+  const total = slices.reduce((s, x) => s + x.value, 0) || 1;
+  const r = (size - thickness) / 2;
+  const circ = 2 * Math.PI * r;
+  const cx = size / 2;
+  const cy = size / 2;
+  let acc = 0;
+  return (
+    <Svg width={size} height={size}>
+      <G rotation={-90} origin={`${cx}, ${cy}`}>
+        <Circle cx={cx} cy={cy} r={r} stroke={trackColor} strokeWidth={thickness} fill="none" />
+        {slices.map((s, i) => {
+          const len = (s.value / total) * circ;
+          const node = (
+            <Circle
+              key={i}
+              cx={cx}
+              cy={cy}
+              r={r}
+              stroke={s.color}
+              strokeWidth={thickness}
+              fill="none"
+              strokeDasharray={`${len} ${circ - len}`}
+              strokeDashoffset={-acc}
+            />
+          );
+          acc += len;
+          return node;
+        })}
+      </G>
+    </Svg>
+  );
+}
 
 export default function PurchaseStatisticsScreen() {
   const { theme, shadows } = useTokens();
@@ -198,6 +272,21 @@ export default function PurchaseStatisticsScreen() {
       .slice(-12);
     return { totalEur, brandEur, nonameEur, brandCount, nonameCount, missedEur, byMonth, count: filtered.length };
   }, [filtered]);
+
+  // Verteilung (Σ preis) für die Donut-Charts — reagieren auf den aktiven Tab.
+  const byCategory = useMemo(
+    () =>
+      aggregateSpend(
+        filtered,
+        (p) => p.kategorieId,
+        (p) => (p.kategorieId ? katMap[p.kategorieId] || 'Kategorie' : 'Ohne Kategorie'),
+      ),
+    [filtered, katMap],
+  );
+  const byMarket = useMemo(
+    () => aggregateSpend(filtered, (p) => p.discounter?.id, (p) => p.discounter?.name || 'Ohne Markt'),
+    [filtered],
+  );
 
   const loading = purchases === null;
   const empty = !loading && filtered.length === 0;
@@ -356,6 +445,40 @@ export default function PurchaseStatisticsScreen() {
                   </View>
                 </View>
               ) : null}
+
+              {/* Verteilung nach Kategorie + Markt (Donut) — reagieren auf den
+                  aktiven Tab (Alle/Eigenmarken/Marken) + die Filter. */}
+              {[
+                { title: 'Ausgaben nach Kategorie', data: byCategory },
+                { title: 'Ausgaben nach Markt', data: byMarket },
+              ].map(({ title, data }) => {
+                if (!data.length || data.every((d) => d.value <= 0)) return null;
+                const pieSlices = data.map((d, i) => ({ ...d, color: sliceColor(d.name, i) }));
+                const pieTotal = pieSlices.reduce((s, x) => s + x.value, 0) || 1;
+                return (
+                  <View key={title} style={{ paddingHorizontal: 20, paddingTop: 24 }}>
+                    <View style={{ marginBottom: 12 }}>
+                      <Text style={sectionTitleStyle}>{title}</Text>
+                    </View>
+                    <View style={[cardStyle, { padding: 16, flexDirection: 'row', alignItems: 'center', gap: 16 }]}>
+                      <Donut slices={pieSlices} trackColor={theme.surfaceAlt ?? theme.border} />
+                      <View style={{ flex: 1, gap: 9 }}>
+                        {pieSlices.map((s, i) => (
+                          <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: s.color }} />
+                            <Text numberOfLines={1} style={{ flex: 1, fontFamily, fontWeight: fontWeight.medium, fontSize: 12, color: theme.text }}>
+                              {s.name}
+                            </Text>
+                            <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 12, color: theme.textMuted }}>
+                              {Math.round((s.value / pieTotal) * 100)}%
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
             </>
           )}
         </ScrollView>
@@ -452,6 +575,17 @@ function StatsSkeleton() {
               <Shimmer height={10} radius={5} />
             </View>
           ))}
+        </View>
+      </View>
+      <View style={{ paddingHorizontal: 20, paddingTop: 24 }}>
+        <Shimmer width={190} height={18} radius={6} style={{ marginBottom: 12 }} />
+        <View style={[card, { padding: 16, flexDirection: 'row', alignItems: 'center', gap: 16 }]}>
+          <Shimmer width={128} height={128} radius={64} />
+          <View style={{ flex: 1, gap: 9 }}>
+            {[0, 1, 2, 3].map((i) => (
+              <Shimmer key={i} height={11} />
+            ))}
+          </View>
         </View>
       </View>
     </View>
