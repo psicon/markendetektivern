@@ -89,6 +89,7 @@ interface NativeProps {
   onError?: (e: NativeErrorEvent) => void;
   onEdgesDetected?: (e: NativeEdgesEvent) => void;
   onQuality?: (e: NativeQualityEvent) => void;
+  onSessionStopped?: (e: { nativeEvent: Record<string, never> }) => void;
 }
 
 const NativeView: React.ComponentType<NativeProps> | null = (() => {
@@ -126,11 +127,15 @@ export interface BonScannerProps {
   onQuality?: (status: BonScannerQuality) => void;
   /** Fired on a fatal camera error (e.g. no camera). */
   onError?: (message: string) => void;
+  /** Fired once the capture session has actually stopped (isActive → false).
+   *  Lets a consumer hand the camera off to another stack deterministically
+   *  instead of guessing with a timeout. */
+  onSessionStopped?: () => void;
 }
 
 export const BonScanner = React.forwardRef<BonScannerHandle, BonScannerProps>(
   function BonScanner(
-    { style, isActive = true, torch = false, rawCapture = false, tuning, onEdges, onQuality, onError },
+    { style, isActive = true, torch = false, rawCapture = false, tuning, onEdges, onQuality, onError, onSessionStopped },
     ref,
   ) {
     const [signal, setSignal] = React.useState(0);
@@ -182,6 +187,7 @@ export const BonScanner = React.forwardRef<BonScannerHandle, BonScannerProps>(
         }}
         onEdgesDetected={(e) => onEdges?.(e.nativeEvent.visible)}
         onQuality={(e) => onQuality?.(e.nativeEvent.status)}
+        onSessionStopped={() => onSessionStopped?.()}
       />
     );
   },

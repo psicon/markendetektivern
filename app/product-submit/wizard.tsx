@@ -105,12 +105,14 @@ export default function ProductWizardScreen() {
   // review grid — capturing then returns straight to review (no advancing),
   // and the top-left button reads "Abbrechen".
   const [editingFromReview, setEditingFromReview] = useState(false);
-  // Camera-stack handoff guard: the doc-scanner (BonScanner, own
-  // AVCaptureSession) and the expo-camera CameraView (front/back/EAN) can't
-  // hold the back camera at the same time. When we switch between the two
-  // stacks we unmount the old one, wait for it to release, then mount the
-  // new one — otherwise the incoming camera gets a black/frozen session.
-  const [camMounted, setCamMounted] = useState(true);
+  // expo-camera (EAN/barcode) may only mount AFTER the native scanner's
+  // AVCaptureSession has actually stopped — otherwise both sessions contend
+  // for the back camera and AVFoundation deadlocks the main thread (whole-app
+  // freeze on the hersteller→EAN handoff). The native scanner stays mounted
+  // the whole capture phase; we toggle its session via isActive and wait for
+  // its onSessionStopped event before mounting expo-camera.
+  const [expoActive, setExpoActive] = useState(false);
+  const stopFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // MarketSelector calls onClose AFTER onSelect too — guard so a real
   // selection doesn't trigger the cancel (router.back) path.
   const marketChosenRef = useRef(false);
@@ -142,6 +144,17 @@ export default function ProductWizardScreen() {
   // The readability hint pill is only meaningful for flat text labels.
   const showReadability = step.mode === 'document' && useNativeCam;
 
+  // Deterministic camera-stack handoff state.
+  const nativeAvailable = isBonScannerAvailable;
+  const wantBarcode = phase === 'capture' && step.mode === 'barcode';
+  // Native scanner runs for every non-barcode step; its session is stopped the
+  // moment we move to the EAN step.
+  const bonActive = phase === 'capture' && nativeAvailable && !wantBarcode;
+  // Show expo-camera for every step on platforms WITHOUT the native scanner,
+  // or only for the barcode step (once the native session stopped) when it is
+  // available.
+  const showExpoCam = !nativeAvailable || (wantBarcode && expoActive);
+
   // Re-arm the barcode scanner + reset the live hint whenever the step
   // changes (so re-entering the EAN step can scan again).
   useEffect(() => {
@@ -158,28 +171,43 @@ export default function ProductWizardScreen() {
     chipsScrollRef.current?.scrollTo({ x: Math.max(0, x - SCREEN_W / 2 + 50), animated: true });
   }, [stepIdx, phase]);
 
-  // Clean camera-stack handoff. When the step switches between a doc-scanner
-  // step and an expo-camera step, briefly unmount any camera so the old
-  // AVCaptureSession releases the device before the new one starts.
-  const prevDocRef = useRef<boolean | null>(null);
+  // expo-camera mounts only after the native scanner confirms its session
+  // stopped (onSessionStopped). The fallback timer keeps the flow working on
+  // dev clients built before the native event existed.
+  const onBonStopped = useCallback(() => {
+    if (stopFallbackRef.current) {
+      clearTimeout(stopFallbackRef.current);
+      stopFallbackRef.current = null;
+    }
+    setExpoActive(true);
+  }, []);
+
   useEffect(() => {
-    if (phase !== 'capture') {
-      prevDocRef.current = null;
+    if (!wantBarcode) {
+      // Not on the barcode step → keep expo-camera torn down so its session
+      // releases before the native scanner (re)starts.
+      setExpoActive(false);
+      if (stopFallbackRef.current) {
+        clearTimeout(stopFallbackRef.current);
+        stopFallbackRef.current = null;
+      }
       return;
     }
-    if (prevDocRef.current === null) {
-      // First frame of the capture phase — mount directly.
-      prevDocRef.current = useNativeCam;
-      setCamMounted(true);
+    if (!nativeAvailable) {
+      // expo is the only stack on this platform — nothing to hand off from.
+      setExpoActive(true);
       return;
     }
-    if (prevDocRef.current !== useNativeCam) {
-      prevDocRef.current = useNativeCam;
-      setCamMounted(false);
-      const t = setTimeout(() => setCamMounted(true), 450);
-      return () => clearTimeout(t);
-    }
-  }, [phase, useNativeCam]);
+    // Entering the barcode step with the native scanner mounted: bonActive is
+    // now false, so BonScanner is stopping. Wait for its onSessionStopped
+    // event (deterministic). The fallback covers builds without the event yet.
+    const t = setTimeout(() => setExpoActive(true), 900);
+    stopFallbackRef.current = t;
+    return () => {
+      clearTimeout(t);
+      stopFallbackRef.current = null;
+    };
+  }, [wantBarcode, nativeAvailable]);
 
   const close = useCallback(() => {
     if (capturedCount > 0) {
@@ -497,20 +525,28 @@ export default function ProductWizardScreen() {
     return (
       <View style={styles.camRoot}>
         <StatusBar barStyle="light-content" />
-        {!camMounted ? (
-          // Brief black gap while the previous camera stack releases the device.
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
-        ) : useNativeCam ? (
+        {/* Native scanner stays mounted for the whole capture phase; its
+            session is toggled via isActive. expo-camera (barcode) is mounted
+            only once the native session has stopped (onBonStopped / fallback),
+            so the two AVCaptureSessions never overlap → no main-thread
+            deadlock on the hersteller→EAN handoff. */}
+        {nativeAvailable ? (
           <BonScanner
             ref={docScannerRef}
             style={StyleSheet.absoluteFill}
-            isActive
-            torch={flashOn}
+            isActive={bonActive}
+            torch={flashOn && bonActive}
             rawCapture
             tuning={LABEL_TUNING}
             onQuality={setQuality}
+            onSessionStopped={onBonStopped}
           />
-        ) : (
+        ) : null}
+        {!showExpoCam && nativeAvailable && !bonActive ? (
+          // Brief gap while the native session releases and before expo mounts.
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
+        ) : null}
+        {showExpoCam ? (
           <CameraView
             ref={cameraRef}
             style={StyleSheet.absoluteFill}
@@ -524,7 +560,7 @@ export default function ProductWizardScreen() {
             }
             onBarcodeScanned={step.mode === 'barcode' ? handleBarcode : undefined}
           />
-        )}
+        ) : null}
 
         {/* top bar */}
         <View style={[styles.camTop, { paddingTop: insets.top + 8 }]}>

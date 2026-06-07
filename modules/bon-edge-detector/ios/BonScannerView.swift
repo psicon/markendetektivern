@@ -76,6 +76,10 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   let onEdgesDetected = EventDispatcher()
   // Live readability/quality: "none" | "far" | "ok" (fired on change).
   let onQuality = EventDispatcher()
+  // Fires after the capture session has actually stopped (isActive → false),
+  // so a consumer can hand the back camera off to another stack (expo-camera)
+  // deterministically instead of guessing with a timeout.
+  let onSessionStopped = EventDispatcher()
   private var lastQualityStatus = ""
 
   // ── Capture stack ──────────────────────────────────────────────────
@@ -151,6 +155,9 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
         if self.configured && !self.session.isRunning { self.session.startRunning() }
       } else {
         if self.session.isRunning { self.session.stopRunning() }
+        // Session is fully released now → tell JS (deterministic camera-stack
+        // handoff; consumer mounts the next camera only after this fires).
+        self.onSessionStopped([:])
       }
     }
   }
