@@ -100,6 +100,7 @@ function buildPromotedDoc(r, kind, gtin, maps, now) {
   const doc = {
     name: r.productName || null,
     EANs: gtin ? [String(gtin)] : [],
+    EAN: gtin ? String(gtin) : null, // singuläres EAN-Feld (kanonisches Produkte-Interface)
     preis: Number.isFinite(Number(r.price_current)) ? Number(r.price_current) : null,
     preisDatum: now,
     bild: r.image || null,
