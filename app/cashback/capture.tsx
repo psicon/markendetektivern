@@ -429,7 +429,12 @@ export default function CashbackCaptureScreen() {
   }, [goReview]);
 
   const handleBack = useCallback(() => {
-    router.back();
+    // Abbruch des Bon-Scans: NICHT router.back() — capture wird via
+    // router.replace von consent betreten (consent.tsx:119/156), der
+    // Back-Stack ist daher unzuverlässig und kann auf der versteckten
+    // index-Splash landen. Wie review/handleDismiss explizit zur
+    // rewards-Tab navigieren (robust, egal über welchen Pfad betreten).
+    router.navigate('/(tabs)/rewards');
   }, []);
 
   // ─── Render: primary state is a thin "opening scanner" splash ─────

@@ -183,7 +183,11 @@ function ThemedApp() {
                 />
                 <Stack.Screen
                   name="cashback/capture"
-                  options={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: true }}
+                  // gestureEnabled:false — capture wird via router.replace
+                  // von consent betreten; Swipe-Back würde wie bei review
+                  // inkonsistent landen (statt zum Scanner zur falschen
+                  // Tab/Splash). Abbruch nur über das X (→ rewards). 2026-06.
+                  options={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: false }}
                 />
                 <Stack.Screen
                   name="cashback/review"
