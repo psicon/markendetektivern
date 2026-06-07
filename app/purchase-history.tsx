@@ -379,6 +379,23 @@ export default function PurchaseHistoryScreen() {
       <DetailHeader
         title="Kaufhistorie"
         onBack={() => router.back()}
+        right={
+          <Pressable
+            onPress={() => router.push('/purchase-statistics' as any)}
+            hitSlop={6}
+            style={({ pressed }) => ({
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: theme.surfaceAlt,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <MaterialCommunityIcons name="chart-box-outline" size={18} color={theme.textMuted} />
+          </Pressable>
+        }
         below={
           <View
             style={{
