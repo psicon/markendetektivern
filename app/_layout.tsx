@@ -166,6 +166,7 @@ function ThemedApp() {
                 {/* Detail screens render their own sticky header — suppress
                     the default Stack header statically here so it never
                     flashes on mount. */}
+                <Stack.Screen name="product/[id]" options={{ headerShown: false }} />
                 <Stack.Screen name="product-comparison/[id]" options={{ headerShown: false }} />
                 <Stack.Screen name="noname-detail/[id]" options={{ headerShown: false }} />
                 <Stack.Screen name="external-product/[ean]" options={{ headerShown: false }} />

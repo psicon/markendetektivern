@@ -1025,7 +1025,9 @@ export default function ExternalProductScreen() {
                       try {
                         FirestoreService.prefetchProductDetails(alt.objectID);
                       } catch {}
-                      router.push(`/noname-detail/${alt.objectID}` as any);
+                      // Via Resolver → richtige Detail-Seite je Stufe (statt
+                      // blind noname-detail, was bei Stufe 3-5 falsch wäre).
+                      router.push(`/product/${alt.objectID}` as any);
                     }}
                   />
                 </View>
