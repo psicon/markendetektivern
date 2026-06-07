@@ -99,8 +99,7 @@ function buildPromotedDoc(r, kind, gtin, maps, now) {
   const bkNorm = norm(r.brandKey);
   const doc = {
     name: r.productName || null,
-    EANs: gtin ? [String(gtin)] : [],
-    EAN: gtin ? String(gtin) : null, // singuläres EAN-Feld (kanonisches Produkte-Interface)
+    EANs: gtin ? [String(gtin)] : [], // EANs[] ist die Daten-Konvention; extractEans() liest daraus
     preis: Number.isFinite(Number(r.price_current)) ? Number(r.price_current) : null,
     preisDatum: now,
     bild: r.image || null,
