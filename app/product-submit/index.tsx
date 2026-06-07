@@ -27,6 +27,13 @@ import {
   type ProductPhotoStep,
   type ProductSubmissionEntry,
 } from '@/lib/services/productSubmit';
+import {
+  kickUploadQueue,
+  removeJob,
+  retryJob,
+  subscribeUploadQueue,
+  type UploadJob,
+} from '@/lib/services/uploadQueue';
 
 const PURPLE = '#5b4f9c';
 
@@ -98,6 +105,7 @@ export default function ProductSubmitOverview() {
   const navigation = useNavigation();
   const { theme, shadows } = useTokens();
   const [rows, setRows] = useState<ProductSubmissionEntry[]>([]);
+  const [queue, setQueue] = useState<UploadJob[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [campaign, setCampaign] = useState<ActiveProductCampaign | null>(null);
   // Tapped submission → detail sheet. URLs are resolved lazily (Storage
@@ -114,6 +122,14 @@ export default function ProductSubmitOverview() {
       setRows(r);
       setLoaded(true);
     });
+    return unsub;
+  }, []);
+
+  // In-flight background uploads (the single status surface). Kick the
+  // queue on mount so any offline/failed jobs resume now that we're here.
+  useEffect(() => {
+    const unsub = subscribeUploadQueue(setQueue);
+    kickUploadQueue();
     return unsub;
   }, []);
 
@@ -213,6 +229,84 @@ export default function ProductSubmitOverview() {
             </Text>
           </Pressable>
         </View>
+
+        {/* Background upload queue — the single status surface for in-flight
+            uploads. One row per job (progress + retry), no overlays even when
+            many submissions wait offline. Jobs disappear here and reappear as
+            'In Prüfung' below once their Firestore doc is written. */}
+        {queue.length > 0 ? (
+          <View>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 20, marginTop: 22, marginBottom: 10 }}>
+              <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.heading, fontWeight: fontWeight.extraBold as any, fontSize: 20, letterSpacing: -0.2 }}>
+                Wird hochgeladen
+              </Text>
+              <Text style={{ color: theme.textMuted ?? theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 12 }}>
+                {queue.length}
+              </Text>
+            </View>
+            {queue.map((j) => {
+              const failed = j.status === 'failed';
+              const uploading = j.status === 'uploading';
+              const title = j.productName || `Produkt ${j.productIndex ?? ''}`.trim();
+              const land = normalizeLand(j.marketLand);
+              const marketLine = j.marketName ? `${j.marketName}${land ? ` (${land})` : ''}` : '';
+              const accent = failed ? '#d6603a' : PURPLE;
+              const icon = failed ? 'cloud-alert' : uploading ? 'cloud-upload-outline' : 'cloud-clock-outline';
+              const statusLabel = failed
+                ? 'Upload fehlgeschlagen — tippen für erneut'
+                : uploading
+                  ? `Wird hochgeladen … ${j.progress} %`
+                  : 'Wartet auf Verbindung …';
+              return (
+                <Pressable
+                  key={j.id}
+                  onPress={failed ? () => retryJob(j.id) : undefined}
+                  style={({ pressed }) => ({
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: theme.surface,
+                    borderRadius: radii.lg,
+                    borderWidth: 1,
+                    borderColor: failed ? 'rgba(214,96,58,0.35)' : theme.border ?? 'rgba(0,0,0,0.06)',
+                    paddingHorizontal: 14,
+                    paddingVertical: 14,
+                    marginHorizontal: 16,
+                    marginBottom: 10,
+                    gap: 12,
+                    opacity: pressed && failed ? 0.7 : 1,
+                  })}
+                >
+                  <View style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: failed ? 'rgba(214,96,58,0.12)' : 'rgba(91,79,156,0.12)' }}>
+                    <MaterialCommunityIcons name={icon as any} size={22} color={accent} />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text numberOfLines={1} style={{ color: theme.text, fontFamily: fontFamilyVariants.heading, fontWeight: fontWeight.extraBold as any, fontSize: 16, letterSpacing: -0.2 }}>
+                      {title}
+                    </Text>
+                    {marketLine ? (
+                      <Text numberOfLines={1} style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 12, marginTop: 2 }}>
+                        {marketLine}
+                      </Text>
+                    ) : null}
+                    <Text numberOfLines={1} style={{ color: accent, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.medium as any, fontSize: 12, marginTop: 4 }}>
+                      {statusLabel}
+                    </Text>
+                    {!failed ? (
+                      <View style={{ height: 5, borderRadius: 3, backgroundColor: theme.surfaceAlt ?? 'rgba(0,0,0,0.08)', overflow: 'hidden', marginTop: 8 }}>
+                        <View style={{ width: `${Math.max(3, Math.min(100, j.progress))}%`, height: '100%', borderRadius: 3, backgroundColor: PURPLE }} />
+                      </View>
+                    ) : null}
+                  </View>
+                  {failed ? (
+                    <Pressable onPress={() => removeJob(j.id)} hitSlop={10} style={{ padding: 4 }}>
+                      <MaterialCommunityIcons name="close" size={20} color={theme.textMuted ?? theme.textSub} />
+                    </Pressable>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
 
         {/* Section header */}
         <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 20, marginTop: 22, marginBottom: 10 }}>

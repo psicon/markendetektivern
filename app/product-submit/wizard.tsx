@@ -47,11 +47,10 @@ import {
   getActiveProductCampaign,
   newSessionId,
   sanitizeForFilename,
-  submitProduct,
-  uploadProductImage,
   type ActiveProductCampaign,
   type ProductPhotoStep,
 } from '@/lib/services/productSubmit';
+import { enqueueProductUpload } from '@/lib/services/uploadQueue';
 import { showInfoToast } from '@/lib/services/ui/toast';
 
 const PURPLE = '#5b4f9c';
@@ -73,7 +72,7 @@ const LABEL_TUNING: ScannerTuning = {
   minReadableHeight: 0.44,
 };
 
-type Phase = 'market' | 'intro' | 'capture' | 'review' | 'uploading';
+type Phase = 'market' | 'intro' | 'capture' | 'review';
 
 export default function ProductWizardScreen() {
   const insets = useSafeAreaInsets();
@@ -99,7 +98,6 @@ export default function ProductWizardScreen() {
   const [stepIdx, setStepIdx] = useState(0);
   const [capturing, setCapturing] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
-  const [uploadPct, setUploadPct] = useState(0);
   const [campaign, setCampaign] = useState<ActiveProductCampaign | null>(null);
   const [quality, setQuality] = useState<BonScannerQuality>('none');
   const [eanCode, setEanCode] = useState<string | null>(null);
@@ -302,28 +300,26 @@ export default function ProductWizardScreen() {
   // ─── Submit ───────────────────────────────────────────────────────
   const doSubmit = useCallback(async () => {
     if (!user?.uid || !allCaptured) return;
-    setPhase('uploading');
-    setUploadPct(0);
+    // Hand the captured set to the background upload queue. Enqueue is
+    // near-instant (copies images to a persistent dir + writes the queue,
+    // no network), so we never block on a foreground "uploading" screen.
+    // Progress + retry live in the product-submit overview — one status
+    // surface, no orphaned overlays even with many offline submissions.
+    const steps = PRODUCT_PHOTO_STEPS.reduce<
+      { key: ProductPhotoStep; uri: string; fileName?: string }[]
+    >((acc, s) => {
+      const local = photos[s.key];
+      if (!local) return acc;
+      // EAN image filename carries the scanned code.
+      const fileName =
+        s.key === 'ean' && eanCode ? `ean_${sanitizeForFilename(eanCode)}.jpg` : undefined;
+      acc.push({ key: s.key, uri: local, fileName });
+      return acc;
+    }, []);
+
     try {
-      const uploaded: Partial<Record<ProductPhotoStep, string>> = {};
-      const steps = PRODUCT_PHOTO_STEPS;
-      for (let i = 0; i < steps.length; i++) {
-        const s = steps[i];
-        const local = photos[s.key];
-        if (!local) continue;
-        // EAN image filename carries the scanned code.
-        const fileName =
-          s.key === 'ean' && eanCode ? `ean_${sanitizeForFilename(eanCode)}.jpg` : undefined;
-        const path = await uploadProductImage(local, user.uid, sessionId, productIndex, s.key, {
-          fileName,
-          onProgress: (pct) => {
-            // Overall progress across all steps.
-            setUploadPct(Math.round(((i + pct / 100) / steps.length) * 100));
-          },
-        });
-        uploaded[s.key] = path;
-      }
-      await submitProduct(user.uid, {
+      await enqueueProductUpload({
+        uid: user.uid,
         sessionId,
         productIndex,
         marketId,
@@ -332,38 +328,41 @@ export default function ProductWizardScreen() {
         productName: productName.trim() || null,
         ean: eanCode,
         campaignId: campaign?.campaignId ?? null,
-        images: uploaded,
+        steps,
       });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      // Ask whether to capture more in the same market.
-      Alert.alert('Produkt eingereicht 🎉', 'Mehr in diesem Markt erfassen?', [
-        {
-          text: 'Fertig',
-          style: 'cancel',
-          // Pop the wizard back to the already-open overview (don't stack
-          // a second one). Fallback to replace if there's nothing below.
-          onPress: () => {
-            if (router.canGoBack()) router.back();
-            else router.replace('/product-submit');
-          },
-        },
-        {
-          text: 'Weiteres Produkt',
-          onPress: () => {
-            setPhotos({});
-            setProductName('');
-            setEanCode(null);
-            setProductIndex((n) => n + 1);
-            setStepIdx(0);
-            setPhase('intro');
-          },
-        },
-      ]);
     } catch (e: any) {
-      console.warn('product submit failed', e?.message);
-      showInfoToast('Einreichen fehlgeschlagen — Verbindung prüfen.', 'error');
-      setPhase('review');
+      console.warn('enqueue product upload failed', e?.message);
+      showInfoToast('Konnte nicht vorgemerkt werden — bitte nochmal.', 'error');
+      return;
     }
+
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    showInfoToast('Produkt eingereicht — lädt im Hintergrund hoch.', 'success');
+    // Fires instantly (we're still on the wizard at this moment), so it's
+    // never an orphan overlay on another screen.
+    Alert.alert('Produkt eingereicht 🎉', 'Es lädt im Hintergrund hoch. Weiteres Produkt in diesem Markt erfassen?', [
+      {
+        text: 'Fertig',
+        style: 'cancel',
+        // Pop the wizard back to the already-open overview (don't stack a
+        // second one). Fallback to replace if there's nothing below.
+        onPress: () => {
+          if (router.canGoBack()) router.back();
+          else router.replace('/product-submit');
+        },
+      },
+      {
+        text: 'Weiteres Produkt',
+        onPress: () => {
+          setPhotos({});
+          setProductName('');
+          setEanCode(null);
+          setProductIndex((n) => n + 1);
+          setStepIdx(0);
+          setPhase('intro');
+        },
+      },
+    ]);
   }, [user?.uid, allCaptured, photos, sessionId, productIndex, marketId, marketName, marketLand, productName, eanCode, campaign?.campaignId]);
 
   // ─── Render ───────────────────────────────────────────────────────
@@ -704,27 +703,11 @@ export default function ProductWizardScreen() {
     );
   }
 
-  // uploading
-  return (
-    <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center', gap: 18, padding: 32 }}>
-      <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
-      <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(91,79,156,0.12)', alignItems: 'center', justifyContent: 'center' }}>
-        <MaterialCommunityIcons name="cloud-upload-outline" size={32} color={PURPLE} />
-      </View>
-      <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.heading, fontWeight: fontWeight.bold as any, fontSize: 18 }}>
-        Produkt wird hochgeladen
-      </Text>
-      {/* purple progress bar in our UI */}
-      <View style={{ width: '100%', maxWidth: 320, gap: 8 }}>
-        <View style={{ height: 10, borderRadius: 5, backgroundColor: theme.surfaceAlt ?? 'rgba(0,0,0,0.08)', overflow: 'hidden' }}>
-          <View style={{ width: `${Math.max(3, Math.min(100, uploadPct))}%`, height: '100%', borderRadius: 5, backgroundColor: PURPLE }} />
-        </View>
-        <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 13, textAlign: 'center' }}>
-          {uploadPct} %
-        </Text>
-      </View>
-    </View>
-  );
+  // Submitting is handled by the background upload queue now
+  // (lib/services/uploadQueue.ts) — the wizard returns to the overview
+  // immediately, so there is no in-wizard "uploading" screen. This default
+  // return is unreachable: phase is always one of the four branches above.
+  return null;
 }
 
 const styles = StyleSheet.create({
