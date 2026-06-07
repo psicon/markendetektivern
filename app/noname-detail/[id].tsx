@@ -1,5 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { backOrHome } from '@/lib/utils/nav';
 import { safePush } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -582,7 +583,7 @@ export default function NoNameDetailScreen() {
           {error ?? 'Produkt nicht verfügbar'}
         </Text>
         <Pressable
-          onPress={() => router.back()}
+          onPress={backOrHome}
           style={({ pressed }) => ({
             marginTop: 20,
             height: 44,
@@ -924,7 +925,7 @@ export default function NoNameDetailScreen() {
         title="Produktdetails"
         scrollY={scrollY}
         swapAt={DOCK_DISTANCE}
-        onBack={() => router.back()}
+        onBack={backOrHome}
       />
 
       {/* Morph title — opacity is driven by morphTitleStyle's

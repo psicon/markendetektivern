@@ -17,6 +17,7 @@
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { backOrHome } from '@/lib/utils/nav';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -372,7 +373,7 @@ export default function ExternalProductScreen() {
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <DetailHeader
         title="Produkt"
-        onBack={() => router.back()}
+        onBack={backOrHome}
         // T17.46: Dev-only Reload-Button im rechten Header-Slot. Löscht
         // den external_products-Cache-Eintrag für diese EAN und fährt
         // die Cascade von vorne. Damit kann man testen ob neue Sources

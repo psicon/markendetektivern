@@ -1,6 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { backOrHome } from '@/lib/utils/nav';
 import { safeReplace } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -1319,7 +1320,7 @@ export default function ProductComparisonScreen() {
         'app_closed',
       );
     }
-    router.back();
+    backOrHome();
   };
 
   // ─── Render ───────────────────────────────────────────────────────────
