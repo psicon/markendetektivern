@@ -1,13 +1,13 @@
 /**
  * Kaufhistorie-Statistik (86ca5fjxk) — Ausgaben-Analyse aus den getätigten
- * Käufen, analog zur Bon-Ausgaben-Sicht (app/cashback/spending.tsx).
+ * Käufen, im App-Design (DetailHeader + SegmentedTabs im Chrome, FilterSheet
+ * für den Zeitraum, Karten mit shadows.sm + Token-Radii, Charts aus RN-Views).
  *
- * Quelle: /users/{uid}/purchases/* (PurchasedProduct). Aggregation
- * clientseitig: Gesamtausgaben, Marken vs. Eigenmarken, „verpasstes
- * Sparpotenzial" (= Σ der beim Markenkauf gespeicherten savings = Differenz
- * zur günstigsten Eigenmarken-Alternative zum Kaufzeitpunkt), Monatsverlauf.
- * Segment Alle / Eigenmarken / Marken (wie Stöbern). UI-Konventionen:
- * DetailHeader, theme-Tokens, Charts aus reinen RN-Views.
+ * Quelle: /users/{uid}/purchases/* (PurchasedProduct), client-aggregiert:
+ * Gesamtausgaben, Marken vs. Eigenmarken, „verpasstes Sparpotenzial" (Σ der
+ * beim Markenkauf gespeicherten savings = Differenz zur günstigsten Eigenmarken-
+ * Alternative), Monatsverlauf. Segment Alle / Eigenmarken / Marken (wie Stöbern).
+ * Modul-Cache (stale-while-revalidate), Shimmer-Skeleton beim Erstladen.
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -17,8 +17,10 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
+import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
+import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { Shimmer } from '@/components/design/Skeletons';
-import { fontFamily, fontWeight } from '@/constants/tokens';
+import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import purchaseHistoryService, {
@@ -27,24 +29,25 @@ import purchaseHistoryService, {
 
 type Segment = 'all' | 'brand' | 'noname';
 
-const SEGMENTS: [Segment, string][] = [
-  ['all', 'Alle'],
-  ['noname', 'Eigenmarken'],
-  ['brand', 'Marken'],
+const SEGMENT_TABS: readonly { key: Segment; label: string }[] = [
+  { key: 'all', label: 'Alle' },
+  { key: 'noname', label: 'Eigenmarken' },
+  { key: 'brand', label: 'Marken' },
 ];
-const PERIODS: [string, string][] = [
-  ['all', 'Alles'],
-  ['365', '12 Monate'],
-  ['90', '90 Tage'],
-  ['30', '30 Tage'],
+const PERIODS: readonly (readonly [string, string])[] = [
+  ['all', 'Gesamter Zeitraum'],
+  ['365', 'Letzte 12 Monate'],
+  ['90', 'Letzte 90 Tage'],
+  ['30', 'Letzte 30 Tage'],
 ];
 const MONTH_LABELS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
-const MISSED = '#d6603a'; // Akzent für verpasstes Sparpotenzial
+const MISSED = '#d6603a';
+const TABS_ROW_HEIGHT = 54;
 
 const formatEur = (n: number) => `${(n || 0).toFixed(2).replace('.', ',')} €`;
 
-// Modul-Cache: re-entry rendert sofort aus dem Cache (Skeleton nur beim ersten
-// Laden), danach Hintergrund-Revalidierung. RAM-only, TTL.
+// Modul-Cache: re-entry rendert sofort (Skeleton nur beim ersten Laden), danach
+// Hintergrund-Revalidierung. RAM-only, TTL.
 const CACHE_TTL_MS = 5 * 60_000;
 let purchaseCache: { uid: string; data: PurchasedProduct[]; at: number } | null = null;
 function cachedFor(uid?: string | null): PurchasedProduct[] | null {
@@ -54,62 +57,8 @@ function cachedFor(uid?: string | null): PurchasedProduct[] | null {
   return null;
 }
 
-/** Shimmer-Skeleton, das das Stats-Layout spiegelt (statt Blocking-Spinner). */
-function StatsSkeleton() {
-  const { theme } = useTokens();
-  const card = {
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: 18,
-  } as const;
-  return (
-    <View>
-      <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 20 }}>
-        {[0, 1, 2].map((i) => (
-          <Shimmer key={i} height={34} radius={10} style={{ flex: 1 }} />
-        ))}
-      </View>
-      <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingTop: 8 }}>
-        {[0, 1, 2, 3].map((i) => (
-          <Shimmer key={i} height={30} radius={9} style={{ flex: 1 }} />
-        ))}
-      </View>
-      <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
-        <View style={[card, { padding: 18, gap: 9 }]}>
-          <Shimmer width={120} height={10} />
-          <Shimmer width={170} height={32} radius={7} />
-          <Shimmer width={90} height={10} />
-        </View>
-      </View>
-      <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
-        <View style={[card, { padding: 16, flexDirection: 'row', gap: 12, alignItems: 'center' }]}>
-          <Shimmer width={44} height={44} radius={22} />
-          <View style={{ flex: 1, gap: 7 }}>
-            <Shimmer width={150} height={10} />
-            <Shimmer width={120} height={24} radius={6} />
-            <Shimmer width="92%" height={10} />
-          </View>
-        </View>
-      </View>
-      <View style={{ paddingHorizontal: 20, paddingTop: 26, gap: 14 }}>
-        <Shimmer width={190} height={18} radius={6} />
-        {[0, 1].map((i) => (
-          <View key={i} style={{ gap: 6 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Shimmer width={80} height={11} />
-              <Shimmer width={60} height={11} />
-            </View>
-            <Shimmer height={10} radius={5} />
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
 export default function PurchaseStatisticsScreen() {
-  const { theme } = useTokens();
+  const { theme, shadows } = useTokens();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { user } = useAuth();
@@ -121,6 +70,7 @@ export default function PurchaseStatisticsScreen() {
   const [purchases, setPurchases] = useState<PurchasedProduct[] | null>(() => cachedFor(user?.uid));
   const [period, setPeriod] = useState('all');
   const [segment, setSegment] = useState<Segment>('all');
+  const [showFilter, setShowFilter] = useState(false);
 
   useEffect(() => {
     const uid = user?.uid;
@@ -128,7 +78,6 @@ export default function PurchaseStatisticsScreen() {
       setPurchases([]);
       return;
     }
-    // Stale-while-revalidate: Cache sofort zeigen, im Hintergrund neu laden.
     const cached = cachedFor(uid);
     if (cached) setPurchases(cached);
     let alive = true;
@@ -147,7 +96,7 @@ export default function PurchaseStatisticsScreen() {
   }, [user?.uid]);
 
   const primary = theme.primary ?? '#0d8575';
-  const headerOffset = insets.top + DETAIL_HEADER_ROW_HEIGHT;
+  const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT + TABS_ROW_HEIGHT;
 
   const periodFiltered = useMemo(() => {
     const all = purchases ?? [];
@@ -178,9 +127,6 @@ export default function PurchaseStatisticsScreen() {
       if (p.type === 'markenprodukt') {
         brandEur += preis;
         brandCount += 1;
-        // savings beim Markenkauf = Differenz zur günstigsten Eigenmarken-
-        // Alternative (firestore.ts createPurchaseHistoryEntry) = das verpasste
-        // Sparpotenzial.
         missedEur += typeof p.savings === 'number' ? p.savings : 0;
       } else {
         nonameEur += preis;
@@ -202,22 +148,32 @@ export default function PurchaseStatisticsScreen() {
   const maxMonth = stats.byMonth.reduce((m, [, c]) => Math.max(m, c), 1);
   const maxSplit = Math.max(stats.brandEur, stats.nonameEur, 0.01);
 
-  const sectionTitle = {
+  const cardStyle = {
+    backgroundColor: theme.surface,
+    borderRadius: radii.xl,
+    ...(shadows?.sm ?? {}),
+  } as const;
+  const sectionTitleStyle = {
     fontFamily,
     fontWeight: fontWeight.extraBold,
     fontSize: 20,
     color: theme.text,
     letterSpacing: -0.2,
-    marginBottom: 14,
+  } as const;
+  const eyebrowStyle = {
+    fontFamily,
+    fontWeight: fontWeight.bold,
+    fontSize: 11,
+    letterSpacing: 0.6,
+    color: theme.textMuted,
+    textTransform: 'uppercase',
   } as const;
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <DetailHeader title="Statistik" onBack={() => router.back()} />
-
       {loading ? (
         <ScrollView
-          contentContainerStyle={{ paddingTop: headerOffset + 12, paddingBottom: insets.bottom + 32 }}
+          contentContainerStyle={{ paddingTop: chromeHeight + 12, paddingBottom: insets.bottom + 32 }}
           showsVerticalScrollIndicator={false}
           scrollEnabled={false}
         >
@@ -225,67 +181,13 @@ export default function PurchaseStatisticsScreen() {
         </ScrollView>
       ) : (
         <ScrollView
-          contentContainerStyle={{ paddingTop: headerOffset + 12, paddingBottom: insets.bottom + 32 }}
+          contentContainerStyle={{ paddingTop: chromeHeight + 12, paddingBottom: insets.bottom + 32 }}
           showsVerticalScrollIndicator={false}
         >
-          {/* Segment Alle / Eigenmarken / Marken */}
-          <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 20 }}>
-            {SEGMENTS.map(([k, label]) => {
-              const active = segment === k;
-              return (
-                <Pressable
-                  key={k}
-                  onPress={() => setSegment(k)}
-                  style={{
-                    flex: 1,
-                    height: 34,
-                    borderRadius: 10,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: active ? primary : theme.surface,
-                    borderWidth: 1,
-                    borderColor: active ? primary : theme.border,
-                  }}
-                >
-                  <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 12, color: active ? '#fff' : theme.textMuted }}>
-                    {label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {/* Zeitraum-Pills */}
-          <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingTop: 8 }}>
-            {PERIODS.map(([k, label]) => {
-              const active = period === k;
-              return (
-                <Pressable
-                  key={k}
-                  onPress={() => setPeriod(k)}
-                  style={{
-                    flex: 1,
-                    height: 30,
-                    borderRadius: 9,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: active ? theme.surfaceAlt ?? theme.surface : theme.surface,
-                    borderWidth: 1,
-                    borderColor: active ? theme.borderStrong ?? primary : theme.border,
-                  }}
-                >
-                  <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, color: active ? theme.text : theme.textMuted }}>
-                    {label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
           {/* Summen-Hero */}
-          <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
-            <View style={{ borderRadius: 18, padding: 18, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border }}>
-              <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, letterSpacing: 0.6, color: theme.textMuted, textTransform: 'uppercase' }}>
+          <View style={{ paddingHorizontal: 20 }}>
+            <View style={[cardStyle, { padding: 18 }]}>
+              <Text style={eyebrowStyle}>
                 Gesamt ausgegeben{segment === 'brand' ? ' · Marken' : segment === 'noname' ? ' · Eigenmarken' : ''}
               </Text>
               <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 34, letterSpacing: -0.8, color: theme.text, marginTop: 2 }}>
@@ -306,15 +208,15 @@ export default function PurchaseStatisticsScreen() {
             </View>
           ) : (
             <>
-              {/* Verpasstes Sparpotenzial (Marken-Käufe) */}
+              {/* Verpasstes Sparpotenzial */}
               {stats.missedEur > 0 && segment !== 'noname' ? (
-                <View style={{ paddingHorizontal: 20, paddingTop: 22 }}>
-                  <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center', padding: 16, borderRadius: 18, backgroundColor: `${MISSED}14`, borderWidth: 1, borderColor: `${MISSED}40` }}>
-                    <View style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: `${MISSED}22` }}>
+                <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
+                  <View style={[cardStyle, { padding: 16, flexDirection: 'row', gap: 12, alignItems: 'center' }]}>
+                    <View style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: `${MISSED}1f` }}>
                       <MaterialCommunityIcons name="piggy-bank-outline" size={24} color={MISSED} />
                     </View>
                     <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 11, letterSpacing: 0.5, color: MISSED, textTransform: 'uppercase' }}>
+                      <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 11, letterSpacing: 0.5, color: MISSED, textTransform: 'uppercase' }}>
                         Verpasstes Sparpotenzial
                       </Text>
                       <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 26, letterSpacing: -0.5, color: theme.text, marginTop: 1 }}>
@@ -328,11 +230,13 @@ export default function PurchaseStatisticsScreen() {
                 </View>
               ) : null}
 
-              {/* Marken vs. Eigenmarken (nur im Alle-Segment sinnvoll) */}
+              {/* Marken vs. Eigenmarken */}
               {segment === 'all' && stats.totalEur > 0 ? (
                 <View style={{ paddingHorizontal: 20, paddingTop: 24 }}>
-                  <Text style={sectionTitle}>Marken vs. Eigenmarken</Text>
-                  <View style={{ gap: 14 }}>
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={sectionTitleStyle}>Marken vs. Eigenmarken</Text>
+                  </View>
+                  <View style={[cardStyle, { padding: 16, gap: 14 }]}>
                     {[
                       { label: 'Marken', eur: stats.brandEur, count: stats.brandCount, color: theme.text },
                       { label: 'Eigenmarken', eur: stats.nonameEur, count: stats.nonameCount, color: primary },
@@ -342,7 +246,7 @@ export default function PurchaseStatisticsScreen() {
                       return (
                         <View key={row.label}>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
-                            <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 13, color: theme.text }}>
+                            <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 13, color: theme.text }}>
                               {row.label}
                             </Text>
                             <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.text }}>
@@ -364,24 +268,28 @@ export default function PurchaseStatisticsScreen() {
 
               {/* Monatsverlauf */}
               {stats.byMonth.length > 1 ? (
-                <View style={{ paddingHorizontal: 20, paddingTop: 26 }}>
-                  <Text style={sectionTitle}>Monatsverlauf</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 110 }}>
-                    {stats.byMonth.map(([m, c]) => {
-                      const h = Math.max(4, Math.round((c / maxMonth) * 84));
-                      const monthIdx = parseInt(m.slice(5, 7), 10) - 1;
-                      return (
-                        <View key={m} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
-                          <Text style={{ fontFamily, fontWeight: fontWeight.bold as any, fontSize: 8, color: theme.textMuted }}>
-                            {Math.round(c)}
-                          </Text>
-                          <View style={{ width: '70%', height: h, borderRadius: 4, backgroundColor: primary }} />
-                          <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 9, color: theme.textMuted }}>
-                            {MONTH_LABELS[monthIdx] ?? ''}
-                          </Text>
-                        </View>
-                      );
-                    })}
+                <View style={{ paddingHorizontal: 20, paddingTop: 24 }}>
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={sectionTitleStyle}>Monatsverlauf</Text>
+                  </View>
+                  <View style={[cardStyle, { padding: 16 }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 110 }}>
+                      {stats.byMonth.map(([m, c]) => {
+                        const h = Math.max(4, Math.round((c / maxMonth) * 84));
+                        const monthIdx = parseInt(m.slice(5, 7), 10) - 1;
+                        return (
+                          <View key={m} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
+                            <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 8, color: theme.textMuted }}>
+                              {Math.round(c)}
+                            </Text>
+                            <View style={{ width: '70%', height: h, borderRadius: 4, backgroundColor: primary }} />
+                            <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 9, color: theme.textMuted }}>
+                              {MONTH_LABELS[monthIdx] ?? ''}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
                   </View>
                 </View>
               ) : null}
@@ -389,6 +297,87 @@ export default function PurchaseStatisticsScreen() {
           )}
         </ScrollView>
       )}
+
+      {/* Chrome: DetailHeader + SegmentedTabs (Alle/Eigenmarken/Marken) im below-Slot,
+          Filter-Button (Zeitraum) im right-Slot. */}
+      <DetailHeader
+        title="Statistik"
+        onBack={() => router.back()}
+        right={
+          <Pressable
+            onPress={() => setShowFilter(true)}
+            hitSlop={6}
+            style={({ pressed }) => ({
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: theme.surfaceAlt,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <MaterialCommunityIcons name="tune-vertical" size={18} color={theme.textMuted} />
+            {period !== 'all' ? (
+              <View style={{ position: 'absolute', top: -1, right: -1, width: 10, height: 10, borderRadius: 5, backgroundColor: primary, borderWidth: 1.5, borderColor: theme.bg }} />
+            ) : null}
+          </Pressable>
+        }
+        below={
+          <View style={{ height: TABS_ROW_HEIGHT, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12, justifyContent: 'center' }}>
+            <SegmentedTabs tabs={SEGMENT_TABS} value={segment} onChange={setSegment} />
+          </View>
+        }
+      />
+
+      <FilterSheet visible={showFilter} title="Zeitraum" onClose={() => setShowFilter(false)}>
+        <OptionList value={period} options={PERIODS} onChange={(v) => setPeriod(v)} />
+      </FilterSheet>
+    </View>
+  );
+}
+
+/** Shimmer-Skeleton, das das Stats-Layout (im Body) spiegelt. */
+function StatsSkeleton() {
+  const { theme, shadows } = useTokens();
+  const card = {
+    backgroundColor: theme.surface,
+    borderRadius: radii.xl,
+    ...(shadows?.sm ?? {}),
+  } as const;
+  return (
+    <View>
+      <View style={{ paddingHorizontal: 20 }}>
+        <View style={[card, { padding: 18, gap: 9 }]}>
+          <Shimmer width={120} height={10} />
+          <Shimmer width={170} height={32} radius={7} />
+          <Shimmer width={90} height={10} />
+        </View>
+      </View>
+      <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
+        <View style={[card, { padding: 16, flexDirection: 'row', gap: 12, alignItems: 'center' }]}>
+          <Shimmer width={44} height={44} radius={22} />
+          <View style={{ flex: 1, gap: 7 }}>
+            <Shimmer width={150} height={10} />
+            <Shimmer width={120} height={24} radius={6} />
+            <Shimmer width="92%" height={10} />
+          </View>
+        </View>
+      </View>
+      <View style={{ paddingHorizontal: 20, paddingTop: 24, gap: 12 }}>
+        <Shimmer width={190} height={18} radius={6} />
+        <View style={[card, { padding: 16, gap: 14 }]}>
+          {[0, 1].map((i) => (
+            <View key={i} style={{ gap: 6 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <Shimmer width={80} height={11} />
+                <Shimmer width={60} height={11} />
+              </View>
+              <Shimmer height={10} radius={5} />
+            </View>
+          ))}
+        </View>
+      </View>
     </View>
   );
 }
