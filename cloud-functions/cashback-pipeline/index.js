@@ -27,7 +27,7 @@
  *
  * Env vars (set via `firebase functions:config:set` or Secret Manager):
  *   GEMINI_API_KEY     — for the OCR call
- *   CASHBACK_OCR_MODEL — optional override (default gemini-2.5-flash)
+ *   CASHBACK_OCR_MODEL — optional override (default gemini-3.5-flash)
  *
  * Region: europe-west3 (matches existing cashback architecture spec).
  *

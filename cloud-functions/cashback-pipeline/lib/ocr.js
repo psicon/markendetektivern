@@ -21,7 +21,11 @@ const {
   VERSION: PROMPT_VERSION,
 } = require('./prompt');
 
-const DEFAULT_MODEL = process.env.CASHBACK_OCR_MODEL || 'gemini-2.5-flash';
+// gemini-3.5-flash: an 37 echten Bons gegen 2.5-flash gemessen — 30/37 vs
+// 18/37 Reconciliation-clean, bei langen Bons (Kaufland 24-29 Artikel) droppt
+// 2.5 reproduzierbar Positionen. 3.5 ist projektweit Standard (crowd-upload-
+// namer, ai-product-comparison). Override via CASHBACK_OCR_MODEL.
+const DEFAULT_MODEL = process.env.CASHBACK_OCR_MODEL || 'gemini-3.5-flash';
 
 let _client = null;
 function getClient() {

@@ -33,7 +33,9 @@ const {
   VERSION: PROMPT_VERSION,
 } = require('./prompt_text');
 
-const DEFAULT_MODEL = process.env.CASHBACK_OCR_MODEL || 'gemini-2.5-flash';
+// 3.5-flash projektweit (siehe ocr.js): die CV-Hybrid-Eskalation nutzt das
+// gleiche Modell wie der Primärpfad (index.js übergibt config.ocrModel).
+const DEFAULT_MODEL = process.env.CASHBACK_OCR_MODEL || 'gemini-3.5-flash';
 
 // ─── Cached clients (re-used across invocations on warm instances) ──
 
