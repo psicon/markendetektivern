@@ -51,7 +51,7 @@ import {
 import { formatCents } from '@/lib/types/cashback';
 import { prepareForUpload } from '@/lib/utils/cashbackImage';
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
-import { useNetworkStatus } from '@/lib/services/network';
+import { isOnline, refreshNetwork, useNetworkStatus } from '@/lib/services/network';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -174,6 +174,18 @@ export default function CashbackPendingScreen() {
     setUploadStep('uploading');
     setUploadError(null);
 
+    // Offline → don't burn the 60s upload watchdog; surface the offline state
+    // immediately (the banner explains it auto-resumes). The reconnect effect
+    // re-runs runUpload the moment connectivity returns.
+    if (!isOnline()) {
+      await refreshNetwork();
+      if (!isOnline()) {
+        setUploadError(null);
+        setUploadStep('error');
+        return;
+      }
+    }
+
     try {
       const prepared = await prepareForUpload(
         String(params.uploadUri),
@@ -252,9 +264,9 @@ export default function CashbackPendingScreen() {
 
       setUploadError(human);
       setUploadStep('error');
-      // Persist failure to the mirror so the user sees it everywhere
-      // (history, etc.) — and it doesn't show as "uploading forever".
-      await setPendingMirrorError(user.uid!, localId, human).catch(() => {});
+      // Persist failure to the mirror (fire-and-forget — the Firestore write
+      // hangs offline and the local 'error' state above already drives the UI).
+      void setPendingMirrorError(user.uid!, localId, human).catch(() => {});
     }
   }, [
     params.id,

@@ -232,6 +232,20 @@ Recent-Sessions.
   server-seitig NACH der Analyse archivieren/verkleinern, NIE client-seitig vor
   Upload.
 
+- **Firestore-Write (`setDoc`/`addDoc`/`updateDoc`) im kritischen UI-Pfad
+  awaiten.** Die Promise löst erst bei SERVER-Ack auf — **offline hängt sie
+  ewig** (der lokale Cache wird optimistisch geupdatet, aber `await` blockt bis
+  Reconnect). Symptom: Flugmodus → Submit-Button-Spinner hängt für immer (war
+  genau so bei `cashback/review.tsx handleSubmit` → `await createPendingMirror`).
+  Regel: **optimistische / Mirror-/Placeholder-Writes fire-and-forget**
+  (`void setDoc(...).catch(...)`), der lokale State + der `onSnapshot`-Listener
+  (feuert offline sofort aus dem Cache) treiben die UI, und **sofort
+  navigieren** statt auf den Write zu warten. Nur das eigentliche Netz-Werk
+  (Storage-Upload, Callable/HTTPS-CF) wird versucht und failt offline sauber →
+  Error-State + Auto-Resume bei Reconnect (NetInfo). Lokalen Error-State IMMER
+  vor einem etwaigen abschließenden Mirror-Write setzen (Z. „setUploadStep
+  ('error')" vor „setPendingMirrorError"). Juni 2026.
+
 - **Time-based Debouncing für "wait for async transition to complete"** —
   Wenn ein React-State-Wechsel ein async-Side-Effect-Window hat
   (z.B. `signOut()` → kurze Null-User-Phase → `signInAnonymously()`),

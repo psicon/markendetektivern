@@ -223,15 +223,16 @@ export default function CashbackReviewScreen() {
     }
     const localId = newClientUploadId();
     setSubmitting(true);
-    try {
-      await createPendingMirror(user.uid, localId, {
-        merchantName: 'Wird hochgeladen …',
-      });
-    } catch (e) {
+    // Fire-and-forget: a Firestore write resolves only on SERVER ack, so
+    // AWAITING it hangs forever offline (flight mode → stuck spinner). The
+    // local cache updates optimistically and the pending screen subscribes to
+    // it, so we navigate immediately and let that screen own the upload +
+    // offline auto-resume. Non-fatal if the placeholder write is delayed.
+    void createPendingMirror(user.uid, localId, {
+      merchantName: 'Wird hochgeladen …',
+    }).catch((e) => {
       console.warn('⚠️ createPendingMirror failed', e);
-      // Non-fatal — pending screen will still upload, just won't have
-      // the placeholder shown in history during the brief window.
-    }
+    });
     // T17.22: Submit-Feedback — leichte Haptik damit der User
     // bestätigt fühlt dass der Tap registriert wurde. Die volle
     // Banner+Celebration kommt erst bei Approval in pending/[id].tsx.
