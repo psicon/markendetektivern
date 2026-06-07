@@ -34,16 +34,37 @@ function derive(s: NetInfoState): NetworkStatus {
 let current: NetworkStatus = { connected: true, reachable: null, online: true };
 const listeners = new Set<(s: NetworkStatus) => void>();
 
-NetInfo.addEventListener((s) => {
-  current = derive(s);
-  listeners.forEach((fn) => {
-    try {
-      fn(current);
-    } catch {
-      /* ignore listener errors */
-    }
+/**
+ * netinfo is a NATIVE module. If the running binary was built BEFORE the
+ * dependency was added (stale Dev-Client / sim), any call into it throws
+ * "NativeModule.RNCNetInfo is null". A connectivity helper must NEVER take the
+ * whole app down — so we guard the subscription and degrade to "assume online"
+ * (the safe default: uploads still attempt, the queue still works, we just
+ * don't auto-skip while offline). Real offline detection comes back after a
+ * native rebuild that includes the module.
+ */
+export let nativeNetInfoAvailable = true;
+
+try {
+  NetInfo.addEventListener((s) => {
+    current = derive(s);
+    listeners.forEach((fn) => {
+      try {
+        fn(current);
+      } catch {
+        /* ignore listener errors */
+      }
+    });
   });
-});
+} catch (e) {
+  nativeNetInfoAvailable = false;
+  current = { connected: true, reachable: null, online: true };
+  console.warn(
+    '[network] netinfo native module unavailable — assuming online. ' +
+      'Rebuild the dev client (npx expo run:ios) to enable offline detection.',
+    e,
+  );
+}
 
 export function getNetwork(): NetworkStatus {
   return current;
