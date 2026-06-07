@@ -1,0 +1,14 @@
+{
+  "name": "crowd-upload-namer",
+  "description": "OCR the product name from crowd-uploaded product photos (front/price tag) via Gemini, after submission",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.0.0"
+  },
+  "private": true
+}

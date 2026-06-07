@@ -175,6 +175,18 @@
         "firebase-debug.*.log",
         "*.local"
       ]
+    },
+    {
+      "source": "cloud-functions/crowd-upload-namer",
+      "codebase": "crowd-upload-namer",
+      "runtime": "nodejs22",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ]
     }
   ],
   "hosting": {
