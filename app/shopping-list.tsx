@@ -20,6 +20,7 @@
 //   – Journey-Tracking, Analytics-Events
 //   – BatchActionLoader, AddCustomItemModal, LevelUpOverlay
 
+import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
@@ -3910,7 +3911,13 @@ export default function ShoppingListScreen() {
                 opacity: pressed ? 0.7 : 1,
               })}
             >
-              <MaterialCommunityIcons name="share-variant" size={18} color={theme.textMuted} />
+              {/* Plattform-konventionelles Teilen-Icon: iOS = Quadrat+Pfeil-hoch
+                  (Ionicons), Android = verbundene Punkte (Material). */}
+              {Platform.OS === 'ios' ? (
+                <Ionicons name="share-outline" size={20} color={theme.textMuted} />
+              ) : (
+                <MaterialCommunityIcons name="share-variant" size={18} color={theme.textMuted} />
+              )}
             </Pressable>
             <Pressable
               onPress={() => setShowFilter(true)}

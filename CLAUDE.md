@@ -785,6 +785,21 @@ safe-area, gleiche Gesture-Bar-Höhe). Auf Android variieren OEM-Skins
 floating Pille auf manchen Devices verloren wirkt oder zu nah am
 Gesture-Bar liegt. Full-width + bottom-flush ist platform-konventionell.
 
+### Plattform-spezifische Icons (iOS-Style auf iOS, Android-Style auf Android)
+
+Konventions-/System-Icons IMMER plattform-korrekt rendern — iOS-Nutzer
+erwarten das iOS-Glyph, Android-Nutzer das Material-Glyph. Umsetzung via
+`Platform.OS === 'ios' ? <iOS-Icon/> : <Android-Icon/>`.
+
+- **Teilen / Share**: iOS = `Ionicons name="share-outline"` (Quadrat + Pfeil
+  nach oben, entspricht SF-Symbol `square.and.arrow.up`), Android =
+  `MaterialCommunityIcons name="share-variant"` (drei verbundene Punkte =
+  Material-Share). Referenz: Einkaufszettel-Header (`app/shopping-list.tsx`).
+- Gilt analog für andere konventionsbehaftete Icons. NIE ein und dasselbe Icon
+  für beide Plattformen, wenn iOS/Android dafür ein klar unterschiedliches
+  System-Glyph haben (Share ist der Paradefall). User-Vorgabe 2026-06: „teilen
+  icon auf ios im ios style und auf android im android style".
+
 ### Search input → ONE shared style across the app
 
 Every search field in the app — Stöbern (Eigenmarken / Marken),
