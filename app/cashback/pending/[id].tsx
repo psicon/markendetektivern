@@ -332,7 +332,12 @@ export default function CashbackPendingScreen() {
   }, [doc?.storagePath]);
 
   const state: ViewState = useMemo(() => {
-    if (uploadStep === 'error') return 'rejected';
+    // A CLIENT upload/enqueue failure (uploadStep 'error') is a retryable
+    // 'upload_failed' — NOT a server 'rejected'. This drives the retry button
+    // (online) and the "Kein Internet" banner + auto-resume (offline). Real
+    // server rejections come from doc.status='rejected' below (reached only
+    // when uploadStep is 'done', i.e. the upload succeeded and the CF judged).
+    if (uploadStep === 'error') return 'upload_failed';
     // Visual state is driven by the mirror doc's status. Upload-step is
     // only used to override copy / show the "Einreichen fehlgeschlagen"
     // banner — actual state comes from Firestore so the user gets the
