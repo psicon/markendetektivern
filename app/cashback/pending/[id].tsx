@@ -878,7 +878,11 @@ export default function CashbackPendingScreen() {
         }}
       >
         <Pressable
-          onPress={() => router.replace('/cashback/history')}
+          // dismissTo (POP_TO): wenn der Bon aus dem Verlauf geöffnet wurde,
+          // poppt das zum BESTEHENDEN Verlauf zurück (kein Duplikat → kein
+          // "2× back" mehr); kam man frisch vom Einreichen (Verlauf nicht im
+          // Stack), navigiert es regulär hin.
+          onPress={() => router.dismissTo('/cashback/history')}
           style={({ pressed }) => ({
             flex: 1,
             height: 50,
