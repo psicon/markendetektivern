@@ -5,7 +5,7 @@
     "version": "5.0.7",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "markendetektivern",
+    "scheme": ["markendetektive", "markendetektivern"],
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "locales": {
@@ -27,7 +27,7 @@
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "1190",
+      "buildNumber": "1204",
       "appleTeamId": "MZD2N2F887",
       "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true,

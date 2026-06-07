@@ -1617,8 +1617,14 @@ werden muss (mehrfach durchexerziert, sonst 1 h verloren):
    ~/Library/Developer/Xcode/DerivedData/MarkenDetektive-*/Build/Products/Debug-iphoneos/MarkenDetektive.app`.
 3. App MIT Metro-Verbindung starten (Dev-Client-Deep-Link):
    `xcrun devicectl device process launch --terminate-existing --device <id>
-   --payload-url "markendetektivern://expo-development-client/?url=http://<LAN-IP>:8081" de.markendetektive`.
-   Scheme = `markendetektivern` (mit n!), LAN-IP via `ipconfig getifaddr en0`.
+   --payload-url "markendetektive://expo-development-client/?url=http://<LAN-IP>:8081" de.markendetektive`.
+   Scheme: seit Juni 2026 sind BEIDE registriert — `app.json` hat
+   `"scheme": ["markendetektive", "markendetektivern"]`. `markendetektive` ist
+   der saubere (passt zu slug + bundle `de.markendetektive`); `markendetektivern`
+   (mit n, Altlast aus dem RN-Rewrite) bleibt nur für Backward-Compat. Neuer
+   Dev-Launch nutzt `markendetektive://…`; der alte rn-Scheme geht weiter.
+   Beides greift erst nach einem nativen Rebuild (Scheme → Info.plist /
+   AndroidManifest beim Prebuild). LAN-IP via `ipconfig getifaddr en0`.
    **iPhone muss ENTSPERRT sein** (sonst „device was not unlocked").
 4. Fehler „[runtime not ready]: Exception in HostFunction … EXDevMenuApp"
    = Dev-Client-Hänger (oft nach Fast-Refresh / Metro mit `--clear` mitten
