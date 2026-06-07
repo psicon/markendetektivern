@@ -211,6 +211,22 @@ function randomId(): string {
  * the same doc (we pass `localId` as `clientUploadId` to the
  * function so it uses our id as the receipt doc id).
  */
+/**
+ * Whether `name` is a REAL merchant label vs. a pre-OCR placeholder.
+ *
+ * Before the Cloud Function resolves the merchant, the mirror doc may carry a
+ * status-ish placeholder ("Wird hochgeladen …"). Once the status moves past
+ * 'uploading' (→ "Wird geprüft" / "In Prüfung") that string must NOT keep
+ * showing as the bon's title — that's the contradiction users see (Task
+ * 86ca5fazh). Treat such placeholders as "not yet resolved" so callers fall
+ * back to a status-appropriate title instead. Covers legacy docs that still
+ * have the placeholder persisted.
+ */
+export function isResolvedMerchant(name?: string | null): boolean {
+  const s = String(name ?? '').trim();
+  return s.length > 0 && !/^wird\s+(hochgeladen|geladen|verarbeitet)/i.test(s);
+}
+
 export async function createPendingMirror(
   uid: string,
   localId: string,

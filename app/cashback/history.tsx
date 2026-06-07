@@ -38,6 +38,7 @@ import { startReceiptScanFlow } from '@/lib/services/cashbackScanStart';
 import { FirestoreService } from '@/lib/services/firestore';
 import {
   getCashbackCount,
+  isResolvedMerchant,
   subscribeUserCashbackHistoryPaged,
   type CashbackStatusEntry,
 } from '@/lib/services/cashbackUpload';
@@ -100,6 +101,13 @@ function statusVisual(s: string | undefined, primary: string): StatusVisual {
         bg: primary + '15',
         icon: 'cloud-upload-outline',
       };
+    case 'upload_failed':
+      return {
+        label: 'Upload pausiert',
+        color: '#d6603a',
+        bg: 'rgba(214,96,58,0.15)',
+        icon: 'cloud-alert',
+      };
     case 'superseded':
       return {
         label: 'Doppelt — siehe Original',
@@ -117,6 +125,27 @@ function statusVisual(s: string | undefined, primary: string): StatusVisual {
         bg: 'rgba(92,103,105,0.12)',
         icon: 'progress-clock',
       };
+  }
+}
+
+/**
+ * Title for a bon whose merchant the Cloud Function hasn't resolved yet.
+ * Must stay consistent with the status chip — never "Wird hochgeladen" while
+ * the chip already says "Wird geprüft"/"In Prüfung" (Task 86ca5fazh).
+ */
+function merchantTitleForStatus(status?: string): string {
+  switch (status) {
+    case 'uploading':
+      return 'Neuer Bon';
+    case 'upload_failed':
+      return 'Upload pausiert';
+    case 'ocr_pending':
+    case 'ocr_done':
+    case 'matched':
+    case 'review':
+      return 'Markt wird erkannt …';
+    default:
+      return 'Unbekannte Filiale';
   }
 }
 
@@ -305,9 +334,15 @@ export default function CashbackHistoryScreen() {
     // Felder vom Bon-Doc.
     const disc = resolveDiscounter(item);
     const discLand = disc?.land ? String(disc.land).toUpperCase() : null;
+    // Real merchant resolved? → show it. Otherwise derive a status-appropriate
+    // title — never the pre-OCR placeholder, which contradicts the chip.
+    const rawMerchant =
+      item.merchantDisplayName || item.merchantName || item.merchant || item.merchantRaw || '';
     const merchant = disc
       ? (discLand ? `${disc.name} (${discLand})` : disc.name)
-      : (item.merchantDisplayName || item.merchantName || item.merchant || item.merchantRaw || 'Unbekannte Filiale');
+      : isResolvedMerchant(rawMerchant)
+        ? rawMerchant
+        : merchantTitleForStatus(item.status);
     const logoUrl: string | null = disc?.bild || (item as any).merchantLogoUrl || null;
     const cashback = item.cashbackCents ? formatCents(item.cashbackCents) : null;
 

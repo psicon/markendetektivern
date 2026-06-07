@@ -219,8 +219,12 @@ export async function enqueueBon(input: EnqueueBonInput): Promise<string> {
   emit();
 
   // Placeholder mirror so the bon shows in history immediately (fire-and-
-  // forget — a Firestore write hangs offline).
-  void createPendingMirror(input.uid, id, { merchantName: 'Wird hochgeladen …' }).catch(() => {});
+  // forget — a Firestore write hangs offline). NO human-facing merchantName
+  // here: the list derives a status-driven title until the CF resolves the
+  // real merchant. Writing "Wird hochgeladen …" as merchantName leaked into
+  // the bon TITLE even after the status moved to "Wird geprüft" (Task
+  // 86ca5fazh) — status and title contradicted each other.
+  void createPendingMirror(input.uid, id).catch(() => {});
 
   void processQueue();
   return id;

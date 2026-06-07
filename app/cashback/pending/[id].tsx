@@ -39,7 +39,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { startReceiptScanFlow } from '@/lib/services/cashbackScanStart';
 import { storage } from '@/lib/firebase';
-import { subscribeReceipt } from '@/lib/services/cashbackUpload';
+import { isResolvedMerchant, subscribeReceipt } from '@/lib/services/cashbackUpload';
 import {
   getBonJob,
   kickBonQueue,
@@ -594,7 +594,12 @@ export default function CashbackPendingScreen() {
         ) : null}
 
         {/* ─── Merchant hero — large logo + bold name + date below ─── */}
-        {(doc?.merchantName || doc?.merchant) && (state === 'approved' || state === 'no_reward' || state === 'rejected' || state === 'review') ? (
+        {/* Only when a REAL merchant is resolved — never the pre-OCR
+            placeholder ("Wird hochgeladen …"), see Task 86ca5fazh. */}
+        {(isResolvedMerchant(doc?.merchantDisplayName) ||
+          isResolvedMerchant(doc?.merchantName) ||
+          isResolvedMerchant(doc?.merchant)) &&
+        (state === 'approved' || state === 'no_reward' || state === 'rejected' || state === 'review') ? (
           <View
             style={{
               marginHorizontal: 16,
