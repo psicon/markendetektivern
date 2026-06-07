@@ -308,6 +308,15 @@ export default function ProductSubmitOverview() {
                     ) : null}
                   </View>
 
+                  {detailRow.status !== 'approved' && detailRow.status !== 'rejected' ? (
+                    <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start', backgroundColor: 'rgba(176,136,0,0.10)', borderRadius: 12, padding: 12 }}>
+                      <MaterialCommunityIcons name="progress-clock" size={18} color="#b08800" style={{ marginTop: 1 }} />
+                      <Text style={{ flex: 1, color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 13, lineHeight: 18 }}>
+                        Deine Einreichung ist da und wird geprüft — das kann ein bisschen dauern. Danke für deine Geduld, du hilfst, den Katalog zu vervollständigen.
+                      </Text>
+                    </View>
+                  ) : null}
+
                   <View style={{ gap: 3 }}>
                     {formatAbsolute(detailRow.createdAt) ? (
                       <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 13 }}>
