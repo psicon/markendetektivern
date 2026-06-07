@@ -34,6 +34,7 @@ import {
   subscribeUploadQueue,
   type UploadJob,
 } from '@/lib/services/uploadQueue';
+import { useNetworkStatus } from '@/lib/services/network';
 
 const PURPLE = '#5b4f9c';
 
@@ -106,6 +107,7 @@ export default function ProductSubmitOverview() {
   const { theme, shadows } = useTokens();
   const [rows, setRows] = useState<ProductSubmissionEntry[]>([]);
   const [queue, setQueue] = useState<UploadJob[]>([]);
+  const net = useNetworkStatus();
   const [loaded, setLoaded] = useState(false);
   const [campaign, setCampaign] = useState<ActiveProductCampaign | null>(null);
   // Tapped submission → detail sheet. URLs are resolved lazily (Storage
@@ -244,6 +246,14 @@ export default function ProductSubmitOverview() {
                 {queue.length}
               </Text>
             </View>
+            {!net.online ? (
+              <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', backgroundColor: 'rgba(176,136,0,0.10)', borderRadius: radii.lg, borderWidth: 1, borderColor: 'rgba(176,136,0,0.25)', paddingHorizontal: 14, paddingVertical: 12, marginHorizontal: 16, marginBottom: 10 }}>
+                <MaterialCommunityIcons name="wifi-off" size={20} color="#b08800" />
+                <Text style={{ flex: 1, color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 13, lineHeight: 18 }}>
+                  Kein Internet — deine Uploads starten automatisch, sobald die Verbindung wieder da ist.
+                </Text>
+              </View>
+            ) : null}
             {queue.map((j) => {
               const failed = j.status === 'failed';
               const uploading = j.status === 'uploading';
@@ -256,7 +266,9 @@ export default function ProductSubmitOverview() {
                 ? 'Upload fehlgeschlagen — tippen für erneut'
                 : uploading
                   ? `Wird hochgeladen … ${j.progress} %`
-                  : 'Wartet auf Verbindung …';
+                  : net.online
+                    ? 'In der Warteschlange …'
+                    : 'Wartet auf Internetverbindung …';
               return (
                 <Pressable
                   key={j.id}

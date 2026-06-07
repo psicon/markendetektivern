@@ -25,6 +25,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import { AppState } from 'react-native';
 
+import { isOnline, refreshNetwork, subscribeNetwork } from './network';
 import { submitProduct, uploadProductImage, type ProductPhotoStep } from './productSubmit';
 
 const STORAGE_KEY = 'product_upload_queue_v1';
@@ -336,6 +337,14 @@ async function runJob(job: UploadJob) {
 export async function processQueue(): Promise<void> {
   await ensureLoaded();
   if (processing) return;
+  // Don't burn per-image upload timeouts when we're clearly offline — leave
+  // jobs 'queued' (the overview shows the offline hint) and let the network
+  // listener resume us on reconnect. A fresh probe avoids stalling on a stale
+  // "offline" reading right after the app wakes.
+  if (!isOnline()) {
+    await refreshNetwork();
+    if (!isOnline()) return;
+  }
   processing = true;
   try {
     let next = pickNext();
@@ -352,6 +361,16 @@ export async function processQueue(): Promise<void> {
 // jobs are re-queued so a reconnect after a flaky upload picks them up.)
 AppState.addEventListener('change', (state) => {
   if (state === 'active') {
+    requeueFailed();
+    void processQueue();
+  }
+});
+
+// Resume the moment connectivity returns — event-driven, no polling. This is
+// what makes "lädt automatisch hoch, sobald du wieder online bist" actually
+// happen without the user doing anything.
+subscribeNetwork((s) => {
+  if (s.online) {
     requeueFailed();
     void processQueue();
   }

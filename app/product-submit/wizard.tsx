@@ -50,6 +50,7 @@ import {
   type ActiveProductCampaign,
   type ProductPhotoStep,
 } from '@/lib/services/productSubmit';
+import { isOnline } from '@/lib/services/network';
 import { enqueueProductUpload } from '@/lib/services/uploadQueue';
 import { showInfoToast } from '@/lib/services/ui/toast';
 
@@ -365,10 +366,21 @@ export default function ProductWizardScreen() {
     }
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    showInfoToast('Produkt eingereicht — lädt im Hintergrund hoch.', 'success');
+    const online = isOnline();
+    showInfoToast(
+      online
+        ? 'Produkt eingereicht — lädt im Hintergrund hoch.'
+        : 'Gespeichert — lädt automatisch hoch, sobald du wieder online bist.',
+      'success',
+    );
     // Fires instantly (we're still on the wizard at this moment), so it's
     // never an orphan overlay on another screen.
-    Alert.alert('Produkt eingereicht 🎉', 'Es lädt im Hintergrund hoch. Weiteres Produkt in diesem Markt erfassen?', [
+    Alert.alert(
+      'Produkt eingereicht 🎉',
+      online
+        ? 'Es lädt im Hintergrund hoch. Weiteres Produkt in diesem Markt erfassen?'
+        : 'Kein Internet gerade — es lädt automatisch hoch, sobald du wieder online bist. Weiteres Produkt in diesem Markt erfassen?',
+      [
       {
         text: 'Fertig',
         style: 'cancel',
