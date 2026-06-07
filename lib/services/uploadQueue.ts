@@ -31,6 +31,11 @@ import { submitProduct, uploadProductImage, type ProductPhotoStep } from './prod
 const STORAGE_KEY = 'product_upload_queue_v1';
 const QUEUE_DIR = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? ''}upload_queue/`;
 const MAX_RETRY_DELAY_MS = 5 * 60_000;
+// After this many consecutive auto-failures we stop the automatic retry loop
+// and leave the job 'failed' until the user taps "Erneut versuchen" — no
+// infinite background spin on a permanently broken job (corrupt image, revoked
+// auth, server reject).
+const MAX_AUTO_ATTEMPTS = 5;
 
 export type UploadJobStatus = 'queued' | 'uploading' | 'failed';
 
@@ -240,10 +245,27 @@ export function subscribeUploadQueue(fn: Listener): () => void {
   };
 }
 
-/** Re-attempt a failed job now (e.g. user tapped "Erneut"). */
+/** Re-attempt a failed job now (user tapped "Erneut versuchen"). Resets the
+ *  auto-retry budget so the automatic loop is available again too. */
 export async function retryJob(id: string) {
   await ensureLoaded();
-  setJob(id, { status: 'queued', lastError: null });
+  setJob(id, { status: 'queued', attempts: 0, lastError: null });
+  void processQueue();
+}
+
+/** Re-attempt ALL failed jobs (user tapped "Alle erneut"). */
+export async function retryAllFailed() {
+  await ensureLoaded();
+  let changed = false;
+  jobs = jobs.map((j) => {
+    if (j.status !== 'failed') return j;
+    changed = true;
+    return { ...j, status: 'queued' as UploadJobStatus, attempts: 0, lastError: null };
+  });
+  if (changed) {
+    emit();
+    void persist();
+  }
   void processQueue();
 }
 
@@ -275,7 +297,9 @@ function pickNext(): UploadJob | null {
 function requeueFailed() {
   let changed = false;
   jobs = jobs.map((j) => {
-    if (j.status !== 'failed') return j;
+    // Don't auto-requeue jobs that exhausted their auto-retry budget — those
+    // wait for an explicit user retry.
+    if (j.status !== 'failed' || j.attempts >= MAX_AUTO_ATTEMPTS) return j;
     changed = true;
     return { ...j, status: 'queued' as UploadJobStatus };
   });
@@ -330,7 +354,9 @@ async function runJob(job: UploadJob) {
   } catch (e: any) {
     const attempts = (getJob(job.id)?.attempts ?? job.attempts) + 1;
     setJob(job.id, { status: 'failed', attempts, lastError: e?.message ?? 'upload_failed' });
-    scheduleRetry(attempts);
+    // Auto-retry with backoff only up to the cap; beyond it, wait for a manual
+    // retry so we never spin forever on a permanently broken job.
+    if (attempts < MAX_AUTO_ATTEMPTS) scheduleRetry(attempts);
   }
 }
 

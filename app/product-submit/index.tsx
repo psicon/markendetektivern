@@ -30,6 +30,7 @@ import {
 import {
   kickUploadQueue,
   removeJob,
+  retryAllFailed,
   retryJob,
   subscribeUploadQueue,
   type UploadJob,
@@ -238,13 +239,22 @@ export default function ProductSubmitOverview() {
             'In Prüfung' below once their Firestore doc is written. */}
         {queue.length > 0 ? (
           <View>
-            <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 20, marginTop: 22, marginBottom: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginTop: 22, marginBottom: 10 }}>
               <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.heading, fontWeight: fontWeight.extraBold as any, fontSize: 20, letterSpacing: -0.2 }}>
                 Wird hochgeladen
               </Text>
-              <Text style={{ color: theme.textMuted ?? theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 12 }}>
-                {queue.length}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                {queue.filter((j) => j.status === 'failed').length > 1 ? (
+                  <Pressable onPress={() => retryAllFailed()} hitSlop={8}>
+                    <Text style={{ color: PURPLE, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 13 }}>
+                      Alle erneut
+                    </Text>
+                  </Pressable>
+                ) : null}
+                <Text style={{ color: theme.textMuted ?? theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 12 }}>
+                  {queue.length}
+                </Text>
+              </View>
             </View>
             {!net.online ? (
               <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', backgroundColor: 'rgba(176,136,0,0.10)', borderRadius: radii.lg, borderWidth: 1, borderColor: 'rgba(176,136,0,0.25)', paddingHorizontal: 14, paddingVertical: 12, marginHorizontal: 16, marginBottom: 10 }}>
@@ -263,19 +273,18 @@ export default function ProductSubmitOverview() {
               const accent = failed ? '#d6603a' : PURPLE;
               const icon = failed ? 'cloud-alert' : uploading ? 'cloud-upload-outline' : 'cloud-clock-outline';
               const statusLabel = failed
-                ? 'Upload fehlgeschlagen — tippen für erneut'
+                ? 'Upload fehlgeschlagen'
                 : uploading
                   ? `Wird hochgeladen … ${j.progress} %`
                   : net.online
                     ? 'In der Warteschlange …'
                     : 'Wartet auf Internetverbindung …';
               return (
-                <Pressable
+                <View
                   key={j.id}
-                  onPress={failed ? () => retryJob(j.id) : undefined}
-                  style={({ pressed }) => ({
+                  style={{
                     flexDirection: 'row',
-                    alignItems: 'center',
+                    alignItems: failed ? 'flex-start' : 'center',
                     backgroundColor: theme.surface,
                     borderRadius: radii.lg,
                     borderWidth: 1,
@@ -285,8 +294,7 @@ export default function ProductSubmitOverview() {
                     marginHorizontal: 16,
                     marginBottom: 10,
                     gap: 12,
-                    opacity: pressed && failed ? 0.7 : 1,
-                  })}
+                  }}
                 >
                   <View style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: failed ? 'rgba(214,96,58,0.12)' : 'rgba(91,79,156,0.12)' }}>
                     <MaterialCommunityIcons name={icon as any} size={22} color={accent} />
@@ -303,18 +311,33 @@ export default function ProductSubmitOverview() {
                     <Text numberOfLines={1} style={{ color: accent, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.medium as any, fontSize: 12, marginTop: 4 }}>
                       {statusLabel}
                     </Text>
-                    {!failed ? (
+                    {failed ? (
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                        <Pressable
+                          onPress={() => retryJob(j.id)}
+                          style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: PURPLE, paddingHorizontal: 12, paddingVertical: 7, borderRadius: radii.md, opacity: pressed ? 0.85 : 1 })}
+                        >
+                          <MaterialCommunityIcons name="refresh" size={14} color="#fff" />
+                          <Text style={{ color: '#fff', fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 13 }}>
+                            Erneut versuchen
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => removeJob(j.id)}
+                          style={({ pressed }) => ({ paddingHorizontal: 12, paddingVertical: 7, borderRadius: radii.md, backgroundColor: theme.surfaceAlt ?? 'rgba(0,0,0,0.05)', opacity: pressed ? 0.85 : 1 })}
+                        >
+                          <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.medium as any, fontSize: 13 }}>
+                            Verwerfen
+                          </Text>
+                        </Pressable>
+                      </View>
+                    ) : (
                       <View style={{ height: 5, borderRadius: 3, backgroundColor: theme.surfaceAlt ?? 'rgba(0,0,0,0.08)', overflow: 'hidden', marginTop: 8 }}>
                         <View style={{ width: `${Math.max(3, Math.min(100, j.progress))}%`, height: '100%', borderRadius: 3, backgroundColor: PURPLE }} />
                       </View>
-                    ) : null}
+                    )}
                   </View>
-                  {failed ? (
-                    <Pressable onPress={() => removeJob(j.id)} hitSlop={10} style={{ padding: 4 }}>
-                      <MaterialCommunityIcons name="close" size={20} color={theme.textMuted ?? theme.textSub} />
-                    </Pressable>
-                  ) : null}
-                </Pressable>
+                </View>
               );
             })}
           </View>
