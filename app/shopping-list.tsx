@@ -2741,29 +2741,32 @@ export default function ShoppingListScreen() {
     produktRef: string,
   ) => {
     if (!user) return;
-    setConvertingItems((prev) => new Set(prev).add(einkaufswagenRef));
-    try {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      const conversions = [{ einkaufswagenRef, markenProduktRef, produktRef }];
-      await FirestoreService.convertToNoName(user.uid, conversions);
-      const brandItem = brandProducts.find((i) => i.id === einkaufswagenRef);
-      const savingsAmount = brandItem?.potentialSavings || 0;
-      await loadShoppingCart();
-      setTimeout(() => onTabChange('noname'), 100);
-      showConvertSuccessToast(savingsAmount);
-      achievementService.trackAction(user.uid, 'convert_product').catch((e) => {
-        console.error('Achievement convert_product error', e);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    const conversions = [{ einkaufswagenRef, markenProduktRef, produktRef }];
+    const brandItem = brandProducts.find((i) => i.id === einkaufswagenRef);
+    const savingsAmount = brandItem?.potentialSavings || 0;
+
+    // Optimistisch: Marken-Item sofort aus der Liste nehmen (wird zu NoName).
+    setBrandProducts((prev) => prev.filter((i) => i.id !== einkaufswagenRef));
+
+    // FIRE-AND-FORGET (Task 86ca5fjhn): den Convert-Write + den (schweren)
+    // loadShoppingCart-Refetch NICHT im UI-Pfad awaiten — das war der Freeze
+    // („umwandeln geht nicht"). Toast + Tab-Switch sofort; der Reload (zeigt
+    // das neue NoName-Item) läuft im Hintergrund nachdem der Write gelandet
+    // ist; bei Fehler reconcilet ein Reload + Error-Toast.
+    FirestoreService.convertToNoName(user.uid, conversions)
+      .then(() => loadShoppingCart())
+      .catch((error) => {
+        console.error('Error converting single product:', error);
+        showInfoToast(TOAST_MESSAGES.SHOPPING.convertError, 'error');
+        loadShoppingCart();
       });
-    } catch (error) {
-      console.error('Error converting single product:', error);
-      showInfoToast(TOAST_MESSAGES.SHOPPING.convertError, 'error');
-    } finally {
-      setConvertingItems((prev) => {
-        const n = new Set(prev);
-        n.delete(einkaufswagenRef);
-        return n;
-      });
-    }
+
+    setTimeout(() => onTabChange('noname'), 100);
+    showConvertSuccessToast(savingsAmount);
+    achievementService.trackAction(user.uid, 'convert_product').catch((e) => {
+      console.error('Achievement convert_product error', e);
+    });
   };
 
   const handleConvertSelected = async () => {
@@ -2902,101 +2905,90 @@ export default function ShoppingListScreen() {
       setBrandProducts((prev) => prev.filter((i) => i.id !== itemId));
     }
 
-    setLoadingItems((prev) => new Set(prev).add(itemId));
+    // Haptics fire-and-forget (kein await — blockt sonst den UI-Pfad).
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 
-    try {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-
-      if (isCustomItem) {
-        await FirestoreService.removeFromShoppingCart(user.uid, itemId, {
-          productId: itemId,
-          productName: matched.name ?? 'Custom item',
-          productType: matched.customType === 'brand' ? 'brand' : 'noname',
-          isCustomItem: true,
-        });
-        // 86ca2rt88: Freitext-Eintrag als GEKAUFT in der Journey festhalten.
-        // (Der gemeinsame removeFromShoppingCart kann gekauft/gelöscht nicht
-        // unterscheiden → Tracking hier, wo die Absicht eindeutig ist.)
-        try {
-          journeyTrackingService.trackCustomItem(
-            'purchased',
-            { name: matched.name ?? 'Custom item', type: matched.customType, marketName: (matched as any).market?.name },
-            user.uid,
-          );
-        } catch {
-          /* fire-and-forget */
-        }
-      } else {
-        await FirestoreService.markAsPurchased(user.uid, itemId);
-      }
-      // Legacy-Dupes (cart-schema v1 auto-IDs für dasselbe Produkt)
-      // auch markieren — sonst tauchen sie beim nächsten Refresh
-      // wieder auf. Fire-and-forget.
-      const legacyIds = matched.legacyIds ?? [];
-      for (const legacyId of legacyIds) {
-        FirestoreService.markAsPurchasedWithoutTracking(user.uid, legacyId).catch((e) => {
-          console.warn('[mark-purchased] legacy dupe fail:', legacyId, (e as Error)?.message);
-        });
-      }
-
-      if (!isCustomItem) {
-        updateUserStats(user.uid, {
-          savingsToAdd: totalSavings,
-          productsToAdd: anz,
-        }).catch((e) => console.warn('[mark-purchased] updateUserStats bg-fail:', e));
-        achievementService
-          .trackAction(user.uid, 'complete_shopping', {
-            productCount: anz,
-            totalSavings,
-          })
-          .catch((error) => console.error('Achievement complete_shopping error:', error));
-        if (totalSavings > 0) {
-          showPurchasedToast(`Gekauft! Du hast ${formatEur(totalSavings)} gespart - super gemacht!`);
-        } else {
-          showPurchasedToast(TOAST_MESSAGES.SHOPPING.purchasedSimple);
-        }
-      } else {
-        showInfoToast(TOAST_MESSAGES.SHOPPING.customItemPurchased, 'success');
-      }
-    } catch (error) {
-      console.error('Error marking as purchased:', error);
-
-      // ─── REVERT: Item zurück an die alte Position ────────────────
-      // Optimistic Removal hat schon gegriffen, Firestore-Write
-      // failed → wir setzen den Item zurück (idealerweise an die
-      // gleiche Index-Position).
+    // Revert: Item zurück an die alte Position, falls der Write failed.
+    const revert = () => {
       if (targetIsNoName) {
         setNoNameProducts((prev) => {
-          // Doppel-Insert vermeiden (defensive — kann passieren wenn
-          // refresh dazwischen lief).
           if (prev.some((i) => i.id === matched.id)) return prev;
           const next = [...prev];
-          const insertAt = Math.min(inNoName, next.length);
-          next.splice(insertAt, 0, matched);
+          next.splice(Math.min(inNoName, next.length), 0, matched);
           return next;
         });
       } else {
         setBrandProducts((prev) => {
           if (prev.some((i) => i.id === matched.id)) return prev;
           const next = [...prev];
-          const insertAt = Math.min(inBrand, next.length);
-          next.splice(insertAt, 0, matched);
+          next.splice(Math.min(inBrand, next.length), 0, matched);
           return next;
         });
       }
+    };
 
-      showRetryableErrorToast(
-        TOAST_MESSAGES.SHOPPING.purchaseError,
-        () => {
-          void handleMarkAsPurchased(itemId, unitSavings);
-        },
-      );
-    } finally {
-      setLoadingItems((prev) => {
-        const n = new Set(prev);
-        n.delete(itemId);
-        return n;
+    // ─── FIRE-AND-FORGET Firestore-Write (Task 86ca5fjhn / Forbidden
+    // Pattern): NIEMALS den Write im UI-Pfad awaiten — die Promise löst erst
+    // bei Server-Ack auf (auf langsamem Android = Sekunden), während Toast,
+    // Stats und Folge-UI warten und die App „einfriert"/nichts nachlädt. Der
+    // lokale State (optimistische Removal oben) treibt die UI; bei Fehler
+    // revertieren wir. Genau diese Regression war Ursache des Reports.
+    const writeP = isCustomItem
+      ? FirestoreService.removeFromShoppingCart(user.uid, itemId, {
+          productId: itemId,
+          productName: matched.name ?? 'Custom item',
+          productType: matched.customType === 'brand' ? 'brand' : 'noname',
+          isCustomItem: true,
+        })
+      : FirestoreService.markAsPurchased(user.uid, itemId);
+    writeP.catch((error: unknown) => {
+      console.error('Error marking as purchased:', error);
+      revert();
+      showRetryableErrorToast(TOAST_MESSAGES.SHOPPING.purchaseError, () => {
+        void handleMarkAsPurchased(itemId, unitSavings);
       });
+    });
+
+    // 86ca2rt88: Freitext-Eintrag als GEKAUFT in der Journey festhalten
+    // (fire-and-forget — der gemeinsame removeFromShoppingCart kann
+    // gekauft/gelöscht nicht unterscheiden, daher hier wo die Absicht klar ist).
+    if (isCustomItem) {
+      try {
+        journeyTrackingService.trackCustomItem(
+          'purchased',
+          { name: matched.name ?? 'Custom item', type: matched.customType, marketName: (matched as any).market?.name },
+          user.uid,
+        );
+      } catch {
+        /* fire-and-forget */
+      }
+    }
+
+    // Legacy-Dupes (cart-schema v1 auto-IDs für dasselbe Produkt) ebenfalls
+    // markieren — fire-and-forget.
+    const legacyIds = matched.legacyIds ?? [];
+    for (const legacyId of legacyIds) {
+      FirestoreService.markAsPurchasedWithoutTracking(user.uid, legacyId).catch((e) => {
+        console.warn('[mark-purchased] legacy dupe fail:', legacyId, (e as Error)?.message);
+      });
+    }
+
+    // ─── Optimistischer Erfolg SOFORT (nicht auf den Server-Ack warten) ──
+    if (!isCustomItem) {
+      updateUserStats(user.uid, {
+        savingsToAdd: totalSavings,
+        productsToAdd: anz,
+      }).catch((e) => console.warn('[mark-purchased] updateUserStats bg-fail:', e));
+      achievementService
+        .trackAction(user.uid, 'complete_shopping', { productCount: anz, totalSavings })
+        .catch((error) => console.error('Achievement complete_shopping error:', error));
+      if (totalSavings > 0) {
+        showPurchasedToast(`Gekauft! Du hast ${formatEur(totalSavings)} gespart - super gemacht!`);
+      } else {
+        showPurchasedToast(TOAST_MESSAGES.SHOPPING.purchasedSimple);
+      }
+    } else {
+      showInfoToast(TOAST_MESSAGES.SHOPPING.customItemPurchased, 'success');
     }
   };
 
@@ -3407,7 +3399,15 @@ export default function ShoppingListScreen() {
         currentItem: 'Alle Produkte werden verarbeitet...',
         processedItems: Math.floor(totalCount * 0.3),
       }));
-      await Promise.all(promises);
+      // FIRE-AND-FORGET (Task 86ca5fjhn): die Cart-Writes NICHT awaiten — sonst
+      // hängt der BatchActionLoader bis zum Server-Ack aller N Writes (auf
+      // langsamem Android Sekunden, App „friert ein"). Die optimistische
+      // Local-Removal unten + die Toasts laufen sofort; bei Write-Fehler
+      // reconcilet der nächste loadShoppingCart, plus Error-Toast.
+      Promise.all(promises).catch((error) => {
+        console.error('[bulk-purchase] writes failed (bg):', error);
+        showInfoToast(TOAST_MESSAGES.SHOPPING.bulkPurchaseError, 'error');
+      });
 
       setPurchaseLoaderState((prev) => ({
         ...prev,
