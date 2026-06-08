@@ -80,6 +80,10 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
       temperature: 0.1,
       responseMimeType: 'application/json',
       responseSchema: RESPONSE_SCHEMA,
+      // Ohne explizites Limit greift ein niedriger Default → lange Bons
+      // (viele Artikel × raw-Zeile) werden mittendrin abgeschnitten → kaputtes
+      // JSON oder gedroppte Items. Gleicher Guard wie im cv-hybrid-Parser.
+      maxOutputTokens: 32768,
     },
   });
 
