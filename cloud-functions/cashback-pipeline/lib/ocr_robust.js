@@ -25,6 +25,7 @@
 'use strict';
 
 const { extractReceipt, reconcile, DEFAULT_MODEL } = require('./ocr');
+const { enhanceForOcr } = require('./imageEnhance');
 
 const PRO_MODEL = process.env.CASHBACK_OCR_PRO_MODEL || 'gemini-2.5-pro';
 const MAX_FLASH = Number(process.env.CASHBACK_OCR_MAX_FLASH || 3);
@@ -58,14 +59,17 @@ function findAgreement(reads) {
 
 function pack(chosen, confidence, method, reads) {
   const proAttempts = reads.filter((r) => r && r.__pro).length;
+  const usedEnhanced = reads.some((r) => r && r.__enh);
   const out = { ...chosen };
   delete out.__pro;
+  delete out.__enh;
   out.engine = 'gemini-robust';
   out.robust = {
     confidence, // 'high' | 'medium' | 'low' | 'none'
     method, // how the result was chosen
     attempts: reads.length,
     proAttempts,
+    enhanced: usedEnhanced,
     agreement: confidence === 'high' || confidence === 'medium',
   };
   return out;
@@ -96,11 +100,37 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
     if (agreed) return pack(agreed, 'high', 'flash-agreement', reads);
   }
 
-  // Phase 2 — escalate to the stronger model; agreement incl. a pro read.
+  // Phase 1.5 — no agreement on the ORIGINAL → enhance the image (upscale +
+  // sharpen + contrast) and read it again. Image quality, not reasoning, is
+  // the bottleneck on creased bons. Best-effort: fall back to original bytes.
+  let enhanced = null;
+  try {
+    enhanced = await enhanceForOcr(imageBytes);
+  } catch (e) {
+    enhanced = null;
+  }
+  const escImg = enhanced || imageBytes;
+  if (enhanced) {
+    for (let i = 0; i < 2; i++) {
+      let r;
+      try {
+        r = await extractReceipt(escImg, 'image/jpeg', { model });
+      } catch (e) {
+        continue;
+      }
+      r.__enh = true;
+      reads.push(r);
+      const agreed = findAgreement(reads);
+      if (agreed) return pack(agreed, 'high', 'enhanced-agreement', reads);
+    }
+  }
+
+  // Phase 2 — escalate to the stronger model on the (enhanced) image;
+  // agreement incl. a pro read.
   for (let i = 0; i < 2; i++) {
     let r;
     try {
-      r = await extractReceipt(imageBytes, mimeType, { model: proModel });
+      r = await extractReceipt(escImg, enhanced ? 'image/jpeg' : mimeType, { model: proModel });
     } catch (e) {
       continue;
     }
