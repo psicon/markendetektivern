@@ -154,6 +154,7 @@ export function SpotlightOverlay({
     return off;
   }, [anchorId, visible]);
 
+
   // ─── Auto-Scroll zum Anchor falls off-screen ─────────────────
   //
   // Wenn das Anchor-Element unterhalb des aktuellen Sichtbereichs
@@ -326,22 +327,21 @@ export function SpotlightOverlay({
   }, [visible, disablePulse, pulse]);
 
   // Android-Edge-to-Edge-Korrektur (NUR Android — iOS-Pfad bleibt
-  // byte-identisch). Bei layout-space messen wir relativ zur ScrollView
-  // (measureLayout). Auf Android (edgeToEdgeEnabled) ist die ScrollView um
-  // die Statusbar nach unten inset, während dieses Overlay ab physischem
-  // Bildschirm-Top zeichnet → der Cutout säße um insets.top zu hoch. iOS
-  // rendert den Content edge-to-edge (ScrollView-Top = Window-0), daher 0.
-  // Nur für layout-space relevant; window-space (measureInWindow) ist bereits
-  // absolut.
+  // Android-Edge-to-Edge-Korrektur (NUR Android — iOS-Pfad byte-identisch,
+  // androidYFix=0). Auf Android (edgeToEdgeEnabled) zeichnet dieses Overlay ab
+  // physischem Bildschirm-Top, aber sowohl measureInWindow (window-space) als
+  // auch measureLayout (layout-space) liefern Y RELATIV zum status-bar-inset-
+  // eten Content → der Cutout säße um insets.top zu hoch. Empirisch bestätigt:
+  // product.hero rectY=48 bei insetTop=37, Element real bei ~85. Gilt für BEIDE
+  // Mess-Modi. iOS rendert Content edge-to-edge (Y bereits korrekt), daher 0.
   const androidYFix = Platform.OS === 'android' ? insets.top : 0;
 
-  // Window-Y des Anchors. Bei layout-space: layoutY - scrollY +
-  // scrollViewOffsetY (+ Android-Statusbar-Korrektur). Bei window-space: Y.
+  // Window-Y des Anchors (+ Android-Statusbar-Korrektur in beiden Modi).
   const winY = useDerivedValue(() => {
     if (isLayoutSpace.value === 1 && ctx?.scrollY) {
       return ay.value - ctx.scrollY.value + scrollViewWindowOffsetY + androidYFix;
     }
-    return ay.value;
+    return ay.value + androidYFix;
   });
   // X gleichermaßen — bei layout-space + horizontal scroll wäre das
   // problematisch, aber unsere Targets liegen innerhalb einer
@@ -458,7 +458,7 @@ export function SpotlightOverlay({
     // assume scrollY=0 plus scrollViewOffset, which is the post-
     // scroll target position the auto-scroll lands on.
     const estimatedWinY =
-      rect.space === 'layout' ? rect.y - 0 + scrollViewWindowOffsetY + androidYFix : rect.y;
+      rect.space === 'layout' ? rect.y - 0 + scrollViewWindowOffsetY + androidYFix : rect.y + androidYFix;
     const targetCenterY = estimatedWinY + rect.height / 2;
     const goAbove = targetCenterY > SCREEN_H / 2;
     if (goAbove) {
