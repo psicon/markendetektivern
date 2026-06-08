@@ -401,18 +401,24 @@ export default function CashbackPendingScreen() {
           : reason === 'no_bon_date'
           ? 'Wir konnten kein Datum auf dem Bon erkennen. Bitte fotografiere den Bon vollständig und gut lesbar (Datum muss sichtbar sein).'
           : reason === 'reconciliation_delta'
-          ? 'Die erkannten Artikel ergeben nicht den Endbetrag. Bitte fotografiere den Bon vollständig und gut lesbar.'
+          ? 'Wir konnten diesen Bon nicht ganz sicher lesen. Fotografiere ihn am besten flach, gut beleuchtet und vollständig — von der ersten bis zur letzten Zeile — dann klappt es meist sofort. Tippe einfach auf „Neuer Bon".'
           : reason === 'process_error'
-          ? 'Bei der Auswertung ist etwas schiefgegangen. Versuche es nochmal mit einem schärferen Foto.'
+          ? 'Beim Auswerten hat etwas nicht geklappt. Mach am besten ein neues, scharfes Foto vom kompletten Bon — wir versuchen es direkt wieder.'
           : reason === 'pubsub_publish_failed'
-          ? 'Beim Hochladen ist etwas schiefgegangen. Bitte versuche es nochmal.'
-          : reason
-          ? `Bon konnte nicht verbucht werden (Grund: ${reason}).`
-          : 'Bon konnte nicht verbucht werden. Bitte versuche es nochmal mit einem schärferen Foto des Kassenbons.';
+          ? 'Beim Hochladen hat etwas nicht geklappt. Tippe auf „Neuer Bon" und versuch es gleich noch mal.'
+          : 'Wir konnten den Bon nicht sicher lesen. Ein scharfes, vollständiges Foto bei gutem Licht hilft — probier es einfach noch mal.';
+      // Titel je nach Grund: „schlecht lesbar"-Fälle bekommen einen
+      // freundlichen, nicht-anklagenden Titel (Copy-Ton: nie Frustration).
+      const rejTitle =
+        reason === 'not_a_receipt'
+          ? 'Kein Kassenbon erkannt'
+          : ['reconciliation_delta', 'process_error', 'pubsub_publish_failed', 'no_bon_date', ''].includes(reason)
+          ? 'Bon nicht lesbar'
+          : 'Bon abgelehnt';
       return {
         icon: <MaterialCommunityIcons name="close-circle-outline" size={42} color={warn} />,
         bg: warn + '22',
-        title: 'Bon abgelehnt',
+        title: rejTitle,
         body,
         cashback: null,
       };

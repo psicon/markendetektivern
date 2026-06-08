@@ -236,13 +236,14 @@ function cashbackRejectToastMsg(reason?: string | null, maxAgeDays?: number | nu
     case 'not_a_receipt':
       return 'Bon abgelehnt: kein Kassenbon erkannt.';
     case 'no_bon_date':
-      return 'Bon abgelehnt: kein Datum erkennbar.';
+      return 'Bon nicht lesbar — bitte neu scannen.';
     case 'reconciliation_delta':
-      return 'Bon abgelehnt: Artikel passen nicht zum Endbetrag.';
+      return 'Bon war schwer lesbar — bitte neu scannen.';
     case 'process_error':
-      return 'Bon abgelehnt: Auswertung fehlgeschlagen.';
+    case 'pubsub_publish_failed':
+      return 'Hat nicht geklappt — bitte noch mal scannen.';
     default:
-      return 'Bon abgelehnt — tippe unter „Meine Bons" für Details.';
+      return 'Bon nicht lesbar — tippe unter „Meine Bons" für Details.';
   }
 }
 
