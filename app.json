@@ -5,7 +5,10 @@
     "version": "5.0.7",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": ["markendetektive", "markendetektivern"],
+    "scheme": [
+      "markendetektive",
+      "markendetektivern"
+    ],
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "locales": {
@@ -133,7 +136,8 @@
           "isAutoInitEnabled": false,
           "iosUserTrackingPermission": "Diese App verwendet deine Daten ausschließlich um deinen Login mit Facebook zu ermöglichen."
         }
-      ]
+      ],
+      "expo-tracking-transparency"
     ],
     "experiments": {
       "typedRoutes": true
