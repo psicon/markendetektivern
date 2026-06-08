@@ -52,8 +52,11 @@ export const configureGoogleSignIn = async () => {
       // für Bundle `de.markendetektive` + App-Store-ID 6471081082.
       config.iosClientId = '139509881339-u77orq1k10s7lqui7vvq615smqskq70b.apps.googleusercontent.com';
     } else if (Platform.OS === 'android') {
-      config.androidClientId = '139509881339-h8ief6hmf22i77k4bcb6h4psilqna86v.apps.googleusercontent.com';
-      config.hostedDomain = '';
+      // KEIN androidClientId — `@react-native-google-signin` kennt den
+      // Parameter nicht ("not a valid configuration parameter") und liest den
+      // Android-OAuth-Client automatisch aus google-services.json. Für den
+      // ID-Token zählt nur `webClientId` (oben) + die in Firebase registrierte
+      // SHA-1 des Signing-Keys. forceAccountSelection bleibt (gültig).
       config.forceAccountSelection = true;
     }
 
