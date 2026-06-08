@@ -90,10 +90,21 @@ function bonTimesWithin(a, b, maxMinutes) {
   return Math.abs(pa - pb) <= maxMinutes;
 }
 
-// OCR engine selection. Default = cv-hybrid (Cloud Vision + Gemini Flash
-// text-parser, validated as the winner in Phase 0). Override per-deploy
-// via env var if you want to A/B-test the original Gemini-direct path.
-const OCR_ENGINE = (process.env.CASHBACK_OCR_ENGINE || 'cv-hybrid').toLowerCase();
+// OCR engine selection. Default = gemini-direct (Gemini-on-image with the
+// v1.3 image prompt + gemini-3.5-flash).
+//
+// Why NOT cv-hybrid anymore (2026-06-08): cv-hybrid feeds Cloud Vision's FLAT
+// linearized text to Gemini. On the (very common) thermal bons whose price
+// column prints vertically OFFSET from the item names, Vision linearizes the
+// columns in the wrong interleaving — e.g. REWE: "CHORIZO\nSERRANO\n2,49\n4,99"
+// (names even reversed) — and the geometry that would pair them correctly is
+// already lost in the flat text. No text prompt can recover it. The image
+// path SEES the layout, and the v1.3 prompt's order/offset rules pair it
+// right. Benchmarked on 37 real bons: gemini-direct(3.5,v1.3) = 30/37
+// reconciliation-clean vs cv-hybrid's wrong stored pairings; the exact bon
+// the user reported (LiDL 22,34 €) → cv-hybrid mispaired, gemini-direct Δ=0.
+// cv-hybrid stays available via CASHBACK_OCR_ENGINE=cv-hybrid for A/B.
+const OCR_ENGINE = (process.env.CASHBACK_OCR_ENGINE || 'gemini-direct').toLowerCase();
 
 // When the primary OCR fails reconciliation (asymmetric tolerance),
 // re-run via DocAI Expense Parser as a fallback. Cost: $0.05/page only
