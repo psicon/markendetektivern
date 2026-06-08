@@ -35,7 +35,6 @@
  * Die App funktioniert weiter, nur die Typo ist visuell falsch.
  */
 
-import React from 'react';
 import { Platform, Text, TextInput, type StyleProp, type TextStyle } from 'react-native';
 import {
   NUNITO_BOLD,
@@ -86,29 +85,30 @@ if (Platform.OS === 'android') {
       console.warn(`[androidTextFontPatch] ${name}.render unavailable — skipping`);
       return;
     }
-    Component.render = function patchedRender(...args: any[]) {
-      const element = originalRender.apply(this, args);
-      if (!element || !element.props) return element;
-
-      const flat = flatten(element.props.style);
-      const ff = flat.fontFamily;
-      // Nur eingreifen wenn fontFamily explizit 'Nunito' ist.
-      // (Wir greifen ABSICHTLICH nicht in den Fall "fontWeight gesetzt,
-      // fontFamily unset" ein — sonst würden Stack-Header-Titles aus
-      // React Navigation oder andere 3rd-party-Komponenten ungewollt
-      // auf Nunito gemappt. Wer Nunito will, setzt fontFamily.)
-      if (ff === 'Nunito') {
-        const resolved = resolveCached(flat.fontWeight);
-        if (resolved !== ff) {
-          // Append-only style — der originale Style bleibt erhalten,
-          // wir overrid'en nur fontFamily. React.cloneElement ist
-          // sauberer als manuelles spread.
-          return React.cloneElement(element, {
-            style: [element.props.style, { fontFamily: resolved }],
-          });
+    // WICHTIG (RN 0.79): Wir resolven auf den INPUT-Props (dem `style` das
+    // an Text/TextInput übergeben wird), NICHT auf dem gerenderten
+    // Output-Element. Ab RN 0.76+ destrukturiert Text seinen `style` und gibt
+    // eine umstrukturierte Element-Struktur zurück — der User-Style liegt dann
+    // NICHT mehr auf `element.props.style`, sodass die alte (Output-basierte)
+    // Variante ein stiller No-op wurde (Android-Texte fielen auf System-Font
+    // zurück). Input-Modifikation ist version-robust: forwardRef-Render-
+    // Signatur ist (props, ref).
+    Component.render = function patchedRender(props: any, ref: any) {
+      if (props && props.style) {
+        const flat = flatten(props.style);
+        // Nur eingreifen wenn fontFamily explizit 'Nunito' ist (nicht den
+        // Fall "weight gesetzt, family unset" — sonst würden 3rd-party-/
+        // Navigation-Texte ungewollt auf Nunito gemappt).
+        if (flat.fontFamily === 'Nunito') {
+          const resolved = resolveCached(flat.fontWeight);
+          if (resolved !== 'Nunito') {
+            // Append-only: Original-Style bleibt, nur fontFamily wird zur
+            // konkreten geladenen Variante (Nunito_700Bold etc.) überschrieben.
+            props = { ...props, style: [props.style, { fontFamily: resolved }] };
+          }
         }
       }
-      return element;
+      return originalRender.call(this, props, ref);
     };
   };
 
