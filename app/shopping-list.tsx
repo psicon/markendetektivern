@@ -2806,9 +2806,7 @@ export default function ShoppingListScreen() {
                 currentItem: 'Umwandlung wird verarbeitet...',
                 processedItems: selectedConversions.length,
               }));
-              await FirestoreService.convertToNoName(user.uid, selectedConversions);
-              await FirestoreService.updateUserTotalSavings(user.uid, totalPotentialSavings);
-
+              // Side-effects (Analytics/Achievement) vorbereiten.
               const sideEffects: Promise<any>[] = [];
               for (const c of selectedConversions) {
                 const bp = brandProducts.find((p) => p.id === c.einkaufswagenRef);
@@ -2832,17 +2830,30 @@ export default function ShoppingListScreen() {
                   Promise.resolve(achievementService?.trackAction?.(user.uid, 'convert_product')),
                 );
               }
-              await Promise.allSettled(sideEffects);
 
-              setConvertLoaderState((prev) => ({
-                ...prev,
-                currentItem: 'Abgeschlossen!',
-                processedItems: selectedConversions.length,
-              }));
-              await new Promise((res) => setTimeout(res, 80));
+              // Optimistisch: konvertierte Marken-Items sofort raus + Auswahl leeren.
+              const convIds = new Set(selectedConversions.map((c) => c.einkaufswagenRef));
+              setBrandProducts((prev) => prev.filter((i) => !convIds.has(i.id)));
+              setSelectedConversions([]);
+
+              // FIRE-AND-FORGET (Task 86ca5fjhn): Convert-Write +
+              // updateUserTotalSavings + der schwere loadShoppingCart-Refetch
+              // NICHT im UI-Pfad awaiten — sonst hängt der Loader bis zum
+              // Server-Ack (Freeze). Loader schließt + Toast/Tab-Switch sofort;
+              // Reload (zeigt die neuen NoNames) im Hintergrund nach dem Write.
+              FirestoreService.convertToNoName(user.uid, selectedConversions)
+                .then(() => FirestoreService.updateUserTotalSavings(user.uid, totalPotentialSavings))
+                .then(() => {
+                  Promise.allSettled(sideEffects);
+                  return loadShoppingCart();
+                })
+                .catch((error) => {
+                  console.error('[convert] bulk write failed (bg):', error);
+                  showInfoToast(TOAST_MESSAGES.SHOPPING.bulkConvertError, 'error');
+                  loadShoppingCart();
+                });
+
               setConvertLoaderState({ visible: false, processedItems: 0, totalItems: 0, currentItem: '' });
-
-              await loadShoppingCart();
               setTimeout(() => onTabChange('noname'), 100);
               showBulkConvertSuccessToast(totalPotentialSavings);
             } catch (error) {
