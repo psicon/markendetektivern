@@ -1714,3 +1714,39 @@ Erfassung). **Kosten:** KI pro NEUEM String (alias-gecacht), nicht pro Bon-Zeile
 (`receipt-matcher`, Trigger pro Bon → Lexikon-Lookup → Shortlist → Gemini-Pick
 → receiptAlias/receiptMatch + Journey-Closure).
 </content>
+
+## Cashback-OCR — Architektur + teure Learnings (Juni 2026)
+
+Bon-OCR läuft **server-seitig** (`cloud-functions/cashback-pipeline`), NICHT
+in der App — Metro/TestFlight/App-Version beeinflussen die Erkennung NICHT.
+
+- **Engine-Auswahl kommt aus `.env`, NICHT aus dem Code-Default.**
+  `CASHBACK_OCR_ENGINE` in `cloud-functions/cashback-pipeline/.env` überschreibt
+  `const OCR_ENGINE = (process.env... || 'default')`. Ich habe einmal nur den
+  Code-Default geändert + deployed → wirkungslos, weil `.env=cv-hybrid` gewann.
+  **Beim Ändern der Engine IMMER `.env` anfassen, nicht nur den Code.** (Deploy-
+  Log zeigt „Loaded environment variables from .env" — das ist der Hinweis.)
+- **Default-Engine = `gemini-direct`** (Bild → Gemini, `lib/ocr.js` +
+  `lib/prompt.js` v1.3 + `lib/ocr_robust.js`). **`cv-hybrid`** (Cloud Vision
+  flat-text → Gemini, `lib/ocr_cvhybrid.js` + `lib/prompt_text.js`) ist NUR
+  Rollback: Cloud Vision linearisiert vertikal **versetzte Preis-Spalten**
+  falsch interleaved (Namen/Preise vertauscht) → die Geometrie ist im flachen
+  Text verloren, kein Text-Prompt rettet das. **Beim OCR-Validieren IMMER die
+  ECHTE Prod-Engine testen, nicht den Legacy-Pfad** (ich habe erst `prompt.js`
+  gefixt+validiert, während Prod `cv-hybrid` lief → Fix griff nie).
+- **Robust-OCR (`lib/ocr_robust.js`):** liest das Bild mehrfach, vertraut dem
+  was unabhängige Läufe auf **Sequenz-Ebene** (`name#priceCents`) übereinstimmen
+  (fängt Swaps/Kompensation die Σ==Total NICHT sieht). Early-stop bei 2er-
+  Agreement; sonst Eskalation auf `gemini-2.5-pro`. `confidence` (high/medium/
+  low/none) landet in `receipts/*.ocr.robust`.
+- **Σ(items)==totalCents ist KEIN vollständiges Korrektheits-Orakel** (Swaps +
+  kompensierende Fehler + Pfand-Toleranz ±200ct bleiben unsichtbar). Auto-
+  Freigabe sollte langfristig zusätzlich an `ocr.robust.confidence==='high'`
+  hängen + low → User-Tap/Review.
+- **Modell:** `gemini-3.5-flash` primär, `gemini-2.5-pro` Eskalation. An echten
+  Bons: 3.5-flash 30/42 reconcile-clean vs 2.5-flash 18/42; pro ~33% teurer.
+- **Bildqualität ist der eigentliche Engpass** (Knicke durch Ziffern), nicht das
+  Modell-Reasoning. 2×-Upscale+Kontrast+Schärfen hebt harte Bons messbar
+  (1/6→5/6) — noch NICHT in der Pipeline (bräuchte `sharp`).
+- **Testen:** ein NEU fotografierter Bon läuft frisch; exakt dasselbe Bild-File
+  trifft per Dedup (`receipts` contentHash) das alte gecachte Ergebnis.
