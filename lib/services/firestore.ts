@@ -4544,16 +4544,22 @@ export class FirestoreService {
         const productData = productDetails[index];
         const trackingDetail = trackingDetails[index];
         
-        const newCartItem = {
+        // WICHTIG (Task 86ca5fjhn — Convert schlägt fehl): Firestore wirft
+        // hart bei `undefined`-Feldwerten ("Unsupported field value: undefined").
+        // journeyId + viewedProductIndex sind oft undefined (keine aktive
+        // Journey = Normalfall) → batch.commit() rejected → Umwandlung failt.
+        // Daher NUR setzen wenn definiert.
+        const newCartItem: Record<string, any> = {
           handelsmarkenProdukt: doc(db, 'produkte', conversion.produktRef),
           gekauft: false,
           timestamp: serverTimestamp(),
           name: productData?.name || 'NoName Produkt',
-          // NEU: Journey ID speichern für späteres Tracking!
-          journeyId: currentJourneyId || trackingDetail?.originalJourneyId,
-          viewedProductIndex: trackingDetail?.originalViewedProductIndex // NEU: Index übertragen
         };
-        
+        const jid = currentJourneyId || trackingDetail?.originalJourneyId;
+        if (jid != null) newCartItem.journeyId = jid;
+        const vpi = trackingDetail?.originalViewedProductIndex;
+        if (vpi != null) newCartItem.viewedProductIndex = vpi;
+
         batch.set(newDoc, newCartItem);
         
         // Map old ID to new ID and store new item data
