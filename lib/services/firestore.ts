@@ -20,7 +20,7 @@ import {
     where,
     writeBatch
 } from '@react-native-firebase/firestore';
-import { Image as RNImage } from 'react-native';
+import { Image as RNImage, InteractionManager } from 'react-native';
 import { db } from '../firebase';
 import {
     Discounter,
@@ -4210,7 +4210,17 @@ export class FirestoreService {
     // Analog zu Favoriten-Remove (1 deleteDoc) — 1 updateDoc.
     await updateDoc(cartItemRef, { gekauft: true });
 
-    // ─── Background: Purchase-History + Journey-Tracking ──────────
+    // ─── Background (DEFERRED): Purchase-History + Journey-Tracking ──
+    // Perf (Report Juni 2026 „nach gekauft markieren steht alles / lädt
+    // mehrere Sekunden"): die Kette unten ist schwer (createPurchaseHistoryEntry
+    // = mehrere sequentielle getDocs + Journey-/Gamification-Cascade). Seit der
+    // Write fire-and-forget ist, navigiert der User SOFORT weiter — liefe die
+    // Kette wie zuvor synchron-startend, contended sie die Firestore-Bridge
+    // parallel zu den Reads des Folge-Screens → „mehrere Sekunden". Daher erst
+    // starten wenn der JS-Thread idle ist (Navigation/Render durch). Kein
+    // Korrektheits-Verlust: Purchase-History/Journey werden minimal später
+    // geschrieben, der kritische gekauft:true-Write ist oben schon durch.
+    InteractionManager.runAfterInteractions(() => {
     void (async () => {
       try {
         // Item existiert noch (gekauft:true gesetzt, aber nicht
@@ -4290,6 +4300,7 @@ export class FirestoreService {
         console.warn('[markAsPurchased] bg-fail:', (e as Error)?.message);
       }
     })();
+    });
   }
 
   /**
@@ -4302,7 +4313,10 @@ export class FirestoreService {
     // Critical: gekauft:true. Item verschwindet aus der active-cart-Query.
     await updateDoc(cartItemRef, { gekauft: true });
 
-    // Background: Purchase-History
+    // Background (DEFERRED, siehe markAsPurchased): bei Bulk-„alle gekauft"
+    // feuert das N× — würde es synchron starten, contendet der getDocs-Burst
+    // die Firestore-Bridge parallel zur UI. runAfterInteractions = erst wenn idle.
+    InteractionManager.runAfterInteractions(() => {
     void (async () => {
       try {
         const snap = await getDoc(cartItemRef);
@@ -4312,6 +4326,7 @@ export class FirestoreService {
         console.warn('[markAsPurchasedWithoutTracking] bg-fail:', (e as Error)?.message);
       }
     })();
+    });
   }
 
   /**

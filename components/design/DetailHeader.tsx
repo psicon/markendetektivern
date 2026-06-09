@@ -9,7 +9,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fontFamily, fontWeight } from '@/constants/tokens';
+import { fontFamily, fontFamilyVariants, fontWeight } from '@/constants/tokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 
@@ -160,7 +160,10 @@ export function DetailHeader({
               position: 'absolute',
               left: 0,
               right: 0,
-              fontFamily,
+              // Animated.Text geht NICHT durch den androidTextFontPatch
+              // (der hookt nur Text/TextInput.render) → bare 'Nunito' fiele
+              // auf Android auf System-Font zurück. Explizite Variante nutzen.
+              fontFamily: fontFamilyVariants.heading,
               fontWeight: fontWeight.extraBold,
               fontSize: 20,
               color: theme.text,
@@ -208,7 +211,7 @@ export function DetailHeader({
               numberOfLines={1}
               style={{
                 flex: 1,
-                fontFamily,
+                fontFamily: fontFamilyVariants.heading,
                 fontWeight: fontWeight.extraBold,
                 fontSize: 17,
                 color: theme.text,

@@ -60,7 +60,7 @@ import {
 } from '@/components/coachmarks/ProductDetailWalkthrough';
 import { Crossfade, Shimmer } from '@/components/design/Skeletons';
 import { StufenChips } from '@/components/design/StufenChips';
-import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { fontFamily, fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useCoachmark } from '@/hooks/useCoachmark';
 import { useCoachmarkAnchor } from '@/hooks/useCoachmarkAnchor';
 import { useOpenFoodFallback } from '@/hooks/useOpenFoodFallback';
@@ -1469,7 +1469,8 @@ export default function ProductComparisonScreen() {
                 entering={FadeIn.duration(280)}
                 numberOfLines={1}
                 style={{
-                  fontFamily,
+                  // Animated.Text umgeht den androidTextFontPatch → explizite Variante
+                  fontFamily: fontFamilyVariants.semibold,
                   fontWeight: fontWeight.semibold,
                   fontSize: 11,
                   color: theme.textMuted,
