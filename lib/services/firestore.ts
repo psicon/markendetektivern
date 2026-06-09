@@ -162,6 +162,13 @@ const topProductsInflight = new Map<string, Promise<any[]>>();
 // Produkt-Dokumente nach. Bei vielen Bewertungen kann das teurer
 // werden (~hunderte Reads), deshalb pro Session nur 1× pro 10 Minuten.
 const topRatedCache = new Map<string, CacheEntry<any[]>>();
+
+// NoName-Alternativen pro Markenprodukt (Task 86ca5fjhn — „lädt ewig"):
+// getNoNameAlternatives macht sonst pro Marken-Cart-Item eine uncachte
+// 50-Doc-Query + Discounter-Reads — bei JEDEM loadShoppingCart/Refresh neu.
+// 3-Min-TTL; Key = markenProduktId|favoriteMarketId (Markt beeinflusst die
+// Sortierung/Top-Auswahl). Stabile Produktdaten, vom Convert unberührt.
+const alternativesCache = new Map<string, CacheEntry<any[]>>();
 const topRatedInflight = new Map<string, Promise<any[]>>();
 
 // ─── Name-Similarity Helpers (für getEnttarnteAlternatives) ─────
@@ -4608,8 +4615,10 @@ export class FirestoreService {
     markenProduktId: string,
     favoriteMarketId?: string
   ): Promise<FirestoreDocument<Produkte>[]> {
+    const cacheKey = `${markenProduktId}|${favoriteMarketId ?? ''}`;
     try {
-      console.log(`🔍 Getting NoName alternatives for brand product: ${markenProduktId}`);
+      const cached = readCache(alternativesCache, cacheKey);
+      if (cached) return cached as FirestoreDocument<Produkte>[];
       const markenProduktRef = doc(db, 'markenProdukte', markenProduktId);
       
       // Einfache Query: nur markenProdukt filter (vermeidet Composite Index)
@@ -4709,7 +4718,7 @@ export class FirestoreService {
         })
       );
 
-      console.log(`✅ Found ${populatedProducts.length} NoName alternatives (${favoriteProducts.length} from favorite market)`);
+      writeCache(alternativesCache, cacheKey, populatedProducts, TTL_SHORT_MS);
       return populatedProducts;
     } catch (error) {
       console.error('Error getting NoName alternatives:', error);
