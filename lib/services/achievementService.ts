@@ -1305,35 +1305,15 @@ class AchievementService {
       // Anti-Abuse Checks
       const now = new Date();
       const ledgerRef = collection(db, 'users', userId, 'ledger');
-
-      // PERF (Post-Kauf-Freeze Android): die bis zu 4 Anti-Abuse-Ledger-Queries
-      // SOFORT PARALLEL starten statt jede einzeln sequentiell zu awaiten. Bei
-      // wachsendem Ledger summierten sich die Round-Trips zu Sekunden und
-      // blockierten nach dem Markieren alles. Ausgewertet wird unten in EXAKT
-      // derselben Reihenfolge → identisches Verhalten/Toasts.
-      const __aa = actionConfig.antiAbuse;
-      const __oneTimeP = __aa?.oneTime
-        ? getDocs(query(ledgerRef, where('action', '==', action), limit(1)))
-        : null;
-      const __dedupeP = __aa?.dedupeWindowSec
-        ? getDocs(query(ledgerRef, where('action', '==', action),
-            where('timestamp', '>', new Date(now.getTime() - __aa.dedupeWindowSec * 1000)), limit(1)))
-        : null;
-      const __dailyP = (() => {
-        if (!__aa?.dailyCap) return null;
-        const s = new Date(now); s.setHours(0, 0, 0, 0);
-        return getDocs(query(ledgerRef, where('action', '==', action), where('timestamp', '>=', s)));
-      })();
-      const __weeklyP = (() => {
-        if (!__aa?.weeklyCap) return null;
-        const s = new Date(now); const d = s.getDay();
-        s.setDate(s.getDate() - (d === 0 ? 6 : d - 1)); s.setHours(0, 0, 0, 0);
-        return getDocs(query(ledgerRef, where('action', '==', action), where('timestamp', '>=', s)));
-      })();
-
+      
       // 1. Check One-Time Actions
       if (actionConfig.antiAbuse?.oneTime) {
-        const existingDocs = await __oneTimeP!;
+        const existingQuery = query(
+          ledgerRef,
+          where('action', '==', action),
+          limit(1)
+        );
+        const existingDocs = await getDocs(existingQuery);
         if (!existingDocs.empty) {
           console.log(`⚠️ One-time action ${action} bereits ausgeführt`);
           // Prüfe ob Gamification Benachrichtigungen deaktiviert sind
@@ -1355,7 +1335,7 @@ class AchievementService {
           where('timestamp', '>', dedupeTime),
           limit(1)
         );
-        const dedupeDocs = await __dedupeP!;
+        const dedupeDocs = await getDocs(dedupeQuery);
         if (!dedupeDocs.empty) {
           console.log(`⚠️ Action ${action} zu schnell wiederholt (Dedupe Window)`);
           const lastDoc = dedupeDocs.docs[0];
@@ -1382,7 +1362,7 @@ class AchievementService {
           where('action', '==', action),
           where('timestamp', '>=', startOfDay)
         );
-        const dailyDocs = await __dailyP!;
+        const dailyDocs = await getDocs(dailyQuery);
         if (dailyDocs.size >= actionConfig.antiAbuse.dailyCap) {
           console.log(`⚠️ Daily cap erreicht für ${action} (${actionConfig.antiAbuse.dailyCap})`);
           // Prüfe ob Gamification Benachrichtigungen deaktiviert sind
@@ -1408,7 +1388,7 @@ class AchievementService {
           where('action', '==', action),
           where('timestamp', '>=', startOfWeek)
         );
-        const weeklyDocs = await __weeklyP!;
+        const weeklyDocs = await getDocs(weeklyQuery);
         if (weeklyDocs.size >= actionConfig.antiAbuse.weeklyCap) {
           console.log(`⚠️ Weekly cap erreicht für ${action} (${actionConfig.antiAbuse.weeklyCap})`);
           // Prüfe ob Gamification Benachrichtigungen deaktiviert sind
