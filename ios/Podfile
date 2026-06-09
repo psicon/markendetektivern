@@ -72,6 +72,19 @@ target 'MarkenDetektive' do
         if config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 12.0
           config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
         end
+
+        # Xcode 26 / neuer Clang: der `fmt`-Pod (React-Native / RCT-Folly) bricht
+        # beim Kompilieren, weil seine FMT_STRING-Format-Checks `consteval` nutzen
+        # und der Xcode-26-Clang das als "call to consteval function ... is not a
+        # constant expression" ablehnt (Pods/fmt/include/fmt/format-inl.h).
+        # FMT_USE_CONSTEVAL=0 lässt fmt auf constexpr statt consteval zurückfallen
+        # → kompiliert sauber, KEIN Laufzeit-Verhalten ändert sich. Pflicht seit
+        # Apple das iOS-26-SDK (Xcode 26) erzwingt (ITMS-90725). Ohne das baut iOS
+        # auf Xcode 26 nicht, und ältere Xcode lehnt Apple ab. Juni 2026.
+        defs = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || ['$(inherited)']
+        defs = [defs] unless defs.is_a?(Array)
+        defs << 'FMT_USE_CONSTEVAL=0' unless defs.include?('FMT_USE_CONSTEVAL=0')
+        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = defs
       end
     end
   end
