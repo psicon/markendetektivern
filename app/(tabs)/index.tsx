@@ -1,5 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { markAppContentReady } from '@/lib/utils/appReady';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -69,6 +70,11 @@ import { getProductImage } from '@/lib/utils/productImage';
 type DiscounterInfo = { color: string; short: string; bild?: string };
 
 export default function HomeScreen() {
+  // Splash-Overlay erst ausblenden, wenn dieser Screen gerendert ist
+  // (verhindert die schwarz/weisse Boot-Lücke auf Android, s. lib/utils/appReady).
+  useEffect(() => {
+    markAppContentReady();
+  }, []);
   const { top: insetTop } = useSafeAreaInsets();
   const { theme, shadows, brand } = useTokens();
   const colorScheme = useColorScheme();

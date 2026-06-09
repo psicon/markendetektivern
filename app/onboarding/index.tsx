@@ -7,6 +7,7 @@
 // gelöscht, das Pattern braucht's nicht mehr.
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { collection, doc, getDocs, query, serverTimestamp, setDoc, where } from '@react-native-firebase/firestore';
+import { markAppContentReady } from '@/lib/utils/appReady';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
@@ -96,6 +97,10 @@ const PRIORITIES = [
 // DemographicsPromptSheet (T3).
 
 export default function OnboardingScreen() {
+  // Splash-Overlay ausblenden sobald dieser Screen steht (s. lib/utils/appReady).
+  useEffect(() => {
+    markAppContentReady();
+  }, []);
   const { signInAnonymously, refreshUserProfile: refreshAuthUserProfile } = useAuth();
   const { presentPaywallIfNeeded, presentPaywall, isPremium, refreshPremiumStatus } = useRevenueCat();
   const colorScheme = useColorScheme();

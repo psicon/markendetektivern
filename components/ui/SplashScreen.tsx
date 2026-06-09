@@ -4,6 +4,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useRef } from 'react';
 import { Animated, Dimensions, Image, Platform, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { isAppContentReady, onAppContentReady } from '@/lib/utils/appReady';
+import * as ExpoSplashScreen from 'expo-splash-screen';
 
 // T17.20: Static require so Metro bundles the asset on first JS-eval —
 // kein Font-Race wie vorher mit `<CustomIcon name="iconBlack">` (das
@@ -33,6 +35,14 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onAnimationComplete 
   const pulseAnim = useRef(new Animated.Value(0.5)).current;
 
   useEffect(() => {
+    // WICHTIG (Fix schwarz/weisse Boot-Lücke Android): Diese Overlay rendert
+    // erst NACH dem Mounten der (schweren) Provider. Genau JETZT — wenn die
+    // gruene Overlay also bereits gezeichnet ist — die NATIVE Splash ausblenden.
+    // Vorher hat FontLoader die native Splash schon ~100 ms nach Font-Load
+    // versteckt, lange bevor diese Overlay stand → schwarze Luecke dazwischen.
+    // So ist der Uebergang native-Splash (gruen) -> Overlay (gruen) nahtlos.
+    ExpoSplashScreen.hideAsync().catch(() => {});
+
     // Pulsations-Animation für Loading-Punkt
     const pulseAnimation = Animated.loop(
       Animated.sequence([
@@ -49,56 +59,51 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onAnimationComplete 
       ])
     );
 
-    // Splash-Animation-Sequenz — Total ~2150ms
-    const splashSequence = Animated.sequence([
-      // 1. Logo fade-in + Scale (600ms)
+    // Entrance: Logo + Text einblenden + kurzer Mindest-Hold (~1,6 s).
+    const entrance = Animated.sequence([
       Animated.parallel([
-        Animated.timing(logoOpacity, {
-          toValue: 1,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-        Animated.spring(logoScale, {
-          toValue: 1,
-          tension: 60,
-          friction: 8,
-          useNativeDriver: true,
-        }),
+        Animated.timing(logoOpacity, { toValue: 1, duration: 600, useNativeDriver: true }),
+        Animated.spring(logoScale, { toValue: 1, tension: 60, friction: 8, useNativeDriver: true }),
       ]),
-
-      // 2. Text fade-in (600ms)
-      Animated.timing(textOpacity, {
-        toValue: 1,
-        duration: 600,
-        useNativeDriver: true,
-      }),
-
-      // 3. Halten (600ms)
-      Animated.delay(600),
-
-      // 4. Fade-out (350ms)
-      Animated.timing(backgroundOpacity, {
-        toValue: 0,
-        duration: 350,
-        useNativeDriver: true,
-      }),
+      Animated.timing(textOpacity, { toValue: 1, duration: 600, useNativeDriver: true }),
+      Animated.delay(400),
     ]);
 
-    // Starte Pulsations-Animation sofort
+    let unsub: (() => void) | undefined;
+    let exited = false;
+    const doExit = () => {
+      if (exited) return;
+      exited = true;
+      unsub?.();
+      // Fade-out (350ms) → erst DANN dismiss (onAnimationComplete).
+      Animated.timing(backgroundOpacity, { toValue: 0, duration: 350, useNativeDriver: true }).start(
+        () => onAnimationComplete?.(),
+      );
+    };
+
     pulseAnimation.start();
 
-    splashSequence.start(() => {
-      onAnimationComplete?.();
+    entrance.start(() => {
+      // WICHTIG (Fix Whitescreen Android): NICHT nach fester Zeit ausblenden,
+      // sondern erst wenn der erste echte Screen (Home/Onboarding/Auth) gerendert
+      // ist → markAppContentReady(). Vorher verschwand die Overlay vor dem ersten
+      // App-Frame → schwarz/weisse Lücke. onAppContentReady feuert sofort, falls
+      // schon bereit.
+      if (isAppContentReady()) {
+        doExit();
+      } else {
+        unsub = onAppContentReady(doExit);
+      }
     });
 
-    // Backup-Timer für den Fall, dass die Animation hängt
-    const timeout = setTimeout(() => {
-      onAnimationComplete?.();
-    }, 3000);
+    // Sicherheits-Timeout: Overlay nie länger als 7 s halten (falls das
+    // Ready-Signal mal ausbleibt — z.B. unerwarteter Einstiegs-Screen).
+    const maxTimeout = setTimeout(doExit, 7000);
 
     return () => {
-      clearTimeout(timeout);
-      splashSequence.stop();
+      clearTimeout(maxTimeout);
+      unsub?.();
+      entrance.stop();
       pulseAnimation.stop();
     };
   }, [logoScale, logoOpacity, textOpacity, backgroundOpacity, pulseAnim, onAnimationComplete]);

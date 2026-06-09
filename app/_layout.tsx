@@ -38,7 +38,13 @@ import React, { useEffect, useState } from 'react';
 // Komponente die sowohl FontLoader als auch Navigation mit Theme verwaltet
 function ThemedApp() {
   const colorScheme = useColorScheme();
-  // Android: Nur nativen Splash verwenden, iOS: Custom Splash
+  // iOS: animierte Custom-Overlay (SplashScreen.tsx). Android: KEINE React-
+  // Overlay — die native Splash (OS-gemalt, kein React-Paint-Lag) bleibt
+  // stattdessen bis der erste echte Screen bereit ist (markAppContentReady),
+  // siehe FontLoader. Grund: die React-Overlay paintet auf Android verzoegert
+  // (LinearGradient+Image+Animationen) → zwischen native-Splash-weg und
+  // Overlay-da klaffte eine schwarze Luecke. Die gehaltene native Splash
+  // (gruen + Icon) ist garantiert nahtlos bis zur App.
   const [showSplash, setShowSplash] = useState(Platform.OS === 'ios');
 
   const handleSplashComplete = () => {
@@ -317,7 +323,11 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    // Root-Hintergrund GRÜN (#0d8575) = Markenfarbe des nativen Splash + der
+    // Overlay. Falls beim Boot zwischen Overlay-Dismiss und erstem App-Frame
+    // eine Lücke entsteht, scheint dann GRÜN durch (vorher schwarzer nativer
+    // Window-Hintergrund bzw. weiss) → durchgängig grüner Boot wie auf iOS.
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0d8575' }}>
       <SafeAreaProvider>
         <ErrorBoundary>
           <ThemeProvider>

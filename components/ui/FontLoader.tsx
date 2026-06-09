@@ -1,5 +1,6 @@
 import { Colors } from '@/constants/Colors';
 import { initializeFonts } from '@/lib/fontManager';
+import { onAppContentReady } from '@/lib/utils/appReady';
 import { preloadImages } from '@/lib/utils/imagePreloader';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
@@ -62,20 +63,38 @@ export const FontLoader = ({ children }: FontLoaderProps) => {
   }, []);
 
   useEffect(() => {
-    const hideSplash = async () => {
-      // Wait for both fonts and images to be ready
-      if ((fontsLoaded || fontError) && imagesPreloaded) {
-        // Initialisiere globale Font-Einstellungen
-        initializeFonts();
-        
-        // Kleine Verzögerung um sicherzustellen, dass alles ready ist
-        setTimeout(async () => {
-          await SplashScreen.hideAsync();
-        }, 100);
-      }
-    };
+    if ((fontsLoaded || fontError) && imagesPreloaded) {
+      // Globale Font-Einstellungen initialisieren.
+      initializeFonts();
 
-    hideSplash();
+      // WICHTIG: Die native Splash NICHT hier (kurz nach Font-Load) ausblenden.
+      // Die gruene Splash-Overlay (SplashScreen.tsx) ruft hideAsync selbst auf,
+      // sobald SIE gerendert ist — erst dann ist der Uebergang native->Overlay
+      // nahtlos gruen. Wuerde FontLoader frueher ausblenden, klaffte zwischen
+      // native-Splash-weg und Overlay-da eine schwarze Luecke (Provider-Mount).
+      // Native Splash ausblenden, sobald der erste echte Screen bereit ist
+      // (markAppContentReady). Auf Android (keine React-Overlay) haelt die
+      // native Splash so nahtlos bis zur App durch — kein Whitescreen. Auf iOS
+      // blendet die Custom-Overlay i.d.R. frueher selbst aus (hideAsync ist
+      // idempotent). + 5s-Sicherheits-Fallback, falls das Signal mal ausbleibt.
+      const unsub = onAppContentReady(() => {
+        // Erst nach 2 Animation-Frames ausblenden → der erste echte Screen ist
+        // dann garantiert GEPAINTET (markAppContentReady feuert im useEffect,
+        // also nach Commit aber vor Paint). So kein 1-Frame-Schwarz beim Handoff.
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            SplashScreen.hideAsync().catch(() => {});
+          }),
+        );
+      });
+      const fallback = setTimeout(() => {
+        SplashScreen.hideAsync().catch(() => {});
+      }, 5000);
+      return () => {
+        unsub();
+        clearTimeout(fallback);
+      };
+    }
   }, [fontsLoaded, fontError, imagesPreloaded]);
 
   if ((!fontsLoaded && !fontError) || !imagesPreloaded) {

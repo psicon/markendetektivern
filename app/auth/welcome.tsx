@@ -11,6 +11,7 @@
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { fetchSignInMethodsForEmail } from '@react-native-firebase/auth';
+import { markAppContentReady } from '@/lib/utils/appReady';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -41,6 +42,10 @@ import { showInfoToast } from '@/lib/services/ui/toast';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function WelcomeScreen() {
+  // Splash-Overlay ausblenden sobald dieser Screen steht (s. lib/utils/appReady).
+  useEffect(() => {
+    markAppContentReady();
+  }, []);
   const router = useRouter();
   const params = useLocalSearchParams<{ from?: string }>();
   const colorScheme = useColorScheme();

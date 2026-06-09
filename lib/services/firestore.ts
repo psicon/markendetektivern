@@ -4341,131 +4341,80 @@ export class FirestoreService {
         originalCartData: cartData
       };
       
+      // PERF (Report Juni 2026 „nach Gekauft-Markieren lädt minutenlang nichts"):
+      // Diese Funktion lief pro Kauf mit mehreren UNCACHTEN getDocs + im Marken-
+      // Fall einer 25-Doc-Collection-Query (Savings-Neuberechnung). Dieser Burst
+      // sättigte die Firestore-Bridge → die als Nächstes geöffneten Produkte/
+      // Seiten luden sekundenlang nicht nach. Fix:
+      //  • Savings NICHT neu berechnen — liegt bereits in cartData.savingsAtTime
+      //    (beim Hinzufügen ermittelt). Die teure 25-Doc-Query entfällt komplett.
+      //  • Produkt/Hersteller/Handelsmarke/Discounter über getDocumentByReference
+      //    (5-Min-Cache, vom loadShoppingCart warm) statt uncachtem getDoc →
+      //    Cache-Hits statt Server-Roundtrips.
       if (cartData.markenProdukt) {
-        // Markenprodukt - lade vollständige Daten
-        const productDoc = await getDoc(cartData.markenProdukt);
-        if (productDoc.exists()) {
-          const rawData = productDoc.data();
-          
-          // Lade Hersteller (MARKE) Daten
+        const rawData = await this.getDocumentByReference<any>(cartData.markenProdukt);
+        if (rawData) {
+          const productId = cartData.markenProdukt.id;
+
           let hersteller = null;
           if (rawData.hersteller) {
-            const herstellerDoc = await getDoc(rawData.hersteller);
-            if (herstellerDoc.exists()) {
-              const herstellerData = herstellerDoc.data();
-              hersteller = {
-                name: herstellerData.name,
-                bild: herstellerData.bild
-              };
+            const herstellerData = await this.getDocumentByReference<any>(rawData.hersteller);
+            if (herstellerData) {
+              hersteller = { name: herstellerData.name, bild: herstellerData.bild };
             }
           }
-          
-          // Ersparnis = Markenpreis − billigste NoName-Alternative ("verpasstes
-          // Sparpotenzial"). 1) schneller Pfad über denormalisierte
-          // relatedProdukteIDs, 2) AUTORITATIVE Quelle: produkte, die per
-          // markenProdukt-Ref auf dieses Markenprodukt zeigen — relatedProdukteIDs
-          // ist oft leer (sonst bleibt savings fälschlich 0).
-          let savings = 0;
-          let cheapestPrice = Infinity;
-          if (rawData.relatedProdukteIDs && rawData.relatedProdukteIDs.length > 0) {
-            for (const relatedId of rawData.relatedProdukteIDs) {
-              const relatedDoc = await getDoc(doc(db, 'produkte', relatedId));
-              if (relatedDoc.exists()) {
-                const p = (relatedDoc.data() as any)?.preis;
-                if (typeof p === 'number' && p < cheapestPrice) cheapestPrice = p;
-              }
-            }
-          }
-          if (cheapestPrice === Infinity) {
-            try {
-              const altSnap = await getDocs(
-                query(
-                  collection(db, 'produkte'),
-                  where('markenProdukt', '==', doc(db, 'markenProdukte', productDoc.id)),
-                  limit(25),
-                ),
-              );
-              altSnap.forEach((d: any) => {
-                const p = (d.data() as any)?.preis;
-                if (typeof p === 'number' && p < cheapestPrice) cheapestPrice = p;
-              });
-            } catch (e) {
-              console.warn('[purchase] alt-query failed', (e as Error)?.message);
-            }
-          }
-          if (cheapestPrice !== Infinity && typeof rawData.preis === 'number') {
-            savings = Math.max(0, rawData.preis - cheapestPrice);
-          }
-          
+
+          const savings =
+            typeof cartData.savingsAtTime === 'number' ? Math.max(0, cartData.savingsAtTime) : 0;
+
           purchaseData = {
             ...purchaseData,
-            productId: productDoc.id,
+            productId,
             productType: 'markenprodukt',
             name: rawData.name || rawData.produktName || cartData.name,
-            preis: rawData.preis || 0,
+            preis: rawData.preis || cartData.priceAtTime || 0,
             bild: rawData.bild || '',
-            savings: savings,
-            hersteller: hersteller,
-            // Vollständige Produktdaten für späteren Zugriff
-            productData: {
-              ...rawData,
-              id: productDoc.id,
-              hersteller: hersteller
-            }
+            savings,
+            hersteller,
+            productData: { ...rawData, id: productId, hersteller },
           };
         }
-        
       } else if (cartData.handelsmarkenProdukt) {
-        // NoName Produkt - lade vollständige Daten
-        const productDoc = await getDoc(cartData.handelsmarkenProdukt);
-        if (productDoc.exists()) {
-          const rawData = productDoc.data();
-          
-          // Lade Handelsmarke Daten
+        const rawData = await this.getDocumentByReference<any>(cartData.handelsmarkenProdukt);
+        if (rawData) {
+          const productId = cartData.handelsmarkenProdukt.id;
+
           let handelsmarke = null;
           if (rawData.handelsmarke) {
-            const handelsmarkeDoc = await getDoc(rawData.handelsmarke);
-            if (handelsmarkeDoc.exists()) {
-              const handelsmarkeData = handelsmarkeDoc.data();
-              handelsmarke = {
-                bezeichnung: handelsmarkeData.bezeichnung
-              };
-            }
+            const hmData = await this.getDocumentByReference<any>(rawData.handelsmarke);
+            if (hmData) handelsmarke = { bezeichnung: hmData.bezeichnung };
           }
-          
-          // Lade Discounter Daten
+
           let discounter = null;
           if (rawData.discounter) {
-            const discounterDoc = await getDoc(rawData.discounter);
-            if (discounterDoc.exists()) {
-              const discounterData = discounterDoc.data();
+            const dData = await this.getDocumentByReference<any>(rawData.discounter);
+            if (dData) {
               discounter = {
-                id: discounterDoc.id,
-                name: discounterData.name,
-                bild: discounterData.bild,
-                land: discounterData.land
+                id: rawData.discounter.id,
+                name: dData.name,
+                bild: dData.bild,
+                land: dData.land,
               };
             }
           }
-          
+
           purchaseData = {
             ...purchaseData,
-            productId: productDoc.id,
+            productId,
             productType: 'noname',
             name: rawData.name || rawData.produktName || cartData.name,
-            preis: rawData.preis || 0,
+            preis: rawData.preis || cartData.priceAtTime || 0,
             bild: rawData.bild || '',
             savings: 0, // NoName hat keine Ersparnis
-            stufe: rawData.stufe || 3, // Wichtig für Navigation
-            handelsmarke: handelsmarke,
-            discounter: discounter,
-            // Vollständige Produktdaten für späteren Zugriff
-            productData: {
-              ...rawData,
-              id: productDoc.id,
-              handelsmarke: handelsmarke,
-              discounter: discounter
-            }
+            stufe: rawData.stufe || 3,
+            handelsmarke,
+            discounter,
+            productData: { ...rawData, id: productId, handelsmarke, discounter },
           };
         }
       }
