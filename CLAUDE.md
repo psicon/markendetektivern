@@ -1060,17 +1060,50 @@ persistence**, **in-memory caches**, **route prefetch on tap**, and
 
 #### 1. Firestore — in-memory cache only, NEVER persistent
 
-`lib/firebase.ts` uses `getFirestore(app)` — plain in-memory
-cache. **DO NOT** switch to `initializeFirestore` with
-`persistentLocalCache` / `persistentSingleTabManager` in this
-project. Those are **web-only** APIs (IndexedDB-backed); on React
-Native the SDK code path triggers a runtime crash via
-`new NativeEventEmitter()` because PushNotificationIOS's native
-module no longer exists in modern RN. We learned this the hard
-way once — it lost half a day. The in-memory caches in
-`services/firestore.ts` (5-min TTL + inflight-promise dedup) +
-the manually-cached `getDocumentByReference` are what give us the
-revisit speed.
+`lib/firebase.ts` uses `getFirestore()`. **Auf Android wird die
+native Disk-Persistenz explizit ABGESCHALTET** via
+`firestore().settings({ persistence: false })` VOR der ersten
+Firestore-Op. Das ist PFLICHT — nicht entfernen.
+
+**Warum (teures Learning, Juni 2026 — Tage gekostet):**
+`@react-native-firebase` defaultet auf `persistence: true`
+(Disk-Cache). Der intendierte Projekt-Stand war IN-MEMORY (alter
+Web-SDK: `getFirestore` ohne `persistentLocalCache`). Die
+Native-Migration hat die Disk-Persistenz unbeabsichtigt aktiviert.
+Folge NUR auf Android: der native SDK hält den über die Session
+gelesenen **Referenz-Graph** (produkte / hersteller_new /
+handelsmarken / kategorien / packungstypen / discounter /
+markenProdukte — ~170+ Docs via `getDocumentByReference`) als
+**persistente Query-Targets** und re-validiert sie bei JEDEM Write.
+Ein Cart-Write am Einkaufszettel (gekauft-markieren / löschen)
+löste dann einen **WatchStream-RESET-Sturm** + `View.computeDoc
+Changes → ObjectValue.equals` über alle re-gelieferten Docs aus →
+der gRPC-WatchStream-Worker (`FirestoreWorker`-Thread) drehte
+**5+ Min bei 600% CPU** durch und blockierte ALLE weiteren Reads
+("alles was nachgeladen wird hängt"). Custom/Freitext-Items hingen
+NICHT (kein Referenz-Graph). Produktseite hing NICHT (nur ~1
+Produkt aktiv). iOS hing NICHT (handhabt dieselbe Persistenz nativ
+sauber). Diagnose-Beweis: SIGQUIT-Thread-Dump auf den
+`FirestoreWorker` zeigte `protobuf MapFieldLite/AbstractProtobuf
+List.equals`-Rekursion; `firestore().setLogLevel('debug')` →
+nativer WatchStream-Log zeigte den RESET + die 172 re-gelieferten
+Referenz-Docs.
+
+**Regeln:**
+- `persistence: false` auf Android NICHT entfernen. iOS NICHT
+  anfassen (läuft mit Default-Persistenz, kein Spin).
+- Diagnose-Hebel für künftige native-Firestore-Probleme:
+  `(firestoreNamespace as any)().settings(...)` +
+  `(firestoreNamespace as any).setLogLevel('debug')` (→ logcat
+  `I Firestore:`, NICHT `I/Firestore`) + `adb shell kill -3 <pid>`
+  → ANR-Trace `/data/anr/` für den `FirestoreWorker`-Stack.
+- **DO NOT** switch to the WEB-SDK `initializeFirestore` with
+  `persistentLocalCache` / `persistentSingleTabManager` — those are
+  web-only (IndexedDB), and on RN the SDK code path crashes via
+  `new NativeEventEmitter()` (PushNotificationIOS lazy getter weg in
+  modern RN). Half a day verloren. Die In-Memory-Caches in
+  `services/firestore.ts` (5-min TTL + inflight-dedup) + der
+  manuell gecachte `getDocumentByReference` geben die Revisit-Speed.
 
 #### Never `await import('react-native')`
 
