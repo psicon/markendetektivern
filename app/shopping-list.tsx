@@ -2749,24 +2749,22 @@ export default function ShoppingListScreen() {
     // Optimistisch: Marken-Item sofort aus der Liste nehmen (wird zu NoName).
     setBrandProducts((prev) => prev.filter((i) => i.id !== einkaufswagenRef));
 
-    // FIRE-AND-FORGET (Task 86ca5fjhn): den Convert-Write + den (schweren)
-    // loadShoppingCart-Refetch NICHT im UI-Pfad awaiten — das war der Freeze
-    // („umwandeln geht nicht"). Toast + Tab-Switch sofort; der Reload (zeigt
-    // das neue NoName-Item) läuft im Hintergrund nachdem der Write gelandet
-    // ist; bei Fehler reconcilet ein Reload + Error-Toast.
-    FirestoreService.convertToNoName(user.uid, conversions)
-      .then(() => loadShoppingCart())
-      .catch((error) => {
-        console.error('Error converting single product:', error);
-        showInfoToast(TOAST_MESSAGES.SHOPPING.convertError, 'error');
-        loadShoppingCart();
+    try {
+      // Den Convert-WRITE awaiten (Batch, schnell) — Erfolg NICHT vortäuschen
+      // (Bug 86ca5fjhn: „meldet umgewandelt, dann schlägt fehl"). NUR der
+      // schwere loadShoppingCart-Refetch bleibt fire-and-forget → kein Freeze.
+      await FirestoreService.convertToNoName(user.uid, conversions);
+      void loadShoppingCart();
+      setTimeout(() => onTabChange('noname'), 100);
+      showConvertSuccessToast(savingsAmount);
+      achievementService.trackAction(user.uid, 'convert_product').catch((e) => {
+        console.error('Achievement convert_product error', e);
       });
-
-    setTimeout(() => onTabChange('noname'), 100);
-    showConvertSuccessToast(savingsAmount);
-    achievementService.trackAction(user.uid, 'convert_product').catch((e) => {
-      console.error('Achievement convert_product error', e);
-    });
+    } catch (error) {
+      console.error('Error converting single product:', error);
+      showInfoToast(TOAST_MESSAGES.SHOPPING.convertError, 'error');
+      void loadShoppingCart(); // Liste zurücksetzen (Item wieder rein)
+    }
   };
 
   const handleConvertSelected = async () => {
