@@ -58,19 +58,22 @@ const STEP_LABEL: Record<ProductPhotoStep, string> = PRODUCT_PHOTO_STEPS.reduce(
   {} as Record<ProductPhotoStep, string>,
 );
 
-/** Normalize a country code/name to a readable German label. */
+/** Normalize a country code/name to a SHORT 2-letter code (DE/AT/CH …).
+ *  User-Vorgabe: Land bei eingereichten Produkten abgekürzt, nicht
+ *  ausgeschrieben. Vollnamen + Codes werden auf den ISO-Code gemappt;
+ *  Unbekanntes bleibt unverändert (ist i.d.R. schon ein Code). */
 function normalizeLand(land?: string | null): string | null {
   if (!land) return null;
   const map: { [k: string]: string } = {
-    DE: 'Deutschland',
-    Germany: 'Deutschland',
-    Deutschland: 'Deutschland',
-    AT: 'Österreich',
-    Austria: 'Österreich',
-    Österreich: 'Österreich',
-    CH: 'Schweiz',
-    Switzerland: 'Schweiz',
-    Schweiz: 'Schweiz',
+    DE: 'DE',
+    Germany: 'DE',
+    Deutschland: 'DE',
+    AT: 'AT',
+    Austria: 'AT',
+    Österreich: 'AT',
+    CH: 'CH',
+    Switzerland: 'CH',
+    Schweiz: 'CH',
   };
   return map[land] || land;
 }
