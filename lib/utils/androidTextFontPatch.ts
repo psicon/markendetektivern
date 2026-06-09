@@ -96,25 +96,33 @@ if (Platform.OS === 'android') {
     Component.render = function patchedRender(props: any, ref: any) {
       if (props && props.style) {
         const flat = flatten(props.style);
-        // Nur eingreifen wenn fontFamily explizit 'Nunito' ist (nicht den
-        // Fall "weight gesetzt, family unset" — sonst würden 3rd-party-/
-        // Navigation-Texte ungewollt auf Nunito gemappt).
-        if (flat.fontFamily === 'Nunito') {
+        // Zwei Fälle, beide enden in: explizite Nunito-Variante + KEIN
+        // fontWeight (das Gewicht steckt im Familiennamen; ein zusätzliches,
+        // nicht-matchendes fontWeight lässt Android still auf System-Font
+        // zurückfallen — das war der „Header/Überschriften nicht Nunito"-Bug).
+        const fam = flat.fontFamily;
+        if (fam === 'Nunito') {
+          // (a) bare 'Nunito' → passende geladene Variante auflösen, Weight weg.
+          // (Den Fall "weight gesetzt, family unset" NICHT anfassen — sonst
+          //  würden 3rd-party-/Navigation-Texte ungewollt auf Nunito gemappt.)
           const resolved = resolveCached(flat.fontWeight);
           if (resolved !== 'Nunito') {
-            // fontFamily auf die geladene Variante UND fontWeight ENTFERNEN.
-            // Bug „Header/Überschriften = System-Font auf Android": die Variante
-            // trägt ihr Gewicht im Familiennamen (Nunito_700Bold). Bleibt
-            // zusätzlich z.B. fontWeight '800' stehen, sucht Android eine
-            // 800-Variante DIESER Family, findet keine → stiller System-Fallback.
-            // 400–700 matchten ihre Variante zufällig (Nunito_500Medium+500…)
-            // und gingen gut; nur extraBold(800)/black(900) auf die 700er-
-            // Variante brachen. ThemedText/typeScale setzen die Variante bewusst
-            // OHNE fontWeight. → flatten + fontFamily ersetzen + fontWeight droppen.
             const next: any = { ...flat, fontFamily: resolved };
             delete next.fontWeight;
             props = { ...props, style: next };
           }
+        } else if (
+          typeof fam === 'string' &&
+          fam.indexOf('Nunito_') === 0 &&
+          flat.fontWeight != null
+        ) {
+          // (b) bereits explizite Variante (Nunito_700Bold etc.) ABER mit einem
+          // fontWeight daneben → Weight droppen, sonst greift derselbe Mismatch-
+          // Fallback (z.B. Nunito_700Bold + '800'). Deckt Callsites ab, die die
+          // Variante direkt setzen statt über den 'Nunito'-Alias.
+          const next: any = { ...flat };
+          delete next.fontWeight;
+          props = { ...props, style: next };
         }
       }
       return originalRender.call(this, props, ref);
