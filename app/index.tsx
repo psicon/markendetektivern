@@ -1,10 +1,14 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { Colors } from '@/constants/Colors';
 import { OnboardingService } from '@/lib/services/onboardingService';
 import { consentService } from '@/lib/services/consentService';
+
+// Statischer require → Metro bündelt das Asset beim ersten JS-Eval (kein Race).
+const SPLASH_ICON = require('../assets/images/splash-icon.png');
 
 /**
  * App Entry Point - Bestimmt initiale Route basierend auf Onboarding Status
@@ -100,7 +104,23 @@ export default function IndexScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Branded Boot-Screen: grüner Gradient + Logo + Nunito — matcht den
+          nativen Splash (#0d8575) statt des vorherigen weißen System-Font-
+          Screens ohne Logo. Fonts sind hier bereits geladen (FontLoader gate),
+          daher explizite Nunito-Varianten (rendern iOS + Android korrekt). */}
+      <LinearGradient
+        colors={[Colors.light.primary, Colors.light.secondary]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
       <View style={styles.content}>
+        <Image
+          source={SPLASH_ICON}
+          style={styles.logo}
+          resizeMode="contain"
+          fadeDuration={0}
+        />
         <Text style={styles.loadingText}>MarkenDetektive</Text>
         <Text style={styles.subtext}>Wir zeigen dir, wer dahinter steckt!</Text>
       </View>
@@ -111,23 +131,32 @@ export default function IndexScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.light.background,
+    backgroundColor: Colors.light.primary, // grüner Fallback hinter dem Gradient
   },
   content: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  logo: {
+    width: 72,
+    height: 72,
+    marginBottom: 20,
+  },
   loadingText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: Colors.light.text,
+    fontSize: 26,
+    fontFamily: 'Nunito_700Bold',
+    color: '#ffffff',
     marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.2)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   subtext: {
-    fontSize: 10,
-    color: Colors.light.text,
-    opacity: 0.6,
+    fontSize: 14,
+    fontFamily: 'Nunito_400Regular',
+    color: 'rgba(255, 255, 255, 0.9)',
+    textAlign: 'center',
   },
   errorContainer: {
     flex: 1,

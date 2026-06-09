@@ -1,5 +1,4 @@
 import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
 import { initializeFonts } from '@/lib/fontManager';
 import { preloadImages } from '@/lib/utils/imagePreloader';
 import { useFonts } from 'expo-font';
@@ -27,7 +26,6 @@ interface FontLoaderProps {
 SplashScreen.preventAutoHideAsync();
 
 export const FontLoader = ({ children }: FontLoaderProps) => {
-  const colorScheme = useColorScheme();
   const [imagesPreloaded, setImagesPreloaded] = useState(false);
   
   const [fontsLoaded, fontError] = useFonts({
@@ -83,15 +81,17 @@ export const FontLoader = ({ children }: FontLoaderProps) => {
   if ((!fontsLoaded && !fontError) || !imagesPreloaded) {
     // Während Assets laden, zeige einen minimalen Fallback
     return (
-      <View style={{ 
-        flex: 1, 
-        justifyContent: 'center', 
+      <View style={{
+        flex: 1,
+        justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: Colors[colorScheme ?? 'light'].background 
+        // Grün statt weiß: matcht den nativen Splash (#0d8575) + app/index →
+        // kein weißer Blitz im Boot-Pfad (native → FontLoader → index → app).
+        backgroundColor: Colors.light.primary
       }}>
-        <ActivityIndicator 
-          size="large" 
-          color={Colors[colorScheme ?? 'light'].primary} 
+        <ActivityIndicator
+          size="large"
+          color="#ffffff"
         />
       </View>
     );
