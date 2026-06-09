@@ -1,7 +1,7 @@
 import { db } from '@/lib/firebase';
 import { addDoc, collection, doc, DocumentReference, getDoc, serverTimestamp, updateDoc } from '@react-native-firebase/firestore';
 import * as Application from 'expo-application';
-import { Platform } from 'react-native';
+import { InteractionManager, Platform } from 'react-native';
 import { analyticsService } from './analyticsService';
 import { AnonymousLocationService } from './anonymousLocationService';
 
@@ -293,7 +293,14 @@ class JourneyTrackingService {
   // Aufruf gewinnt, alle vorherigen werden verworfen.
   private persistDebounceTimer: NodeJS.Timeout | null = null;
   private persistPendingUserId: string | null = null;
-  private readonly PERSIST_DEBOUNCE_MS = 1500;
+  // 4000 statt 1500 (Android-Freeze „alles laedt langsam nach Mark-Purchased"):
+  // der schwere Journey-Write fiel bei 1500ms mitten in den Produkt-Load (der
+  // laenger als 1500ms braucht), blockierte den seriellen Firestore-Executor →
+  // Load wurde noch langsamer (zirkulaer). Mit 4000ms > normaler Load setzt die
+  // naechste „viewed"-Aktion den Debounce zurueck BEVOR er feuert → Load laeuft
+  // contention-frei, der Write erst beim Pausieren (≥4s) bzw. auf Journey-
+  // Abschluss (flushPendingPersist, sofort). Reine Analytics → kein UX-Verlust.
+  private readonly PERSIST_DEBOUNCE_MS = 4000;
   // Welchem User gehört die aktuell im Memory liegende Journey? Wird in
   // startJourney + loadActiveJourney gesetzt, in completeJourney
   // gelöscht. Wenn sich der User mitten in der Session ändert (Logout
@@ -1746,12 +1753,22 @@ class JourneyTrackingService {
       this.persistPendingUserId = null;
       this.persistJourneyCallCount = 0;
       if (uid) {
-        // console.error damit es babel transform-remove-console exclude:
-        // ['error'] überlebt → in production logs (adb logcat ReactNativeJS)
-        // sehen wir wieviele Aufrufe in einen einzigen Write zusammen-
-        // gefasst wurden. Bei tap-burst sollte coalesced > 1 sein.
-        this._persistJourneyToFirestoreImmediate(uid).catch((e) => {
-          console.warn('Journey persist debounced flush failed', e);
+        // PERF (Android-Freeze „alles laedt sekundenlang nach Mark-Purchased"):
+        // Der Journey-Write serialisiert die GESAMTE wachsende Journey
+        // (viewedProducts[] + verschachtelte Actions + DocumentReferences) ueber
+        // die RN-Bridge. Auf Android laeuft Firestore auf einem SERIELLEN
+        // Executor → dieser eine schwere Write blockiert ihn → ALLE Folge-Reads
+        // (Produkt oeffnen etc.) warten sekundenlang. Der Debounce-Timer fiel
+        // genau in das Navigations-Fenster nach dem Markieren.
+        // Fix: den Write erst ausfuehren, wenn die Navigation/Interaktionen
+        // IDLE sind → der Produkt-Load des Users laeuft ZUERST, der schwere
+        // Journey-Write danach (UI-unkritisch, reine Analytics). completeJourney/
+        // abandonJourney flushen weiterhin sofort (flushPendingPersist), daher
+        // kein Datenverlust beim Abschluss.
+        InteractionManager.runAfterInteractions(() => {
+          this._persistJourneyToFirestoreImmediate(uid).catch((e) => {
+            console.warn('Journey persist debounced flush failed', e);
+          });
         });
       }
     }, this.PERSIST_DEBOUNCE_MS);
