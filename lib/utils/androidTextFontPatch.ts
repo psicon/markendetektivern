@@ -102,9 +102,18 @@ if (Platform.OS === 'android') {
         if (flat.fontFamily === 'Nunito') {
           const resolved = resolveCached(flat.fontWeight);
           if (resolved !== 'Nunito') {
-            // Append-only: Original-Style bleibt, nur fontFamily wird zur
-            // konkreten geladenen Variante (Nunito_700Bold etc.) überschrieben.
-            props = { ...props, style: [props.style, { fontFamily: resolved }] };
+            // fontFamily auf die geladene Variante UND fontWeight ENTFERNEN.
+            // Bug „Header/Überschriften = System-Font auf Android": die Variante
+            // trägt ihr Gewicht im Familiennamen (Nunito_700Bold). Bleibt
+            // zusätzlich z.B. fontWeight '800' stehen, sucht Android eine
+            // 800-Variante DIESER Family, findet keine → stiller System-Fallback.
+            // 400–700 matchten ihre Variante zufällig (Nunito_500Medium+500…)
+            // und gingen gut; nur extraBold(800)/black(900) auf die 700er-
+            // Variante brachen. ThemedText/typeScale setzen die Variante bewusst
+            // OHNE fontWeight. → flatten + fontFamily ersetzen + fontWeight droppen.
+            const next: any = { ...flat, fontFamily: resolved };
+            delete next.fontWeight;
+            props = { ...props, style: next };
           }
         }
       }

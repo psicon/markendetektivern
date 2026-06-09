@@ -9,7 +9,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fontFamily, fontFamilyVariants, fontWeight } from '@/constants/tokens';
+import { fontFamilyVariants } from '@/constants/tokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 
@@ -161,10 +161,10 @@ export function DetailHeader({
               left: 0,
               right: 0,
               // Animated.Text geht NICHT durch den androidTextFontPatch
-              // (der hookt nur Text/TextInput.render) → bare 'Nunito' fiele
-              // auf Android auf System-Font zurück. Explizite Variante nutzen.
+              // (der hookt nur Text/TextInput.render) → explizite Variante.
+              // KEIN fontWeight: Nunito_700Bold trägt das Gewicht im Namen;
+              // ein zusätzliches '800' liesse Android auf System zurückfallen.
               fontFamily: fontFamilyVariants.heading,
-              fontWeight: fontWeight.extraBold,
               fontSize: 20,
               color: theme.text,
               letterSpacing: -0.2,
@@ -211,8 +211,9 @@ export function DetailHeader({
               numberOfLines={1}
               style={{
                 flex: 1,
+                // Explizite Variante OHNE fontWeight (siehe oben): '800' neben
+                // Nunito_700Bold = System-Fallback auf Android.
                 fontFamily: fontFamilyVariants.heading,
-                fontWeight: fontWeight.extraBold,
                 fontSize: 17,
                 color: theme.text,
                 letterSpacing: -0.2,
