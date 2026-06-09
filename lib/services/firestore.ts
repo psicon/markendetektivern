@@ -7,7 +7,6 @@ import {
     documentId,
     getCountFromServer,
     getDoc,
-    getDocFromCache,
     getDocs,
     increment,
     limit,
@@ -21,7 +20,7 @@ import {
     where,
     writeBatch
 } from '@react-native-firebase/firestore';
-import { Image as RNImage, InteractionManager, Platform } from 'react-native';
+import { Image as RNImage, InteractionManager } from 'react-native';
 import { db } from '../firebase';
 import {
     Discounter,
@@ -153,54 +152,6 @@ let topProductsAggregateInflight: Promise<{
 
 const refDocCache = new Map<string, CacheEntry<any>>();
 const refDocInflight = new Map<string, Promise<any>>();
-
-// ────────────────────────────────────────────────────────────────────────
-// Android-Read-Resilienz gegen native gRPC-WatchStream-Stalls
-// ────────────────────────────────────────────────────────────────────────
-// Hintergrund (siehe lib/firebase.ts Migrations-Notiz): die alte Web-SDK-
-// Version nutzte `experimentalAutoDetectLongPolling` → robuste, schnelle
-// Reads auf Android. Das native @react-native-firebase-SDK nutzt gRPC-
-// Streaming; nach einem Write-Burst (z.B. mehrere „gekauft markiert") kann
-// die Listener-Existence-Filter-Invalidierung den WatchStream resetten, der
-// sich unter Last MINUTENLANG nicht erholt → ALLE Server-Reads hängen
-// (gemessen: 565s). Writes laufen weiter (anderer Channel) → daher der
-// Eindruck „App lädt ewig" obwohl gespeichert wird.
-//
-// Fix: Server-Read versuchen, aber wenn der Stream stallt, nach kurzer Zeit
-// auf den nativen Disk-Cache zurückfallen (den die Migration mitbrachte) →
-// die UI hängt nie. Bei Fehler sofort Cache. Wenn beides leer → null
-// (Caller behandelt das wie „nicht gefunden", rendert ohne diese Referenz).
-//
-// NUR Android: iOS' natives SDK hat das Stall-Verhalten nicht → dort 1:1 das
-// unveränderte `getDoc` (keine Verhaltensänderung, kein Risiko).
-const ANDROID_READ_STALL_TIMEOUT_MS = 2500;
-
-function resilientGetDoc(docRef: DocumentReference): Promise<any> {
-  if (Platform.OS !== 'android') {
-    return getDoc(docRef);
-  }
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (snap: any) => {
-      if (!settled) {
-        settled = true;
-        resolve(snap);
-      }
-    };
-    const fallbackToCache = () => {
-      if (settled) return;
-      getDocFromCache(docRef)
-        .then(finish)
-        .catch(() => finish(null));
-    };
-    // 1) Frischer Server-Read (Normalfall, < 500ms wenn Stream gesund).
-    getDoc(docRef)
-      .then(finish)
-      .catch(fallbackToCache); // echter Fehler → sofort Cache statt warten
-    // 2) Stream gestallt (Read antwortet nicht) → nach Timeout Cache.
-    setTimeout(fallbackToCache, ANDROID_READ_STALL_TIMEOUT_MS);
-  });
-}
 
 const topProductsCache = new Map<string, CacheEntry<any[]>>();
 const topProductsInflight = new Map<string, Promise<any[]>>();
@@ -790,13 +741,7 @@ export class FirestoreService {
 
     const promise = (async () => {
       try {
-        // Android: resilient gegen WatchStream-Stalls (Server → Cache-Fallback);
-        // iOS: unverändertes getDoc. Siehe resilientGetDoc oben.
-        const docSnap = await resilientGetDoc(docRef);
-        // null = Server stalled UND nichts im Cache → transienter Fehlschlag.
-        // NICHT cachen (damit ein späterer Call neu versucht, sobald der
-        // Stream sich erholt hat); Referenz fehlt nur diesmal.
-        if (!docSnap) return null;
+        const docSnap = await getDoc(docRef);
         const value = docSnap.exists() ? (docSnap.data() as any) : null;
         writeCache(refDocCache, cacheKey, value, TTL_LONG_MS);
         return value;
