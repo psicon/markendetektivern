@@ -439,7 +439,8 @@ export default function CashbackConsentScreen() {
         flexDirection: 'row' as const,
         alignItems: 'flex-start' as const,
         paddingHorizontal: 4,
-        paddingBottom: 10,
+        paddingTop: 4,
+        paddingBottom: 6,
       },
       trustItem: {
         flex: 1,
@@ -572,21 +573,6 @@ export default function CashbackConsentScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        {/* Trust-Badges am Entscheidungspunkt — drei dezente Icon-
-            Spalten direkt über dem CTA (gleiche Tonalität wie die
-            Step-Kreise, kein Karten-Chrome). */}
-        <View style={styles.trustRow}>
-          {TRUST.map((item) => (
-            <View key={item.label} style={styles.trustItem}>
-              <MaterialCommunityIcons
-                name={item.icon as any}
-                size={16}
-                color={accent}
-              />
-              <Text style={styles.trustLabel}>{item.label}</Text>
-            </View>
-          ))}
-        </View>
         <Pressable
           accessibilityRole="button"
           disabled={isSubmitting || hasAccepted}
@@ -616,6 +602,22 @@ export default function CashbackConsentScreen() {
         <Pressable accessibilityRole="button" onPress={handleCancel}>
           <Text style={styles.cancelText}>Jetzt nicht</Text>
         </Pressable>
+
+        {/* Trust-Badges UNTER den Buttons (User-Vorgabe 2026-06-10:
+            nicht vom Akzeptieren ablenken) — drei dezente Icon-
+            Spalten, gleiche Tonalität wie die Step-Kreise. */}
+        <View style={styles.trustRow}>
+          {TRUST.map((item) => (
+            <View key={item.label} style={styles.trustItem}>
+              <MaterialCommunityIcons
+                name={item.icon as any}
+                size={16}
+                color={accent}
+              />
+              <Text style={styles.trustLabel}>{item.label}</Text>
+            </View>
+          ))}
+        </View>
 
         {/* Legal-Zeile ganz unten, klein unter "Jetzt nicht"
             (User-Vorgabe 2026-06-10). */}
