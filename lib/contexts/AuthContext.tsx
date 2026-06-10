@@ -418,6 +418,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // identically — drop anonymous, sign in to the existing account.
     const isCredentialAlreadyInUse = (e: any): boolean => {
       if (e?.code === 'auth/credential-already-in-use') return true;
+      // Beim LINKEN an den Anon-User wirft Firebase-iOS
+      // `auth/email-already-in-use` (statt credential-already-in-use),
+      // wenn die Provider-E-Mail bereits einem anderen Konto gehört —
+      // z.B. früher registriert, jetzt frische Anon-Session auf dem
+      // Device. Gleicher Fall, gleiche Behandlung (Confirm → Sign-In).
+      // Repro: Google-Login auf Registrieren-Screen, Juni 2026.
+      if (e?.code === 'auth/email-already-in-use') return true;
       const msg = String(e?.message ?? '').toLowerCase();
       if (e?.code === 'auth/unknown' && msg.includes('duplicate')) return true;
       return false;
