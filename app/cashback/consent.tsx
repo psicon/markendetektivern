@@ -13,7 +13,7 @@
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useNavigation } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import React, {
   useCallback,
   useEffect,
@@ -107,6 +107,10 @@ export default function CashbackConsentScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { user, isAnonymous } = useAuth();
+  // from=settings (Profil-Toggle, ClickUp 86ca6u6xd [5]): nach Accept
+  // zurück zu den Einstellungen statt in den Kamera-Flow.
+  const params = useLocalSearchParams<{ from?: string }>();
+  const fromSettings = params.from === 'settings';
 
   const [, setConsentVersion] = useState<string>('');
   const [isSubmitting, setSubmitting] = useState(false);
@@ -125,14 +129,20 @@ export default function CashbackConsentScreen() {
       if (user?.uid) {
         const valid = await hasValidCashbackConsent(user.uid);
         if (alive && valid) {
-          router.replace('/cashback/capture');
+          // Aus den Einstellungen kommend gibt es keinen Auto-Sprung
+          // in den Kamera-Flow — Consent ist schon da, zurück.
+          if (fromSettings) {
+            router.back();
+          } else {
+            router.replace('/cashback/capture');
+          }
         }
       }
     })();
     return () => {
       alive = false;
     };
-  }, [user?.uid]);
+  }, [user?.uid, fromSettings]);
 
   const handleAccept = useCallback(async () => {
     if (!user?.uid) {
@@ -162,7 +172,13 @@ export default function CashbackConsentScreen() {
     try {
       await acceptCashbackConsent(user.uid);
       setHasAccepted(true);
-      setTimeout(() => router.replace('/cashback/capture'), 300);
+      setTimeout(() => {
+        if (fromSettings) {
+          router.back();
+        } else {
+          router.replace('/cashback/capture');
+        }
+      }, 300);
     } catch (error: any) {
       console.warn('acceptCashbackConsent failed:', error);
       Alert.alert(
@@ -172,7 +188,7 @@ export default function CashbackConsentScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [user?.uid, isAnonymous]);
+  }, [user?.uid, isAnonymous, fromSettings]);
 
   const handleCancel = useCallback(() => router.back(), []);
 
@@ -549,7 +565,11 @@ export default function CashbackConsentScreen() {
                 color="#fff"
               />
               <Text style={styles.acceptText}>
-                {hasAccepted ? 'Gespeichert' : 'Akzeptieren & Bon scannen'}
+                {hasAccepted
+                  ? 'Gespeichert'
+                  : fromSettings
+                    ? 'Akzeptieren'
+                    : 'Akzeptieren & Bon scannen'}
               </Text>
             </>
           )}

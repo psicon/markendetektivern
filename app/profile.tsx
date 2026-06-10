@@ -1371,21 +1371,26 @@ export default function ProfileScreen() {
               value={gamificationDisabled}
               onChange={handleGamificationToggle}
             />
-            {/* T17.31: Cashback-Zustimmung lässt sich hier zurückziehen
-                — erfüllt das Versprechen vom Consent-Screen "Du kannst
-                deine Zustimmung in den Einstellungen jederzeit
-                zurückziehen". Toggle erscheint nur wenn der User
-                aktuell Cashback aktiviert hat. Aus-Toggeln triggert
-                Confirm-Alert; bestätigt → revokeCashbackConsent. */}
-            {cashback.hasConsent ? (
-              <ToggleRow
-                icon="cash-multiple"
-                label="Cashback aktiv"
-                value
-                onChange={() => {
+            {/* T17.31 + ClickUp 86ca6u6xd [5]: Cashback & Markt-
+                Statistiken — der EINE v2-Consent (Bon-Daten + App-
+                Nutzung). Row ist IMMER sichtbar, weil die Datenschutz-
+                erklärung den Widerruf unter "Profil → Einstellungen"
+                verspricht:
+                • AN → AUS: Confirm-Alert; bestätigt → revoke. Das
+                  Tracking-Gate (trackingConsent.ts) schließt live über
+                  den User-Snapshot — Erfassung endet sofort.
+                • AUS → AN: KEIN stilles Aktivieren — informierte
+                  Einwilligung nötig → Route zum Consent-Screen; nach
+                  Accept flippt der Snapshot den Toggle automatisch. */}
+            <ToggleRow
+              icon="cash-multiple"
+              label="Cashback & Markt-Statistiken"
+              value={cashback.hasConsent}
+              onChange={() => {
+                if (cashback.hasConsent) {
                   Alert.alert(
-                    'Cashback deaktivieren?',
-                    'Du kannst keine Bons mehr einreichen. Bereits gutgeschriebenes Cashback bleibt erhalten — Auszahlung wie gewohnt ab 10 €.',
+                    'Cashback & Markt-Statistiken deaktivieren?',
+                    'Die Erfassung deiner App-Nutzung endet sofort und du kannst keine Bons mehr einreichen. Bereits gutgeschriebenes Cashback bleibt erhalten — Auszahlung wie gewohnt ab 10 €.',
                     [
                       { text: 'Abbrechen', style: 'cancel' },
                       {
@@ -1408,10 +1413,14 @@ export default function ProfileScreen() {
                       },
                     ],
                   );
-                }}
-                last
-              />
-            ) : null}
+                } else {
+                  // from=settings: Consent-Screen routet nach Accept
+                  // zurück hierher statt in den Kamera-Flow.
+                  router.push('/cashback/consent?from=settings' as any);
+                }
+              }}
+              last
+            />
           </MenuCard>
         </View>
 
