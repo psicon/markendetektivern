@@ -115,7 +115,14 @@ export const DEFAULT_CASHBACK_CONFIG: CashbackConfigDoc = {
   manualReviewThreshold: 0.65,
   autoApproveThreshold: 0.85,
   kycRequiredAt: 2000,
-  consentVersion: 'v1.0-2026-05',
+  // v2.0 = Consent-Text deckt anonymisierte Marktdaten-Verwertung ab
+  // (ClickUp 86ca6u6xd). ACHTUNG: das Live-Doc cashback_config/v1 hat
+  // ein eigenes consentVersion-Feld, das diesen Default ÜBERSCHREIBT —
+  // dort steht noch v1.0-2026-05. Das Doc ist der Aktivierungsschalter:
+  // erst auf v2.0-2026-06 setzen, wenn der Build mit dem neuen Consent-
+  // Text ausgerollt ist (sonst re-consenten User auf den ALTEN Text).
+  // Der Bump invalidiert alle v1-Consents → Re-Consent-Flow greift.
+  consentVersion: 'v2.0-2026-06',
   payoutThresholdCents: 1000, // 10 €
   monthlyMaxCents: 0, // 0 = kein Limit (opt-in via Config-Doc)
   campaignsEnabled: false, // false = Dauer-Cashback (opt-in via Config-Doc)

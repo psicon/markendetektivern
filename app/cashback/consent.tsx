@@ -73,13 +73,22 @@ const STEPS: { icon: string; title: string; sub: string }[] = [
   },
 ];
 
-// Compact privacy/data block. Three rows = the legal minimum users
+// Compact privacy/data block. Four rows = the legal minimum users
 // need to see up-front (was an essay before, now one line each).
+// v2.0 (ClickUp 86ca6u6xd): Zeile "Anonyme Marktdaten" deckt die
+// anonymisierte Verwertung von Einkaufs- + Nutzungsdaten ab (B2B-
+// Insights). Positiv geframt — der Deal (Daten finanzieren das
+// Cashback) wird als fairer Tausch erklärt, nicht versteckt.
 const PRIVACY: { icon: string; title: string; body: string }[] = [
   {
     icon: 'database-check-outline',
     title: 'Daten in der EU verarbeitet',
     body: 'Foto wird nach 30 Tagen gelöscht. Bon-Daten (Markt, Datum, Artikel) bleiben.',
+  },
+  {
+    icon: 'chart-box-outline',
+    title: 'Anonyme Marktdaten',
+    body: 'Deine Einkäufe und deine App-Nutzung fließen anonymisiert in Markt-Statistiken für Handelspartner ein — das finanziert dein Cashback. Nie mit deinem Namen oder Konto verknüpft.',
   },
   {
     icon: 'gift-outline',

@@ -741,6 +741,86 @@ function RedeemTab() {
 
       </View>
 
+      {/* ── Cashback-Aktivierung (ClickUp 86ca6u6xd) — sichtbar bis
+          der Consent in der AKTUELLEN Version vorliegt (hasConsent ist
+          versions-bewusst → greift auch nach einem consentVersion-Bump
+          als Re-Consent-Einladung). Bewusst eine positive Einladungs-
+          Card statt Warn-Banner/Modal: minimale Hürde, ein Tap führt
+          durch denselben Gate wie der Bon-Scan (erst Login falls nötig,
+          dann /cashback/consent). Verschwindet automatisch über den
+          User-Snapshot, sobald akzeptiert wurde. ── */}
+      {!cashback.isLoading && !cashback.hasConsent ? (
+        <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              if (!cashback.uid) {
+                router.push('/auth/login');
+                return;
+              }
+              router.push('/cashback/consent');
+            }}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 12,
+              padding: 14,
+              borderRadius: 16,
+              backgroundColor: theme.surface,
+              borderWidth: 1.5,
+              borderColor: theme.primary ?? '#0d8575',
+            }}
+          >
+            <View
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: (theme.primary ?? '#0d8575') + '18',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <MaterialCommunityIcons
+                name="cash-plus"
+                size={20}
+                color={theme.primary ?? '#0d8575'}
+              />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 15,
+                  letterSpacing: -0.2,
+                  color: theme.text,
+                }}
+              >
+                Cashback aktivieren
+              </Text>
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 12,
+                  lineHeight: 17,
+                  color: theme.textSub,
+                  marginTop: 2,
+                }}
+              >
+                Einmal kurz zustimmen — danach gibt&apos;s für deine Bons Geld zurück.
+              </Text>
+            </View>
+            <MaterialCommunityIcons
+              name="chevron-right"
+              size={20}
+              color={theme.primary ?? theme.textMuted}
+            />
+          </Pressable>
+        </View>
+      ) : null}
+
       {/* ── Quick actions row ── */}
       <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
         {/* T17.27: Anchor um Section-Title + Card-Row, NICHT
