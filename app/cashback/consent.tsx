@@ -93,6 +93,9 @@ const REWARDS: {
   label: string;
   icon: string;
   image?: ImageSourcePropType;
+  /** Abweichende Render-Größe für Wortmarken (Default 24×24). */
+  imageWidth?: number;
+  imageHeight?: number;
 }[] = [
   {
     key: 'rewe',
@@ -119,10 +122,13 @@ const REWARDS: {
     image: require('@/assets/rewards/amazon.png'),
   },
   {
+    // Wortmarke sagt schon "VISA" — Label ergänzt nur "Prepaid".
     key: 'visa',
-    label: 'VISA Prepaid',
+    label: 'Prepaid',
     icon: 'credit-card-outline',
     image: require('@/assets/rewards/visa.png'),
+    imageWidth: 37,
+    imageHeight: 12,
   },
   { key: 'bank', label: 'Bankkonto', icon: 'bank-outline' },
   { key: 'spende', label: 'Oder spenden', icon: 'hand-heart-outline' },
@@ -166,18 +172,19 @@ function RewardsMarquee({
   const chip = {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 12,
+    gap: 8,
+    minHeight: 48,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
-    marginRight: 8,
+    marginRight: 10,
   };
   const label = {
     color: theme.text,
-    fontSize: 12,
+    fontSize: 13,
     fontFamily,
     fontWeight: fontWeight.bold as any,
   };
@@ -196,13 +203,17 @@ function RewardsMarquee({
           {item.image ? (
             <Image
               source={item.image}
-              style={{ width: 18, height: 18, borderRadius: 4 }}
+              style={{
+                width: item.imageWidth ?? 24,
+                height: item.imageHeight ?? 24,
+                borderRadius: 5,
+              }}
               resizeMode="contain"
             />
           ) : (
             <MaterialCommunityIcons
               name={item.icon as any}
-              size={14}
+              size={18}
               color={accent}
             />
           )}
