@@ -127,8 +127,8 @@ const REWARDS: {
     label: 'Prepaid',
     icon: 'credit-card-outline',
     image: require('@/assets/rewards/visa.png'),
-    imageWidth: 37,
-    imageHeight: 12,
+    imageWidth: 46,
+    imageHeight: 15,
   },
   {
     key: 'paypal',
@@ -176,24 +176,26 @@ function RewardsMarquee({
     transform: [{ translateX: offset.value }],
   }));
 
-  const chip = {
-    flexDirection: 'row' as const,
+  // Logo-Strip statt Chip-Pills: jedes Item ist eine schmale Spalte
+  // (Logo bzw. Icon oben, dezente 10px-Caption darunter) — die
+  // "Partner-Logos"-Optik aus Fintech-/Cashback-Apps. Keine Rahmen,
+  // keine Button-Anmutung.
+  const itemColumn = {
+    width: 84,
     alignItems: 'center' as const,
-    gap: 8,
-    minHeight: 48,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
-    marginRight: 10,
+    gap: 5,
   };
-  const label = {
-    color: theme.text,
-    fontSize: 13,
+  const logoBox = {
+    height: 30,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  };
+  const caption = {
+    color: theme.textSub,
+    fontSize: 10,
     fontFamily,
-    fontWeight: fontWeight.bold as any,
+    fontWeight: fontWeight.semibold as any,
+    textAlign: 'center' as const,
   };
 
   const renderRow = (measure: boolean) => (
@@ -206,36 +208,68 @@ function RewardsMarquee({
       }
     >
       {REWARDS.map((item) => (
-        <View key={item.key} style={chip}>
-          {item.image ? (
-            <Image
-              source={item.image}
-              style={{
-                width: item.imageWidth ?? 24,
-                height: item.imageHeight ?? 24,
-                borderRadius: 5,
-              }}
-              resizeMode="contain"
-            />
-          ) : (
-            <MaterialCommunityIcons
-              name={item.icon as any}
-              size={18}
-              color={accent}
-            />
-          )}
-          <Text style={label}>{item.label}</Text>
+        <View key={item.key} style={itemColumn}>
+          <View style={logoBox}>
+            {item.image ? (
+              <Image
+                source={item.image}
+                style={{
+                  width: item.imageWidth ?? 26,
+                  height: item.imageHeight ?? 26,
+                  borderRadius: 6,
+                }}
+                resizeMode="contain"
+              />
+            ) : (
+              <MaterialCommunityIcons
+                name={item.icon as any}
+                size={24}
+                color={accent}
+              />
+            )}
+          </View>
+          <Text style={caption} numberOfLines={1}>
+            {item.label}
+          </Text>
         </View>
       ))}
     </View>
   );
 
   return (
-    <View style={{ overflow: 'hidden', marginTop: 12 }}>
+    <View style={{ overflow: 'hidden', marginTop: 16 }}>
       <Animated.View style={[{ flexDirection: 'row' }, animatedStyle]}>
         {renderRow(true)}
         {renderRow(false)}
       </Animated.View>
+      {/* Edge-Fades — der Loop taucht weich aus dem Seitenhintergrund
+          auf statt hart an der Kante zu schneiden. */}
+      <LinearGradient
+        colors={[theme.bg, `${theme.bg}00`]}
+        start={{ x: 0, y: 0.5 }}
+        end={{ x: 1, y: 0.5 }}
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 32,
+        }}
+        pointerEvents="none"
+      />
+      <LinearGradient
+        colors={[`${theme.bg}00`, theme.bg]}
+        start={{ x: 0, y: 0.5 }}
+        end={{ x: 1, y: 0.5 }}
+        style={{
+          position: 'absolute',
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: 32,
+        }}
+        pointerEvents="none"
+      />
     </View>
   );
 }
