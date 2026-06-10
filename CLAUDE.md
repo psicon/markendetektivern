@@ -563,6 +563,63 @@ solange `eas submit` nicht durch ist und Apple die Verarbeitung
 nicht abgeschlossen hat (i.d.R. 5–30 min nach submit). Bis dahin
 ist der Build NUR ein IPA-Artefakt auf den EAS-Servern.
 
+### iOS TestFlight: Pflicht-Checkliste VOR jedem Build (Juni 2026)
+
+Jede Zeile hier hat mindestens einen Build/eine TestFlight-Version
+gekostet. Alle 4 Checks ausführen, DANN bauen — nie umgekehrt.
+
+**1. Entitlements-Check (Vorfall Build 1211: Apple-Login + Push tot):**
+```bash
+git diff ios/MarkenDetektive/MarkenDetektive.entitlements
+grep -c applesignin ios/MarkenDetektive/MarkenDetektive.entitlements  # muss 1 sein
+```
+EAS baut den WORKING TREE (inkl. uncommitted Changes). Der
+"Entitlements-Hack" (Datei temporär leeren für lokale Dev-Builds)
+darf NIE uncommitted liegen bleiben — Build 1211 ging mit leeren
+Entitlements zu TestFlight → `com.apple.AuthenticationServices.
+AuthorizationError` bei jedem Apple-Login + Push tot (aps-environment
+fehlte). Vor jedem Build: Diff muss leer sein, applesignin drin.
+
+**2. buildNumber-Check** (siehe Abschnitt oben — `eas build:list`,
+höchste FINISHED-Nummer = lokale Nummer; autoIncrement macht +1).
+
+**3. Image-Check: `eas.json` → `production.ios.image` MUSS ein
+konkretes Xcode-Image sein (Stand: `macos-tahoe-26.4-xcode-26.4`).**
+- NIE `"latest"`: EAS dreht das Image still weiter (latest sprang
+  Juni 2026 auf Xcode 26.4 und brach den fmt-Pod) → Builds brechen
+  ohne eigene Code-Änderung.
+- NIE `"default"`: war Xcode 15.4 → FirebaseSharedSwift braucht das
+  Swift-6-Keyword `sending` → "cannot find type 'sending'".
+- Älteres Xcode (16.4) ist KEIN Ausweg mehr: Apple lehnt seit Juni
+  2026 alles unter dem iOS-26-SDK ab → **ITMS-90725** ("must be
+  built with the iOS 26 SDK"). Xcode 26.x ist Pflicht.
+- Gültige Image-Namen: https://docs.expo.dev/build-reference/infrastructure/
+
+**4. fmt-Patch-Check: der `FMT_USE_CONSTEVAL`-Block in
+`ios/Podfile` (post_install) darf NICHT entfernt werden.**
+fmt 11.0.2 + Xcode-26-Clang = "call to consteval function ... is not
+a constant expression" in `Pods/fmt/format-inl.h`. WICHTIG: ein
+Compiler-Define `-DFMT_USE_CONSTEVAL=0` ist WIRKUNGSLOS — fmt's
+`base.h` setzt das Macro ohne `#ifndef`-Guard hart auf 1, sobald
+`__cpp_consteval` existiert, und überschreibt jeden Define. Deshalb
+patcht der post_install-Hook die Header-QUELLE nach `pod install`
+(gsub `define FMT_USE_CONSTEVAL 1` → `0`). Entfällt erst, wenn
+RN/Expo eine fmt-Version mit Xcode-26-Fix einzieht.
+
+**Build + Submit (ein Befehl, Standard):**
+```bash
+eas build --platform ios --profile production --auto-submit --non-interactive --no-wait
+```
+
+**Nachkontrolle (Pflicht, ~20 min nach Start):**
+- Build-Status: `eas build:view <id> --json` → FINISHED + ipa-URL.
+- Submission: bei Fehlschlag zeigt die CLI nur "Fastlane pilot
+  failed" / `SUBMISSION_SERVICE_IOS_UNKNOWN_ERROR` — die ECHTE
+  Apple-Begründung (ITMS-Code) steht NUR im EAS-Dashboard unter der
+  Submission-URL (die Submission-Logs sind verschlüsselt, lokal
+  nicht lesbar). Bei ITMS-Code → Code nachschlagen, nicht raten.
+- Erst "in TestFlight" melden, wenn die Submission durch ist.
+
 ## Redesign status — what's done, what's left
 
 Check before suggesting "next screen": grep for `DetailHeader |
