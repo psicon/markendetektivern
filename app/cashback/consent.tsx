@@ -199,7 +199,7 @@ export default function CashbackConsentScreen() {
     () => ({
       // Hero — brand-teal gradient (same vector as the Cashback
       // hero on Belohnungen so this screen reads as part of that
-      // family). Big "Bis zu …€" headline + 3 stat pills.
+      // family). Big headline, Konditionen bewusst ohne harte Zahlen.
       hero: {
         marginHorizontal: 20,
         marginTop: 6,
@@ -240,33 +240,6 @@ export default function CashbackConsentScreen() {
         fontFamily,
         marginTop: 6,
       },
-      pillRow: {
-        // T17.32: nowrap statt wrap — alle 3 Pills sollen auf eine
-        // Zeile passen. Texte sind oben bereits gekürzt, padding ist
-        // tighter, flexShrink an den Pills fängt Restrest ab.
-        flexDirection: 'row' as const,
-        flexWrap: 'nowrap' as const,
-        gap: 5,
-        marginTop: 14,
-      },
-      pill: {
-        flexDirection: 'row' as const,
-        alignItems: 'center' as const,
-        flexShrink: 1,
-        gap: 4,
-        paddingHorizontal: 8,
-        paddingVertical: 5,
-        borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.22)',
-      },
-      pillText: {
-        color: '#fff',
-        fontSize: 11,
-        fontFamily,
-        fontWeight: fontWeight.bold as any,
-        letterSpacing: 0.1,
-      },
-
       sectionLabel: {
         color: theme.textMuted,
         fontSize: 11,
@@ -432,7 +405,7 @@ export default function CashbackConsentScreen() {
         }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Hero — value pitch + stat pills */}
+        {/* Hero — value pitch */}
         <LinearGradient
           colors={['#0a6f62', '#0d8575', '#10a18a']}
           start={{ x: -1, y: 0.34 }}
@@ -448,39 +421,14 @@ export default function CashbackConsentScreen() {
           </View>
           <Text style={styles.heroEyebrow}>Geld zurück fürs Einkaufen</Text>
           <Text style={styles.heroTitle}>Hol dir Geld für deine Bons</Text>
+          {/* Keine hardcodierten Konditionen (Cent-Beträge, Wochen-Limits)
+              — die sind config-/aktionsgetrieben und würden hier veralten.
+              Einzige stabile Aussage: bis zu 1 € pro Bon (User-Vorgabe
+              2026-06-10). Aktuelle Aktionen zeigt der Rewards-Tab. */}
           <Text style={styles.heroBody}>
-            Bis zu 6 Bons pro Woche — das sind rund 25 € im Jahr, nur fürs
-            Hochladen.
+            Lade deine Kassenbons hoch und sichere dir bis zu 1 € pro Bon —
+            die aktuellen Aktionen siehst du in der App.
           </Text>
-
-          <View style={styles.pillRow}>
-            <View style={styles.pill}>
-              <MaterialCommunityIcons name="receipt" size={11} color="#fff" />
-              <Text numberOfLines={1} style={styles.pillText}>
-                Bis zu 0,08 €/Bon
-              </Text>
-            </View>
-            <View style={styles.pill}>
-              <MaterialCommunityIcons
-                name="calendar-week"
-                size={11}
-                color="#fff"
-              />
-              <Text numberOfLines={1} style={styles.pillText}>
-                6/Woche
-              </Text>
-            </View>
-            <View style={styles.pill}>
-              <MaterialCommunityIcons
-                name="gift-outline"
-                size={11}
-                color="#fff"
-              />
-              <Text numberOfLines={1} style={styles.pillText}>
-                Ab 10 € einlösen
-              </Text>
-            </View>
-          </View>
         </LinearGradient>
 
         {/* So einfach geht's */}
