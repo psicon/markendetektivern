@@ -94,11 +94,36 @@ const REWARDS: {
   icon: string;
   image?: ImageSourcePropType;
 }[] = [
-  { key: 'rewe', label: 'REWE', icon: 'cart-outline' },
-  { key: 'kaufland', label: 'Kaufland', icon: 'cart-outline' },
-  { key: 'rossmann', label: 'Rossmann', icon: 'cart-outline' },
-  { key: 'amazon', label: 'Amazon', icon: 'shopping-outline' },
-  { key: 'visa', label: 'VISA Prepaid', icon: 'credit-card-outline' },
+  {
+    key: 'rewe',
+    label: 'REWE',
+    icon: 'cart-outline',
+    image: require('@/assets/rewards/rewe.png'),
+  },
+  {
+    key: 'kaufland',
+    label: 'Kaufland',
+    icon: 'cart-outline',
+    image: require('@/assets/rewards/kaufland.png'),
+  },
+  {
+    key: 'rossmann',
+    label: 'Rossmann',
+    icon: 'cart-outline',
+    image: require('@/assets/rewards/rossmann.png'),
+  },
+  {
+    key: 'amazon',
+    label: 'Amazon',
+    icon: 'shopping-outline',
+    image: require('@/assets/rewards/amazon.png'),
+  },
+  {
+    key: 'visa',
+    label: 'VISA Prepaid',
+    icon: 'credit-card-outline',
+    image: require('@/assets/rewards/visa.png'),
+  },
   { key: 'bank', label: 'Bankkonto', icon: 'bank-outline' },
   { key: 'spende', label: 'Oder spenden', icon: 'hand-heart-outline' },
 ];
@@ -171,7 +196,7 @@ function RewardsMarquee({
           {item.image ? (
             <Image
               source={item.image}
-              style={{ width: 16, height: 16, borderRadius: 3 }}
+              style={{ width: 18, height: 18, borderRadius: 4 }}
               resizeMode="contain"
             />
           ) : (
