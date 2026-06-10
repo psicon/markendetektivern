@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, startAfter } from '@react-native-firebase/firestore';
+import { collection, doc, getCountFromServer, getDocs, limit, onSnapshot, orderBy, query, startAfter, where } from '@react-native-firebase/firestore';
 import { db } from '../firebase';
 
 export interface PurchasedProduct {
@@ -61,56 +61,42 @@ class PurchaseHistoryService {
   }> {
     try {
       const userRef = doc(db, 'users', userId);
-      
-      // SMART FALLBACK: Load larger batches and handle pagination correctly
-      let queryConstraints: any[] = [
-        orderBy('purchasedAt', 'desc')
-      ];
-      
-      // For client-side filtering, we need to load much more to ensure we get enough items
-      const batchSize = productType ? Math.max(100, pageSize * 5) : pageSize + 1;
-      
-      // Add pagination
+
+      // Server-seitiger Filter statt Client-Filter (Fix 2026-06-10,
+      // ClickUp 86ca78dxh "Kaufhistorie lädt nicht / unfassbar lange"):
+      // Vorher wurden pro Page max(100, pageSize*5) Docs geladen und
+      // client-seitig auf productType gefiltert — bei großen Collections
+      // (real: 1300+ Käufe) plus den Full-Scan-Counts ergab das tausende
+      // Reads pro Screen-Öffnung. Jetzt filtert Firestore selbst:
+      // where(productType) + orderBy(purchasedAt) — braucht den
+      // Composite-Index purchases(productType ASC, purchasedAt DESC),
+      // angelegt 2026-06-10 via Admin-REST-API (siehe firestore.indexes.json).
+      // Verhalten identisch: Docs ohne productType/purchasedAt waren auch
+      // vorher unsichtbar (Client-Filter bzw. orderBy schließen sie aus).
+      const queryConstraints: any[] = [];
+      if (productType) {
+        queryConstraints.push(where('productType', '==', productType));
+      }
+      queryConstraints.push(orderBy('purchasedAt', 'desc'));
       if (lastDoc) {
         queryConstraints.push(startAfter(lastDoc));
       }
-      queryConstraints.push(limit(batchSize));
-      
+      // pageSize+1: das Extra-Doc verrät ob es eine weitere Seite gibt.
+      queryConstraints.push(limit(pageSize + 1));
+
       const q = query(collection(userRef, 'purchases'), ...queryConstraints);
 
       const snapshot = await getDocs(q);
       const allDocs = snapshot.docs;
-      
-      // Client-side filter by productType if specified
-      const filteredDocs = productType
-        ? allDocs.filter(doc => doc.data().productType === productType)
-        : allDocs;
 
       const purchasedItems: PurchasedProduct[] = [];
 
-      // Take only pageSize items after filtering
-      const docs = filteredDocs.slice(0, pageSize);
+      const hasMore = allDocs.length > pageSize;
+      const docs = allDocs.slice(0, pageSize);
 
-      // hasMore-Logik (2026-05-28 Fix): wenn wir den batchSize-Limit
-      // erreicht haben, gibt es DEFINITIV noch mehr Docs in der Collection
-      // — egal wie wenig davon den Filter passieren. Bei asymmetrischer
-      // Verteilung (z.B. 52 Marken vs 1355 NoNames) müssen wir weiter
-      // paginieren bis wir genug filtered-items haben oder die Collection
-      // erschöpft ist.
-      //
-      // Plus: wenn die ersten N Docs ZU VIELE filtered-items lieferten
-      // (filteredDocs > pageSize), bleibt noch was im Buffer für die
-      // nächste Page → hasMore=true auch wenn wir den batch nicht
-      // ausgeschöpft haben.
-      const hasMore =
-        allDocs.length >= batchSize ||      // Batch ausgeschöpft → mehr Docs in DB
-        filteredDocs.length > pageSize;     // Mehr filtered-items als pageSize → Rest für nächste Page
-
-      // Set lastDoc to the last document from the ORIGINAL (unfiltered) query for proper pagination
-      let newLastDoc = null;
-      if (allDocs.length > 0) {
-        newLastDoc = allDocs[allDocs.length - 1];
-      }
+      // lastDoc = letztes ANGEZEIGTES Doc — die Folge-Query nutzt
+      // dieselben Constraints, startAfter ist damit konsistent.
+      const newLastDoc = docs.length > 0 ? docs[docs.length - 1] : null;
 
       for (const purchaseDoc of docs) {
         const purchaseData = purchaseDoc.data();
@@ -216,7 +202,7 @@ class PurchaseHistoryService {
       try {
         const purchasedItems: PurchasedProduct[] = [];
 
-        snapshot.docs.forEach(purchaseDoc => {
+        snapshot.docs.forEach((purchaseDoc: any) => {
           const purchaseData = purchaseDoc.data();
           
           try {
@@ -308,21 +294,19 @@ class PurchaseHistoryService {
   ): Promise<number> {
     try {
       const userRef = doc(db, 'users', userId);
-      
-      // FALLBACK: Load all and count client-side (until Firebase index is created)
-      const q = query(collection(userRef, 'purchases'));
-      const snapshot = await getDocs(q);
-      
-      if (!productType) {
-        return snapshot.docs.length;
-      }
-      
-      // Client-side filter and count
-      const filteredCount = snapshot.docs.filter(doc => 
-        doc.data().productType === productType
-      ).length;
-      
-      return filteredCount;
+
+      // Server-seitige COUNT-Aggregation (Fix 2026-06-10, ClickUp
+      // 86ca78dxh): Vorher wurde die KOMPLETTE purchases-Collection
+      // geladen und client-seitig gezählt — 2× pro Screen-Öffnung
+      // (Marken + NoNames), bei großen Usern tausende Reads und der
+      // Hauptgrund für "Kaufhistorie lädt ewig". getCountFromServer
+      // liefert nur die Zahl (1 Aggregations-Read, keine Doc-Downloads).
+      const base = collection(userRef, 'purchases');
+      const q = productType
+        ? query(base, where('productType', '==', productType))
+        : query(base);
+      const agg = await getCountFromServer(q);
+      return agg.data().count;
     } catch (error) {
       console.error('Error getting purchase count:', error);
       return 0; // Return 0 instead of throwing to prevent UI breaks
