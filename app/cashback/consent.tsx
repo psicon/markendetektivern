@@ -130,8 +130,15 @@ const REWARDS: {
     imageWidth: 37,
     imageHeight: 12,
   },
+  {
+    key: 'paypal',
+    label: 'PayPal',
+    icon: 'wallet-outline',
+    image: require('@/assets/rewards/paypal.png'),
+  },
   { key: 'bank', label: 'Bankkonto', icon: 'bank-outline' },
   { key: 'spende', label: 'Oder spenden', icon: 'hand-heart-outline' },
+  { key: 'mehr', label: 'und viele mehr', icon: 'dots-horizontal' },
 ];
 
 /**
