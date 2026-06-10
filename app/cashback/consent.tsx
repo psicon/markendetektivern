@@ -91,7 +91,7 @@ const PRIVACY: { icon: string; title: string }[] = [
   },
   {
     icon: 'gift-outline',
-    title: 'Auszahlung über Partner',
+    title: 'Attraktive Prämien und Gutscheine',
   },
   {
     icon: 'account-cancel-outline',
@@ -297,39 +297,41 @@ export default function CashbackConsentScreen() {
         marginTop: 2,
       },
 
-      // Privacy block — same one-card-with-rows pattern as Profile.
-      privacyCard: {
+      // Privacy block — 2x2-Chip-Grid (Design-System: surface-Chips,
+      // radius 12 wie Such-Input/SegmentedTabs, getönter Icon-Kreis).
+      privacyGrid: {
         marginHorizontal: 20,
+        flexDirection: 'row' as const,
+        flexWrap: 'wrap' as const,
+        gap: 8,
+      },
+      privacyChip: {
+        flexGrow: 1,
+        flexBasis: '46%' as const,
+        minHeight: 46,
+        flexDirection: 'row' as const,
+        alignItems: 'center' as const,
+        gap: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        borderRadius: 12,
         backgroundColor: theme.surface,
-        borderRadius: 14,
         borderWidth: 1,
         borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
-        overflow: 'hidden' as const,
-      },
-      privacyRow: {
-        flexDirection: 'row' as const,
-        alignItems: 'flex-start' as const,
-        gap: 12,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-      },
-      privacyDivider: {
-        height: 1,
-        backgroundColor: theme.border ?? 'rgba(0,0,0,0.06)',
-        marginLeft: 14 + 30 + 12,
       },
       privacyIconBox: {
-        width: 30,
-        height: 30,
-        borderRadius: 8,
+        width: 24,
+        height: 24,
+        borderRadius: 12,
         backgroundColor: accent + '14',
         alignItems: 'center' as const,
         justifyContent: 'center' as const,
-        marginTop: 1,
       },
       privacyTitle: {
+        flex: 1,
         color: theme.text,
-        fontSize: 13,
+        fontSize: 12,
+        lineHeight: 16,
         fontFamily,
         fontWeight: fontWeight.bold as any,
       },
@@ -445,28 +447,21 @@ export default function CashbackConsentScreen() {
 
         {/* Privacy / Data — same card-with-rows pattern as Profile */}
         <Text style={styles.sectionLabel}>Daten & Auszahlung</Text>
-        <View style={styles.privacyCard}>
-          {PRIVACY.map((row, idx) => (
-            <View key={row.title}>
-              {idx > 0 ? <View style={styles.privacyDivider} /> : null}
-              <View style={styles.privacyRow}>
-                <View style={styles.privacyIconBox}>
-                  <MaterialCommunityIcons
-                    name={row.icon as any}
-                    size={16}
-                    color={accent}
-                  />
-                </View>
-                <View
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    justifyContent: 'center' as const,
-                  }}
-                >
-                  <Text style={styles.privacyTitle}>{row.title}</Text>
-                </View>
+        {/* 2x2-Chip-Grid statt Karte-mit-Trennlinien: Headline-only-Rows
+            sahen in der Karte verloren aus (Leerraum rechts, eingerückte
+            Divider). Chips = Design-System-Sprache (surface, radius 12,
+            getönter Icon-Kreis), Icon + Text vertikal zentriert. */}
+        <View style={styles.privacyGrid}>
+          {PRIVACY.map((row) => (
+            <View key={row.title} style={styles.privacyChip}>
+              <View style={styles.privacyIconBox}>
+                <MaterialCommunityIcons
+                  name={row.icon as any}
+                  size={14}
+                  color={accent}
+                />
               </View>
+              <Text style={styles.privacyTitle}>{row.title}</Text>
             </View>
           ))}
         </View>
