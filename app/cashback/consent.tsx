@@ -24,12 +24,21 @@ import React, {
 import {
   ActivityIndicator,
   Alert,
+  Image,
+  type ImageSourcePropType,
   Linking,
   Pressable,
   ScrollView,
   Text,
   View,
 } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -72,6 +81,121 @@ const STEPS: { icon: string; title: string; sub: string }[] = [
     sub: 'Ab 10 € einlösen — Gutschein deiner Wahl oder Auszahlung aufs Konto',
   },
 ];
+
+// Prämien-Katalog für den Auto-Marquee unter Schritt 3. `image` ist
+// optional vorbereitet: sobald echte Logo-Assets definiert sind
+// (kleine PNGs, ~32×32), hier eintragen — der Chip rendert dann das
+// Bild statt des Icons. Bis dahin Icon + Label. Reihenfolge =
+// Anzeige-Reihenfolge im Loop. "Oder spenden ❤" gehört bewusst dazu
+// (User-Vorgabe 2026-06-10).
+const REWARDS: {
+  key: string;
+  label: string;
+  icon: string;
+  image?: ImageSourcePropType;
+}[] = [
+  { key: 'rewe', label: 'REWE', icon: 'cart-outline' },
+  { key: 'kaufland', label: 'Kaufland', icon: 'cart-outline' },
+  { key: 'rossmann', label: 'Rossmann', icon: 'cart-outline' },
+  { key: 'amazon', label: 'Amazon', icon: 'shopping-outline' },
+  { key: 'visa', label: 'VISA Prepaid', icon: 'credit-card-outline' },
+  { key: 'bank', label: 'Bankkonto', icon: 'bank-outline' },
+  { key: 'spende', label: 'Oder spenden', icon: 'hand-heart-outline' },
+];
+
+/**
+ * Endlos durchlaufender Prämien-Strip (Reanimated 3, UI-Thread).
+ * Zwei identische Chip-Reihen nebeneinander; translateX läuft linear
+ * von 0 auf -Reihenbreite und springt nahtlos zurück → Endlos-Loop.
+ * Nicht interaktiv — reine Appetit-Anzeige der Einlöse-Optionen.
+ */
+function RewardsMarquee({
+  theme,
+  accent,
+}: {
+  theme: any;
+  accent: string;
+}) {
+  const [rowWidth, setRowWidth] = useState(0);
+  const offset = useSharedValue(0);
+
+  useEffect(() => {
+    if (rowWidth > 0) {
+      offset.value = 0;
+      // ~33 px/s — gemütlich lesbar, nicht hektisch.
+      offset.value = withRepeat(
+        withTiming(-rowWidth, {
+          duration: rowWidth * 30,
+          easing: Easing.linear,
+        }),
+        -1,
+        false,
+      );
+    }
+  }, [rowWidth, offset]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: offset.value }],
+  }));
+
+  const chip = {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 12,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
+    marginRight: 8,
+  };
+  const label = {
+    color: theme.text,
+    fontSize: 12,
+    fontFamily,
+    fontWeight: fontWeight.bold as any,
+  };
+
+  const renderRow = (measure: boolean) => (
+    <View
+      style={{ flexDirection: 'row' }}
+      onLayout={
+        measure
+          ? (e) => setRowWidth(Math.round(e.nativeEvent.layout.width))
+          : undefined
+      }
+    >
+      {REWARDS.map((item) => (
+        <View key={item.key} style={chip}>
+          {item.image ? (
+            <Image
+              source={item.image}
+              style={{ width: 16, height: 16, borderRadius: 3 }}
+              resizeMode="contain"
+            />
+          ) : (
+            <MaterialCommunityIcons
+              name={item.icon as any}
+              size={14}
+              color={accent}
+            />
+          )}
+          <Text style={label}>{item.label}</Text>
+        </View>
+      ))}
+    </View>
+  );
+
+  return (
+    <View style={{ overflow: 'hidden', marginTop: 12 }}>
+      <Animated.View style={[{ flexDirection: 'row' }, animatedStyle]}>
+        {renderRow(true)}
+        {renderRow(false)}
+      </Animated.View>
+    </View>
+  );
+}
 
 // Trust-Badges — sitzen DIREKT über dem Akzeptieren-Button (Best
 // Practice: Safety-Signale am Entscheidungspunkt, nicht als eigene
@@ -304,13 +428,15 @@ export default function CashbackConsentScreen() {
         fontWeight: fontWeight.semibold as any,
         textAlign: 'center' as const,
       },
+      // Klein + zentriert ganz unten im Footer, unter "Jetzt nicht".
       legalText: {
-        marginTop: 14,
-        marginHorizontal: 20,
+        marginTop: 2,
+        paddingHorizontal: 8,
         color: theme.textMuted,
-        fontSize: 11,
-        lineHeight: 16,
+        fontSize: 10,
+        lineHeight: 14,
         fontFamily,
+        textAlign: 'center' as const,
       },
       legalLink: {
         color: accent,
@@ -414,24 +540,10 @@ export default function CashbackConsentScreen() {
           ))}
         </View>
 
-        {/* Privacy / Data — same card-with-rows pattern as Profile */}
-        <Text style={styles.legalText}>
-          Mit "Akzeptieren" stimmst du unseren{' '}
-          <Text
-            style={styles.legalLink}
-            onPress={() => Linking.openURL(TERMS_URL)}
-          >
-            AGB
-          </Text>
-          {' '}und der{' '}
-          <Text
-            style={styles.legalLink}
-            onPress={() => Linking.openURL(PRIVACY_URL)}
-          >
-            Datenschutzerklärung
-          </Text>
-          {' '}zu.
-        </Text>
+        {/* Prämien-Marquee — die Einlöse-Optionen laufen als Appetit-
+            Strip unter Schritt 3 durch (REWE/Kaufland/Rossmann/Amazon/
+            VISA/Bankkonto/Spenden). */}
+        <RewardsMarquee theme={theme} accent={accent} />
       </ScrollView>
 
       <View style={styles.footer}>
@@ -479,6 +591,26 @@ export default function CashbackConsentScreen() {
         <Pressable accessibilityRole="button" onPress={handleCancel}>
           <Text style={styles.cancelText}>Jetzt nicht</Text>
         </Pressable>
+
+        {/* Legal-Zeile ganz unten, klein unter "Jetzt nicht"
+            (User-Vorgabe 2026-06-10). */}
+        <Text style={styles.legalText}>
+          Mit "Akzeptieren" stimmst du unseren{' '}
+          <Text
+            style={styles.legalLink}
+            onPress={() => Linking.openURL(TERMS_URL)}
+          >
+            AGB
+          </Text>
+          {' '}und der{' '}
+          <Text
+            style={styles.legalLink}
+            onPress={() => Linking.openURL(PRIVACY_URL)}
+          >
+            Datenschutzerklärung
+          </Text>
+          {' '}zu.
+        </Text>
       </View>
     </View>
   );
