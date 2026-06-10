@@ -68,35 +68,22 @@ const STEPS: { icon: string; title: string; sub: string }[] = [
   },
   {
     icon: 'gift-outline',
-    title: 'Ab 10 € einlösen',
-    sub: 'Gutschein deiner Wahl oder Auszahlung aufs Konto',
+    title: 'Attraktive Prämien & Gutscheine',
+    sub: 'Ab 10 € einlösen — Gutschein deiner Wahl oder Auszahlung aufs Konto',
   },
 ];
 
-// Compact privacy/data block — NUR Headlines, kein Kleingedrucktes
-// (User-Vorgabe 2026-06-10: "lass nur die fetten schriften").
-// Die Langfassung steht in Datenschutzerklärung + AGB, die der User
-// über die Links unten mitakzeptiert. v2.0 (ClickUp 86ca6u6xd):
-// "Anonyme Marktdaten" = die anonymisierte Verwertung von Einkaufs-
-// + Nutzungsdaten (B2B-Insights). Hinweis: ob Headline-only für die
-// "informierte" Einwilligung reicht, liegt beim Anwalts-Review.
-const PRIVACY: { icon: string; title: string }[] = [
-  {
-    icon: 'database-check-outline',
-    title: 'Daten in der EU verarbeitet',
-  },
-  {
-    icon: 'chart-box-outline',
-    title: 'Anonyme Marktdaten',
-  },
-  {
-    icon: 'gift-outline',
-    title: 'Attraktive Prämien und Gutscheine',
-  },
-  {
-    icon: 'account-cancel-outline',
-    title: 'Jederzeit widerrufbar',
-  },
+// Trust-Badges — sitzen DIREKT über dem Akzeptieren-Button (Best
+// Practice: Safety-Signale am Entscheidungspunkt, nicht als eigene
+// Listen-Sektion). Nur Headlines (User-Vorgabe 2026-06-10), die
+// Langfassung steht in Datenschutzerklärung + AGB (Links darüber).
+// v2.0 (ClickUp 86ca6u6xd): "Anonyme Marktdaten" = anonymisierte
+// Verwertung von Einkaufs- + Nutzungsdaten (B2B-Insights). Ob
+// Headline-only für die "informierte" Einwilligung reicht → Anwalt.
+const TRUST: { icon: string; label: string }[] = [
+  { icon: 'shield-check-outline', label: 'EU-Datenschutz' },
+  { icon: 'chart-box-outline', label: 'Anonyme Marktdaten' },
+  { icon: 'account-cancel-outline', label: 'Jederzeit widerrufbar' },
 ];
 
 export default function CashbackConsentScreen() {
@@ -297,42 +284,25 @@ export default function CashbackConsentScreen() {
         marginTop: 2,
       },
 
-      // Privacy block — vier volle-Breite-Chips untereinander
-      // (Design-System: surface, radius 12 wie Such-Input/Segmented-
-      // Tabs, getönter Icon-Kreis, Icon + Titel vertikal zentriert).
-      // KEIN Prozent-flexBasis-Grid: kollabierte auf iOS zu einer
-      // 4er-Spalte mit Wort-Umbrüchen (2026-06-10).
-      privacyGrid: {
-        marginHorizontal: 20,
-        gap: 8,
-      },
-      privacyChip: {
-        minHeight: 48,
+      // Trust-Badges über dem CTA — drei gleichbreite Icon-Spalten,
+      // bewusst ohne Karten-Chrome (Tonalität der Step-Kreise).
+      trustRow: {
         flexDirection: 'row' as const,
-        alignItems: 'center' as const,
-        gap: 10,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 12,
-        backgroundColor: theme.surface,
-        borderWidth: 1,
-        borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
+        alignItems: 'flex-start' as const,
+        paddingHorizontal: 4,
+        paddingBottom: 10,
       },
-      privacyIconBox: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: accent + '14',
-        alignItems: 'center' as const,
-        justifyContent: 'center' as const,
-      },
-      privacyTitle: {
+      trustItem: {
         flex: 1,
-        color: theme.text,
-        fontSize: 13,
-        lineHeight: 17,
+        alignItems: 'center' as const,
+        gap: 3,
+      },
+      trustLabel: {
+        color: theme.textSub,
+        fontSize: 10,
         fontFamily,
-        fontWeight: fontWeight.bold as any,
+        fontWeight: fontWeight.semibold as any,
+        textAlign: 'center' as const,
       },
       legalText: {
         marginTop: 14,
@@ -445,26 +415,6 @@ export default function CashbackConsentScreen() {
         </View>
 
         {/* Privacy / Data — same card-with-rows pattern as Profile */}
-        <Text style={styles.sectionLabel}>Daten & Auszahlung</Text>
-        {/* 2x2-Chip-Grid statt Karte-mit-Trennlinien: Headline-only-Rows
-            sahen in der Karte verloren aus (Leerraum rechts, eingerückte
-            Divider). Chips = Design-System-Sprache (surface, radius 12,
-            getönter Icon-Kreis), Icon + Text vertikal zentriert. */}
-        <View style={styles.privacyGrid}>
-          {PRIVACY.map((row) => (
-            <View key={row.title} style={styles.privacyChip}>
-              <View style={styles.privacyIconBox}>
-                <MaterialCommunityIcons
-                  name={row.icon as any}
-                  size={15}
-                  color={accent}
-                />
-              </View>
-              <Text style={styles.privacyTitle}>{row.title}</Text>
-            </View>
-          ))}
-        </View>
-
         <Text style={styles.legalText}>
           Mit "Akzeptieren" stimmst du unseren{' '}
           <Text
@@ -485,6 +435,21 @@ export default function CashbackConsentScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
+        {/* Trust-Badges am Entscheidungspunkt — drei dezente Icon-
+            Spalten direkt über dem CTA (gleiche Tonalität wie die
+            Step-Kreise, kein Karten-Chrome). */}
+        <View style={styles.trustRow}>
+          {TRUST.map((item) => (
+            <View key={item.label} style={styles.trustItem}>
+              <MaterialCommunityIcons
+                name={item.icon as any}
+                size={16}
+                color={accent}
+              />
+              <Text style={styles.trustLabel}>{item.label}</Text>
+            </View>
+          ))}
+        </View>
         <Pressable
           accessibilityRole="button"
           disabled={isSubmitting || hasAccepted}
