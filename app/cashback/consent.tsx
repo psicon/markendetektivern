@@ -73,32 +73,29 @@ const STEPS: { icon: string; title: string; sub: string }[] = [
   },
 ];
 
-// Compact privacy/data block. Four rows = the legal minimum users
-// need to see up-front (was an essay before, now one line each).
-// v2.0 (ClickUp 86ca6u6xd): Zeile "Anonyme Marktdaten" deckt die
-// anonymisierte Verwertung von Einkaufs- + Nutzungsdaten ab (B2B-
-// Insights). Positiv geframt — der Deal (Daten finanzieren das
-// Cashback) wird als fairer Tausch erklärt, nicht versteckt.
-const PRIVACY: { icon: string; title: string; body: string }[] = [
+// Compact privacy/data block — NUR Headlines, kein Kleingedrucktes
+// (User-Vorgabe 2026-06-10: "lass nur die fetten schriften").
+// Die Langfassung steht in Datenschutzerklärung + AGB, die der User
+// über die Links unten mitakzeptiert. v2.0 (ClickUp 86ca6u6xd):
+// "Anonyme Marktdaten" = die anonymisierte Verwertung von Einkaufs-
+// + Nutzungsdaten (B2B-Insights). Hinweis: ob Headline-only für die
+// "informierte" Einwilligung reicht, liegt beim Anwalts-Review.
+const PRIVACY: { icon: string; title: string }[] = [
   {
     icon: 'database-check-outline',
     title: 'Daten in der EU verarbeitet',
-    body: 'Foto wird nach 30 Tagen gelöscht. Bon-Daten (Markt, Datum, Artikel) bleiben.',
   },
   {
     icon: 'chart-box-outline',
     title: 'Anonyme Marktdaten',
-    body: 'Deine Einkäufe und deine App-Nutzung fließen anonymisiert in Markt-Statistiken für Handelspartner ein — das finanziert dein Cashback. Nie mit deinem Namen oder Konto verknüpft.',
   },
   {
     icon: 'gift-outline',
     title: 'Auszahlung über Partner',
-    body: 'Per PayPal, SEPA-Überweisung oder Gutschein deiner Wahl.',
   },
   {
     icon: 'account-cancel-outline',
     title: 'Jederzeit widerrufbar',
-    body: 'Du kannst deine Zustimmung in den Einstellungen jederzeit zurückziehen.',
   },
 ];
 
@@ -336,14 +333,6 @@ export default function CashbackConsentScreen() {
         fontFamily,
         fontWeight: fontWeight.bold as any,
       },
-      privacyBody: {
-        color: theme.textSub,
-        fontSize: 11,
-        lineHeight: 16,
-        fontFamily,
-        marginTop: 2,
-      },
-
       legalText: {
         marginTop: 14,
         marginHorizontal: 20,
@@ -468,9 +457,14 @@ export default function CashbackConsentScreen() {
                     color={accent}
                   />
                 </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
+                <View
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    justifyContent: 'center' as const,
+                  }}
+                >
                   <Text style={styles.privacyTitle}>{row.title}</Text>
-                  <Text style={styles.privacyBody}>{row.body}</Text>
                 </View>
               </View>
             </View>
