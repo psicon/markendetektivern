@@ -4,6 +4,7 @@ import * as Application from 'expo-application';
 import { Platform } from 'react-native';
 import { analyticsService } from './analyticsService';
 import { AnonymousLocationService } from './anonymousLocationService';
+import { isMarketDataConsentGranted } from './trackingConsent';
 
 // App-Kontext pro Journey (User-Vorgabe): Version + Build-Nr + OS. Einmal beim
 // Modul-Load gelesen (Application-Getter sind synchron; in Expo Go ggf. null).
@@ -432,6 +433,8 @@ class JourneyTrackingService {
    * Updated nur den Status einer Journey in Firestore
    */
   private async updateJourneyStatus(status: string, userId: string): Promise<void> {
+    // Consent-Gate: Widerruf während laufender Journey → kein Write mehr.
+    if (!isMarketDataConsentGranted()) return;
     if (!this.currentJourney || !this.currentJourney.firestoreDocId) return;
     // Owner-Mismatch: Status-Update einer Fremd-User-Journey darf
     // nicht in den neuen User-Pfad geschrieben werden. Stillschweigend
@@ -564,6 +567,12 @@ class JourneyTrackingService {
    * Lädt aktive Journey aus Firestore (für Session-Fortsetzung)
    */
   async loadActiveJourney(userId: string): Promise<void> {
+    // Consent-Gate (ClickUp 86ca6u6xd): ohne gültigen Markt-Daten-
+    // Consent wird keine Journey geladen/fortgesetzt.
+    if (!isMarketDataConsentGranted()) {
+      return;
+    }
+
     // Verhindere Race Conditions
     if (this.isLoadingJourney) {
       console.log('⏳ Journey wird bereits geladen - überspringe');
@@ -663,12 +672,22 @@ class JourneyTrackingService {
     activeFilters?: JourneyContext['activeFilters'],
     userId?: string
   ): string {
+    // Consent-Gate (ClickUp 86ca6u6xd): ohne gültigen Markt-Daten-
+    // Consent wird KEINE Journey angelegt — alle track*-Methoden sind
+    // dadurch inert (sie guarden auf currentJourney === null bzw.
+    // haben einen Fail-safe für "startJourney hat nichts erzeugt").
+    // Es wird trotzdem eine ID zurückgegeben, damit Caller-Signaturen
+    // stabil bleiben; sie referenziert bewusst nichts.
+    if (!isMarketDataConsentGranted()) {
+      return `journey_untracked_${Date.now()}`;
+    }
+
     // Beende vorherige Journey falls vorhanden
     if (this.currentJourney) {
       console.log(`🔄 Beende vorherige Journey bevor neue gestartet wird`);
       this.completeJourney('navigation', userId);
     }
-    
+
     const journeyId = `journey_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     this.currentJourney = {
@@ -1773,6 +1792,8 @@ class JourneyTrackingService {
   }
 
   private async _persistJourneyToFirestoreImmediate(userId: string): Promise<void> {
+    // Consent-Gate: Widerruf während laufender Journey → kein Write mehr.
+    if (!isMarketDataConsentGranted()) return;
     // Diag (2026-05-07): Misst die synchrone Arbeit vor dem ersten
     // await. Wenn das viele MB allokiert + viele ms läuft, ist DAS
     // der freeze-Auslöser bei tap-burst.
@@ -2080,6 +2101,8 @@ class JourneyTrackingService {
    * Finalisiert Journey in Firestore
    */
   private async finalizeJourneyInFirestore(userId: string, completionReason: string, journey?: JourneyContext): Promise<void> {
+    // Consent-Gate: Widerruf während laufender Journey → kein Write mehr.
+    if (!isMarketDataConsentGranted()) return;
     const journeyToFinalize = journey || this.currentJourney;
     if (!journeyToFinalize) return;
 
@@ -2431,6 +2454,9 @@ class JourneyTrackingService {
     totalSavings: number,
     userId: string
   ): Promise<void> {
+    // Consent-Gate (ClickUp 86ca6u6xd): Journey-Outcome-Writes nur mit
+    // gültigem Markt-Daten-Consent.
+    if (!isMarketDataConsentGranted()) return;
     // Fix (2026-05-07): in per-Journey-Buffer akkumulieren statt direkt
     // schreiben. Verhindert WriteStream-Drops bei Mark-as-Purchased-Burst.
     let entry = this.historicalJourneyDebounce.get(journeyId);
@@ -2567,6 +2593,9 @@ class JourneyTrackingService {
     totalSavings: number,
     userId: string
   ): Promise<void> {
+    // Consent-Gate (ClickUp 86ca6u6xd): Journey-Outcome-Writes nur mit
+    // gültigem Markt-Daten-Consent.
+    if (!isMarketDataConsentGranted()) return;
     try {
       const { query, where, getDocs, updateDoc, collection } = await import('@react-native-firebase/firestore');
       
@@ -2753,6 +2782,9 @@ class JourneyTrackingService {
       purchaseActions: Array<any>;
     },
   ): Promise<void> {
+    // Consent-Gate (ClickUp 86ca6u6xd): Journey-Outcome-Writes nur mit
+    // gültigem Markt-Daten-Consent.
+    if (!isMarketDataConsentGranted()) return;
     const removeCount = entry.removeActions.length;
     const purchaseCount = entry.purchaseActions.length;
     if (removeCount === 0 && purchaseCount === 0) return;
@@ -2857,6 +2889,9 @@ class JourneyTrackingService {
     userId: string,
     viewedProductIndex?: number // NEU: Index für eindeutige Zuordnung
   ): Promise<void> {
+    // Consent-Gate (ClickUp 86ca6u6xd): Journey-Outcome-Writes nur mit
+    // gültigem Markt-Daten-Consent.
+    if (!isMarketDataConsentGranted()) return;
     // Fix (2026-05-07): Statt direkt zu schreiben, in den per-Journey-
     // Buffer akkumulieren. Nach 1.2 s Ruhe wird EIN gemeinsamer
     // updateDoc ausgeführt. Verhindert WriteStream-Drops bei Cart-Burst.

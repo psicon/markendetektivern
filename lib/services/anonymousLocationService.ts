@@ -1,7 +1,15 @@
 /**
  * Anonymer Location Service - ohne User Permissions
  * Optimiert für Deutschland mit einfachen Fallbacks
+ *
+ * Consent-Gate (ClickUp 86ca6u6xd): Die IP-Geolokalisierung läuft über
+ * einen Drittanbieter (ipapi.co) und gehört zu den Markt-Daten. Ohne
+ * gültigen Consent wird KEIN IP-Call gemacht — Aufrufer bekommen den
+ * statischen Deutschland-Fallback (kein echter Standort, Shape bleibt
+ * stabil für GA4/Journey-Konsumenten).
  */
+
+import { isMarketDataConsentGranted } from './trackingConsent';
 
 export interface LocationData {
   lat: number;
@@ -22,6 +30,13 @@ export class AnonymousLocationService {
    * Holt Location-Daten ohne User Permission
    */
   static async getLocation(): Promise<LocationData | null> {
+    // Consent-Gate: ohne Markt-Daten-Consent kein IP-Call. Bewusst
+    // OHNE Caching, damit ein später erteilter Consent in derselben
+    // Session wieder die echte Lokalisierung bekommt.
+    if (!isMarketDataConsentGranted()) {
+      return this.getFallbackLocation();
+    }
+
     // Cache für 1 Stunde
     if (this.cache && Date.now() < this.cacheExpiry) {
       return this.cache;

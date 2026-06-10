@@ -6,6 +6,7 @@ import { AppState, AppStateStatus, InteractionManager, Platform } from 'react-na
 // Version wird aus Constants gelesen, nicht aus package.json
 import { analyticsService } from '../services/analyticsService';
 import journeyTrackingService from '../services/journeyTrackingService';
+import { startMarketDataConsentSync } from '../services/trackingConsent';
 import { PERF } from '../perfFlags';
 import { isExpoGo } from '../utils/platform';
 
@@ -85,11 +86,22 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
     }
   }, []); // Nur einmal beim App-Start
 
-  // Lade aktive Journey beim Start (Session-Fortsetzung)
+  // Markt-Daten-Consent-Gate + Journey-Fortsetzung (ClickUp 86ca6u6xd):
+  // Das Gate hält den Consent-Status des Users live (Cashback-Consent
+  // v2 deckt die App-Nutzungsdaten ab). journeyTrackingService + IP-
+  // Location prüfen es synchron vor jedem Write. loadActiveJourney
+  // läuft erst, wenn der Consent bestätigt ist — der Snapshot kommt
+  // async, ein sofortiger Call würde am Gate abprallen. Bei Widerruf
+  // schließt das Gate sofort (Persist-Pfade droppen still). Logout/
+  // User-Wechsel → Cleanup schließt das Gate (Default: kein Tracking).
   useEffect(() => {
-    if (user?.uid) {
-      journeyTrackingService.loadActiveJourney(user.uid);
-    }
+    if (!user?.uid) return;
+    const uid = user.uid;
+    return startMarketDataConsentSync(uid, (granted) => {
+      if (granted) {
+        journeyTrackingService.loadActiveJourney(uid);
+      }
+    });
   }, [user?.uid]);
 
   // ─── Attribution Capture (T4, ClickUp 86c9zbxy7) ─────────────
