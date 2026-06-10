@@ -297,22 +297,21 @@ export default function CashbackConsentScreen() {
         marginTop: 2,
       },
 
-      // Privacy block — 2x2-Chip-Grid (Design-System: surface-Chips,
-      // radius 12 wie Such-Input/SegmentedTabs, getönter Icon-Kreis).
+      // Privacy block — vier volle-Breite-Chips untereinander
+      // (Design-System: surface, radius 12 wie Such-Input/Segmented-
+      // Tabs, getönter Icon-Kreis, Icon + Titel vertikal zentriert).
+      // KEIN Prozent-flexBasis-Grid: kollabierte auf iOS zu einer
+      // 4er-Spalte mit Wort-Umbrüchen (2026-06-10).
       privacyGrid: {
         marginHorizontal: 20,
-        flexDirection: 'row' as const,
-        flexWrap: 'wrap' as const,
         gap: 8,
       },
       privacyChip: {
-        flexGrow: 1,
-        flexBasis: '46%' as const,
-        minHeight: 46,
+        minHeight: 48,
         flexDirection: 'row' as const,
         alignItems: 'center' as const,
-        gap: 8,
-        paddingHorizontal: 10,
+        gap: 10,
+        paddingHorizontal: 12,
         paddingVertical: 8,
         borderRadius: 12,
         backgroundColor: theme.surface,
@@ -320,9 +319,9 @@ export default function CashbackConsentScreen() {
         borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
       },
       privacyIconBox: {
-        width: 24,
-        height: 24,
-        borderRadius: 12,
+        width: 28,
+        height: 28,
+        borderRadius: 14,
         backgroundColor: accent + '14',
         alignItems: 'center' as const,
         justifyContent: 'center' as const,
@@ -330,8 +329,8 @@ export default function CashbackConsentScreen() {
       privacyTitle: {
         flex: 1,
         color: theme.text,
-        fontSize: 12,
-        lineHeight: 16,
+        fontSize: 13,
+        lineHeight: 17,
         fontFamily,
         fontWeight: fontWeight.bold as any,
       },
@@ -457,7 +456,7 @@ export default function CashbackConsentScreen() {
               <View style={styles.privacyIconBox}>
                 <MaterialCommunityIcons
                   name={row.icon as any}
-                  size={14}
+                  size={15}
                   color={accent}
                 />
               </View>
