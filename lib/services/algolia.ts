@@ -47,6 +47,10 @@ type SearchAllResult = {
   // Suchen parallel — produkte + markenProdukte). Beide werden
   // mit-cached, sodass Folge-Klicks aus einem Cache-Hit weiterhin
   // korrekt zugeordnet werden können.
+  /** true wenn der Algolia-Call fehlschlug und das ein leerer
+   *  FALLBACK ist (Netz/Timeout) — Consumer sollen "keine Verbindung"
+   *  statt "keine Treffer" zeigen (86ca7uhn4). */
+  failed?: boolean;
   queryIdEigen?: string;
   queryIdMarken?: string;
 };
@@ -369,7 +373,8 @@ export class AlgoliaService {
       return {
         noNameResults: { hits: [], nbHits: 0, page: 0, nbPages: 0, hitsPerPage: 0, processingTimeMS: 0 },
         markenproduktResults: { hits: [], nbHits: 0, page: 0, nbPages: 0, hitsPerPage: 0, processingTimeMS: 0 },
-        totalHits: 0
+        totalHits: 0,
+        failed: true
       };
     }
   }

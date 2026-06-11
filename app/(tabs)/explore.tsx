@@ -2,6 +2,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BlurView } from 'expo-blur';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
+import { showRetryableErrorToast } from '@/lib/services/ui/toast';
 import { safePush } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -2069,6 +2070,9 @@ export default function ExploreScreen() {
   // Pulled out as a standalone so callers can pass a query directly
   // (route-param auto-submit) without waiting for `query` state to
   // settle on a specific render.
+  // Self-Referenz fuer den Retry-Toast (useCallback kann sich nicht
+  // selbst in den eigenen Deps referenzieren).
+  const runSearchRef = useRef<((q: string) => Promise<void>) | null>(null);
   const runSearch = useCallback(
     async (q: string) => {
       const trimmed = q.trim();
@@ -2093,6 +2097,15 @@ export default function ExploreScreen() {
         // ~200 ms even on a cold cache.
         const res = await AlgoliaService.searchAll(trimmed, 0, 40);
         if (isStale()) return;
+        // Netzwerk-Fehler ehrlich machen (86ca7uhn4): der leere
+        // Fallback aus searchAll sah bisher aus wie "0 Treffer" —
+        // User zweifelt an der Datenbank statt am Empfang.
+        if (res.failed) {
+          showRetryableErrorToast(
+            'Suche gerade nicht möglich — prüfe deine Verbindung.',
+            () => void runSearchRef.current?.(trimmed),
+          );
+        }
         const [eigen, marken] = await Promise.all([
           Promise.all(
             res.noNameResults.hits.map((h) => enrichWithFirestore(h, true)),
@@ -2119,12 +2132,17 @@ export default function ExploreScreen() {
         console.warn('Stöbern in-place search failed', e);
         setSearchHitsEigen([]);
         setSearchHitsMarken([]);
+        showRetryableErrorToast(
+          'Suche gerade nicht möglich — prüfe deine Verbindung.',
+          () => void runSearchRef.current?.(trimmed),
+        );
       } finally {
         if (!isStale()) setSearchLoading(false);
       }
     },
     [tab, analytics, enrichWithFirestore],
   );
+  runSearchRef.current = runSearch;
 
   // Infinite-scroll loader for search mode. Per-side independent
   // pagination — each Algolia index has its own `nbHits`. Skips
