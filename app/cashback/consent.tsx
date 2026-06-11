@@ -291,7 +291,7 @@ function RewardsMarquee({
   );
 
   return (
-    <View style={{ overflow: 'hidden', marginTop: compact ? 8 : 16 }}>
+    <View style={{ overflow: 'hidden' }}>
       <Animated.View style={[{ flexDirection: 'row' }, animatedStyle]}>
         {renderRow(true)}
         {renderRow(false)}
@@ -491,7 +491,7 @@ export default function CashbackConsentScreen() {
         letterSpacing: 0.7,
         textTransform: 'uppercase' as const,
         marginHorizontal: 20,
-        marginTop: compact ? 12 : 18,
+        marginTop: 0,
         marginBottom: compact ? 6 : 10,
       },
 
@@ -623,7 +623,13 @@ export default function CashbackConsentScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{
           paddingTop: chromeHeight + 4,
-          paddingBottom: 24,
+          paddingBottom: compact ? 16 : 24,
+          // Auf hohen Displays (Pro Max/Plus) waechst der Content auf
+          // die volle Viewport-Hoehe; die flexiblen Spacer zwischen
+          // den Sektionen verteilen den Ueberschuss gleichmaessig,
+          // statt ihn als Loch vorm Footer zu sammeln. Auf kleinen
+          // Displays kollabieren die Spacer auf ihre minHeight.
+          flexGrow: 1,
         }}
         showsVerticalScrollIndicator={false}
       >
@@ -653,6 +659,8 @@ export default function CashbackConsentScreen() {
           </Text>
         </LinearGradient>
 
+        <View style={{ flexGrow: 1, minHeight: compact ? 12 : 18 }} />
+
         {/* So einfach geht's */}
         <Text style={styles.sectionLabel}>So einfach geht's</Text>
         <View>
@@ -676,10 +684,14 @@ export default function CashbackConsentScreen() {
           ))}
         </View>
 
+        <View style={{ flexGrow: 1, minHeight: compact ? 8 : 14 }} />
+
         {/* Prämien-Marquee — die Einlöse-Optionen laufen als Appetit-
             Strip unter Schritt 3 durch (REWE/Kaufland/Rossmann/Amazon/
             VISA/Bankkonto/Spenden). */}
         <RewardsMarquee theme={theme} accent={accent} compact={compact} />
+
+        <View style={{ flexGrow: 1.4, minHeight: 4 }} />
       </ScrollView>
 
       <View style={styles.footer}>
