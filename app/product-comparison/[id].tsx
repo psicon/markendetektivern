@@ -901,47 +901,6 @@ export default function ProductComparisonScreen() {
     }
   };
 
-  // ─── Error branch ─────────────────────────────────────────────────
-  // We deliberately do NOT short-circuit the render on `loading` —
-  // the rest of the body renders chrome + skeletons until each
-  // stage of data lands (heroReady / detailsReady / nonamesReady).
-  if (error) {
-    return (
-      <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
-        <MaterialCommunityIcons name="alert-circle-outline" size={48} color={theme.textMuted} />
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.bold,
-            fontSize: 16,
-            color: theme.text,
-            marginTop: 12,
-            textAlign: 'center',
-          }}
-        >
-          {error ?? 'Produkt nicht verfügbar'}
-        </Text>
-        <Pressable
-          onPress={handleBack}
-          style={({ pressed }) => ({
-            marginTop: 20,
-            height: 44,
-            paddingHorizontal: 22,
-            borderRadius: radii.full,
-            backgroundColor: brand.primary,
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: pressed ? 0.9 : 1,
-          })}
-        >
-          <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: '#fff' }}>
-            Zurück
-          </Text>
-        </Pressable>
-      </View>
-    );
-  }
-
   // ─── Derived data ─────────────────────────────────────────────────────
   // `mp` is null until the brand product fully resolves; the page
   // chrome and skeleton sections render meanwhile. Live values
@@ -1322,6 +1281,55 @@ export default function ProductComparisonScreen() {
     }
     backOrHome();
   };
+
+  // ─── Error branch ─────────────────────────────────────────────────
+  // We deliberately do NOT short-circuit the render on `loading` —
+  // the rest of the body renders chrome + skeletons until each
+  // stage of data lands (heroReady / detailsReady / nonamesReady).
+  //
+  // WICHTIG (Fix 2026-06-11): Dieser Return MUSS NACH allen Hooks
+  // stehen (useOpenFoodFallback, usePressLock, useEffects oben).
+  // Er stand frueher VOR ihnen -> sobald `error` nach einem
+  // erfolgreichen Render kippte, renderte die Komponente weniger
+  // Hooks ("Rendered fewer hooks than expected"-Crash, Repro: Load-
+  // Fehler nach Onboarding-Skip). Zusaetzlich nutzte der Branch
+  // handleBack aus der TDZ (Definition stand dahinter).
+  if (error) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+        <MaterialCommunityIcons name="alert-circle-outline" size={48} color={theme.textMuted} />
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 16,
+            color: theme.text,
+            marginTop: 12,
+            textAlign: 'center',
+          }}
+        >
+          {error ?? 'Produkt nicht verfügbar'}
+        </Text>
+        <Pressable
+          onPress={handleBack}
+          style={({ pressed }) => ({
+            marginTop: 20,
+            height: 44,
+            paddingHorizontal: 22,
+            borderRadius: radii.full,
+            backgroundColor: brand.primary,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed ? 0.9 : 1,
+          })}
+        >
+          <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: '#fff' }}>
+            Zurück
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   // ─── Render ───────────────────────────────────────────────────────────
   return (
