@@ -94,42 +94,48 @@ const REWARDS: {
   label: string;
   icon: string;
   image?: ImageSourcePropType;
-  /** Abweichende Render-Größe für Wortmarken (Default 24×24). */
+  /** Abweichende Render-Größe für Wortmarken (Default 30×30). */
   imageWidth?: number;
   imageHeight?: number;
+  /** Einkaufsgutschein-Partner → kleines schräges Ticket-Badge überm Logo. */
+  voucher?: boolean;
 }[] = [
   {
     key: 'rewe',
-    label: 'Gutschein',
+    label: 'REWE',
     icon: 'cart-outline',
     image: require('@/assets/rewards/rewe.png'),
+    voucher: true,
   },
   {
     key: 'kaufland',
-    label: 'Gutschein',
+    label: 'Kaufland',
     icon: 'cart-outline',
     image: require('@/assets/rewards/kaufland.png'),
+    voucher: true,
   },
   {
     key: 'rossmann',
-    label: 'Gutschein',
+    label: 'Rossmann',
     icon: 'cart-outline',
     image: require('@/assets/rewards/rossmann.png'),
+    voucher: true,
   },
   {
     key: 'amazon',
-    label: 'Gutschein',
+    label: 'Amazon',
     icon: 'shopping-outline',
     image: require('@/assets/rewards/amazon.png'),
+    voucher: true,
   },
   {
     // Wortmarke sagt schon "VISA" — Label ergänzt nur "Prepaid".
     key: 'visa',
-    label: 'Prepaid-Karte',
+    label: 'VISA Prepaid',
     icon: 'credit-card-outline',
     image: require('@/assets/rewards/visa.png'),
-    imageWidth: 46,
-    imageHeight: 15,
+    imageWidth: 52,
+    imageHeight: 17,
   },
   {
     key: 'paypal',
@@ -205,9 +211,26 @@ function RewardsMarquee({
     gap: 5,
   };
   const logoBox = {
-    height: 30,
+    width: 56,
+    height: 38,
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
+  };
+  // Kleines, schräg gestelltes Gutschein-Ticket in Primary — sitzt
+  // in der oberen Ecke über den Einkaufsgutschein-Logos.
+  const voucherBadge = {
+    position: 'absolute' as const,
+    top: -5,
+    right: 0,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    transform: [{ rotate: '-18deg' }],
   };
   const caption = {
     color: theme.textSub,
@@ -233,8 +256,8 @@ function RewardsMarquee({
               <Image
                 source={item.image}
                 style={{
-                  width: item.imageWidth ?? 26,
-                  height: item.imageHeight ?? 26,
+                  width: item.imageWidth ?? 30,
+                  height: item.imageHeight ?? 30,
                   borderRadius: 6,
                 }}
                 resizeMode="contain"
@@ -242,10 +265,19 @@ function RewardsMarquee({
             ) : (
               <MaterialCommunityIcons
                 name={item.icon as any}
-                size={24}
+                size={26}
                 color={accent}
               />
             )}
+            {item.voucher ? (
+              <View style={voucherBadge}>
+                <MaterialCommunityIcons
+                  name="ticket-percent"
+                  size={11}
+                  color={accent}
+                />
+              </View>
+            ) : null}
           </Animated.View>
           <Text style={caption} numberOfLines={1}>
             {item.label}
