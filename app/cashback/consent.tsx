@@ -30,6 +30,7 @@ import {
   Pressable,
   ScrollView,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import Animated, {
@@ -157,9 +158,11 @@ const REWARDS: {
 function RewardsMarquee({
   theme,
   accent,
+  compact,
 }: {
   theme: any;
   accent: string;
+  compact: boolean;
 }) {
   const [rowWidth, setRowWidth] = useState(0);
   const offset = useSharedValue(0);
@@ -288,7 +291,7 @@ function RewardsMarquee({
   );
 
   return (
-    <View style={{ overflow: 'hidden', marginTop: 16 }}>
+    <View style={{ overflow: 'hidden', marginTop: compact ? 8 : 16 }}>
       <Animated.View style={[{ flexDirection: 'row' }, animatedStyle]}>
         {renderRow(true)}
         {renderRow(false)}
@@ -343,6 +346,10 @@ export default function CashbackConsentScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { user, isAnonymous } = useAuth();
+  // Kompakt-Modus für kleine Displays (iPhone SE-Klasse): engere
+  // Paddings, damit Hero + alle 3 Steps ohne Scrollen sichtbar sind.
+  const { height: winHeight } = useWindowDimensions();
+  const compact = winHeight < 700;
   // from=settings (Profil-Toggle, ClickUp 86ca6u6xd [5]): nach Accept
   // zurück zu den Einstellungen statt in den Kamera-Flow.
   const params = useLocalSearchParams<{ from?: string }>();
@@ -438,10 +445,10 @@ export default function CashbackConsentScreen() {
       // family). Big headline, Konditionen bewusst ohne harte Zahlen.
       hero: {
         marginHorizontal: 20,
-        marginTop: 6,
+        marginTop: 4,
         borderRadius: 18,
         paddingHorizontal: 18,
-        paddingVertical: 18,
+        paddingVertical: compact ? 12 : 14,
         overflow: 'hidden' as const,
       },
       heroIcon: {
@@ -459,11 +466,11 @@ export default function CashbackConsentScreen() {
         fontWeight: fontWeight.bold as any,
         letterSpacing: 0.8,
         textTransform: 'uppercase' as const,
-        marginTop: 10,
+        marginTop: compact ? 8 : 10,
       },
       heroTitle: {
         color: '#fff',
-        fontSize: 24,
+        fontSize: compact ? 21 : 24,
         fontFamily,
         fontWeight: fontWeight.extraBold as any,
         letterSpacing: -0.4,
@@ -484,8 +491,8 @@ export default function CashbackConsentScreen() {
         letterSpacing: 0.7,
         textTransform: 'uppercase' as const,
         marginHorizontal: 20,
-        marginTop: 22,
-        marginBottom: 10,
+        marginTop: compact ? 12 : 18,
+        marginBottom: compact ? 6 : 10,
       },
 
       // Step row — circle with the step number + title + sub. Three
@@ -495,7 +502,7 @@ export default function CashbackConsentScreen() {
         alignItems: 'center' as const,
         gap: 12,
         paddingHorizontal: 20,
-        paddingVertical: 8,
+        paddingVertical: compact ? 5 : 8,
       },
       stepCircle: {
         width: 38,
@@ -542,8 +549,8 @@ export default function CashbackConsentScreen() {
         flexDirection: 'row' as const,
         alignItems: 'flex-start' as const,
         paddingHorizontal: 4,
-        paddingTop: 4,
-        paddingBottom: 6,
+        paddingTop: compact ? 2 : 4,
+        paddingBottom: compact ? 3 : 6,
       },
       trustItem: {
         flex: 1,
@@ -574,9 +581,9 @@ export default function CashbackConsentScreen() {
 
       footer: {
         paddingHorizontal: 16,
-        paddingTop: 12,
-        paddingBottom: insets.bottom + 12,
-        gap: 6,
+        paddingTop: compact ? 8 : 12,
+        paddingBottom: insets.bottom + (compact ? 6 : 12),
+        gap: compact ? 4 : 6,
         borderTopWidth: 1,
         borderTopColor: theme.border ?? 'rgba(0,0,0,0.06)',
         backgroundColor: theme.bg,
@@ -584,7 +591,7 @@ export default function CashbackConsentScreen() {
       acceptButton: {
         backgroundColor: accent,
         borderRadius: 14,
-        height: 52,
+        height: compact ? 48 : 52,
         alignItems: 'center' as const,
         justifyContent: 'center' as const,
         flexDirection: 'row' as const,
@@ -603,10 +610,10 @@ export default function CashbackConsentScreen() {
         fontFamily,
         fontSize: 13,
         textAlign: 'center' as const,
-        paddingVertical: 8,
+        paddingVertical: compact ? 5 : 8,
       },
     }),
-    [theme, accent, insets.bottom, isSubmitting],
+    [theme, accent, insets.bottom, isSubmitting, compact],
   );
 
   return (
@@ -672,7 +679,7 @@ export default function CashbackConsentScreen() {
         {/* Prämien-Marquee — die Einlöse-Optionen laufen als Appetit-
             Strip unter Schritt 3 durch (REWE/Kaufland/Rossmann/Amazon/
             VISA/Bankkonto/Spenden). */}
-        <RewardsMarquee theme={theme} accent={accent} />
+        <RewardsMarquee theme={theme} accent={accent} compact={compact} />
       </ScrollView>
 
       <View style={styles.footer}>
@@ -724,15 +731,20 @@ export default function CashbackConsentScreen() {
 
         {/* Legal-Zeile ganz unten, klein unter "Jetzt nicht"
             (User-Vorgabe 2026-06-10). */}
-        <Text style={styles.legalText}>
-          Mit "Akzeptieren" stimmst du unseren{' '}
+        <Text
+          style={styles.legalText}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.82}
+        >
+          Mit "Akzeptieren" stimmst du{' '}
           <Text
             style={styles.legalLink}
             onPress={() => Linking.openURL(TERMS_URL)}
           >
             AGB
           </Text>
-          {' '}und der{' '}
+          {' '}&{' '}
           <Text
             style={styles.legalLink}
             onPress={() => Linking.openURL(PRIVACY_URL)}
