@@ -1,3 +1,4 @@
+import * as Device from 'expo-device';
 import { REVENUECAT_CONFIG } from '@/lib/config/revenueCatConfig';
 import { revenueCatService } from '@/lib/services/revenueCatService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -142,7 +143,10 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
 
           // Falls (noch) kein Premium: restore im Hintergrund versuchen.
           // Cleanup-Flag verhindert state-set nach Unmount.
-          if (!isPremiumUser) {
+          // NICHT im Simulator: restorePurchases triggert dort den
+          // Sandbox-Apple-ID-Login-Prompt in Endlosschleife (Sim hat
+          // keinen App-Store-Account) — blockiert jedes Sim-Testing.
+          if (!isPremiumUser && Device.isDevice) {
             revenueCatService.restorePurchases()
               .then(async () => {
                 if (cancelled) return;
