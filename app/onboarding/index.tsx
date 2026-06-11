@@ -51,6 +51,10 @@ import { revenueCatService } from '@/lib/services/revenueCatService';
 import { detectCountry, type DachCountry } from '@/lib/utils/country';
 
 const { width } = Dimensions.get('window');
+// SE-Klasse (Höhe < 700): Climax-Step bekommt kompakte Maße, damit
+// Jahresersparnis-Card + Auth-CTAs ohne Scrollen sichtbar sind.
+// Alle größeren Screens bleiben unverändert (User-Vorgabe 2026-06-11).
+const IS_SMALL_SCREEN = Dimensions.get('window').height < 700;
 
 // Flow Variante B (User-Decision 2026-05-22):
 //   Step 1 = Hero (ohne ProgressBar, "Los geht's"-Button)
@@ -1438,15 +1442,35 @@ export default function OnboardingScreen() {
               showsVerticalScrollIndicator={false}
             >
               {/* Hero Section mit Lottie Animation */}
-              <View style={styles.savingsHero}>
+              <View
+                style={[
+                  styles.savingsHero,
+                  IS_SMALL_SCREEN && { marginTop: 2, marginBottom: 10 },
+                ]}
+              >
                 <LottieView
                   source={require('@/assets/lottie/money.json')}
                   autoPlay
                   loop={false}
-                  style={styles.moneyLottie}
+                  style={[
+                    styles.moneyLottie,
+                    IS_SMALL_SCREEN && { width: 84, height: 84, marginBottom: 8 },
+                  ]}
                 />
-                <Text style={styles.savingsHeroTitle}>Dein Sparpotenzial!</Text>
-                <Text style={styles.savingsHeroSubtitle}>
+                <Text
+                  style={[
+                    styles.savingsHeroTitle,
+                    IS_SMALL_SCREEN && { fontSize: 22, marginBottom: 4 },
+                  ]}
+                >
+                  Dein Sparpotenzial!
+                </Text>
+                <Text
+                  style={[
+                    styles.savingsHeroSubtitle,
+                    IS_SMALL_SCREEN && { fontSize: 13 },
+                  ]}
+                >
                   Basierend auf deinem Wocheneinkauf von {budget}€
                 </Text>
               </View>
@@ -1455,9 +1479,21 @@ export default function OnboardingScreen() {
                   waren redundant zur Subline und drückten auf kleinen
                   Displays (iPhone SE) Cards + CTAs unter den Fold.
                   Weekly-Info wandert inline in den Subtext. */}
-              <View style={styles.yearlyHighlight}>
+              <View
+                style={[
+                  styles.yearlyHighlight,
+                  IS_SMALL_SCREEN && { padding: 14, marginBottom: 10 },
+                ]}
+              >
                 <Text style={styles.yearlyLabel}>🏆 Deine Jahresersparnis</Text>
-                <Text style={styles.yearlyAmount}>{yearlySavings}€</Text>
+                <Text
+                  style={[
+                    styles.yearlyAmount,
+                    IS_SMALL_SCREEN && { fontSize: 36, marginBottom: 4 },
+                  ]}
+                >
+                  {yearlySavings}€
+                </Text>
                 <Text style={styles.yearlySubtext}>
                   {monthlySavings}€/Monat · {weeklySavings}€/Woche
                 </Text>
@@ -1485,7 +1521,12 @@ export default function OnboardingScreen() {
               <Text style={styles.climaxAuthHeadline}>
                 Sichere dein Sparpotenzial
               </Text>
-              <Text style={styles.climaxAuthSubline}>
+              <Text
+                style={[
+                  styles.climaxAuthSubline,
+                  IS_SMALL_SCREEN && { marginBottom: 10 },
+                ]}
+              >
                 Erstelle ein Profil, damit deine Antworten + Punkte
                 geräteübergreifend bleiben.
               </Text>
@@ -1495,7 +1536,10 @@ export default function OnboardingScreen() {
                 loading={isLoading}
               />
               <TouchableOpacity
-                style={styles.climaxGuestLink}
+                style={[
+                  styles.climaxGuestLink,
+                  IS_SMALL_SCREEN && { marginTop: 6, paddingVertical: 5 },
+                ]}
                 onPress={completeOnboarding}
                 disabled={isLoading}
               >
