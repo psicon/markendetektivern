@@ -33,7 +33,10 @@ export const HOME_DEMO_ANCHOR_ID = 'home.demoProduct';
 
 export type HomeWalkthroughProps = {
   visible: boolean;
-  onDismiss: () => void;
+  // mode: 'completed' (Tour zu Ende / Demo-Produkt getippt) vs.
+  // 'skipped' (Überspringen / Fetch-Fail) — steuert den Demografie-
+  // Sheet-Aufschub (2026-06-11).
+  onDismiss: (mode?: 'completed' | 'skipped') => void;
 };
 
 // ─── Demo-Produkt-Resolver ──────────────────────────────────────
@@ -119,7 +122,7 @@ export function HomeWalkthrough({
   // Fetch-Fail → silent dismiss.
   useEffect(() => {
     if (visible && demoFetchFailed) {
-      onDismiss();
+      onDismiss('skipped');
     }
   }, [visible, demoFetchFailed, onDismiss]);
 
@@ -133,7 +136,7 @@ export function HomeWalkthrough({
     useCallback(() => {
       return () => {
         if (visibleRef.current) {
-          onDismiss();
+          onDismiss('completed');
         }
       };
     }, [onDismiss]),
@@ -166,7 +169,7 @@ export function HomeWalkthrough({
       title="Diese Karten siehst du überall"
       body="Markenprodukt oder günstige Alternative — tipp einfach drauf. Du siehst sofort alles: Preis, wie ähnlich beide sind, und wie viel du sparen kannst."
       onTapProduct={handleTapDemoProduct}
-      onSkip={onDismiss}
+      onSkip={() => onDismiss('skipped')}
     />
   );
 }

@@ -143,6 +143,13 @@ export default function NoNameDetailScreen() {
   const { user } = useAuth();
   const { toggleFavorite, isFavorite } = useFavorites();
 
+  // Produktbesuch fürs Demografie-Sheet-Aufschub-Signal (2026-06-11).
+  useEffect(() => {
+    import('@/lib/services/demographicsPromptSignals')
+      .then((m) => m.markProductVisited())
+      .catch(() => {});
+  }, []);
+
   // ─── Coachmark Walkthrough ───────────────────────────────────
   // Tour 'product-detail' fires beim ersten Aufruf einer Detail-
   // Seite. Anchors sitzen unten auf den drei ActionButtons in der

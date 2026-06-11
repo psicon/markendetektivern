@@ -99,11 +99,27 @@ export const CoachmarkService = {
    * Tour als gesehen markieren. Speichert den ISO-Zeitpunkt;
    * der Wert ist sowohl Marker ("gesehen") als auch Daten ("wann").
    */
-  async markSeen(tour: TourKey): Promise<void> {
+  async markSeen(tour: TourKey, mode: 'completed' | 'skipped' = 'completed'): Promise<void> {
     try {
       await AsyncStorage.setItem(storageKeyFor(tour), new Date().toISOString());
+      // Seen-MODUS separat (2026-06-11, Demographics-Aufschub): das
+      // Demografie-Sheet darf nach KOMPLETTEM Walkthrough sofort
+      // kommen, nach SKIP erst beim 2. App-Start oder nach dem ersten
+      // Produktbesuch. Bestandsdaten ohne Modus-Key gelten als
+      // 'completed' (kein Aufschub — Verhalten wie bisher).
+      await AsyncStorage.setItem(`${storageKeyFor(tour)}_mode`, mode);
     } catch (e) {
       console.warn('Coachmark markSeen failed (non-fatal):', e);
+    }
+  },
+
+  /** Wie wurde die Tour beendet? null = kein Modus gespeichert (Altdaten). */
+  async getSeenMode(tour: TourKey): Promise<'completed' | 'skipped' | null> {
+    try {
+      const v = await AsyncStorage.getItem(`${storageKeyFor(tour)}_mode`);
+      return v === 'skipped' || v === 'completed' ? v : null;
+    } catch {
+      return null;
     }
   },
 

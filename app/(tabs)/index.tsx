@@ -332,6 +332,26 @@ export default function HomeScreen() {
         const { CoachmarkService } = await import('@/lib/services/coachmarkService');
         if (!(await CoachmarkService.getSeen('home'))) { why("getSeen('home')=false — walkthrough nie gesehen/markiert"); return; }
 
+        // Aufschub nach Walkthrough-SKIP (User-Spec 2026-06-11): nach
+        // KOMPLETT durchlaufener Tour darf das Sheet sofort kommen
+        // (der Tour-Abschluss ist ohnehin der Tap auf das Demo-Produkt
+        // = erster Produktbesuch). Nach SKIP erst beim 2. App-Start
+        // ODER nach dem ersten Produktbesuch + Rückkehr zum Home (der
+        // isFocused-Re-Run dieses Effects). Altdaten ohne Modus-Key
+        // gelten als 'completed' (Verhalten wie bisher).
+        const seenMode = await CoachmarkService.getSeenMode('home');
+        if (seenMode === 'skipped') {
+          const signals = await import('@/lib/services/demographicsPromptSignals');
+          const [startCount, productVisited] = await Promise.all([
+            signals.getAppStartCount(),
+            signals.wasProductVisited(),
+          ]);
+          if (startCount < 2 && !productVisited) {
+            why(`walkthrough geskippt — Aufschub aktiv (starts=${startCount}, produktBesucht=false)`);
+            return;
+          }
+        }
+
         const { getDoc, doc } = await import('@react-native-firebase/firestore');
         const { db } = await import('@/lib/firebase');
         const snap = await getDoc(doc(db, 'users', user.uid));

@@ -86,6 +86,13 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
     }
   }, []); // Nur einmal beim App-Start
 
+  // App-Start-Zähler für den Demografie-Sheet-Aufschub (2026-06-11).
+  useEffect(() => {
+    import('@/lib/services/demographicsPromptSignals')
+      .then((m) => m.registerAppStart())
+      .catch(() => {});
+  }, []);
+
   // Markt-Daten-Consent-Gate + Journey-Fortsetzung (ClickUp 86ca6u6xd):
   // Das Gate hält den Consent-Status des Users live (Cashback-Consent
   // v2 deckt die App-Nutzungsdaten ab). journeyTrackingService + IP-

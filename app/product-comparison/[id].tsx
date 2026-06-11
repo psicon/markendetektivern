@@ -224,6 +224,13 @@ export default function ProductComparisonScreen() {
   // #5: Scroll-Stop-Lesen der KI-Sektion (measure(), kein Rauschen).
   const aiSectionRef = useRef<View>(null);
   const sectionReadFiredRef = useRef(false);
+
+  // Produktbesuch fürs Demografie-Sheet-Aufschub-Signal (2026-06-11).
+  useEffect(() => {
+    import('@/lib/services/demographicsPromptSignals')
+      .then((m) => m.markProductVisited())
+      .catch(() => {});
+  }, []);
   const sectionDwellTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Different callers across the app push either `?type=markenprodukt`
