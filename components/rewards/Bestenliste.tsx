@@ -1,5 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { SegmentedTabs } from '@/components/design/SegmentedTabs';
+import { CITY_TO_BUNDESLAND } from '@/lib/data/city-to-bundesland';
 import { LinearGradient } from 'expo-linear-gradient';
 import { doc, updateDoc } from '@react-native-firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -113,6 +113,7 @@ export function BestenlisteTab({
     setOuterScope(next);
   };
 
+
   // ─── Overall: period ──────────────────────────────────────────
   // ClickUp 86ca6qwb2: Die User-Bestenliste zeigt NUR Punkte —
   // oeffentliche Geld-Summen einzelner Nutzer sind raus. Die
@@ -129,6 +130,32 @@ export function BestenlisteTab({
   // ("Aller Zeiten"). The two axes the user wants to compare are
   // BL vs City (lifted state) and Punkte vs Ersparnis (local).
   const [regionMetric, setRegionMetric] = useState<OverallMetric>('pts');
+  // Gemeinsamer Liga-Header (alle 5 Ligen) — gespeist aus Scope/Periode/Geo.
+  const leagueHeader =
+    outerScope === 'overall'
+      ? {
+          title: `${PERIOD_META[overallPeriod].emoji} ${PERIOD_META[overallPeriod].name}`,
+          sub: `${PERIOD_META[overallPeriod].klartext}${
+            formatSeasonCountdown(overallPeriod)
+              ? ` · ${formatSeasonCountdown(overallPeriod)}`
+              : ''
+          }`,
+          chip: PERIOD_META[overallPeriod].chipLabel,
+          gold: overallPeriod === 'all',
+        }
+      : geo === 'bundesland'
+        ? {
+            title: '🗺️ Bundesländer-Liga',
+            sub: '16 Bundesländer im Duell',
+            chip: 'Länder',
+            gold: false,
+          }
+        : {
+            title: '🏙️ Städte-Liga',
+            sub: 'Die Top-20-Städte im Duell',
+            chip: 'Städte',
+            gold: false,
+          };
 
   // ─── Data ─────────────────────────────────────────────────────
   // The user's own percentile + motivational message used to live
@@ -223,102 +250,88 @@ export function BestenlisteTab({
         />
       </View>
 
-      {/* ─── Outer scope: SegmentedTabs — die EINZIGE Top-Ebene
-          (Liga-Modell). Der StatusHero trennt sie visuell von den
-          Errungenschaften/Bestenliste-Tabs am Seitenkopf. ─── */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
-        <SegmentedTabs
-          tabs={[
-            { key: 'overall', label: 'Detektive' },
-            { key: 'region', label: 'Regionen' },
-          ]}
-          value={outerScope}
-          onChange={(k) => onOuterChange(k as 'overall' | 'region')}
-        />
+      {/* ─── Liga-Header: das EINZIGE Steuerelement (keine Tabs mehr —
+          User-Feedback 2026-06-11 'immer noch Tabs in Tabs'). Titel +
+          Klartext links, Liga-Chip rechts öffnet das Sheet mit ALLEN
+          fünf Ligen (Monat/Woche/Hall of Fame + Länder/Städte). ─── */}
+      <View
+        style={{
+          paddingHorizontal: 20,
+          paddingTop: 14,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+        }}
+      >
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 17,
+              letterSpacing: -0.2,
+              color: leagueHeader.gold ? '#c98a00' : theme.text,
+            }}
+          >
+            {leagueHeader.title}
+          </Text>
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 11,
+              color: theme.textMuted,
+              marginTop: 1,
+            }}
+          >
+            {leagueHeader.sub}
+          </Text>
+        </View>
+        <Pressable
+          onPress={() => setPeriodSheetOpen(true)}
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 4,
+            height: 34,
+            paddingLeft: 12,
+            paddingRight: 8,
+            borderRadius: 12,
+            backgroundColor: theme.surface,
+            borderWidth: 1,
+            borderColor: theme.border,
+            opacity: pressed ? 0.85 : 1,
+          })}
+        >
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.bold,
+              fontSize: 12,
+              color: theme.text,
+            }}
+          >
+            {leagueHeader.chip}
+          </Text>
+          <MaterialCommunityIcons
+            name="chevron-down"
+            size={16}
+            color={theme.textMuted}
+          />
+        </Pressable>
       </View>
 
 
       {/* ─── Outer pager (Overall / Regionenkampf) ─── */}
       {/* No inner PagerView — its fixed height was clipping content
           and swallowing the parent ScrollView's vertical gesture, so
-          users couldn't scroll the leaderboard. The SegmentedTabs above
-          drive `outerScope` directly via state. */}
+          users couldn't scroll the leaderboard. Der Liga-Header oben
+          treibt `outerScope`/`geo`/`overallPeriod` via Sheet. */}
       {outerScope === 'overall' ? (
         <View>
-          {/* Liga-Header: Name + Klartext + Saison-Countdown links,
-              Zeitraum-Chip (öffnet FilterSheet) rechts. */}
-          <View
-            style={{
-              paddingHorizontal: 20,
-              paddingTop: 14,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 10,
-            }}
-          >
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text
-                numberOfLines={1}
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.extraBold,
-                  fontSize: 17,
-                  letterSpacing: -0.2,
-                  color: overallPeriod === 'all' ? '#c98a00' : theme.text,
-                }}
-              >
-                {PERIOD_META[overallPeriod].emoji} {PERIOD_META[overallPeriod].name}
-              </Text>
-              <Text
-                numberOfLines={1}
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.medium,
-                  fontSize: 11,
-                  color: theme.textMuted,
-                  marginTop: 1,
-                }}
-              >
-                {PERIOD_META[overallPeriod].klartext}
-                {formatSeasonCountdown(overallPeriod)
-                  ? ` · ${formatSeasonCountdown(overallPeriod)}`
-                  : ''}
-              </Text>
-            </View>
-            <Pressable
-              onPress={() => setPeriodSheetOpen(true)}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 4,
-                height: 34,
-                paddingLeft: 12,
-                paddingRight: 8,
-                borderRadius: 12,
-                backgroundColor: theme.surface,
-                borderWidth: 1,
-                borderColor: theme.border,
-                opacity: pressed ? 0.85 : 1,
-              })}
-            >
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.bold,
-                  fontSize: 12,
-                  color: theme.text,
-                }}
-              >
-                {PERIOD_META[overallPeriod].chipLabel}
-              </Text>
-              <MaterialCommunityIcons
-                name="chevron-down"
-                size={16}
-                color={theme.textMuted}
-              />
-            </Pressable>
-          </View>
           <UserBoard
             users={overallUsers}
             period={overallPeriod}
@@ -332,30 +345,17 @@ export function BestenlisteTab({
         </View>
       ) : (
         <View>
-          {/* EINE Kontroll-Zeile: Geo links, Metrik rechts. Die
-              Ersparnis-Metrik ist im Regionenkampf gewollt (Aggregate
-              ohne Personenbezug — User-Vorgabe: "super wichtig"). */}
+          {/* Metrik-Toggle (Geo lebt im Liga-Sheet). Ersparnis ist im
+              Regionenkampf gewollt — Aggregate ohne Personenbezug. */}
           <View
             style={{
               paddingHorizontal: 20,
-              paddingTop: 14,
+              paddingTop: 10,
               flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 8,
+              justifyContent: 'flex-end',
             }}
           >
-            <View style={{ flex: 1 }}>
-              <InlineToggle
-                value={geo}
-                onChange={setGeo}
-                options={[
-                  { key: 'bundesland', label: '🗺️ Länder' },
-                  { key: 'stadt', label: '🏙️ Städte' },
-                ]}
-              />
-            </View>
-            <View style={{ width: 150 }}>
+            <View style={{ width: 168 }}>
               <InlineToggle
                 value={regionMetric}
                 onChange={setRegionMetric}
@@ -394,83 +394,85 @@ export function BestenlisteTab({
 
       <RefreshHint updatedAt={updatedAt} />
 
-      {/* ─── Zeitraum-Sheet (Liga-Wahl) — Marketing-Name + Klartext +
-          Beschreibung pro Liga; Hall of Fame in Gold. ─── */}
+      {/* ─── Liga-Sheet: ALLE fünf Ligen in zwei Sektionen — das
+          einzige Navigations-Element der Bestenliste. ─── */}
       <FilterSheet
         visible={periodSheetOpen}
         title="Liga wählen"
         onClose={() => setPeriodSheetOpen(false)}
       >
         <View style={{ gap: 8, paddingBottom: 8 }}>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.bold,
+              fontSize: 11,
+              letterSpacing: 0.7,
+              textTransform: 'uppercase',
+              color: theme.textMuted,
+              marginBottom: 2,
+            }}
+          >
+            Deine Liga
+          </Text>
           {(['month', 'week', 'all'] as Period[]).map((pKey) => {
             const meta = PERIOD_META[pKey];
-            const on = overallPeriod === pKey;
+            const on = outerScope === 'overall' && overallPeriod === pKey;
             return (
-              <Pressable
+              <LeagueOption
                 key={pKey}
+                emoji={meta.emoji}
+                name={meta.name}
+                klartext={meta.klartext}
+                desc={meta.desc}
+                gold={pKey === 'all'}
+                active={on}
                 onPress={() => {
+                  onOuterChange('overall');
                   setOverallPeriod(pKey);
                   setPeriodSheetOpen(false);
                 }}
-                style={({ pressed }) => ({
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 12,
-                  paddingHorizontal: 14,
-                  paddingVertical: 12,
-                  borderRadius: 14,
-                  backgroundColor: on
-                    ? theme.primaryContainer ?? theme.surfaceAlt
-                    : theme.surface,
-                  borderWidth: on ? 1.5 : 1,
-                  borderColor: on ? theme.primary : theme.border,
-                  opacity: pressed ? 0.9 : 1,
-                })}
-              >
-                <Text style={{ fontSize: 22 }}>{meta.emoji}</Text>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text
-                    style={{
-                      fontFamily,
-                      fontWeight: fontWeight.extraBold,
-                      fontSize: 14,
-                      color: pKey === 'all' ? '#c98a00' : theme.text,
-                    }}
-                  >
-                    {meta.name}
-                    <Text
-                      style={{
-                        fontWeight: fontWeight.medium,
-                        color: theme.textMuted,
-                      }}
-                    >
-                      {'  ·  '}
-                      {meta.klartext}
-                    </Text>
-                  </Text>
-                  <Text
-                    style={{
-                      fontFamily,
-                      fontWeight: fontWeight.medium,
-                      fontSize: 11.5,
-                      lineHeight: 16,
-                      color: theme.textSub,
-                      marginTop: 2,
-                    }}
-                  >
-                    {meta.desc}
-                  </Text>
-                </View>
-                {on ? (
-                  <MaterialCommunityIcons
-                    name="check-circle"
-                    size={20}
-                    color={theme.primary}
-                  />
-                ) : null}
-              </Pressable>
+              />
             );
           })}
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.bold,
+              fontSize: 11,
+              letterSpacing: 0.7,
+              textTransform: 'uppercase',
+              color: theme.textMuted,
+              marginTop: 10,
+              marginBottom: 2,
+            }}
+          >
+            Regionen-Kampf
+          </Text>
+          <LeagueOption
+            emoji="🗺️"
+            name="Bundesländer-Liga"
+            klartext="16 Länder"
+            desc="Welches Bundesland sammelt am meisten — Punkte oder Ersparnis?"
+            active={outerScope === 'region' && geo === 'bundesland'}
+            onPress={() => {
+              onOuterChange('region');
+              setGeo('bundesland');
+              setPeriodSheetOpen(false);
+            }}
+          />
+          <LeagueOption
+            emoji="🏙️"
+            name="Städte-Liga"
+            klartext="Top 20"
+            desc="Deine Stadt gegen den Rest — kämpf für dein Revier."
+            active={outerScope === 'region' && geo === 'stadt'}
+            onPress={() => {
+              onOuterChange('region');
+              setGeo('stadt');
+              setPeriodSheetOpen(false);
+            }}
+          />
         </View>
       </FilterSheet>
 
@@ -482,6 +484,8 @@ export function BestenlisteTab({
       >
         <RegionSetupContent
           suggestion={{ city: userCity, bundesland: userBL }}
+          mode={geo}
+          cityOptions={cityRows.map((r) => r.label)}
           onAccept={async () => {
             if (userBL && userCity) await saveRegion(userBL, userCity);
             setSetupOpen(false);
@@ -489,8 +493,16 @@ export function BestenlisteTab({
           onPickOther={() => setSetupOpen(false)}
           onPickBundesland={async (bl) => {
             // Save BL only — keep whatever city the profile already
-            // had (or empty). City picker is a follow-up.
+            // had (or empty).
             await saveRegion(bl, userCity ?? '');
+            setSetupOpen(false);
+          }}
+          onPickCity={async (pickedCity) => {
+            // Stadt → Bundesland über das statische Mapping ableiten,
+            // damit BEIDE Ligen ab sofort den DU-Highlight haben.
+            const mappedBl =
+              CITY_TO_BUNDESLAND[pickedCity] ?? userBL ?? '';
+            await saveRegion(mappedBl, pickedCity);
             setSetupOpen(false);
           }}
         />
@@ -585,6 +597,85 @@ function SetupNudge({
 // Accepts either an MDI icon name (rendered in a coloured circle)
 // or a short emoji string (rendered as plain text). One component
 // → one design, no visual drift between selectors.
+// ─── Liga-Option im Liga-Sheet ──────────────────────────────────────────
+function LeagueOption({
+  emoji,
+  name,
+  klartext,
+  desc,
+  active,
+  gold,
+  onPress,
+}: {
+  emoji: string;
+  name: string;
+  klartext: string;
+  desc: string;
+  active: boolean;
+  gold?: boolean;
+  onPress: () => void;
+}) {
+  const { theme } = useTokens();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        borderRadius: 14,
+        backgroundColor: active
+          ? theme.primaryContainer ?? theme.surfaceAlt
+          : theme.surface,
+        borderWidth: active ? 1.5 : 1,
+        borderColor: active ? theme.primary : theme.border,
+        opacity: pressed ? 0.9 : 1,
+      })}
+    >
+      <Text style={{ fontSize: 22 }}>{emoji}</Text>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 14,
+            color: gold ? '#c98a00' : theme.text,
+          }}
+        >
+          {name}
+          <Text
+            style={{ fontWeight: fontWeight.medium, color: theme.textMuted }}
+          >
+            {'  ·  '}
+            {klartext}
+          </Text>
+        </Text>
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 11.5,
+            lineHeight: 16,
+            color: theme.textSub,
+            marginTop: 2,
+          }}
+        >
+          {desc}
+        </Text>
+      </View>
+      {active ? (
+        <MaterialCommunityIcons
+          name="check-circle"
+          size={20}
+          color={theme.primary}
+        />
+      ) : null}
+    </Pressable>
+  );
+}
+
 // ─── Liga-Metadaten + Saison-Countdown (Liga-Modell, 86ca6qwb2) ─────────
 // Marketing-Name IMMER mit Klartext kombiniert (User-Feedback: niemand
 // weiß, was "Rising Star" ist). 'all' ist bewusst als Hall of Fame
@@ -1172,14 +1263,6 @@ function RegionBoard({
   );
 }
 
-// ─── Bundesländer | Städte primary switcher ─────────────────────────────
-//
-// Two equal-width pills at the top of the region tab. Visually
-// distinct from the inline pts/eur toggle in the region control row so
-// the user reads the hierarchy "first WHO is competing, then WHAT
-// metric we're comparing".
-
-
 // ─── Region podium (same look as user podium, but for cities/BL) ────────
 //
 // Same visual grammar as `Podium` (avatars row + pastel cards row),
@@ -1300,6 +1383,7 @@ function RegionPodiumAvatar({
         }}
       >
         {row.label}
+        {row.isMe ? <Text style={{ color: '#0d8575' }}> · Du</Text> : null}
       </Text>
     </View>
   );
@@ -1338,14 +1422,45 @@ function RegionPodiumCard({
         height,
         borderRadius: 16,
         backgroundColor: bg,
-        borderWidth: 1,
-        borderColor: border,
+        // Eigene Region klar markieren (User-Feedback 2026-06-11:
+        // "seh nicht welche meine Region ist"): Primary-Ring + Pin.
+        borderWidth: row.isMe ? 2 : 1,
+        borderColor: row.isMe ? '#0d8575' : border,
         paddingVertical: 12,
         paddingHorizontal: 8,
         alignItems: 'center',
         justifyContent: 'center',
       }}
     >
+      {row.isMe ? (
+        <View
+          style={{
+            position: 'absolute',
+            top: -9,
+            alignSelf: 'center',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 2,
+            backgroundColor: '#0d8575',
+            paddingHorizontal: 7,
+            paddingVertical: 2,
+            borderRadius: 8,
+          }}
+        >
+          <MaterialCommunityIcons name="map-marker" size={9} color="#fff" />
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 9,
+              letterSpacing: 0.5,
+              color: '#fff',
+            }}
+          >
+            DU
+          </Text>
+        </View>
+      ) : null}
       <Text
         style={{
           fontFamily,
@@ -2171,14 +2286,45 @@ function PodiumCard({
         height,
         borderRadius: 16,
         backgroundColor: bg,
-        borderWidth: 1,
-        borderColor: border,
+        // Eigene Region klar markieren (User-Feedback 2026-06-11:
+        // "seh nicht welche meine Region ist"): Primary-Ring + Pin.
+        borderWidth: user.isMe ? 2 : 1,
+        borderColor: user.isMe ? '#0d8575' : border,
         paddingVertical: 12,
         paddingHorizontal: 8,
         alignItems: 'center',
         justifyContent: 'center',
       }}
     >
+      {user.isMe ? (
+        <View
+          style={{
+            position: 'absolute',
+            top: -9,
+            alignSelf: 'center',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 2,
+            backgroundColor: '#0d8575',
+            paddingHorizontal: 7,
+            paddingVertical: 2,
+            borderRadius: 8,
+          }}
+        >
+          <MaterialCommunityIcons name="map-marker" size={9} color="#fff" />
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 9,
+              letterSpacing: 0.5,
+              color: '#fff',
+            }}
+          >
+            DU
+          </Text>
+        </View>
+      ) : null}
       <Text
         style={{
           fontFamily,
@@ -2290,14 +2436,24 @@ const BUNDESLAENDER = [
 
 function RegionSetupContent({
   suggestion,
+  mode,
+  cityOptions,
   onAccept,
   onPickOther,
   onPickBundesland,
+  onPickCity,
 }: {
   suggestion: { city: string | null; bundesland: string | null };
+  /** Aus welcher Liga das Sheet geöffnet wurde — bestimmt, was der
+   *  Picker anbietet (Städte-Kampf braucht eine STADT, nicht nur ein
+   *  Bundesland — vorher war der Stadt-Pfad ein Dead-End). */
+  mode: 'bundesland' | 'stadt';
+  /** Die Top-Städte der Liga (aus den Leaderboard-Rows). */
+  cityOptions: string[];
   onAccept: () => void;
   onPickOther: () => void;
   onPickBundesland: (bl: string) => void;
+  onPickCity: (city: string) => void;
 }) {
   const { theme } = useTokens();
   const city = suggestion.city ?? '';
@@ -2306,6 +2462,8 @@ function RegionSetupContent({
   // default when no suggestion exists.
   const [picking, setPicking] = useState(false);
   const showPicker = picking || !(city && bl);
+  const cityMode = mode === 'stadt';
+  const pickerItems = cityMode ? cityOptions : BUNDESLAENDER;
 
   if (showPicker) {
     return (
@@ -2319,7 +2477,7 @@ function RegionSetupContent({
             textAlign: 'center',
           }}
         >
-          Wähle dein Bundesland
+          {cityMode ? 'Wähle deine Stadt' : 'Wähle dein Bundesland'}
         </Text>
         <Text
           style={{
@@ -2333,8 +2491,9 @@ function RegionSetupContent({
             marginBottom: 14,
           }}
         >
-          Tippe dein Bundesland an — deine Punkte zählen dann für die
-          Bundesländer-Liga.
+          {cityMode
+            ? 'Tippe deine Stadt an — deine Punkte zählen dann für die Städte-Liga.'
+            : 'Tippe dein Bundesland an — deine Punkte zählen dann für die Bundesländer-Liga.'}
         </Text>
         <ScrollView
           style={{ maxHeight: 360 }}
@@ -2349,10 +2508,10 @@ function RegionSetupContent({
               overflow: 'hidden',
             }}
           >
-            {BUNDESLAENDER.map((b, i) => (
+            {pickerItems.map((b, i) => (
               <Pressable
                 key={b}
-                onPress={() => onPickBundesland(b)}
+                onPress={() => (cityMode ? onPickCity(b) : onPickBundesland(b))}
                 style={({ pressed }) => ({
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -2365,7 +2524,7 @@ function RegionSetupContent({
                 })}
               >
                 <MaterialCommunityIcons
-                  name="map-marker-outline"
+                  name={cityMode ? 'city-variant-outline' : 'map-marker-outline'}
                   size={18}
                   color={theme.textMuted}
                 />
@@ -2400,7 +2559,7 @@ function RegionSetupContent({
             textAlign: 'center',
           }}
         >
-          Stadt-Liga folgt — wir aggregieren anonym, du tauchst nirgends einzeln auf.
+          Wir aggregieren anonym — du tauchst nirgends einzeln auf.
         </Text>
       </View>
     );
