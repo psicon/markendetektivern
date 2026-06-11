@@ -1890,3 +1890,37 @@ in der App — Metro/TestFlight/App-Version beeinflussen die Erkennung NICHT.
   (1/6→5/6) — noch NICHT in der Pipeline (bräuchte `sharp`).
 - **Testen:** ein NEU fotografierter Bon läuft frisch; exakt dasselbe Bild-File
   trifft per Dedup (`receipts` contentHash) das alte gecachte Ergebnis.
+
+## Sim-Testing headless: Taps, echtes Offline, RevenueCat-Falle (2026-06-11)
+
+Erarbeitet beim Offline-Resilienz-Test (86ca7uguc) — damit sind
+autonome UI-Tests im Simulator OHNE manuelles Klicken möglich:
+
+- **Taps/Texteingabe im Sim headless**: `idb` (Facebook iOS-Bridge).
+  Setup: `brew install facebook/fb/idb-companion` + `/usr/bin/python3
+  -m pip install --user fb-idb` (NICHT Python 3.14 — asyncio-Bruch;
+  System-Python 3.9 funktioniert → Binary liegt in
+  `~/Library/Python/3.9/bin/idb`). Nutzung: `idb ui tap --udid <UDID>
+  <x> <y>` (LOGISCHE Punkte, nicht Screenshot-Pixel! iPhone 16 =
+  393×852), `idb ui text "..."`, `idb ui key 40` (=Enter).
+  Screenshots via `xcrun simctl io <UDID> screenshot` (Pixel →
+  fuer Tap-Koordinaten durch Scale teilen). osascript/cliclick
+  scheitern an fehlender Accessibility-Permission.
+- **Echtes Offline-Testen**: Mac-Netz kappen, aber NUR innerhalb
+  EINES Bash-Calls mit `trap restore EXIT` (sonst stirbt die eigene
+  Session). WICHTIG: `networksetup -setairportpower en0 off` reicht
+  NICHT — macOS failt auf USB-LAN/iPhone-Tethering over. ALLE
+  Services deaktivieren (`-setnetworkserviceenabled "USB 10/100/1000
+  LAN" off` + iPhone + Thunderbolt Bridge + Wi-Fi) und IM Fenster mit
+  `curl -m 4` verifizieren ("wirklich offline"). Sim-Statusbar-Icon
+  ist NICHT verlaesslich.
+- **Deep-Link auf dieselbe Route remountet nicht** (expo-router) —
+  fuer frische Lade-Effekte eine NEUE Param-ID verwenden.
+- **RevenueCat im Simulator**: `restorePurchases()` (und tlw. schon
+  StoreKit-Zugriffe) triggern im Sim einen ENDLOS-Sandbox-Apple-ID-
+  Prompt ("Bei Apple Account anmelden"), der jede Session ueberlagert
+  und sich nicht killen laesst (AuthenticationServicesUI respawnt).
+  Darum: Boot-Restore nur `if (Device.isDevice)` (expo-device) —
+  steht in RevenueCatProvider. Frischer Test-Sim: `simctl create` +
+  App aus DerivedData installieren + Dev-Client-Deep-Link
+  (`markendetektivern://expo-development-client/?url=...`).
