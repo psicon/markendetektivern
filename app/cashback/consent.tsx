@@ -639,9 +639,11 @@ export default function CashbackConsentScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      {/* Modal-Präsentation (slide_from_bottom): KEIN Zurück-Pfeil —
+          der suggeriert einen Push-Stack. Schließen über "Jetzt nicht"
+          oben rechts oder Swipe-down (gestureEnabled). */}
       <DetailHeader
         title="Cashback"
-        onBack={handleCancel}
         right={
           <Pressable
             accessibilityRole="button"
