@@ -6,6 +6,7 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { isOnline } from '@/lib/services/network';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
@@ -370,6 +371,34 @@ export default function BarcodeScannerScreen() {
       console.log(`❌ No product found in our DB for EAN: ${ean}`);
       console.log(`🔄 Trying external sources cascade…`);
 
+      // Offline-Gate (86ca7uh9n): die External-Cascade ist reine
+      // Netz-Arbeit — ohne Empfang sofort ehrlich antworten statt
+      // den User durch einen langen Spinner + generischen Fehler zu
+      // schicken. Copy-Ton positiv (kein Frust-Framing).
+      if (!isOnline()) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        setHasNavigated(true);
+        setIsSearching(false);
+        setScanningLoading(false);
+        Alert.alert(
+          'Gerade kein Empfang',
+          'Der Barcode wurde gelesen, aber für die Produktsuche brauchen wir kurz Internet. Versuch es einfach erneut, sobald du wieder Empfang hast.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                setScanned(false);
+                setHasNavigated(false);
+                setScanningLoading(false);
+                lastScannedTimestampRef.current = 0;
+                lastScannedEANRef.current = '';
+              },
+            },
+          ],
+        );
+        return;
+      }
+
       // T17.42: Lookup-Cascade via ExternalProductService (REWE →
       // Globus → OpenFood) mit external_products als Cache.
       const lookupResult = await ExternalProductService.lookupByEAN(ean);
@@ -508,9 +537,12 @@ export default function BarcodeScannerScreen() {
       setIsSearching(false);
       setScanningLoading(false);
       
+      const offline = !isOnline();
       Alert.alert(
-        'Fehler',
-        'Beim Suchen des Produkts ist ein Fehler aufgetreten. Bitte versuche es erneut.',
+        offline ? 'Gerade kein Empfang' : 'Fehler',
+        offline
+          ? 'Für die Produktsuche brauchen wir kurz Internet. Versuch es erneut, sobald du wieder Empfang hast.'
+          : 'Beim Suchen des Produkts ist ein Fehler aufgetreten. Bitte versuche es erneut.',
         [
           {
                         text: 'Erneut versuchen',
