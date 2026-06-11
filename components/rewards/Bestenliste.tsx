@@ -1,4 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { LinearGradient } from 'expo-linear-gradient';
 import { doc, updateDoc } from '@react-native-firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -117,7 +118,11 @@ export function BestenlisteTab({
   // oeffentliche Geld-Summen einzelner Nutzer sind raus. Die
   // Ersparnis-Metrik lebt weiter im Regionenkampf (regionMetric),
   // dort sind es Aggregate ohne Personenbezug.
-  const [overallPeriod, setOverallPeriod] = useState<Period>('all');
+  // Liga-Modell (ClickUp 86ca6qwb2, 2026-06-11): Standard = Monats-
+  // Liga (lebender Wettbewerb, jeder hat eine Chance). Woche via
+  // Zeitraum-Chip; 'all' ist als "Hall of Fame" inszeniert.
+  const [overallPeriod, setOverallPeriod] = useState<Period>('month');
+  const [periodSheetOpen, setPeriodSheetOpen] = useState(false);
 
   // ─── Regionenkampf: metric ────────────────────────────────────
   // No period switcher here — region duels are always lifetime
@@ -218,51 +223,101 @@ export function BestenlisteTab({
         />
       </View>
 
-      {/* ─── Outer scope: 2 SCOPE-CARDS (NOT pills) ───
-          Card-style selector visually distinct from the parent
-          "Einlösen | Bestenliste" pill, so we don't have stacked
-          identical-looking tab rows. Same family as the period
-          cards below. */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <ScopeCard
-            active={outerScope === 'overall'}
-            onPress={() => onOuterChange('overall')}
-            icon="account-multiple"
-            title="Overall"
-            sub="Detektive Deutschland"
-          />
-          <ScopeCard
-            active={outerScope === 'region'}
-            onPress={() => onOuterChange('region')}
-            icon="map-marker-radius"
-            title="Regionenkampf"
-            sub="Städte vs. Bundesländer"
-          />
-        </View>
+      {/* ─── Outer scope: SegmentedTabs — die EINZIGE Top-Ebene
+          (Liga-Modell). Der StatusHero trennt sie visuell von den
+          Errungenschaften/Bestenliste-Tabs am Seitenkopf. ─── */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
+        <SegmentedTabs
+          tabs={[
+            { key: 'overall', label: 'Detektive' },
+            { key: 'region', label: 'Regionen' },
+          ]}
+          value={outerScope}
+          onChange={(k) => onOuterChange(k as 'overall' | 'region')}
+        />
       </View>
 
-      {/* Setup nudge — only when explicit city not set yet (Regionenkampf
-          works without it via guessedCity, but the user gets a softer
-          "Wo wohnst du?" hint that gives them a better DU-highlight.) */}
-      {!hasExplicitCity ? (
-        <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>
-          <SetupNudge
-            guessedCity={userCity}
-            onPress={() => setSetupOpen(true)}
-          />
-        </View>
-      ) : null}
 
       {/* ─── Outer pager (Overall / Regionenkampf) ─── */}
       {/* No inner PagerView — its fixed height was clipping content
           and swallowing the parent ScrollView's vertical gesture, so
-          users couldn't scroll the leaderboard. ScopeCards above
+          users couldn't scroll the leaderboard. The SegmentedTabs above
           drive `outerScope` directly via state. */}
       {outerScope === 'overall' ? (
         <View>
-          <View style={{ paddingTop: 10 }}>
-            <PeriodSwitcher value={overallPeriod} onChange={setOverallPeriod} />
+          {/* Liga-Header: Name + Klartext + Saison-Countdown links,
+              Zeitraum-Chip (öffnet FilterSheet) rechts. */}
+          <View
+            style={{
+              paddingHorizontal: 20,
+              paddingTop: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+            }}
+          >
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 17,
+                  letterSpacing: -0.2,
+                  color: overallPeriod === 'all' ? '#c98a00' : theme.text,
+                }}
+              >
+                {PERIOD_META[overallPeriod].emoji} {PERIOD_META[overallPeriod].name}
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 11,
+                  color: theme.textMuted,
+                  marginTop: 1,
+                }}
+              >
+                {PERIOD_META[overallPeriod].klartext}
+                {formatSeasonCountdown(overallPeriod)
+                  ? ` · ${formatSeasonCountdown(overallPeriod)}`
+                  : ''}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => setPeriodSheetOpen(true)}
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+                height: 34,
+                paddingLeft: 12,
+                paddingRight: 8,
+                borderRadius: 12,
+                backgroundColor: theme.surface,
+                borderWidth: 1,
+                borderColor: theme.border,
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.bold,
+                  fontSize: 12,
+                  color: theme.text,
+                }}
+              >
+                {PERIOD_META[overallPeriod].chipLabel}
+              </Text>
+              <MaterialCommunityIcons
+                name="chevron-down"
+                size={16}
+                color={theme.textMuted}
+              />
+            </Pressable>
           </View>
           <UserBoard
             users={overallUsers}
@@ -277,41 +332,30 @@ export function BestenlisteTab({
         </View>
       ) : (
         <View>
-          {/* BL vs Städte — primary axis. Pill row at the top of
-              the region tab, replacing the period switcher (region
-              duels are always lifetime). */}
-          <View style={{ paddingTop: 10, paddingHorizontal: 20 }}>
-            <RegionGeoSwitch value={geo} onChange={setGeo} />
-          </View>
-          {/* Section-Header-Zeile statt Orange-Banner: Titel links,
-              Punkte/Ersparnis-Toggle rechts. Die Ersparnis-Metrik ist
-              im Regionenkampf gewollt (Aggregate, kein Personenbezug —
-              User-Vorgabe 2026-06-11: "super wichtig"). */}
+          {/* EINE Kontroll-Zeile: Geo links, Metrik rechts. Die
+              Ersparnis-Metrik ist im Regionenkampf gewollt (Aggregate
+              ohne Personenbezug — User-Vorgabe: "super wichtig"). */}
           <View
             style={{
-              marginHorizontal: 20,
-              marginTop: 12,
-              marginBottom: 2,
+              paddingHorizontal: 20,
+              paddingTop: 14,
               flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'space-between',
-              gap: 10,
+              gap: 8,
             }}
           >
-            <Text
-              numberOfLines={1}
-              style={{
-                flex: 1,
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 16,
-                letterSpacing: -0.2,
-                color: theme.text,
-              }}
-            >
-              {geo === 'bundesland' ? '🗺️ Bundesländer-Liga' : '🏙️ Städte-Liga'}
-            </Text>
-            <View style={{ width: 168 }}>
+            <View style={{ flex: 1 }}>
+              <InlineToggle
+                value={geo}
+                onChange={setGeo}
+                options={[
+                  { key: 'bundesland', label: '🗺️ Länder' },
+                  { key: 'stadt', label: '🏙️ Städte' },
+                ]}
+              />
+            </View>
+            <View style={{ width: 150 }}>
               <InlineToggle
                 value={regionMetric}
                 onChange={setRegionMetric}
@@ -322,6 +366,17 @@ export function BestenlisteTab({
               />
             </View>
           </View>
+          {/* "Spiel für deine Stadt" — nur noch KONTEXTUELL im
+              Städte-Kampf, wenn keine Stadt gesetzt ist (statt
+              Dauer-Banner über allem; User-Feedback 2026-06-11). */}
+          {geo === 'stadt' && !hasExplicitCity ? (
+            <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>
+              <SetupNudge
+                guessedCity={userCity}
+                onPress={() => setSetupOpen(true)}
+              />
+            </View>
+          ) : null}
           <RegionBoard
             rows={geo === 'bundesland' ? blRows : cityRows}
             metric={regionMetric}
@@ -338,6 +393,86 @@ export function BestenlisteTab({
           Sektion mit Lottie-Loops auf demselben Screen. */}
 
       <RefreshHint updatedAt={updatedAt} />
+
+      {/* ─── Zeitraum-Sheet (Liga-Wahl) — Marketing-Name + Klartext +
+          Beschreibung pro Liga; Hall of Fame in Gold. ─── */}
+      <FilterSheet
+        visible={periodSheetOpen}
+        title="Liga wählen"
+        onClose={() => setPeriodSheetOpen(false)}
+      >
+        <View style={{ gap: 8, paddingBottom: 8 }}>
+          {(['month', 'week', 'all'] as Period[]).map((pKey) => {
+            const meta = PERIOD_META[pKey];
+            const on = overallPeriod === pKey;
+            return (
+              <Pressable
+                key={pKey}
+                onPress={() => {
+                  setOverallPeriod(pKey);
+                  setPeriodSheetOpen(false);
+                }}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                  paddingHorizontal: 14,
+                  paddingVertical: 12,
+                  borderRadius: 14,
+                  backgroundColor: on
+                    ? theme.primaryContainer ?? theme.surfaceAlt
+                    : theme.surface,
+                  borderWidth: on ? 1.5 : 1,
+                  borderColor: on ? theme.primary : theme.border,
+                  opacity: pressed ? 0.9 : 1,
+                })}
+              >
+                <Text style={{ fontSize: 22 }}>{meta.emoji}</Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.extraBold,
+                      fontSize: 14,
+                      color: pKey === 'all' ? '#c98a00' : theme.text,
+                    }}
+                  >
+                    {meta.name}
+                    <Text
+                      style={{
+                        fontWeight: fontWeight.medium,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      {'  ·  '}
+                      {meta.klartext}
+                    </Text>
+                  </Text>
+                  <Text
+                    style={{
+                      fontFamily,
+                      fontWeight: fontWeight.medium,
+                      fontSize: 11.5,
+                      lineHeight: 16,
+                      color: theme.textSub,
+                      marginTop: 2,
+                    }}
+                  >
+                    {meta.desc}
+                  </Text>
+                </View>
+                {on ? (
+                  <MaterialCommunityIcons
+                    name="check-circle"
+                    size={20}
+                    color={theme.primary}
+                  />
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      </FilterSheet>
 
       {/* ─── Region-Setup-Sheet ─── */}
       <FilterSheet
@@ -440,71 +575,6 @@ function SetupNudge({
 
 // ─── Period switcher (3 wide pills with subtitle) ───────────────────────
 
-function PeriodSwitcher({
-  value,
-  onChange,
-}: {
-  value: Period;
-  onChange: (p: Period) => void;
-}) {
-  // Kompakte Chip-Reihe statt einer zweiten vollen ScopeCard-Reihe
-  // (ClickUp 86ca6qwb2: drei gestapelte Selector-Ebenen waren zu
-  // viel). Aktiv-Sprache wie ScopeCard: primaryContainer-Fill +
-  // 1.5er Primary-Border — gleiche Familie, halbe Hoehe.
-  const { theme } = useTokens();
-  const items: { key: Period; emoji: string; title: string }[] = [
-    { key: 'all', emoji: '👑', title: 'Legendär' },
-    { key: 'month', emoji: '⭐', title: 'Rising Star' },
-    { key: 'week', emoji: '🔥', title: 'On Fire' },
-  ];
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        gap: 8,
-        paddingHorizontal: 20,
-      }}
-    >
-      {items.map((it) => {
-        const on = value === it.key;
-        return (
-          <Pressable
-            key={it.key}
-            onPress={() => onChange(it.key)}
-            style={({ pressed }) => ({
-              flex: 1,
-              height: 36,
-              borderRadius: 12,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 5,
-              backgroundColor: on
-                ? theme.primaryContainer ?? theme.surfaceAlt
-                : theme.surface,
-              borderWidth: on ? 1.5 : 1,
-              borderColor: on ? theme.primary : theme.border,
-              opacity: pressed ? 0.85 : 1,
-            })}
-          >
-            <Text style={{ fontSize: 12 }}>{it.emoji}</Text>
-            <Text
-              numberOfLines={1}
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.bold,
-                fontSize: 12,
-                color: on ? theme.primary : theme.textSub,
-              }}
-            >
-              {it.title}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
 
 
 // ─── Scope card (Overall / Regionenkampf top selector) ──────────────────
@@ -515,92 +585,58 @@ function PeriodSwitcher({
 // Accepts either an MDI icon name (rendered in a coloured circle)
 // or a short emoji string (rendered as plain text). One component
 // → one design, no visual drift between selectors.
-function ScopeCard({
-  active,
-  onPress,
-  icon,
-  title,
-  sub,
-}: {
-  active: boolean;
-  onPress: () => void;
-  /** MDI glyph name (contains a hyphen, e.g. "map-marker-radius")
-   *  → rendered in a coloured icon-circle. Otherwise treated as
-   *  a literal emoji string (e.g. "👑", "🔥") → rendered as text. */
-  icon: keyof typeof MaterialCommunityIcons.glyphMap | string;
-  title: string;
-  sub: string;
-}) {
-  const { theme, shadows } = useTokens();
-  const isEmoji =
-    typeof icon === 'string' && !icon.includes('-') && icon.length <= 4;
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        flex: 1,
-        minHeight: 50,
-        borderRadius: 12,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        backgroundColor: active
-          ? theme.primaryContainer ?? theme.surfaceAlt
-          : theme.surface,
-        borderWidth: active ? 1.5 : 1,
-        borderColor: active ? theme.primary : theme.border,
-        opacity: pressed ? 0.92 : 1,
-        ...(active ? shadows.sm : {}),
-      })}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        {isEmoji ? (
-          <Text style={{ fontSize: 18 }}>{icon as string}</Text>
-        ) : (
-          <View
-            style={{
-              width: 24,
-              height: 24,
-              borderRadius: 12,
-              backgroundColor: active ? theme.primary : theme.surfaceAlt,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <MaterialCommunityIcons
-              name={icon as keyof typeof MaterialCommunityIcons.glyphMap}
-              size={14}
-              color={active ? '#fff' : theme.primary}
-            />
-          </View>
-        )}
-        <Text
-          numberOfLines={1}
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 13,
-            color: theme.text,
-            flex: 1,
-          }}
-        >
-          {title}
-        </Text>
-      </View>
-      <Text
-        numberOfLines={1}
-        style={{
-          fontFamily,
-          fontWeight: fontWeight.medium,
-          fontSize: 10,
-          color: theme.textMuted,
-          marginTop: 2,
-        }}
-      >
-        {sub}
-      </Text>
-    </Pressable>
-  );
+// ─── Liga-Metadaten + Saison-Countdown (Liga-Modell, 86ca6qwb2) ─────────
+// Marketing-Name IMMER mit Klartext kombiniert (User-Feedback: niemand
+// weiß, was "Rising Star" ist). 'all' ist bewusst als Hall of Fame
+// inszeniert — kein Zeitraum, sondern die Ehrenhalle.
+const PERIOD_META: Record<
+  Period,
+  { emoji: string; name: string; klartext: string; chipLabel: string; desc: string }
+> = {
+  month: {
+    emoji: '⭐',
+    name: 'Rising Star',
+    klartext: 'Monats-Liga',
+    chipLabel: 'Monat',
+    desc: 'Wer sammelt diesen Monat die meisten Punkte?',
+  },
+  week: {
+    emoji: '🔥',
+    name: 'On Fire',
+    klartext: 'Wochen-Liga',
+    chipLabel: 'Woche',
+    desc: 'Die heißesten Detektive dieser Woche.',
+  },
+  all: {
+    emoji: '👑',
+    name: 'Hall of Fame',
+    klartext: 'Aller Zeiten',
+    chipLabel: 'Aller Zeiten',
+    desc: 'Die Allzeit-Legenden — hier zählt das Lebenswerk.',
+  },
+};
+
+/** "endet in 3 Tagen" / "endet in 14 Std." — null für Hall of Fame. */
+function formatSeasonCountdown(period: Period): string | null {
+  if (period === 'all') return null;
+  const now = new Date();
+  let end: Date;
+  if (period === 'week') {
+    // Saison-Ende: Montag 00:00 (Woche läuft Mo–So).
+    const day = now.getDay(); // 0 = So
+    const daysToMonday = day === 0 ? 1 : 8 - day;
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysToMonday);
+  } else {
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  }
+  const ms = end.getTime() - now.getTime();
+  if (ms <= 0) return null;
+  const hours = Math.floor(ms / 3_600_000);
+  if (hours >= 48) return `endet in ${Math.floor(hours / 24)} Tagen`;
+  if (hours >= 2) return `endet in ${hours} Std.`;
+  return 'endet gleich';
 }
+
 
 // ─── Inline metric toggle (Section-Header der Region-Liga) ──────────────
 
@@ -1139,43 +1175,10 @@ function RegionBoard({
 // ─── Bundesländer | Städte primary switcher ─────────────────────────────
 //
 // Two equal-width pills at the top of the region tab. Visually
-// distinct from the inline pts/eur toggle inside the HeroBanner so
+// distinct from the inline pts/eur toggle in the region control row so
 // the user reads the hierarchy "first WHO is competing, then WHAT
 // metric we're comparing".
 
-function RegionGeoSwitch({
-  value,
-  onChange,
-}: {
-  value: RegionGeo;
-  onChange: (v: RegionGeo) => void;
-}) {
-  // Same `ScopeCard` design as the other selectors on the page.
-  const items: { key: RegionGeo; emoji: string; title: string; sub: string }[] =
-    [
-      {
-        key: 'bundesland',
-        emoji: '🗺️',
-        title: 'Bundesländer',
-        sub: '16 Bundesländer',
-      },
-      { key: 'stadt', emoji: '🏙️', title: 'Städte', sub: 'Top 20' },
-    ];
-  return (
-    <View style={{ flexDirection: 'row', gap: 8 }}>
-      {items.map((it) => (
-        <ScopeCard
-          key={it.key}
-          active={value === it.key}
-          onPress={() => onChange(it.key)}
-          icon={it.emoji}
-          title={it.title}
-          sub={it.sub}
-        />
-      ))}
-    </View>
-  );
-}
 
 // ─── Region podium (same look as user podium, but for cities/BL) ────────
 //
