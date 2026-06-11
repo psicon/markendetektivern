@@ -258,8 +258,9 @@ export class AlgoliaService {
       
     } catch (error) {
       console.error('Error searching NoName products:', error);
-      // Return empty results instead of throwing
-      return { hits: [], nbHits: 0, page: 0, nbPages: 0, hitsPerPage: 0, processingTimeMS: 0 };
+      // Leeres Fallback, aber als FEHLER markiert (86ca7uhn4) — sonst
+      // sieht searchAll nie, dass etwas schiefging.
+      return { hits: [], nbHits: 0, page: 0, nbPages: 0, hitsPerPage: 0, processingTimeMS: 0, failed: true } as any;
     }
   }
 
@@ -301,8 +302,8 @@ export class AlgoliaService {
       
     } catch (error) {
       console.error('Error searching Markenprodukte:', error);
-      // Return empty results instead of throwing
-      return { hits: [], nbHits: 0, page: 0, nbPages: 0, hitsPerPage: 0, processingTimeMS: 0 };
+      // Leeres Fallback, aber als FEHLER markiert (siehe oben).
+      return { hits: [], nbHits: 0, page: 0, nbPages: 0, hitsPerPage: 0, processingTimeMS: 0, failed: true } as any;
     }
   }
 
@@ -345,14 +346,22 @@ export class AlgoliaService {
         const totalHits = noNameResults.nbHits + markenproduktResults.nbHits;
         console.log(`✅ Algolia: Found ${totalHits} total products (${noNameResults.nbHits} NoName + ${markenproduktResults.nbHits} Markenprodukte)`);
 
+        // Sub-Suchen schlucken Netzfehler und liefern leer+failed —
+        // ein failed-Teilergebnis darf NICHT als "0 Treffer" gecacht
+        // werden (sonst klebt der Fehlschlag 24h im LRU) und muss den
+        // Consumer erreichen (Retry-Toast, 86ca7uhn4).
+        const subFailed =
+          (noNameResults as any).failed === true ||
+          (markenproduktResults as any).failed === true;
         const result: SearchAllResult = {
           noNameResults,
           markenproduktResults,
           totalHits,
           queryIdEigen: noNameResults.queryID,
           queryIdMarken: markenproduktResults.queryID,
+          ...(subFailed ? { failed: true } : {}),
         };
-        writeSearchCache(cacheKey, result);
+        if (!subFailed) writeSearchCache(cacheKey, result);
         return result;
       } finally {
         inflightSearchAll.delete(cacheKey);
