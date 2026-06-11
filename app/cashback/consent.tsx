@@ -455,12 +455,12 @@ export default function CashbackConsentScreen() {
         width: 38,
         height: 38,
         borderRadius: 12,
-        backgroundColor: 'rgba(255,255,255,0.22)',
+        backgroundColor: `${accent}1C`,
         alignItems: 'center' as const,
         justifyContent: 'center' as const,
       },
       heroEyebrow: {
-        color: 'rgba(255,255,255,0.85)',
+        color: accent,
         fontSize: 11,
         fontFamily,
         fontWeight: fontWeight.bold as any,
@@ -469,7 +469,7 @@ export default function CashbackConsentScreen() {
         marginTop: compact ? 8 : 10,
       },
       heroTitle: {
-        color: '#fff',
+        color: theme.text,
         fontSize: compact ? 21 : 24,
         fontFamily,
         fontWeight: fontWeight.extraBold as any,
@@ -477,7 +477,7 @@ export default function CashbackConsentScreen() {
         marginTop: 4,
       },
       heroBody: {
-        color: 'rgba(255,255,255,0.92)',
+        color: theme.textSub,
         fontSize: 13,
         lineHeight: 19,
         fontFamily,
@@ -629,7 +629,7 @@ export default function CashbackConsentScreen() {
       >
         {/* Hero — value pitch */}
         <LinearGradient
-          colors={['#0a6f62', '#0d8575', '#10a18a']}
+          colors={[`${accent}1C`, `${accent}0C`]}
           start={{ x: -1, y: 0.34 }}
           end={{ x: 1, y: -0.34 }}
           style={styles.hero}
@@ -638,7 +638,7 @@ export default function CashbackConsentScreen() {
             <MaterialCommunityIcons
               name="cash-multiple"
               size={20}
-              color="#fff"
+              color={accent}
             />
           </View>
           <Text style={styles.heroEyebrow}>Geld zurück fürs Einkaufen</Text>
