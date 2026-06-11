@@ -32,6 +32,14 @@ const CONFIG_DOC_PATH = 'cashback_config/v1';
 let configCache: { value: CashbackConfigDoc; fetchedAt: number } | null = null;
 const CONFIG_TTL_MS = 5 * 60 * 1000;
 
+// Offline-Fallback (86ca7uhr9): der zuletzt ERFOLGREICH vom Server
+// gelesene Config-Stand wird in AsyncStorage gespiegelt. Ohne das
+// fiele getCashbackConfig offline auf den CODE-Default zurueck — beim
+// naechsten consentVersion-Flip (Code-Default != Live-Doc) wuerde der
+// Versions-Check in hasValidCashbackConsent dann faelschlich
+// fehlschlagen (Re-Prompt / Features gesperrt, obwohl Consent gegeben).
+const CONFIG_STORAGE_KEY = 'cashback_config_last_server_v1';
+
 // ─── Config ─────────────────────────────────────────────────────────
 
 /**
@@ -50,9 +58,28 @@ export async function getCashbackConfig(forceRefresh = false): Promise<CashbackC
       ? ({ ...DEFAULT_CASHBACK_CONFIG, ...(snap.data() as Partial<CashbackConfigDoc>) } as CashbackConfigDoc)
       : DEFAULT_CASHBACK_CONFIG;
     configCache = { value, fetchedAt: Date.now() };
+    if (snap.exists()) {
+      // Letzten Server-Stand persistieren (fire-and-forget).
+      void AsyncStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(value)).catch(() => {});
+    }
     return value;
   } catch (error) {
-    console.warn('⚠️ getCashbackConfig failed, using defaults:', error);
+    console.warn('⚠️ getCashbackConfig failed, trying last server state:', error);
+    // Fallback-Kette: Memory-Cache (oben) → AsyncStorage-letzter-
+    // Server-Stand → Code-Default.
+    try {
+      const stored = await AsyncStorage.getItem(CONFIG_STORAGE_KEY);
+      if (stored) {
+        const value = {
+          ...DEFAULT_CASHBACK_CONFIG,
+          ...(JSON.parse(stored) as Partial<CashbackConfigDoc>),
+        } as CashbackConfigDoc;
+        configCache = { value, fetchedAt: Date.now() };
+        return value;
+      }
+    } catch {
+      // korrupter Storage-Eintrag → Default
+    }
     return DEFAULT_CASHBACK_CONFIG;
   }
 }
