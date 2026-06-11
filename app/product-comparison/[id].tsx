@@ -1,6 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { isOnline } from '@/lib/services/network';
 import { backOrHome } from '@/lib/utils/nav';
 import { safeReplace } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -254,6 +255,8 @@ export default function ProductComparisonScreen() {
   // felt like multiple little pops; one clean crossfade per
   // section is much smoother.
   const [error, setError] = useState<string | null>(null);
+  // Offline-Retry (86ca7uh5w): zaehlt hoch -> Lade-Effect laeuft erneut.
+  const [retryNonce, setRetryNonce] = useState(0);
   const [mainProduct, setMainProduct] = useState<MarkenProduktWithDetails | null>(null);
   const [nonames, setNonames] = useState<ProductWithDetails[]>([]);
   const [nonamesReady, setNonamesReady] = useState(false);
@@ -262,6 +265,7 @@ export default function ProductComparisonScreen() {
 
   useEffect(() => {
     let alive = true;
+    let settled = false;
     setError(null);
     setMainProduct(null);
     setNonames([]);
@@ -276,9 +280,15 @@ export default function ProductComparisonScreen() {
         );
         if (!alive) return;
         if (!data) {
-          setError('Produkt nicht gefunden');
+          settled = true;
+          setError(
+            isOnline()
+              ? 'Produkt nicht gefunden'
+              : 'Gerade kein Empfang — die Produktdaten konnten nicht geladen werden.',
+          );
           return;
         }
+        settled = true;
         setMainProduct(data.mainProduct);
         const sorted = [...(data.relatedNoNameProducts ?? [])].sort((a, b) => {
           const sa = parseStufe((a as any).stufe);
@@ -366,14 +376,30 @@ export default function ProductComparisonScreen() {
         }
       } catch (e) {
         if (!alive) return;
+        settled = true;
         console.warn('ProductComparison: load failed', e);
-        setError('Fehler beim Laden');
+        setError(
+          isOnline() ? 'Fehler beim Laden' : 'Gerade kein Empfang — die Produktdaten konnten nicht geladen werden.',
+        );
       }
     })();
+    // Safety-Timeout (86ca7uh5w): bei SCHWACHEM Empfang resolved der
+    // Fetch u.U. minutenlang nicht — nach 10s ehrlicher Fehler-State
+    // mit Retry statt Endlos-Skeleton.
+    const watchdog = setTimeout(() => {
+      if (!alive || settled) return;
+      settled = true;
+      setError(
+        isOnline()
+          ? 'Das dauert gerade zu lange — bitte versuch es erneut.'
+          : 'Gerade kein Empfang — die Produktdaten konnten nicht geladen werden.',
+      );
+    }, 10_000);
     return () => {
       alive = false;
+      clearTimeout(watchdog);
     };
-  }, [id, isMarkenProdukt, type, user?.uid]);
+  }, [id, isMarkenProdukt, type, user?.uid, retryNonce]);
 
   const picked = useMemo(
     () => nonames.find((p) => p.id === pickedId) ?? nonames[0] ?? null,
@@ -1318,7 +1344,7 @@ export default function ProductComparisonScreen() {
           {error ?? 'Produkt nicht verfügbar'}
         </Text>
         <Pressable
-          onPress={handleBack}
+          onPress={() => setRetryNonce((n) => n + 1)}
           style={({ pressed }) => ({
             marginTop: 20,
             height: 44,
@@ -1331,6 +1357,23 @@ export default function ProductComparisonScreen() {
           })}
         >
           <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: '#fff' }}>
+            Erneut versuchen
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={handleBack}
+          style={({ pressed }) => ({
+            marginTop: 10,
+            height: 44,
+            paddingHorizontal: 22,
+            borderRadius: radii.full,
+            backgroundColor: theme.surfaceAlt,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed ? 0.9 : 1,
+          })}
+        >
+          <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: theme.text }}>
             Zurück
           </Text>
         </Pressable>

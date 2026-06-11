@@ -1,5 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { isOnline } from '@/lib/services/network';
 import { backOrHome } from '@/lib/utils/nav';
 import { safePush } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -180,6 +181,8 @@ export default function NoNameDetailScreen() {
   // crossfades in 150 ms later via `Crossfade(delay=…)`. The
   // DetailHeader chrome renders on the first frame regardless.
   const [error, setError] = useState<string | null>(null);
+  // Offline-Retry (86ca7uh5w): zaehlt hoch -> Lade-Effect laeuft erneut.
+  const [retryNonce, setRetryNonce] = useState(0);
   const [product, setProduct] = useState<ProductWithDetails | null>(null);
   const ready = !!product;
 
@@ -425,6 +428,7 @@ export default function NoNameDetailScreen() {
 
   useEffect(() => {
     let alive = true;
+    let settled = false;
     setError(null);
     setProduct(null);
     (async () => {
@@ -432,9 +436,15 @@ export default function NoNameDetailScreen() {
         const data = await FirestoreService.getProductWithDetails(String(id));
         if (!alive) return;
         if (!data) {
-          setError('Produkt nicht gefunden');
+          settled = true;
+          setError(
+            isOnline()
+              ? 'Produkt nicht gefunden'
+              : 'Gerade kein Empfang — die Produktdaten konnten nicht geladen werden.',
+          );
           return;
         }
+        settled = true;
         setProduct(data);
 
         // 🎯 Gamification: track `view_comparison` once the
@@ -453,14 +463,30 @@ export default function NoNameDetailScreen() {
         }
       } catch (e) {
         if (!alive) return;
+        settled = true;
         console.warn('NoNameDetail: load failed', e);
-        setError('Fehler beim Laden');
+        setError(
+          isOnline() ? 'Fehler beim Laden' : 'Gerade kein Empfang — die Produktdaten konnten nicht geladen werden.',
+        );
       }
     })();
+    // Safety-Timeout (86ca7uh5w): bei SCHWACHEM Empfang resolved der
+    // Fetch u.U. minutenlang nicht — nach 10s ehrlicher Fehler-State
+    // mit Retry statt Endlos-Skeleton.
+    const watchdog = setTimeout(() => {
+      if (!alive || settled) return;
+      settled = true;
+      setError(
+        isOnline()
+          ? 'Das dauert gerade zu lange — bitte versuch es erneut.'
+          : 'Gerade kein Empfang — die Produktdaten konnten nicht geladen werden.',
+      );
+    }, 10_000);
     return () => {
       alive = false;
+      clearTimeout(watchdog);
     };
-  }, [id]);
+  }, [id, retryNonce]);
 
   // Initial-Load des Cart-Status. Ohne diesen useEffect startet
   // Initial-Load des Cart-Status — wird ersetzt durch
@@ -590,7 +616,7 @@ export default function NoNameDetailScreen() {
           {error ?? 'Produkt nicht verfügbar'}
         </Text>
         <Pressable
-          onPress={backOrHome}
+          onPress={() => setRetryNonce((n) => n + 1)}
           style={({ pressed }) => ({
             marginTop: 20,
             height: 44,
@@ -603,6 +629,23 @@ export default function NoNameDetailScreen() {
           })}
         >
           <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: '#fff' }}>
+            Erneut versuchen
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={backOrHome}
+          style={({ pressed }) => ({
+            marginTop: 10,
+            height: 44,
+            paddingHorizontal: 22,
+            borderRadius: radii.full,
+            backgroundColor: theme.surfaceAlt,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed ? 0.9 : 1,
+          })}
+        >
+          <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: theme.text }}>
             Zurück
           </Text>
         </Pressable>
