@@ -9,6 +9,7 @@
  * See CASHBACK_ARCHITECTURE.md §3 for the schema and §11 for hard rules.
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, type Unsubscribe } from '@react-native-firebase/firestore';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
@@ -143,6 +144,34 @@ export async function acceptCashbackConsent(uid: string): Promise<void> {
 
   // setDoc with merge to be safe even if user doc doesn't exist yet
   await setDoc(doc(db, 'users', uid), { cashback_consent: consent }, { merge: true });
+}
+
+// ─── Einmaliger Auto-Prompt auf der Rewards-Seite ────────────────────
+// Beim ERSTEN Rewards-Besuch ohne gueltigen Consent oeffnet die App den
+// Consent-Screen automatisch (ClickUp 86ca6u6xd) — genau einmal PRO
+// CONSENT-VERSION und Geraet. Danach wirbt nur noch die Aktivierungs-
+// Card. Key ist versioniert: ein consentVersion-Bump (Re-Consent-
+// Welle) bekommt wieder genau einen Auto-Prompt.
+const CONSENT_PROMPT_KEY_PREFIX = 'cashback_consent_prompt_shown_';
+
+export async function wasConsentPromptShown(): Promise<boolean> {
+  try {
+    const config = await getCashbackConfig();
+    const v = await AsyncStorage.getItem(CONSENT_PROMPT_KEY_PREFIX + config.consentVersion);
+    return v === '1';
+  } catch {
+    // Im Zweifel "schon gezeigt" — lieber kein Prompt als ein Loop.
+    return true;
+  }
+}
+
+export async function markConsentPromptShown(): Promise<void> {
+  try {
+    const config = await getCashbackConfig();
+    await AsyncStorage.setItem(CONSENT_PROMPT_KEY_PREFIX + config.consentVersion, '1');
+  } catch (error) {
+    console.warn('markConsentPromptShown failed:', error);
+  }
 }
 
 /**

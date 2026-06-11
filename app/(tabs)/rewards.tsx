@@ -305,7 +305,7 @@ export default function RewardsScreen() {
         }}
         showsVerticalScrollIndicator={false}
       >
-        <RedeemTab />
+        <RedeemTab walkthroughVisible={rewardsCoachmark.visible} />
       </ScrollView>
 
       {/* Chrome — absolute from y=0 (covers status-bar zone too) so
@@ -375,8 +375,9 @@ export default function RewardsScreen() {
 // EINLÖSEN TAB
 // ────────────────────────────────────────────────────────────────────────
 
-function RedeemTab() {
+function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
   const { theme } = useTokens();
+  const isFocused = useIsFocused();
   const scheme = useColorScheme() ?? 'light';
   const { user } = useAuth();
   const payoutEmail = user?.email ?? null;
@@ -384,6 +385,37 @@ function RedeemTab() {
   // the user isn't signed in or the backend hasn't seeded the field
   // yet (Phase 1 deploys the fields lazy via the Cloud Function).
   const cashback = useCashbackUserState();
+
+  // Einmaliger Consent-Auto-Prompt beim ersten Rewards-Besuch (ClickUp
+  // 86ca6u6xd): nur ohne gültigen Consent, nie während der Walkthrough
+  // läuft (walkthroughVisible-Prop als Gate — nach Dismiss feuert der
+  // Effect erneut), genau einmal pro Consent-Version + Gerät
+  // (Service-Flag). Danach wirbt nur noch die Aktivierungs-Card.
+  const consentPromptedRef = useRef(false);
+  useEffect(() => {
+    if (consentPromptedRef.current) return;
+    if (!isFocused || cashback.isLoading || cashback.hasConsent) return;
+    if (walkthroughVisible) return;
+    let alive = true;
+    (async () => {
+      const { wasConsentPromptShown, markConsentPromptShown } = await import(
+        '@/lib/services/cashbackService'
+      );
+      if (!alive || consentPromptedRef.current) return;
+      if (await wasConsentPromptShown()) {
+        consentPromptedRef.current = true;
+        return;
+      }
+      if (!alive) return;
+      consentPromptedRef.current = true;
+      // Erst persistieren, DANN navigieren (Race-Regel aus CLAUDE.md).
+      await markConsentPromptShown();
+      if (alive) router.push('/cashback/consent');
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [isFocused, cashback.isLoading, cashback.hasConsent, walkthroughVisible]);
   const cashbackEur = cashback.uid
     ? cashback.balanceCents / 100
     : CASHBACK_FALLBACK_EUR;
