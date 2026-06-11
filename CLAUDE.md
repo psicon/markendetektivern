@@ -417,6 +417,19 @@ NEUE Asset-Dateien (z.B. assets/rewards/*.png) nimmt ein laufender
 Metro nicht auf — nach dem Anlegen neuer Assets Metro neu starten,
 Hot-Reload reicht nicht (geänderte Dateiinhalte dagegen schon).
 
+**Drittes Learning (2026-06-11, kostete DREI "ich sehe keinen
+Unterschied"-Runden): Wenn Metro läuft, aber Code-Änderungen NIE im
+Bundle ankommen (auch nach --clear-Restart nur der Stand vom
+Start-Zeitpunkt), ist der File-Watcher tot — Ursache war ein
+hängender Watchman-Daemon (Intel-Brew-Install, `watchman version`
+hing endlos; killen + State löschen half NICHT). Fix:
+`brew unlink watchman` → Metro fällt auf den Node-Watcher zurück,
+der zuverlässig läuft. Diagnose-Rezept: Marker-Kommentar in eine
+Datei appenden, 4s warten, Bundle curlen
+(`http://localhost:8081/.expo/.virtual-metro-entry.bundle?platform=ios&dev=true`
+— expo-router hat KEINEN ./index-Entry, index.bundle gibt nur eine
+5KB-Fehler-JSON) und auf den Marker greppen. 0 Treffer = Watcher tot.**
+
 ## Android: APK aufs Device — Workflow
 
 Wenn der User „aufs Device packen", „APK installieren" o.ä. sagt:
