@@ -174,9 +174,9 @@ export function ProductDetailWalkthrough({
       anchorId={config.anchorId}
       title={config.title}
       body={config.body}
-      onSkip={onDismiss}
+      onSkip={() => onDismiss()}
       skipLabel="Tour beenden"
-      onPrimary={isLastStep ? onDismiss : advance}
+      onPrimary={isLastStep ? () => onDismiss() : advance}
       primaryLabel={primaryLabel}
     />
   );

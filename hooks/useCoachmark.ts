@@ -119,6 +119,14 @@ export function useCoachmark(tour: TourKey): UseCoachmarkResult {
   }, [tour]);
 
   const dismiss = useCallback(async (mode: 'completed' | 'skipped' = 'completed') => {
+    // GUARD (ClickUp 86ca7x55d): dismiss wird teils DIREKT als
+    // Button-Handler verdrahtet (onPrimary={onDismiss}) — dann kommt
+    // das Press-EVENT als erstes Argument rein. Ein Objekt als
+    // AsyncStorage-Value crasht nativ (multiSet "Entries must be
+    // arrays..."). Alles ausser dem expliziten 'skipped' wird zu
+    // 'completed' normalisiert.
+    const safeMode: 'completed' | 'skipped' =
+      (mode as unknown) === 'skipped' ? 'skipped' : 'completed';
     // T17.14: AWAIT markSeen damit AsyncStorage-Write fertig ist BEVOR
     // setVisible(false) den next-effect-cycle in einem Caller triggert.
     // Vorher Race: Demographics-useEffect fragte getSeen('home') sofort
@@ -126,7 +134,7 @@ export function useCoachmark(tour: TourKey): UseCoachmarkResult {
     // getSeen returnte false → Sheet wurde nicht gezeigt. Jetzt:
     // Storage erst persistiert, dann visible-flip.
     try {
-      await CoachmarkService.markSeen(tour, mode);
+      await CoachmarkService.markSeen(tour, safeMode);
     } catch (e) {
       console.warn('Coachmark dismiss markSeen failed (non-fatal):', e);
     }

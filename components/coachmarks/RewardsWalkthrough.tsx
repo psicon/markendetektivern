@@ -123,7 +123,7 @@ export function RewardsWalkthrough({
       title={config.title}
       body={config.body}
       lottie={config.lottie}
-      onSkip={onDismiss}
+      onSkip={() => onDismiss()}
       onPrimary={advance}
       primaryLabel={primaryLabel}
     />

@@ -100,6 +100,10 @@ export const CoachmarkService = {
    * der Wert ist sowohl Marker ("gesehen") als auch Daten ("wann").
    */
   async markSeen(tour: TourKey, mode: 'completed' | 'skipped' = 'completed'): Promise<void> {
+    // Nicht-String-Werte (z.B. durchgereichtes Press-Event) wuerden
+    // den nativen AsyncStorage-multiSet crashen (86ca7x55d).
+    const safeMode: 'completed' | 'skipped' =
+      (mode as unknown) === 'skipped' ? 'skipped' : 'completed';
     try {
       await AsyncStorage.setItem(storageKeyFor(tour), new Date().toISOString());
       // Seen-MODUS separat (2026-06-11, Demographics-Aufschub): das
@@ -107,7 +111,7 @@ export const CoachmarkService = {
       // kommen, nach SKIP erst beim 2. App-Start oder nach dem ersten
       // Produktbesuch. Bestandsdaten ohne Modus-Key gelten als
       // 'completed' (kein Aufschub — Verhalten wie bisher).
-      await AsyncStorage.setItem(`${storageKeyFor(tour)}_mode`, mode);
+      await AsyncStorage.setItem(`${storageKeyFor(tour)}_mode`, safeMode);
     } catch (e) {
       console.warn('Coachmark markSeen failed (non-fatal):', e);
     }
