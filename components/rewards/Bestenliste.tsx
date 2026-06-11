@@ -112,8 +112,11 @@ export function BestenlisteTab({
     setOuterScope(next);
   };
 
-  // ─── Overall: metric + period ─────────────────────────────────
-  const [metric, setMetric] = useState<OverallMetric>('pts');
+  // ─── Overall: period ──────────────────────────────────────────
+  // ClickUp 86ca6qwb2: Die User-Bestenliste zeigt NUR Punkte —
+  // oeffentliche Geld-Summen einzelner Nutzer sind raus. Die
+  // Ersparnis-Metrik lebt weiter im Regionenkampf (regionMetric),
+  // dort sind es Aggregate ohne Personenbezug.
   const [overallPeriod, setOverallPeriod] = useState<Period>('all');
 
   // ─── Regionenkampf: metric ────────────────────────────────────
@@ -137,17 +140,17 @@ export function BestenlisteTab({
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
   useEffect(() => {
     setVisibleCount(INITIAL_VISIBLE);
-  }, [metric, overallPeriod]);
+  }, [overallPeriod]);
 
   useEffect(() => {
     let alive = true;
-    getOverallUsers(userNick, overallPeriod, metric).then(
+    getOverallUsers(userNick, overallPeriod, 'pts').then(
       (r) => alive && setOverallUsers(r),
     );
     return () => {
       alive = false;
     };
-  }, [userNick, metric, overallPeriod]);
+  }, [userNick, overallPeriod]);
 
   useEffect(() => {
     let alive = true;
@@ -261,23 +264,8 @@ export function BestenlisteTab({
           <View style={{ paddingTop: 10 }}>
             <PeriodSwitcher value={overallPeriod} onChange={setOverallPeriod} />
           </View>
-          <HeroBanner
-            icon={metric === 'pts' ? 'trophy' : 'cash-multiple'}
-            title={metric === 'pts' ? 'Punkte Bestenliste' : 'Ersparnis-Bestenliste'}
-            inlineSelector={
-              <InlineToggle
-                value={metric}
-                onChange={setMetric}
-                options={[
-                  { key: 'pts', label: 'Punkte' },
-                  { key: 'eur', label: 'Ersparnisse' },
-                ]}
-              />
-            }
-          />
           <UserBoard
             users={overallUsers}
-            metric={metric}
             period={overallPeriod}
             visibleCount={visibleCount}
             onLoadMore={() =>
@@ -295,20 +283,45 @@ export function BestenlisteTab({
           <View style={{ paddingTop: 10, paddingHorizontal: 20 }}>
             <RegionGeoSwitch value={geo} onChange={setGeo} />
           </View>
-          <HeroBanner
-            icon={geo === 'bundesland' ? '🗺️' : '🏙️'}
-            title={geo === 'bundesland' ? 'Bundesländer-Liga' : 'Städte-Liga'}
-            inlineSelector={
+          {/* Section-Header-Zeile statt Orange-Banner: Titel links,
+              Punkte/Ersparnis-Toggle rechts. Die Ersparnis-Metrik ist
+              im Regionenkampf gewollt (Aggregate, kein Personenbezug —
+              User-Vorgabe 2026-06-11: "super wichtig"). */}
+          <View
+            style={{
+              marginHorizontal: 20,
+              marginTop: 12,
+              marginBottom: 2,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+            }}
+          >
+            <Text
+              numberOfLines={1}
+              style={{
+                flex: 1,
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 16,
+                letterSpacing: -0.2,
+                color: theme.text,
+              }}
+            >
+              {geo === 'bundesland' ? '🗺️ Bundesländer-Liga' : '🏙️ Städte-Liga'}
+            </Text>
+            <View style={{ width: 168 }}>
               <InlineToggle
                 value={regionMetric}
                 onChange={setRegionMetric}
                 options={[
                   { key: 'pts', label: 'Punkte' },
-                  { key: 'eur', label: 'Ersparnisse' },
+                  { key: 'eur', label: 'Ersparnis' },
                 ]}
               />
-            }
-          />
+            </View>
+          </View>
           <RegionBoard
             rows={geo === 'bundesland' ? blRows : cityRows}
             metric={regionMetric}
@@ -434,13 +447,15 @@ function PeriodSwitcher({
   value: Period;
   onChange: (p: Period) => void;
 }) {
-  // Same `ScopeCard` design as Outer-Scope (Overall/Regionenkampf)
-  // and RegionGeoSwitch (Bundesländer/Städte). One selector, three
-  // contexts — guarantees consistency across the page.
-  const items: { key: Period; emoji: string; title: string; sub: string }[] = [
-    { key: 'all', emoji: '👑', title: 'Legendär', sub: 'Aller Zeiten' },
-    { key: 'month', emoji: '⭐', title: 'Rising Star', sub: 'Dieser Monat' },
-    { key: 'week', emoji: '🔥', title: 'On Fire', sub: 'Diese Woche' },
+  // Kompakte Chip-Reihe statt einer zweiten vollen ScopeCard-Reihe
+  // (ClickUp 86ca6qwb2: drei gestapelte Selector-Ebenen waren zu
+  // viel). Aktiv-Sprache wie ScopeCard: primaryContainer-Fill +
+  // 1.5er Primary-Border — gleiche Familie, halbe Hoehe.
+  const { theme } = useTokens();
+  const items: { key: Period; emoji: string; title: string }[] = [
+    { key: 'all', emoji: '👑', title: 'Legendär' },
+    { key: 'month', emoji: '⭐', title: 'Rising Star' },
+    { key: 'week', emoji: '🔥', title: 'On Fire' },
   ];
   return (
     <View
@@ -450,102 +465,47 @@ function PeriodSwitcher({
         paddingHorizontal: 20,
       }}
     >
-      {items.map((it) => (
-        <ScopeCard
-          key={it.key}
-          active={value === it.key}
-          onPress={() => onChange(it.key)}
-          icon={it.emoji}
-          title={it.title}
-          sub={it.sub}
-        />
-      ))}
-    </View>
-  );
-}
-
-// ─── Yellow hero banner ─────────────────────────────────────────────────
-
-function HeroBanner({
-  icon,
-  title,
-  subtitle,
-  inlineSelector,
-}: {
-  /** Either an MDI icon name OR an emoji string. Emojis read more
-   *  consistently with the rest of the page (period switcher,
-   *  podium medals, etc.); MDI is kept for legacy callers. */
-  icon: keyof typeof MaterialCommunityIcons.glyphMap | string;
-  title: string;
-  /** Optional one-liner under the title. Omit when the title +
-   *  selector together already make the context clear (the
-   *  selector labels say "Punkte / Ersparnisse" anyway). */
-  subtitle?: string;
-  /** Optional inline metric/geo selector rendered at the bottom of
-   *  the hero — keeps the metric-switch in context without a third
-   *  separate tab row. */
-  inlineSelector?: React.ReactNode;
-}) {
-  return (
-    <LinearGradient
-      colors={['#ffd34a', '#f5a623']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={{
-        marginHorizontal: 20,
-        marginTop: 10,
-        borderRadius: 14,
-        paddingVertical: 10,
-        paddingHorizontal: 12,
-      }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        {/* Heuristic: short non-MDI strings are treated as emoji.
-            All MDI glyph names contain a hyphen ("trophy-outline",
-            "cash-multiple", "map-marker-radius", …) so anything
-            without one is rendered as text. */}
-        {typeof icon === 'string' && !icon.includes('-') && icon.length <= 4 ? (
-          <Text style={{ fontSize: 18 }}>{icon}</Text>
-        ) : (
-          <MaterialCommunityIcons
-            name={icon as keyof typeof MaterialCommunityIcons.glyphMap}
-            size={20}
-            color="#5a3500"
-          />
-        )}
-        <View style={{ flex: 1 }}>
-          <Text
-            numberOfLines={1}
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.extraBold,
-              fontSize: 14,
-              color: '#1a1a1a',
-              letterSpacing: -0.1,
-            }}
+      {items.map((it) => {
+        const on = value === it.key;
+        return (
+          <Pressable
+            key={it.key}
+            onPress={() => onChange(it.key)}
+            style={({ pressed }) => ({
+              flex: 1,
+              height: 36,
+              borderRadius: 12,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 5,
+              backgroundColor: on
+                ? theme.primaryContainer ?? theme.surfaceAlt
+                : theme.surface,
+              borderWidth: on ? 1.5 : 1,
+              borderColor: on ? theme.primary : theme.border,
+              opacity: pressed ? 0.85 : 1,
+            })}
           >
-            {title}
-          </Text>
-          {subtitle ? (
+            <Text style={{ fontSize: 12 }}>{it.emoji}</Text>
             <Text
               numberOfLines={1}
               style={{
                 fontFamily,
-                fontWeight: fontWeight.medium,
-                fontSize: 11,
-                color: '#3a3a3a',
-                marginTop: 1,
+                fontWeight: fontWeight.bold,
+                fontSize: 12,
+                color: on ? theme.primary : theme.textSub,
               }}
             >
-              {subtitle}
+              {it.title}
             </Text>
-          ) : null}
-        </View>
-      </View>
-      {inlineSelector ? <View style={{ marginTop: 8 }}>{inlineSelector}</View> : null}
-    </LinearGradient>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
+
 
 // ─── Scope card (Overall / Regionenkampf top selector) ──────────────────
 
@@ -642,7 +602,7 @@ function ScopeCard({
   );
 }
 
-// ─── Inline metric/geo toggle (lives inside the yellow hero) ────────────
+// ─── Inline metric toggle (Section-Header der Region-Liga) ──────────────
 
 function InlineToggle<T extends string>({
   value,
@@ -805,13 +765,11 @@ function RefreshHint({ updatedAt }: { updatedAt: Date | null }) {
 
 function UserBoard({
   users,
-  metric,
   period,
   visibleCount,
   onLoadMore,
 }: {
   users: LbUser[];
-  metric: OverallMetric;
   period: Period;
   /** Total visible rows including the top-3 podium (so 10 means
    *  podium for #1–3 + list rows #4–10). */
@@ -853,7 +811,7 @@ function UserBoard({
   const remaining = users.length - visibleCount;
   return (
     <>
-      {hasPodium ? <Podium top3={top3} metric={metric} /> : null}
+      {hasPodium ? <Podium top3={top3} /> : null}
       <View
         style={{
           marginHorizontal: 20,
@@ -862,7 +820,7 @@ function UserBoard({
         }}
       >
         {rest.map((u) => (
-          <UserCard key={u.id} user={u} metric={metric} />
+          <UserCard key={u.id} user={u} />
         ))}
       </View>
       {canLoadMore ? (
@@ -913,17 +871,12 @@ function UserBoard({
 
 // ─── Single user card ───────────────────────────────────────────────────
 
-function UserCard({ user, metric }: { user: LbUser; metric: OverallMetric }) {
+function UserCard({ user }: { user: LbUser }) {
   const { theme, shadows } = useTokens();
   const isTop3 = user.rank <= 3;
-  const value =
-    metric === 'pts'
-      ? `${user.pts.toLocaleString('de-DE')} Pkt`
-      : `${user.eur.toFixed(2).replace('.', ',')} €`;
-  const subValue =
-    metric === 'pts'
-      ? `${user.eur.toFixed(2).replace('.', ',')} € gespart`
-      : `${user.pts.toLocaleString('de-DE')} Pkt`;
+  // Nur Punkte — keine oeffentlichen Geld-Summen einzelner User
+  // (ClickUp 86ca6qwb2).
+  const value = `${user.pts.toLocaleString('de-DE')} Pkt`;
   return (
     <View
       style={{
@@ -965,8 +918,7 @@ function UserCard({ user, metric }: { user: LbUser; metric: OverallMetric }) {
             marginTop: 2,
           }}
         >
-          {user.level ? `Level ${user.level} · ` : ''}
-          {subValue}
+          {user.level ? `Level ${user.level}` : ''}
         </Text>
       </View>
       <Text
@@ -2026,7 +1978,7 @@ function Chip({
 // No bold gradients on the cards — they're flat pastel surfaces so
 // the avatars + names dominate visually.
 
-function Podium({ top3, metric }: { top3: LbUser[]; metric: OverallMetric }) {
+function Podium({ top3 }: { top3: LbUser[] }) {
   if (top3.length < 3) return null;
   const r1 = top3[0];
   const r2 = top3[1];
@@ -2056,9 +2008,9 @@ function Podium({ top3, metric }: { top3: LbUser[]; metric: OverallMetric }) {
           gap: 8,
         }}
       >
-        <PodiumCard user={r2} medalRank={2} metric={metric} height={108} />
-        <PodiumCard user={r1} medalRank={1} metric={metric} height={134} />
-        <PodiumCard user={r3} medalRank={3} metric={metric} height={96} />
+        <PodiumCard user={r2} medalRank={2} height={108} />
+        <PodiumCard user={r1} medalRank={1} height={134} />
+        <PodiumCard user={r3} medalRank={3} height={96} />
       </View>
     </View>
   );
@@ -2193,12 +2145,10 @@ function PodiumAvatarInner({
 function PodiumCard({
   user,
   medalRank,
-  metric,
   height,
 }: {
   user: LbUser;
   medalRank: 1 | 2 | 3;
-  metric: OverallMetric;
   height: number;
 }) {
   // Soft pastel surface colours — flat, NO gradient, to match the
@@ -2207,14 +2157,10 @@ function PodiumCard({
     medalRank === 1 ? '#fff3c2' : medalRank === 2 ? '#e9edef' : '#fbe4d2';
   const border =
     medalRank === 1 ? '#f5b301' : medalRank === 2 ? '#cdd3d6' : '#e6b18c';
-  const valueText =
-    metric === 'pts'
-      ? `${user.pts.toLocaleString('de-DE')} Pkt`
-      : `${user.eur.toFixed(2).replace('.', ',')} €`;
-  const subText =
-    metric === 'pts'
-      ? `${user.eur.toFixed(2).replace('.', ',')} € gespart`
-      : `${user.pts.toLocaleString('de-DE')} Pkt`;
+  // Nur Punkte + Level — keine oeffentlichen Geld-Summen einzelner
+  // User (ClickUp 86ca6qwb2).
+  const valueText = `${user.pts.toLocaleString('de-DE')} Pkt`;
+  const subText = user.level ? `Level ${user.level}` : '';
   return (
     <View
       style={{
