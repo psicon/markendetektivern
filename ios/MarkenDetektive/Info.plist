@@ -53,19 +53,19 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>1190</string>
+    <string>1215</string>
+    <key>FacebookAdvertiserIDCollectionEnabled</key>
+    <false/>
     <key>FacebookAppID</key>
     <string>1757877148062670</string>
-    <key>FacebookClientToken</key>
-    <string>d9af024703776b9b46864bcf0c721840</string>
-    <key>FacebookDisplayName</key>
-    <string>MarkenDetektive</string>
     <key>FacebookAutoInitEnabled</key>
     <false/>
     <key>FacebookAutoLogAppEventsEnabled</key>
     <false/>
-    <key>FacebookAdvertiserIDCollectionEnabled</key>
-    <false/>
+    <key>FacebookClientToken</key>
+    <string>d9af024703776b9b46864bcf0c721840</string>
+    <key>FacebookDisplayName</key>
+    <string>MarkenDetektive</string>
     <key>GADApplicationIdentifier</key>
     <string>ca-app-pub-9082891656550991~3669162596</string>
     <key>GADDelayAppMeasurementInit</key>
