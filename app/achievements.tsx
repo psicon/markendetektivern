@@ -497,7 +497,7 @@ export default function AchievementsScreen() {
             <SegmentedTabs
               tabs={[
                 { key: 'errungen', label: 'Errungenschaften' },
-                { key: 'bestenliste', label: 'Bestenliste' },
+                { key: 'bestenliste', label: 'Bestenlisten' },
               ] as const}
               value={tab}
               onChange={onTabChange}

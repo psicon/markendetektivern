@@ -1,4 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import {
   CITY_TO_BUNDESLAND,
   normalizeCityName,
@@ -77,10 +78,11 @@ type Period = 'all' | 'month' | 'week';
 // the next chunk in 10-row jumps. Lifetime list goes up to top-100;
 // live week/month lists are capped at 50 server-side.
 // Kollabiert starten: nur das Podium (Top 3) — so ist der
-// Regionen-Kampf beim ersten Blick erreichbar (User-Vorgabe
-// 2026-06-11). 'Mehr laden' holt dann 10er-Schritte.
+// Regionen-Kampf beim ersten Blick erreichbar. Aufklappen ist ein
+// One-Shot auf die Top 10 (User-Vorgabe 2026-06-11: 'nur 1x
+// moeglich, bei Usern Top 10').
 const INITIAL_VISIBLE = 3;
-const LOAD_MORE_STEP = 10;
+const EXPANDED_VISIBLE = 10;
 
 export function BestenlisteTab({
   userStats,
@@ -188,14 +190,16 @@ export function BestenlisteTab({
 
   const [setupOpen, setSetupOpen] = useState(false);
   const saveRegion = useCallback(
-    async (bl: string, city: string) => {
+    (bl: string, city: string) => {
       if (!user?.uid) return;
-      try {
-        await updateDoc(doc(db, 'users', user.uid), { bundesland: bl, city });
-        await refreshUserProfile();
-      } catch (e) {
-        console.warn('Rewards: saveRegion failed', e);
-      }
+      // Fire-and-forget (Forbidden Pattern: Firestore-Write im UI-Pfad
+      // awaiten — die Promise loest erst bei Server-Ack, offline nie).
+      // Das Sheet schliesst sofort; DU-Highlight kommt mit dem
+      // Profil-Refresh nach. Fix fuer "Stadt setzen dauert lange,
+      // konnte 3x klicken" (User 2026-06-11).
+      void updateDoc(doc(db, 'users', user.uid), { bundesland: bl, city })
+        .then(() => refreshUserProfile())
+        .catch((e) => console.warn('Rewards: saveRegion failed', e));
     },
     [user?.uid, refreshUserProfile],
   );
@@ -308,11 +312,7 @@ export function BestenlisteTab({
         users={overallUsers}
         period={overallPeriod}
         visibleCount={visibleCount}
-        onLoadMore={() =>
-          setVisibleCount((c) =>
-            Math.min(c + LOAD_MORE_STEP, overallUsers.length),
-          )
-        }
+        onLoadMore={() => setVisibleCount(EXPANDED_VISIBLE)}
       />
 
       {/* ─── Bühne 2: Regionen-Kampf — IMMER sichtbar (User-Feedback
@@ -446,21 +446,21 @@ export function BestenlisteTab({
         <RegionSetupContent
           suggestion={{ city: userCity, bundesland: userBL }}
           mode={geo}
-          onAccept={async () => {
-            if (userBL && userCity) await saveRegion(userBL, userCity);
+          onAccept={() => {
+            if (userBL && userCity) saveRegion(userBL, userCity);
             setSetupOpen(false);
           }}
           onPickOther={() => setSetupOpen(false)}
-          onPickBundesland={async (bl) => {
+          onPickBundesland={(bl) => {
             // Save BL only — keep whatever city the profile already
             // had (or empty).
-            await saveRegion(bl, userCity ?? '');
+            saveRegion(bl, userCity ?? '');
             setSetupOpen(false);
           }}
-          onPickCity={async (pickedCity, pickedBl) => {
+          onPickCity={(pickedCity, pickedBl) => {
             // BL kommt aus Schritt 1 des Pickers — beide Ligen haben
             // ab sofort den DU-Highlight.
-            await saveRegion(pickedBl, pickedCity);
+            saveRegion(pickedBl, pickedCity);
             setSetupOpen(false);
           }}
         />
@@ -892,8 +892,7 @@ function UserBoard({
   const hasPodium = users.length >= 3;
   const top3 = hasPodium ? users.slice(0, 3) : [];
   const rest = hasPodium ? users.slice(3, visibleCount) : users.slice(0, visibleCount);
-  const canLoadMore = visibleCount < users.length;
-  const remaining = users.length - visibleCount;
+  const canLoadMore = visibleCount <= 3 && users.length > 3;
   return (
     <>
       {hasPodium ? <Podium top3={top3} /> : null}
@@ -904,8 +903,13 @@ function UserBoard({
           gap: 10,
         }}
       >
-        {rest.map((u) => (
-          <UserCard key={u.id} user={u} />
+        {rest.map((u, i) => (
+          <Animated.View
+            key={u.id}
+            entering={FadeInDown.duration(220).delay(Math.min(i * 30, 180))}
+          >
+            <UserCard user={u} />
+          </Animated.View>
         ))}
       </View>
       {canLoadMore ? (
@@ -933,17 +937,7 @@ function UserBoard({
                 color: theme.primary,
               }}
             >
-              {visibleCount <= 3 ? 'Liste anzeigen' : 'Mehr laden'}
-            </Text>
-            <Text
-              style={{
-                fontFamily,
-                fontWeight: fontWeight.medium,
-                fontSize: 11,
-                color: theme.textMuted,
-              }}
-            >
-              · noch {remaining}
+              Top 10 anzeigen
             </Text>
           </Pressable>
         </View>
@@ -1208,13 +1202,17 @@ function RegionBoard({
             gap: 10,
           }}
         >
-          {rest.map((r) => (
-            <RegionCard
+          {rest.map((r, i) => (
+            <Animated.View
               key={r.key}
-              row={r}
-              metric={metric}
-              showBundesland={showBundesland}
-            />
+              entering={FadeInDown.duration(220).delay(Math.min(i * 30, 240))}
+            >
+              <RegionCard
+                row={r}
+                metric={metric}
+                showBundesland={showBundesland}
+              />
+            </Animated.View>
           ))}
         </View>
       ) : rest.length > 0 ? (
