@@ -3761,8 +3761,17 @@ export class FirestoreService {
 
       // Existierenden Det-Doc lesen (für gekauft-Reset und newAnzahl-Schätzung
       // für Journey-Tracking). Read aus local-cache wenn vorhanden.
-      const existingSnap = await getDoc(detRef);
-      const exists = existingSnap.exists();
+      // Offline-tolerant (86ca7ugym): auf Android (persistence:false)
+      // rejected getDoc ohne Netz — dann behandeln wir das Item als
+      // neu. merge:true macht den Reference-Re-Write idempotent; im
+      // schlimmsten Fall wird anzahl statt resettet inkrementiert.
+      let existingSnap: any = null;
+      try {
+        existingSnap = await getDoc(detRef);
+      } catch (e) {
+        console.warn('[cart] getDoc offline-fallback (treat as new):', (e as Error)?.message);
+      }
+      const exists = existingSnap?.exists() === true;
       const existingData = exists ? ((existingSnap.data() as any) ?? {}) : null;
       const wasGekauft = existingData?.gekauft === true;
       // Bei "war gekauft" → Cycle resetten: anzahl wieder auf 1.
@@ -3821,7 +3830,14 @@ export class FirestoreService {
           writePayload.handelsmarkenProdukt = doc(db, 'produkte', productId);
         }
       }
-      await setDoc(detRef, writePayload, { merge: true });
+      // Fire-and-forget (86ca7ugym, Forbidden Pattern: die Promise löst
+      // erst beim SERVER-Ack — im Funkloch hängt sonst der Button-Spinner
+      // für immer). Der lokale Cache wird sofort optimistisch geupdatet,
+      // die onSnapshot-Listener (Cart-Badge, Einkaufszettel) feuern auch
+      // offline → UI ist konsistent, Sync passiert beim Reconnect.
+      void setDoc(detRef, writePayload, { merge: true }).catch((e) =>
+        console.warn('[cart] addToShoppingCart write pending/failed:', (e as Error)?.message),
+      );
 
       // 📊 Analytics fire-and-forget
       if (source) {
@@ -3874,8 +3890,11 @@ export class FirestoreService {
       // ─── Fast-Path: Caller weiß was er hat ───
       if (typeof currentAnzahl === 'number') {
         if (currentAnzahl > 1) {
-          // 1 awaited write — analog Favoriten remove.
-          await updateDoc(detRef, { anzahl: increment(-1), timestamp: serverTimestamp() });
+          // Fire-and-forget (86ca7ugym): lokaler Cache + Listener
+          // treiben die UI, Server-Ack ist nicht UI-relevant.
+          void updateDoc(detRef, { anzahl: increment(-1), timestamp: serverTimestamp() }).catch(
+            (e) => console.warn('[cart] decrement write pending/failed:', (e as Error)?.message),
+          );
           return currentAnzahl - 1;
         } else {
           // anzahl === 1 → full remove. Caller liefert Tracking-Daten,
@@ -4045,8 +4064,11 @@ export class FirestoreService {
 
       // ─── Fast-Path ───────────────────────────────────────────────
       if (trackingPayload) {
-        // 1 awaited write. Genau wie Favoriten.
-        await deleteDoc(cartItemRef);
+        // Fire-and-forget (86ca7ugym): lokale Löschung greift sofort
+        // im Cache, Listener updaten die UI auch offline.
+        void deleteDoc(cartItemRef).catch((e) =>
+          console.warn('[cart] remove write pending/failed:', (e as Error)?.message),
+        );
 
         // Background tracking — der Caller hat die Daten geliefert,
         // kein zusätzlicher Read auf den eben gelöschten Doc nötig.
@@ -4206,9 +4228,12 @@ export class FirestoreService {
     const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
 
     // ─── Critical Write: gekauft:true ────────────────────────────
-    // Das ist die einzige Operation, die der UI-Thread abwarten muss.
-    // Analog zu Favoriten-Remove (1 deleteDoc) — 1 updateDoc.
-    await updateDoc(cartItemRef, { gekauft: true });
+    // Fire-and-forget (86ca7ugym): der lokale Cache wendet die Mutation
+    // sofort an (das Item verschwindet aus der active-cart-Query, auch
+    // offline). Der Background-Re-Read unten liest aus dem Cache.
+    void updateDoc(cartItemRef, { gekauft: true }).catch((e) =>
+      console.warn('[cart] markAsPurchased write pending/failed:', (e as Error)?.message),
+    );
 
     // ─── Background (DEFERRED): Purchase-History + Journey-Tracking ──
     // Perf (Report Juni 2026 „nach gekauft markieren steht alles / lädt
@@ -4311,7 +4336,10 @@ export class FirestoreService {
     const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
 
     // Critical: gekauft:true. Item verschwindet aus der active-cart-Query.
-    await updateDoc(cartItemRef, { gekauft: true });
+    // Fire-and-forget (86ca7ugym) — lokaler Cache sofort, Sync bei Reconnect.
+    void updateDoc(cartItemRef, { gekauft: true }).catch((e) =>
+      console.warn('[cart] markAsPurchasedWithoutTracking write pending/failed:', (e as Error)?.message),
+    );
 
     // Background (DEFERRED, siehe markAsPurchased): bei Bulk-„alle gekauft"
     // feuert das N× — würde es synchron starten, contendet der getDocs-Burst

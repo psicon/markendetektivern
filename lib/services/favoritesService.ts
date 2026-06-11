@@ -63,12 +63,17 @@ class FavoritesService {
         brand: productData.brand || null
       } : null;
 
-      await setDoc(favoriteRef, {
+      // Fire-and-forget (86ca7ugym): lokaler Cache + onSnapshot-Listener
+      // (useFavorites) treiben die UI auch offline; Server-Ack abwarten
+      // hieße im Funkloch ein ewig hängender Herz-Button.
+      void setDoc(favoriteRef, {
         productId,
         productType,
         productData: cleanProductData,
         addedAt: serverTimestamp()
-      });
+      }).catch((e) =>
+        console.warn('[favorites] add write pending/failed:', (e as Error)?.message),
+      );
     } catch (error: any) {
       console.error('❌ Error adding to favorites:', error);
       
@@ -99,7 +104,10 @@ class FavoritesService {
       const favoriteId = `${productType}_${productId}`;
       const favoriteRef = doc(db, 'users', userId, 'favorites', favoriteId);
 
-      await deleteDoc(favoriteRef);
+      // Fire-and-forget (86ca7ugym), analog addToFavorites.
+      void deleteDoc(favoriteRef).catch((e) =>
+        console.warn('[favorites] remove write pending/failed:', (e as Error)?.message),
+      );
     } catch (error: any) {
       console.error('❌ Error removing from favorites:', error);
       
