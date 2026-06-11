@@ -91,6 +91,9 @@ target 'MarkenDetektive' do
       src = File.read(fmt_base)
       patched = src.gsub(/define FMT_USE_CONSTEVAL 1/, 'define FMT_USE_CONSTEVAL 0')
       if patched != src
+        # Lokale Pod-Checkouts sind teils read-only (Permission denied
+        # beim direkten write; auf EAS beschreibbar) -> erst chmod.
+        File.chmod(0644, fmt_base) rescue nil
         File.write(fmt_base, patched)
         Pod::UI.puts '[fmt-patch] FMT_USE_CONSTEVAL -> 0 erzwungen (Xcode-26-consteval-Fix)'
       end
