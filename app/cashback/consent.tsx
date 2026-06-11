@@ -455,12 +455,12 @@ export default function CashbackConsentScreen() {
         width: 38,
         height: 38,
         borderRadius: 12,
-        backgroundColor: `${accent}1C`,
+        backgroundColor: 'rgba(255,255,255,0.22)',
         alignItems: 'center' as const,
         justifyContent: 'center' as const,
       },
       heroEyebrow: {
-        color: accent,
+        color: 'rgba(255,255,255,0.85)',
         fontSize: 11,
         fontFamily,
         fontWeight: fontWeight.bold as any,
@@ -469,7 +469,7 @@ export default function CashbackConsentScreen() {
         marginTop: compact ? 8 : 10,
       },
       heroTitle: {
-        color: theme.text,
+        color: '#fff',
         fontSize: compact ? 21 : 24,
         fontFamily,
         fontWeight: fontWeight.extraBold as any,
@@ -477,7 +477,7 @@ export default function CashbackConsentScreen() {
         marginTop: 4,
       },
       heroBody: {
-        color: theme.textSub,
+        color: 'rgba(255,255,255,0.92)',
         fontSize: 13,
         lineHeight: 19,
         fontFamily,
@@ -497,12 +497,56 @@ export default function CashbackConsentScreen() {
 
       // Step row — circle with the step number + title + sub. Three
       // of these stacked, no card chrome — keeps the page airy.
+      stepsCard: {
+        marginHorizontal: 20,
+        backgroundColor: theme.surface,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
+        paddingHorizontal: 14,
+        paddingVertical: compact ? 8 : 12,
+      },
       stepRow: {
         flexDirection: 'row' as const,
         alignItems: 'center' as const,
         gap: 12,
-        paddingHorizontal: 20,
-        paddingVertical: compact ? 5 : 8,
+        paddingHorizontal: 4,
+        paddingVertical: compact ? 4 : 6,
+      },
+      // Timeline-Segment zwischen den Step-Kreisen (Kreis 38px,
+      // Zentrum bei 4 + 19 = 23 -> Linie bei 22).
+      stepConnector: {
+        width: 2,
+        height: compact ? 8 : 12,
+        backgroundColor: `${accent}30`,
+        marginLeft: 22,
+        borderRadius: 1,
+      },
+      heroPill: {
+        flexDirection: 'row' as const,
+        alignItems: 'center' as const,
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 10,
+        backgroundColor: 'rgba(255,255,255,0.22)',
+      },
+      heroPillText: {
+        color: '#fff',
+        fontSize: 10,
+        fontFamily,
+        fontWeight: fontWeight.extraBold as any,
+        letterSpacing: 0.4,
+      },
+      marqueeLabel: {
+        color: theme.textMuted,
+        fontSize: 11,
+        fontFamily,
+        fontWeight: fontWeight.bold as any,
+        letterSpacing: 0.7,
+        textTransform: 'uppercase' as const,
+        textAlign: 'center' as const,
+        marginBottom: compact ? 6 : 10,
       },
       stepCircle: {
         width: 38,
@@ -635,7 +679,7 @@ export default function CashbackConsentScreen() {
       >
         {/* Hero — value pitch */}
         <LinearGradient
-          colors={[`${accent}1C`, `${accent}0C`]}
+          colors={['#0a6f62', '#0d8575', '#10a18a']}
           start={{ x: -1, y: 0.34 }}
           end={{ x: 1, y: -0.34 }}
           style={styles.hero}
@@ -644,7 +688,7 @@ export default function CashbackConsentScreen() {
             <MaterialCommunityIcons
               name="cash-multiple"
               size={20}
-              color={accent}
+              color="#fff"
             />
           </View>
           <Text style={styles.heroEyebrow}>Geld zurück fürs Einkaufen</Text>
@@ -654,18 +698,32 @@ export default function CashbackConsentScreen() {
               Einzige stabile Aussage: bis zu 1 € pro Bon (User-Vorgabe
               2026-06-10). Aktuelle Aktionen zeigt der Rewards-Tab. */}
           <Text style={styles.heroBody}>
-            Lade deine Kassenbons hoch und sichere dir bis zu 1 € pro Bon —
-            die aktuellen Aktionen siehst du in der App.
+            Bon fotografieren, hochladen, kassieren — die aktuellen Aktionen
+            siehst du in der App.
           </Text>
+          <View style={{ flexDirection: 'row', gap: 6, marginTop: compact ? 8 : 10 }}>
+            <View style={styles.heroPill}>
+              <MaterialCommunityIcons name="cash" size={11} color="#ffd44b" />
+              <Text style={styles.heroPillText}>Bis zu 1 € pro Bon</Text>
+            </View>
+            <View style={styles.heroPill}>
+              <MaterialCommunityIcons name="gift-outline" size={11} color="#ffd44b" />
+              <Text style={styles.heroPillText}>Ab 10 € einlösbar</Text>
+            </View>
+          </View>
         </LinearGradient>
 
         <View style={{ flexGrow: 1, minHeight: compact ? 12 : 18 }} />
 
-        {/* So einfach geht's */}
+        {/* So einfach geht's — Surface-Card mit Timeline-Linie
+            zwischen den Step-Kreisen (Design-System: Card radius 18,
+            Border, shadows.sm wie die Belohnungen-Cards). */}
         <Text style={styles.sectionLabel}>So einfach geht's</Text>
-        <View>
+        <View style={styles.stepsCard}>
           {STEPS.map((step, idx) => (
-            <View key={step.title} style={styles.stepRow}>
+            <View key={step.title}>
+            {idx > 0 ? <View style={styles.stepConnector} /> : null}
+            <View style={styles.stepRow}>
               <View style={styles.stepCircle}>
                 <MaterialCommunityIcons
                   name={step.icon as any}
@@ -681,14 +739,15 @@ export default function CashbackConsentScreen() {
                 <Text style={styles.stepSub}>{step.sub}</Text>
               </View>
             </View>
+            </View>
           ))}
         </View>
 
         <View style={{ flexGrow: 1, minHeight: compact ? 8 : 14 }} />
 
-        {/* Prämien-Marquee — die Einlöse-Optionen laufen als Appetit-
-            Strip unter Schritt 3 durch (REWE/Kaufland/Rossmann/Amazon/
-            VISA/Bankkonto/Spenden). */}
+        {/* Prämien-Marquee mit eigenem Label — die Einlöse-Optionen
+            haengen nicht mehr beziehungslos im Raum. */}
+        <Text style={styles.marqueeLabel}>Einlösbar bei</Text>
         <RewardsMarquee theme={theme} accent={accent} compact={compact} />
 
         <View style={{ flexGrow: 1.4, minHeight: 4 }} />
