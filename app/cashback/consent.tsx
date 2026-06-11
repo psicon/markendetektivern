@@ -220,11 +220,11 @@ function RewardsMarquee({
   // in der oberen Ecke über den Einkaufsgutschein-Logos.
   const voucherBadge = {
     position: 'absolute' as const,
-    top: -5,
-    right: 0,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    top: -6,
+    right: -2,
+    width: 21,
+    height: 21,
+    borderRadius: 10.5,
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
@@ -273,7 +273,7 @@ function RewardsMarquee({
               <View style={voucherBadge}>
                 <MaterialCommunityIcons
                   name="ticket-percent"
-                  size={11}
+                  size={13}
                   color={accent}
                 />
               </View>
@@ -445,9 +445,9 @@ export default function CashbackConsentScreen() {
         overflow: 'hidden' as const,
       },
       heroIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 14,
+        width: 38,
+        height: 38,
+        borderRadius: 12,
         backgroundColor: 'rgba(255,255,255,0.22)',
         alignItems: 'center' as const,
         justifyContent: 'center' as const,
@@ -459,7 +459,7 @@ export default function CashbackConsentScreen() {
         fontWeight: fontWeight.bold as any,
         letterSpacing: 0.8,
         textTransform: 'uppercase' as const,
-        marginTop: 14,
+        marginTop: 10,
       },
       heroTitle: {
         color: '#fff',
@@ -630,7 +630,7 @@ export default function CashbackConsentScreen() {
           <View style={styles.heroIcon}>
             <MaterialCommunityIcons
               name="cash-multiple"
-              size={24}
+              size={20}
               color="#fff"
             />
           </View>
