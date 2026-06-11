@@ -406,6 +406,17 @@ User-Hinweis 2026-05-27: "builden musst du nicht immer für solche
 tests da wir ja metro haben". Default: Metro. xcodebuild nur bei
 nativen Änderungen.
 
+**Metro IMMER via `nohup npx expo start --port 8081 > /tmp/metro.log 2>&1 &`
++ `disown` starten, NIE als run_in_background-Bash-Task.** Background-
+Tasks haben ein 10-Minuten-Timeout — Metro stirbt dann mit, die App im
+Sim läuft scheinbar weiter (Bundle im Speicher), aber on-demand
+geladene Assets (Bilder via require) kommen nicht mehr an → Symptom
+"Bilder fehlen", Icons gehen weiter (sind im Bundle). Kostete am
+2026-06-10 eine Debugging-Runde. Zweites Learning desselben Abends:
+NEUE Asset-Dateien (z.B. assets/rewards/*.png) nimmt ein laufender
+Metro nicht auf — nach dem Anlegen neuer Assets Metro neu starten,
+Hot-Reload reicht nicht (geänderte Dateiinhalte dagegen schon).
+
 ## Android: APK aufs Device — Workflow
 
 Wenn der User „aufs Device packen", „APK installieren" o.ä. sagt:
