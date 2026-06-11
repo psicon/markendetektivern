@@ -71,6 +71,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BannerAd } from '@/components/ads/BannerAd';
 import { DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import {
+  CartSnapshotService,
+  type CartSnapshot,
+  type CartSnapshotItem,
+} from '@/lib/services/cartSnapshotService';
+import { isOnline } from '@/lib/services/network';
+import {
   FilterSheet,
   OptionList,
 } from '@/components/design/FilterSheet';
@@ -2271,6 +2277,10 @@ export default function ShoppingListScreen() {
 
   // ─── Data ──────────────────────────────────────────────────────
   const [initialLoading, setInitialLoading] = useState(true);
+  // Offline-Fallback (86ca7uhg7): letzter AsyncStorage-Snapshot der
+  // Liste, wenn der Firestore-Load ohne Netz scheitert (Android hat
+  // bewusst keine Disk-Persistenz). Read-only-Ansicht.
+  const [offlineSnapshot, setOfflineSnapshot] = useState<CartSnapshot | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [brandProducts, setBrandProducts] = useState<EnrichedItem[]>([]);
   const [noNameProducts, setNoNameProducts] = useState<EnrichedItem[]>([]);
@@ -2586,9 +2596,34 @@ export default function ShoppingListScreen() {
       setSelectedConversions(newSelected);
       setBrandProducts(brandItems);
       setNoNameProducts(noNameItems);
+      setOfflineSnapshot(null);
+      // Kompakten Snapshot fuer den Offline-Fallback spiegeln
+      // (86ca7uhg7) — fire-and-forget.
+      const toSnap = (it: EnrichedItem): CartSnapshotItem => ({
+        id: it.id,
+        name: it.isCustom
+          ? (it.name ?? 'Eigenes Produkt')
+          : ((it.product as any)?.name ?? it.name ?? 'Produkt'),
+        anzahl: ((it as any).anzahl ?? 1) as number,
+        kind: it.kind,
+        marketName: (it as any)?.markt?.name ?? null,
+      });
+      CartSnapshotService.save(user.uid, {
+        brand: brandItems.map(toSnap),
+        noname: noNameItems.map(toSnap),
+      });
       // Totals werden via useMemo derived → keine Setter nötig.
     } catch (error: any) {
       console.error('Error loading shopping cart:', error);
+      // Offline-Fallback (86ca7uhg7): ohne Netz den letzten Stand aus
+      // AsyncStorage zeigen statt Fehler-Toast + leerer Liste.
+      if (!isOnline()) {
+        const snap = await CartSnapshotService.load(user.uid);
+        if (snap && (snap.brand.length > 0 || snap.noname.length > 0)) {
+          setOfflineSnapshot(snap);
+          return;
+        }
+      }
       showInfoToast(
         TOAST_MESSAGES.SHOPPING.loadError +
           ' ' +
@@ -3862,6 +3897,161 @@ export default function ShoppingListScreen() {
       </Pressable>
     );
   };
+
+  // ─── Offline-Fallback-Render (86ca7uhg7) ───────────────────────
+  // Read-only-Ansicht aus dem AsyncStorage-Snapshot, wenn der
+  // Firestore-Load offline scheiterte. Nach allen Hooks platziert
+  // (Hooks-Regel). Mutationen sind hier bewusst deaktiviert — V1.
+  if (offlineSnapshot && brandProducts.length === 0 && noNameProducts.length === 0) {
+    const sections: { title: string; items: CartSnapshotItem[] }[] = [
+      { title: 'Markenprodukte', items: offlineSnapshot.brand },
+      { title: 'NoName-Produkte', items: offlineSnapshot.noname },
+    ].filter((sec) => sec.items.length > 0);
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.bg }}>
+        <ScrollView
+          contentContainerStyle={{
+            paddingTop: insets.top + 16,
+            paddingHorizontal: 20,
+            paddingBottom: insets.bottom + 40,
+          }}
+        >
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.extraBold,
+              fontSize: 24,
+              letterSpacing: -0.3,
+              color: theme.text,
+            }}
+          >
+            Einkaufszettel
+          </Text>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              marginTop: 12,
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+              borderRadius: 12,
+              backgroundColor: theme.surfaceAlt,
+            }}
+          >
+            <MaterialCommunityIcons name="wifi-off" size={16} color={theme.textMuted} />
+            <Text
+              style={{
+                flex: 1,
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 12,
+                lineHeight: 17,
+                color: theme.textSub,
+              }}
+            >
+              Kein Empfang — das ist dein letzter gespeicherter Stand. Abhaken
+              geht wieder, sobald du online bist.
+            </Text>
+          </View>
+          {sections.map((sec) => (
+            <View key={sec.title} style={{ marginTop: 20 }}>
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 16,
+                  letterSpacing: -0.2,
+                  color: theme.text,
+                  marginBottom: 8,
+                }}
+              >
+                {sec.title}
+              </Text>
+              <View
+                style={{
+                  backgroundColor: theme.surface,
+                  borderRadius: 14,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                  overflow: 'hidden',
+                }}
+              >
+                {sec.items.map((it, i) => (
+                  <View
+                    key={it.id}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 10,
+                      paddingHorizontal: 14,
+                      paddingVertical: 12,
+                      borderTopWidth: i === 0 ? 0 : 1,
+                      borderTopColor: theme.border,
+                    }}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        flex: 1,
+                        fontFamily,
+                        fontWeight: fontWeight.bold,
+                        fontSize: 14,
+                        color: theme.text,
+                      }}
+                    >
+                      {it.name}
+                    </Text>
+                    {it.anzahl > 1 ? (
+                      <Text
+                        style={{
+                          fontFamily,
+                          fontWeight: fontWeight.extraBold,
+                          fontSize: 12,
+                          color: theme.textMuted,
+                        }}
+                      >
+                        ×{it.anzahl}
+                      </Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            </View>
+          ))}
+          <Pressable
+            onPress={() => {
+              setOfflineSnapshot(null);
+              setInitialLoading(true);
+              void loadShoppingCart();
+            }}
+            style={({ pressed }) => ({
+              marginTop: 24,
+              height: 46,
+              borderRadius: 12,
+              backgroundColor: theme.surface,
+              borderWidth: 1,
+              borderColor: theme.border,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 13,
+                color: theme.primary,
+              }}
+            >
+              Erneut laden
+            </Text>
+          </Pressable>
+        </ScrollView>
+      </View>
+    );
+  }
 
   // ─── Render ────────────────────────────────────────────────────
   return (
