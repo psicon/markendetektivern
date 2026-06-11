@@ -599,60 +599,6 @@ export default function NoNameDetailScreen() {
     };
   }, [product?.id, categoryIdForAlternatives]);
 
-  if (error) {
-    return (
-      <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
-        <MaterialCommunityIcons name="alert-circle-outline" size={48} color={theme.textMuted} />
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.bold,
-            fontSize: 16,
-            color: theme.text,
-            marginTop: 12,
-            textAlign: 'center',
-          }}
-        >
-          {error ?? 'Produkt nicht verfügbar'}
-        </Text>
-        <Pressable
-          onPress={() => setRetryNonce((n) => n + 1)}
-          style={({ pressed }) => ({
-            marginTop: 20,
-            height: 44,
-            paddingHorizontal: 22,
-            borderRadius: radii.full,
-            backgroundColor: brand.primary,
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: pressed ? 0.9 : 1,
-          })}
-        >
-          <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: '#fff' }}>
-            Erneut versuchen
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={backOrHome}
-          style={({ pressed }) => ({
-            marginTop: 10,
-            height: 44,
-            paddingHorizontal: 22,
-            borderRadius: radii.full,
-            backgroundColor: theme.surfaceAlt,
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: pressed ? 0.9 : 1,
-          })}
-        >
-          <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: theme.text }}>
-            Zurück
-          </Text>
-        </Pressable>
-      </View>
-    );
-  }
-
   // ─── Derived data ─────────────────────────────────────────────────────
   // `p` is null until the full joined product lands; the page
   // chrome and skeleton sections render meanwhile. All derived
@@ -966,6 +912,64 @@ export default function NoNameDetailScreen() {
   };
 
   // ─── Render ───────────────────────────────────────────────────────────
+
+  // Error-Branch NACH allen Hooks (Hooks-Regel — vorher crashte
+  // 'Rendered fewer hooks' sobald error gesetzt wurde; gleicher Fix
+  // wie product-comparison 26f8ba8).
+  if (error) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+        <MaterialCommunityIcons name="alert-circle-outline" size={48} color={theme.textMuted} />
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 16,
+            color: theme.text,
+            marginTop: 12,
+            textAlign: 'center',
+          }}
+        >
+          {error ?? 'Produkt nicht verfügbar'}
+        </Text>
+        <Pressable
+          onPress={() => setRetryNonce((n) => n + 1)}
+          style={({ pressed }) => ({
+            marginTop: 20,
+            height: 44,
+            paddingHorizontal: 22,
+            borderRadius: radii.full,
+            backgroundColor: brand.primary,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed ? 0.9 : 1,
+          })}
+        >
+          <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: '#fff' }}>
+            Erneut versuchen
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={backOrHome}
+          style={({ pressed }) => ({
+            marginTop: 10,
+            height: 44,
+            paddingHorizontal: 22,
+            borderRadius: radii.full,
+            backgroundColor: theme.surfaceAlt,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed ? 0.9 : 1,
+          })}
+        >
+          <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: theme.text }}>
+            Zurück
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       {/* swapAt = DOCK_DISTANCE so the "Produktdetails" fade-out finishes
