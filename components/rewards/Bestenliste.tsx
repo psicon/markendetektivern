@@ -63,7 +63,6 @@ import type { Level } from '@/lib/types/achievements';
 //     yearly counters once we deploy that schema upgrade
 //   • Rising Star (Diese Woche) — same; weekly rolling counter
 
-type LbScopeOuter = 'overall' | 'region';
 type OverallMetric = 'pts' | 'eur';
 type RegionGeo = 'bundesland' | 'stadt';
 // 'year' (Champion) was dropped — month + week cover the
@@ -77,20 +76,16 @@ const INITIAL_VISIBLE = 10;
 const LOAD_MORE_STEP = 10;
 
 export function BestenlisteTab({
-  outerScope,
-  setOuterScope,
-  geo,
-  setGeo,
   userStats,
   levels,
 }: {
-  outerScope: LbScopeOuter;
-  setOuterScope: (v: LbScopeOuter) => void;
-  geo: RegionGeo;
-  setGeo: (v: RegionGeo) => void;
   userStats: ReturnType<typeof useAchievements>['userStats'];
   levels: Level[];
 }) {
+  // Eine Seite, zwei Buehnen (User-Feedback Runde 4): Deine Liga oben,
+  // Regionen-Kampf als eigene Arena-Sektion darunter — beides IMMER
+  // sichtbar, kein Scope-Switch, kein Lifting mehr noetig.
+  const [geo, setGeo] = useState<RegionGeo>('bundesland');
   const { theme } = useTokens();
   const { user, userProfile, refreshUserProfile } = useAuth();
 
@@ -105,13 +100,6 @@ export function BestenlisteTab({
   const userNick = userProfile?.display_name ?? null;
   const hasExplicitCity = !!(userProfile as any)?.city;
 
-  // ─── Outer scope: Overall | Regionenkampf ──────────
-  // `outerScope`/`geo` are controlled from RewardsScreen so the
-  // floating PositionStickyBar (rendered outside this ScrollView)
-  // can read them. Pure state-driven (no inner PagerView).
-  const onOuterChange = (next: LbScopeOuter) => {
-    setOuterScope(next);
-  };
 
 
   // ─── Overall: period ──────────────────────────────────────────
@@ -130,32 +118,17 @@ export function BestenlisteTab({
   // ("Aller Zeiten"). The two axes the user wants to compare are
   // BL vs City (lifted state) and Punkte vs Ersparnis (local).
   const [regionMetric, setRegionMetric] = useState<OverallMetric>('pts');
-  // Gemeinsamer Liga-Header (alle 5 Ligen) — gespeist aus Scope/Periode/Geo.
-  const leagueHeader =
-    outerScope === 'overall'
-      ? {
-          title: `${PERIOD_META[overallPeriod].emoji} ${PERIOD_META[overallPeriod].name}`,
-          sub: `${PERIOD_META[overallPeriod].klartext}${
-            formatSeasonCountdown(overallPeriod)
-              ? ` · ${formatSeasonCountdown(overallPeriod)}`
-              : ''
-          }`,
-          chip: PERIOD_META[overallPeriod].chipLabel,
-          gold: overallPeriod === 'all',
-        }
-      : geo === 'bundesland'
-        ? {
-            title: '🗺️ Bundesländer-Liga',
-            sub: '16 Bundesländer im Duell',
-            chip: 'Länder',
-            gold: false,
-          }
-        : {
-            title: '🏙️ Städte-Liga',
-            sub: 'Die Top-20-Städte im Duell',
-            chip: 'Städte',
-            gold: false,
-          };
+  // Liga-Header der User-Liga (Periode + Countdown).
+  const leagueHeader = {
+    title: `${PERIOD_META[overallPeriod].emoji} ${PERIOD_META[overallPeriod].name}`,
+    sub: `${PERIOD_META[overallPeriod].klartext}${
+      formatSeasonCountdown(overallPeriod)
+        ? ` · ${formatSeasonCountdown(overallPeriod)}`
+        : ''
+    }`,
+    chip: PERIOD_META[overallPeriod].chipLabel,
+    gold: overallPeriod === 'all',
+  };
 
   // ─── Data ─────────────────────────────────────────────────────
   // The user's own percentile + motivational message used to live
@@ -245,8 +218,6 @@ export function BestenlisteTab({
           userStats={userStats}
           userProfile={userProfile}
           levels={levels}
-          outerScope={outerScope}
-          geo={geo}
         />
       </View>
 
@@ -325,67 +296,102 @@ export function BestenlisteTab({
       </View>
 
 
-      {/* ─── Outer pager (Overall / Regionenkampf) ─── */}
-      {/* No inner PagerView — its fixed height was clipping content
-          and swallowing the parent ScrollView's vertical gesture, so
-          users couldn't scroll the leaderboard. Der Liga-Header oben
-          treibt `outerScope`/`geo`/`overallPeriod` via Sheet. */}
-      {outerScope === 'overall' ? (
-        <View>
-          <UserBoard
-            users={overallUsers}
-            period={overallPeriod}
-            visibleCount={visibleCount}
-            onLoadMore={() =>
-              setVisibleCount((c) =>
-                Math.min(c + LOAD_MORE_STEP, overallUsers.length),
-              )
-            }
+      {/* ─── Bühne 1: Deine Liga (Periode via Chip oben) ─── */}
+      <UserBoard
+        users={overallUsers}
+        period={overallPeriod}
+        visibleCount={visibleCount}
+        onLoadMore={() =>
+          setVisibleCount((c) =>
+            Math.min(c + LOAD_MORE_STEP, overallUsers.length),
+          )
+        }
+      />
+
+      {/* ─── Bühne 2: Regionen-Kampf — IMMER sichtbar (User-Feedback
+          Runde 4: 'nicht verstecken, das ist geiles Binding'). Eigene
+          Arena-Sektion mit Geo- + Metrik-Toggle im Scroll-Flow. ─── */}
+      <View
+        style={{
+          paddingHorizontal: 20,
+          paddingTop: 30,
+          flexDirection: 'row',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+        }}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 20,
+            letterSpacing: -0.2,
+            color: theme.text,
+          }}
+        >
+          ⚔️ Regionen-Kampf
+        </Text>
+      </View>
+      <Text
+        style={{
+          paddingHorizontal: 20,
+          marginTop: 2,
+          fontFamily,
+          fontWeight: fontWeight.medium,
+          fontSize: 11,
+          color: theme.textMuted,
+        }}
+      >
+        Dein Revier gegen den Rest — Punkte oder Ersparnis, du entscheidest.
+      </Text>
+      <View
+        style={{
+          paddingHorizontal: 20,
+          paddingTop: 12,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        }}
+      >
+        <View style={{ flex: 1 }}>
+          <InlineToggle
+            value={geo}
+            onChange={setGeo}
+            options={[
+              { key: 'bundesland', label: '🗺️ Länder' },
+              { key: 'stadt', label: '🏙️ Städte' },
+            ]}
           />
         </View>
-      ) : (
-        <View>
-          {/* Metrik-Toggle (Geo lebt im Liga-Sheet). Ersparnis ist im
-              Regionenkampf gewollt — Aggregate ohne Personenbezug. */}
-          <View
-            style={{
-              paddingHorizontal: 20,
-              paddingTop: 10,
-              flexDirection: 'row',
-              justifyContent: 'flex-end',
-            }}
-          >
-            <View style={{ width: 168 }}>
-              <InlineToggle
-                value={regionMetric}
-                onChange={setRegionMetric}
-                options={[
-                  { key: 'pts', label: 'Punkte' },
-                  { key: 'eur', label: 'Ersparnis' },
-                ]}
-              />
-            </View>
-          </View>
-          {/* "Spiel für deine Stadt" — nur noch KONTEXTUELL im
-              Städte-Kampf, wenn keine Stadt gesetzt ist (statt
-              Dauer-Banner über allem; User-Feedback 2026-06-11). */}
-          {geo === 'stadt' && !hasExplicitCity ? (
-            <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>
-              <SetupNudge
-                guessedCity={userCity}
-                onPress={() => setSetupOpen(true)}
-              />
-            </View>
-          ) : null}
-          <RegionBoard
-            rows={geo === 'bundesland' ? blRows : cityRows}
-            metric={regionMetric}
-            showBundesland={geo === 'stadt'}
-            myRank={geo === 'bundesland' ? userBLRank : userCityRank}
-            myLabel={geo === 'bundesland' ? userBL : userCity}
+        <View style={{ width: 150 }}>
+          <InlineToggle
+            value={regionMetric}
+            onChange={setRegionMetric}
+            options={[
+              { key: 'pts', label: 'Punkte' },
+              { key: 'eur', label: 'Ersparnis' },
+            ]}
           />
         </View>
-      )}
+      </View>
+      {/* "Spiel für deine Stadt" — kontextuell im Städte-Kampf, wenn
+          keine Stadt gesetzt ist. */}
+      {geo === 'stadt' && !hasExplicitCity ? (
+        <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
+          <SetupNudge
+            guessedCity={userCity}
+            onPress={() => setSetupOpen(true)}
+          />
+        </View>
+      ) : null}
+      <RegionBoard
+        rows={geo === 'bundesland' ? blRows : cityRows}
+        metric={regionMetric}
+        showBundesland={geo === 'stadt'}
+        myRank={geo === 'bundesland' ? userBLRank : userCityRank}
+        myLabel={geo === 'bundesland' ? userBL : userCity}
+      />
 
       {/* Errungenschaften leben jetzt komplett auf /achievements
           (erreichbar über den StatusHero oben). Hält die Bestenliste
@@ -394,30 +400,16 @@ export function BestenlisteTab({
 
       <RefreshHint updatedAt={updatedAt} />
 
-      {/* ─── Liga-Sheet: ALLE fünf Ligen in zwei Sektionen — das
-          einzige Navigations-Element der Bestenliste. ─── */}
+      {/* ─── Liga-Sheet: Periode der User-Liga (Regionen-Kampf lebt
+          sichtbar auf der Seite, braucht keinen Sheet-Eintrag). ─── */}
       <FilterSheet
         visible={periodSheetOpen}
         title="Liga wählen"
         onClose={() => setPeriodSheetOpen(false)}
       >
         <View style={{ gap: 8, paddingBottom: 8 }}>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.bold,
-              fontSize: 11,
-              letterSpacing: 0.7,
-              textTransform: 'uppercase',
-              color: theme.textMuted,
-              marginBottom: 2,
-            }}
-          >
-            Deine Liga
-          </Text>
           {(['month', 'week', 'all'] as Period[]).map((pKey) => {
             const meta = PERIOD_META[pKey];
-            const on = outerScope === 'overall' && overallPeriod === pKey;
             return (
               <LeagueOption
                 key={pKey}
@@ -426,53 +418,14 @@ export function BestenlisteTab({
                 klartext={meta.klartext}
                 desc={meta.desc}
                 gold={pKey === 'all'}
-                active={on}
+                active={overallPeriod === pKey}
                 onPress={() => {
-                  onOuterChange('overall');
                   setOverallPeriod(pKey);
                   setPeriodSheetOpen(false);
                 }}
               />
             );
           })}
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.bold,
-              fontSize: 11,
-              letterSpacing: 0.7,
-              textTransform: 'uppercase',
-              color: theme.textMuted,
-              marginTop: 10,
-              marginBottom: 2,
-            }}
-          >
-            Regionen-Kampf
-          </Text>
-          <LeagueOption
-            emoji="🗺️"
-            name="Bundesländer-Liga"
-            klartext="16 Länder"
-            desc="Welches Bundesland sammelt am meisten — Punkte oder Ersparnis?"
-            active={outerScope === 'region' && geo === 'bundesland'}
-            onPress={() => {
-              onOuterChange('region');
-              setGeo('bundesland');
-              setPeriodSheetOpen(false);
-            }}
-          />
-          <LeagueOption
-            emoji="🏙️"
-            name="Städte-Liga"
-            klartext="Top 20"
-            desc="Deine Stadt gegen den Rest — kämpf für dein Revier."
-            active={outerScope === 'region' && geo === 'stadt'}
-            onPress={() => {
-              onOuterChange('region');
-              setGeo('stadt');
-              setPeriodSheetOpen(false);
-            }}
-          />
         </View>
       </FilterSheet>
 
@@ -1703,16 +1656,12 @@ function StatusHero({
   userStats,
   userProfile,
   levels,
-  outerScope,
-  geo,
 }: {
   name: string;
   photoUrl: string | null;
   userStats: { currentLevel?: number; currentStreak?: number; freezeTokens?: number; pointsTotal?: number } | null;
   userProfile: any;
   levels: Level[];
-  outerScope: LbScopeOuter;
-  geo: RegionGeo;
 }) {
   // Identity for the gradient colour only — the hero itself is now
   // exclusively about WHERE THE USER STANDS in the active leaderboard
@@ -1732,68 +1681,18 @@ function StatusHero({
   const userNick: string | null = userProfile?.display_name ?? null;
   const [position, setPosition] = useState<LbPosition | null>(null);
   useEffect(() => {
-    if (outerScope !== 'overall') return;
     let alive = true;
     getUserPosition(userPts, userNick).then((p) => alive && setPosition(p));
     return () => {
       alive = false;
     };
-  }, [outerScope, userPts, userNick]);
+  }, [userPts, userNick]);
 
-  // Region mode: find the user's own BL/Stadt row in the league.
-  const userBL: string | null =
-    (userProfile as any)?.bundesland ??
-    (userProfile as any)?.guessedBundesland ??
-    null;
-  const userCity: string | null =
-    (userProfile as any)?.city ??
-    (userProfile as any)?.guessedCity ??
-    null;
-  const [regionRow, setRegionRow] = useState<LbRow | null>(null);
-  const [regionTotal, setRegionTotal] = useState(0);
-  useEffect(() => {
-    if (outerScope !== 'region') return;
-    let alive = true;
-    const target = geo === 'bundesland' ? userBL : userCity;
-    const fetcher =
-      geo === 'bundesland'
-        ? getBundeslandRanks(target, 'all', 'pts')
-        : getCityRanks(target, 'all', 'pts');
-    fetcher.then((rows) => {
-      if (!alive) return;
-      setRegionTotal(rows.length);
-      setRegionRow(rows.find((r) => r.isMe) ?? null);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [outerScope, geo, userBL, userCity]);
 
-  // ── Resolve badge + message from current selection ──
+  // ── Badge + Message: Stand des Users in der User-Liga ──
   let badge: string;
   let message: string;
-  if (outerScope === 'region') {
-    const target = geo === 'bundesland' ? userBL : userCity;
-    if (!target) {
-      badge = geo === 'bundesland' ? 'Bundesland' : 'Stadt';
-      message =
-        geo === 'bundesland'
-          ? '🗺️ Setze dein Bundesland um in der Liga mitzuspielen!'
-          : '🏙️ Setze deine Stadt um in der Liga mitzuspielen!';
-    } else if (!regionRow) {
-      badge = target;
-      message =
-        geo === 'bundesland'
-          ? '🗺️ Sammle Punkte für dein Bundesland!'
-          : '🏙️ Sammle Punkte für deine Stadt!';
-    } else {
-      badge =
-        regionRow.rank <= 3
-          ? `Platz ${regionRow.rank}`
-          : `Platz ${regionRow.rank}/${regionTotal}`;
-      message = regionMessage(regionRow.rank, regionTotal, target, geo);
-    }
-  } else {
+  {
     if (position?.rank !== undefined && position?.rank !== null && position.rank <= 50) {
       badge = `Top ${position.rank}`;
     } else if (position?.rank !== undefined && position?.rank !== null) {
@@ -2385,24 +2284,6 @@ function PodiumCard({
 // Region-side motivational copy. Symmetric to motivationalLine()
 // in the leaderboard service but tied to the user's BL/Stadt rank
 // inside its own league (16 BLs / top-50 cities).
-function regionMessage(
-  rank: number,
-  total: number,
-  name: string,
-  geo: RegionGeo,
-): string {
-  const noun = geo === 'bundesland' ? 'Bundesland' : 'Stadt';
-  if (rank === 1) return `🥇 ${name} — auf Platz 1! Verteidige die Spitze!`;
-  if (rank === 2) return `🥈 ${name} — Silber, der Thron ist nah!`;
-  if (rank === 3) return `🥉 ${name} — auf dem Treppchen, stark!`;
-  if (rank <= 5) return `🔥 ${name} ist Top 5 — sammle weiter Punkte!`;
-  if (rank <= 10) return `💪 ${name} ist Top 10 — die Spitze ist in Sicht!`;
-  // Out of top 10: include the position fraction so the user knows
-  // how far they are from the front.
-  return `🚀 Sammle Punkte und bring dein${
-    geo === 'bundesland' ? '' : 'e'
-  } ${noun} ${name} weiter nach oben!`;
-}
 
 // ─── Region setup sheet content ──────────────────────────────────────
 // Two modes:

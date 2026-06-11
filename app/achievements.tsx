@@ -260,12 +260,6 @@ export default function AchievementsScreen() {
     [],
   );
 
-  // Bestenliste-state lifted up so the floating PositionStickyBar
-  // (sibling of PagerView, screen-fixed overlay) reads the right
-  // slice without re-querying.
-  const [outerScope, setOuterScope] =
-    useState<'overall' | 'region'>('overall');
-  const [geo, setGeo] = useState<'bundesland' | 'stadt'>('bundesland');
 
   // Chrome layout — ONE BlurView (iOS) / tinted View (Android) holds
   // BOTH the title row AND the tabs row. Two stacked BlurViews show
@@ -409,14 +403,7 @@ export default function AchievementsScreen() {
             }}
             showsVerticalScrollIndicator={false}
           >
-            <BestenlisteTab
-              outerScope={outerScope}
-              setOuterScope={setOuterScope}
-              geo={geo}
-              setGeo={setGeo}
-              userStats={userStats}
-              levels={levels}
-            />
+            <BestenlisteTab userStats={userStats} levels={levels} />
           </ScrollView>
         </View>
       </PagerView>
