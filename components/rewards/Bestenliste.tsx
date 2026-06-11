@@ -1,5 +1,8 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { CITY_TO_BUNDESLAND } from '@/lib/data/city-to-bundesland';
+import {
+  CITY_TO_BUNDESLAND,
+  normalizeCityName,
+} from '@/lib/data/city-to-bundesland';
 import { LinearGradient } from 'expo-linear-gradient';
 import { doc, updateDoc } from '@react-native-firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -9,6 +12,7 @@ import {
   ScrollView,
   Text,
   View,
+  TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -438,7 +442,6 @@ export function BestenlisteTab({
         <RegionSetupContent
           suggestion={{ city: userCity, bundesland: userBL }}
           mode={geo}
-          cityOptions={cityRows.map((r) => r.label)}
           onAccept={async () => {
             if (userBL && userCity) await saveRegion(userBL, userCity);
             setSetupOpen(false);
@@ -450,12 +453,10 @@ export function BestenlisteTab({
             await saveRegion(bl, userCity ?? '');
             setSetupOpen(false);
           }}
-          onPickCity={async (pickedCity) => {
-            // Stadt → Bundesland über das statische Mapping ableiten,
-            // damit BEIDE Ligen ab sofort den DU-Highlight haben.
-            const mappedBl =
-              CITY_TO_BUNDESLAND[pickedCity] ?? userBL ?? '';
-            await saveRegion(mappedBl, pickedCity);
+          onPickCity={async (pickedCity, pickedBl) => {
+            // BL kommt aus Schritt 1 des Pickers — beide Ligen haben
+            // ab sofort den DU-Highlight.
+            await saveRegion(pickedBl, pickedCity);
             setSetupOpen(false);
           }}
         />
@@ -2296,6 +2297,15 @@ function PodiumCard({
 // the Städte-Liga shows "Sammle Punkte für deine Stadt!" until they
 // set a city via a separate flow.
 
+/** Alle gemappten Städte eines Bundeslands, A-Z, ohne die englischen
+ *  Alias-Eintraege (Munich/Cologne/…) aus dem Geocoder-Mapping. */
+function citiesForBundesland(bl: string): string[] {
+  return Object.entries(CITY_TO_BUNDESLAND)
+    .filter(([c, b]) => b === bl && normalizeCityName(c) === c)
+    .map(([c]) => c)
+    .sort((a, b) => a.localeCompare(b, 'de'));
+}
+
 const BUNDESLAENDER = [
   'Baden-Württemberg',
   'Bayern',
@@ -2318,23 +2328,20 @@ const BUNDESLAENDER = [
 function RegionSetupContent({
   suggestion,
   mode,
-  cityOptions,
   onAccept,
   onPickOther,
   onPickBundesland,
   onPickCity,
 }: {
   suggestion: { city: string | null; bundesland: string | null };
-  /** Aus welcher Liga das Sheet geöffnet wurde — bestimmt, was der
-   *  Picker anbietet (Städte-Kampf braucht eine STADT, nicht nur ein
-   *  Bundesland — vorher war der Stadt-Pfad ein Dead-End). */
+  /** Aus welcher Liga das Sheet geöffnet wurde. Städte-Kampf =
+   *  ZWEI Schritte: Bundesland → Stadt (A-Z + Suche, alle gemappten
+   *  Städte — User-Vorgabe 2026-06-11). */
   mode: 'bundesland' | 'stadt';
-  /** Die Top-Städte der Liga (aus den Leaderboard-Rows). */
-  cityOptions: string[];
   onAccept: () => void;
   onPickOther: () => void;
   onPickBundesland: (bl: string) => void;
-  onPickCity: (city: string) => void;
+  onPickCity: (city: string, bl: string) => void;
 }) {
   const { theme } = useTokens();
   const city = suggestion.city ?? '';
@@ -2344,7 +2351,16 @@ function RegionSetupContent({
   const [picking, setPicking] = useState(false);
   const showPicker = picking || !(city && bl);
   const cityMode = mode === 'stadt';
-  const pickerItems = cityMode ? cityOptions : BUNDESLAENDER;
+  // Schritt-State des Stadt-Flows: erst Bundesland, dann Stadt.
+  const [pickedBL, setPickedBL] = useState<string | null>(null);
+  const [citySearch, setCitySearch] = useState('');
+  const inCityStep = cityMode && pickedBL !== null;
+  const cityList = inCityStep
+    ? citiesForBundesland(pickedBL).filter((c) =>
+        c.toLowerCase().includes(citySearch.trim().toLowerCase()),
+      )
+    : [];
+  const pickerItems = inCityStep ? cityList : BUNDESLAENDER;
 
   if (showPicker) {
     return (
@@ -2358,7 +2374,7 @@ function RegionSetupContent({
             textAlign: 'center',
           }}
         >
-          {cityMode ? 'Wähle deine Stadt' : 'Wähle dein Bundesland'}
+          {inCityStep ? 'Wähle deine Stadt' : 'Wähle dein Bundesland'}
         </Text>
         <Text
           style={{
@@ -2372,14 +2388,112 @@ function RegionSetupContent({
             marginBottom: 14,
           }}
         >
-          {cityMode
+          {inCityStep
             ? 'Tippe deine Stadt an — deine Punkte zählen dann für die Städte-Liga.'
-            : 'Tippe dein Bundesland an — deine Punkte zählen dann für die Bundesländer-Liga.'}
+            : cityMode
+              ? 'Schritt 1 von 2 — erst dein Bundesland, dann deine Stadt.'
+              : 'Tippe dein Bundesland an — deine Punkte zählen dann für die Bundesländer-Liga.'}
         </Text>
+        {inCityStep ? (
+          <>
+            {/* Zurück zu Schritt 1 + Suchfeld (kanonischer Such-Stil). */}
+            <Pressable
+              onPress={() => {
+                setPickedBL(null);
+                setCitySearch('');
+              }}
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+                alignSelf: 'flex-start',
+                paddingVertical: 4,
+                paddingRight: 8,
+                marginBottom: 8,
+                opacity: pressed ? 0.6 : 1,
+              })}
+            >
+              <MaterialCommunityIcons
+                name="chevron-left"
+                size={18}
+                color={theme.primary}
+              />
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.bold,
+                  fontSize: 13,
+                  color: theme.primary,
+                }}
+              >
+                {pickedBL}
+              </Text>
+            </Pressable>
+            <View
+              style={{
+                height: 38,
+                borderRadius: 11,
+                backgroundColor: theme.surface,
+                borderWidth: 1,
+                borderColor: theme.border,
+                paddingHorizontal: 12,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                marginBottom: 10,
+              }}
+            >
+              <MaterialCommunityIcons
+                name="magnify"
+                size={16}
+                color={theme.textMuted}
+              />
+              <TextInput
+                value={citySearch}
+                onChangeText={setCitySearch}
+                placeholder="Stadt suchen …"
+                placeholderTextColor={theme.textMuted}
+                autoCorrect={false}
+                style={{
+                  flex: 1,
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 14,
+                  color: theme.text,
+                  paddingVertical: 0,
+                }}
+              />
+              {citySearch.length > 0 ? (
+                <Pressable onPress={() => setCitySearch('')} hitSlop={8}>
+                  <MaterialCommunityIcons
+                    name="close-circle"
+                    size={16}
+                    color={theme.textMuted}
+                  />
+                </Pressable>
+              ) : null}
+            </View>
+          </>
+        ) : null}
         <ScrollView
-          style={{ maxHeight: 360 }}
+          style={{ maxHeight: inCityStep ? 300 : 360 }}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
+          {inCityStep && cityList.length === 0 ? (
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 13,
+                color: theme.textMuted,
+                textAlign: 'center',
+                paddingVertical: 24,
+              }}
+            >
+              Keine Stadt gefunden — prüfe die Schreibweise.
+            </Text>
+          ) : null}
           <View
             style={{
               backgroundColor: theme.surface,
@@ -2392,7 +2506,13 @@ function RegionSetupContent({
             {pickerItems.map((b, i) => (
               <Pressable
                 key={b}
-                onPress={() => (cityMode ? onPickCity(b) : onPickBundesland(b))}
+                onPress={() =>
+                  inCityStep
+                    ? onPickCity(b, pickedBL as string)
+                    : cityMode
+                      ? setPickedBL(b)
+                      : onPickBundesland(b)
+                }
                 style={({ pressed }) => ({
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -2405,7 +2525,7 @@ function RegionSetupContent({
                 })}
               >
                 <MaterialCommunityIcons
-                  name={cityMode ? 'city-variant-outline' : 'map-marker-outline'}
+                  name={inCityStep ? 'city-variant-outline' : 'map-marker-outline'}
                   size={18}
                   color={theme.textMuted}
                 />
