@@ -76,7 +76,10 @@ type Period = 'all' | 'month' | 'week';
 // How many overall-users to show on first paint. "Mehr laden" reveals
 // the next chunk in 10-row jumps. Lifetime list goes up to top-100;
 // live week/month lists are capped at 50 server-side.
-const INITIAL_VISIBLE = 10;
+// Kollabiert starten: nur das Podium (Top 3) — so ist der
+// Regionen-Kampf beim ersten Blick erreichbar (User-Vorgabe
+// 2026-06-11). 'Mehr laden' holt dann 10er-Schritte.
+const INITIAL_VISIBLE = 3;
 const LOAD_MORE_STEP = 10;
 
 export function BestenlisteTab({
@@ -318,7 +321,7 @@ export function BestenlisteTab({
       <View
         style={{
           paddingHorizontal: 20,
-          paddingTop: 30,
+          paddingTop: 22,
           flexDirection: 'row',
           alignItems: 'baseline',
           justifyContent: 'space-between',
@@ -351,7 +354,7 @@ export function BestenlisteTab({
       <View
         style={{
           paddingHorizontal: 20,
-          paddingTop: 12,
+          paddingTop: 10,
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -390,6 +393,7 @@ export function BestenlisteTab({
         </View>
       ) : null}
       <RegionBoard
+        key={geo}
         rows={geo === 'bundesland' ? blRows : cityRows}
         metric={regionMetric}
         showBundesland={geo === 'stadt'}
@@ -896,7 +900,7 @@ function UserBoard({
       <View
         style={{
           marginHorizontal: 20,
-          marginTop: hasPodium ? 18 : 14,
+          marginTop: hasPodium ? 12 : 12,
           gap: 10,
         }}
       >
@@ -929,7 +933,7 @@ function UserBoard({
                 color: theme.primary,
               }}
             >
-              Mehr laden
+              {visibleCount <= 3 ? 'Liste anzeigen' : 'Mehr laden'}
             </Text>
             <Text
               style={{
@@ -1167,6 +1171,7 @@ function RegionBoard({
   myLabel: string | null;
 }) {
   const { theme } = useTokens();
+  const [expanded, setExpanded] = useState(false);
   if (rows.length === 0) {
     return (
       <View style={{ padding: 40, alignItems: 'center' }}>
@@ -1187,27 +1192,63 @@ function RegionBoard({
   const hasPodium = visible.length >= 3;
   const top3 = hasPodium ? visible.slice(0, 3) : [];
   const rest = hasPodium ? visible.slice(3) : visible;
+  // Podium immer, Restliste ausklappbar — gleiche Logik wie die
+  // User-Liga, haelt die Seite kompakt (User-Vorgabe 2026-06-11).
+  const showRest = expanded || !hasPodium;
   return (
     <>
       {hasPodium ? (
         <RegionPodium top3={top3} metric={metric} isCity={!!showBundesland} />
       ) : null}
-      <View
-        style={{
-          marginHorizontal: 20,
-          marginTop: hasPodium ? 18 : 14,
-          gap: 10,
-        }}
-      >
-        {rest.map((r) => (
-          <RegionCard
-            key={r.key}
-            row={r}
-            metric={metric}
-            showBundesland={showBundesland}
-          />
-        ))}
-      </View>
+      {showRest ? (
+        <View
+          style={{
+            marginHorizontal: 20,
+            marginTop: hasPodium ? 14 : 12,
+            gap: 10,
+          }}
+        >
+          {rest.map((r) => (
+            <RegionCard
+              key={r.key}
+              row={r}
+              metric={metric}
+              showBundesland={showBundesland}
+            />
+          ))}
+        </View>
+      ) : rest.length > 0 ? (
+        <View style={{ paddingHorizontal: 20, marginTop: 14 }}>
+          <Pressable
+            onPress={() => setExpanded(true)}
+            style={({ pressed }) => ({
+              height: 46,
+              borderRadius: 12,
+              backgroundColor: theme.surface,
+              borderWidth: 1,
+              borderColor: theme.border,
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexDirection: 'row',
+              gap: 6,
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 13,
+                color: theme.primary,
+              }}
+            >
+              {showBundesland
+                ? `Alle ${visible.length} Städte anzeigen`
+                : `Alle ${visible.length} Länder anzeigen`}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
       <DeinePositionRegionCard
         rank={myRank}
         label={myLabel}
@@ -1239,7 +1280,7 @@ function RegionPodium({
   const r2 = top3[1];
   const r3 = top3[2];
   return (
-    <View style={{ marginHorizontal: 20, marginTop: 18 }}>
+    <View style={{ marginHorizontal: 20, marginTop: 12 }}>
       <View
         style={{
           flexDirection: 'row',
@@ -2003,7 +2044,7 @@ function Podium({ top3 }: { top3: LbUser[] }) {
   const r3 = top3[2];
 
   return (
-    <View style={{ marginHorizontal: 20, marginTop: 18 }}>
+    <View style={{ marginHorizontal: 20, marginTop: 12 }}>
       {/* Avatar row — rank-1 floats higher and bigger in the middle. */}
       <View
         style={{
