@@ -40,6 +40,26 @@ const FUNCTIONS_BASE =
   process.env.EXPO_PUBLIC_CASHBACK_FN_BASE ||
   'https://europe-west3-markendetektive-895f7.cloudfunctions.net';
 
+/**
+ * fetch mit hartem Timeout (86ca7uh1x): bei SCHWACHEM Empfang (1 Balken
+ * Edge — der Normalfall im Markt) haengt ein fetch ohne AbortController
+ * minutenlang. 30s-Abort wirft 'upload_timeout'-artig; die Upload-Queue
+ * uebernimmt den Retry.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 30_000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── Upload ─────────────────────────────────────────────────────────
 
 export interface UploadResult {
@@ -381,7 +401,7 @@ export async function enqueueCashback(args: EnqueueArgs): Promise<EnqueueResult>
   });
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetchWithTimeout(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -390,12 +410,14 @@ export async function enqueueCashback(args: EnqueueArgs): Promise<EnqueueResult>
       body: JSON.stringify(args),
     });
   } catch (err: any) {
+    const aborted = err?.name === 'AbortError';
     console.error('[bonUpload] fetch_failed', {
       code: err?.code,
+      aborted,
       message: err?.message,
     });
-    const e: any = new Error(err?.message || 'network_failed');
-    e.code = 'network_failed';
+    const e: any = new Error(aborted ? 'enqueue_timeout' : err?.message || 'network_failed');
+    e.code = aborted ? 'enqueue_timeout' : 'network_failed';
     throw e;
   }
   let payload: any = null;
@@ -450,11 +472,19 @@ export async function requestPayout(amountCents?: number, method?: PayoutMethodK
   const body: Record<string, unknown> = {};
   if (typeof amountCents === 'number' && amountCents > 0) body.amountCents = Math.round(amountCents);
   if (method) body.method = method;
-  const res = await fetch(`${FUNCTIONS_BASE}/requestPayout`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-    body: JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(`${FUNCTIONS_BASE}/requestPayout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      body: JSON.stringify(body),
+    });
+  } catch (err: any) {
+    const aborted = err?.name === 'AbortError';
+    const e: any = new Error(aborted ? 'payout_timeout' : err?.message || 'network_failed');
+    e.code = aborted ? 'payout_timeout' : 'network_failed';
+    throw e;
+  }
   let payload: any = null;
   try {
     payload = await res.json();

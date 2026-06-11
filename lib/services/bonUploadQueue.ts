@@ -167,7 +167,7 @@ async function deleteJobFiles(jobId: string) {
 function humanError(e: any): string {
   const code = e?.code as string | undefined;
   const message = e?.message as string | undefined;
-  if (code === 'upload_timeout')
+  if (code === 'upload_timeout' || code === 'enqueue_timeout' || code === 'network_failed')
     return 'Der Upload braucht zu lange. Prüfe deine Verbindung und versuch es erneut.';
   if (code === 'rate_limited') return 'Du hast heute schon einen Bon eingereicht. Morgen geht es weiter.';
   if (code === 'consent_missing') return 'Bitte bestätige zuerst die Cashback-Einwilligung.';

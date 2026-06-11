@@ -6,7 +6,12 @@ const ALGOLIA_APP_ID = 'Y0KKZHT49Q';
 const ALGOLIA_SEARCH_API_KEY = 'b87bb9ffcda4b4b3e3161e155e29869e';
 
 // Initialize Algolia client (v5 syntax)
-const client = algoliasearch(ALGOLIA_APP_ID, ALGOLIA_SEARCH_API_KEY);
+// Timeouts (86ca7uh1x): ohne Limit haengt eine Suche bei schwachem
+// Empfang minutenlang — 10s read reicht; Fehler faellt in die
+// bestehenden catch-Pfade (Cache/leere Hits).
+const client = algoliasearch(ALGOLIA_APP_ID, ALGOLIA_SEARCH_API_KEY, {
+  timeouts: { connect: 5_000, read: 10_000, write: 15_000 },
+});
 
 // Index names - from Algolia dashboard screenshot
 const NONAME_INDEX = 'produkte'; // NoName products index
