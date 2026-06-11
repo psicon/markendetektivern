@@ -654,10 +654,20 @@ class JourneyTrackingService {
         console.log('🆕 Keine aktive Journey gefunden - starte neue Session');
         this.startJourney('browse', 'app_start', undefined, userId);
       }
+      // Consent-Gate-Fail-safe (2026-06-11): startJourney erzeugt OHNE
+      // Markt-Daten-Consent bewusst KEINE Journey -> ohne Guard crasht
+      // der folgende currentJourney-Zugriff (Repro: 'Fehler beim Laden'
+      // auf jeder Produktseite fuer nicht-consentete User).
+      if (!this.currentJourney) return;
     } catch (error) {
       console.error('❌ Error loading active journey:', error);
       // Bei Fehler auch neue Journey starten
       this.startJourney('browse', 'app_start', undefined, userId);
+      // Consent-Gate-Fail-safe (2026-06-11): startJourney erzeugt OHNE
+      // Markt-Daten-Consent bewusst KEINE Journey -> ohne Guard crasht
+      // der folgende currentJourney-Zugriff (Repro: 'Fehler beim Laden'
+      // auf jeder Produktseite fuer nicht-consentete User).
+      if (!this.currentJourney) return;
     } finally {
       this.isLoadingJourney = false;
     }
@@ -955,6 +965,11 @@ class JourneyTrackingService {
     if (!this.currentJourney) {
       this.startJourney('browse', 'product-comparison', undefined, userId);
     }
+    // Consent-Gate-Fail-safe (2026-06-11): startJourney erzeugt OHNE
+    // Markt-Daten-Consent bewusst KEINE Journey -> ohne Guard crasht
+    // der folgende currentJourney-Zugriff (Repro: 'Fehler beim Laden'
+    // auf jeder Produktseite fuer nicht-consentete User).
+    if (!this.currentJourney) return;
 
     // Tracke für das Hauptprodukt
     let mainProduct = this.currentJourney!.viewedProducts.find(p => p.productId === mainProductId);
@@ -2188,6 +2203,11 @@ class JourneyTrackingService {
       // Journey noch nicht geladen UND nicht gerade am Laden - starte neue
       console.log('⏳ Journey noch nicht aktiv - starte neue...');
       this.startJourney('browse', screenName, undefined, userId);
+      // Consent-Gate-Fail-safe (2026-06-11): startJourney erzeugt OHNE
+      // Markt-Daten-Consent bewusst KEINE Journey -> ohne Guard crasht
+      // der folgende currentJourney-Zugriff (Repro: 'Fehler beim Laden'
+      // auf jeder Produktseite fuer nicht-consentete User).
+      if (!this.currentJourney) return;
     } else {
       console.log('⏳ Journey wird geladen - warte...');
     }
