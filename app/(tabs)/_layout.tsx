@@ -26,6 +26,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { OfflineChip } from '@/components/ui/OfflineChip';
 import { HapticTab } from '@/components/HapticTab';
 import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
@@ -799,6 +800,7 @@ export default function TabLayout() {
   // ─── Flying-Pill Tab-Bar ────────────────────────────────────────────
   if (USE_FLYING_TABS) {
     return (
+      <View style={{ flex: 1 }}>
       <Tabs
         tabBar={(props) => <FlyingTabBar {...props} />}
         screenOptions={{
@@ -819,6 +821,9 @@ export default function TabLayout() {
         <Tabs.Screen name="explore" options={{ title: 'Stöbern' }} />
         <Tabs.Screen name="rewards" options={{ title: 'Rewards' }} />
       </Tabs>
+      {/* Globaler Offline-Hinweis (86ca7uhxd) — über der Tab-Pille. */}
+      <OfflineChip />
+      </View>
     );
   }
 
