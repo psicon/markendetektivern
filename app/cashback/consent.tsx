@@ -37,6 +37,7 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
+  withSequence,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -99,32 +100,32 @@ const REWARDS: {
 }[] = [
   {
     key: 'rewe',
-    label: 'REWE',
+    label: 'Gutschein',
     icon: 'cart-outline',
     image: require('@/assets/rewards/rewe.png'),
   },
   {
     key: 'kaufland',
-    label: 'Kaufland',
+    label: 'Gutschein',
     icon: 'cart-outline',
     image: require('@/assets/rewards/kaufland.png'),
   },
   {
     key: 'rossmann',
-    label: 'Rossmann',
+    label: 'Gutschein',
     icon: 'cart-outline',
     image: require('@/assets/rewards/rossmann.png'),
   },
   {
     key: 'amazon',
-    label: 'Amazon',
+    label: 'Gutschein',
     icon: 'shopping-outline',
     image: require('@/assets/rewards/amazon.png'),
   },
   {
     // Wortmarke sagt schon "VISA" — Label ergänzt nur "Prepaid".
     key: 'visa',
-    label: 'Prepaid',
+    label: 'Prepaid-Karte',
     icon: 'credit-card-outline',
     image: require('@/assets/rewards/visa.png'),
     imageWidth: 46,
@@ -176,6 +177,24 @@ function RewardsMarquee({
     transform: [{ translateX: offset.value }],
   }));
 
+  // Leichter Shimmer auf den Logos (User-Vorgabe 2026-06-10):
+  // sanfter Opacity-Puls im Tempo des Skeleton-Shimmers — lebendig,
+  // ohne unruhig zu werden.
+  const shine = useSharedValue(0);
+  useEffect(() => {
+    shine.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 1200, easing: Easing.inOut(Easing.quad) }),
+        withTiming(0, { duration: 1200, easing: Easing.inOut(Easing.quad) }),
+      ),
+      -1,
+      false,
+    );
+  }, [shine]);
+  const shineStyle = useAnimatedStyle(() => ({
+    opacity: 0.78 + shine.value * 0.22,
+  }));
+
   // Logo-Strip statt Chip-Pills: jedes Item ist eine schmale Spalte
   // (Logo bzw. Icon oben, dezente 10px-Caption darunter) — die
   // "Partner-Logos"-Optik aus Fintech-/Cashback-Apps. Keine Rahmen,
@@ -209,7 +228,7 @@ function RewardsMarquee({
     >
       {REWARDS.map((item) => (
         <View key={item.key} style={itemColumn}>
-          <View style={logoBox}>
+          <Animated.View style={[logoBox, shineStyle]}>
             {item.image ? (
               <Image
                 source={item.image}
@@ -227,7 +246,7 @@ function RewardsMarquee({
                 color={accent}
               />
             )}
-          </View>
+          </Animated.View>
           <Text style={caption} numberOfLines={1}>
             {item.label}
           </Text>
