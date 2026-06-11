@@ -806,18 +806,48 @@ export default function ProfileScreen() {
             <Avatar photoUrl={photoUrl} name={displayName} />
           )}
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text
-              numberOfLines={1}
+            {/* Name + Premium-Krone: die Krone sitzt schräg über der
+                rechten oberen Ecke des Namens (User-Vorgabe 2026-06-11
+                — "fühlt sich besser an"). Wrapper hugged den Text
+                (flex-start), damit die Krone am Namensende klebt,
+                egal wie lang der Name ist. */}
+            <View
               style={{
-                fontFamily,
-                fontWeight: fontWeight.extraBold,
-                fontSize: 22,
-                color: theme.text,
-                letterSpacing: -0.3,
+                flexDirection: 'row',
+                alignItems: 'flex-start',
               }}
             >
-              {isAnonymous ? 'Anonymer Detektiv' : displayName}
-            </Text>
+              <View style={{ position: 'relative', flexShrink: 1, minWidth: 0 }}>
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.extraBold,
+                    fontSize: 22,
+                    color: theme.text,
+                    letterSpacing: -0.3,
+                  }}
+                >
+                  {isAnonymous ? 'Anonymer Detektiv' : displayName}
+                </Text>
+                {isPremium ? (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: -9,
+                      right: -6,
+                      transform: [{ rotate: '18deg' }],
+                    }}
+                  >
+                    <MaterialCommunityIcons
+                      name="crown"
+                      size={15}
+                      color="#FFC107"
+                    />
+                  </View>
+                ) : null}
+              </View>
+            </View>
             {!isAnonymous && realName ? (
               <Text
                 numberOfLines={1}

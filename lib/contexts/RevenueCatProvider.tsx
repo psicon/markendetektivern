@@ -122,6 +122,24 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
           if (cancelled) return;
           setIsPremium(isPremiumUser);
 
+          // Sofortiger Server-Abgleich im Hintergrund (User-Vorgabe
+          // 2026-06-11: "beim Start die Käufe checken — oft Werbung
+          // trotz Premium"). Der isPremium()-Call oben bedient sich
+          // aus dem RC-SDK-Cache — ist der stale-false (Kauf auf
+          // anderem Gerät, abgelaufene TTL), bleibt Werbung sichtbar.
+          // forceRefresh holt CustomerInfo frisch vom RC-Server;
+          // danach liest isPremium() den frischen Cache. Fire-and-
+          // forget: nur ein ERFOLGREICHER Refresh updated den State
+          // (Netz-Fehler lassen den Cache-Wert unangetastet).
+          revenueCatService
+            .forceRefreshCustomerInfo()
+            .then(async () => {
+              if (cancelled) return;
+              const premiumNow = await revenueCatService.isPremium();
+              if (!cancelled) setIsPremium(premiumNow);
+            })
+            .catch(() => {});
+
           // Falls (noch) kein Premium: restore im Hintergrund versuchen.
           // Cleanup-Flag verhindert state-set nach Unmount.
           if (!isPremiumUser) {
