@@ -1716,6 +1716,32 @@ Bonus: Match-Precision lässt sich direkt an den bereits gesammelten
       `achievementService.getAllLevels()`)
     - `achievements/*` — Achievement catalogue
 
+## Apple-Sign-In im SIMULATOR testen (Sim-Build-Saga 2026-06-11)
+
+Vier Fallen in Serie, jede hat einen Build/eine Stunde gekostet:
+1. **`expo run:ios` baut Sim-Targets mit deaktiviertem Code-Signing**
+   → CODE_SIGN_ENTITLEMENTS wird ignoriert, Apple-Login wirft
+   `AuthorizationError 1000`. Fuer einen Sim-Build MIT Entitlements:
+   `xcodebuild -workspace ios/MarkenDetektive.xcworkspace -scheme
+   MarkenDetektive -configuration Debug -sdk iphonesimulator
+   CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- build`
+   (gleiches DerivedData via -derivedDataPath = inkrementell).
+2. **Nachsignieren des fertigen .app (codesign --force [--deep] --sign -
+   --entitlements …) macht die App UNSTARTBAR** (SBMainWorkspace
+   denied) — nicht versuchen, immer neu bauen.
+3. **Entitlements-Pruefung bei SIM-Builds NICHT via
+   `codesign -d --entitlements`** (zeigt leeres Dict!) — massgeblich
+   ist die Binary-Sektion: `xcrun otool -s __TEXT __entitlements
+   App.app/Binary` (XML-Hexdump; applesignin muss drin sein).
+4. **nohup-Builds brauchen `env LANG=en_US.UTF-8`** — sonst crasht
+   CocoaPods an den Umlauten in den Podfile-Kommentaren
+   ("Unicode Normalization not appropriate for ASCII-8BIT").
+Ausserdem: lokale Pod-Checkouts sind teils read-only — der
+fmt-Patch-Hook chmod't deshalb vor dem Write (ios/Podfile).
+Und selbst mit allem: Apple-Login im Sim braucht eine in den
+Sim-Settings eingeloggte Apple-ID und bleibt wackliger als auf
+dem Device — finaler Test gehoert auf TestFlight.
+
 ## iOS Dev-Client aufs PHYSISCHE iPhone (install + launch + Metro)
 
 Lokale JS-Tests → Metro (siehe oben). Wenn die App auf dem physischen
