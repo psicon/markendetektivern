@@ -23,8 +23,10 @@
  *     (lowercase 'männlich', 'nonbinary' etc.) auf das Canonical-Schema.
  */
 
-/** Canonical Gender-Werte. Werden so in users/{uid}.gender gespeichert. */
-export const GENDER_VALUES = ['Männlich', 'Weiblich', 'Divers', 'Anderes'] as const;
+/** Canonical Gender-Werte. Werden so in users/{uid}.gender gespeichert.
+ *  'Divers' entfernt (ClickUp 86ca7x8ft, 2026-06-11) — Bestandsdaten
+ *  mit 'Divers' werden via normalizeLegacyGender auf 'Anderes' gemappt. */
+export const GENDER_VALUES = ['Männlich', 'Weiblich', 'Anderes'] as const;
 export type Gender = (typeof GENDER_VALUES)[number];
 
 /** UI-Pill-Spec (Label + Storage-Value sind hier gleich, aber wir
@@ -44,7 +46,7 @@ export const GENDER_PILL_OPTIONS: GenderPillOption[] = GENDER_VALUES.map((v) => 
  * Akzeptiert:
  *   - 'Männlich', 'männlich' → 'Männlich'
  *   - 'Weiblich', 'weiblich' → 'Weiblich'
- *   - 'Divers', 'divers', 'nonbinary' → 'Divers'
+ *   - 'Divers', 'divers', 'nonbinary' → 'Anderes' (Divers entfernt, 86ca7x8ft)
  *   - 'Anderes', 'anderes', 'other' → 'Anderes'
  *   - alles andere → null
  */
@@ -58,7 +60,7 @@ export function normalizeLegacyGender(input: unknown): Gender | null {
     return 'Weiblich';
   }
   if (lower === 'divers' || lower === 'nonbinary' || lower === 'non-binary' || lower === 'd') {
-    return 'Divers';
+    return 'Anderes';
   }
   if (lower === 'anderes' || lower === 'other' || lower === 'sonstiges') {
     return 'Anderes';

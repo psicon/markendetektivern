@@ -63,7 +63,7 @@ interface FormData {
 // T6: Gender-Pills aus zentralem Enum (lib/types/gender.ts). Vorher
 // hardcoded 3-Pill — User mit gender='Anderes' aus dem Demographics-
 // Bottom-Sheet (T3) konnten ihre Pille hier nicht selektieren.
-import { GENDER_VALUES } from '@/lib/types/gender';
+import { GENDER_VALUES, normalizeLegacyGender } from '@/lib/types/gender';
 const GENDER_OPTIONS = GENDER_VALUES;
 
 const FLAG_BY_COUNTRY: Record<string, string> = {
@@ -141,7 +141,9 @@ export default function EditProfileScreen() {
           displayName: data.display_name || user.displayName || '',
           realName: data.real_name || '',
           age: prefilledAge,
-          gender: data.gender || '',
+          // Legacy-Werte ('Divers', lowercase, ...) auf die aktuellen
+          // Pills normalisieren — sonst keine Vorselektion (86ca7x8ft).
+          gender: normalizeLegacyGender(data.gender) ?? '',
           location: data.location || '',
           photoURL: data.photo_url || user.photoURL || '',
           favoriteMarket:
