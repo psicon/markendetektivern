@@ -376,22 +376,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // signInWithCredential. Falls nein, Anmeldung abbrechen.
 
   /**
-   * Show a destructive confirm-Dialog wenn die Anon-Daten gegen
-   * einen existierenden Provider-Account getauscht würden.
-   * Returns true wenn der User wechseln will, false sonst.
+   * Confirm-Dialog wenn die Anon-Daten gegen einen existierenden
+   * Provider-Account getauscht würden. Returns true wenn der User
+   * fortfahren will, false sonst.
+   *
+   * ClickUp 86ca7f3xn (2026-06-11):
+   * - FRISCHE Anon-Session (< 15 Min, typisch: erste Anmeldung direkt
+   *   nach dem Onboarding) → KEIN Dialog, einfach mit dem bestehenden
+   *   Konto fortfahren. Da ist nichts Wertvolles zu verlieren, und
+   *   ein Warn-Dialog beim allerersten Login ist doppelt verwirrend.
+   * - Sonst: positive Formulierung ("Mit diesem Konto fortfahren"
+   *   statt rotem "Konto wechseln") + faktischer Hinweis, dass die
+   *   Gast-Daten nicht übernommen werden.
    */
   const confirmAccountSwitch = (): Promise<boolean> => {
+    const createdAt = auth.currentUser?.metadata?.creationTime;
+    if (createdAt) {
+      const ageMs = Date.now() - new Date(createdAt).getTime();
+      if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 15 * 60 * 1000) {
+        return Promise.resolve(true);
+      }
+    }
     return new Promise((resolve) => {
       Alert.alert(
         'Du hast bereits ein Konto',
-        'Mit diesem Konto bist du anderswo schon angemeldet. Wenn du wechselst, ' +
-          'gehen die Daten der aktuellen anonymen Sitzung verloren ' +
-          '(z.B. Favoriten, Punkte, Käufe, Einkaufszettel).\n\nMöchtest du wechseln?',
+        'Mit diesem Konto bist du schon einmal angemeldet gewesen. ' +
+          'Möchtest du damit fortfahren?\n\nFavoriten, Punkte und ' +
+          'Einkaufszettel deiner aktuellen Gast-Sitzung werden dabei ' +
+          'nicht übernommen.',
         [
           { text: 'Abbrechen', style: 'cancel', onPress: () => resolve(false) },
           {
-            text: 'Konto wechseln',
-            style: 'destructive',
+            text: 'Mit diesem Konto fortfahren',
             onPress: () => resolve(true),
           },
         ],
