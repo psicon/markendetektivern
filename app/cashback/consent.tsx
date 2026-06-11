@@ -448,7 +448,7 @@ export default function CashbackConsentScreen() {
         marginTop: 4,
         borderRadius: 18,
         paddingHorizontal: 18,
-        paddingVertical: compact ? 12 : 14,
+        paddingVertical: 12,
         overflow: 'hidden' as const,
       },
       heroIcon: {
@@ -466,7 +466,7 @@ export default function CashbackConsentScreen() {
         fontWeight: fontWeight.bold as any,
         letterSpacing: 0.8,
         textTransform: 'uppercase' as const,
-        marginTop: compact ? 8 : 10,
+        marginTop: compact ? 8 : 9,
       },
       heroTitle: {
         color: '#fff',
@@ -504,7 +504,7 @@ export default function CashbackConsentScreen() {
         borderWidth: 1,
         borderColor: theme.border ?? 'rgba(0,0,0,0.06)',
         paddingHorizontal: 14,
-        paddingVertical: compact ? 8 : 12,
+        paddingVertical: compact ? 8 : 10,
       },
       stepRow: {
         flexDirection: 'row' as const,
@@ -546,7 +546,7 @@ export default function CashbackConsentScreen() {
         letterSpacing: 0.7,
         textTransform: 'uppercase' as const,
         textAlign: 'center' as const,
-        marginBottom: compact ? 6 : 10,
+        marginBottom: compact ? 5 : 8,
       },
       stepCircle: {
         width: 38,
@@ -625,8 +625,8 @@ export default function CashbackConsentScreen() {
 
       footer: {
         paddingHorizontal: 16,
-        paddingTop: compact ? 8 : 12,
-        paddingBottom: insets.bottom + (compact ? 6 : 12),
+        paddingTop: compact ? 8 : 10,
+        paddingBottom: insets.bottom + (compact ? 6 : 10),
         gap: compact ? 4 : 6,
         borderTopWidth: 1,
         borderTopColor: theme.border ?? 'rgba(0,0,0,0.06)',
@@ -684,12 +684,39 @@ export default function CashbackConsentScreen() {
           end={{ x: 1, y: -0.34 }}
           style={styles.hero}
         >
-          <View style={styles.heroIcon}>
-            <MaterialCommunityIcons
-              name="cash-multiple"
-              size={20}
-              color="#fff"
-            />
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+            }}
+          >
+            <View style={styles.heroIcon}>
+              <MaterialCommunityIcons
+                name="cash-multiple"
+                size={20}
+                color="#fff"
+              />
+            </View>
+            <View
+              style={{
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                justifyContent: 'flex-end',
+                gap: 6,
+                flexShrink: 1,
+              }}
+            >
+              <View style={styles.heroPill}>
+                <MaterialCommunityIcons name="cash" size={11} color="#ffd44b" />
+                <Text style={styles.heroPillText}>Bis zu 1 € pro Bon</Text>
+              </View>
+              <View style={styles.heroPill}>
+                <MaterialCommunityIcons name="gift-outline" size={11} color="#ffd44b" />
+                <Text style={styles.heroPillText}>Ab 10 € einlösbar</Text>
+              </View>
+            </View>
           </View>
           <Text style={styles.heroEyebrow}>Geld zurück fürs Einkaufen</Text>
           <Text style={styles.heroTitle}>Hol dir Geld für deine Bons</Text>
@@ -701,19 +728,9 @@ export default function CashbackConsentScreen() {
             Bon fotografieren, hochladen, kassieren — die aktuellen Aktionen
             siehst du in der App.
           </Text>
-          <View style={{ flexDirection: 'row', gap: 6, marginTop: compact ? 8 : 10 }}>
-            <View style={styles.heroPill}>
-              <MaterialCommunityIcons name="cash" size={11} color="#ffd44b" />
-              <Text style={styles.heroPillText}>Bis zu 1 € pro Bon</Text>
-            </View>
-            <View style={styles.heroPill}>
-              <MaterialCommunityIcons name="gift-outline" size={11} color="#ffd44b" />
-              <Text style={styles.heroPillText}>Ab 10 € einlösbar</Text>
-            </View>
-          </View>
         </LinearGradient>
 
-        <View style={{ flexGrow: 1, minHeight: compact ? 12 : 18 }} />
+        <View style={{ flexGrow: 1, minHeight: compact ? 10 : 14 }} />
 
         {/* So einfach geht's — Surface-Card mit Timeline-Linie
             zwischen den Step-Kreisen (Design-System: Card radius 18,
@@ -743,7 +760,7 @@ export default function CashbackConsentScreen() {
           ))}
         </View>
 
-        <View style={{ flexGrow: 1, minHeight: compact ? 8 : 14 }} />
+        <View style={{ flexGrow: 1, minHeight: compact ? 8 : 12 }} />
 
         {/* Prämien-Marquee mit eigenem Label — die Einlöse-Optionen
             haengen nicht mehr beziehungslos im Raum. */}
