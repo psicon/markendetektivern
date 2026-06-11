@@ -522,22 +522,6 @@ export default function CashbackConsentScreen() {
         marginLeft: 22,
         borderRadius: 1,
       },
-      heroPill: {
-        flexDirection: 'row' as const,
-        alignItems: 'center' as const,
-        gap: 4,
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 10,
-        backgroundColor: 'rgba(255,255,255,0.22)',
-      },
-      heroPillText: {
-        color: '#fff',
-        fontSize: 10,
-        fontFamily,
-        fontWeight: fontWeight.extraBold as any,
-        letterSpacing: 0.4,
-      },
       marqueeLabel: {
         color: theme.textMuted,
         fontSize: 11,
@@ -591,22 +575,22 @@ export default function CashbackConsentScreen() {
       // bewusst ohne Karten-Chrome (Tonalität der Step-Kreise).
       trustRow: {
         flexDirection: 'row' as const,
-        alignItems: 'flex-start' as const,
-        paddingHorizontal: 4,
-        paddingTop: compact ? 2 : 4,
-        paddingBottom: compact ? 3 : 6,
+        alignItems: 'center' as const,
+        justifyContent: 'center' as const,
+        gap: 14,
+        paddingTop: compact ? 4 : 6,
+        paddingBottom: 2,
       },
       trustItem: {
-        flex: 1,
+        flexDirection: 'row' as const,
         alignItems: 'center' as const,
-        gap: 3,
+        gap: 4,
       },
       trustLabel: {
         color: theme.textSub,
         fontSize: 10,
         fontFamily,
         fontWeight: fontWeight.semibold as any,
-        textAlign: 'center' as const,
       },
       // Klein + zentriert ganz unten im Footer, unter "Jetzt nicht".
       legalText: {
@@ -649,20 +633,35 @@ export default function CashbackConsentScreen() {
         fontSize: 15,
         letterSpacing: 0.2,
       },
-      cancelText: {
-        color: theme.textSub,
-        fontFamily,
-        fontSize: 13,
-        textAlign: 'center' as const,
-        paddingVertical: compact ? 5 : 8,
-      },
     }),
     [theme, accent, insets.bottom, isSubmitting, compact],
   );
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <DetailHeader title="Cashback" onBack={handleCancel} />
+      <DetailHeader
+        title="Cashback"
+        onBack={handleCancel}
+        right={
+          <Pressable
+            accessibilityRole="button"
+            onPress={handleCancel}
+            hitSlop={8}
+            style={{ paddingHorizontal: 4, paddingVertical: 8 }}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.semibold as any,
+                fontSize: 13,
+                color: theme.textSub,
+              }}
+            >
+              Jetzt nicht
+            </Text>
+          </Pressable>
+        }
+      />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
@@ -684,39 +683,12 @@ export default function CashbackConsentScreen() {
           end={{ x: 1, y: -0.34 }}
           style={styles.hero}
         >
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 8,
-            }}
-          >
-            <View style={styles.heroIcon}>
-              <MaterialCommunityIcons
-                name="cash-multiple"
-                size={20}
-                color="#fff"
-              />
-            </View>
-            <View
-              style={{
-                flexDirection: 'row',
-                flexWrap: 'wrap',
-                justifyContent: 'flex-end',
-                gap: 6,
-                flexShrink: 1,
-              }}
-            >
-              <View style={styles.heroPill}>
-                <MaterialCommunityIcons name="cash" size={11} color="#ffd44b" />
-                <Text style={styles.heroPillText}>Bis zu 1 € pro Bon</Text>
-              </View>
-              <View style={styles.heroPill}>
-                <MaterialCommunityIcons name="gift-outline" size={11} color="#ffd44b" />
-                <Text style={styles.heroPillText}>Ab 10 € einlösbar</Text>
-              </View>
-            </View>
+          <View style={styles.heroIcon}>
+            <MaterialCommunityIcons
+              name="cash-multiple"
+              size={20}
+              color="#fff"
+            />
           </View>
           <Text style={styles.heroEyebrow}>Geld zurück fürs Einkaufen</Text>
           <Text style={styles.heroTitle}>Hol dir Geld für deine Bons</Text>
@@ -725,8 +697,11 @@ export default function CashbackConsentScreen() {
               Einzige stabile Aussage: bis zu 1 € pro Bon (User-Vorgabe
               2026-06-10). Aktuelle Aktionen zeigt der Rewards-Tab. */}
           <Text style={styles.heroBody}>
-            Bon fotografieren, hochladen, kassieren — die aktuellen Aktionen
-            siehst du in der App.
+            Bon fotografieren, hochladen und{' '}
+            <Text style={{ fontWeight: fontWeight.extraBold as any, color: '#fff' }}>
+              bis zu 1 € pro Bon
+            </Text>
+            {' '}sichern — die aktuellen Aktionen siehst du in der App.
           </Text>
         </LinearGradient>
 
@@ -797,10 +772,6 @@ export default function CashbackConsentScreen() {
           )}
         </Pressable>
 
-        <Pressable accessibilityRole="button" onPress={handleCancel}>
-          <Text style={styles.cancelText}>Jetzt nicht</Text>
-        </Pressable>
-
         {/* Trust-Badges UNTER den Buttons (User-Vorgabe 2026-06-10:
             nicht vom Akzeptieren ablenken) — drei dezente Icon-
             Spalten, gleiche Tonalität wie die Step-Kreise. */}
@@ -809,7 +780,7 @@ export default function CashbackConsentScreen() {
             <View key={item.label} style={styles.trustItem}>
               <MaterialCommunityIcons
                 name={item.icon as any}
-                size={16}
+                size={13}
                 color={accent}
               />
               <Text style={styles.trustLabel}>{item.label}</Text>
