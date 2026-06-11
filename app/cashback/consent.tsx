@@ -42,6 +42,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as WebBrowser from 'expo-web-browser';
 
 import {
   DETAIL_HEADER_ROW_HEIGHT,
@@ -354,6 +355,21 @@ export default function CashbackConsentScreen() {
   // zurück zu den Einstellungen statt in den Kamera-Flow.
   const params = useLocalSearchParams<{ from?: string }>();
   const fromSettings = params.from === 'settings';
+
+  // AGB/Datenschutz im IN-APP-Browser öffnen (SFSafariViewController /
+  // Custom Tab) statt extern in Safari — User-Vorgabe 2026-06-11.
+  // Gleiche Konvention wie profile.tsx; Linking nur als Fallback.
+  const openLegalLink = async (url: string) => {
+    try {
+      await WebBrowser.openBrowserAsync(url, {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.AUTOMATIC,
+        controlsColor: accent,
+        toolbarColor: theme.bg,
+      });
+    } catch {
+      Linking.openURL(url);
+    }
+  };
 
   const [, setConsentVersion] = useState<string>('');
   const [isSubmitting, setSubmitting] = useState(false);
@@ -801,14 +817,14 @@ export default function CashbackConsentScreen() {
           Mit "Akzeptieren" stimmst du{' '}
           <Text
             style={styles.legalLink}
-            onPress={() => Linking.openURL(TERMS_URL)}
+            onPress={() => openLegalLink(TERMS_URL)}
           >
             AGB
           </Text>
           {' '}&{' '}
           <Text
             style={styles.legalLink}
-            onPress={() => Linking.openURL(PRIVACY_URL)}
+            onPress={() => openLegalLink(PRIVACY_URL)}
           >
             Datenschutzerklärung
           </Text>
