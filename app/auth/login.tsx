@@ -344,7 +344,15 @@ export default function LoginScreen() {
               {/* Passwort vergessen — zentriert (User-Spec) */}
               <TouchableOpacity
                 style={styles.forgotPasswordCentered}
-                onPress={() => router.push('/auth/forgot-password')}
+                onPress={() =>
+                  router.push({
+                    pathname: '/auth/forgot-password',
+                    // Bereits eingetippte E-Mail mitnehmen (ClickUp 86ca7x1d6)
+                    params: formData.email.trim()
+                      ? { email: formData.email.trim() }
+                      : undefined,
+                  })
+                }
               >
                 <ThemedText style={styles.forgotPasswordTextWhite}>
                   Passwort vergessen?

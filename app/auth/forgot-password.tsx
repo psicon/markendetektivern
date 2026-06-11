@@ -6,7 +6,7 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { auth } from '@/lib/firebase';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { sendPasswordResetEmail } from '@react-native-firebase/auth';
 import React, { useState } from 'react';
 import {
@@ -34,7 +34,11 @@ export default function ForgotPasswordScreen() {
   const [imageLoaded, setImageLoaded] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
 
-  const [email, setEmail] = useState('');
+  // Vom Login mitgegebene E-Mail vorbefuellen (ClickUp 86ca7x1d6).
+  const params = useLocalSearchParams<{ email?: string }>();
+  const [email, setEmail] = useState(
+    typeof params.email === 'string' ? params.email : '',
+  );
   const [loading, setLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
 
@@ -99,7 +103,9 @@ export default function ForgotPasswordScreen() {
       {/* Animated ImageBackground */}
       <Animated.View style={[styles.imageContainer, { opacity: fadeAnim }]}>
         <ImageBackground 
-          source={require('@/assets/images/table-optimized.jpg')}
+          // GLEICHES Bild wie der Login-Screen — table-optimized.jpg war
+          // ein sichtbarer Stilbruch beim Push (ClickUp 86ca7x1d6).
+          source={require('@/assets/images/background.jpg')}
           style={styles.background}
           blurRadius={2}
           onLoad={handleImageLoad}
