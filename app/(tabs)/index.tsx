@@ -314,18 +314,23 @@ export default function HomeScreen() {
   //   8. User-Doc hat NICHT `demographicsSkipped: true` (User hat
   //      sich aktiv gegen das Sheet entschieden — nicht nochmal nerven)
   useEffect(() => {
-    if (!user?.uid) return;
-    if (!isFocused) return;
-    if (anyWalkthroughActive) return;
-    if (homeCoachmark.visible) return;
+    // Dev-Diagnose (2026-06-11): das Sheet brach still ab — jeder
+    // Early-Return loggt im DEV-Build seinen Grund.
+    const why = (reason: string) => {
+      if (__DEV__) console.log(`[DemographicsSheet] skip: ${reason}`);
+    };
+    if (!user?.uid) { why('kein user'); return; }
+    if (!isFocused) { why('home nicht fokussiert'); return; }
+    if (anyWalkthroughActive) { why('walkthrough aktiv'); return; }
+    if (homeCoachmark.visible) { why('home-coachmark sichtbar'); return; }
     let cancelled = false;
     (async () => {
       try {
         const { OnboardingService } = await import('@/lib/services/onboardingService');
-        if (!(await OnboardingService.hasPassedOnboarding())) return;
+        if (!(await OnboardingService.hasPassedOnboarding())) { why('onboarding nicht durchlaufen'); return; }
 
         const { CoachmarkService } = await import('@/lib/services/coachmarkService');
-        if (!(await CoachmarkService.getSeen('home'))) return;
+        if (!(await CoachmarkService.getSeen('home'))) { why("getSeen('home')=false — walkthrough nie gesehen/markiert"); return; }
 
         const { getDoc, doc } = await import('@react-native-firebase/firestore');
         const { db } = await import('@/lib/firebase');
@@ -333,10 +338,11 @@ export default function HomeScreen() {
         const data = snap.exists ? snap.data() : null;
 
         // Daten bereits vorhanden? Nicht nochmal fragen.
-        if (data?.age != null) return;
-        if (typeof data?.gender === 'string' && data.gender.length > 0) return;
+        if (data?.age != null) { why('age schon im User-Doc'); return; }
+        if (typeof data?.gender === 'string' && data.gender.length > 0) { why('gender schon im User-Doc'); return; }
         // User hat bewusst geskipped? Nicht nochmal nerven.
-        if (data?.demographicsSkipped === true) return;
+        if (data?.demographicsSkipped === true) { why('demographicsSkipped=true'); return; }
+        if (__DEV__) console.log('[DemographicsSheet] alle Bedingungen erfüllt → Sheet öffnet');
 
         // Kurz warten bis Home-Mount ruhig ist (sonst öffnet das Sheet
         // mitten in den ProductCard-Initial-Animationen).
