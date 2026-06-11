@@ -381,7 +381,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * fortfahren will, false sonst.
    *
    * ClickUp 86ca7f3xn (2026-06-11):
-   * - FRISCHE Anon-Session (< 15 Min, typisch: erste Anmeldung direkt
+   * - FRISCHE Anon-Session (< 5 Min, typisch: erste Anmeldung direkt
    *   nach dem Onboarding) → KEIN Dialog, einfach mit dem bestehenden
    *   Konto fortfahren. Da ist nichts Wertvolles zu verlieren, und
    *   ein Warn-Dialog beim allerersten Login ist doppelt verwirrend.
@@ -393,7 +393,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const createdAt = auth.currentUser?.metadata?.creationTime;
     if (createdAt) {
       const ageMs = Date.now() - new Date(createdAt).getTime();
-      if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 15 * 60 * 1000) {
+      if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 5 * 60 * 1000) {
         return Promise.resolve(true);
       }
     }
