@@ -202,7 +202,7 @@ export default function ProductComparisonScreen() {
   const { id, type } = useLocalSearchParams<{ id: string; type?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { theme, brand, shadows, stufen } = useTokens();
+  const { theme, brand, shadows, stufen, isDark } = useTokens();
   const { user } = useAuth();
   const { toggleFavorite, isFavorite } = useFavorites();
   const analytics = useAnalytics();
@@ -1752,7 +1752,11 @@ export default function ProductComparisonScreen() {
                   position: 'absolute',
                   left: 12,
                   bottom: 12,
-                  backgroundColor: 'rgba(255,255,255,0.95)',
+                  // Darkmode: dunkle Pille + weisse Schrift; Light
+                  // bleibt EXAKT wie zuvor (86ca6nyyu).
+                  backgroundColor: isDark
+                    ? 'rgba(28,32,34,0.95)'
+                    : 'rgba(255,255,255,0.95)',
                   paddingVertical: 8,
                   paddingHorizontal: 12,
                   borderRadius: 14,
@@ -1769,7 +1773,7 @@ export default function ProductComparisonScreen() {
                       fontFamily,
                       fontWeight: fontWeight.medium,
                       fontSize: 11,
-                      color: '#5c6769',
+                      color: isDark ? 'rgba(255,255,255,0.72)' : '#5c6769',
                     }}
                   >
                     {brandPackInfo}
@@ -1780,7 +1784,7 @@ export default function ProductComparisonScreen() {
                     fontFamily,
                     fontWeight: fontWeight.extraBold,
                     fontSize: 22,
-                    color: '#191c1d',
+                    color: isDark ? '#ffffff' : '#191c1d',
                     letterSpacing: -0.4,
                     marginTop: brandPackInfo ? 4 : 0,
                   }}
@@ -2247,7 +2251,7 @@ export default function ProductComparisonScreen() {
                           fontFamily,
                           fontWeight: fontWeight.medium,
                           fontSize: 11,
-                          color: '#5c6769',
+                          color: isDark ? 'rgba(255,255,255,0.72)' : '#5c6769',
                           paddingHorizontal: 14,
                           // Vorher 10 — User-Feedback: "abstand zwischen
                           // packpreis und preis ist bei den unteren

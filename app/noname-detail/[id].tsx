@@ -140,7 +140,7 @@ export default function NoNameDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { theme, brand, shadows } = useTokens();
+  const { theme, brand, shadows, isDark } = useTokens();
   const { user } = useAuth();
   const { toggleFavorite, isFavorite } = useFavorites();
 
@@ -1218,7 +1218,11 @@ export default function NoNameDetailScreen() {
                   position: 'absolute',
                   left: 12,
                   bottom: 12,
-                  backgroundColor: 'rgba(255,255,255,0.95)',
+                  // Darkmode: dunkle Pille + weisse Schrift; Light
+                  // bleibt EXAKT wie zuvor (86ca6nyyu).
+                  backgroundColor: isDark
+                    ? 'rgba(28,32,34,0.95)'
+                    : 'rgba(255,255,255,0.95)',
                   paddingVertical: 8,
                   paddingHorizontal: 12,
                   borderRadius: 14,
@@ -1235,7 +1239,7 @@ export default function NoNameDetailScreen() {
                       fontFamily,
                       fontWeight: fontWeight.medium,
                       fontSize: 11,
-                      color: '#5c6769',
+                      color: isDark ? 'rgba(255,255,255,0.72)' : '#5c6769',
                     }}
                   >
                     {packInfo}
@@ -1246,7 +1250,7 @@ export default function NoNameDetailScreen() {
                     fontFamily,
                     fontWeight: fontWeight.extraBold,
                     fontSize: 22,
-                    color: '#191c1d',
+                    color: isDark ? '#ffffff' : '#191c1d',
                     letterSpacing: -0.4,
                     marginTop: packInfo ? 4 : 0,
                   }}
