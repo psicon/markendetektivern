@@ -53,7 +53,9 @@ function configForPhase(
         anchorId: REWARDS_ANCHOR_HERO,
         title: 'Dein Cashback-Guthaben',
         body:
-          'Hier siehst du, wie viel Geld du schon gesammelt hast. Ab 10 € kannst du es einlösen — als Gutschein oder Auszahlung.',
+          // Keine konkreten Betraege — Schwelle/Saetze sind aktions-
+          // abhaengig konfiguriert (ClickUp 86ca7xgg7).
+          'Hier siehst du, wie viel Geld du schon gesammelt hast. Sobald du die Auszahlungs-Schwelle erreichst, kannst du es einlösen — als Gutschein oder Auszahlung.',
         lottie: require('@/assets/lottie/gift.json'),
       };
     case 'earn':
@@ -61,13 +63,13 @@ function configForPhase(
         anchorId: REWARDS_ANCHOR_EARN,
         title: 'So sammelst du Cashback',
         body:
-          'Mach ein Foto vom Kassenbon nach dem Einkauf — wir lesen ihn automatisch und schreiben dir bis zu 0,08 € pro Bon gut. Bis zu 6 Bons pro Woche, das sind ungefähr 2 € extra im Monat.',
+          'Mach ein Foto vom Kassenbon nach dem Einkauf — wir lesen ihn automatisch und schreiben dir dein Cashback gut. Wie viel es pro Bon gibt, siehst du immer direkt bei der aktuellen Aktion.',
         lottie: require('@/assets/lottie/task.json'),
       };
     case 'redeem':
       return {
         anchorId: REWARDS_ANCHOR_REDEEM,
-        title: 'Ab 10 € geht’s los',
+        title: 'Einlösen leicht gemacht',
         body:
           'Such dir bei unserem Partner einen Gutschein deiner Wahl aus — z.B. Amazon, Rewe oder Apple — oder lass dir den Betrag auszahlen.',
         lottie: require('@/assets/lottie/savings.json'),
