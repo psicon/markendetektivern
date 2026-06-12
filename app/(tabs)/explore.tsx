@@ -88,9 +88,11 @@ import { PERF } from '@/lib/perfFlags';
 import { categoryAccessService } from '@/lib/services/categoryAccessService';
 import { FirestoreService } from '@/lib/services/firestore';
 import {
+  type AlgoliaFacetFilters,
   AlgoliaService,
   type AlgoliaSearchResult,
 } from '@/lib/services/algolia';
+import searchHistoryService from '@/lib/services/searchHistoryService';
 import { ExtendedMarkenproduktFilters, ExtendedNoNameFilters } from '@/lib/types/filters';
 import { getProductImage } from '@/lib/utils/productImage';
 import type {
@@ -677,10 +679,25 @@ export default function ExploreScreen() {
   ]);
   const [searchTotalEigen, setSearchTotalEigen] = useState(0);
   const [searchTotalMarken, setSearchTotalMarken] = useState(0);
+  // Anti-Flash (86ca5yp4k: 'Cards flashen mit Shimmer kurz auf beim
+  // Such-Submit'): das Such-Skeleton erscheint erst, wenn der Load
+  // laenger als 200ms dauert. Schnelle Algolia-Antworten (~300ms aus
+  // dem Netz, ~0ms aus dem Cache) zeigen statt Shimmer-Blitz ein
+  // kurzes stilles Fenster. Browse-Skeletons bleiben unveraendert.
+  const [searchSkelVisible, setSearchSkelVisible] = useState(false);
+
   // searchLoading initial true wenn wir mit Query mounten — der
   // erste Frame zeigt dann sofort den Skeleton-Grid (statt eines
   // Browse-Mode "Keine Treffer"-Flashes oder leeren Frames).
   const [searchLoading, setSearchLoading] = useState(hasInitialQuery);
+  useEffect(() => {
+    if (!searchLoading) {
+      setSearchSkelVisible(false);
+      return;
+    }
+    const t = setTimeout(() => setSearchSkelVisible(true), 200);
+    return () => clearTimeout(t);
+  }, [searchLoading]);
   const [searchLoadingMore, setSearchLoadingMore] = useState(false);
   // Algolia pages already fetched per index, used to derive the
   // next page number on infinite-scroll. Reset on every fresh
@@ -2116,6 +2133,32 @@ export default function ExploreScreen() {
   // Pulled out as a standalone so callers can pass a query directly
   // (route-param auto-submit) without waiting for `query` state to
   // settle on a specific render.
+  // ─── Server-seitige Such-Filter (86ca5yp4k Folge-Fix) ────────────────
+  // Vorher liefen Kategorie/Markt/Stufe/Marke CLIENT-seitig ueber die
+  // Algolia-Hits — bei 471 'Kaese'-Treffern und restriktivem Filter
+  // enthielten die ersten Pages oft NULL Matches -> 'Keine Treffer'
+  // trotz vorhandener Produkte. Jetzt filtert Algolia selbst
+  // (filterOnly-Facetten auf beiden Indizes): jede Page enthaelt nur
+  // Matches. Die Client-Filter (filteredSearch*) bleiben als
+  // Sicherheitsnetz fuer gecachte Alt-Resultate. Inhalts-Filter
+  // (nutr_*/attr_*) bleiben client-seitig bis 86ca84gnw.
+  const searchFacetsEigen = useMemo<AlgoliaFacetFilters>(() => {
+    const f: AlgoliaFacetFilters = [];
+    if (cat !== 'all') f.push(`kategorie:kategorien/${cat}`);
+    if (market !== 'all') f.push(`discounter:discounter/${market}`);
+    if (handels !== 'all') f.push(`handelsmarke:handelsmarken/${handels}`);
+    if (stufeSelection.length > 0) {
+      f.push(stufeSelection.map((st) => `stufe:${st}`)); // OR-Gruppe
+    }
+    return f;
+  }, [cat, market, handels, stufeSelection]);
+  const searchFacetsMarken = useMemo<AlgoliaFacetFilters>(() => {
+    const f: AlgoliaFacetFilters = [];
+    if (cat !== 'all') f.push(`kategorie:kategorien/${cat}`);
+    if (brandId !== 'all') f.push(`hersteller:hersteller/${brandId}`);
+    return f;
+  }, [cat, brandId]);
+
   // Self-Referenz fuer den Retry-Toast (useCallback kann sich nicht
   // selbst in den eigenen Deps referenzieren).
   const runSearchRef = useRef<((q: string) => Promise<void>) | null>(null);
@@ -2141,7 +2184,10 @@ export default function ExploreScreen() {
         // that most search sessions fit on the first page; small
         // enough to keep the initial enrichment round-trip under
         // ~200 ms even on a cold cache.
-        const res = await AlgoliaService.searchAll(trimmed, 0, 40);
+        const res = await AlgoliaService.searchAll(trimmed, 0, 40, {
+          eigen: searchFacetsEigen,
+          marken: searchFacetsMarken,
+        });
         if (isStale()) return;
         // Netzwerk-Fehler ehrlich machen (86ca7uhn4): der leere
         // Fallback aus searchAll sah bisher aus wie "0 Treffer" —
@@ -2163,6 +2209,12 @@ export default function ExploreScreen() {
         if (isStale()) return;
         setSearchHitsEigen(eigen);
         setSearchHitsMarken(marken);
+        // 'Zuletzt gesucht' befuellen (86ca5yp4k: Stoebern-Suchen
+        // fehlten in der Historie — nur die Home-Suche speicherte).
+        // Service dedupt selbst (24h-Fenster); fire-and-forget.
+        if (user?.uid) {
+          void searchHistoryService.saveSearchTerm(user.uid, trimmed, res.totalHits);
+        }
         setSearchTotalEigen(res.noNameResults.nbHits);
         setSearchTotalMarken(res.markenproduktResults.nbHits);
         // Reset pagination cursors — first page is freshly loaded.
@@ -2184,9 +2236,24 @@ export default function ExploreScreen() {
         if (!isStale()) setSearchLoading(false);
       }
     },
-    [tab, analytics, enrichWithFirestore],
+    [tab, analytics, enrichWithFirestore, searchFacetsEigen, searchFacetsMarken, user?.uid],
   );
   runSearchRef.current = runSearch;
+
+  // Filterwechsel WAEHREND aktiver Suche -> Suche mit neuen Facetten
+  // neu ausfuehren (Seq-Bump in runSearch droppt alte Resultate).
+  const facetsInitRef = useRef(true);
+  useEffect(() => {
+    if (facetsInitRef.current) {
+      facetsInitRef.current = false;
+      return;
+    }
+    const q = searchActiveQuery;
+    if (typeof q === 'string' && q.length > 0) {
+      void runSearchRef.current?.(q);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchFacetsEigen, searchFacetsMarken]);
 
   // Infinite-scroll loader for search mode. Per-side independent
   // pagination — each Algolia index has its own `nbHits`. Skips
@@ -2229,7 +2296,10 @@ export default function ExploreScreen() {
       if (!eigenDone) {
         const nextPage = searchPageEigen + 1;
         tasks.push(
-          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40).then(
+          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40, {
+            eigen: searchFacetsEigen,
+            marken: searchFacetsMarken,
+          }).then(
             async (r) => ({
               kind: 'eigen',
               hits: await mapWithConcurrency(
@@ -2246,7 +2316,10 @@ export default function ExploreScreen() {
       if (!markenDone) {
         const nextPage = searchPageMarken + 1;
         tasks.push(
-          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40).then(
+          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40, {
+            eigen: searchFacetsEigen,
+            marken: searchFacetsMarken,
+          }).then(
             async (r) => ({
               kind: 'marken',
               hits: await mapWithConcurrency(
@@ -2300,13 +2373,14 @@ export default function ExploreScreen() {
     searchPageEigen,
     searchPageMarken,
     enrichWithFirestore,
+    searchFacetsEigen,
+    searchFacetsMarken,
   ]);
 
-  // Bei Filter-Change im Search-Mode brauchen wir KEINEN Algolia-
-  // Re-Run mehr — die client-side filteredSearchEigen/Marken
-  // reagieren auf die State-Änderung und re-filtern die schon
-  // geholten Hits direkt im Render. Kein neuer Algolia-Call =
-  // schneller + günstiger.
+  // Filter-Change im Search-Mode: der Facetten-Effect oben feuert die
+  // Suche mit neuen Server-Filtern neu (86ca5yp4k); die client-side
+  // filteredSearchEigen/Marken re-filtern zusaetzlich sofort im Render
+  // (Sicherheitsnetz + Instant-Feedback bis die neue Response da ist).
 
   const submitSearch = useCallback(() => {
     void runSearch(query);
@@ -2989,14 +3063,17 @@ export default function ExploreScreen() {
         : forTab === 'eigen'
           ? nonames
           : markenprodukte;
-    const loading = inSearch
+    const rawLoading = inSearch
       ? searchLoading
       : forTab === 'alle'
         ? nonameLoading || markenLoading
         : forTab === 'eigen'
           ? nonameLoading
           : markenLoading;
-    const empty = !loading && items.length === 0;
+    // Suche: Skeleton erst nach 200ms (searchSkelVisible) — vorher
+    // ein stilles Fenster, KEIN EmptyState-/Shimmer-Blitz.
+    const loading = inSearch ? searchLoading && searchSkelVisible : rawLoading;
+    const empty = !rawLoading && items.length === 0;
 
     // Skeleton-Grid: 6 Karten, identische Paddings + Spacing wie der
     // echte Grid → Crossfade zwischen ihnen liest sich als "Karten
@@ -3024,6 +3101,12 @@ export default function ExploreScreen() {
     // nötig, da nichts zum Drüberblenden).
     if (loading && items.length === 0) {
       return skeletonGrid;
+    }
+
+    // Stilles 200ms-Fenster der Suche (rawLoading, Skeleton noch
+    // unterdrueckt): nichts rendern statt 'Keine Treffer' flashen.
+    if (rawLoading && items.length === 0) {
+      return <View style={{ height: 240 }} />;
     }
 
     if (empty) {

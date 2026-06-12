@@ -59,8 +59,21 @@ type CacheEntry = { value: SearchAllResult; expiresAt: number };
 
 const searchCache = new Map<string, CacheEntry>();
 
-function searchCacheKey(query: string, page: number, hitsPerPage: number) {
-  return `${query.trim().toLowerCase()}|${page}|${hitsPerPage}`;
+/** Algolia facetFilters-Format: string = AND-Bedingung, string[] = OR-Gruppe. */
+export type AlgoliaFacetFilters = (string | string[])[];
+
+function facetsKey(f?: AlgoliaFacetFilters): string {
+  return f && f.length > 0 ? JSON.stringify(f) : '';
+}
+
+function searchCacheKey(
+  query: string,
+  page: number,
+  hitsPerPage: number,
+  facetsEigen?: AlgoliaFacetFilters,
+  facetsMarken?: AlgoliaFacetFilters,
+) {
+  return `${query.trim().toLowerCase()}|${page}|${hitsPerPage}|${facetsKey(facetsEigen)}|${facetsKey(facetsMarken)}`;
 }
 
 function readSearchCache(key: string): SearchAllResult | null {
@@ -222,7 +235,8 @@ export class AlgoliaService {
   static async searchNoNameProducts(
     query: string,
     page: number = 0,
-    hitsPerPage: number = 20
+    hitsPerPage: number = 20,
+    facetFilters?: AlgoliaFacetFilters,
   ): Promise<AlgoliaSearchResponse> {
     try {
       console.log(`🔍 Algolia: Searching NoName products for "${query}"`);
@@ -240,6 +254,10 @@ export class AlgoliaService {
           // ursprünglichen Such-Session zuzuordnen — Grundlage für
           // späteres Learning-to-Rank / AI Re-Ranking.
           clickAnalytics: true,
+          // Server-seitige Filter (86ca5yp4k): bei aktiven Filtern
+          // enthaelt jede Page nur Matches — Relevanz-Ranking + Filter
+          // passen zusammen, kein Client-Wegfiltern ganzer Pages mehr.
+          ...(facetFilters && facetFilters.length > 0 ? { facetFilters } : {}),
           attributesToRetrieve: [
             'objectID',
             'name',
@@ -270,7 +288,8 @@ export class AlgoliaService {
   static async searchMarkenprodukte(
     query: string,
     page: number = 0,
-    hitsPerPage: number = 20
+    hitsPerPage: number = 20,
+    facetFilters?: AlgoliaFacetFilters,
   ): Promise<AlgoliaSearchResponse> {
     try {
       console.log(`🔍 Algolia: Searching Markenprodukte for "${query}"`);
@@ -286,6 +305,10 @@ export class AlgoliaService {
           // den queryID auch hier, damit Klicks auf Markenprodukte
           // nach einer Suche getracked werden können.
           clickAnalytics: true,
+          // Server-seitige Filter (86ca5yp4k): bei aktiven Filtern
+          // enthaelt jede Page nur Matches — Relevanz-Ranking + Filter
+          // passen zusammen, kein Client-Wegfiltern ganzer Pages mehr.
+          ...(facetFilters && facetFilters.length > 0 ? { facetFilters } : {}),
           attributesToRetrieve: [
             'objectID',
             'name',
@@ -314,10 +337,16 @@ export class AlgoliaService {
   static async searchAll(
     query: string,
     page: number = 0,
-    hitsPerPage: number = 20
+    hitsPerPage: number = 20,
+    facets?: {
+      eigen?: AlgoliaFacetFilters;
+      marken?: AlgoliaFacetFilters;
+    },
   ): Promise<SearchAllResult> {
     // 1. Cache hit → return synchronously without touching Algolia.
-    const cacheKey = searchCacheKey(query, page, hitsPerPage);
+    // Cache-Key enthaelt die Facetten — gefilterte und ungefilterte
+    // Suchen sind getrennte Eintraege (86ca5yp4k).
+    const cacheKey = searchCacheKey(query, page, hitsPerPage, facets?.eigen, facets?.marken);
     const cached = readSearchCache(cacheKey);
     if (cached) {
       console.log(`💾 Algolia: cache HIT for "${query}" (p${page}) — saved one API call`);
@@ -339,8 +368,8 @@ export class AlgoliaService {
         console.log(`🔍 Algolia: Searching products for "${query}" (page: ${page}, ${hitsPerIndex} per index)`);
 
         const [noNameResults, markenproduktResults] = await Promise.all([
-          this.searchNoNameProducts(query, page, hitsPerIndex),
-          this.searchMarkenprodukte(query, page, hitsPerIndex),
+          this.searchNoNameProducts(query, page, hitsPerIndex, facets?.eigen),
+          this.searchMarkenprodukte(query, page, hitsPerIndex, facets?.marken),
         ]);
 
         const totalHits = noNameResults.nbHits + markenproduktResults.nbHits;
