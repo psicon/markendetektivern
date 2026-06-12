@@ -262,6 +262,7 @@ export class AlgoliaService {
             'objectID',
             'name',
             'bild',
+            'bildBlurhash',
             'stufe',
             'preis',
             'discounter',
@@ -313,6 +314,7 @@ export class AlgoliaService {
             'objectID',
             'name',
             'bild',
+            'bildBlurhash',
             'preis',
             'hersteller',
             'kategorie'
@@ -583,6 +585,7 @@ export class AlgoliaService {
             'objectID',
             'name',
             'bild',
+            'bildBlurhash',
             'preis',
             'hersteller',
             'kategorie'

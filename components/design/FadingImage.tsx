@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { Image, ImageProps, ImageSourcePropType, View, ViewStyle } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -42,6 +43,11 @@ type FadingImageProps = Omit<ImageProps, 'source' | 'onLoad'> & {
   source: ImageSourcePropType | null | undefined;
   /** Background of the slot while loading. Default: light grey. */
   placeholderColor?: string;
+  /** BlurHash-Platzhalter (86c9pz8pz): wenn gesetzt, rendert die
+   *  Komponente via expo-image mit nativem BlurHash-Placeholder +
+   *  Transition — farbige Produkt-Silhouette statt leerer Flaeche.
+   *  Ohne Hash bleibt der bisherige RN-Image-Fade unveraendert. */
+  blurhash?: string | null;
   /** Children rendered on top of image (e.g. badges). */
   children?: React.ReactNode;
   containerStyle?: ViewStyle;
@@ -50,6 +56,7 @@ type FadingImageProps = Omit<ImageProps, 'source' | 'onLoad'> & {
 export function FadingImage({
   source,
   placeholderColor = '#f1f3f5',
+  blurhash,
   children,
   containerStyle,
   style,
@@ -70,6 +77,33 @@ export function FadingImage({
   }, [sourceKey, opacity]);
 
   const animStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+
+  // BlurHash-Pfad: expo-image uebernimmt Placeholder-Decode +
+  // Ueberblendung nativ (kein Reanimated noetig). Der RN-Pfad unten
+  // bleibt fuer Bilder ohne Hash byte-identisch erhalten.
+  if (blurhash && source && typeof source === 'object' && 'uri' in source && source.uri) {
+    const fit =
+      (rest as any).resizeMode === 'cover' ? 'cover' : 'contain';
+    return (
+      <View
+        style={[
+          { width: '100%', height: '100%', backgroundColor: placeholderColor },
+          containerStyle,
+        ]}
+      >
+        <ExpoImage
+          source={{ uri: String(source.uri) }}
+          style={[{ width: '100%', height: '100%' }, style as object]}
+          contentFit={fit}
+          placeholder={{ blurhash }}
+          placeholderContentFit="cover"
+          transition={240}
+          cachePolicy="memory-disk"
+        />
+        {children}
+      </View>
+    );
+  }
 
   return (
     <View

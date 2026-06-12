@@ -1633,6 +1633,7 @@ export default function ProductComparisonScreen() {
                   source={{ uri: getProductImage(mp as any, 'png') ?? undefined }}
                   resizeMode="contain"
                   placeholderColor={theme.surface}
+                  blurhash={(mp as any)?.bildBlurhash}
                 />
               </Pressable>
             ) : mainReady ? (
@@ -2131,6 +2132,7 @@ export default function ProductComparisonScreen() {
                               source={{ uri: getProductImage(nn as any) ?? undefined }}
                               resizeMode="contain"
                               placeholderColor={theme.surface}
+                              blurhash={(nn as any)?.bildBlurhash}
                             />
                           </Pressable>
                         ) : (

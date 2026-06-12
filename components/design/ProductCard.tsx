@@ -45,7 +45,7 @@ type Props = {
    * override (e.g. loading placeholder, custom thumbnail). If both
    * are provided, `imageUri` wins.
    */
-  product?: { bildClean?: string | null; bild?: string | null } | null;
+  product?: { bildClean?: string | null; bild?: string | null; bildBlurhash?: string | null } | null;
   imageUri?: string | null;
   price: number;
   /**
@@ -136,6 +136,11 @@ function ProductCardImpl({
   // pages. Reset on URI change so paginated rows re-shimmer until
   // their image arrives.
   const [imageLoaded, setImageLoaded] = useState(false);
+  // BlurHash-Platzhalter (86c9pz8pz): farbige Produkt-Silhouette aus
+  // der DB statt grauem Shimmer. expo-image decodiert nativ und
+  // blendet via `transition` weich ins echte Bild. Shimmer bleibt
+  // Fallback fuer Produkte ohne Hash.
+  const blurhash = (product as any)?.bildBlurhash as string | undefined;
   React.useEffect(() => {
     setImageLoaded(false);
   }, [resolvedImageUri]);
@@ -173,6 +178,8 @@ function ProductCardImpl({
               source={{ uri: resolvedImageUri }}
               style={{ width: '100%', height: '100%' }}
               contentFit="contain"
+              placeholder={blurhash ? { blurhash } : undefined}
+              placeholderContentFit="cover"
               transition={150}
               cachePolicy="memory-disk"
               onLoad={() => setImageLoaded(true)}
@@ -183,7 +190,7 @@ function ProductCardImpl({
                 shimmer on a 404). Sits absolute so it doesn't push
                 the layout around. Pointer-events:none lets taps fall
                 through to the parent Pressable. */}
-            {!imageLoaded ? (
+            {!imageLoaded && !blurhash ? (
               <View
                 pointerEvents="none"
                 style={{

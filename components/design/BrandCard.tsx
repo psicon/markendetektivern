@@ -19,7 +19,7 @@ type Props = {
    * automatically) OR pass `imageUri` to override (e.g. loading
    * placeholder). If both are provided, `imageUri` wins.
    */
-  product?: { bildClean?: string | null; bild?: string | null } | null;
+  product?: { bildClean?: string | null; bild?: string | null; bildBlurhash?: string | null } | null;
   imageUri?: string | null;
   price: number;
   /** Best-alternative savings (€), optional — shown when known. */
@@ -84,6 +84,8 @@ function BrandCardImpl({
   // tiles never flash blank white before the image arrives. Reset
   // on URI change so paginated / recycled cards re-shimmer.
   const [imageLoaded, setImageLoaded] = useState(false);
+  // BlurHash-Platzhalter (86c9pz8pz) — siehe ProductCard.
+  const blurhash = (product as any)?.bildBlurhash as string | undefined;
   useEffect(() => {
     setImageLoaded(false);
   }, [resolvedImageUri]);
@@ -115,12 +117,14 @@ function BrandCardImpl({
               source={{ uri: resolvedImageUri }}
               style={{ width: '100%', height: '100%' }}
               contentFit="contain"
+              placeholder={blurhash ? { blurhash } : undefined}
+              placeholderContentFit="cover"
               transition={150}
               cachePolicy="memory-disk"
               onLoad={() => setImageLoaded(true)}
               onError={() => setImageLoaded(true)}
             />
-            {!imageLoaded ? (
+            {!imageLoaded && !blurhash ? (
               <View
                 pointerEvents="none"
                 style={{
