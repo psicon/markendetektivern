@@ -2237,7 +2237,12 @@ export default function ExploreScreen() {
       if (isStale()) return;
       console.warn('Stöbern search pagination failed', e);
     } finally {
-      if (!isStale()) setSearchLoadingMore(false);
+      // IMMER resetten (86ca5yp4k-Deadlock): vorher blieb das Flag bei
+      // einem stale gewordenen Lauf (neue Suche mid-flight -> seq-Bump)
+      // fuer immer true -> jeder weitere loadMoreSearch returnte am
+      // Guard -> 'Nachladen mit Suche geht nicht' bis zum Remount.
+      // Die Daten-Staleness schuetzt weiterhin der Seq-Snapshot oben.
+      setSearchLoadingMore(false);
     }
   }, [
     searchActiveQuery,
@@ -2262,6 +2267,11 @@ export default function ExploreScreen() {
   }, [query, runSearch]);
 
   const clearSearch = useCallback(() => {
+    // In-flight Such-Pagination invalidieren (Seq-Bump) + Guard-Flag
+    // resetten — sonst koennte ein spaeter Response in die geleerten
+    // Hits appenden bzw. das Flag haengen bleiben (86ca5yp4k).
+    searchSeq.current += 1;
+    setSearchLoadingMore(false);
     setSearchActiveQuery(null);
     setSearchHitsEigen([]);
     setSearchHitsMarken([]);
@@ -2764,6 +2774,30 @@ export default function ExploreScreen() {
   // den Deps, damit auch eine Seite mit 0 sichtbaren Treffern den nächsten
   // Load auslöst (sonst Endlos-Hänger bei dünnen Treffer-Seiten).
   const FILL_TARGET = 16;
+  // Perf-Kappe (86ca5yp4k: 'mit Filtern geht die Performance weg'):
+  // die Fill-Schleifen holten bei restriktiven Filtern unbegrenzt
+  // Seite um Seite (inkl. Firestore-Enrichment pro Such-Hit) — CPU-
+  // Burst + Render-Sturm. Max. Runden pro Filter-/Such-Konstellation;
+  // danach uebernimmt der (jetzt frische) Scroll-Trigger — auch eine
+  // kurze Liste feuert via Bounce-Scroll onScroll-Events.
+  const FILL_MAX_ROUNDS = 5;
+  const fillRoundsRef = useRef(0);
+  const fillFingerprintRef = useRef('');
+  const fillFingerprint = [
+    searchActiveQuery ?? '',
+    tab,
+    cat,
+    market,
+    handels,
+    brandId,
+    stufeSelection.join(','),
+    contentFiltersActive ? '1' : '0',
+  ].join('|');
+  if (fillFingerprintRef.current !== fillFingerprint) {
+    fillFingerprintRef.current = fillFingerprint;
+    fillRoundsRef.current = 0;
+  }
+
   useEffect(() => {
     if (searchActiveQuery) return;
     if (!(contentFiltersActive || cat !== 'all')) return;
@@ -2771,6 +2805,8 @@ export default function ExploreScreen() {
     const wantMarken = tab === 'marken' || tab === 'alle';
     const visible = tab === 'eigen' ? dataEigen.length : tab === 'marken' ? dataMarken.length : dataAlle.length;
     if (visible >= FILL_TARGET) return;
+    if (fillRoundsRef.current >= FILL_MAX_ROUNDS) return;
+    fillRoundsRef.current += 1;
     if (wantEigen && nonameHasMoreRef.current && !nonameInflightRef.current) loadNonames(false);
     if (wantMarken && markenHasMoreRef.current && !markenInflightRef.current) loadMarken(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2786,6 +2822,46 @@ export default function ExploreScreen() {
     markenprodukte.length,
     loadNonames,
     loadMarken,
+  ]);
+
+  // ─── Auto-Fill im SUCH-Modus (86ca5yp4k) ───────────────────────────
+  // Die Such-Filter (Markt/Kategorie/Stufe/Marke) laufen client-seitig
+  // ueber die Algolia-Hits. Eine restriktive Kombination kann eine ganze
+  // 40er-Page wegfiltern → die sichtbare Liste waechst nicht → der
+  // Scroll-Trigger ist nicht mehr erreichbar (Liste zu kurz) → 'beim
+  // Scrollen kommen keine Produkte'. Analog zum Browse-Auto-Fill oben:
+  // proaktiv weitere Algolia-Pages holen, bis genug sichtbar ist oder
+  // alle Treffer geladen sind. loadMoreSearch hat eigene Guards
+  // (searchLoadingMore + Seq-Snapshot).
+  useEffect(() => {
+    if (!searchActiveQuery) return;
+    const visible =
+      tab === 'eigen'
+        ? dataEigen.length
+        : tab === 'marken'
+          ? dataMarken.length
+          : dataAlle.length;
+    if (visible >= FILL_TARGET) return;
+    const moreAvailable =
+      searchHitsEigen.length < searchTotalEigen ||
+      searchHitsMarken.length < searchTotalMarken;
+    if (!moreAvailable || searchLoadingMore) return;
+    if (fillRoundsRef.current >= FILL_MAX_ROUNDS) return;
+    fillRoundsRef.current += 1;
+    void loadMoreSearch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    searchActiveQuery,
+    tab,
+    dataAlle.length,
+    dataEigen.length,
+    dataMarken.length,
+    searchHitsEigen.length,
+    searchHitsMarken.length,
+    searchTotalEigen,
+    searchTotalMarken,
+    searchLoadingMore,
+    loadMoreSearch,
   ]);
 
   // 86ca2rty8: Render-Window-Lever für den gefilterten Zustand.
@@ -3110,6 +3186,23 @@ export default function ExploreScreen() {
     if (markenHasMoreRef.current && !markenInflightRef.current) loadMarken(false);
   }, [inSearchMode, loadMoreSearch, loadNonames, loadMarken]);
 
+  // ROOT-CAUSE-FIX 86ca5yp4k ('beim Scrollen wird nicht korrekt
+  // nachgeladen / Filter+Suchbegriff werden ignoriert'): die
+  // onScrollJs*-Handler unten sind BEWUSST mit leeren Deps memoisiert
+  // (stabile Identität fuer die Listen) — schlossen aber direkt ueber
+  // checkLoadMore* und froren damit die MOUNT-Version ein:
+  // inSearchMode=false + loadNonames mit den MOUNT-Filtern. Folge:
+  // Scrollen in der Suche feuerte den Browse-Loader (nichts Sichtbares
+  // laedt nach) und Browse-Nachladen lief mit veralteten Filtern.
+  // Fix: Ref-Spiegel — Handler bleiben referenzstabil, lesen den
+  // Trigger aber IMMER frisch.
+  const checkLoadMoreAlleRef = useRef(checkLoadMoreAlle);
+  checkLoadMoreAlleRef.current = checkLoadMoreAlle;
+  const checkLoadMoreEigenRef = useRef(checkLoadMoreEigen);
+  checkLoadMoreEigenRef.current = checkLoadMoreEigen;
+  const checkLoadMoreMarkenRef = useRef(checkLoadMoreMarken);
+  checkLoadMoreMarkenRef.current = checkLoadMoreMarken;
+
   // Animated scroll handlers driven both die per-page scrollYxxx
   // (→ powert die Tab-Bar-Collapse-Animation auf dem UI-Thread) und
   // den Infinite-Scroll-Trigger (JS-Thread via runOnJS).
@@ -3175,7 +3268,7 @@ export default function ExploreScreen() {
         ne.contentSize.height - ne.contentOffset.y - ne.layoutMeasurement.height;
       const viewport = ne.layoutMeasurement.height || 800;
       if (dist < viewport * 4) {
-        checkLoadMoreAlle();
+        checkLoadMoreAlleRef.current();
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3192,7 +3285,7 @@ export default function ExploreScreen() {
         ne.contentSize.height - ne.contentOffset.y - ne.layoutMeasurement.height;
       const viewport = ne.layoutMeasurement.height || 800;
       if (dist < viewport * 4) {
-        checkLoadMoreEigen();
+        checkLoadMoreEigenRef.current();
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3209,7 +3302,7 @@ export default function ExploreScreen() {
         ne.contentSize.height - ne.contentOffset.y - ne.layoutMeasurement.height;
       const viewport = ne.layoutMeasurement.height || 800;
       if (dist < viewport * 4) {
-        checkLoadMoreMarken();
+        checkLoadMoreMarkenRef.current();
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
