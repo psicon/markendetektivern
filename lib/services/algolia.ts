@@ -356,8 +356,19 @@ export class AlgoliaService {
     hitsPerPage: number,
     filters: string,
     facetFilters?: AlgoliaFacetFilters,
+    // Sort 'Preis aufsteigend' laeuft ueber Standard-Replicas
+    // (produkte_preis_asc / markenProdukte_preis_asc, customRanking
+    // asc(preis)); Default ist der Primary, dessen customRanking
+    // asc(name) bei leerer Query die A-Z-Reihenfolge ergibt.
+    sortByPrice?: boolean,
   ): Promise<AlgoliaSearchResponse> {
-    const indexName = kind === 'eigen' ? NONAME_INDEX : MARKENPRODUKTE_INDEX;
+    const indexName = sortByPrice
+      ? kind === 'eigen'
+        ? `${NONAME_INDEX}_preis_asc`
+        : `${MARKENPRODUKTE_INDEX}_preis_asc`
+      : kind === 'eigen'
+        ? NONAME_INDEX
+        : MARKENPRODUKTE_INDEX;
     const attributesToRetrieve =
       kind === 'eigen'
         ? ['objectID', 'name', 'bild', 'bildThumb', 'stufe', 'preis', 'discounter', 'handelsmarke', 'kategorie']

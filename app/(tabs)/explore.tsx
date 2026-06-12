@@ -1297,6 +1297,7 @@ export default function ExploreScreen() {
             reset ? 12 : 18,
             numeric.join(' AND '),
             [...csf.facets, ...searchFacetsEigenRef.current],
+            sort === 'preis',
           );
           if (reloadSeq.current !== startSeq) return;
           const enriched = await mapWithConcurrency(
@@ -1401,7 +1402,7 @@ export default function ExploreScreen() {
     // Refs (nonameLastDocRef/nonameHasMoreRef) liefern die aktuellen
     // Werte — daher KEINE state-deps, sonst hätten wir wieder das
     // closure-staleness-Problem in den JS-Scroll-Handlern.
-    [buildNonameFilters, productSorter],
+    [buildNonameFilters, productSorter, sort],
   );
 
   const loadMarken = useCallback(
@@ -1426,6 +1427,7 @@ export default function ExploreScreen() {
             reset ? 12 : 18,
             csf.numeric.join(' AND '),
             [...csf.facets, ...searchFacetsMarkenRef.current],
+            sort === 'preis',
           );
           if (reloadSeq.current !== startSeq) return;
           const enriched = await mapWithConcurrency(
@@ -1512,7 +1514,7 @@ export default function ExploreScreen() {
     },
     // Refs liefern aktuelle Werte — keine state-deps, sonst stale-
     // closure in den JS-Scroll-Handlern.
-    [buildMarkenFilters, productSorter],
+    [buildMarkenFilters, productSorter, sort],
   );
 
   const loadMore = useCallback(() => {
