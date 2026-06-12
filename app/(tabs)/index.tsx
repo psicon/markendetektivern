@@ -61,6 +61,7 @@ import { useShoppingCartCount } from '@/lib/hooks/useShoppingCartCount';
 import { achievementService } from '@/lib/services/achievementService';
 import { AlgoliaService } from '@/lib/services/algolia';
 import { FirestoreService } from '@/lib/services/firestore';
+import { useNetworkStatus } from '@/lib/services/network';
 import searchHistoryService from '@/lib/services/searchHistoryService';
 import WordPressService, { WordPressPost } from '@/lib/services/wordpress';
 import { Level } from '@/lib/types/achievements';
@@ -203,6 +204,25 @@ export default function HomeScreen() {
   // immer zuerst, weil das die wichtigste Discovery-Section ist.
   const [productsStageDone, setProductsStageDone] = useState(false);
   const [newsStageDone, setNewsStageDone] = useState(false);
+  // Reconnect-Reload (ClickUp 86ca8c9n6): wurde Home OHNE Empfang
+  // gemountet, blieben alle Sections leer — und luden nach dem Netz-
+  // Comeback nie nach. Der Nonce re-triggert die Stage-1-Pipeline
+  // (Stage 2/3 haengen an den StageDone-Flanken und laufen mit).
+  const [netRetryNonce, setNetRetryNonce] = useState(0);
+  const netStatus = useNetworkStatus();
+  const prevNetOnlineRef = React.useRef(netStatus.online);
+  useEffect(() => {
+    const wasOnline = prevNetOnlineRef.current;
+    prevNetOnlineRef.current = netStatus.online;
+    if (wasOnline || !netStatus.online) return; // nur offline→online
+    if (enttarnteProdukte.length > 0 && !error) return; // Daten sind da
+    setError(null);
+    setLoading(true);
+    setProductsStageDone(false);
+    setNewsStageDone(false);
+    setNetRetryNonce((n) => n + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [netStatus.online]);
 
   // Gamification
   const [levels, setLevels] = useState<Level[]>([]);
@@ -599,7 +619,9 @@ export default function HomeScreen() {
       cancelled = true;
       handle.cancel?.();
     };
-  }, []);
+    // netRetryNonce: Reconnect-Reload (siehe oben) — laesst die ganze
+    // Stage-Pipeline nach einem Offline-Mount erneut durchlaufen.
+  }, [netRetryNonce]);
 
   // ─── Load news (Stage 2) ────────────────────────────────────────────
   // Lädt erst nachdem die Produkt-Stage durch ist — das ist die

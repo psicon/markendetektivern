@@ -3,6 +3,7 @@ import { BlurView } from 'expo-blur';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import { showRetryableErrorToast } from '@/lib/services/ui/toast';
+import { useNetworkStatus } from '@/lib/services/network';
 import { safePush } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -1529,6 +1530,32 @@ export default function ExploreScreen() {
     if (tab === 'eigen') loadNonames(false);
     else loadMarken(false);
   }, [tab, loadNonames, loadMarken]);
+
+  // ── Reconnect-Reload (ClickUp 86ca8c9n6) ──────────────────────────
+  // Wurde Stoebern OHNE Empfang gemountet, blieben die Listen leer und
+  // luden auch nach dem Netz-Comeback nie nach ('wird nicht nachgeladen
+  // wenn Empfang wieder da'). Bei der offline→online-Flanke laden wir
+  // alles nach, was leer ist. Suche hat ihren eigenen Retry-Toast.
+  const netStatus = useNetworkStatus();
+  const prevNetOnlineRef = useRef(netStatus.online);
+  useEffect(() => {
+    const wasOnline = prevNetOnlineRef.current;
+    prevNetOnlineRef.current = netStatus.online;
+    if (wasOnline || !netStatus.online) return; // nur offline→online
+    if (searchActiveQuery) return;
+    if (nonames.length === 0) void loadNonames(true);
+    if (markenprodukte.length === 0) void loadMarken(true);
+    if (discounter.length === 0) {
+      FirestoreService.getDiscounter()
+        .then((ds) => {
+          const byName = (a: any, b: any) =>
+            String(a?.name ?? '').localeCompare(String(b?.name ?? ''), 'de');
+          setDiscounter([...(ds ?? [])].sort(byName));
+        })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [netStatus.online]);
 
   // Map a Tab key to the analytics source-screen name used by
   // `trackTabSwitched`. Centralised so the three call sites stay in

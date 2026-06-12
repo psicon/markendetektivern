@@ -2,6 +2,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { isOnline } from '@/lib/services/network';
+import { useAutoRetryOnReconnect } from '@/hooks/useAutoRetryOnReconnect';
 import { backOrHome } from '@/lib/utils/nav';
 import { safeReplace } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -258,6 +259,13 @@ export default function ProductComparisonScreen() {
   const [error, setError] = useState<string | null>(null);
   // Offline-Retry (86ca7uh5w): zaehlt hoch -> Lade-Effect laeuft erneut.
   const [retryNonce, setRetryNonce] = useState(0);
+  // Reconnect-Auto-Retry (86ca8c9n6): Offline-/Generic-Fehler werden
+  // beim Netz-Comeback automatisch neu versucht; ein server-
+  // bestaetigtes 'Produkt nicht gefunden' bleibt stehen.
+  useAutoRetryOnReconnect(
+    !!error && error !== 'Produkt nicht gefunden',
+    () => setRetryNonce((n) => n + 1),
+  );
   const [mainProduct, setMainProduct] = useState<MarkenProduktWithDetails | null>(null);
   const [nonames, setNonames] = useState<ProductWithDetails[]>([]);
   const [nonamesReady, setNonamesReady] = useState(false);
@@ -282,11 +290,9 @@ export default function ProductComparisonScreen() {
         if (!alive) return;
         if (!data) {
           settled = true;
-          setError(
-            isOnline()
-              ? 'Produkt nicht gefunden'
-              : 'Gerade kein Empfang — die Produktdaten konnten nicht geladen werden.',
-          );
+          // null ist seit getDocPreferServer SERVER-bestaetigt —
+          // offline wirft der Service stattdessen (catch unten).
+          setError('Produkt nicht gefunden');
           return;
         }
         settled = true;
@@ -379,8 +385,11 @@ export default function ProductComparisonScreen() {
         if (!alive) return;
         settled = true;
         console.warn('ProductComparison: load failed', e);
+        const offlineErr = String((e as Error)?.message ?? '').includes('offline-cache-miss');
         setError(
-          isOnline() ? 'Fehler beim Laden' : 'Gerade kein Empfang — die Produktdaten konnten nicht geladen werden.',
+          offlineErr || !isOnline()
+            ? 'Gerade kein Empfang — die Produktdaten konnten nicht geladen werden.'
+            : 'Fehler beim Laden',
         );
       }
     })();

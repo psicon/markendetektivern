@@ -1897,6 +1897,18 @@ in der App — Metro/TestFlight/App-Version beeinflussen die Erkennung NICHT.
 - **Testen:** ein NEU fotografierter Bon läuft frisch; exakt dasselbe Bild-File
   trifft per Dedup (`receipts` contentHash) das alte gecachte Ergebnis.
 
+## Sim-Testing: NUR wenn's wirklich nötig ist (User-Vorgabe 2026-06-12)
+
+Screenshot-Loops im Simulator verbrennen massiv Tokens. Default-Vorgehen
+bei Bugfixes: **logisch vorgehen** — Code lesen, Root-Cause herleiten,
+Fix + Callsite-Audit (z.B. "wer ruft das ohne catch"), tsc-Baseline.
+Sim/Screenshots nur einsetzen, wenn die Hypothese sich NICHT aus dem
+Code beweisen lässt (z.B. natives Rendering-Verhalten, Gesten-Hit-
+Targets) oder der User explizit drum bittet. User-Wortlaut: "nicht die
+ganze zeit im sim testen - das verbrennt tokens ohne ende … du kannst
+das schon machen aber nur wenns sinn macht." Qualität bleibt gleich —
+die Beweisführung läuft über Code-Review statt Screen-Staring.
+
 ## Sim-Testing headless: Taps, echtes Offline, RevenueCat-Falle (2026-06-11)
 
 Erarbeitet beim Offline-Resilienz-Test (86ca7uguc) — damit sind

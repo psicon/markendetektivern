@@ -7,6 +7,7 @@ import {
     documentId,
     getCountFromServer,
     getDoc,
+    getDocFromServer,
     getDocs,
     increment,
     limit,
@@ -101,6 +102,47 @@ function readCache<T>(map: Map<string, CacheEntry<T>>, key: string): T | null | 
 function writeCache<T>(map: Map<string, CacheEntry<T>>, key: string, value: T | null, ttlMs: number = PRODUCT_CACHE_TTL_MS) {
   map.set(key, { value, expiresAt: Date.now() + ttlMs });
 }
+
+/**
+ * Offline-Erkennung fuer Firestore-Fehler (ClickUp 86ca8c9n6).
+ * 'offline-cache-miss' werfen wir selbst (fromCache-not-exists);
+ * 'unavailable' wirft der SDK wenn der Server nicht erreichbar ist
+ * (Android ohne Persistence sofort, iOS bei getDocFromServer).
+ */
+function isOfflineFirestoreError(e: any): boolean {
+  const msg = String(e?.message ?? '');
+  const code = String(e?.code ?? '');
+  return (
+    msg === 'offline-cache-miss' ||
+    msg.includes('offline-cache-miss') ||
+    code.includes('unavailable') ||
+    msg.includes('firestore/unavailable') ||
+    msg.toLowerCase().includes('client is offline')
+  );
+}
+
+/**
+ * getDoc mit Server-Eskalation (ClickUp 86ca8c9n6): liefert der
+ * Default-Read einen not-exists-Snapshot AUS DEM CACHE (offline oder
+ * Firestore noch im Reconnect-Backoff — das OS kann laengst wieder
+ * online sein!), fragen wir den Server EXPLIZIT. Drei Ausgaenge:
+ *   • Server antwortet, Doc existiert  -> normaler Snapshot
+ *   • Server antwortet, Doc fehlt      -> echtes Not-Found (exists=false, !fromCache)
+ *   • Server nicht erreichbar          -> throw 'offline-cache-miss'
+ * Vorher entschied der Geraete-Netzstatus ueber 'nicht gefunden' vs.
+ * 'kein Empfang' — direkt nach Reconnect zeigte deshalb JEDES Produkt
+ * 'Produkt nicht gefunden' (OS online, Firestore-Stream noch tot).
+ */
+async function getDocPreferServer(ref: any): Promise<any> {
+  const snap = await getDoc(ref);
+  if ((snap as any).exists() || !(snap as any).metadata?.fromCache) return snap;
+  try {
+    return await getDocFromServer(ref);
+  } catch (e) {
+    throw new Error('offline-cache-miss');
+  }
+}
+
 
 // ─── Homepage caches ─────────────────────────────────────────────
 //
@@ -400,7 +442,12 @@ export class FirestoreService {
             snap.forEach((d) => {
               fresh.push({ id: d.id, ...(d.data() as Produkte) });
             });
-            writeCache(topProductsCache, cacheKey, fresh, TTL_SHORT_MS);
+            // Leeres fromCache-Resultat = offline, kein Urteil —
+            // nicht cachen, sonst zeigt Home auch nach dem Reconnect
+            // noch eine leere Liste (ClickUp 86ca8c9n6).
+            if (fresh.length > 0 || !(snap as any).metadata?.fromCache) {
+              writeCache(topProductsCache, cacheKey, fresh, TTL_SHORT_MS);
+            }
             return fresh;
           } finally {
             topProductsInflight.delete(cacheKey);
@@ -750,7 +797,14 @@ export class FirestoreService {
       try {
         const docSnap = await getDoc(docRef);
         const value = docSnap.exists() ? (docSnap.data() as any) : null;
-        writeCache(refDocCache, cacheKey, value, TTL_LONG_MS);
+        // Offline-not-exists (fromCache-Miss) ist KEIN Urteil ueber
+        // die Existenz — so ein null darf nicht TTL_LONG in den
+        // Cache (ClickUp 86ca8c9n6: Referenzen blieben sonst bis
+        // App-Restart leer, Markt-Logos/Hersteller-Chips fehlten
+        // auch lange nach dem Reconnect noch).
+        if (value !== null || !(docSnap as any).metadata?.fromCache) {
+          writeCache(refDocCache, cacheKey, value, TTL_LONG_MS);
+        }
         return value;
       } catch (error) {
         console.error('Error fetching document by reference:', error);
@@ -814,11 +868,17 @@ export class FirestoreService {
           writeCache(refDocCache, `${collectionName}/${id}`, data, TTL_LONG_MS);
           seen.add(id);
         });
-        // Fehlende IDs (nicht-existente Docs) als null cachen
+        // Fehlende IDs als null cachen — aber NUR server-bestaetigt
+        // (ClickUp 86ca8c9n6): eine Offline-Query liefert ein leeres
+        // fromCache-Snapshot; die IDs existieren sehr wohl. TTL_LONG-
+        // null haette sie bis App-Restart 'nicht existent' gemacht.
+        const trustworthy = !(snap as any).metadata?.fromCache;
         for (const id of chunk) {
           if (!seen.has(id)) {
             result[id] = null;
-            writeCache(refDocCache, `${collectionName}/${id}`, null, TTL_LONG_MS);
+            if (trustworthy) {
+              writeCache(refDocCache, `${collectionName}/${id}`, null, TTL_LONG_MS);
+            }
           }
         }
       });
@@ -1192,7 +1252,10 @@ export class FirestoreService {
           });
         });
 
-        writeCache(markenCache, KEY, marken, TTL_LONG_MS);
+        // Offline-Leer-Resultat nicht TTL_LONG einfrieren (86ca8c9n6).
+        if (marken.length > 0 || !(querySnapshot as any).metadata?.fromCache) {
+          writeCache(markenCache, KEY, marken, TTL_LONG_MS);
+        }
         return marken;
       } catch (error) {
         console.error('Error fetching marken:', error);
@@ -1564,7 +1627,10 @@ export class FirestoreService {
             ...doc.data() as Discounter
           });
         });
-        writeCache(discounterCache, KEY, discounter, TTL_LONG_MS);
+        // Offline-Leer-Resultat nicht TTL_LONG einfrieren (86ca8c9n6).
+        if (discounter.length > 0 || !(querySnapshot as any).metadata?.fromCache) {
+          writeCache(discounterCache, KEY, discounter, TTL_LONG_MS);
+        }
         return discounter;
       } catch (error) {
         console.error('Error fetching discounter:', error);
@@ -1783,19 +1849,13 @@ export class FirestoreService {
     const promise = (async (): Promise<ProductWithDetails | null> => {
       try {
         const productRef = doc(db, 'produkte', productId);
-        const productSnap = await getDoc(productRef);
+        // getDocPreferServer: Cache-Miss eskaliert zum Server —
+        // 'nicht gefunden' gibt es nur noch SERVER-bestaetigt; offline
+        // (oder Firestore im Reconnect-Backoff) wirft 'offline-cache-
+        // miss' (Screen zeigt den Offline-Fehler mit Retry).
+        const productSnap = await getDocPreferServer(productRef);
 
         if (!productSnap.exists()) {
-          // Offline-Cache-Miss von echtem Not-Found unterscheiden
-          // (2026-06-12): offline liefert RNFirebase teils einen
-          // not-exists-Snapshot aus dem leeren Cache. Der war frueher
-          // 5 Min als null GECACHT -> nach einem Offline-Tap zeigte
-          // JEDES Produkt 'nicht gefunden'. Jetzt: fromCache-Miss
-          // wirft (Screen zeigt den Offline-Fehler mit Retry),
-          // echtes Not-Found returnt null OHNE Cache-Write.
-          if ((productSnap as any).metadata?.fromCache) {
-            throw new Error('offline-cache-miss');
-          }
           console.log('NoName product not found with ID:', productId);
           return null;
         }
@@ -1891,6 +1951,12 @@ export class FirestoreService {
         writeCache(productDetailsCache, productId, productWithDetails);
         return productWithDetails;
       } catch (error: any) {
+        // Offline-Fehler PROPAGIEREN (ClickUp 86ca8c9n6): das catch
+        // hier hatte den offline-cache-miss-Throw verschluckt und zu
+        // null gemacht -> Screen zeigte 'Produkt nicht gefunden'
+        // statt 'Gerade kein Empfang'. null bleibt ausschliesslich
+        // die Semantik fuer server-bestaetigtes Not-Found.
+        if (isOfflineFirestoreError(error)) throw new Error('offline-cache-miss');
         console.log('Error fetching NoName product details (this is normal if product is in other collection):', error?.message);
         return null;
       } finally {
@@ -1918,7 +1984,9 @@ export class FirestoreService {
     if (productDetailsInflight.has(productId)) return;
     // Fire-and-forget; the inflight map will hand the same promise
     // back to the screen when it asks.
-    void this.getProductWithDetails(productId);
+    // .catch: die Fetcher werfen seit 86ca8c9n6 bei Offline —
+    // ein Prefetch ist fire-and-forget und darf nie unhandled rejecten.
+    void this.getProductWithDetails(productId).catch(() => {});
   }
 
   /**
@@ -2001,14 +2069,10 @@ export class FirestoreService {
     const promise = (async (): Promise<MarkenProduktWithDetails | null> => {
     try {
       const productRef = doc(db, 'markenProdukte', productId);
-      const productSnap = await getDoc(productRef);
+      // Siehe getProductWithDetails: not-found nur server-bestaetigt.
+      const productSnap = await getDocPreferServer(productRef);
 
       if (!productSnap.exists()) {
-        // Siehe getProductWithDetails: fromCache-Miss = offline,
-        // kein Urteil; nie negativ cachen.
-        if ((productSnap as any).metadata?.fromCache) {
-          throw new Error('offline-cache-miss');
-        }
         console.log('Brand product not found with ID:', productId);
         return null;
       }
@@ -2146,6 +2210,8 @@ export class FirestoreService {
       writeCache(markenProduktDetailsCache, cacheKey, productWithDetails);
       return productWithDetails;
     } catch (error: any) {
+      // Offline-Fehler propagieren — siehe getProductWithDetails.
+      if (isOfflineFirestoreError(error)) throw new Error('offline-cache-miss');
       console.log('Error fetching brand product details (this is normal if product is in other collection):', error?.message);
       return null;
     } finally {
@@ -2234,9 +2300,14 @@ export class FirestoreService {
           // CASE 2: NoName product clicked
           result = await FirestoreService.getNoNameProductComparison(productId, callbacks);
         }
-        writeCache(comparisonCache, cacheKey, result);
+        // NIE null cachen (ClickUp 86ca8c9n6): result war bei einem
+        // Offline-Fail der inneren Fetcher null und wurde hier 5 Min
+        // als 'Produkt existiert nicht' eingefroren — ein einziger
+        // Offline-Tap vergiftete den Vergleich fuer alle Retries.
+        if (result) writeCache(comparisonCache, cacheKey, result);
         return result;
       } catch (error) {
+        if (isOfflineFirestoreError(error)) throw new Error('offline-cache-miss');
         console.error('Error in getProductComparisonData:', error);
         return null;
       } finally {
@@ -2259,7 +2330,7 @@ export class FirestoreService {
     const cacheKey = `${productId}:${isMarkenProdukt ? 1 : 0}`;
     if (readCache(comparisonCache, cacheKey) !== undefined) return;
     if (comparisonInflight.has(cacheKey)) return;
-    void this.getProductComparisonData(productId, isMarkenProdukt);
+    void this.getProductComparisonData(productId, isMarkenProdukt).catch(() => {});
   }
 
   /**
@@ -2329,6 +2400,8 @@ export class FirestoreService {
         clickedWasNoName: false,
       };
     } catch (error) {
+      // Offline-Fehler propagieren — siehe getProductWithDetails.
+      if (isOfflineFirestoreError(error)) throw error;
       console.error('Error in getBrandProductComparison:', error);
       return null;
     }
@@ -2420,6 +2493,8 @@ export class FirestoreService {
         clickedWasNoName: true,
       };
     } catch (error) {
+      // Offline-Fehler propagieren — siehe getProductWithDetails.
+      if (isOfflineFirestoreError(error)) throw error;
       console.error('Error in getNoNameProductComparison:', error);
       return null;
     }
@@ -3079,6 +3154,9 @@ export class FirestoreService {
         const snap = await getDoc(doc(db, 'aggregates', 'topProducts_v1'));
         const empty = { overall: [], monthly: [], mostViewed: [], updatedAt: null };
         if (!snap.exists()) {
+          // Offline-Cache-Miss ist KEIN 'Aggregat fehlt' — nicht
+          // cachen, naechster Versuch (Reconnect-Reload) geht durch.
+          if ((snap as any).metadata?.fromCache) return empty;
           // Aggregat noch nicht da (Erst-Deploy, neue Installation)
           // — leer cachen für 1 Min, danach erneut probieren.
           topProductsAggregateCache.value = empty;
