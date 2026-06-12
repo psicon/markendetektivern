@@ -2273,6 +2273,23 @@ export default function ExploreScreen() {
     if (brandId !== 'all') f.push(`hersteller:hersteller/${brandId}`);
     return f;
   }, [cat, brandId]);
+
+  // ── Inhalts-Filter AUCH im Such-Modus serverseitig (86ca88cam) ──
+  // Gleiche Mechanik wie der Browse-Zweig: numerische nutr_*-Filter +
+  // attr_is*-Facets gehen mit in die Algolia-Query, jede Such-Page
+  // enthaelt nur Treffer. Allergene bleiben client-seitig
+  // (filterContent), KI-Score gilt nur fuer Eigenmarken.
+  const searchContentFilters = useMemo(() => {
+    if (!contentServerFilters?.serverFilterable) return null;
+    const csf = contentServerFilters;
+    const eigenNumeric = [...csf.numeric];
+    if (csf.kiMin !== null) eigenNumeric.push(`aiComparison.score >= ${csf.kiMin}`);
+    return {
+      eigen: eigenNumeric.join(' AND '),
+      marken: csf.numeric.join(' AND '),
+      facets: csf.facets,
+    };
+  }, [contentServerFilters]);
   searchFacetsEigenRef.current = searchFacetsEigen;
   searchFacetsMarkenRef.current = searchFacetsMarken;
 
@@ -2301,10 +2318,22 @@ export default function ExploreScreen() {
         // that most search sessions fit on the first page; small
         // enough to keep the initial enrichment round-trip under
         // ~200 ms even on a cold cache.
-        const res = await AlgoliaService.searchAll(trimmed, 0, 40, {
-          eigen: searchFacetsEigen,
-          marken: searchFacetsMarken,
-        });
+        const res = await AlgoliaService.searchAll(
+          trimmed,
+          0,
+          40,
+          {
+            eigen: searchContentFilters
+              ? [...searchFacetsEigen, ...searchContentFilters.facets]
+              : searchFacetsEigen,
+            marken: searchContentFilters
+              ? [...searchFacetsMarken, ...searchContentFilters.facets]
+              : searchFacetsMarken,
+          },
+          searchContentFilters
+            ? { eigen: searchContentFilters.eigen, marken: searchContentFilters.marken }
+            : undefined,
+        );
         if (isStale()) return;
         // Netzwerk-Fehler ehrlich machen (86ca7uhn4): der leere
         // Fallback aus searchAll sah bisher aus wie "0 Treffer" —
@@ -2353,7 +2382,7 @@ export default function ExploreScreen() {
         if (!isStale()) setSearchLoading(false);
       }
     },
-    [tab, analytics, enrichWithFirestore, searchFacetsEigen, searchFacetsMarken, user?.uid],
+    [tab, analytics, enrichWithFirestore, searchFacetsEigen, searchFacetsMarken, searchContentFilters, user?.uid],
   );
   runSearchRef.current = runSearch;
 
@@ -2370,7 +2399,7 @@ export default function ExploreScreen() {
       void runSearchRef.current?.(q);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchFacetsEigen, searchFacetsMarken]);
+  }, [searchFacetsEigen, searchFacetsMarken, searchContentFilters]);
 
   // Infinite-scroll loader for search mode. Per-side independent
   // pagination — each Algolia index has its own `nbHits`. Skips
@@ -2413,10 +2442,22 @@ export default function ExploreScreen() {
       if (!eigenDone) {
         const nextPage = searchPageEigen + 1;
         tasks.push(
-          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40, {
-            eigen: searchFacetsEigen,
-            marken: searchFacetsMarken,
-          }).then(
+          AlgoliaService.searchAll(
+            searchActiveQuery,
+            nextPage,
+            40,
+            {
+              eigen: searchContentFilters
+                ? [...searchFacetsEigen, ...searchContentFilters.facets]
+                : searchFacetsEigen,
+              marken: searchContentFilters
+                ? [...searchFacetsMarken, ...searchContentFilters.facets]
+                : searchFacetsMarken,
+            },
+            searchContentFilters
+              ? { eigen: searchContentFilters.eigen, marken: searchContentFilters.marken }
+              : undefined,
+          ).then(
             async (r) => ({
               kind: 'eigen',
               hits: await mapWithConcurrency(
@@ -2433,10 +2474,22 @@ export default function ExploreScreen() {
       if (!markenDone) {
         const nextPage = searchPageMarken + 1;
         tasks.push(
-          AlgoliaService.searchAll(searchActiveQuery, nextPage, 40, {
-            eigen: searchFacetsEigen,
-            marken: searchFacetsMarken,
-          }).then(
+          AlgoliaService.searchAll(
+            searchActiveQuery,
+            nextPage,
+            40,
+            {
+              eigen: searchContentFilters
+                ? [...searchFacetsEigen, ...searchContentFilters.facets]
+                : searchFacetsEigen,
+              marken: searchContentFilters
+                ? [...searchFacetsMarken, ...searchContentFilters.facets]
+                : searchFacetsMarken,
+            },
+            searchContentFilters
+              ? { eigen: searchContentFilters.eigen, marken: searchContentFilters.marken }
+              : undefined,
+          ).then(
             async (r) => ({
               kind: 'marken',
               hits: await mapWithConcurrency(
@@ -2492,6 +2545,7 @@ export default function ExploreScreen() {
     enrichWithFirestore,
     searchFacetsEigen,
     searchFacetsMarken,
+    searchContentFilters,
   ]);
 
   // Filter-Change im Search-Mode: der Facetten-Effect oben feuert die
@@ -3048,7 +3102,11 @@ export default function ExploreScreen() {
     if (searchActiveQuery) return;
     // Server-gefilterter Browse (86ca88cam): Pages sind dicht — kein
     // Auto-Fill noetig (der verursachte die Grid-Luecken + CPU-Last).
-    if (useAlgoliaBrowse) return;
+    // AUSNAHME: Allergene filtern weiterhin client-seitig aus den
+    // server-gefilterten Pages (Safety-Semantik) — faellt dabei eine
+    // ganze Page weg, braucht es den Fill als Netz, sonst bleibt die
+    // Liste ohne Scroll-Trigger stehen.
+    if (useAlgoliaBrowse && contentFilters.allergens.length === 0) return;
     if (!(contentFiltersActive || cat !== 'all')) return;
     const wantEigen = tab === 'eigen' || tab === 'alle';
     const wantMarken = tab === 'marken' || tab === 'alle';
@@ -3072,6 +3130,7 @@ export default function ExploreScreen() {
     loadNonames,
     loadMarken,
     useAlgoliaBrowse,
+    contentFilters.allergens.length,
   ]);
 
   // ─── Auto-Fill im SUCH-Modus (86ca5yp4k) ───────────────────────────
