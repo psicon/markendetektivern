@@ -9,7 +9,7 @@ import {
 } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { getProductImage } from '@/lib/utils/productImage';
-import { Shimmer } from './Skeletons';
+import { SheenSweep, Shimmer } from './Skeletons';
 import { StufenChips } from './StufenChips';
 
 export type ProductCardVariant = 'horizontal' | 'grid';
@@ -201,13 +201,17 @@ function ProductCardImpl({
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  // Mit Blur-Silhouette: Shimmer nur als sanfter Puls
-                  // DARUEBER (gedimmt), damit die Silhouette durchscheint
-                  // und der Lade-Zustand lebendig bleibt.
-                  opacity: thumbhash ? 0.4 : 1,
+                  overflow: 'hidden',
                 }}
               >
-                <Shimmer width="100%" height={imageHeight} radius={0} />
+                {thumbhash ? (
+                  // Ueber der ThumbHash-Silhouette: wandernder Glanz-
+                  // Streifen (Sheen) statt Grau-Puls — sichtbar auf
+                  // buntem Grund, hochwertiger Lade-Eindruck.
+                  <SheenSweep width={300} />
+                ) : (
+                  <Shimmer width="100%" height={imageHeight} radius={0} />
+                )}
               </View>
             ) : null}
           </>

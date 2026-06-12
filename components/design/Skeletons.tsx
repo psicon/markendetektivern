@@ -221,6 +221,56 @@ const SHIMMER_DURATION_MS = 1500;
 // like a strobe and more like Instagram's gentle pulse.
 const SHIMMER_PAUSE_MS = 600;
 
+/**
+ * SheenSweep — wandernder Glanz-Streifen fuer Lade-Zustaende UEBER
+ * Inhalt (z.B. der ThumbHash-Silhouette, 86c9pz8pz). Der klassische
+ * Skeleton-Sheen: ein schraeger, weicher Highlight-Streifen laeuft
+ * alle ~1.6s einmal durch. Reanimated UI-Thread, pointerEvents none.
+ * Absolut positioniert — Parent braucht overflow:hidden.
+ */
+export function SheenSweep({ width }: { width: number }) {
+  const x = useSharedValue(-1);
+  useEffect(() => {
+    x.value = withRepeat(
+      withTiming(1, { duration: 1600, easing: Easing.inOut(Easing.quad) }),
+      -1,
+      false,
+    );
+  }, [x]);
+  const style = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: interpolate(x.value, [-1, 1], [-width, width]) },
+      { rotate: '18deg' },
+    ],
+  }));
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        {
+          position: 'absolute',
+          top: '-25%',
+          bottom: '-25%',
+          left: 0,
+          width: width * 0.6,
+        },
+        style,
+      ]}
+    >
+      <LinearGradient
+        colors={[
+          'rgba(255,255,255,0)',
+          'rgba(255,255,255,0.45)',
+          'rgba(255,255,255,0)',
+        ]}
+        start={{ x: 0, y: 0.5 }}
+        end={{ x: 1, y: 0.5 }}
+        style={{ flex: 1 }}
+      />
+    </Animated.View>
+  );
+}
+
 export function Shimmer({
   width = '100%',
   height = 12,
