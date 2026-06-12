@@ -30,6 +30,17 @@ class RatingPromptService {
     console.log(`📱 Rating Modal Handler ${handler ? 'registered' : 'unregistered'}`);
   }
 
+  /** Dev-Tool (Profil → Debug): Modal sofort anzeigen, ohne Flags/
+   *  Level-Gate — zum Testen von Copy/Design-Iterationen. */
+  debugShowNow(): boolean {
+    if (!this.showRatingModal) {
+      console.warn('📱 Rating Modal Handler nicht registriert');
+      return false;
+    }
+    this.showRatingModal(true);
+    return true;
+  }
+
   /**
    * Set pending rating flag after level up
    */

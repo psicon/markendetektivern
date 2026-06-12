@@ -12,6 +12,7 @@
 //   • level-tinted gradient hero (mirrors levelGradient on rewards)
 //   • white-surface menu cards with soft shadow
 
+import { ratingPromptService } from '@/lib/services/ratingPrompt';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
@@ -1617,6 +1618,17 @@ export default function ProfileScreen() {
                 color="#10b981"
                 label="Consent-Status anzeigen"
                 onPress={onConsentStatus}
+              />
+              <MenuRow
+                icon="star-face"
+                color="#f59e0b"
+                label="App-Rating-Dialog anzeigen"
+                sub="Öffnet das Bewertungs-Modal sofort (zum Testen von Copy/Design)"
+                onPress={() => {
+                  if (!ratingPromptService.debugShowNow()) {
+                    Alert.alert('Rating-Modal', 'Handler nicht registriert (GamificationProvider nicht gemountet?).');
+                  }
+                }}
               />
               <MenuRow
                 icon="receipt"
