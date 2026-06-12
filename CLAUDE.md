@@ -257,6 +257,12 @@ Recent-Sessions.
   Timing-Glücksspiel. Beispiel: Tabs-Layout-Escape-Hatch zu
   `/auth/welcome` (siehe `app/(tabs)/_layout.tsx` T17.14).
 
+- **`withRepeat(withTiming(ZIEL))` ohne Start-Reset** — animiert ab der
+  zweiten Wiederholung von ZIEL nach ZIEL = steht still (Sweep/Loop
+  laeuft genau 1x). Immer `withRepeat(withSequence(withTiming(START,
+  {duration:0}), withTiming(ZIEL, {...})), -1)`. Kostete am 2026-06-12
+  zwei Test-Runden beim SheenSweep.
+
 - **Fire-and-forget `void asyncStorageWrite(...)` direkt vor
   `setVisible(false)`/`setState`** — Race-Garantie. Wenn ein Listener
   auf das State-Change wartet und dann den just-geschriebenen Wert

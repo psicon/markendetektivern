@@ -10,6 +10,7 @@ import Animated, {
   useSharedValue,
   withDelay,
   withRepeat,
+  withSequence,
   withTiming,
 } from 'react-native-reanimated';
 import { radii } from '@/constants/tokens';
@@ -231,8 +232,13 @@ const SHIMMER_PAUSE_MS = 600;
 export function SheenSweep({ width }: { width: number }) {
   const x = useSharedValue(-1);
   useEffect(() => {
+    // withSequence mit 0ms-Reset: ohne ihn animiert der Repeat ab dem
+    // zweiten Durchlauf von 1 -> 1 (= steht still). Klassiker.
     x.value = withRepeat(
-      withTiming(1, { duration: 1600, easing: Easing.inOut(Easing.quad) }),
+      withSequence(
+        withTiming(-1, { duration: 0 }),
+        withTiming(1, { duration: 1600, easing: Easing.inOut(Easing.quad) }),
+      ),
       -1,
       false,
     );
