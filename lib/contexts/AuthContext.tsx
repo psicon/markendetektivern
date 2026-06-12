@@ -13,7 +13,7 @@ import {
   updateProfile,
   User,
 } from '@react-native-firebase/auth';
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, InteractionManager } from 'react-native';
 import { PERF } from '../perfFlags';
 import { auth } from '../firebase';
@@ -138,8 +138,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // sichtbaren Welcome-Flash beim Abmelden.
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
+  // Read-Race-Guard (86ca7x9ep-Follow-up 'Name blitzt auf und wird
+  // wieder ersetzt'): mehrere parallele refreshUserProfile-Laeufe
+  // (Auth-Listener + Provider-Sign-In-Pfad) koennen sich gegenseitig
+  // mit VERALTETEN Reads ueberschreiben — der zuletzt GESTARTETE
+  // Lauf gewinnt, aeltere setzen keinen State mehr.
+  const profileRefreshSeq = useRef(0);
+
   const refreshUserProfile = useCallback(async () => {
     if (user?.uid) {
+      const seq = ++profileRefreshSeq.current;
+      const isStale = () => seq !== profileRefreshSeq.current;
       try {
         // Versuche Profile zu laden (auch für anonyme User)
         let profile = await getUserProfile(user.uid);
@@ -170,11 +179,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           stats: stats
         };
         
+        if (isStale()) return; // neuerer Refresh laeuft — nicht clobbern
         setUserProfile(enrichedProfile);
         console.log('🔄 AuthContext: User profile + stats refreshed (anonymous:', user.isAnonymous, ')');
       } catch (error) {
         console.warn('⚠️ Profil konnte nicht geladen werden:', error);
-        setUserProfile(null);
+        if (!isStale()) setUserProfile(null);
       }
     }
     // Phase 0 B: Deps sind string/boolean primitives statt das ganze
