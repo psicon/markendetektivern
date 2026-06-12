@@ -1450,7 +1450,7 @@ function BrandCard({
           source={{ uri: getProductImage(product) ?? undefined }}
           style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
           resizeMode="contain"
-          blurhash={(product as any)?.bildBlurhash}
+          thumbhash={(product as any)?.bildThumbhash}
         />
         <View style={{ flex: 1, minWidth: 0 }}>
           {(() => {
@@ -1702,7 +1702,7 @@ function BrandCard({
                     diese Alternative wählt. */}
                 <View style={{ position: 'relative' }}>
                   <ImageWithShimmer
-                    blurhash={(alt as any)?.bildBlurhash}
+                    thumbhash={(alt as any)?.bildThumbhash}
                     source={{ uri: getProductImage(alt) ?? undefined }}
                     style={{
                       width: 44,
@@ -1916,7 +1916,7 @@ function NoNameCard({
           source={{ uri: getProductImage(p) ?? undefined }}
           style={{ width: 62, height: 62, borderRadius: 10, backgroundColor: '#ffffff' }}
           resizeMode="contain"
-          blurhash={(p as any)?.bildBlurhash}
+          thumbhash={(p as any)?.bildThumbhash}
         />
         {savingsPercent > 0 ? (
           <View

@@ -59,7 +59,7 @@ class FavoritesService {
         packSize: productData.packSize || null,
         bild: productData.bild || null,
         bildClean: productData.bildClean || null,
-        bildBlurhash: productData.bildBlurhash || null,
+        bildThumbhash: productData.bildThumbhash || null,
         type: productData.type || null,
         category: productData.category || null,
         brand: productData.brand || null

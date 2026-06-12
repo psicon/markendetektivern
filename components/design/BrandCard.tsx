@@ -19,7 +19,7 @@ type Props = {
    * automatically) OR pass `imageUri` to override (e.g. loading
    * placeholder). If both are provided, `imageUri` wins.
    */
-  product?: { bildClean?: string | null; bild?: string | null; bildBlurhash?: string | null } | null;
+  product?: { bildClean?: string | null; bild?: string | null; bildThumbhash?: string | null } | null;
   imageUri?: string | null;
   price: number;
   /** Best-alternative savings (€), optional — shown when known. */
@@ -84,8 +84,8 @@ function BrandCardImpl({
   // tiles never flash blank white before the image arrives. Reset
   // on URI change so paginated / recycled cards re-shimmer.
   const [imageLoaded, setImageLoaded] = useState(false);
-  // BlurHash-Platzhalter (86c9pz8pz) — siehe ProductCard.
-  const blurhash = (product as any)?.bildBlurhash as string | undefined;
+  // ThumbHash-Platzhalter (86c9pz8pz) — siehe ProductCard.
+  const thumbhash = (product as any)?.bildThumbhash as string | undefined;
   useEffect(() => {
     setImageLoaded(false);
   }, [resolvedImageUri]);
@@ -117,10 +117,9 @@ function BrandCardImpl({
               source={{ uri: resolvedImageUri }}
               style={{ width: '100%', height: '100%' }}
               contentFit="contain"
-              placeholder={blurhash ? { blurhash } : undefined}
-              // contain: die Silhouette behaelt die Bild-Proportion
-              // (Hash traegt den Aspekt) statt die ganze Card-Flaeche
-              // zu fluten (User-Feedback 2026-06-12).
+              placeholder={thumbhash ? { thumbhash } : undefined}
+              // contain: ThumbHash traegt Aspekt+Alpha — die Silhouette
+              // hat die ECHTE Produktform statt die Card zu fluten.
               placeholderContentFit="contain"
               transition={150}
               cachePolicy="memory-disk"
@@ -139,7 +138,7 @@ function BrandCardImpl({
                   // Mit Blur-Silhouette: Shimmer nur als sanfter Puls
                   // DARUEBER (gedimmt), damit die Silhouette durchscheint
                   // und der Lade-Zustand lebendig bleibt.
-                  opacity: blurhash ? 0.4 : 1,
+                  opacity: thumbhash ? 0.4 : 1,
                 }}
               >
                 <Shimmer width="100%" height={162} radius={0} />

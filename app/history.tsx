@@ -548,8 +548,8 @@ function ScanCard({
             style={{ width: '100%', height: '100%' }}
             contentFit="cover"
             placeholder={
-              (item as any)?.productBlurhash
-                ? { blurhash: (item as any).productBlurhash }
+              (item as any)?.productThumbhash
+                ? { thumbhash: (item as any).productThumbhash }
                 : undefined
             }
             placeholderContentFit="contain"

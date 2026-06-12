@@ -2,10 +2,11 @@
  * BlurHash-Generator — Firebase Cloud Functions (Gen2).
  * ClickUp 86c9pz8pz: app-weite Bild-Platzhalter statt Shimmer-only.
  *
- * Schreibt pro Produkt einen ~30-Byte-BlurHash-String, den expo-image
- * client-seitig als weichen Platzhalter decodiert:
- *   • Feld `bildBlurhash`     — der Hash (für placeholder={{ blurhash }})
- *   • Feld `bildBlurhashFor`  — Quell-URL, aus der der Hash entstand
+ * Schreibt pro Produkt einen ~25-Byte-ThumbHash (base64), den
+ * expo-image client-seitig als Silhouetten-Platzhalter decodiert
+ * (traegt Aspekt + Alpha — anders als BlurHash):
+ *   • Feld `bildThumbhash`     — der Hash (für placeholder={{ thumbhash }})
+ *   • Feld `bildThumbhashFor`  — Quell-URL, aus der der Hash entstand
  *     (Idempotenz-Marker: nur neu rechnen, wenn sich das Bild ändert;
  *     verhindert zugleich die Trigger-Self-Loop).
  *
@@ -29,7 +30,13 @@ const { onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const sharp = require('sharp');
-const { encode } = require('blurhash');
+// thumbhash ist ESM-only — in der CJS-CF via dynamic import laden
+// (Node 22 kann das nativ; einmal pro Instanz gecacht).
+let thumbhashModP = null;
+function loadThumbhash() {
+  if (!thumbhashModP) thumbhashModP = import('thumbhash');
+  return thumbhashModP;
+}
 
 admin.initializeApp();
 
@@ -47,26 +54,29 @@ function imageUrlOf(data) {
 }
 
 /**
- * Lädt das Bild und encodiert einen 4x4-BlurHash. 48px reicht völlig —
- * der Hash trägt ohnehin nur ~16 Frequenz-Komponenten.
+ * Lädt das Bild und encodiert einen ThumbHash (base64).
+ *
+ * ThumbHash statt BlurHash (User-Feedback 2026-06-12): BlurHash
+ * speichert WEDER Seitenverhältnis NOCH Alpha — der Placeholder
+ * flutete die ganze Card-Fläche ('alles grün geblurrt') und das echte
+ * Bild poppte in anderer Form auf. ThumbHash kodiert Aspekt + Alpha:
+ * freigestellte Produktbilder ergeben eine weiche SILHOUETTE in
+ * echter Produktform, das Bild materialisiert sich formgleich.
+ * Deshalb auch KEIN flatten — Alpha bleibt erhalten.
+ * 100px = ThumbHash-Maximum.
  */
-async function computeBlurhash(url) {
+async function computeThumbhash(url) {
   const resp = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   if (!resp.ok) throw new Error(`fetch ${resp.status}`);
   const buf = Buffer.from(await resp.arrayBuffer());
   const { data, info } = await sharp(buf)
-    .flatten({ background: '#ffffff' })
-    .resize(48, 48, { fit: 'inside' })
+    .resize(100, 100, { fit: 'inside' })
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  return encode(
-    new Uint8ClampedArray(data),
-    info.width,
-    info.height,
-    4,
-    4,
-  );
+  const th = await loadThumbhash();
+  const hash = th.rgbaToThumbHash(info.width, info.height, data);
+  return Buffer.from(hash).toString('base64');
 }
 
 /**
@@ -76,9 +86,11 @@ async function computeBlurhash(url) {
 async function processDoc(ref, data) {
   const url = imageUrlOf(data);
   if (!url) {
-    // Kein Bild (mehr): veralteten Hash aufräumen.
-    if (data && data.bildBlurhash) {
+    // Kein Bild (mehr): veraltete Hashes aufräumen.
+    if (data && (data.bildThumbhash || data.bildBlurhash)) {
       await ref.update({
+        bildThumbhash: admin.firestore.FieldValue.delete(),
+        bildThumbhashFor: admin.firestore.FieldValue.delete(),
         bildBlurhash: admin.firestore.FieldValue.delete(),
         bildBlurhashFor: admin.firestore.FieldValue.delete(),
       });
@@ -86,9 +98,16 @@ async function processDoc(ref, data) {
     }
     return 'skipped';
   }
-  if (data.bildBlurhash && data.bildBlurhashFor === url) return 'skipped';
-  const hash = await computeBlurhash(url);
-  await ref.update({ bildBlurhash: hash, bildBlurhashFor: url });
+  if (data.bildThumbhash && data.bildThumbhashFor === url) return 'skipped';
+  const hash = await computeThumbhash(url);
+  // Die Legacy-BlurHash-Felder (erste Iteration, 2026-06-12 vormittags)
+  // im selben Write entsorgen.
+  await ref.update({
+    bildThumbhash: hash,
+    bildThumbhashFor: url,
+    bildBlurhash: admin.firestore.FieldValue.delete(),
+    bildBlurhashFor: admin.firestore.FieldValue.delete(),
+  });
   return 'written';
 }
 
@@ -117,9 +136,9 @@ function makeTrigger(collection) {
       const urlAfter = imageUrlOf(data);
       const urlBefore = imageUrlOf(before);
       const upToDate =
-        data.bildBlurhash && data.bildBlurhashFor === urlAfter;
+        data.bildThumbhash && data.bildThumbhashFor === urlAfter;
       if (urlAfter === urlBefore && upToDate) return;
-      if (!urlAfter && !data.bildBlurhash) return;
+      if (!urlAfter && !data.bildThumbhash && !data.bildBlurhash) return;
       try {
         const r = await processDoc(after.ref, data);
         if (r !== 'skipped') {

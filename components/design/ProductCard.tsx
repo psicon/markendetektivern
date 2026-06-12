@@ -45,7 +45,7 @@ type Props = {
    * override (e.g. loading placeholder, custom thumbnail). If both
    * are provided, `imageUri` wins.
    */
-  product?: { bildClean?: string | null; bild?: string | null; bildBlurhash?: string | null } | null;
+  product?: { bildClean?: string | null; bild?: string | null; bildThumbhash?: string | null } | null;
   imageUri?: string | null;
   price: number;
   /**
@@ -136,11 +136,11 @@ function ProductCardImpl({
   // pages. Reset on URI change so paginated rows re-shimmer until
   // their image arrives.
   const [imageLoaded, setImageLoaded] = useState(false);
-  // BlurHash-Platzhalter (86c9pz8pz): farbige Produkt-Silhouette aus
+  // ThumbHash-Platzhalter (86c9pz8pz): Produkt-SILHOUETTE (Aspekt+Alpha) aus
   // der DB statt grauem Shimmer. expo-image decodiert nativ und
   // blendet via `transition` weich ins echte Bild. Shimmer bleibt
   // Fallback fuer Produkte ohne Hash.
-  const blurhash = (product as any)?.bildBlurhash as string | undefined;
+  const thumbhash = (product as any)?.bildThumbhash as string | undefined;
   React.useEffect(() => {
     setImageLoaded(false);
   }, [resolvedImageUri]);
@@ -178,10 +178,9 @@ function ProductCardImpl({
               source={{ uri: resolvedImageUri }}
               style={{ width: '100%', height: '100%' }}
               contentFit="contain"
-              placeholder={blurhash ? { blurhash } : undefined}
-              // contain: die Silhouette behaelt die Bild-Proportion
-              // (Hash traegt den Aspekt) statt die ganze Card-Flaeche
-              // zu fluten (User-Feedback 2026-06-12).
+              placeholder={thumbhash ? { thumbhash } : undefined}
+              // contain: ThumbHash traegt Aspekt+Alpha — die Silhouette
+              // hat die ECHTE Produktform statt die Card zu fluten.
               placeholderContentFit="contain"
               transition={150}
               cachePolicy="memory-disk"
@@ -205,7 +204,7 @@ function ProductCardImpl({
                   // Mit Blur-Silhouette: Shimmer nur als sanfter Puls
                   // DARUEBER (gedimmt), damit die Silhouette durchscheint
                   // und der Lade-Zustand lebendig bleibt.
-                  opacity: blurhash ? 0.4 : 1,
+                  opacity: thumbhash ? 0.4 : 1,
                 }}
               >
                 <Shimmer width="100%" height={imageHeight} radius={0} />
