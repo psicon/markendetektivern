@@ -399,21 +399,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const createdAt = auth.currentUser?.metadata?.creationTime;
     if (createdAt) {
       const ageMs = Date.now() - new Date(createdAt).getTime();
-      if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 5 * 60 * 1000) {
+      // 60 Min statt 5 (ClickUp 86ca7x1m2): Onboarding + Walkthrough
+      // dauern laenger als 5 Min — die 'erste Anmeldung direkt nach
+      // der Installation' fiel sonst aus dem Fenster und bekam den
+      // Dialog doch. 60 Min deckt die gesamte Erst-Session ab.
+      if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 60 * 60 * 1000) {
         return Promise.resolve(true);
       }
     }
     return new Promise((resolve) => {
+      // Copy-Ton-Regel + ClickUp 86ca7x1m2: kein 'nicht übernommen'
+      // (Negativ-Frame), Button kurz und eindeutig.
       Alert.alert(
         'Du hast bereits ein Konto',
         'Mit diesem Konto bist du schon einmal angemeldet gewesen. ' +
-          'Möchtest du damit fortfahren?\n\nFavoriten, Punkte und ' +
-          'Einkaufszettel deiner aktuellen Gast-Sitzung werden dabei ' +
-          'nicht übernommen.',
+          'Du machst genau dort weiter, wo du damit aufgehört hast — ' +
+          'mit deinen Punkten, Favoriten und Listen aus diesem Konto.',
         [
           { text: 'Abbrechen', style: 'cancel', onPress: () => resolve(false) },
           {
-            text: 'Mit diesem Konto fortfahren',
+            text: 'Ok, fortfahren!',
             onPress: () => resolve(true),
           },
         ],
