@@ -151,6 +151,13 @@ let topProductsAggregateInflight: Promise<{
 }> | null = null;
 
 const refDocCache = new Map<string, CacheEntry<any>>();
+
+// Such-Karten-Cache (86ca5yp4k Perf): die Stoebern-Suche braucht pro
+// Algolia-Hit nur die Card-/Filter-Felder — NICHT den vollen
+// getProductWithDetails-Graph (Hersteller-Kette, Naehrwert-Refs,
+// Hero-Image-Prefetch). Eigener kleiner TTL-Cache + Inflight-Dedup.
+const searchCardCache = new Map<string, CacheEntry<any>>();
+const inflightSearchCard = new Map<string, Promise<any | null>>();
 const refDocInflight = new Map<string, Promise<any>>();
 
 const topProductsCache = new Map<string, CacheEntry<any[]>>();
@@ -1642,6 +1649,68 @@ export class FirestoreService {
    * card with Hersteller + Kategorie names) once references resolve.
    * Result: a top-then-bottom reveal instead of one big flash.
    */
+  /**
+   * Schlankes Karten-Datenpaket fuer die Stoebern-SUCHE (86ca5yp4k).
+   *
+   * Ersetzt getProductWithDetails im Such-Enrichment: EIN getDoc statt
+   * der vollen Referenz-Aufloesung + Image-Prefetch (bei 40 Hits/Page
+   * waren das ~150-200 Reads + Bild-Downloads pro Nachlade-Runde —
+   * der 'Performance weg mit Filtern'-Burst). Aufgeloest werden nur
+   * die zwei Referenzen, die die Grid-Karten wirklich konsumieren —
+   * beide ueber den refDocCache (wiederholen sich stark ueber Hits):
+   *   • hersteller (nur markenProdukte — Brand-Name/Logo der Card)
+   *   • packTypInfo (Pack-Detail-Anzeige)
+   * Detail-Daten laedt weiterhin der Prefetch-on-Tap (openProduct).
+   */
+  static async getSearchCardData(
+    productId: string,
+    isMarkenProdukt: boolean,
+  ): Promise<any | null> {
+    const key = `${isMarkenProdukt ? 'mp' : 'p'}_${productId}`;
+    const cached = readCache(searchCardCache, key);
+    if (cached !== undefined) return cached;
+    const inflight = inflightSearchCard.get(key);
+    if (inflight) return inflight;
+
+    const task = (async (): Promise<any | null> => {
+      try {
+        const snap = await getDoc(
+          doc(db, isMarkenProdukt ? 'markenProdukte' : 'produkte', productId),
+        );
+        if (!snap.exists()) {
+          writeCache(searchCardCache, key, null);
+          return null;
+        }
+        const data: any = { id: snap.id, ...(snap.data() as any) };
+        const refTasks: Promise<void>[] = [];
+        if (isMarkenProdukt && data.hersteller) {
+          refTasks.push(
+            this.getDocumentByReference<any>(data.hersteller).then((h) => {
+              if (h) data.hersteller = h;
+            }),
+          );
+        }
+        if (data.packTypInfo) {
+          refTasks.push(
+            this.getDocumentByReference<any>(data.packTypInfo).then((pt) => {
+              if (pt) data.packTypInfo = pt;
+            }),
+          );
+        }
+        if (refTasks.length > 0) await Promise.all(refTasks);
+        writeCache(searchCardCache, key, data);
+        return data;
+      } catch (e) {
+        console.warn('getSearchCardData failed:', (e as Error)?.message);
+        return null;
+      } finally {
+        inflightSearchCard.delete(key);
+      }
+    })();
+    inflightSearchCard.set(key, task);
+    return task;
+  }
+
   static async getProductWithDetails(
     productId: string,
     onBasic?: (basic: ProductWithDetails) => void,

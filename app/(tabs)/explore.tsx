@@ -37,6 +37,29 @@ import { LegendList, type LegendListRef } from '@legendapp/list';
 // HINWEIS: Mit PERF.useScrollOffset=true wird statt dieser Wrapper
 // die plain LegendList verwendet (siehe `ListComp` weiter unten).
 // Der Animated-Wrapper bleibt für den Rollback-Pfad erhalten.
+// Begrenzte Parallelitaet fuer das Such-Enrichment (86ca5yp4k Perf):
+// 40 gleichzeitige Firestore-Fetches pro Algolia-Page erzeugten einen
+// Bridge-/CPU-Burst (Jank beim Nachladen mit Filtern). Worker-Pool
+// mit fester Breite, Reihenfolge der Ergebnisse bleibt erhalten.
+const ENRICH_CONCURRENCY = 8;
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const idx = next++;
+        out[idx] = await fn(items[idx]);
+      }
+    }),
+  );
+  return out;
+}
+
 const AnimatedLegendList = Animated.createAnimatedComponent(LegendList) as any;
 
 import { BrandCard } from '@/components/design/BrandCard';
@@ -2020,9 +2043,13 @@ export default function ExploreScreen() {
       };
 
       try {
-        const fs: any = isNoName
-          ? await FirestoreService.getProductWithDetails(hit.objectID)
-          : await FirestoreService.getMarkenProduktWithDetails(hit.objectID);
+        // Schlanker Karten-Fetch (86ca5yp4k Perf): 1 getDoc + 2 gecachte
+        // Referenzen statt des vollen Detail-Graphen mit Image-Prefetch.
+        // Detail-Daten holt weiterhin der Prefetch-on-Tap beim Oeffnen.
+        const fs: any = await FirestoreService.getSearchCardData(
+          hit.objectID,
+          !isNoName,
+        );
         if (!fs) return enrichedBase;
         const merged: any = enrichedBase;
         if (fs.bildClean) merged.bildClean = fs.bildClean;
@@ -2126,13 +2153,11 @@ export default function ExploreScreen() {
           );
         }
         const [eigen, marken] = await Promise.all([
-          Promise.all(
-            res.noNameResults.hits.map((h) => enrichWithFirestore(h, true)),
+          mapWithConcurrency(res.noNameResults.hits, ENRICH_CONCURRENCY, (h) =>
+            enrichWithFirestore(h, true),
           ),
-          Promise.all(
-            res.markenproduktResults.hits.map((h) =>
-              enrichWithFirestore(h, false),
-            ),
+          mapWithConcurrency(res.markenproduktResults.hits, ENRICH_CONCURRENCY, (h) =>
+            enrichWithFirestore(h, false),
           ),
         ]);
         if (isStale()) return;
@@ -2207,8 +2232,10 @@ export default function ExploreScreen() {
           AlgoliaService.searchAll(searchActiveQuery, nextPage, 40).then(
             async (r) => ({
               kind: 'eigen',
-              hits: await Promise.all(
-                r.noNameResults.hits.map((h) => enrichWithFirestore(h, true)),
+              hits: await mapWithConcurrency(
+                r.noNameResults.hits,
+                ENRICH_CONCURRENCY,
+                (h) => enrichWithFirestore(h, true),
               ),
               queryID: r.queryIdEigen,
             }),
@@ -2222,10 +2249,10 @@ export default function ExploreScreen() {
           AlgoliaService.searchAll(searchActiveQuery, nextPage, 40).then(
             async (r) => ({
               kind: 'marken',
-              hits: await Promise.all(
-                r.markenproduktResults.hits.map((h) =>
-                  enrichWithFirestore(h, false),
-                ),
+              hits: await mapWithConcurrency(
+                r.markenproduktResults.hits,
+                ENRICH_CONCURRENCY,
+                (h) => enrichWithFirestore(h, false),
               ),
               queryID: r.queryIdMarken,
             }),
@@ -2900,7 +2927,19 @@ export default function ExploreScreen() {
   // im gefilterten Zustand hält die ganze (kurze) gefilterte Liste im Render-
   // Window, also rendern sie sofort. Unfiltered bleibt 250 (Perf bei langer
   // Liste — da macht der normale Scroll das Nachrendern).
-  const fillDrawDistance = contentFiltersActive || cat !== 'all' ? 3000 : 250;
+  // Dynamisch (86ca5yp4k Perf): das weite Render-Fenster existiert
+  // gegen das 'Nachgeladene ploppen erst beim Scrollen'-Problem KURZER
+  // gefilterter Listen. Bei LANGEN gefilterten Listen mountete 3000px
+  // dauerhaft hunderte Karten (Memory/CPU). Daher: weit nur solange
+  // die sichtbare Liste kurz ist, sonst normales Fenster.
+  const activeVisibleLen =
+    tab === 'eigen'
+      ? dataEigen.length
+      : tab === 'marken'
+        ? dataMarken.length
+        : dataAlle.length;
+  const fillDrawDistance =
+    (contentFiltersActive || cat !== 'all') && activeVisibleLen < 24 ? 1500 : 250;
 
   // First-load scroll-to-top per tab: when data goes from empty to
   // populated (e.g. user opened Stöbern + switched tabs BEFORE the
