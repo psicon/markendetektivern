@@ -133,6 +133,14 @@ export const getGoogleCredential = async (): Promise<FirebaseAuthTypes.AuthCrede
     throw error;
   }
 
+  // v13+/v15: Cancel WIRFT nicht mehr, sondern liefert
+  // { type: 'cancelled', data: null } — ohne diesen Check rumpelte
+  // der Abbruch in den idToken-Fehlerpfad und erzeugte die
+  // irrefuehrende Meldung 'Keine Benutzerdaten erhalten' (86ca7x9ep).
+  if (response?.type === 'cancelled') {
+    return null;
+  }
+
   // Response-Struktur kann zwischen Versionen variieren.
   const userInfo = response?.data || response;
   let idToken: string | undefined = userInfo?.idToken;

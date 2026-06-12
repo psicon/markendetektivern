@@ -363,7 +363,8 @@ export default function RegisterScreen() {
   const handleGoogleSignIn = async () => {
     try {
       setLoading(true);
-      await signInWithGoogle();
+      const ok = await signInWithGoogle();
+      if (!ok) return; // Abbruch = kein Login (86ca7x9ep)
       try { await OnboardingService.markCompleted(); } catch {}
       router.replace('/(tabs)');
     } catch (error: any) {
@@ -394,7 +395,8 @@ export default function RegisterScreen() {
         );
         return;
       }
-      await signInWithApple();
+      const ok = await signInWithApple();
+      if (!ok) return; // Abbruch = kein Login (86ca7x9ep)
       try { await OnboardingService.markCompleted(); } catch {}
       router.replace('/(tabs)');
     } catch (error: any) {

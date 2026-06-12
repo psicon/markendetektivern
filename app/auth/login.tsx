@@ -147,7 +147,8 @@ export default function LoginScreen() {
   const handleGoogleSignIn = async () => {
     try {
       setLoading(true);
-      await signInWithGoogle();
+      const okGoogle = await signInWithGoogle();
+      if (!okGoogle) return; // Abbruch = kein Login (86ca7x9ep)
       // T5: Onboarding-Status committen damit Re-Start-Bug B1
       // weg ist (idempotent — no-op wenn schon completed).
       try { await OnboardingService.markCompleted(); } catch {}
@@ -184,7 +185,8 @@ export default function LoginScreen() {
         );
         return;
       }
-      await signInWithApple();
+      const okApple = await signInWithApple();
+      if (!okApple) return; // Abbruch = kein Login (86ca7x9ep)
       // T5: Onboarding-Status committen damit Re-Start-Bug B1
       // weg ist (idempotent — no-op wenn schon completed).
       try { await OnboardingService.markCompleted(); } catch {}
@@ -207,7 +209,8 @@ export default function LoginScreen() {
   const handleFacebookSignIn = async () => {
     try {
       setLoading(true);
-      await signInWithFacebook();
+      const okFb = await signInWithFacebook();
+      if (!okFb) return; // Abbruch = kein Login (86ca7x9ep)
       try { await OnboardingService.markCompleted(); } catch {}
       router.replace('/(tabs)');
     } catch (error: any) {

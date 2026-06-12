@@ -86,7 +86,9 @@ export default function WelcomeScreen() {
     if (authInFlight) return;
     setAuthInFlight(true);
     try {
-      await signInWithApple();
+      const ok = await signInWithApple();
+      // Abbruch = kein Login — NICHT als Erfolg werten (86ca7x9ep).
+      if (!ok) return;
       await completeAndGoHome();
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return;
@@ -105,7 +107,9 @@ export default function WelcomeScreen() {
     if (authInFlight) return;
     setAuthInFlight(true);
     try {
-      await signInWithGoogle();
+      const ok = await signInWithGoogle();
+      // Abbruch = kein Login — NICHT als Erfolg werten (86ca7x9ep).
+      if (!ok) return;
       await completeAndGoHome();
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return;
@@ -124,7 +128,9 @@ export default function WelcomeScreen() {
     if (authInFlight) return;
     setAuthInFlight(true);
     try {
-      await signInWithFacebook();
+      const ok = await signInWithFacebook();
+      // Abbruch = kein Login — NICHT als Erfolg werten (86ca7x9ep).
+      if (!ok) return;
       await completeAndGoHome();
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return;

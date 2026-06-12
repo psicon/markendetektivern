@@ -62,9 +62,15 @@ interface AuthContextType {
   isLoggingOut: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, displayName: string, additionalData?: AdditionalProfileData) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
-  signInWithApple: () => Promise<void>;
-  signInWithFacebook: () => Promise<void>;
+  /** true = echter Login; false = User hat abgebrochen (Caller darf
+   *  dann NICHT completeAndGoHome/markCompleted ausfuehren — 86ca7x9ep). */
+  signInWithGoogle: () => Promise<boolean>;
+  /** true = echter Login; false = User hat abgebrochen (Caller darf
+   *  dann NICHT completeAndGoHome/markCompleted ausfuehren — 86ca7x9ep). */
+  signInWithApple: () => Promise<boolean>;
+  /** true = echter Login; false = User hat abgebrochen (Caller darf
+   *  dann NICHT completeAndGoHome/markCompleted ausfuehren — 86ca7x9ep). */
+  signInWithFacebook: () => Promise<boolean>;
   signInAnonymously: () => Promise<void>;
   logout: () => Promise<void>;
   isAppleAuthAvailable: () => Promise<boolean>;
@@ -600,12 +606,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const handleSignInWithGoogle = async () => {
+  const handleSignInWithGoogle = async (): Promise<boolean> => {
+    // Rueckgabe false = Abbruch OHNE Login (86ca7x9ep): vorher kehrte
+    // der Handler still zurueck und JEDER Caller lief danach in seinen
+    // Erfolgs-Pfad (markCompleted + router.replace) — der User landete
+    // als ANONYMER User in der App und dachte, er sei eingeloggt.
     try {
       const credential = await getGoogleCredential();
       if (!credential) {
         // User hat das Google-Sheet abgebrochen. Kein Fehler.
-        return;
+        return false;
       }
       const userCredential = await linkOrSignIn(credential);
       console.log(
@@ -613,8 +623,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         userCredential.user.email,
         userCredential.additionalUserInfo?.isNewUser ? '(neu)' : '(bestehend)',
       );
+      return true;
     } catch (error: any) {
-      if (error?.code === 'auth/cancelled') return; // User cancel = kein Fehler
+      if (error?.code === 'auth/cancelled') return false; // User cancel = kein Fehler
       if (__DEV__) {
         console.error('Google Sign-In error:', error);
       }
@@ -622,7 +633,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const handleSignInWithApple = async () => {
+  const handleSignInWithApple = async (): Promise<boolean> => {
     // T17.13: Seamless Apple-Sign-In (matches production-App-Behavior).
     //
     // Wir verzichten auf `linkWithCredential` für Apple. Stattdessen:
@@ -640,7 +651,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       const bundle = await getAppleCredential();
-      if (!bundle) return;
+      if (!bundle) return false;
 
       // Stale Anon-Session abmelden, sonst Firebase versucht implizit
       // zu linken und triggert wieder den "Duplicate credential"-Pfad.
@@ -661,8 +672,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         console.log('✅ Apple Sign-In: bestehender User');
       }
+      return true;
     } catch (error: any) {
-      if (error?.code === 'auth/cancelled') return;
+      if (error?.code === 'auth/cancelled') return false;
       if (__DEV__) {
         console.error('Apple Sign-In error:', error);
       }
@@ -670,12 +682,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const handleSignInWithFacebook = async () => {
+  const handleSignInWithFacebook = async (): Promise<boolean> => {
     try {
       const bundle = await getFacebookCredential();
       if (!bundle) {
         // User hat das Facebook-Sheet abgebrochen.
-        return;
+        return false;
       }
       const userCredential = await linkOrSignIn(bundle.credential);
 
@@ -692,8 +704,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         console.log('✅ Facebook Sign-In: bestehender User');
       }
+      return true;
     } catch (error: any) {
-      if (error?.code === 'auth/cancelled') return;
+      if (error?.code === 'auth/cancelled') return false;
       if (__DEV__) {
         if (error?.code === 'auth/facebook-sdk-unavailable') {
           console.warn('Facebook Sign-In skipped (SDK unavailable on this build):', error?.message);
