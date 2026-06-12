@@ -552,7 +552,7 @@ function ScanCard({
                 ? { blurhash: (item as any).productBlurhash }
                 : undefined
             }
-            placeholderContentFit="cover"
+            placeholderContentFit="contain"
             transition={150}
             cachePolicy="memory-disk"
           />

@@ -1045,7 +1045,7 @@ function FavoriteCard({
                 ? { blurhash: (item as any).bildBlurhash }
                 : undefined
             }
-            placeholderContentFit="cover"
+            placeholderContentFit="contain"
             transition={150}
             cachePolicy="memory-disk"
           />

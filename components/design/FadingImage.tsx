@@ -96,7 +96,7 @@ export function FadingImage({
           style={[{ width: '100%', height: '100%' }, style as object]}
           contentFit={fit}
           placeholder={{ blurhash }}
-          placeholderContentFit="cover"
+          placeholderContentFit="contain"
           transition={240}
           cachePolicy="memory-disk"
         />

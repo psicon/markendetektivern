@@ -67,7 +67,7 @@ export const ImageWithShimmer: React.FC<ImageWithShimmerProps> = ({
           style={style as object}
           contentFit={resizeMode === 'cover' ? 'cover' : 'contain'}
           placeholder={{ blurhash }}
-          placeholderContentFit="cover"
+          placeholderContentFit="contain"
           transition={200}
           cachePolicy="memory-disk"
           onLoad={() => onLoad?.()}

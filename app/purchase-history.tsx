@@ -561,7 +561,7 @@ function PurchaseCard({
                   }
                 : undefined
             }
-            placeholderContentFit="cover"
+            placeholderContentFit="contain"
             transition={150}
             cachePolicy="memory-disk"
             contentFit="contain"

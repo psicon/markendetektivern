@@ -1144,7 +1144,21 @@ class AchievementService {
   /**
    * Benachrichtigt über Level-Aufstieg
    */
+  /** Session-Dedupe gegen Banner-Doppel (User-Report 2026-06-12):
+   *  öffnet der User direkt nach dem Level-Up das nächste Produkt,
+   *  liest der Folge-trackAction stats.currentLevel u.U. noch VOR der
+   *  Sichtbarkeit des Level-Writes (Read-after-Write-Race) →
+   *  correctLevel > currentLevel ist erneut wahr → zweites Banner.
+   *  Pro User wird jedes Level nur EINMAL pro Session notifiziert. */
+  private static notifiedLevelByUser = new Map<string, number>();
+
   private async notifyLevelUp(newLevel: number, oldLevel: number, userId: string): Promise<void> {
+    const lastNotified = AchievementService.notifiedLevelByUser.get(userId) ?? 0;
+    if (newLevel <= lastNotified) {
+      console.log(`🔁 Level-Up ${newLevel} bereits notifiziert — Dedupe (Race-Schutz).`);
+      return;
+    }
+    AchievementService.notifiedLevelByUser.set(userId, newLevel);
     console.log(`🎉 Level-Up Benachrichtigung: Level ${oldLevel} → ${newLevel}`);
     
     // Prüfe ob eine Kategorie freigeschaltet wurde

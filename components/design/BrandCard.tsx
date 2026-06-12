@@ -118,13 +118,16 @@ function BrandCardImpl({
               style={{ width: '100%', height: '100%' }}
               contentFit="contain"
               placeholder={blurhash ? { blurhash } : undefined}
-              placeholderContentFit="cover"
+              // contain: die Silhouette behaelt die Bild-Proportion
+              // (Hash traegt den Aspekt) statt die ganze Card-Flaeche
+              // zu fluten (User-Feedback 2026-06-12).
+              placeholderContentFit="contain"
               transition={150}
               cachePolicy="memory-disk"
               onLoad={() => setImageLoaded(true)}
               onError={() => setImageLoaded(true)}
             />
-            {!imageLoaded && !blurhash ? (
+            {!imageLoaded ? (
               <View
                 pointerEvents="none"
                 style={{
@@ -133,6 +136,10 @@ function BrandCardImpl({
                   left: 0,
                   right: 0,
                   bottom: 0,
+                  // Mit Blur-Silhouette: Shimmer nur als sanfter Puls
+                  // DARUEBER (gedimmt), damit die Silhouette durchscheint
+                  // und der Lade-Zustand lebendig bleibt.
+                  opacity: blurhash ? 0.4 : 1,
                 }}
               >
                 <Shimmer width="100%" height={162} radius={0} />

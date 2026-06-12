@@ -179,7 +179,10 @@ function ProductCardImpl({
               style={{ width: '100%', height: '100%' }}
               contentFit="contain"
               placeholder={blurhash ? { blurhash } : undefined}
-              placeholderContentFit="cover"
+              // contain: die Silhouette behaelt die Bild-Proportion
+              // (Hash traegt den Aspekt) statt die ganze Card-Flaeche
+              // zu fluten (User-Feedback 2026-06-12).
+              placeholderContentFit="contain"
               transition={150}
               cachePolicy="memory-disk"
               onLoad={() => setImageLoaded(true)}
@@ -190,7 +193,7 @@ function ProductCardImpl({
                 shimmer on a 404). Sits absolute so it doesn't push
                 the layout around. Pointer-events:none lets taps fall
                 through to the parent Pressable. */}
-            {!imageLoaded && !blurhash ? (
+            {!imageLoaded ? (
               <View
                 pointerEvents="none"
                 style={{
@@ -199,6 +202,10 @@ function ProductCardImpl({
                   left: 0,
                   right: 0,
                   bottom: 0,
+                  // Mit Blur-Silhouette: Shimmer nur als sanfter Puls
+                  // DARUEBER (gedimmt), damit die Silhouette durchscheint
+                  // und der Lade-Zustand lebendig bleibt.
+                  opacity: blurhash ? 0.4 : 1,
                 }}
               >
                 <Shimmer width="100%" height={imageHeight} radius={0} />
