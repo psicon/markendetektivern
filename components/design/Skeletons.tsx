@@ -224,7 +224,7 @@ const SHIMMER_PAUSE_MS = 600;
 
 /**
  * SheenSweep — wandernder Glanz-Streifen fuer Lade-Zustaende UEBER
- * Inhalt (z.B. der ThumbHash-Silhouette, 86c9pz8pz). Der klassische
+ * Inhalt (z.B. der Mini-Bild-Vorschau, 86c9pz8pz). Der klassische
  * Skeleton-Sheen: ein schraeger, weicher Highlight-Streifen laeuft
  * alle ~1.6s einmal durch. Reanimated UI-Thread, pointerEvents none.
  * Absolut positioniert — Parent braucht overflow:hidden.

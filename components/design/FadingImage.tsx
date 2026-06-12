@@ -43,11 +43,11 @@ type FadingImageProps = Omit<ImageProps, 'source' | 'onLoad'> & {
   source: ImageSourcePropType | null | undefined;
   /** Background of the slot while loading. Default: light grey. */
   placeholderColor?: string;
-  /** ThumbHash-Platzhalter (86c9pz8pz): wenn gesetzt, rendert die
-   *  Komponente via expo-image mit nativem ThumbHash-Placeholder +
+  /** Mini-Bild-Platzhalter (86c9pz8pz v3): wenn gesetzt, rendert die
+   *  Komponente via expo-image mit nativem Mini-Bild-Placeholder (data-URI) +
    *  Transition — farbige Produkt-Silhouette statt leerer Flaeche.
    *  Ohne Hash bleibt der bisherige RN-Image-Fade unveraendert. */
-  thumbhash?: string | null;
+  thumb?: string | null;
   /** Children rendered on top of image (e.g. badges). */
   children?: React.ReactNode;
   containerStyle?: ViewStyle;
@@ -56,7 +56,7 @@ type FadingImageProps = Omit<ImageProps, 'source' | 'onLoad'> & {
 export function FadingImage({
   source,
   placeholderColor = '#f1f3f5',
-  thumbhash,
+  thumb,
   children,
   containerStyle,
   style,
@@ -78,10 +78,10 @@ export function FadingImage({
 
   const animStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
 
-  // ThumbHash-Pfad: expo-image uebernimmt Placeholder-Decode +
+  // Mini-Bild-Pfad: expo-image uebernimmt Placeholder-Decode +
   // Ueberblendung nativ (kein Reanimated noetig). Der RN-Pfad unten
   // bleibt fuer Bilder ohne Hash byte-identisch erhalten.
-  if (thumbhash && source && typeof source === 'object' && 'uri' in source && source.uri) {
+  if (thumb && source && typeof source === 'object' && 'uri' in source && source.uri) {
     const fit =
       (rest as any).resizeMode === 'cover' ? 'cover' : 'contain';
     return (
@@ -95,7 +95,7 @@ export function FadingImage({
           source={{ uri: String(source.uri) }}
           style={[{ width: '100%', height: '100%' }, style as object]}
           contentFit={fit}
-          placeholder={{ thumbhash }}
+          placeholder={{ uri: thumb }}
           placeholderContentFit="contain"
           transition={240}
           cachePolicy="memory-disk"

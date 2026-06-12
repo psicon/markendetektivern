@@ -1596,7 +1596,7 @@ export default function ProductComparisonScreen() {
                   source={{ uri: getProductImage(mp as any, 'png') ?? undefined }}
                   resizeMode="contain"
                   placeholderColor={theme.surface}
-                  thumbhash={(mp as any)?.bildThumbhash}
+                  thumb={(mp as any)?.bildThumb}
                 />
               </Pressable>
             ) : mainReady ? (
@@ -2095,7 +2095,7 @@ export default function ProductComparisonScreen() {
                               source={{ uri: getProductImage(nn as any) ?? undefined }}
                               resizeMode="contain"
                               placeholderColor={theme.surface}
-                              thumbhash={(nn as any)?.bildThumbhash}
+                              thumb={(nn as any)?.bildThumb}
                             />
                           </Pressable>
                         ) : (

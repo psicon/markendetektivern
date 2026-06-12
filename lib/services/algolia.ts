@@ -262,7 +262,7 @@ export class AlgoliaService {
             'objectID',
             'name',
             'bild',
-            'bildThumbhash',
+            'bildThumb',
             'stufe',
             'preis',
             'discounter',
@@ -314,7 +314,7 @@ export class AlgoliaService {
             'objectID',
             'name',
             'bild',
-            'bildThumbhash',
+            'bildThumb',
             'preis',
             'hersteller',
             'kategorie'
@@ -585,7 +585,7 @@ export class AlgoliaService {
             'objectID',
             'name',
             'bild',
-            'bildThumbhash',
+            'bildThumb',
             'preis',
             'hersteller',
             'kategorie'

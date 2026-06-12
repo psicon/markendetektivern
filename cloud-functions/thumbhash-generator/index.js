@@ -2,11 +2,11 @@
  * BlurHash-Generator — Firebase Cloud Functions (Gen2).
  * ClickUp 86c9pz8pz: app-weite Bild-Platzhalter statt Shimmer-only.
  *
- * Schreibt pro Produkt einen ~25-Byte-ThumbHash (base64), den
- * expo-image client-seitig als Silhouetten-Platzhalter decodiert
- * (traegt Aspekt + Alpha — anders als BlurHash):
- *   • Feld `bildThumbhash`     — der Hash (für placeholder={{ thumbhash }})
- *   • Feld `bildThumbhashFor`  — Quell-URL, aus der der Hash entstand
+ * Schreibt pro Produkt ein 32px-WebP als data-URI (~0,5 KB), das
+ * expo-image client-seitig als formtreuen Mini-Bild-Platzhalter
+ * rendert:
+ *   • Feld `bildThumb`     — data-URI (für placeholder={{ uri }})
+ *   • Feld `bildThumbFor`  — Quell-URL, aus der das Thumb entstand
  *     (Idempotenz-Marker: nur neu rechnen, wenn sich das Bild ändert;
  *     verhindert zugleich die Trigger-Self-Loop).
  *
@@ -30,13 +30,8 @@ const { onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const sharp = require('sharp');
-// thumbhash ist ESM-only — in der CJS-CF via dynamic import laden
-// (Node 22 kann das nativ; einmal pro Instanz gecacht).
-let thumbhashModP = null;
-function loadThumbhash() {
-  if (!thumbhashModP) thumbhashModP = import('thumbhash');
-  return thumbhashModP;
-}
+// (v3: ThumbHash-Encode entfernt — wir liefern jetzt ein echtes
+// 32px-WebP als data-URI, siehe computeThumb.)
 
 admin.initializeApp();
 
@@ -54,29 +49,26 @@ function imageUrlOf(data) {
 }
 
 /**
- * Lädt das Bild und encodiert einen ThumbHash (base64).
+ * Lädt das Bild und erzeugt ein 32px-WebP als data-URI (~350-600 B
+ * base64).
  *
- * ThumbHash statt BlurHash (User-Feedback 2026-06-12): BlurHash
- * speichert WEDER Seitenverhältnis NOCH Alpha — der Placeholder
- * flutete die ganze Card-Fläche ('alles grün geblurrt') und das echte
- * Bild poppte in anderer Form auf. ThumbHash kodiert Aspekt + Alpha:
- * freigestellte Produktbilder ergeben eine weiche SILHOUETTE in
- * echter Produktform, das Bild materialisiert sich formgleich.
- * Deshalb auch KEIN flatten — Alpha bleibt erhalten.
- * 100px = ThumbHash-Maximum.
+ * v3 (User-Feedback 2026-06-12, zweite Runde): Hash-Blur (BlurHash/
+ * ThumbHash) ist die Best Practice fuer VOLLFLAECHEN-Fotos — fuer
+ * Produkt-CUTOUTS auf Karten wirkt der Farbnebel falsch ('haesslich,
+ * Aufpoppen'). Ein winziges ECHTES Bild zeigt dagegen eine erkennbare,
+ * formtreue Produkt-Vorschau (unscharf hochskaliert), in die das
+ * echte Bild unsichtbar weich ueberblendet. expo-image rendert
+ * data-URIs als placeholder nativ; contain haelt die Geometrie.
  */
-async function computeThumbhash(url) {
+async function computeThumb(url) {
   const resp = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   if (!resp.ok) throw new Error(`fetch ${resp.status}`);
   const buf = Buffer.from(await resp.arrayBuffer());
-  const { data, info } = await sharp(buf)
-    .resize(100, 100, { fit: 'inside' })
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const th = await loadThumbhash();
-  const hash = th.rgbaToThumbHash(info.width, info.height, data);
-  return Buffer.from(hash).toString('base64');
+  const out = await sharp(buf)
+    .resize(32, 32, { fit: 'inside' })
+    .webp({ quality: 50, alphaQuality: 50 })
+    .toBuffer();
+  return `data:image/webp;base64,${out.toString('base64')}`;
 }
 
 /**
@@ -86,9 +78,11 @@ async function computeThumbhash(url) {
 async function processDoc(ref, data) {
   const url = imageUrlOf(data);
   if (!url) {
-    // Kein Bild (mehr): veraltete Hashes aufräumen.
-    if (data && (data.bildThumbhash || data.bildBlurhash)) {
+    // Kein Bild (mehr): veraltete Thumbs/Hashes aufräumen.
+    if (data && (data.bildThumb || data.bildThumbhash || data.bildBlurhash)) {
       await ref.update({
+        bildThumb: admin.firestore.FieldValue.delete(),
+        bildThumbFor: admin.firestore.FieldValue.delete(),
         bildThumbhash: admin.firestore.FieldValue.delete(),
         bildThumbhashFor: admin.firestore.FieldValue.delete(),
         bildBlurhash: admin.firestore.FieldValue.delete(),
@@ -98,13 +92,14 @@ async function processDoc(ref, data) {
     }
     return 'skipped';
   }
-  if (data.bildThumbhash && data.bildThumbhashFor === url) return 'skipped';
-  const hash = await computeThumbhash(url);
-  // Die Legacy-BlurHash-Felder (erste Iteration, 2026-06-12 vormittags)
-  // im selben Write entsorgen.
+  if (data.bildThumb && data.bildThumbFor === url) return 'skipped';
+  const thumb = await computeThumb(url);
+  // Legacy-Felder der frueheren Iterationen im selben Write entsorgen.
   await ref.update({
-    bildThumbhash: hash,
-    bildThumbhashFor: url,
+    bildThumb: thumb,
+    bildThumbFor: url,
+    bildThumbhash: admin.firestore.FieldValue.delete(),
+    bildThumbhashFor: admin.firestore.FieldValue.delete(),
     bildBlurhash: admin.firestore.FieldValue.delete(),
     bildBlurhashFor: admin.firestore.FieldValue.delete(),
   });
@@ -135,10 +130,9 @@ function makeTrigger(collection) {
       // Bild-URL geändert hat ODER noch kein (passender) Hash da ist.
       const urlAfter = imageUrlOf(data);
       const urlBefore = imageUrlOf(before);
-      const upToDate =
-        data.bildThumbhash && data.bildThumbhashFor === urlAfter;
+      const upToDate = data.bildThumb && data.bildThumbFor === urlAfter;
       if (urlAfter === urlBefore && upToDate) return;
-      if (!urlAfter && !data.bildThumbhash && !data.bildBlurhash) return;
+      if (!urlAfter && !data.bildThumb && !data.bildThumbhash && !data.bildBlurhash) return;
       try {
         const r = await processDoc(after.ref, data);
         if (r !== 'skipped') {

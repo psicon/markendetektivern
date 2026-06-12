@@ -1132,7 +1132,7 @@ export default function NoNameDetailScreen() {
                 source={{ uri: getProductImage(p, 'png') ?? undefined }}
                 resizeMode="contain"
                 placeholderColor={theme.surface}
-                thumbhash={(p as any)?.bildThumbhash}
+                thumb={(p as any)?.bildThumb}
               />
             ) : ready ? (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>

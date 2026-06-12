@@ -16,9 +16,9 @@ interface ImageWithShimmerProps {
   onError?: () => void;
   onLoad?: () => void;
   resizeMode?: 'cover' | 'contain' | 'stretch' | 'repeat' | 'center';
-  /** ThumbHash-Platzhalter (86c9pz8pz): wenn gesetzt, rendert expo-image
+  /** Mini-Bild-Platzhalter (86c9pz8pz v3): wenn gesetzt, rendert expo-image
    *  mit nativem Placeholder + Transition statt Shimmer. */
-  thumbhash?: string | null;
+  thumb?: string | null;
 }
 
 export const ImageWithShimmer: React.FC<ImageWithShimmerProps> = ({
@@ -31,7 +31,7 @@ export const ImageWithShimmer: React.FC<ImageWithShimmerProps> = ({
   onError,
   onLoad,
   resizeMode = 'cover',
-  thumbhash,
+  thumb,
 }) => {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -57,16 +57,16 @@ export const ImageWithShimmer: React.FC<ImageWithShimmerProps> = ({
     onError?.();
   };
 
-  // ThumbHash-Pfad: farbige Silhouette sofort, weiche Transition —
+  // Mini-Bild-Pfad: farbige Silhouette sofort, weiche Transition —
   // Shimmer/Fade unten bleiben fuer Bilder ohne Hash unveraendert.
-  if (thumbhash && typeof source === 'object' && 'uri' in source && source.uri) {
+  if (thumb && typeof source === 'object' && 'uri' in source && source.uri) {
     return (
       <View style={[styles.container, containerStyle]}>
         <ExpoImage
           source={{ uri: source.uri }}
           style={style as object}
           contentFit={resizeMode === 'cover' ? 'cover' : 'contain'}
-          placeholder={{ thumbhash }}
+          placeholder={{ uri: thumb }}
           placeholderContentFit="contain"
           transition={200}
           cachePolicy="memory-disk"

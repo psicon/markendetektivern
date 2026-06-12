@@ -19,7 +19,7 @@ type Props = {
    * automatically) OR pass `imageUri` to override (e.g. loading
    * placeholder). If both are provided, `imageUri` wins.
    */
-  product?: { bildClean?: string | null; bild?: string | null; bildThumbhash?: string | null } | null;
+  product?: { bildClean?: string | null; bild?: string | null; bildThumb?: string | null } | null;
   imageUri?: string | null;
   price: number;
   /** Best-alternative savings (€), optional — shown when known. */
@@ -84,8 +84,8 @@ function BrandCardImpl({
   // tiles never flash blank white before the image arrives. Reset
   // on URI change so paginated / recycled cards re-shimmer.
   const [imageLoaded, setImageLoaded] = useState(false);
-  // ThumbHash-Platzhalter (86c9pz8pz) — siehe ProductCard.
-  const thumbhash = (product as any)?.bildThumbhash as string | undefined;
+  // Mini-Bild-Platzhalter (86c9pz8pz v3) — siehe ProductCard.
+  const thumb = (product as any)?.bildThumb as string | undefined;
   useEffect(() => {
     setImageLoaded(false);
   }, [resolvedImageUri]);
@@ -117,9 +117,8 @@ function BrandCardImpl({
               source={{ uri: resolvedImageUri }}
               style={{ width: '100%', height: '100%' }}
               contentFit="contain"
-              placeholder={thumbhash ? { thumbhash } : undefined}
-              // contain: ThumbHash traegt Aspekt+Alpha — die Silhouette
-              // hat die ECHTE Produktform statt die Card zu fluten.
+              placeholder={thumb ? { uri: thumb } : undefined}
+              // contain: das Mini-Bild hat die echte Produktform.
               placeholderContentFit="contain"
               transition={150}
               cachePolicy="memory-disk"
@@ -138,8 +137,8 @@ function BrandCardImpl({
                   overflow: 'hidden',
                 }}
               >
-                {thumbhash ? (
-                  // Ueber der ThumbHash-Silhouette: wandernder Glanz-
+                {thumb ? (
+                  // Ueber der Mini-Bild-Vorschau: wandernder Glanz-
                   // Streifen (Sheen) statt Grau-Puls — sichtbar auf
                   // buntem Grund, hochwertiger Lade-Eindruck.
                   <SheenSweep width={300} />

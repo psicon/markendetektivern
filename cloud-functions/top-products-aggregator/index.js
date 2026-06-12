@@ -304,9 +304,9 @@ async function enrichProducts(items) {
           // umging die Image-Cleanup-Pipeline.
           bild: product.bild ?? null,
           bildClean: product.bildClean ?? null,
-          // ThumbHash-Platzhalter (86c9pz8pz) — Client zeigt damit
+          // Mini-Bild-Platzhalter (86c9pz8pz v3) — Client zeigt damit
           // sofort eine farbige Silhouette statt Shimmer.
-          bildThumbhash: product.bildThumbhash ?? null,
+          bildThumb: product.bildThumb ?? null,
           bildCleanPng: product.bildCleanPng ?? null,
           bildCleanHq: product.bildCleanHq ?? null,
           preis: typeof product.preis === 'number' ? product.preis : null,

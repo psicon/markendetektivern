@@ -1041,8 +1041,8 @@ function FavoriteCard({
             style={{ width: '100%', height: '100%' }}
             contentFit="contain"
             placeholder={
-              (item as any)?.bildThumbhash
-                ? { thumbhash: (item as any).bildThumbhash }
+              (item as any)?.bildThumb
+                ? { uri: (item as any).bildThumb }
                 : undefined
             }
             placeholderContentFit="contain"

@@ -553,11 +553,11 @@ function PurchaseCard({
           <ExpoImage
             source={{ uri: getProductImage(item) ?? '' }}
             placeholder={
-              (item as any)?.productData?.bildThumbhash || (item as any)?.bildThumbhash
+              (item as any)?.productData?.bildThumb || (item as any)?.bildThumb
                 ? {
-                    thumbhash:
-                      (item as any)?.productData?.bildThumbhash ??
-                      (item as any)?.bildThumbhash,
+                    uri:
+                      (item as any)?.productData?.bildThumb ??
+                      (item as any)?.bildThumb,
                   }
                 : undefined
             }

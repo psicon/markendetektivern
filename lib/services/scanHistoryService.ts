@@ -21,7 +21,7 @@ export interface ScanHistoryItem {
   productId: string;
   productName: string;
   productImage?: string;
-  productThumbhash?: string | null;
+  productThumb?: string | null;
   productType: 'noname' | 'markenprodukt';
   brandName?: string;
   brandImage?: string;
@@ -54,7 +54,7 @@ class ScanHistoryService {
     productId: string;
     productName: string;
     productImage?: string;
-    productThumbhash?: string;
+    productThumb?: string;
     productType: 'noname' | 'markenprodukt';
     brandName?: string;
     brandImage?: string;
@@ -80,7 +80,7 @@ class ScanHistoryService {
         productId: scanData.productId,
         productName: scanData.productName,
         productImage: scanData.productImage,
-        productThumbhash: scanData.productThumbhash ?? null,
+        productThumb: scanData.productThumb ?? null,
         productType: scanData.productType,
         brandName: scanData.brandName,
         brandImage: scanData.brandImage,
@@ -132,7 +132,7 @@ class ScanHistoryService {
           productId: data.productId,
           productName: data.productName,
           productImage: data.productImage,
-          productThumbhash: data.productThumbhash ?? null,
+          productThumb: data.productThumb ?? null,
           productType: data.productType || (data.isMarke ? 'markenprodukt' : 'noname'),
           brandName: data.brandName,
           brandImage: data.brandImage,
@@ -181,7 +181,7 @@ class ScanHistoryService {
             productId: data.productId,
             productName: data.productName,
             productImage: data.productImage,
-          productThumbhash: data.productThumbhash ?? null,
+          productThumb: data.productThumb ?? null,
             productType: data.productType || (data.isMarke ? 'markenprodukt' : 'noname'),
             brandName: data.brandName,
             brandImage: data.brandImage,

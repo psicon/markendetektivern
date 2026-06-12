@@ -2069,7 +2069,7 @@ export default function ExploreScreen() {
         );
         if (!fs) return enrichedBase;
         const merged: any = enrichedBase;
-        if (fs.bildThumbhash) merged.bildThumbhash = fs.bildThumbhash;
+        if (fs.bildThumb) merged.bildThumb = fs.bildThumb;
         if (fs.bildClean) merged.bildClean = fs.bildClean;
         if (fs.bildCleanPng) merged.bildCleanPng = fs.bildCleanPng;
         if (fs.bildCleanHq) merged.bildCleanHq = fs.bildCleanHq;
