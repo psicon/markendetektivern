@@ -16,6 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+  Platform,
   ActivityIndicator,
   Animated,
   Dimensions,
@@ -197,6 +198,16 @@ export default function WelcomeScreen() {
         return;
       }
       if (methods.includes('apple.com')) {
+        // Android hat kein Apple-Sign-In (@invertase = iOS-only) —
+        // dort nur der Hinweis, KEIN toter Auto-Aufruf.
+        if (Platform.OS !== 'ios') {
+          showInfoToast(
+            'Dieses Konto ist mit Apple verknüpft — melde dich auf einem iPhone/iPad an oder nutze deine E-Mail-Adresse.',
+            'info',
+            colorScheme ?? 'light',
+          );
+          return;
+        }
         showInfoToast(
           'Dieser Account ist mit Apple verbunden — bitte mit Apple anmelden.',
           'info',

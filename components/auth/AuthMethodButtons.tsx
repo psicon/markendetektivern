@@ -117,8 +117,10 @@ export function AuthMethodButtons({
       {Platform.OS === 'ios' ? appleButton : googleButton}
 
       {/* showAllProviders: zweiter Plattform-Button als gleichwertige
-          Alternative (Identifier-First-Pattern wie TheFork/Uber/Linear). */}
-      {showAllProviders && (Platform.OS === 'ios' ? googleButton : appleButton)}
+          Alternative (Identifier-First-Pattern wie TheFork/Uber/Linear).
+          NUR auf iOS — Apple-Sign-In (@invertase) existiert auf Android
+          nicht, der Button waere ein toter Knopf (User-Report 2026-06-12). */}
+      {showAllProviders && Platform.OS === 'ios' && googleButton}
 
       {/* E-Mail (primary brand color) — optional ausblendbar */}
       {showEmailButton && onEmail && (

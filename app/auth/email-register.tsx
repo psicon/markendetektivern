@@ -43,7 +43,7 @@ export default function RegisterScreen() {
   const params = useLocalSearchParams();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const { signUp, signInWithGoogle, signInWithApple, user, userProfile } = useAuth();
+  const { signUp, signInWithGoogle, user, userProfile } = useAuth();
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
   const screenHeight = Dimensions.get('window').height;
@@ -373,38 +373,6 @@ export default function RegisterScreen() {
         `Google-Anmeldung fehlgeschlagen: ${error.message || 'Bitte erneut versuchen.'}`,
         () => {
           void handleGoogleSignIn();
-        },
-        { colorScheme: colorScheme ?? 'light' },
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAppleSignIn = async () => {
-    try {
-      setLoading(true);
-      // Check if running in Expo Go
-      if (isExpoGo()) {
-        // Dev-Hinweis bleibt als Alert (Build-Type-Switch erforderlich,
-        // User muss explizit lesen + bestätigen).
-        Alert.alert(
-          'Nicht verfügbar in Expo Go',
-          'Apple Sign-In funktioniert nur in der TestFlight oder App Store Version. Bitte nutze Email/Passwort für die Entwicklung.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-      const ok = await signInWithApple();
-      if (!ok) return; // Abbruch = kein Login (86ca7x9ep)
-      try { await OnboardingService.markCompleted(); } catch {}
-      router.replace('/(tabs)');
-    } catch (error: any) {
-      console.error('Apple Sign-In error:', error);
-      showRetryableErrorToast(
-        `Apple-Anmeldung fehlgeschlagen: ${error.message || 'Bitte erneut versuchen.'}`,
-        () => {
-          void handleAppleSignIn();
         },
         { colorScheme: colorScheme ?? 'light' },
       );
@@ -926,14 +894,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: 'white',
     gap: 12,
-  },
-  appleButton: {
-    backgroundColor: '#000',
-  },
-  appleButtonText: {
-    fontSize: 16,
-    fontFamily: 'Nunito_600SemiBold',
-    color: 'white',
   },
   googleIconContainer: {
     width: 20,
