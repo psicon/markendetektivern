@@ -45,6 +45,7 @@ import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { usePurchaseHistory } from '@/lib/hooks/usePurchaseHistory';
 import { FirestoreService } from '@/lib/services/firestore';
+import { Image as ExpoImage } from 'expo-image';
 import { getProductImage } from '@/lib/utils/productImage';
 
 type Tab = 'brands' | 'nonames';
@@ -549,10 +550,22 @@ function PurchaseCard({
         }}
       >
         {getProductImage(item) ? (
-          <Image
-            source={{ uri: getProductImage(item) ?? undefined }}
+          <ExpoImage
+            source={{ uri: getProductImage(item) ?? '' }}
+            placeholder={
+              (item as any)?.productData?.bildBlurhash || (item as any)?.bildBlurhash
+                ? {
+                    blurhash:
+                      (item as any)?.productData?.bildBlurhash ??
+                      (item as any)?.bildBlurhash,
+                  }
+                : undefined
+            }
+            placeholderContentFit="cover"
+            transition={150}
+            cachePolicy="memory-disk"
+            contentFit="contain"
             style={{ width: '100%', height: '100%' }}
-            resizeMode="contain"
           />
         ) : (
           <MaterialCommunityIcons

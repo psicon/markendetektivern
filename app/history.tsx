@@ -10,6 +10,7 @@
 //   • Tap auf Such-Card → search-results
 //   • "Verlauf löschen" Button per Tab am Top der Liste
 
+import { Image as ExpoImage } from 'expo-image';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect, useNavigation } from 'expo-router';
@@ -542,10 +543,18 @@ function ScanCard({
         }}
       >
         {(item as any).productImage ? (
-          <Image
+          <ExpoImage
             source={{ uri: (item as any).productImage }}
             style={{ width: '100%', height: '100%' }}
-            resizeMode="cover"
+            contentFit="cover"
+            placeholder={
+              (item as any)?.productBlurhash
+                ? { blurhash: (item as any).productBlurhash }
+                : undefined
+            }
+            placeholderContentFit="cover"
+            transition={150}
+            cachePolicy="memory-disk"
           />
         ) : (
           <MaterialCommunityIcons

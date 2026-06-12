@@ -601,6 +601,7 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
                         fallbackIcon="cube.box"
                         fallbackIconSize={16}
                         resizeMode="contain"
+                        blurhash={(item as any)?.bildBlurhash}
                       />
                     ) : (
                       <Text style={styles.popularEmoji}>{item.icon}</Text>

@@ -304,6 +304,9 @@ async function enrichProducts(items) {
           // umging die Image-Cleanup-Pipeline.
           bild: product.bild ?? null,
           bildClean: product.bildClean ?? null,
+          // BlurHash-Platzhalter (86c9pz8pz) — Client zeigt damit
+          // sofort eine farbige Silhouette statt Shimmer.
+          bildBlurhash: product.bildBlurhash ?? null,
           bildCleanPng: product.bildCleanPng ?? null,
           bildCleanHq: product.bildCleanHq ?? null,
           preis: typeof product.preis === 'number' ? product.preis : null,

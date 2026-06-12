@@ -52,6 +52,7 @@ import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import { FirestoreService } from '@/lib/services/firestore';
+import { Image as ExpoImage } from 'expo-image';
 import { getProductImage } from '@/lib/utils/productImage';
 import {
   showCartAddedToast,
@@ -1035,10 +1036,18 @@ function FavoriteCard({
         }}
       >
         {getProductImage(item) ? (
-          <Image
-            source={{ uri: getProductImage(item) ?? undefined }}
+          <ExpoImage
+            source={{ uri: getProductImage(item) ?? '' }}
             style={{ width: '100%', height: '100%' }}
-            resizeMode="contain"
+            contentFit="contain"
+            placeholder={
+              (item as any)?.bildBlurhash
+                ? { blurhash: (item as any).bildBlurhash }
+                : undefined
+            }
+            placeholderContentFit="cover"
+            transition={150}
+            cachePolicy="memory-disk"
           />
         ) : (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>

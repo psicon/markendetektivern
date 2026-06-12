@@ -2,6 +2,7 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import React, { useState } from 'react';
 import { Animated, ImageStyle, StyleSheet, View, ViewStyle } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { IconSymbol } from './IconSymbol';
 import { ShimmerSkeleton } from './ShimmerSkeleton';
 
@@ -15,6 +16,9 @@ interface ImageWithShimmerProps {
   onError?: () => void;
   onLoad?: () => void;
   resizeMode?: 'cover' | 'contain' | 'stretch' | 'repeat' | 'center';
+  /** BlurHash-Platzhalter (86c9pz8pz): wenn gesetzt, rendert expo-image
+   *  mit nativem Placeholder + Transition statt Shimmer. */
+  blurhash?: string | null;
 }
 
 export const ImageWithShimmer: React.FC<ImageWithShimmerProps> = ({
@@ -27,6 +31,7 @@ export const ImageWithShimmer: React.FC<ImageWithShimmerProps> = ({
   onError,
   onLoad,
   resizeMode = 'cover',
+  blurhash,
 }) => {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -51,6 +56,26 @@ export const ImageWithShimmer: React.FC<ImageWithShimmerProps> = ({
     setError(true);
     onError?.();
   };
+
+  // BlurHash-Pfad: farbige Silhouette sofort, weiche Transition —
+  // Shimmer/Fade unten bleiben fuer Bilder ohne Hash unveraendert.
+  if (blurhash && typeof source === 'object' && 'uri' in source && source.uri) {
+    return (
+      <View style={[styles.container, containerStyle]}>
+        <ExpoImage
+          source={{ uri: source.uri }}
+          style={style as object}
+          contentFit={resizeMode === 'cover' ? 'cover' : 'contain'}
+          placeholder={{ blurhash }}
+          placeholderContentFit="cover"
+          transition={200}
+          cachePolicy="memory-disk"
+          onLoad={() => onLoad?.()}
+          onError={() => onError?.()}
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, containerStyle]}>
