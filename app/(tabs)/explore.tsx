@@ -2037,6 +2037,25 @@ export default function ExploreScreen() {
         if (!isNoName && fs.hersteller && typeof fs.hersteller === 'object') {
           merged.hersteller = fs.hersteller;
         }
+        // Inhalts-Filter-Felder (86ca5yp4k: 'Inhalt'-Filter griffen im
+        // Such-Modus nicht): Algolia-Hits tragen nutr_*/attr_*/
+        // aiComparison nicht — der volle Firestore-Doc ist hier aber
+        // ohnehin geladen, also Felder mitnehmen. Damit kann
+        // filterContent auch auf Such-Hits laufen.
+        for (const k of [
+          'aiComparison',
+          'nutr_KohlenhydratedavonZucker_val',
+          'nutr_Fett_val',
+          'nutr_Salz_val',
+          'nutr_Eiwei_val',
+          'attr_allergene',
+          'attr_spuren',
+          'attr_isBio',
+          'attr_isVegan',
+          'attr_isVegetarisch',
+        ] as const) {
+          if ((fs as any)[k] !== undefined) merged[k] = (fs as any)[k];
+        }
         if (!isNoName && fs.marke && typeof fs.marke === 'object') {
           merged.marke = fs.marke;
         }
@@ -2744,23 +2763,32 @@ export default function ExploreScreen() {
     [contentFilters, contentFiltersActive],
   );
 
-  // Slice C: content filters apply in BROWSE mode only (Algolia search hits
-  // lack nutr_*/attr_*/aiComparison). Default-AUS → filterContent is a
-  // pass-through, so browse behaviour is byte-identical when no filter is set.
+  // Slice C: content filters apply in BEIDEN Modi (86ca5yp4k) — die
+  // Such-Hits tragen die noetigen Felder seit dem Enrichment-Merge
+  // (siehe enrichWithFirestore). Kategorie laeuft im Such-Modus
+  // weiterhin ueber filteredSearch* (_kategorieId), daher dort KEIN
+  // filterByCategory. Default-AUS → filterContent ist pass-through,
+  // Verhalten ohne aktiven Filter bleibt byte-identisch.
   const dataAlle = useMemo(() => {
     if (paused) return EMPTY_ARR;
     const base = filterAlkohol(itemsForTab('alle'));
-    return searchActiveQuery ? base : filterContent(filterByCategory(base), 'alle');
+    return searchActiveQuery
+      ? filterContent(base, 'alle')
+      : filterContent(filterByCategory(base), 'alle');
   }, [itemsForTab, paused, EMPTY_ARR, filterAlkohol, filterByCategory, filterContent, searchActiveQuery]);
   const dataEigen = useMemo(() => {
     if (paused) return EMPTY_ARR;
     const base = filterAlkohol(itemsForTab('eigen'));
-    return searchActiveQuery ? base : filterContent(filterByCategory(base), 'eigen');
+    return searchActiveQuery
+      ? filterContent(base, 'eigen')
+      : filterContent(filterByCategory(base), 'eigen');
   }, [itemsForTab, paused, EMPTY_ARR, filterAlkohol, filterByCategory, filterContent, searchActiveQuery]);
   const dataMarken = useMemo(() => {
     if (paused) return EMPTY_ARR;
     const base = filterAlkohol(itemsForTab('marken'));
-    return searchActiveQuery ? base : filterContent(filterByCategory(base), 'marken');
+    return searchActiveQuery
+      ? filterContent(base, 'marken')
+      : filterContent(filterByCategory(base), 'marken');
   }, [itemsForTab, paused, EMPTY_ARR, filterAlkohol, filterByCategory, filterContent, searchActiveQuery]);
 
   // ─── Auto-Fill bei aktiven (client-seitigen) Filtern ───────────────────
