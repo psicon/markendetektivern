@@ -1687,6 +1687,24 @@ export class FirestoreService {
         }
         const data: any = { id: snap.id, ...(snap.data() as any) };
         const refTasks: Promise<void>[] = [];
+        // discounter/handelsmarke fuer die Eigen-Karten-Eyebrow
+        // aufloesen (86ca88cam — auch Bonus fuer Such-Karten: Markt-
+        // Logo war dort bisher leer). Beide Collections sind winzig
+        // (~20 Docs) -> refDocCache trifft praktisch immer.
+        if (!isMarkenProdukt && data.discounter) {
+          refTasks.push(
+            this.getDocumentByReference<any>(data.discounter).then((d) => {
+              if (d) data.discounter = d;
+            }),
+          );
+        }
+        if (!isMarkenProdukt && data.handelsmarke) {
+          refTasks.push(
+            this.getDocumentByReference<any>(data.handelsmarke).then((h) => {
+              if (h) data.handelsmarke = h;
+            }),
+          );
+        }
         if (isMarkenProdukt && data.hersteller) {
           refTasks.push(
             this.getDocumentByReference<any>(data.hersteller).then((h) => {

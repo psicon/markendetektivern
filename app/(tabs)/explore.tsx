@@ -520,6 +520,48 @@ export default function ExploreScreen() {
       contentFilters.vegetarian,
     [contentFilters],
   );
+
+  // ─── Inhalts-Filter SERVER-seitig (86ca88cam) ─────────────────────────
+  // Vorher liefen die Inhalts-Filter client-seitig ueber Firestore-
+  // Pages: Server lieferte ungefiltert, der Client warf weg, der
+  // Auto-Fill stopfte Loecher nach -> Grid-Luecken, Nachploppen, CPU.
+  // Jetzt filtert Algolia (numerische nutr_*-Filter brauchen kein
+  // Facetting; attr_is* sind filterOnly-Facets; aiComparison.score
+  // nested-numerisch): jede Page enthaelt NUR Treffer. Allergene
+  // bleiben bewusst client-seitig (Safety-Semantik 'keine Daten ->
+  // raus' geht serverseitig nicht) — filterContent ist weiterhin das
+  // Sicherheitsnetz ueber allem.
+  const contentServerFilters = useMemo(() => {
+    if (!contentFiltersActive) return null;
+    const cf = contentFilters;
+    const numeric: string[] = [];
+    if (cf.lowSugar) numeric.push(`nutr_KohlenhydratedavonZucker_val <= ${NUTRI_THRESHOLDS.lowSugar}`);
+    if (cf.lowFat) numeric.push(`nutr_Fett_val <= ${NUTRI_THRESHOLDS.lowFat}`);
+    if (cf.lowSalt) numeric.push(`nutr_Salz_val <= ${NUTRI_THRESHOLDS.lowSalt}`);
+    if (cf.highProtein) numeric.push(`nutr_Eiwei_val >= ${NUTRI_THRESHOLDS.highProtein}`);
+    const facets: string[] = [];
+    if (cf.bio) facets.push('attr_isBio:true');
+    if (cf.vegan) facets.push('attr_isVegan:true');
+    if (cf.vegetarian) facets.push('attr_isVegetarisch:true');
+    const kiMin = cf.ki === 'equiv' ? 3 : cf.ki === 'better' ? 4 : null;
+    // Nur Allergene aktiv -> nichts serverseitig filterbar; der alte
+    // Firestore-Pfad + Auto-Fill bleiben dann zustaendig.
+    const serverFilterable = numeric.length > 0 || facets.length > 0 || kiMin !== null;
+    return { numeric, facets, kiMin, serverFilterable };
+  }, [contentFilters, contentFiltersActive]);
+  const useAlgoliaBrowse = !!contentServerFilters?.serverFilterable;
+  // Page-Cursor des Algolia-Browse-Zweigs (Refs — gleiche Begruendung
+  // wie die uebrigen Pagination-Refs: nie stale in Scroll-Closures).
+  const nonameAlgPageRef = useRef(0);
+  const markenAlgPageRef = useRef(0);
+  const useAlgoliaBrowseRef = useRef(useAlgoliaBrowse);
+  useAlgoliaBrowseRef.current = useAlgoliaBrowse;
+  // Such-Facetten (Markt/Kategorie/Stufe/Marke) — die Memos sind erst
+  // weiter unten definiert; die Loader lesen sie zur Laufzeit via Ref.
+  const searchFacetsEigenRef = useRef<AlgoliaFacetFilters>([]);
+  const searchFacetsMarkenRef = useRef<AlgoliaFacetFilters>([]);
+  const contentServerFiltersRef = useRef(contentServerFilters);
+  contentServerFiltersRef.current = contentServerFilters;
   const contentActiveCount = useMemo(() => {
     const cf = contentFilters;
     let n = 0;
@@ -1103,7 +1145,10 @@ export default function ExploreScreen() {
     // Firestore filter. Putting it back in here would re-read the
     // collection on every keystroke for nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, market, handels, cat, stufeSelection, brandId, sort]);
+    // contentFilters NEU in den Deps (86ca88cam): der Inhalts-Filter
+    // laeuft jetzt server-seitig — eine Aenderung muss die Listen ab
+    // Page 0 neu laden (vorher rein client-seitig, kein Reload noetig).
+  }, [tab, market, handels, cat, stufeSelection, brandId, sort, contentFilters]);
 
   // ─── Category access gate ─────────────────────────────────────────────
   const onChangeCategory = useCallback(
@@ -1240,6 +1285,37 @@ export default function ExploreScreen() {
       const startSeq = reloadSeq.current;
       try {
         setNonameLoading(true);
+        // ── Server-gefilterter Zweig (86ca88cam) ──
+        if (useAlgoliaBrowseRef.current && contentServerFiltersRef.current) {
+          const csf = contentServerFiltersRef.current;
+          const pageNo = reset ? 0 : nonameAlgPageRef.current + 1;
+          const numeric = [...csf.numeric];
+          if (csf.kiMin !== null) numeric.push(`aiComparison.score >= ${csf.kiMin}`);
+          const res = await AlgoliaService.browseFiltered(
+            'eigen',
+            pageNo,
+            reset ? 12 : 18,
+            numeric.join(' AND '),
+            [...csf.facets, ...searchFacetsEigenRef.current],
+          );
+          if (reloadSeq.current !== startSeq) return;
+          const enriched = await mapWithConcurrency(
+            res.hits as any[],
+            ENRICH_CONCURRENCY,
+            (h) => enrichWithFirestore(h as any, true),
+          );
+          if (reloadSeq.current !== startSeq) return;
+          setNonames((prev) => {
+            const existing = reset ? new Set<string>() : new Set(prev.map((p2: any) => p2.id));
+            const incoming = (enriched as any[]).filter((p2) => !existing.has(p2.id));
+            return reset
+              ? ([...incoming].sort(productSorter) as any)
+              : ([...prev, ...incoming] as any);
+          });
+          nonameAlgPageRef.current = pageNo;
+          setNonameHasMore(pageNo + 1 < (res.nbPages ?? 0));
+          return;
+        }
         const size = reset ? FIRST_PAGE_SIZE : PAGE_SIZE;
         const res = await FirestoreService.getNoNameProductsPaginated(
           size,
@@ -1339,6 +1415,36 @@ export default function ExploreScreen() {
       const startSeq = reloadSeq.current;
       try {
         setMarkenLoading(true);
+        // ── Server-gefilterter Zweig (86ca88cam) — ohne KI-Filter
+        // (der gilt nur fuer Eigenmarken). ──
+        if (useAlgoliaBrowseRef.current && contentServerFiltersRef.current) {
+          const csf = contentServerFiltersRef.current;
+          const pageNo = reset ? 0 : markenAlgPageRef.current + 1;
+          const res = await AlgoliaService.browseFiltered(
+            'marken',
+            pageNo,
+            reset ? 12 : 18,
+            csf.numeric.join(' AND '),
+            [...csf.facets, ...searchFacetsMarkenRef.current],
+          );
+          if (reloadSeq.current !== startSeq) return;
+          const enriched = await mapWithConcurrency(
+            res.hits as any[],
+            ENRICH_CONCURRENCY,
+            (h) => enrichWithFirestore(h as any, false),
+          );
+          if (reloadSeq.current !== startSeq) return;
+          setMarkenprodukte((prev) => {
+            const existing = reset ? new Set<string>() : new Set(prev.map((p2: any) => p2.id));
+            const incoming = (enriched as any[]).filter((p2) => !existing.has(p2.id));
+            return reset
+              ? ([...incoming].sort(productSorter) as any)
+              : ([...prev, ...incoming] as any);
+          });
+          markenAlgPageRef.current = pageNo;
+          setMarkenHasMore(pageNo + 1 < (res.nbPages ?? 0));
+          return;
+        }
         const size = reset ? FIRST_PAGE_SIZE : PAGE_SIZE;
         const res = await FirestoreService.getMarkenproduktePaginated(
           size,
@@ -2079,6 +2185,14 @@ export default function ExploreScreen() {
         if (fs.kategorie && typeof fs.kategorie === 'object') {
           merged.kategorie = fs.kategorie;
         }
+        // Aufgeloeste Markt-/Handelsmarken-Objekte (Eigen-Karten-Eyebrow,
+        // 86ca88cam) — getSearchCardData liefert sie resolved.
+        if (isNoName && fs.discounter && typeof fs.discounter === 'object') {
+          merged.discounter = fs.discounter;
+        }
+        if (isNoName && fs.handelsmarke && typeof fs.handelsmarke === 'object') {
+          merged.handelsmarke = fs.handelsmarke;
+        }
         if (!isNoName && fs.hersteller && typeof fs.hersteller === 'object') {
           merged.hersteller = fs.hersteller;
         }
@@ -2159,6 +2273,8 @@ export default function ExploreScreen() {
     if (brandId !== 'all') f.push(`hersteller:hersteller/${brandId}`);
     return f;
   }, [cat, brandId]);
+  searchFacetsEigenRef.current = searchFacetsEigen;
+  searchFacetsMarkenRef.current = searchFacetsMarken;
 
   // Self-Referenz fuer den Retry-Toast (useCallback kann sich nicht
   // selbst in den eigenen Deps referenzieren).
@@ -2930,6 +3046,9 @@ export default function ExploreScreen() {
 
   useEffect(() => {
     if (searchActiveQuery) return;
+    // Server-gefilterter Browse (86ca88cam): Pages sind dicht — kein
+    // Auto-Fill noetig (der verursachte die Grid-Luecken + CPU-Last).
+    if (useAlgoliaBrowse) return;
     if (!(contentFiltersActive || cat !== 'all')) return;
     const wantEigen = tab === 'eigen' || tab === 'alle';
     const wantMarken = tab === 'marken' || tab === 'alle';
@@ -2952,6 +3071,7 @@ export default function ExploreScreen() {
     markenprodukte.length,
     loadNonames,
     loadMarken,
+    useAlgoliaBrowse,
   ]);
 
   // ─── Auto-Fill im SUCH-Modus (86ca5yp4k) ───────────────────────────
@@ -3014,7 +3134,9 @@ export default function ExploreScreen() {
         ? dataMarken.length
         : dataAlle.length;
   const fillDrawDistance =
-    (contentFiltersActive || cat !== 'all') && activeVisibleLen < 24 ? 1500 : 250;
+    !useAlgoliaBrowse && (contentFiltersActive || cat !== 'all') && activeVisibleLen < 24
+      ? 1500
+      : 250;
 
   // First-load scroll-to-top per tab: when data goes from empty to
   // populated (e.g. user opened Stöbern + switched tabs BEFORE the

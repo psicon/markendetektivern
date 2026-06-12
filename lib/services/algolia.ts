@@ -333,6 +333,39 @@ export class AlgoliaService {
   }
 
   /**
+   * Server-gefiltertes BROWSE (86ca88cam): leere Query + filters/
+   * facetFilters — fuer den Stoebern-Inhaltsfilter. Jede Page enthaelt
+   * NUR Treffer (numerische nutr_*-Filter, attr_is*-Facets,
+   * aiComparison.score), dadurch entfallen Client-Wegfiltern, Auto-
+   * Fill-Schleifen und Grid-Luecken komplett.
+   */
+  static async browseFiltered(
+    kind: 'eigen' | 'marken',
+    page: number,
+    hitsPerPage: number,
+    filters: string,
+    facetFilters?: AlgoliaFacetFilters,
+  ): Promise<AlgoliaSearchResponse> {
+    const indexName = kind === 'eigen' ? NONAME_INDEX : MARKENPRODUKTE_INDEX;
+    const attributesToRetrieve =
+      kind === 'eigen'
+        ? ['objectID', 'name', 'bild', 'bildThumb', 'stufe', 'preis', 'discounter', 'handelsmarke', 'kategorie']
+        : ['objectID', 'name', 'bild', 'bildThumb', 'preis', 'hersteller', 'kategorie'];
+    const result = await client.searchSingleIndex({
+      indexName,
+      searchParams: {
+        query: '',
+        page,
+        hitsPerPage,
+        ...(filters ? { filters } : {}),
+        ...(facetFilters && facetFilters.length > 0 ? { facetFilters } : {}),
+        attributesToRetrieve,
+      },
+    });
+    return result as unknown as AlgoliaSearchResponse;
+  }
+
+  /**
    * Search both NoName products and Markenprodukte
    * OPTIMIERT: Keine automatischen Marken/Hersteller-Suchen mehr!
    */
