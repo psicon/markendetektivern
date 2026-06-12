@@ -248,7 +248,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.log('✅ Timeout gecancelt - User gefunden');
         }
         hasInitialAuthState = true;
-        
+
+        // WSOD-Fix (ClickUp 86ca8c9rn): setLoading(false) SOFORT,
+        // sobald der Auth-State steht — NICHT erst nach der
+        // Firestore-Pipeline unten. Offline haengt `await
+        // createUserProfile` (setDoc-Promise resolved erst bei
+        // Server-Ack, Forbidden Pattern) fuer immer -> loading blieb
+        // true -> das (tabs)/_layout-Gate renderte dauerhaft einen
+        // leeren View = White Screen of Death beim Kaltstart ohne
+        // Empfang. Die UI braucht nur den User; Profil/Gamification
+        // fuellen sich nachgelagert (und holen sich bei Reconnect
+        // ihre Writes automatisch nach).
+        setLoading(false);
+
         // 🔄 EINMALIGE GAMIFICATION INITIALISIERUNG nach Authentifizierung
         console.log('🚀 Starte Gamification-Initialisierung nach Authentifizierung...');
         try {
@@ -299,8 +311,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch (error) {
           console.warn('⚠️ Achievement-Checks fehlgeschlagen für User:', user.uid, error);
         }
-        
-        setLoading(false);
+        // setLoading(false) ist bereits oben passiert (WSOD-Fix) —
+        // hier bewusst KEIN zweiter Call noetig.
       } else {
         // WICHTIG: Warte 1 Sekunde bevor neue anonyme Session erstellt wird
         // Firebase braucht Zeit um persistierte Session aus AsyncStorage zu laden
