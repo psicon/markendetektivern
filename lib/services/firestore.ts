@@ -1678,7 +1678,11 @@ export class FirestoreService {
           doc(db, isMarkenProdukt ? 'markenProdukte' : 'produkte', productId),
         );
         if (!snap.exists()) {
-          writeCache(searchCardCache, key, null);
+          // NIE negative Ergebnisse cachen (Offline-Vergiftung,
+          // 2026-06-12): RNFirebase liefert offline teils einen
+          // not-exists-Snapshot AUS DEM LEEREN CACHE — gecachtes null
+          // machte danach JEDES Produkt fuer 5 Min 'nicht gefunden'.
+          // fromCache-Miss = offline, kein Urteil ueber Existenz.
           return null;
         }
         const data: any = { id: snap.id, ...(snap.data() as any) };
@@ -1764,8 +1768,17 @@ export class FirestoreService {
         const productSnap = await getDoc(productRef);
 
         if (!productSnap.exists()) {
+          // Offline-Cache-Miss von echtem Not-Found unterscheiden
+          // (2026-06-12): offline liefert RNFirebase teils einen
+          // not-exists-Snapshot aus dem leeren Cache. Der war frueher
+          // 5 Min als null GECACHT -> nach einem Offline-Tap zeigte
+          // JEDES Produkt 'nicht gefunden'. Jetzt: fromCache-Miss
+          // wirft (Screen zeigt den Offline-Fehler mit Retry),
+          // echtes Not-Found returnt null OHNE Cache-Write.
+          if ((productSnap as any).metadata?.fromCache) {
+            throw new Error('offline-cache-miss');
+          }
           console.log('NoName product not found with ID:', productId);
-          writeCache(productDetailsCache, productId, null);
           return null;
         }
 
@@ -1973,8 +1986,12 @@ export class FirestoreService {
       const productSnap = await getDoc(productRef);
 
       if (!productSnap.exists()) {
+        // Siehe getProductWithDetails: fromCache-Miss = offline,
+        // kein Urteil; nie negativ cachen.
+        if ((productSnap as any).metadata?.fromCache) {
+          throw new Error('offline-cache-miss');
+        }
         console.log('Brand product not found with ID:', productId);
-        writeCache(markenProduktDetailsCache, cacheKey, null);
         return null;
       }
 

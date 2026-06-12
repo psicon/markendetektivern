@@ -29,6 +29,7 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { DetailErrorState } from '@/components/design/DetailErrorState';
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { usePressLock } from '@/lib/hooks/usePressLock';
 import {
@@ -1328,56 +1329,18 @@ export default function ProductComparisonScreen() {
   // Fehler nach Onboarding-Skip). Zusaetzlich nutzte der Branch
   // handleBack aus der TDZ (Definition stand dahinter).
   if (error) {
+    const errorVariant =
+      error.startsWith('Gerade kein Empfang')
+        ? ('offline' as const)
+        : error === 'Produkt nicht gefunden'
+          ? ('notFound' as const)
+          : ('generic' as const);
     return (
-      <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
-        <MaterialCommunityIcons name="alert-circle-outline" size={48} color={theme.textMuted} />
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.bold,
-            fontSize: 16,
-            color: theme.text,
-            marginTop: 12,
-            textAlign: 'center',
-          }}
-        >
-          {error ?? 'Produkt nicht verfügbar'}
-        </Text>
-        <Pressable
-          onPress={() => setRetryNonce((n) => n + 1)}
-          style={({ pressed }) => ({
-            marginTop: 20,
-            height: 44,
-            paddingHorizontal: 22,
-            borderRadius: radii.full,
-            backgroundColor: brand.primary,
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: pressed ? 0.9 : 1,
-          })}
-        >
-          <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: '#fff' }}>
-            Erneut versuchen
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={handleBack}
-          style={({ pressed }) => ({
-            marginTop: 10,
-            height: 44,
-            paddingHorizontal: 22,
-            borderRadius: radii.full,
-            backgroundColor: theme.surfaceAlt,
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: pressed ? 0.9 : 1,
-          })}
-        >
-          <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: theme.text }}>
-            Zurück
-          </Text>
-        </Pressable>
-      </View>
+      <DetailErrorState
+        variant={errorVariant}
+        onRetry={() => setRetryNonce((n) => n + 1)}
+        onBack={handleBack}
+      />
     );
   }
 
