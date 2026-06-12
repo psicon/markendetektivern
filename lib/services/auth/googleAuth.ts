@@ -93,7 +93,15 @@ export const configureGoogleSignIn = async () => {
  *   - Error wenn native Module fehlt (Expo Go) oder Konfig kaputt
  *   - Error wenn idToken nicht erhalten wurde (Konfig-Mismatch)
  */
-export const getGoogleCredential = async (): Promise<FirebaseAuthTypes.AuthCredential | null> => {
+export interface GoogleCredentialBundle {
+  credential: FirebaseAuthTypes.AuthCredential;
+  /** Anzeigename aus dem Google-Konto (z.B. 'Patrick Sieber'). */
+  displayName: string | null;
+  email: string | null;
+  photoUrl: string | null;
+}
+
+export const getGoogleCredential = async (): Promise<GoogleCredentialBundle | null> => {
   // T17.4: KEIN NativeModules-Check mehr (siehe configureGoogleSignIn-
   // Kommentar). Wir versuchen es einfach — falls Native-Modul fehlt
   // (Expo Go, alter Build), schlägt das require fehl und der äußere
@@ -167,7 +175,17 @@ export const getGoogleCredential = async (): Promise<FirebaseAuthTypes.AuthCrede
     );
   }
 
-  return GoogleAuthProvider.credential(idToken);
+  // Profildaten mitliefern (86ca7x9ep-Follow-up: 'es steht immer
+  // Detektiv') — beim LINKEN eines Anon-Users uebernimmt Firebase
+  // displayName/photoURL NICHT vom Provider, also muss der
+  // AuthContext sie selbst ins Firestore-Profil schreiben.
+  const gUser = userInfo?.user ?? {};
+  return {
+    credential: GoogleAuthProvider.credential(idToken),
+    displayName: gUser.name || [gUser.givenName, gUser.familyName].filter(Boolean).join(' ') || null,
+    email: gUser.email || null,
+    photoUrl: gUser.photo || null,
+  };
 };
 
 /**

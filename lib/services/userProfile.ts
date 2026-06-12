@@ -153,6 +153,18 @@ export const updateUserProfile = async (user: User, additionalData?: Partial<Use
 };
 
 /**
+ * Patcht einzelne Felder im BESTEHENDEN Profil-Doc (kein Create).
+ * Schlanker Ersatz fuer die auskommentierte updateUserProfile-Funktion
+ * darueber. (86ca7x9ep-Follow-up: Google-Name ins Profil ziehen.)
+ */
+export const patchUserProfile = async (
+  uid: string,
+  fields: Partial<UserProfile>,
+): Promise<void> => {
+  await updateDoc(doc(db, 'users', uid), fields as any);
+};
+
+/**
  * Aktualisiert Gamification-Statistiken
  */
 export const updateUserStats = async (uid: string, stats: {

@@ -33,7 +33,7 @@ import {
   lastFbDebug,
   signOutFacebook,
 } from '../services/auth/facebookAuth';
-import { createUserProfile, getUserProfile, UserProfile } from '../services/userProfile';
+import { createUserProfile, getUserProfile, patchUserProfile, UserProfile } from '../services/userProfile';
 import { scheduleRegionGuess } from '../services/regionGuess';
 import { FirestoreService } from '../services/firestore';
 import { doc, setDoc } from '@react-native-firebase/firestore';
@@ -617,17 +617,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Erfolgs-Pfad (markCompleted + router.replace) — der User landete
     // als ANONYMER User in der App und dachte, er sei eingeloggt.
     try {
-      const credential = await getGoogleCredential();
-      if (!credential) {
+      const bundle = await getGoogleCredential();
+      if (!bundle) {
         // User hat das Google-Sheet abgebrochen. Kein Fehler.
         return false;
       }
-      const userCredential = await linkOrSignIn(credential);
+      const userCredential = await linkOrSignIn(bundle.credential);
       console.log(
         '✅ Google Sign-In:',
         userCredential.user.email,
         userCredential.additionalUserInfo?.isNewUser ? '(neu)' : '(bestehend)',
       );
+      // Name/Foto aus dem Google-Konto ins Profil ziehen ('es steht
+      // immer Detektiv'): beim Linken eines Anon-Users setzt Firebase
+      // displayName/photoURL NICHT — und auch das Firestore-Profil
+      // existiert dann schon (vom Anon-User) ohne echten Namen.
+      // Nur fuellen, nie ueberschreiben: ein selbst gewaehlter Name
+      // im Profil-Editor bleibt unangetastet.
+      try {
+        const uid = userCredential.user.uid;
+        const profile = await getUserProfile(uid);
+        const currentName = (profile?.display_name ?? '').trim();
+        const updates: Partial<UserProfile> = {};
+        if (
+          bundle.displayName &&
+          (!currentName || currentName === 'Anonymer Nutzer')
+        ) {
+          updates.display_name = bundle.displayName;
+        }
+        if (bundle.photoUrl && !(profile?.photo_url ?? '').trim()) {
+          updates.photo_url = bundle.photoUrl;
+        }
+        if (!profile) {
+          await createUserProfile(userCredential.user, {
+            display_name: bundle.displayName || userCredential.user.displayName || '',
+            email: bundle.email || userCredential.user.email || '',
+            photo_url: bundle.photoUrl || '',
+          });
+          await refreshUserProfile();
+        } else if (Object.keys(updates).length > 0) {
+          await patchUserProfile(uid, updates);
+          await refreshUserProfile();
+        }
+      } catch (e) {
+        console.warn('Google Sign-In: Profil-Namen-Sync fehlgeschlagen (non-fatal):', e);
+      }
       return true;
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return false; // User cancel = kein Fehler
