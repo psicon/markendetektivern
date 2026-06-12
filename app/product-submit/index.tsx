@@ -9,6 +9,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image as ExpoImage } from 'expo-image';
 import { router, useNavigation } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -217,7 +218,7 @@ export default function ProductSubmitOverview() {
         {/* CTA */}
         <View style={{ marginHorizontal: 16, marginTop: 12 }}>
           <Pressable
-            onPress={() => router.push('/product-submit/wizard')}
+            onPress={() => safePush('/product-submit/wizard')}
             style={({ pressed }) => ({
               height: 52,
               borderRadius: 14,

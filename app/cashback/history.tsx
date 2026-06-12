@@ -13,6 +13,7 @@
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router, useNavigation } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -349,7 +350,7 @@ export default function CashbackHistoryScreen() {
     return (
       <Pressable
         onPress={() =>
-          router.push({
+          safePush({
             pathname: '/cashback/pending/[id]' as any,
             params: { id: item.id },
           })
@@ -655,7 +656,7 @@ export default function CashbackHistoryScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             {/* Ausgabenstatistik */}
             <Pressable
-              onPress={() => router.push('/cashback/spending')}
+              onPress={() => safePush('/cashback/spending')}
               hitSlop={6}
               accessibilityLabel="Ausgaben-Statistik"
               style={({ pressed }) => ({

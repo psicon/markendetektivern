@@ -19,6 +19,7 @@ import Constants from 'expo-constants';
 import * as Application from 'expo-application';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useNavigation } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import * as WebBrowser from 'expo-web-browser';
 import React, {
   useCallback,
@@ -292,7 +293,7 @@ export default function ProfileScreen() {
     try {
       await OnboardingService.resetOnboarding();
       setShowOnboardingButton(false);
-      router.push('/onboarding' as any);
+      safePush('/onboarding' as any);
     } catch (e) {
       console.warn('Profile: resumeOnboarding failed', e);
     }
@@ -585,13 +586,13 @@ export default function ProfileScreen() {
           stufe <= 2
             ? `/noname-detail/${productId}`
             : `/product-comparison/${productId}?type=noname`;
-        router.push(route as any);
+        safePush(route as any);
       } catch (e) {
         Alert.alert('Fehler', String((e as any)?.message ?? e));
         return;
       }
     } else {
-      router.push(COACHMARK_ROUTES[key] as any);
+      safePush(COACHMARK_ROUTES[key] as any);
     }
     setTimeout(() => {
       CoachmarkService.requestReplay(key);
@@ -689,7 +690,7 @@ export default function ProfileScreen() {
       // be in the pristine "first time" state.
       console.warn('revokeCashbackConsent failed', e?.message);
     }
-    router.push('/cashback/consent' as any);
+    safePush('/cashback/consent' as any);
   };
   const onResetUnlocks = async () => {
     try {
@@ -751,7 +752,7 @@ export default function ProfileScreen() {
   const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
   const editAction = () => {
     if (isAnonymous) setShowAuthModal(true);
-    else router.push('/edit-profile' as any);
+    else safePush('/edit-profile' as any);
   };
 
   // ── Single render path for both anonymous + registered. The
@@ -926,7 +927,7 @@ export default function ProfileScreen() {
         {isAnonymous ? (
           <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
             <Pressable
-              onPress={() => router.push('/auth/register?from=app' as any)}
+              onPress={() => safePush('/auth/register?from=app' as any)}
               style={({ pressed }) => ({
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -1065,7 +1066,7 @@ export default function ProfileScreen() {
         {gamificationEnabled ? (
         <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
           <Pressable
-            onPress={() => router.push('/achievements' as any)}
+            onPress={() => safePush('/achievements' as any)}
             style={({ pressed }) => ({
               borderRadius: radii.lg,
               backgroundColor: theme.surface,
@@ -1138,7 +1139,7 @@ export default function ProfileScreen() {
         {/* Savings card — orange gradient, links to purchase history */}
         <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
           <Pressable
-            onPress={() => router.push('/purchase-history' as any)}
+            onPress={() => safePush('/purchase-history' as any)}
             style={({ pressed }) => ({ opacity: pressed ? 0.92 : 1 })}
           >
             <LinearGradient
@@ -1234,7 +1235,7 @@ export default function ProfileScreen() {
                   color="#f97316"
                   label="Belohnungen"
                   sub={`${cashbackEurStr} € Cashback-Konto`}
-                  onPress={() => router.push('/(tabs)/rewards' as any)}
+                  onPress={() => safePush('/(tabs)/rewards' as any)}
                   first
                 />
                 <MenuRow
@@ -1242,7 +1243,7 @@ export default function ProfileScreen() {
                   color="#e0a800"
                   label="Level & Errungenschaften"
                   sub={`Level ${level} · ${points.toLocaleString('de-DE')} Pkt`}
-                  onPress={() => router.push('/achievements' as any)}
+                  onPress={() => safePush('/achievements' as any)}
                 />
               </>
             ) : null}
@@ -1250,33 +1251,33 @@ export default function ProfileScreen() {
               icon="format-list-checks"
               color={theme.primary}
               label="Einkaufszettel"
-              onPress={() => router.push('/shopping-list' as any)}
+              onPress={() => safePush('/shopping-list' as any)}
               first={!gamificationEnabled}
             />
             <MenuRow
               icon="heart-outline"
               color="#ef4444"
               label="Lieblingsprodukte"
-              onPress={() => router.push('/favorites' as any)}
+              onPress={() => safePush('/favorites' as any)}
             />
             <MenuRow
               icon="history"
               color="#8b5cf6"
               label="Kaufhistorie"
-              onPress={() => router.push('/purchase-history' as any)}
+              onPress={() => safePush('/purchase-history' as any)}
             />
             <MenuRow
               icon="clipboard-list-outline"
               color="#0d8575"
               label="Meine Bons"
               sub="Verlauf, Status & abgelehnte Bons"
-              onPress={() => router.push('/cashback/history' as any)}
+              onPress={() => safePush('/cashback/history' as any)}
             />
             <MenuRow
               icon="magnify"
               color="#0ea5e9"
               label="Such- & Scanverlauf"
-              onPress={() => router.push('/history' as any)}
+              onPress={() => safePush('/history' as any)}
             />
             <MenuRow
               icon="chart-bar"
@@ -1288,7 +1289,7 @@ export default function ProfileScreen() {
               icon="account-edit-outline"
               color={theme.textMuted}
               label="Profil bearbeiten"
-              onPress={() => router.push('/edit-profile' as any)}
+              onPress={() => safePush('/edit-profile' as any)}
               last
             />
           </MenuCard>
@@ -1311,7 +1312,7 @@ export default function ProfileScreen() {
               icon="lightbulb-on-outline"
               color={theme.primary}
               label="Tipps & Tricks"
-              onPress={() => router.push('/tipps-und-tricks' as any)}
+              onPress={() => safePush('/tipps-und-tricks' as any)}
               first={!showOnboardingButton}
             />
             <MenuRow
@@ -1344,7 +1345,7 @@ export default function ProfileScreen() {
               icon="bell-outline"
               color={theme.primary}
               label="Benachrichtigungen"
-              onPress={() => router.push('/notification-settings' as any)}
+              onPress={() => safePush('/notification-settings' as any)}
               last
             />
           </MenuCard>
@@ -1447,7 +1448,7 @@ export default function ProfileScreen() {
                 } else {
                   // from=settings: Consent-Screen routet nach Accept
                   // zurück hierher statt in den Kamera-Flow.
-                  router.push('/cashback/consent?from=settings' as any);
+                  safePush('/cashback/consent?from=settings' as any);
                 }
               }}
               last
@@ -1481,7 +1482,7 @@ export default function ProfileScreen() {
         <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
           {isAnonymous ? (
             <Pressable
-              onPress={() => router.push('/auth/login' as any)}
+              onPress={() => safePush('/auth/login' as any)}
               style={({ pressed }) => ({
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -1655,7 +1656,7 @@ export default function ProfileScreen() {
                 color="#0d8575"
                 label="Toast / Banner Tester"
                 sub="Jeden Toast und jedes Achievement / Level-Banner einzeln triggern"
-                onPress={() => router.push('/debug/notifications' as any)}
+                onPress={() => safePush('/debug/notifications' as any)}
               />
               <MenuRow
                 icon="account-question-outline"

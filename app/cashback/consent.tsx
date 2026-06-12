@@ -14,6 +14,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, {
   useCallback,
   useEffect,
@@ -410,7 +411,7 @@ export default function CashbackConsentScreen() {
         'Cashback ist nur für angemeldete Konten verfügbar.',
         [
           { text: 'Abbrechen', style: 'cancel' },
-          { text: 'Zum Login', onPress: () => router.push('/auth/login') },
+          { text: 'Zum Login', onPress: () => safePush('/auth/login') },
         ],
       );
       return;
@@ -421,7 +422,7 @@ export default function CashbackConsentScreen() {
         'Für Cashback brauchst du ein vollständiges Konto.',
         [
           { text: 'Abbrechen', style: 'cancel' },
-          { text: 'Konto erstellen', onPress: () => router.push('/auth/register') },
+          { text: 'Konto erstellen', onPress: () => safePush('/auth/register') },
         ],
       );
       return;

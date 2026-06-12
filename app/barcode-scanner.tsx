@@ -20,6 +20,7 @@ import { isExpoGo, platformLog } from '@/lib/utils/platform';
 import { Camera, CameraType, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import { getDoc } from '@react-native-firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, InteractionManager, Linking, Platform, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -922,7 +923,7 @@ export default function BarcodeScannerScreen() {
                           const route = item.productType === 'noname' 
                             ? `/product-comparison/${item.productId}?type=noname`
                             : `/product-comparison/${item.productId}?type=brand`;
-                          router.push(route as any);
+                          safePush(route as any);
                         }}
                         activeOpacity={0.7}
                       >

@@ -14,6 +14,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Haptics from 'expo-haptics';
 import { router, useNavigation } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, {
   useCallback,
   useEffect,
@@ -183,7 +184,7 @@ export default function PurchaseHistoryScreen() {
 
     if (item.type === 'markenprodukt') {
       FirestoreService.prefetchComparisonData(item.id, true);
-      router.push(`/product-comparison/${item.id}?type=brand` as any);
+      safePush(`/product-comparison/${item.id}?type=brand` as any);
     } else {
       const stufe =
         parseInt(
@@ -195,10 +196,10 @@ export default function PurchaseHistoryScreen() {
         ) || 3;
       if (stufe <= 2) {
         FirestoreService.prefetchProductDetails(item.id);
-        router.push(`/noname-detail/${item.id}` as any);
+        safePush(`/noname-detail/${item.id}` as any);
       } else {
         FirestoreService.prefetchComparisonData(item.id, false);
-        router.push(`/product-comparison/${item.id}?type=noname` as any);
+        safePush(`/product-comparison/${item.id}?type=noname` as any);
       }
     }
   };
@@ -382,7 +383,7 @@ export default function PurchaseHistoryScreen() {
         onBack={() => router.back()}
         right={
           <Pressable
-            onPress={() => router.push('/purchase-statistics' as any)}
+            onPress={() => safePush('/purchase-statistics' as any)}
             hitSlop={6}
             style={({ pressed }) => ({
               width: 36,

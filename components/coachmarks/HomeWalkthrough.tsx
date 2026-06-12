@@ -17,7 +17,8 @@
 //
 // Bei Fetch-Fehler wird die Tour silent dismissed.
 
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { CoachmarkService } from '@/lib/services/coachmarkService';
@@ -150,10 +151,10 @@ export function HomeWalkthrough({
     const stufeNum = parseInt(String((demoProduct as any).stufe ?? '1')) || 1;
     if (stufeNum <= 2) {
       FirestoreService.prefetchProductDetails(demoProduct.id);
-      router.push(`/noname-detail/${demoProduct.id}` as any);
+      safePush(`/noname-detail/${demoProduct.id}` as any);
     } else {
       FirestoreService.prefetchComparisonData(demoProduct.id, false);
-      router.push(`/product-comparison/${demoProduct.id}?type=noname` as any);
+      safePush(`/product-comparison/${demoProduct.id}?type=noname` as any);
     }
   }, [demoProduct, onDismiss]);
 

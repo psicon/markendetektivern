@@ -14,6 +14,7 @@ import { fetchSignInMethodsForEmail } from '@react-native-firebase/auth';
 import { markAppContentReady } from '@/lib/utils/appReady';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, { useEffect, useState } from 'react';
 import {
   Platform,
@@ -185,7 +186,7 @@ export default function WelcomeScreen() {
           'info',
           colorScheme ?? 'light',
         );
-        router.push({ pathname: '/auth/login', params: { email: trimmed } } as any);
+        safePush({ pathname: '/auth/login', params: { email: trimmed } } as any);
         return;
       }
       if (methods.includes('google.com')) {
@@ -228,7 +229,7 @@ export default function WelcomeScreen() {
 
       // Keine bekannte Methode → neuer Account, weiter zur Form mit
       // prefilled Email.
-      router.push({
+      safePush({
         pathname: '/auth/email-register',
         params: { email: trimmed },
       } as any);
@@ -400,7 +401,7 @@ export default function WelcomeScreen() {
             {/* "Schon dabei?" Link — Login-Cross-Reference */}
             <View style={styles.loginRow}>
               <Text style={styles.loginText}>Schon registriert? </Text>
-              <Pressable onPress={() => router.push('/auth/login')} hitSlop={6}>
+              <Pressable onPress={() => safePush('/auth/login')} hitSlop={6}>
                 <Text style={styles.loginLink}>Hier einloggen</Text>
               </Pressable>
             </View>

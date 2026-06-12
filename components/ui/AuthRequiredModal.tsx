@@ -3,7 +3,7 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 // import { BlurView } from 'expo-blur'; // Temporär deaktiviert
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React from 'react';
 import {
     Modal,
@@ -32,12 +32,12 @@ export const AuthRequiredModal: React.FC<AuthRequiredModalProps> = ({
 
   const handleLogin = () => {
     onClose();
-    router.push('/auth/login');
+    safePush('/auth/login');
   };
 
   const handleRegister = () => {
     onClose();
-    router.push('/auth/register?from=app');
+    safePush('/auth/register?from=app');
   };
 
   return (

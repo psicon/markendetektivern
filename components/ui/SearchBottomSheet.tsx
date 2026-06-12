@@ -3,7 +3,7 @@ import { FirestoreService } from '@/lib/services/firestore';
 import searchHistoryService, { PopularSearch, SearchHistoryItem } from '@/lib/services/searchHistoryService';
 import { getProductImage } from '@/lib/utils/productImage';
 import * as Haptics from 'expo-haptics';
-import { useRouter } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -58,7 +58,6 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
   colors,
   onSearch,
 }) => {
-  const router = useRouter();
   const { user } = useAuth();
   const { bottom: insetBottom } = useSafeAreaInsets();
   
@@ -578,14 +577,14 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
                         handleClose();
                         const it: any = item;
                         if (it.productType === 'brand') {
-                          router.push(`/product-comparison/${item.id}?type=brand` as any);
+                          safePush(`/product-comparison/${item.id}?type=brand` as any);
                         } else {
                           const stufe =
                             typeof it.stufe === 'number' ? it.stufe : 3;
                           if (stufe <= 2) {
-                            router.push(`/noname-detail/${item.id}` as any);
+                            safePush(`/noname-detail/${item.id}` as any);
                           } else {
-                            router.push(`/product-comparison/${item.id}?type=noname` as any);
+                            safePush(`/product-comparison/${item.id}?type=noname` as any);
                           }
                         }
                       } else if (!isSearching) {
@@ -660,7 +659,7 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
                   style={[styles.quickAction, { backgroundColor: colors.primary + '10' }]}
                   onPress={() => {
                     handleClose();
-                    router.push('/favorites' as any);
+                    safePush('/favorites' as any);
                   }}
                 >
                   <IconSymbol name="heart.fill" size={16} color={colors.primary} />
@@ -673,7 +672,7 @@ export const SearchBottomSheet: React.FC<SearchBottomSheetProps> = ({
                   style={[styles.quickAction, { backgroundColor: colors.success + '10' }]}
                   onPress={() => {
                     handleClose();
-                    router.push('/shopping-list' as any);
+                    safePush('/shopping-list' as any);
                   }}
                 >
                   <IconSymbol name="cart.fill" size={16} color={colors.success} />

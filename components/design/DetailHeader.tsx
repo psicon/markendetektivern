@@ -71,6 +71,21 @@ export function DetailHeader({
   const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === 'ios';
 
+  // Doppel-Tap-Guard auf dem Back-Button (ClickUp 86ca6qaeb): zwei
+  // schnelle Taps feuerten onBack zweimal -> router.back() x2 -> der
+  // User landet ZWEI Screens zurueck. Zentral hier gedeckelt statt in
+  // jedem Screen; 600 ms = gleiches Fenster wie lib/utils/safeNav.
+  const lastBackAtRef = React.useRef(0);
+  const handleBack = React.useMemo(() => {
+    if (!onBack) return undefined;
+    return () => {
+      const now = Date.now();
+      if (now - lastBackAtRef.current < 600) return;
+      lastBackAtRef.current = now;
+      onBack();
+    };
+  }, [onBack]);
+
   // "hasSwap" gates ONLY whether we render the scrolled-in second title.
   // The default title's fade-out is driven purely by scrollY (if
   // provided) so callers that only want the default to fade out can
@@ -133,9 +148,9 @@ export function DetailHeader({
         gap: 8,
       }}
     >
-      {onBack ? (
+      {handleBack ? (
         <Pressable
-          onPress={onBack}
+          onPress={handleBack}
           style={({ pressed }) => ({
             width: 40,
             height: 40,

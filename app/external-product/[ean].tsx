@@ -17,6 +17,7 @@
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import { backOrHome } from '@/lib/utils/nav';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
@@ -1027,7 +1028,7 @@ export default function ExternalProductScreen() {
                       } catch {}
                       // Via Resolver → richtige Detail-Seite je Stufe (statt
                       // blind noname-detail, was bei Stufe 3-5 falsch wäre).
-                      router.push(`/product/${alt.objectID}` as any);
+                      safePush(`/product/${alt.objectID}` as any);
                     }}
                   />
                 </View>

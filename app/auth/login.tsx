@@ -14,6 +14,7 @@ import {
 import { isExpoGo } from '@/lib/utils/platform';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
@@ -348,7 +349,7 @@ export default function LoginScreen() {
               <TouchableOpacity
                 style={styles.forgotPasswordCentered}
                 onPress={() =>
-                  router.push({
+                  safePush({
                     pathname: '/auth/forgot-password',
                     // Bereits eingetippte E-Mail mitnehmen (ClickUp 86ca7x1d6)
                     params: formData.email.trim()

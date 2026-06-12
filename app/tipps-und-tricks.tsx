@@ -15,6 +15,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { router, useNavigation } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, { useLayoutEffect } from 'react';
 import {
   Dimensions,
@@ -179,7 +180,7 @@ export default function TippsUndTricksScreen() {
 
   const goExplore = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push('/(tabs)/explore' as any);
+    safePush('/(tabs)/explore' as any);
   };
 
   return (

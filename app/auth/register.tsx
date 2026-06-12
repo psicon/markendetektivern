@@ -26,6 +26,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { fetchSignInMethodsForEmail } from '@react-native-firebase/auth';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -131,7 +132,7 @@ export default function RegisterScreen() {
           'info',
           colorScheme ?? 'light',
         );
-        router.push({
+        safePush({
           pathname: '/auth/login',
           params: { email: trimmed },
         } as any);
@@ -178,7 +179,7 @@ export default function RegisterScreen() {
       // Keine bekannte Methode → neuer Account, weiter zur Form mit
       // prefilled Email. Falls Enum-Protection aktiv war und Email
       // doch existiert, fängt email-register's Submit-Handler das ab.
-      router.push({
+      safePush({
         pathname: '/auth/email-register',
         params: { email: trimmed },
       } as any);

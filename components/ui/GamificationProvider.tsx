@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
+import { safePush } from '@/lib/utils/safeNav';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { subscribeUserCashbackHistoryPaged } from '@/lib/services/cashbackUpload';
@@ -105,7 +105,7 @@ export function bannerDataFromAchievement(achievement: Achievement): BannerData 
     tint: (achievement.color as string) || '#F0A030',
     onTap: () => {
       try {
-        router.push('/achievements' as any);
+        safePush('/achievements' as any);
       } catch (e) {
         console.warn('Achievement banner nav failed (non-fatal):', e);
       }
@@ -172,7 +172,7 @@ export function bannerDataFromLevelUp(
     withGlow: true,
     onTap: () => {
       try {
-        router.push('/achievements' as any);
+        safePush('/achievements' as any);
       } catch (e) {
         console.warn('LevelUp banner nav failed (non-fatal):', e);
       }
@@ -210,7 +210,7 @@ export function bannerDataFromCashbackPayout(cashbackCents: number): BannerData 
     withGlow: true,
     onTap: () => {
       try {
-        router.push('/cashback/history' as any);
+        safePush('/cashback/history' as any);
       } catch (e) {
         console.warn('Cashback banner nav failed (non-fatal):', e);
       }
