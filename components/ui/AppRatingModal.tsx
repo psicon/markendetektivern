@@ -1,10 +1,21 @@
-import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
+import { showInfoToast } from '@/lib/services/ui/toast';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
-import { Alert, Dimensions, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  Dimensions,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { IconSymbol } from './IconSymbol';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -16,166 +27,249 @@ interface AppRatingModalProps {
 
 type RatingStep = 'initial' | 'store' | 'feedback';
 
+/**
+ * Feedback-Kategorien der "Geht so"-Route — 1-Tap-Chips statt
+ * Freitext-Pflicht (niedrige Huerde, strukturiertes Feedback).
+ */
+const FEEDBACK_CHIPS: { key: string; label: string }[] = [
+  { key: 'products', label: 'Zu wenige Produkte' },
+  { key: 'bugs', label: 'Fehler / Abstürze' },
+  { key: 'ux', label: 'Unübersichtlich' },
+  { key: 'prices', label: 'Preise stimmen nicht' },
+  { key: 'other', label: 'Sonstiges' },
+];
+
+/**
+ * App-Rating-Funnel (Redesign 2026-06-12, psychologische Hebel):
+ *
+ *  1. REZIPROZITÄT: Headline spiegelt zuerst den ERHALTENEN Wert
+ *     (echte Gesamtersparnis bzw. Detektiv-Level), dann erst die
+ *     Frage — die Bitte fühlt sich wie ein fairer Tausch an.
+ *  2. ASYMMETRIE: positive Antwort ist der visuell primäre, voll
+ *     gefüllte Button mit konkreter Sprache ('Ja, richtig gut!');
+ *     'Geht so' ist ein dezenter Ghost darunter. Beide ehrlich
+ *     vorhanden (Store-konform), aber mit klarer Führung.
+ *  3. HELFER-FRAMING im Store-Schritt: 'Hilf anderen Sparfüchsen,
+ *     uns zu finden' schlägt die Ich-Bitte 'bewerte uns'. Der
+ *     native In-App-Review-Prompt (requestStoreReview) minimiert
+ *     die Reibung.
+ *  4. Negative Route: 1-Tap-Kategorie-Chips + optionaler Freitext;
+ *     diese Nutzer werden nie zum Store geleitet.
+ *  5. HYGIENE: X/Später = 60-Tage-Cooldown (markDismissed), nach
+ *     einer Antwort nie wieder (hasRated, wie bisher).
+ */
 export const AppRatingModal: React.FC<AppRatingModalProps> = ({ visible, onClose }) => {
   const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
+  void colorScheme; // Modal ist auf dem Gradient self-contained.
   const { user, userProfile } = useAuth();
-  
+
   const [currentStep, setCurrentStep] = useState<RatingStep>('initial');
   const [feedback, setFeedback] = useState('');
+  const [selectedChips, setSelectedChips] = useState<string[]>([]);
   const [ratingDocId, setRatingDocId] = useState<string | undefined>(undefined);
 
-  const handleClose = () => {
+  const totalSavings = Number(userProfile?.totalSavings ?? 0);
+  const level = Number(
+    userProfile?.stats?.currentLevel ?? (userProfile as any)?.level ?? 1,
+  );
+  const savingsLabel = `${totalSavings.toFixed(2).replace('.', ',')} €`;
+
+  const resetAndClose = () => {
     setCurrentStep('initial');
     setFeedback('');
+    setSelectedChips([]);
     setRatingDocId(undefined);
     onClose();
   };
 
-  const handleThumbsUp = async () => {
-    console.log('👍 Thumbs up clicked - saving to Firestore immediately');
+  /** X / 'Später' im initial-Step: Cooldown setzen, damit der Prompt
+   *  nicht beim nächsten Trigger sofort wieder nervt. */
+  const handleDismiss = () => {
+    if (user?.uid) void ratingPromptService.markDismissed(user.uid);
+    resetAndClose();
+  };
+
+  const handlePositive = async () => {
     if (user?.uid) {
-      const currentLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
-      console.log(`📊 User Level: ${currentLevel}`);
-      const docId = await ratingPromptService.markAsRated(user.uid, 'positive', currentLevel);
+      const docId = await ratingPromptService.markAsRated(user.uid, 'positive', level);
       setRatingDocId(docId);
-      console.log('✅ Positive rating saved to Firestore with level:', currentLevel);
     }
     setCurrentStep('store');
   };
 
-  const handleThumbsDown = async () => {
-    console.log('👎 Thumbs down clicked - saving to Firestore immediately');
+  const handleNegative = async () => {
     if (user?.uid) {
-      const currentLevel = userProfile?.stats?.currentLevel || userProfile?.level || 1;
-      console.log(`📊 User Level: ${currentLevel}`);
-      const docId = await ratingPromptService.markAsRated(user.uid, 'negative', currentLevel);
+      const docId = await ratingPromptService.markAsRated(user.uid, 'negative', level);
       setRatingDocId(docId);
-      console.log('✅ Negative rating saved to Firestore with level:', currentLevel);
     }
     setCurrentStep('feedback');
   };
 
+  const handleStoreReview = () => {
+    void ratingPromptService.requestStoreReview();
+    resetAndClose();
+  };
+
+  const toggleChip = (key: string) =>
+    setSelectedChips((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+
   const handleSubmitFeedback = async () => {
-    console.log('📝 Feedback submitted:', feedback);
     try {
-      if (user?.uid && feedback.trim()) {
-        // Add feedback to existing Firestore document
-        await ratingPromptService.saveFeedback(user.uid, feedback.trim(), ratingDocId);
-        console.log('✅ Feedback added to Firestore document:', ratingDocId);
+      if (user?.uid && (feedback.trim() || selectedChips.length > 0)) {
+        await ratingPromptService.saveFeedback(
+          user.uid,
+          feedback.trim(),
+          ratingDocId,
+          selectedChips,
+        );
       }
-      Alert.alert('Danke!', 'Dein Feedback wurde gespeichert.');
-      handleClose();
     } catch (error) {
       console.error('Feedback error:', error);
-      Alert.alert('Danke!', 'Dein Feedback wurde gespeichert.'); // Still show success to user
     }
-  };
-
-  const handleSkipFeedback = () => {
-    console.log('⏭️ Feedback skipped - rating already saved');
-    handleClose();
-  };
-
-  const handleStoreReview = () => {
-    console.log('⭐ Store review requested');
-    ratingPromptService.requestStoreReview();
-    handleClose();
+    resetAndClose();
+    showInfoToast('Danke dir — das hilft uns wirklich weiter! 💚', 'success');
   };
 
   if (!visible) return null;
 
-  const renderInitialStep = () => (
-    <>
-      {/* App Icon */}
-      <View style={styles.iconContainer}>
-        <IconSymbol name="heart.fill" size={60} color="white" />
-      </View>
+  // ─── Step 1: Wert spiegeln + asymmetrische Frage ──────────────────
+  const renderInitialStep = () => {
+    const hasSavings = totalSavings >= 0.5;
+    return (
+      <>
+        <View style={styles.iconContainer}>
+          <IconSymbol
+            name={hasSavings ? 'eurosign.circle.fill' : 'heart.fill'}
+            size={52}
+            color="white"
+          />
+        </View>
 
-      {/* Title */}
-      <Text style={styles.title}>Gefällt dir MarkenDetektive?</Text>
-      <Text style={styles.subtitle}>Deine Meinung hilft uns dabei, die App für dich zu verbessern!</Text>
+        {hasSavings ? (
+          <>
+            <Text style={styles.eyebrow}>DU HAST MIT MARKENDETEKTIVE SCHON</Text>
+            <Text style={styles.heroNumber}>{savingsLabel}</Text>
+            <Text style={styles.heroSuffix}>gespart 🎉</Text>
+          </>
+        ) : (
+          <Text style={styles.title}>
+            Du bist schon Level-{level}-Detektiv! 🕵️
+          </Text>
+        )}
+        <Text style={styles.subtitle}>Macht dir MarkenDetektive Freude?</Text>
 
-      {/* Rating Buttons */}
-      <View style={styles.ratingContainer}>
-        <TouchableOpacity style={styles.ratingButton} onPress={handleThumbsUp}>
-          <IconSymbol name="hand.thumbsup.fill" size={32} color="white" />
-          <Text style={styles.ratingButtonText}>Gefällt mir</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.ratingButton} onPress={handleThumbsDown}>
-          <IconSymbol name="hand.thumbsdown.fill" size={32} color="white" />
-          <Text style={styles.ratingButtonText}>Gefällt mir nicht</Text>
-        </TouchableOpacity>
-      </View>
-    </>
-  );
+        {/* Asymmetrie: Positiv = primärer, voll gefüllter Button. */}
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity style={styles.primaryButton} onPress={handlePositive}>
+            <IconSymbol name="hand.thumbsup.fill" size={20} color="#5b4f9c" />
+            <Text style={styles.primaryButtonText}>Ja, richtig gut!</Text>
+          </TouchableOpacity>
 
+          <TouchableOpacity style={styles.ghostButton} onPress={handleNegative}>
+            <Text style={styles.ghostButtonText}>Geht so</Text>
+          </TouchableOpacity>
+        </View>
+      </>
+    );
+  };
+
+  // ─── Step 2 (nur nach Ja): Helfer-Framing + nativer Review ────────
   const renderStoreStep = () => (
     <>
       <View style={styles.iconContainer}>
-        <IconSymbol name="star.fill" size={60} color="white" />
+        <IconSymbol name="star.fill" size={52} color="#ffd44b" />
       </View>
 
-      <Text style={styles.title}>Fantastisch!</Text>
-      <Text style={styles.subtitle}>Danke, dass du MarkenDetektive nutzt! Magst du uns kurz im App Store bewerten? Damit kannst du dieses Projekt ganz einfach unterstützen!</Text>
+      <Text style={styles.title}>Danke dir! 💚</Text>
+      <Text style={styles.subtitle}>
+        Hilf anderen Sparfüchsen, uns zu finden — eine Bewertung dauert keine
+        10 Sekunden und macht für uns einen riesigen Unterschied.
+      </Text>
 
       <View style={styles.buttonContainer}>
         <TouchableOpacity style={styles.primaryButton} onPress={handleStoreReview}>
-          <IconSymbol name="star" size={18} color="#667eea" />
-          <Text style={styles.primaryButtonText}>Jetzt bewerten!</Text>
+          <IconSymbol name="star.fill" size={18} color="#5b4f9c" />
+          <Text style={styles.primaryButtonText}>
+            {Platform.OS === 'ios' ? 'Im App Store unterstützen' : 'Im Play Store unterstützen'}
+          </Text>
         </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.secondaryButton} onPress={handleClose}>
-          <Text style={styles.secondaryButtonText}>Später</Text>
+
+        <TouchableOpacity style={styles.ghostButton} onPress={handleDismiss}>
+          <Text style={styles.ghostButtonText}>Später</Text>
         </TouchableOpacity>
       </View>
     </>
   );
 
+  // ─── Step 3 (nur nach Geht so): Chips + optionaler Freitext ───────
   const renderFeedbackStep = () => (
     <>
       <View style={styles.iconContainer}>
-        <IconSymbol name="lightbulb.fill" size={60} color="white" />
+        <IconSymbol name="lightbulb.fill" size={52} color="white" />
       </View>
 
-      <Text style={styles.title}>Was können wir verbessern?</Text>
-      <Text style={styles.subtitle}>Dein Feedback hilft uns dabei, MarkenDetektive für dich besser zu machen!</Text>
+      <Text style={styles.title}>Was sollten wir besser machen?</Text>
+      <Text style={styles.subtitle}>
+        Tippe an, was dich stört — wir lesen jedes Feedback.
+      </Text>
+
+      <View style={styles.chipWrap}>
+        {FEEDBACK_CHIPS.map((chip) => {
+          const on = selectedChips.includes(chip.key);
+          return (
+            <Pressable
+              key={chip.key}
+              onPress={() => toggleChip(chip.key)}
+              style={[styles.chip, on && styles.chipActive]}
+            >
+              <Text style={[styles.chipText, on && styles.chipTextActive]}>
+                {chip.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
 
       <View style={styles.feedbackContainer}>
         <TextInput
           style={styles.feedbackInput}
-          placeholder="Dein Feedback (optional)..."
-          placeholderTextColor="#666"
+          placeholder="Magst du es kurz beschreiben? (optional)"
+          placeholderTextColor="#888"
           value={feedback}
           onChangeText={setFeedback}
           multiline
-          numberOfLines={4}
+          numberOfLines={3}
           textAlignVertical="top"
         />
       </View>
 
       <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.primaryButton} onPress={handleSubmitFeedback}>
-          <IconSymbol name="paperplane.fill" size={18} color="#667eea" />
+        <TouchableOpacity
+          style={[
+            styles.primaryButton,
+            selectedChips.length === 0 && !feedback.trim() && styles.primaryButtonDisabled,
+          ]}
+          onPress={handleSubmitFeedback}
+          disabled={selectedChips.length === 0 && !feedback.trim()}
+        >
+          <IconSymbol name="paperplane.fill" size={18} color="#5b4f9c" />
           <Text style={styles.primaryButtonText}>Feedback senden</Text>
         </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.secondaryButton} onPress={handleSkipFeedback}>
-          <Text style={styles.secondaryButtonText}>Überspringen</Text>
+
+        <TouchableOpacity style={styles.ghostButton} onPress={resetAndClose}>
+          <Text style={styles.ghostButtonText}>Überspringen</Text>
         </TouchableOpacity>
       </View>
     </>
   );
 
-  if (!visible) return null;
-
   return (
     <Modal visible={visible} transparent animationType="fade">
-      <KeyboardAvoidingView 
+      <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         <View style={[styles.overlay, currentStep === 'feedback' && styles.overlayKeyboard]}>
           <View style={styles.modalContainer}>
@@ -185,12 +279,10 @@ export const AppRatingModal: React.FC<AppRatingModalProps> = ({ visible, onClose
               end={{ x: 1, y: 1 }}
               style={styles.gradientBackground}
             >
-              {/* Close Button */}
-              <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
+              <TouchableOpacity style={styles.closeButton} onPress={handleDismiss}>
                 <IconSymbol name="xmark" size={16} color="rgba(255,255,255,0.9)" />
               </TouchableOpacity>
 
-              {/* Content based on current step */}
               {currentStep === 'initial' && renderInitialStep()}
               {currentStep === 'store' && renderStoreStep()}
               {currentStep === 'feedback' && renderFeedbackStep()}
@@ -212,10 +304,10 @@ const styles = StyleSheet.create({
   },
   overlayKeyboard: {
     justifyContent: 'flex-start',
-    paddingTop: Platform.OS === 'ios' ? 100 : 50,
+    paddingTop: Platform.OS === 'ios' ? 80 : 40,
   },
   modalContainer: {
-    width: SCREEN_WIDTH * 0.85,
+    width: SCREEN_WIDTH * 0.88,
     maxWidth: 400,
     borderRadius: 20,
     overflow: 'hidden',
@@ -231,100 +323,132 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 2,
   },
   iconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 24,
-    marginTop: 20,
+    marginBottom: 18,
+    marginTop: 16,
+  },
+  eyebrow: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    color: 'rgba(255,255,255,0.85)',
+    textAlign: 'center',
+  },
+  heroNumber: {
+    fontSize: 44,
+    fontWeight: '800',
+    letterSpacing: -1,
+    color: 'white',
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  heroSuffix: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.95)',
+    textAlign: 'center',
+    marginTop: 2,
+    marginBottom: 6,
   },
   title: {
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: '800',
     color: 'white',
     textAlign: 'center',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 14,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.92)',
     textAlign: 'center',
-    marginBottom: 32,
-    lineHeight: 20,
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    gap: 20,
-    marginBottom: 20,
-  },
-  ratingButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 12,
-    paddingVertical: 20,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    flex: 1,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
-  },
-  ratingButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'white',
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  feedbackContainer: {
-    width: '100%',
     marginBottom: 24,
-  },
-  feedbackInput: {
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: '#333',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
-    minHeight: 100,
+    lineHeight: 20,
+    maxWidth: 300,
   },
   buttonContainer: {
     width: '100%',
-    gap: 12,
+    gap: 10,
   },
   primaryButton: {
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderRadius: 12,
-    paddingVertical: 14,
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowOffset: { width: 0, height: 3 },
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.55,
   },
   primaryButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#667eea',
+    fontWeight: '800',
+    color: '#5b4f9c',
   },
-  secondaryButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 12,
-    paddingVertical: 14,
+  ghostButton: {
+    paddingVertical: 12,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
   },
-  secondaryButtonText: {
-    fontSize: 16,
+  ghostButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.75)',
+  },
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  chipActive: {
+    backgroundColor: '#ffffff',
+    borderColor: '#ffffff',
+  },
+  chipText: {
+    fontSize: 13,
     fontWeight: '600',
     color: 'white',
+  },
+  chipTextActive: {
+    color: '#5b4f9c',
+  },
+  feedbackContainer: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  feedbackInput: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 15,
+    color: '#222',
+    minHeight: 76,
   },
 });

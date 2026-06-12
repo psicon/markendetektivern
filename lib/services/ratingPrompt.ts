@@ -4,6 +4,10 @@ import { Alert } from 'react-native';
 import { db } from '../firebase';
 
 const RATING_FLAG_KEY = 'pendingRatingPrompt';
+// X/'Später' = sanfter Cooldown statt Sofort-Wiederholung beim
+// naechsten Trigger (Rating-Funnel-Redesign 2026-06-12).
+const DISMISSED_AT_KEY = (uid: string) => `ratingDismissedAt_${uid}`;
+const DISMISS_COOLDOWN_MS = 60 * 24 * 60 * 60 * 1000; // 60 Tage
 
 interface RatingFlag {
   userId: string;
@@ -106,12 +110,30 @@ class RatingPromptService {
    */
   private async shouldShowRating(userId: string): Promise<boolean> {
     try {
-      // Simple check: If not rated yet
+      // Nie wieder nach einer Antwort (positiv wie negativ).
       const hasRated = await AsyncStorage.getItem(`hasRated_${userId}`);
-      return !hasRated;
+      if (hasRated) return false;
+      // 60-Tage-Cooldown nach X/'Später' — nicht beim naechsten
+      // Level-Up sofort wieder nerven.
+      const dismissedAt = await AsyncStorage.getItem(DISMISSED_AT_KEY(userId));
+      if (dismissedAt) {
+        const age = Date.now() - Number(dismissedAt);
+        if (Number.isFinite(age) && age < DISMISS_COOLDOWN_MS) return false;
+      }
+      return true;
     } catch (error) {
       console.log('❌ Error checking rating status:', error);
       return true; // Default to show
+    }
+  }
+
+  /** X / 'Später': Cooldown setzen (60 Tage). */
+  async markDismissed(userId: string): Promise<void> {
+    try {
+      await AsyncStorage.setItem(DISMISSED_AT_KEY(userId), String(Date.now()));
+      console.log('📱 Rating dismissed — 60-Tage-Cooldown gesetzt');
+    } catch (error) {
+      console.error('❌ Error marking rating dismissed:', error);
     }
   }
 
@@ -203,15 +225,21 @@ class RatingPromptService {
   /**
    * Save feedback to existing Firestore rating document
    */
-  async saveFeedback(userId: string, feedback: string, ratingDocId?: string): Promise<void> {
+  async saveFeedback(
+    userId: string,
+    feedback: string,
+    ratingDocId?: string,
+    categories?: string[],
+  ): Promise<void> {
     try {
-      console.log(`💾 Saving feedback to Firestore: ${feedback}`);
+      console.log(`💾 Saving feedback to Firestore: ${feedback} [${(categories ?? []).join(',')}]`);
       
       if (ratingDocId) {
         // Update existing rating document with feedback
         const ratingDoc = doc(db, 'userfeedback', ratingDocId);
         await updateDoc(ratingDoc, {
-          feedbackText: feedback,
+          feedbackText: feedback || null,
+          feedbackCategories: categories ?? [],
           feedbackTimestamp: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
@@ -225,7 +253,8 @@ class RatingPromptService {
           rating: 'negative', // Feedback only comes from negative ratings
           triggerLevel: null,
           timestamp: serverTimestamp(),
-          feedbackText: feedback,
+          feedbackText: feedback || null,
+          feedbackCategories: categories ?? [],
           feedbackTimestamp: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
