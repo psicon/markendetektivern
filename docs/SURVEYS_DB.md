@@ -91,6 +91,12 @@ Pfad sichtbar, NICHT als bloße String-ID):
 "targetBrands":   [ db.doc('hersteller/Tj6g82LYEQn7dkaCuZXD') ]      // nur diese Marke
 ```
 
+> **WICHTIG — Targeting niemals im Titel/der Beschreibung verraten.** `title`
+> und `description` sind user-sichtbar (Umfragen-Übersicht). Das `targeting`-
+> Objekt selbst wird der App NIE angezeigt — aber schreib die Zielgruppe auch
+> nicht versehentlich in den Titel/Text ("nur für 18–99, alle Geschlechter…").
+> Der User soll nicht sehen, ob/welche demografischen Einschränkungen gelten.
+
 - `targetProducts`: Referenzen auf `produkte/*` (Eigenmarken/NoName) ODER
   `markenProdukte/*` (Marken) — du nimmst die jeweilige Doc-Referenz.
 - `targetBrands`: Referenz auf die `hersteller`-Ref des Produkts —
