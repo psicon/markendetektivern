@@ -294,16 +294,53 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
 
   // Banner-State + Pending-Queue (für Walkthrough-Konflikt).
   const [bannerData, setBannerData] = useState<BannerData | null>(null);
-  const [pendingBannerData, setPendingBannerData] = useState<BannerData | null>(null);
-  // Synchron lesbarer Spiegel von "läuft gerade ein Banner?" — die Banner-
-  // Trigger laufen in setTimeout/async-Callbacks und dürfen NICHT den
-  // closure-veralteten bannerData-State lesen. Verhindert, dass eine weitere
-  // Aktion einen offenen Banner ersetzt/neu animiert ("kommt immer wieder",
-  // 86ca8h…) — stattdessen geht der neue Banner in die Queue.
-  const bannerVisibleRef = useRef(false);
-  useEffect(() => {
-    bannerVisibleRef.current = bannerData !== null;
-  }, [bannerData]);
+  // Banner-Queue (86ca8h…): Banner laufen SEQUENZIELL, einer nach dem anderen.
+  // WICHTIG: `bannerShowingRef` wird SYNCHRON gesetzt (nicht per useEffect) —
+  // sonst racen Banner, die im selben Tick feuern (z.B. mehrere Achievements,
+  // die eine einzige Aktion freischaltet) und ersetzen sich gegenseitig.
+  // `bannerQueueRef` hält die wartenden Banner (FIFO, dedupt, gedeckelt).
+  const bannerQueueRef = useRef<BannerData[]>([]);
+  const bannerShowingRef = useRef(false);
+  const currentBannerKeyRef = useRef<string | null>(null);
+  const BANNER_QUEUE_MAX = 4;
+  const bannerKey = (b: BannerData) => `${b.title}|${b.subtitle}`;
+
+  // Banner zeigen ODER hinten anstellen — komplett synchron entschieden, ohne
+  // bannerData-State zu lesen (sonst stale closure in den setTimeout/async-
+  // Handlern). Refs sind immer aktuell, auch im selben Tick.
+  const presentBanner = useCallback((data: BannerData) => {
+    const k = bannerKey(data);
+    // Dedupe: identischer Banner läuft gerade ODER steht schon in der Queue.
+    if (bannerShowingRef.current && currentBannerKeyRef.current === k) return;
+    if (bannerQueueRef.current.some((b) => bannerKey(b) === k)) return;
+    // Walkthrough läuft ODER ein Banner ist offen → hinten anstellen.
+    if (CoachmarkService.isAnyActive() || bannerShowingRef.current) {
+      if (bannerQueueRef.current.length < BANNER_QUEUE_MAX) bannerQueueRef.current.push(data);
+      return;
+    }
+    bannerShowingRef.current = true; // synchron → kein Same-Tick-Race
+    currentBannerKeyRef.current = k;
+    setBannerData(data);
+  }, []);
+
+  // Nächsten Banner aus der Queue zeigen, sofern frei + kein Walkthrough.
+  const maybeShowNextBanner = useCallback(() => {
+    if (CoachmarkService.isAnyActive()) return;
+    if (bannerShowingRef.current) return;
+    const next = bannerQueueRef.current.shift();
+    if (!next) return;
+    bannerShowingRef.current = true;
+    currentBannerKeyRef.current = bannerKey(next);
+    setBannerData(next);
+  }, []);
+
+  // Banner dismisst → Slot freigeben + nach kurzer Pause den nächsten zeigen.
+  const dismissBanner = useCallback(() => {
+    bannerShowingRef.current = false;
+    currentBannerKeyRef.current = null;
+    setBannerData(null);
+    setTimeout(maybeShowNextBanner, 350);
+  }, [maybeShowNextBanner]);
 
   // 📱 App Rating Modal State
   const [showAppRatingModal, setShowAppRatingModal] = useState(false);
@@ -348,16 +385,10 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     }
 
     const data = bannerDataFromAchievement(achievement);
-    setTimeout(() => {
-      // Läuft ein Walkthrough ODER schon ein Banner? → in die Queue, NICHT
-      // den offenen Banner ersetzen/neu animieren (86ca8h…).
-      if (CoachmarkService.isAnyActive() || bannerVisibleRef.current) {
-        setPendingBannerData(data);
-      } else {
-        setBannerData(data);
-      }
-    }, 1500);
-  }, []);
+    // presentBanner entscheidet synchron Zeigen-vs-Queue (race-frei auch bei
+    // mehreren Achievements, die EINE Aktion gleichzeitig freischaltet).
+    setTimeout(() => presentBanner(data), 1500);
+  }, [presentBanner]);
 
   const pointsHandler = useCallback(async (points: number, action: string, message: string) => {
     if (points <= 0) return;
@@ -393,14 +424,7 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     }
 
     const data = bannerDataFromLevelUp(newLevel, oldLevel, unlockedCategory);
-    setTimeout(() => {
-      // Walkthrough ODER offener Banner → queuen statt ersetzen (86ca8h…).
-      if (CoachmarkService.isAnyActive() || bannerVisibleRef.current) {
-        setPendingBannerData(data);
-      } else {
-        setBannerData(data);
-      }
-    }, 1500);
+    setTimeout(() => presentBanner(data), 1500);
 
     // Rating-Trigger nach Level-Up: ab Level 3 setzen wir den
     // Pending-Rating-Flag, sodass der periodische Check (siehe
@@ -412,7 +436,7 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         console.error('❌ Error setting rating flag:', error);
       }
     }
-  }, [user?.uid]);
+  }, [user?.uid, presentBanner]);
 
   // 🔄 Callback-Registrierung beim Mount
   useEffect(() => {
@@ -428,32 +452,26 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     };
   }, [achievementHandler, pointsHandler, levelUpHandler]);
 
-  // 🎖️ Banner-Suppression beim Walkthrough-Open: ziehe einen
-  // sichtbaren Banner zurück und queue ihn.
+  // 🎖️ Banner-Suppression beim Walkthrough-Open: ziehe einen sichtbaren
+  // Banner zurück und stell ihn VORNE in die Queue (kommt nach dem
+  // Walkthrough zuerst wieder). Refs synchron freigeben.
   useEffect(() => {
-    if (!bannerData) return;
-    if (walkthroughActive) {
+    if (walkthroughActive && bannerData) {
       console.log('🎖️ Walkthrough öffnet — aktiver Banner geht in Queue');
-      setPendingBannerData(bannerData);
+      bannerQueueRef.current.unshift(bannerData);
+      bannerShowingRef.current = false;
+      currentBannerKeyRef.current = null;
       setBannerData(null);
     }
   }, [bannerData, walkthroughActive]);
 
-  // 🎖️ Banner-Drain: zeigt den gequeueten Banner, sobald KEIN Banner mehr
-  // offen ist und kein Walkthrough läuft. Greift sowohl nach Walkthrough-
-  // Close als auch nach dem Dismiss eines vorherigen Banners (86ca8h…) —
-  // dadurch laufen Banner sequenziell (einer nach dem anderen) statt sich zu
-  // ersetzen/zu wiederholen.
+  // 🎖️ Banner-Drain nach Walkthrough-Close: zeigt den nächsten gequeueten
+  // Banner. (Der Drain nach einem normalen Dismiss läuft über dismissBanner.)
   useEffect(() => {
-    if (!pendingBannerData) return;
     if (walkthroughActive) return;
-    if (bannerData) return; // erst wenn der aktuelle Banner zu ist
-    const t = setTimeout(() => {
-      setBannerData(pendingBannerData);
-      setPendingBannerData(null);
-    }, 400);
+    const t = setTimeout(maybeShowNextBanner, 400);
     return () => clearTimeout(t);
-  }, [pendingBannerData, walkthroughActive, bannerData]);
+  }, [walkthroughActive, maybeShowNextBanner]);
 
   // 🟡 Pending Punkte/Streak-Toasts-Drain bei Walkthrough-Ende.
   useEffect(() => {
@@ -529,16 +547,14 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   // Wird über useGamification() konsumiert. Zeigt direkt einen
   // Banner ohne 1.5 s Defer (User hat ja gerade aktiv getapped),
   // respektiert aber die Walkthrough-Queue.
-  const showBanner = useCallback((data: BannerData) => {
-    // Walkthrough ODER schon ein Banner offen → queuen statt ersetzen, sonst
-    // „kommt immer wieder", wenn mehrere Banner-Quellen kurz nacheinander
-    // feuern (Level-Up + Achievement + Cashback). 86ca8h…
-    if (CoachmarkService.isAnyActive() || bannerVisibleRef.current) {
-      setPendingBannerData(data);
-    } else {
-      setBannerData(data);
-    }
-  }, []);
+  const showBanner = useCallback(
+    (data: BannerData) => {
+      // Geht durch dieselbe synchrone Queue wie alle Banner — kein Ersetzen
+      // eines offenen Banners (86ca8h…).
+      presentBanner(data);
+    },
+    [presentBanner],
+  );
 
   // ─── Globaler Cashback-Status-Watcher ───────────────────────────
   //
@@ -626,7 +642,7 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
           <AchievementUnlockBanner
             visible
             data={bannerData}
-            onDismiss={() => setBannerData(null)}
+            onDismiss={dismissBanner}
           />
         </Suspense>
       ) : null}
