@@ -9,7 +9,7 @@
  * React-Komponente importiert (Import-Zyklus + RN-Bridge-Risiko).
  */
 
-import { getActionSurvey, markActionPromptShown } from '@/lib/services/surveyService';
+import { getActionSurvey } from '@/lib/services/surveyService';
 import type { ActionType } from '@/lib/types/achievements';
 import type { Poll } from '@/lib/types/survey';
 
@@ -38,7 +38,6 @@ export async function requestActionSurvey(
   try {
     const poll = await getActionSurvey(uid, action, metadata ?? undefined);
     if (poll && prompter) {
-      await markActionPromptShown();
       prompter(poll);
     }
   } catch {

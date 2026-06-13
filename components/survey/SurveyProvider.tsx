@@ -44,9 +44,15 @@ import { pollTriggerOf, type Poll, type PollAnswer } from '@/lib/types/survey';
 interface SurveyContextValue {
   /** Öffnet das Umfrage-Sheet mit einer konkreten Umfrage. */
   showSurvey: (poll: Poll) => void;
+  /** Bumpt bei jedem Schließen/Abschluss — Konsumenten (Rewards-Tile)
+   *  laden ihre Umfrage-Liste neu, damit beantwortete verschwinden. */
+  activityNonce: number;
 }
 
-const SurveyContext = createContext<SurveyContextValue>({ showSurvey: () => {} });
+const SurveyContext = createContext<SurveyContextValue>({
+  showSurvey: () => {},
+  activityNonce: 0,
+});
 
 export function useSurvey(): SurveyContextValue {
   return useContext(SurveyContext);
@@ -59,6 +65,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
 
   const [poll, setPoll] = useState<Poll | null>(null);
   const [visible, setVisible] = useState(false);
+  const [activityNonce, setActivityNonce] = useState(0);
   const startedAtRef = useRef(0);
   const completedRef = useRef(false);
 
@@ -124,6 +131,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
           ? ` ${formatCents(p.rewardCents)} Taler sind unterwegs.`
           : '';
       showInfoToast(`Danke für deine Antwort!${reward}`, 'info', scheme);
+      setActivityNonce((n) => n + 1); // Tile-Liste neu laden
     },
     [poll, user?.uid, scheme],
   );
@@ -134,9 +142,10 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
       void markDismissed(poll.id);
     }
     setVisible(false);
+    setActivityNonce((n) => n + 1);
   }, [poll]);
 
-  // "Heute keine Vorschläge mehr" — nur bei action-getriggerten Umfragen.
+  // "Heute stumm schalten" — nur bei action-getriggerten Umfragen.
   const handleSnooze = useCallback(() => {
     void snoozeActionSurveysToday();
     completedRef.current = true; // kein Dismiss-Cooldown nötig, Snooze deckt ab
@@ -147,7 +156,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
   const isActionPoll = poll ? pollTriggerOf(poll).type === 'action' : false;
 
   return (
-    <SurveyContext.Provider value={{ showSurvey }}>
+    <SurveyContext.Provider value={{ showSurvey, activityNonce }}>
       {children}
       <FilterSheet
         visible={visible}
@@ -177,7 +186,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
                     color: theme.textMuted,
                   }}
                 >
-                  Heute keine Vorschläge mehr
+                  Heute stumm schalten
                 </Text>
               </Pressable>
             ) : null}

@@ -445,13 +445,12 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
   const [campaigns, setCampaigns] = useState<ActiveCampaign[]>([]);
   const [campaignsLoaded, setCampaignsLoaded] = useState(false);
   // Umfragen (ClickUp 86ca8fbpz): eligible, unbeantwortete general-Polls.
-  const { showSurvey } = useSurvey();
+  // activityNonce bumpt nach jeder Beantwortung → Liste hier neu laden
+  // (beantwortete verschwinden, kein Re-Pop, kein Lügen-Toast).
+  const { activityNonce } = useSurvey();
   const [availableSurveys, setAvailableSurveys] = useState<Poll[]>([]);
-  const [surveyPickerOpen, setSurveyPickerOpen] = useState(false);
-  // Welche Teilmenge der Picker zeigt (alle vs. zu einer Campaign).
-  const [surveyPickerList, setSurveyPickerList] = useState<Poll[]>([]);
   React.useEffect(() => {
-    if (!isFocused || !user?.uid) return;
+    if (!user?.uid) return;
     let alive = true;
     getGeneralSurveys(user.uid)
       .then((s) => {
@@ -461,26 +460,12 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
     return () => {
       alive = false;
     };
-  }, [isFocused, user?.uid]);
-  // Öffnet eine Umfrage-Liste: genau eine → direkt; mehrere → Auswahl-
-  // Sheet; keine → Hinweis. Gemeinsam für Tile + Campaign-Card.
-  const openSurveyList = useCallback(
-    (list: Poll[]) => {
-      if (list.length === 1) {
-        showSurvey(list[0]);
-      } else if (list.length > 1) {
-        setSurveyPickerList(list);
-        setSurveyPickerOpen(true);
-      }
-      // list leer → no-op: das Tile ist bei 0 Umfragen gar nicht erst
-      // tippbar (kein irritierender "keine Umfrage"-Toast mehr).
-    },
-    [showSurvey],
-  );
-  // Schnellzugriff-Tile: alle eligible Umfragen.
+  }, [isFocused, user?.uid, activityNonce]);
+  // Schnellzugriff-Tile → dedizierte Umfragen-Übersicht (eine Stelle,
+  // wo alle allgemeinen Umfragen durchgegangen werden können).
   const openSurveys = useCallback(() => {
-    openSurveyList(availableSurveys);
-  }, [availableSurveys, openSurveyList]);
+    safePush('/surveys' as any);
+  }, []);
   React.useEffect(() => {
     let alive = true;
     getCashbackConfig()
@@ -1396,73 +1381,6 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
               </>
             )}
           </Pressable>
-        </View>
-      </FilterSheet>
-
-      {/* Umfragen-Auswahl (ClickUp 86ca8fbpz) — nur bei >1 verfügbaren.
-          Eine einzelne öffnet direkt via openSurveys. */}
-      <FilterSheet
-        visible={surveyPickerOpen}
-        title="Umfragen"
-        onClose={() => setSurveyPickerOpen(false)}
-      >
-        <View style={{ paddingBottom: 8, gap: 10 }}>
-          {surveyPickerList.map((s) => (
-            <Pressable
-              key={s.id}
-              onPress={() => {
-                setSurveyPickerOpen(false);
-                showSurvey(s);
-              }}
-              style={({ pressed }) => ({
-                padding: 14,
-                borderRadius: radii.lg,
-                backgroundColor: theme.surface,
-                borderWidth: 1,
-                borderColor: theme.border,
-                opacity: pressed ? 0.85 : 1,
-              })}
-            >
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.extraBold,
-                  fontSize: 15,
-                  color: theme.text,
-                  letterSpacing: -0.2,
-                }}
-              >
-                {s.title}
-              </Text>
-              {s.description ? (
-                <Text
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.medium,
-                    fontSize: 12,
-                    color: theme.textSub,
-                    marginTop: 4,
-                  }}
-                  numberOfLines={2}
-                >
-                  {s.description}
-                </Text>
-              ) : null}
-              {typeof s.rewardCents === 'number' && s.rewardCents > 0 ? (
-                <Text
-                  style={{
-                    fontFamily,
-                    fontWeight: fontWeight.bold,
-                    fontSize: 12,
-                    color: theme.primary ?? '#0d8575',
-                    marginTop: 6,
-                  }}
-                >
-                  +{fmtCents(s.rewardCents)} Taler
-                </Text>
-              ) : null}
-            </Pressable>
-          ))}
         </View>
       </FilterSheet>
     </>

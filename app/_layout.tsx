@@ -178,6 +178,7 @@ function ThemedApp() {
                 <Stack.Screen name="product-comparison/[id]" options={{ headerShown: false }} />
                 <Stack.Screen name="noname-detail/[id]" options={{ headerShown: false }} />
                 <Stack.Screen name="external-product/[ean]" options={{ headerShown: false }} />
+                <Stack.Screen name="surveys" options={{ headerShown: false }} />
                 <Stack.Screen
                   name="barcode-scanner"
                   options={{

@@ -45,21 +45,20 @@ import {
 } from '@/lib/types/survey';
 
 // ── Frequency-Konfig ──
-// Globaler Floor zwischen ZWEI Action-Prompts (egal welche Umfrage) —
-// verhindert Survey-Fatigue, ohne das Verdienen auszubremsen. 1 h ist
-// ein vernünftiger "stört nicht"-Default (6 h war zu selten).
-const ACTION_GLOBAL_COOLDOWN_MS = 60 * 60 * 1000; // 1 h
-// Re-Ask-/Dismiss-Cooldown EINER Umfrage. Pro Umfrage via trigger.
-// cooldownHours überschreibbar (0 = sofort wieder, z.B. zum Testen).
+// Re-Ask-/Dismiss-Cooldown EINER Umfrage: nach Antwort/Wegklick erst
+// nach `cooldownHours` (Default 6 h) wieder zeigen → kein Re-Pop-Spam.
+// Pro Umfrage via trigger.cooldownHours überschreibbar (0 = sofort wieder).
+// KEIN globaler Cooldown mehr — verschiedene Umfragen dürfen je auf ihre
+// Aktion feuern; Spam derselben Umfrage verhindert dieser Cooldown.
 const POLL_DISMISS_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 h Default
 const POLLS_TTL_MS = 5 * 60 * 1000;
 const CTX_TTL_MS = 5 * 60 * 1000;
 
 const K_ANSWERED = 'survey_answered_v1'; // string[] pollIds
 const K_DISMISSED = 'survey_dismissed_v1'; // Record<pollId, ts>
-const K_LAST_ACTION_PROMPT = 'survey_last_action_prompt_v1'; // ts
 const K_SNOOZE_UNTIL = 'survey_snooze_until_v1'; // ts — "heute keine Vorschläge mehr"
 const K_ACTION_ENABLED = 'survey_action_enabled_v1'; // '0' = dauerhaft aus (Profil-Setting)
+const K_ANSWER_COUNT = 'survey_answer_count_v1'; // Record<pollId, number>
 
 // ── In-memory caches (RAM, kein Persist) ──
 let pollsCache: { at: number; polls: Poll[] } | null = null;
@@ -171,6 +170,17 @@ async function getDismissed(): Promise<Record<string, number>> {
     return {};
   }
 }
+// Anzahl der (lokal bekannten) Antworten pro Umfrage — treibt das
+// Per-User-Limit client-seitig, damit beantwortete/ausgeschöpfte Umfragen
+// nicht erneut erscheinen + der Reward-Toast nicht lügt.
+async function getAnswerCounts(): Promise<Record<string, number>> {
+  try {
+    const raw = await AsyncStorage.getItem(K_ANSWER_COUNT);
+    return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
 
 /** Hat der User diese Umfrage schon beantwortet (lokal bekannt)? */
 export async function hasAnswered(pollId: string): Promise<boolean> {
@@ -251,13 +261,7 @@ export async function getActionSurvey(
   // Rewards-Tab bleibt immer erreichbar.
   if (!(await areActionSurveysEnabled())) return null;
   if (await isSnoozed()) return null;
-  const [lastPromptRaw, answered, dismissed] = await Promise.all([
-    AsyncStorage.getItem(K_LAST_ACTION_PROMPT),
-    getAnswered(),
-    getDismissed(),
-  ]);
-  const lastPrompt = lastPromptRaw ? parseInt(lastPromptRaw, 10) || 0 : 0;
-  const globalCooldownActive = nowMs() - lastPrompt < ACTION_GLOBAL_COOLDOWN_MS;
+  const [answered, dismissed] = await Promise.all([getAnswered(), getDismissed()]);
 
   const [polls, ctx] = await Promise.all([
     getActivePolls(),
@@ -272,9 +276,9 @@ export async function getActionSurvey(
     const trig = pollTriggerOf(p);
     if (trig.type !== 'action' || trig.action !== action) continue;
     if (answered.has(p.id)) continue;
-    // Globaler Anti-Fatigue-Floor — greift NICHT, wenn die Umfrage
-    // explizit cooldownHours:0 setzt (= "immer zeigen", z.B. zum Testen).
-    if (globalCooldownActive && trig.cooldownHours !== 0) continue;
+    // Pro-Umfrage-Cooldown: nach Antwort/Wegklick (markDismissed) erst
+    // nach `cooldownHours` (Default 6 h) wieder zeigen → kein Re-Pop-Spam.
+    // Verschiedene Umfragen können weiterhin je auf ihre Aktion feuern.
     const dAt = dismissed[p.id];
     const cd = (trig.cooldownHours ?? POLL_DISMISS_COOLDOWN_MS / 3_600_000) * 3_600_000;
     if (dAt && now - dAt < cd) continue;
@@ -341,14 +345,6 @@ async function resolveProductBrandId(
   }
 }
 
-/** Markiert, dass ein Action-Prompt JETZT gezeigt wurde (globaler Cooldown). */
-export async function markActionPromptShown(): Promise<void> {
-  try {
-    await AsyncStorage.setItem(K_LAST_ACTION_PROMPT, String(nowMs()));
-  } catch {
-    /* ignore */
-  }
-}
 
 /** Merkt eine abgebrochene Umfrage (Dismiss-Cooldown). */
 export async function markDismissed(pollId: string): Promise<void> {
@@ -379,16 +375,25 @@ export async function submitResponse(args: {
 
   // 1. Frequenz-State setzen (await: muss VOR dem Sheet-Schließen
   //    persistiert sein — sonst Re-Trigger-Race, siehe Coachmark-Learning).
-  //    • Einmalige Umfragen → answered (nie wieder).
-  //    • Wiederholbare (per_answer / none-action) → NICHT answered, aber
-  //      Dismiss-Cooldown, damit sie nicht sofort erneut aufpoppen.
+  //    • Antwort-Zähler hochzählen.
+  //    • Einmalig (completion / none-general) ODER Per-User-Limit erreicht
+  //      → answered (nie wieder zeigen → kein Re-Pop, kein Lügen-Toast).
+  //    • Sonst (per_answer mit Restkontingent) → nur Dismiss-Cooldown.
   try {
-    if (isPollRepeatable(poll)) {
-      await markDismissed(poll.id);
-    } else {
+    const counts = await getAnswerCounts();
+    const newCount = (counts[poll.id] ?? 0) + 1;
+    counts[poll.id] = newCount;
+    await AsyncStorage.setItem(K_ANSWER_COUNT, JSON.stringify(counts));
+
+    const repeatable = isPollRepeatable(poll);
+    const capReached =
+      typeof poll.maxPerUser === 'number' && poll.maxPerUser > 0 && newCount >= poll.maxPerUser;
+    if (!repeatable || capReached) {
       const answered = await getAnswered();
       answered.add(poll.id);
       await AsyncStorage.setItem(K_ANSWERED, JSON.stringify([...answered]));
+    } else {
+      await markDismissed(poll.id);
     }
   } catch {
     /* nicht fatal */
