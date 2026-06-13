@@ -123,7 +123,9 @@ const StandardToast: React.FC<{
             />
           )}
           <Text
-            numberOfLines={2}
+            // Mit Action-Pille frisst der Button horizontalen Platz → eine
+            // Zeile mehr, damit längere Hinweise nicht abgeschnitten werden.
+            numberOfLines={actionLabel && onActionPress ? 3 : 2}
             style={[styles.text, { color: textColor }]}
           >
             {text}

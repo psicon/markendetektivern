@@ -196,7 +196,9 @@ export function SurveyRunner({
                   alignItems: 'center',
                   gap: 10,
                   paddingHorizontal: 14,
-                  paddingVertical: 13,
+                  // Höhere Tap-Fläche (~Button-Höhe) → weniger Fehltipps.
+                  minHeight: 52,
+                  paddingVertical: 12,
                   borderRadius: radii.md,
                   marginBottom: 8,
                   borderWidth: selected ? 1.5 : 1,

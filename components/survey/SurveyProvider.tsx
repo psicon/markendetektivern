@@ -188,8 +188,10 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
           scheme,
         );
       } else if (pays && !eligible) {
+        // Betrag ZUERST — der Hinweis-Toast kürzt lange Texte (2 Zeilen +
+        // Action-Pille), sonst wird der Betrag abgeschnitten (86ca…).
         showCashbackNudgeToast(
-          `Danke für deine Antwort! Mit aktiviertem Cashback gäbe es dafür ${formatCents(p.rewardCents!)} Taler.`,
+          `${formatCents(p.rewardCents!)} Taler gäbe es mit aktiviertem Cashback.`,
           goToCashback,
           scheme,
         );
