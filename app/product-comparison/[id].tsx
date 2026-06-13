@@ -1267,9 +1267,9 @@ export default function ProductComparisonScreen() {
         prevAnzahl,
         trackingPayload,
       );
-      if (newAnzahl === 0) {
-        showInfoToast('🗑️ Aus Einkaufsliste entfernt', 'ERROR');
-      }
+      // Kein "entfernt"-Toast: die Mengen-Pill schließt sich beim Entfernen
+      // sichtbar → das IST das Feedback. Toast wäre redundant + verdeckt den
+      // Header. (User-Vorgabe)
     } catch (e) {
       console.error('Cart decrement failed:', e);
       setCartAnzahlMap((prev) => ({ ...prev, [productId]: prevAnzahl }));

@@ -888,7 +888,9 @@ export default function NoNameDetailScreen() {
             }
           : undefined,
       );
-      if (next === 0) showInfoToast('🗑️ Aus Einkaufsliste entfernt', 'ERROR');
+      // Kein "entfernt"-Toast: die Mengen-Pill schließt sich beim Entfernen
+      // mit Exit-Animation (closePill oben) → das IST das Feedback. Der Toast
+      // wäre redundant + verdeckt den Header. (User-Vorgabe)
     } catch (e) {
       console.error('Cart decrement failed:', e);
       setCartAnzahl(prev);
