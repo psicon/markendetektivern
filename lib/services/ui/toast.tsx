@@ -184,13 +184,16 @@ function showToast(
     // Von allen Helpern durchgereicht (scheme-aware Styling). War im Typ
     // bisher nicht deklariert → 10 vorbestehende TS-Fehler; hier ergänzt.
     colorScheme?: 'light' | 'dark';
+    // Position-Override (sonst kategorie-basiert). Genutzt z.B. für den
+    // Umfrage-Hinweis: BOTTOM, damit er nicht den Header verdeckt.
+    position?: ToastPosition;
   },
 ) {
   const duration = options?.durationMs ?? getToastDuration(category);
 
   toast(message, {
     id: options?.id,
-    position: positionForCategory(category),
+    position: options?.position ?? positionForCategory(category),
     duration,
     disableShadow: true, // we draw our own shadow on the card
     width: SCREEN_WIDTH,
@@ -331,6 +334,8 @@ export function showSurveyHintToast(
     onActionPress: onOpen,
     colorScheme,
     durationMs: 8000,
+    // BOTTOM, damit der Hinweis nicht den Header (Back/Titel) verdeckt.
+    position: ToastPosition.BOTTOM,
   });
 }
 

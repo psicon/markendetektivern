@@ -58,6 +58,7 @@ import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { startReceiptScanFlow } from '@/lib/services/cashbackScanStart';
 import { useShoppingCartCount } from '@/lib/hooks/useShoppingCartCount';
+import { useFavoritesCount } from '@/lib/hooks/useFavoritesCount';
 import { useSurvey } from '@/components/survey/SurveyProvider';
 import { getGeneralSurveys } from '@/lib/services/surveyService';
 import { achievementService } from '@/lib/services/achievementService';
@@ -94,20 +95,30 @@ export default function HomeScreen() {
   // Live cart-count für das Einkaufsliste-Schnellzugriff-Card-Badge.
   // Shared mit FloatingShoppingListButton — gleicher Listener-Wert.
   const { count: cartCount } = useShoppingCartCount();
+  // Live favorites-count → Badge auf der Favoriten-Card. Leichtgewichtiger
+  // snap.size-Listener (KEIN Produktdaten-Load) → Home-Performance bleibt.
+  const { count: favoritesCount } = useFavoritesCount();
 
   // Anzahl verfügbarer allgemeiner Umfragen → Badge auf der Umfragen-
-  // Schnellzugriff-Card (analog cartCount). activityNonce triggert ein
-  // Reload nach jeder Beantwortung/Schließen; isFocused beim Zurückkehren.
+  // Schnellzugriff-Card. activityNonce triggert ein Reload nach jeder
+  // Beantwortung/Schließen; isFocused beim Zurückkehren. PERFORMANCE: der
+  // (gecachte) Poll-Fetch wird via InteractionManager hinter den First-
+  // Paint/Animationen deferred, damit das Badge die Home-Render-Phase nicht
+  // belastet.
   const { activityNonce } = useSurvey();
   const [surveyCount, setSurveyCount] = useState(0);
   useEffect(() => {
     if (!user?.uid || !isFocused) return;
     let alive = true;
-    getGeneralSurveys(user.uid)
-      .then((s) => alive && setSurveyCount(s.length))
-      .catch(() => alive && setSurveyCount(0));
+    const handle = InteractionManager.runAfterInteractions(() => {
+      if (!alive) return;
+      getGeneralSurveys(user.uid)
+        .then((s) => alive && setSurveyCount(s.length))
+        .catch(() => alive && setSurveyCount(0));
+    });
     return () => {
       alive = false;
+      handle.cancel?.();
     };
   }, [user?.uid, isFocused, activityNonce]);
 
@@ -978,15 +989,17 @@ export default function HomeScreen() {
                 background={item.background}
                 dark={item.dark}
                 onPress={item.onPress}
-                // Live-Count-Badge: Cart-Card → Einkaufszettel-Anzahl,
-                // Umfragen-Card → Anzahl verfügbarer Umfragen. Andere
+                // Live-Count-Badge: Cart → Einkaufszettel, Favoriten →
+                // Anzahl Favoriten, Umfragen → verfügbare Umfragen. Andere
                 // Cards bleiben badge-frei (count <= 0 rendert nichts).
                 count={
                   item.icon === 'cart'
                     ? cartCount
-                    : item.icon === 'poll'
-                      ? surveyCount
-                      : undefined
+                    : item.icon === 'heart-outline'
+                      ? favoritesCount
+                      : item.icon === 'poll'
+                        ? surveyCount
+                        : undefined
                 }
               />
             ))}

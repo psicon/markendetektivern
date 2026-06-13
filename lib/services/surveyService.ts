@@ -50,11 +50,17 @@ import {
 // Re-Ask-/Dismiss-Cooldown EINER Umfrage: nach Antwort/Wegklick erst
 // nach `cooldownHours` (Default 6 h) wieder zeigen → kein Re-Pop-Spam.
 // Pro Umfrage via trigger.cooldownHours überschreibbar (0 = sofort wieder).
-// KEIN globaler Cooldown mehr — verschiedene Umfragen dürfen je auf ihre
-// Aktion feuern; Spam derselben Umfrage verhindert dieser Cooldown.
 const POLL_DISMISS_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 h Default
 const POLLS_TTL_MS = 5 * 60 * 1000;
 const CTX_TTL_MS = 5 * 60 * 1000;
+
+// Session-Cap (User-Vorgabe 86ca8fbpz / Bug-Report): eine action-getriggerte
+// Umfrage darf pro App-Start NUR EINMAL aufpoppen — sonst kommt sie bei jeder
+// Aktion (z.B. jedes Produkt-Öffnen) wieder und nervt. Nach dem Anzeigen wird
+// die Umfrage zusätzlich per markDismissed in den persistenten 6-h-Cooldown
+// gelegt, damit sie auch nach einem App-Neustart nicht sofort wieder kommt.
+// Das Flag ist MODUL-scoped (RAM) → resettet beim App-Neustart von selbst.
+let actionPromptedThisSession = false;
 
 const K_ANSWERED = 'survey_answered_v1'; // string[] pollIds
 const K_DISMISSED = 'survey_dismissed_v1'; // Record<pollId, ts>
@@ -287,6 +293,10 @@ export async function getActionSurvey(
   metadata?: { productId?: string; productType?: string },
 ): Promise<Poll | null> {
   if (!uid) return null;
+  // Session-Cap: pro App-Start max. EIN action-Prompt (User-Vorgabe —
+  // sonst poppt die Umfrage bei jeder Aktion wieder). Resettet beim
+  // App-Neustart (Modul-Flag).
+  if (actionPromptedThisSession) return null;
   // Stummschaltung (User): dauerhaftes Profil-Setting ODER Tages-Snooze.
   // Beide gelten nur für action-Vorschläge — die general-Liste im
   // Rewards-Tab bleibt immer erreichbar.
@@ -331,6 +341,13 @@ export async function getActionSurvey(
       }
       if (!brandIdResolved || !brandIds.includes(brandIdResolved)) continue;
     }
+    // Treffer → diesen Prompt für die Session sperren (max. 1×/Start) UND
+    // die Umfrage in den persistenten 6-h-Cooldown legen, damit sie auch
+    // nach einem Neustart nicht sofort wieder kommt. Erst NACH dem Anzeigen
+    // (nicht schon bei reiner Eligibility) — sonst würde eine geöffnete,
+    // aber nie angezeigte Umfrage fälschlich gesperrt.
+    actionPromptedThisSession = true;
+    void markDismissed(p.id);
     return p;
   }
   return null;
@@ -499,4 +516,6 @@ export function resetSurveyCaches(): void {
   pollsCache = null;
   ctxCache = null;
   brandIdCache.clear();
+  // Account-Wechsel zählt wie ein frischer Start → Session-Cap zurücksetzen.
+  actionPromptedThisSession = false;
 }
