@@ -25,7 +25,7 @@ import {
   RewardsWalkthrough,
 } from '@/components/coachmarks/RewardsWalkthrough';
 import { FilterSheet } from '@/components/design/FilterSheet';
-import { fontFamily, fontWeight } from '@/constants/tokens';
+import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useCoachmark } from '@/hooks/useCoachmark';
 import { useCoachmarkAnchor } from '@/hooks/useCoachmarkAnchor';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -33,6 +33,9 @@ import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { getActiveCashbackCampaigns, getCashbackConfig, type ActiveCampaign } from '@/lib/services/cashbackService';
+import { useSurvey } from '@/components/survey/SurveyProvider';
+import { getGeneralSurveys } from '@/lib/services/surveyService';
+import type { Poll } from '@/lib/types/survey';
 import { useWeeklyReceiptCount } from '@/lib/hooks/useWeeklyReceiptCount';
 import { showInfoToast } from '@/lib/services/ui/toast';
 import { requestPayout, setSelectedCampaignId, subscribePayout } from '@/lib/services/cashbackUpload';
@@ -111,6 +114,7 @@ function buildEarnActions(
   weeklyReceiptCount: number,
   campaignsEnabled: boolean,
   campaigns: ActiveCampaign[],
+  surveyCount: number = 0,
 ): EarnAction[] {
   const receiptCount = campaigns.filter((c) => (c.kind ?? 'receipt') === 'receipt').length;
   const photoCount = campaigns.filter((c) => (c.kind ?? 'receipt') === 'product_photos').length;
@@ -177,9 +181,17 @@ function buildEarnActions(
       label: 'Umfragen',
       bg: '#dde2e4',
       dark: false,
+      // Reward: Poll-eigener rewardCents wird in der Liste/im Sheet
+      // gezeigt; das Tile nutzt weiterhin den Campaign-Reward-Hint
+      // (falls eine survey-Campaign läuft) bzw. bleibt leer.
       reward: surveyReward,
-      available: SURVEY_AVAILABLE,
-      statusLabel: SURVEY_AVAILABLE ? 'Verfügbar' : 'Aktuell keine',
+      // Verfügbar = es gibt mind. eine eligible, unbeantwortete Umfrage
+      // (ClickUp 86ca8fbpz). surveyCount kommt aus getGeneralSurveys.
+      available: surveyCount > 0,
+      statusLabel:
+        surveyCount > 0
+          ? `${surveyCount} verfügbar`
+          : 'Aktuell keine',
     },
   ];
 }
@@ -427,6 +439,31 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
   const [campaignsEnabled, setCampaignsEnabled] = useState(false);
   const [campaigns, setCampaigns] = useState<ActiveCampaign[]>([]);
   const [campaignsLoaded, setCampaignsLoaded] = useState(false);
+  // Umfragen (ClickUp 86ca8fbpz): eligible, unbeantwortete general-Polls.
+  const { showSurvey } = useSurvey();
+  const [availableSurveys, setAvailableSurveys] = useState<Poll[]>([]);
+  const [surveyPickerOpen, setSurveyPickerOpen] = useState(false);
+  React.useEffect(() => {
+    if (!isFocused || !user?.uid) return;
+    let alive = true;
+    getGeneralSurveys(user.uid)
+      .then((s) => {
+        if (alive) setAvailableSurveys(s);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [isFocused, user?.uid]);
+  // Tap auf das Umfragen-Tile: genau eine → direkt öffnen; mehrere →
+  // Auswahl-Sheet; keine → no-op (Tile ist dann eh disabled).
+  const openSurveys = useCallback(() => {
+    if (availableSurveys.length === 1) {
+      showSurvey(availableSurveys[0]);
+    } else if (availableSurveys.length > 1) {
+      setSurveyPickerOpen(true);
+    }
+  }, [availableSurveys, showSurvey]);
   React.useEffect(() => {
     let alive = true;
     getCashbackConfig()
@@ -465,8 +502,8 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
   const [payoutBusy, setPayoutBusy] = useState(false);
   const [payoutAmountCents, setPayoutAmountCents] = useState(0);
   const earnActions = React.useMemo(
-    () => buildEarnActions(weeklyReceiptCount, campaignsEnabled, campaigns),
-    [weeklyReceiptCount, campaignsEnabled, campaigns],
+    () => buildEarnActions(weeklyReceiptCount, campaignsEnabled, campaigns, availableSurveys.length),
+    [weeklyReceiptCount, campaignsEnabled, campaigns, availableSurveys.length],
   );
 
   // T17.26: Anchors für den Spotlight-Walkthrough — Cashback-Hero,
@@ -868,7 +905,9 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
                   ? startReceiptScan
                   : a.k === 'photo'
                     ? () => router.push('/product-submit')
-                    : undefined
+                    : a.k === 'survey'
+                      ? openSurveys
+                      : undefined
               }
             />
           ))}
@@ -1327,6 +1366,73 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
               </>
             )}
           </Pressable>
+        </View>
+      </FilterSheet>
+
+      {/* Umfragen-Auswahl (ClickUp 86ca8fbpz) — nur bei >1 verfügbaren.
+          Eine einzelne öffnet direkt via openSurveys. */}
+      <FilterSheet
+        visible={surveyPickerOpen}
+        title="Umfragen"
+        onClose={() => setSurveyPickerOpen(false)}
+      >
+        <View style={{ paddingBottom: 8, gap: 10 }}>
+          {availableSurveys.map((s) => (
+            <Pressable
+              key={s.id}
+              onPress={() => {
+                setSurveyPickerOpen(false);
+                showSurvey(s);
+              }}
+              style={({ pressed }) => ({
+                padding: 14,
+                borderRadius: radii.lg,
+                backgroundColor: theme.surface,
+                borderWidth: 1,
+                borderColor: theme.border,
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Text
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.extraBold,
+                  fontSize: 15,
+                  color: theme.text,
+                  letterSpacing: -0.2,
+                }}
+              >
+                {s.title}
+              </Text>
+              {s.description ? (
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 12,
+                    color: theme.textSub,
+                    marginTop: 4,
+                  }}
+                  numberOfLines={2}
+                >
+                  {s.description}
+                </Text>
+              ) : null}
+              {typeof s.rewardCents === 'number' && s.rewardCents > 0 ? (
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.bold,
+                    fontSize: 12,
+                    color: theme.primary ?? '#0d8575',
+                    marginTop: 6,
+                  }}
+                >
+                  +{fmtCents(s.rewardCents)} Taler
+                </Text>
+              ) : null}
+            </Pressable>
+          ))}
         </View>
       </FilterSheet>
     </>

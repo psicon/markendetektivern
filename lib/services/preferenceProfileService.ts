@@ -226,4 +226,48 @@ export async function updateFromJourney(uid: string | null | undefined, journey:
   }
 }
 
-export const preferenceProfileService = { updateFromJourney };
+/**
+ * declared > inferred (ClickUp 86ca8fbpz): vom User explizit Angegebenes
+ * (profile.declared, vom CF aus dem User-Doc gespiegelt) überschreibt die
+ * abgeleiteten Dimensionen mit voller Confidence. Aus hooks/
+ * usePreferenceProfile hierher gezogen, damit der non-React surveyService
+ * (Eligibility-Filterung) dieselbe Logik nutzt — eine Quelle.
+ */
+export function mergeDeclaredProfile(p: any): PreferenceProfile {
+  const d = p?.declared;
+  if (!d) return p;
+  const dims = { ...(p.dimensions || {}) };
+  const conf = { ...(p.confidence || {}) };
+  const boost = (dim: string) => {
+    dims[dim] = Math.max(typeof dims[dim] === 'number' ? dims[dim] : 0, 0.6);
+    conf[dim] = 1;
+  };
+  if (d.favoriteMarket) boost('marketLoyalty');
+  if (Array.isArray(d.dietary) && d.dietary.length) boost('health');
+  if (Array.isArray(d.caresAbout)) {
+    if (d.caresAbout.some((x: string) => ['sustainability', 'bio', 'regional', 'eco'].includes(x)))
+      boost('sustainability');
+    if (d.caresAbout.includes('quality')) boost('contentQuality');
+    if (d.caresAbout.includes('price')) boost('price');
+  }
+  return { ...p, dimensions: dims, confidence: conf };
+}
+
+/**
+ * Liest users/{uid}/profile/preferences (declared-gemerged) — standalone,
+ * für Services außerhalb von React (z.B. surveyTargeting). KEIN Modul-
+ * Cache hier (der lebt im Hook); Aufrufer sollten selbst cachen.
+ */
+export async function getPreferenceProfile(
+  uid: string | null | undefined,
+): Promise<PreferenceProfile | null> {
+  if (!uid) return null;
+  try {
+    const snap = await getDoc(doc(db, 'users', uid, 'profile', 'preferences'));
+    return snap.exists() ? mergeDeclaredProfile(snap.data()) : null;
+  } catch {
+    return null;
+  }
+}
+
+export const preferenceProfileService = { updateFromJourney, getPreferenceProfile };

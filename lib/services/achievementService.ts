@@ -29,6 +29,7 @@ import {
 } from '../types/achievements';
 import { categoryAccessService } from './categoryAccessService';
 import leaderboardService from './leaderboardService';
+import { requestActionSurvey } from './surveyPromptBus';
 import { showDailyCapToast, showDedupeWindowToast, showOneTimeRestrictionToast, showWeeklyCapToast } from './ui/antiAbuseToast';
 
 class AchievementService {
@@ -654,6 +655,12 @@ class AchievementService {
 
       // 🎮 TRACK GAME ACTION POINTS (vor Achievements)
       await this.trackGameActionPoints(userId, action, metadata);
+
+      // 📋 ACTION-GETRIGGERTE UMFRAGE (ClickUp 86ca8fbpz): fire-and-
+      // forget — der Bus sucht eine passende, eligible, nicht-
+      // beantwortete Umfrage (mit Cooldown) und blendet sie als Sheet
+      // ein. Darf trackAction nie blockieren/beeinflussen.
+      void requestActionSurvey(userId, action);
 
       // Erstelle Event für Logging (optional für spätere Analyse)
       const event: AchievementEvent = {

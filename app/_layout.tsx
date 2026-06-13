@@ -20,6 +20,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { FontLoader } from '@/components/ui/FontLoader';
 import { GamificationProvider } from '@/components/ui/GamificationProvider';
 import { SplashScreen } from '@/components/ui/SplashScreen';
+import { SurveyProvider } from '@/components/survey/SurveyProvider';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { AnalyticsProvider } from '@/lib/contexts/AnalyticsProvider';
@@ -161,6 +162,7 @@ function ThemedApp() {
           <PushNotificationProvider>
             <AnalyticsProvider>
               <GamificationProvider>
+              <SurveyProvider>
               <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
               <Stack>
                 <Stack.Screen name="index" options={{ headerShown: false }} />
@@ -240,6 +242,7 @@ function ThemedApp() {
                 }}
               />
             </NavigationThemeProvider>
+              </SurveyProvider>
               </GamificationProvider>
             </AnalyticsProvider>
           </PushNotificationProvider>

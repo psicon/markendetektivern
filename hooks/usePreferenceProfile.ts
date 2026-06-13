@@ -13,6 +13,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { db } from '@/lib/firebase';
 import {
   PROFILE_DIMENSIONS,
+  mergeDeclaredProfile,
   type PreferenceProfile,
   type ProfileDimension,
 } from '@/lib/services/preferenceProfileService';
@@ -20,29 +21,9 @@ import {
 // Module-scoped read-once cache (RAM only, kein erneuter Read pro Mount).
 let cache: { uid: string; profile: PreferenceProfile | null } | null = null;
 
-/**
- * #2: declared > inferred. Vom User explizit Angegebenes überschreibt die
- * abgeleiteten Dimensionen (mit voller Confidence). declared kommt aus dem
- * profile.declared-Feld (vom CF aus dem User-Doc gespiegelt).
- */
-function mergeDeclared(p: any): PreferenceProfile {
-  const d = p?.declared;
-  if (!d) return p;
-  const dims = { ...(p.dimensions || {}) };
-  const conf = { ...(p.confidence || {}) };
-  const boost = (dim: string) => {
-    dims[dim] = Math.max(typeof dims[dim] === 'number' ? dims[dim] : 0, 0.6);
-    conf[dim] = 1;
-  };
-  if (d.favoriteMarket) boost('marketLoyalty');
-  if (Array.isArray(d.dietary) && d.dietary.length) boost('health');
-  if (Array.isArray(d.caresAbout)) {
-    if (d.caresAbout.some((x: string) => ['sustainability', 'bio', 'regional', 'eco'].includes(x))) boost('sustainability');
-    if (d.caresAbout.includes('quality')) boost('contentQuality');
-    if (d.caresAbout.includes('price')) boost('price');
-  }
-  return { ...p, dimensions: dims, confidence: conf };
-}
+// declared>inferred-Merge lebt jetzt im Service (eine Quelle, auch vom
+// non-React surveyTargeting genutzt). Lokaler Alias hält den Call-Site unten.
+const mergeDeclared = mergeDeclaredProfile;
 
 export function usePreferenceProfile(): PreferenceProfile | null {
   const { user } = useAuth();
