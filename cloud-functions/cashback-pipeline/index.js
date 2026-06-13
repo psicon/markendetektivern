@@ -585,13 +585,12 @@ exports.enqueueCashback = onRequest(
       return;
     }
 
-    // Daily cap (Bon-Datum semantics — server only knows upload date here;
-    // processCashback re-checks against the OCR'd Bon-Datum once available).
-    const today = todayBerlin();
-    if (userData.cashback_last_bon_date === today) {
-      res.status(429).json({ code: 'rate_limited', message: 'daily cap reached' });
-      return;
-    }
+    // KEIN Daily-Cap-Block mehr beim Upload (ClickUp 86ca8hr90): der Bon soll
+    // IMMER eingereicht + getrackt werden (OCR, Positionen, Journey, Ausgaben-
+    // übersicht), auch wenn das Tageslimit schon erreicht ist. Das Tageslimit
+    // gated nur noch die CASHBACK-Gutschrift — processCashback setzt dann
+    // 'no_reward' (Bon-Datum-Semantik gegen cashback_last_bon_date), statt den
+    // Upload zu verwerfen.
 
     // ─── Layer 1: exact-byte duplicate (sha256) ──────────────────────
     // Cheapest check first: caught the trivial "user retry-tapped" case
@@ -1271,6 +1270,26 @@ exports.processCashback = onMessagePublished(
         }
       }
 
+      // 6y) Tageslimit (ClickUp 86ca8hr90): hat der User für ein Bon DIESES
+      // Datums schon Cashback bekommen, gibt's für weitere Bons desselben Tages
+      // KEIN Cashback mehr — der Bon wird aber angenommen + getrackt (no_reward
+      // statt Verwerfen). Ersetzt den früheren harten Enqueue-Block. Nutzt das
+      // bestehende cashback_last_bon_date (Bon-Datum-Semantik); config.dailyCap
+      // 1 = max ein vergüteter Bon pro Tag (aktuelle Konfig).
+      if (cashbackCents > 0 && Number(config.dailyCap) > 0) {
+        try {
+          const dSnap = await db.doc(`users/${uid}`).get();
+          const lastBonDay = dSnap.exists ? dSnap.data().cashback_last_bon_date || null : null;
+          const bonDay = (ocr.parsed.bonDate || todayBerlin()).slice(0, 10);
+          if (lastBonDay && lastBonDay === bonDay) {
+            cashbackCents = 0;
+            zeroReason = 'daily_cap_reached';
+          }
+        } catch (e) {
+          logger.warn('daily-cap-read-failed', { cashbackId, err: e.message });
+        }
+      }
+
       // 7) Decide status (priority: not-a-receipt > unknown-merchant >
       //                  too-old > duplicate > recon > below-min)
       let status = 'matched';
@@ -1306,9 +1325,10 @@ exports.processCashback = onMessagePublished(
         if (config.campaignsEnabled) {
           status = 'no_reward';
           rejectReason = zeroReason || 'below_min_items';
-        } else if (zeroReason === 'monthly_cap_reached') {
+        } else if (zeroReason === 'monthly_cap_reached' || zeroReason === 'daily_cap_reached') {
+          // Cap erreicht → Bon trotzdem annehmen + tracken (86ca8hr90).
           status = 'no_reward';
-          rejectReason = 'monthly_cap_reached';
+          rejectReason = zeroReason;
         } else {
           status = 'rejected';
           rejectReason = 'below_min_items';

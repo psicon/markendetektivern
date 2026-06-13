@@ -1598,21 +1598,43 @@ function CampaignListItem({
       {expanded ? (
         <View style={{ marginTop: 14, gap: 12 }}>
           {/* Konfigurierte Eckdaten als Chips */}
-          {(typeof campaign.cashbackPerBonCents === 'number' && campaign.cashbackPerBonCents > 0) ||
-          (typeof campaign.minItems === 'number' && campaign.minItems > 0) ? (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-              {typeof campaign.cashbackPerBonCents === 'number' && campaign.cashbackPerBonCents > 0 ? (
-                <CampaignChip
-                  theme={theme}
-                  icon="cash"
-                  label={`${(campaign.cashbackPerBonCents / 100).toFixed(2).replace('.', ',')} € ${meta.perLabel}`}
-                />
-              ) : null}
-              {meta.showMinItems && typeof campaign.minItems === 'number' && campaign.minItems > 0 ? (
-                <CampaignChip theme={theme} icon="basket-outline" label={`ab ${campaign.minItems} Artikeln`} />
-              ) : null}
-            </View>
-          ) : null}
+          {(() => {
+            const isReceipt = (campaign.kind ?? 'receipt') === 'receipt';
+            const hasReward =
+              typeof campaign.cashbackPerBonCents === 'number' && campaign.cashbackPerBonCents > 0;
+            const hasMin =
+              meta.showMinItems && typeof campaign.minItems === 'number' && campaign.minItems > 0;
+            const hasWeekly =
+              isReceipt && typeof campaign.weeklyBonCap === 'number' && campaign.weeklyBonCap > 0;
+            // Tageslimit klar machen (ClickUp 86ca8hr90): Bons gibt es max.
+            // 1×/Tag Cashback (config.dailyCap). Bon kann trotzdem immer
+            // eingereicht werden — nur ohne weiteres Cashback am selben Tag.
+            if (!hasReward && !hasMin && !hasWeekly && !isReceipt) return null;
+            return (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                {hasReward ? (
+                  <CampaignChip
+                    theme={theme}
+                    icon="cash"
+                    label={`${(campaign.cashbackPerBonCents! / 100).toFixed(2).replace('.', ',')} € ${meta.perLabel}`}
+                  />
+                ) : null}
+                {hasMin ? (
+                  <CampaignChip theme={theme} icon="basket-outline" label={`ab ${campaign.minItems} Artikeln`} />
+                ) : null}
+                {hasWeekly ? (
+                  <CampaignChip
+                    theme={theme}
+                    icon="calendar-week"
+                    label={`max ${campaign.weeklyBonCap} Bons/Woche`}
+                  />
+                ) : null}
+                {isReceipt ? (
+                  <CampaignChip theme={theme} icon="calendar-today" label="1 Bon/Tag" />
+                ) : null}
+              </View>
+            );
+          })()}
 
           {/* Aktions-Button — je nach Aktions-Typ */}
           <Pressable

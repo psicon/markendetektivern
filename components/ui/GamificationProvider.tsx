@@ -567,11 +567,17 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         } else if (cur === 'rejected') {
           showInfoToast(cashbackRejectToastMsg(e.rejectReason, (e as any).maxAgeDays), 'error', colorScheme || 'light');
         } else if (cur === 'no_reward') {
-          showInfoToast(
-            'Bon gespeichert — zählt zu deiner Ausgabenübersicht.',
-            'info',
-            colorScheme || 'light',
-          );
+          // Reason-aware + positiv (CLAUDE.md: nie Frust). Bei erreichtem
+          // Tages-/Wochenlimit klar kommunizieren, dass der Bon trotzdem
+          // zählt + wann es wieder Cashback gibt (86ca8hr90).
+          const reason = (e as any).rejectReason as string | undefined;
+          let msg = 'Bon gespeichert — zählt zu deiner Ausgabenübersicht.';
+          if (reason === 'daily_cap_reached') {
+            msg = 'Bon gespeichert & zählt zu deiner Übersicht. Heute gab es schon Cashback — morgen gibt es wieder etwas obendrauf.';
+          } else if (reason === 'weekly_cap_reached') {
+            msg = 'Bon gespeichert & zählt zu deiner Übersicht. Dein Cashback-Limit dieser Woche ist erreicht — nächste Woche geht es weiter.';
+          }
+          showInfoToast(msg, 'info', colorScheme || 'light');
         }
       });
     });

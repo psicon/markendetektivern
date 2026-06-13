@@ -361,6 +361,8 @@ export default function CashbackPendingScreen() {
           ? `${SAVED} Sobald eine passende Cashback-Aktion läuft, gibt's beim nächsten Mal etwas obendrauf.`
           : reason === 'below_min_items'
           ? `${SAVED} Für Cashback braucht diese Aktion ein paar anrechenbare Artikel mehr auf dem Bon.`
+          : reason === 'daily_cap_reached'
+          ? `${SAVED} Für heute hast du dein Cashback schon abgeholt — morgen gibt's wieder etwas obendrauf.`
           : reason === 'weekly_cap_reached'
           ? `${SAVED} Für diese Aktion bist du diese Woche schon am Ziel — nächste Woche geht's weiter.`
           : reason === 'per_user_cap_reached'
