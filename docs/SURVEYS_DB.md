@@ -45,8 +45,8 @@ Umfragen sind **eigenständig** — KEINE Verknüpfung zu `cashback_campaigns`.
 
   // ── Action-Targeting (nur bei trigger.type==='action') ──
   "actionDisplay": "immediate",       // 'immediate' (Sheet sofort) | 'hint' (antippbarer Hinweis-Toast)
-  "targetProductIds": ["<docId>"],    // optional: nur bei diesen Produkten (produkte/markenProdukte Doc-IDs)
-  "targetBrandIds": ["<herstellerId>"], // optional: nur bei diesen Marken/Herstellern
+  "targetProducts": [<ref>],          // optional: Firestore-REFERENZEN auf produkte/* | markenProdukte/*
+  "targetBrands":   [<ref>],           // optional: Referenzen auf hersteller/* | hersteller_new/*
 
   // ── Zeitfenster (optional, ISO-Strings) ──
   "startDate": null,
@@ -81,21 +81,36 @@ Beides erreicht → Umfrage verschwindet.
 
 ## Produktspezifische Action-Umfragen
 
-Ohne `targetProductIds`/`targetBrandIds` feuert eine Action-Umfrage bei **jedem**
-Produkt. Zum Eingrenzen:
+Ohne `targetProducts`/`targetBrands` feuert eine Action-Umfrage bei **jedem**
+Produkt. Zum Eingrenzen — als echte **Firestore-Referenzen** (in der Console als
+Pfad sichtbar, NICHT als bloße String-ID):
 
-```jsonc
-"trigger": { "type": "action", "action": "save_product" },
-"targetProductIds": ["0247JdXahwTZ3oRm8ck7"]   // nur dieses Produkt (Salzstangen)
+```js
+"targetProducts": [ db.doc('markenProdukte/0247JdXahwTZ3oRm8ck7') ]  // nur Salzstangen
 // oder:
-"targetBrandIds": ["Tj6g82LYEQn7dkaCuZXD"]     // nur diese Marke
+"targetBrands":   [ db.doc('hersteller/Tj6g82LYEQn7dkaCuZXD') ]      // nur diese Marke
 ```
 
-- `targetProductIds`: Doc-IDs aus `produkte` ODER `markenProdukte`.
-- `targetBrandIds`: die `hersteller`-Ref-ID des Produkts —
-  `markenProdukte.hersteller` → `hersteller`-Collection (= Marke),
-  `produkte.hersteller` → `hersteller_new`-Collection (= Hersteller).
+- `targetProducts`: Referenzen auf `produkte/*` (Eigenmarken/NoName) ODER
+  `markenProdukte/*` (Marken) — du nimmst die jeweilige Doc-Referenz.
+- `targetBrands`: Referenz auf die `hersteller`-Ref des Produkts —
+  `markenProdukte.hersteller` → `hersteller/*` (= Marke),
+  `produkte.hersteller` → `hersteller_new/*` (= Hersteller).
 - Beide Listen leer/fehlen → alle Produkte.
+
+## Cashback-Berechtigung (wichtig)
+
+Die **Antwort** (`poll_responses`) wird IMMER gespeichert — auch von nicht
+registrierten Usern (Engagement + Datenvolumen). **Cashback-Taler gibt es aber
+NUR**, wenn der User:
+1. **registriert** ist (kein anonymer Account) UND
+2. den **Markt-Consent** aktiviert hat (`users/{uid}.cashback_consent.accepted`
+   mit aktueller Version, identisch zur Bon-Pipeline).
+
+Die Cloud Function `survey-reward` prüft beides server-seitig. Nicht-berechtigte
+User sehen in der App eine ehrliche Meldung („Mit aktiviertem Cashback gäbe es
+dafür X Taler") statt eines falschen Versprechens — und es entsteht kein
+Geister-Guthaben.
 
 ## targeting (Zielgruppe, für general + action)
 
@@ -126,7 +141,7 @@ db.collection('polls').add({
   title: 'Produkt-Feedback',
   status: 'active',
   trigger: { type: 'action', action: 'view_comparison' },
-  targetProductIds: ['0247JdXahwTZ3oRm8ck7'],
+  targetProducts: [db.doc('markenProdukte/0247JdXahwTZ3oRm8ck7')], // echte Referenz
   rewardTrigger: 'per_answer', rewardCents: 5, maxPerUser: 5,
   actionDisplay: 'immediate',
   targeting: {},

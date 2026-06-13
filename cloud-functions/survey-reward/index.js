@@ -73,6 +73,45 @@ exports.onPollResponseCreated = onDocumentCreated(
       return;
     }
 
+    // ── Cashback-Berechtigung (ClickUp 86ca8fbpz) ──
+    // Taler NUR für registrierte User MIT aktivem Markt-Consent (gleiche
+    // Regel wie die Bon-Pipeline). Anonyme / Consent-lose User dürfen die
+    // Umfrage beantworten (Antwort wird gespeichert), bekommen aber kein
+    // Cashback. So lügt die App-Meldung nie + es entsteht kein Geister-
+    // Guthaben, das nie ausgezahlt werden kann.
+    try {
+      const userSnap = await db.collection('users').doc(uid).get();
+      const u = userSnap.exists ? userSnap.data() : {};
+      const consent = u.cashback_consent || {};
+      let requiredVersion = 'v2.0-2026-06'; // Fallback = aktuelle Version; primär aus cashback_config/v1
+      try {
+        const cfg = await db.collection('cashback_config').doc('v1').get();
+        if (cfg.exists && typeof cfg.data()?.consentVersion === 'string') {
+          requiredVersion = cfg.data().consentVersion;
+        }
+      } catch {
+        /* Fallback: Code-Default */
+      }
+      if (!consent.accepted || consent.version !== requiredVersion) {
+        logger.info('[survey-reward] skip: no/old consent', { uid });
+        return;
+      }
+      // Registrierung: anonyme Auth-User haben keine providerData.
+      try {
+        const rec = await admin.auth().getUser(uid);
+        if (!rec || rec.providerData.length === 0) {
+          logger.info('[survey-reward] skip: anonymous user', { uid });
+          return;
+        }
+      } catch (e) {
+        logger.warn('[survey-reward] auth lookup failed, skip reward', { uid, err: e.message });
+        return;
+      }
+    } catch (e) {
+      logger.error('[survey-reward] eligibility check failed', { uid, err: e.message });
+      return;
+    }
+
     const userRef = db.collection('users').doc(uid);
     const ledgerCol = userRef.collection('cashback_ledger');
     const pollRef = db.collection('polls').doc(pollId);

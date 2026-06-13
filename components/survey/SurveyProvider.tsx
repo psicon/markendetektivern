@@ -14,6 +14,7 @@ import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { formatCents } from '@/lib/types/cashback';
 import {
   buildUserContext,
@@ -59,9 +60,13 @@ export function useSurvey(): SurveyContextValue {
 }
 
 export function SurveyProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, isAnonymous } = useAuth();
+  const { hasConsent } = useCashbackUserState();
   const scheme = useColorScheme() ?? 'light';
   const { theme } = useTokens();
+  // Cashback gibt's NUR für registrierte User mit aktivem Markt-Consent.
+  // Der Reward-Toast darf sonst nichts versprechen (kein "X Taler unterwegs"-Lügen).
+  const cashbackEligible = !isAnonymous && hasConsent;
 
   const [poll, setPoll] = useState<Poll | null>(null);
   const [visible, setVisible] = useState(false);
@@ -126,14 +131,25 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
       } catch (e) {
         console.warn('[survey] submit failed', (e as Error)?.message);
       }
-      const reward =
-        typeof p.rewardCents === 'number' && p.rewardCents > 0
-          ? ` ${formatCents(p.rewardCents)} Taler sind unterwegs.`
-          : '';
-      showInfoToast(`Danke für deine Antwort!${reward}`, 'info', scheme);
+      // Reward-Text NUR wenn der User wirklich Cashback bekommt
+      // (registriert + Consent) UND die Umfrage vergütet. Sonst ehrlich
+      // danken + positiv auf Cashback hinweisen (kein Frust-Ton).
+      const pays =
+        (p.rewardTrigger ?? 'completion') !== 'none' &&
+        typeof p.rewardCents === 'number' &&
+        p.rewardCents > 0;
+      let msg: string;
+      if (pays && cashbackEligible) {
+        msg = `Danke für deine Antwort! ${formatCents(p.rewardCents!)} Taler sind unterwegs.`;
+      } else if (pays && !cashbackEligible) {
+        msg = `Danke für deine Antwort! Mit aktiviertem Cashback gäbe es dafür ${formatCents(p.rewardCents!)} Taler.`;
+      } else {
+        msg = 'Danke für deine Antwort!';
+      }
+      showInfoToast(msg, 'info', scheme);
       setActivityNonce((n) => n + 1); // Tile-Liste neu laden
     },
-    [poll, user?.uid, scheme],
+    [poll, user?.uid, scheme, cashbackEligible],
   );
 
   const handleClose = useCallback(() => {

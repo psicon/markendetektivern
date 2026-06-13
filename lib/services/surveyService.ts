@@ -38,6 +38,7 @@ import {
 } from '@/lib/services/surveyTargeting';
 import type { ActionType } from '@/lib/types/achievements';
 import {
+  extractRefId,
   isPollRepeatable,
   pollTriggerOf,
   type Poll,
@@ -285,18 +286,20 @@ export async function getActionSurvey(
     if (!budgetAllows(p)) continue;
     if (!isPollEligible(p, ctx)) continue;
 
-    // ── Produkt-Targeting ──
-    if (Array.isArray(p.targetProductIds) && p.targetProductIds.length > 0) {
-      if (!productId || !p.targetProductIds.includes(productId)) continue;
+    // ── Produkt-Targeting (Referenzen → id-Vergleich) ──
+    if (Array.isArray(p.targetProducts) && p.targetProducts.length > 0) {
+      const ids = p.targetProducts.map((r) => extractRefId(r)?.id).filter(Boolean);
+      if (!productId || !ids.includes(productId)) continue;
     }
-    // ── Marken-/Hersteller-Targeting (lazy aufgelöst) ──
-    if (Array.isArray(p.targetBrandIds) && p.targetBrandIds.length > 0) {
+    // ── Marken-/Hersteller-Targeting (Referenzen, lazy aufgelöst) ──
+    if (Array.isArray(p.targetBrands) && p.targetBrands.length > 0) {
+      const brandIds = p.targetBrands.map((r) => extractRefId(r)?.id).filter(Boolean);
       if (brandIdResolved === undefined) {
         brandIdResolved = productId
           ? await resolveProductBrandId(productId, metadata?.productType)
           : null;
       }
-      if (!brandIdResolved || !p.targetBrandIds.includes(brandIdResolved)) continue;
+      if (!brandIdResolved || !brandIds.includes(brandIdResolved)) continue;
     }
     return p;
   }

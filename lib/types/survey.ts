@@ -127,14 +127,16 @@ export interface Poll {
    *  Verdienst-Möglichkeit. Default 'immediate'. (general-Polls ignorieren
    *  das — sie leben in der Umfragen-Liste.) */
   actionDisplay?: 'immediate' | 'hint';
-  /** Produkt-Targeting (action-Trigger): Umfrage nur ausspielen, wenn die
-   *  Aktion eines dieser Produkte betrifft (produkte/markenProdukte-Doc-ID).
-   *  Leer/fehlt = alle Produkte. */
-  targetProductIds?: string[];
-  /** Marken-/Hersteller-Targeting (action-Trigger): Umfrage nur, wenn das
-   *  betroffene Produkt zu einer dieser Marken/Hersteller gehört
-   *  (hersteller/hersteller_new-Doc-ID). Leer/fehlt = alle Marken. */
-  targetBrandIds?: string[];
+  /** Produkt-Targeting (action-Trigger): Firestore-REFERENZEN auf
+   *  produkte/* oder markenProdukte/* — in der Console als Pfad sichtbar
+   *  (z.B. `markenProdukte/0247…`). Umfrage erscheint nur, wenn die Aktion
+   *  eines dieser Produkte betrifft. Leer/fehlt = alle Produkte.
+   *  (Defensiv getypt: RN-Firestore liefert DocumentReference-Objekte;
+   *  extractRefId() unten holt id + collection — auch aus Legacy-Strings.) */
+  targetProducts?: any[];
+  /** Marken-/Hersteller-Targeting (action-Trigger): Firestore-REFERENZEN
+   *  auf hersteller/* oder hersteller_new/*. Leer/fehlt = alle Marken. */
+  targetBrands?: any[];
   // ── Zeitsteuerung (ISO-Strings, RevealyIQ-Konvention) ──
   startDate?: string;
   endDate?: string;
@@ -175,6 +177,30 @@ export interface PollResponse {
 /** Normalisiert den Trigger eines (ggf. alten) Poll-Docs. */
 export function pollTriggerOf(poll: Pick<Poll, 'trigger'>): PollTrigger {
   return poll.trigger?.type === 'action' ? poll.trigger : { type: 'general' };
+}
+
+/**
+ * Holt { id, collection } aus einem Target-Eintrag — egal ob echte
+ * Firestore-DocumentReference (RN modular `.id`/`.path`, Legacy
+ * `referencePath`/`_path.segments`) oder ein Pfad-/ID-String. Gibt null,
+ * wenn nichts extrahierbar.
+ */
+export function extractRefId(ref: any): { id: string; collection: string | null } | null {
+  if (!ref) return null;
+  // Pfad-/ID-String ("markenProdukte/abc" oder "abc")
+  if (typeof ref === 'string') {
+    const parts = ref.split('/').filter(Boolean);
+    if (parts.length >= 2) return { collection: parts[parts.length - 2], id: parts[parts.length - 1] };
+    if (parts.length === 1) return { collection: null, id: parts[0] };
+    return null;
+  }
+  const path: string | undefined =
+    ref.path ?? ref.referencePath ?? (ref._path?.segments ? ref._path.segments.join('/') : undefined);
+  const id: string | undefined =
+    ref.id ?? (path ? path.split('/').filter(Boolean).pop() : undefined);
+  if (!id) return null;
+  const collection = path ? path.split('/').filter(Boolean).slice(-2)[0] ?? null : null;
+  return { id, collection };
 }
 
 /**
