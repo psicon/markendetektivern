@@ -219,6 +219,24 @@ werden sollten. Andere "Don't"-Regeln stehen verteilt im File
 `USE_FLYING_TABS`-Legacy etc.) — hier nur die Learnings aus
 Recent-Sessions.
 
+- **Zwei React-Native-`<Modal>`s gleichzeitig sichtbar präsentieren.**
+  iOS deadlockt ("Attempt to present X on Y which is already presenting Z")
+  → App FRIERT EIN (kein Crash, harter Hang). Passierte als Hyperbug
+  (86ca8g2p9): nach dem Abgeben einer Bewertung öffnete eine action-
+  getriggerte Umfrage ihr `FilterSheet`-Modal ÜBER dem noch präsentierten
+  `RatingsSheet`-Modal. Beide Sheet-Komponenten (`FilterSheet`,
+  `RatingsSheet`) sind RN-`<Modal>`. Regel: NIE ein zweites Modal-Sheet
+  öffnen, solange ein anderes präsentiert ist — erst das erste schließen
+  (+ Dismiss-Animation abwarten), dann das zweite. Mechanik dafür existiert:
+  `lib/services/sheetPresence.ts` (globaler Zähler offener Sheets;
+  `FilterSheet`/`RatingsSheet` melden sich an/ab via `registerSheetOpen`).
+  Konsumenten, die programmatisch ein Sheet öffnen (z.B. action-Umfragen im
+  `SurveyProvider`), MÜSSEN über `isAnySheetOpen()` / `whenSheetsIdle()`
+  gaten. Neue Modal-basierte Sheets immer am Zähler registrieren; ein
+  Sheet, das selbst nicht zählen soll (das gerade präsentierte), setzt
+  `registerPresence={false}`. Nicht-Modal-Overlays (Toasts, Reanimated-
+  Slide-Up-Views wie AchievementUnlockBanner) sind unkritisch.
+
 - **Upload-Bilder (Bon + Produkt) komprimieren/runterskalieren VOR dem Upload.**
   Die Cloud-Pipelines brauchen VOLLE Bildqualität für die Analyse: OCR von
   Nährwert-/Zutaten-Labels, Bon-Text-Erkennung, Produkt-Identifikation,
