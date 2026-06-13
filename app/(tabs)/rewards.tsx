@@ -443,6 +443,8 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
   const { showSurvey } = useSurvey();
   const [availableSurveys, setAvailableSurveys] = useState<Poll[]>([]);
   const [surveyPickerOpen, setSurveyPickerOpen] = useState(false);
+  // Welche Teilmenge der Picker zeigt (alle vs. zu einer Campaign).
+  const [surveyPickerList, setSurveyPickerList] = useState<Poll[]>([]);
   React.useEffect(() => {
     if (!isFocused || !user?.uid) return;
     let alive = true;
@@ -455,15 +457,32 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
       alive = false;
     };
   }, [isFocused, user?.uid]);
-  // Tap auf das Umfragen-Tile: genau eine → direkt öffnen; mehrere →
-  // Auswahl-Sheet; keine → no-op (Tile ist dann eh disabled).
+  // Öffnet eine Umfrage-Liste: genau eine → direkt; mehrere → Auswahl-
+  // Sheet; keine → Hinweis. Gemeinsam für Tile + Campaign-Card.
+  const openSurveyList = useCallback(
+    (list: Poll[]) => {
+      if (list.length === 1) {
+        showSurvey(list[0]);
+      } else if (list.length > 1) {
+        setSurveyPickerList(list);
+        setSurveyPickerOpen(true);
+      } else {
+        showInfoToast('Aktuell ist keine Umfrage für dich verfügbar.', 'info', scheme);
+      }
+    },
+    [showSurvey, scheme],
+  );
+  // Schnellzugriff-Tile: alle eligible Umfragen.
   const openSurveys = useCallback(() => {
-    if (availableSurveys.length === 1) {
-      showSurvey(availableSurveys[0]);
-    } else if (availableSurveys.length > 1) {
-      setSurveyPickerOpen(true);
-    }
-  }, [availableSurveys, showSurvey]);
+    openSurveyList(availableSurveys);
+  }, [availableSurveys, openSurveyList]);
+  // survey-Campaign-Card: nur die zu DIESER Aktion verknüpften Umfragen.
+  const openSurveysForCampaign = useCallback(
+    (campaignId: string) => {
+      openSurveyList(availableSurveys.filter((s) => s.campaignId === campaignId));
+    },
+    [availableSurveys, openSurveyList],
+  );
   React.useEffect(() => {
     let alive = true;
     getCashbackConfig()
@@ -1096,7 +1115,7 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
           />
           <View style={{ gap: 10, marginTop: 10 }}>
             {campaigns.map((c) => (
-              <CampaignListItem key={c.id} campaign={c} onScanBon={onScanBon} scheme={scheme} />
+              <CampaignListItem key={c.id} campaign={c} onScanBon={onScanBon} onStartSurvey={openSurveysForCampaign} scheme={scheme} />
             ))}
           </View>
         </View>
@@ -1377,7 +1396,7 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
         onClose={() => setSurveyPickerOpen(false)}
       >
         <View style={{ paddingBottom: 8, gap: 10 }}>
-          {availableSurveys.map((s) => (
+          {surveyPickerList.map((s) => (
             <Pressable
               key={s.id}
               onPress={() => {
@@ -1452,20 +1471,65 @@ const AnimatedCampaignCard = Animated.createAnimatedComponent(Pressable);
 // hell-grau mit dunkler fg. Siehe CLAUDE.md „Earn-Action-Farben".
 const CAMPAIGN_KINDS: Record<
   NonNullable<ActiveCampaign['kind']>,
-  { icon: keyof typeof MaterialCommunityIcons.glyphMap; bg: string; dark: boolean; cta: string }
+  {
+    icon: keyof typeof MaterialCommunityIcons.glyphMap;
+    bg: string;
+    dark: boolean;
+    cta: string;
+    // Reward-Einheit pro Aktionstyp — VORHER war "pro Bon" für alle
+    // hartkodiert (falsch bei Umfragen/Produktfotos, ClickUp 86ca8fbpz).
+    perLabel: string;
+    // Mindestartikel-Chip nur bei Bons sinnvoll.
+    showMinItems: boolean;
+    // Fallback-Beschreibung, wenn das Campaign-Doc keine kind-passende
+    // trägt (geklonte Docs erbten die Bon-Copy).
+    fallbackDesc: string;
+  }
 > = {
-  receipt: { icon: 'receipt', bg: '#0d8575', dark: true, cta: 'Kassenbon scannen' },
-  product_photos: { icon: 'camera-plus-outline', bg: '#5b4f9c', dark: true, cta: 'Produktbilder einreichen' },
-  survey: { icon: 'poll', bg: '#dde2e4', dark: false, cta: 'Umfrage starten' },
+  receipt: {
+    icon: 'receipt',
+    bg: '#0d8575',
+    dark: true,
+    cta: 'Kassenbon scannen',
+    perLabel: 'pro Bon',
+    showMinItems: true,
+    fallbackDesc: 'Cashback auf deinen Einkauf in teilnehmenden Märkten — solange das Budget reicht.',
+  },
+  product_photos: {
+    icon: 'camera-plus-outline',
+    bg: '#5b4f9c',
+    dark: true,
+    cta: 'Produktbilder einreichen',
+    perLabel: 'je Produkt',
+    showMinItems: false,
+    fallbackDesc: 'Fotografiere Produkte und hilf, die Datenbank zu vervollständigen — Taler sichern, solange das Budget reicht.',
+  },
+  survey: {
+    icon: 'poll',
+    bg: '#dde2e4',
+    dark: false,
+    cta: 'Umfrage starten',
+    perLabel: 'je Umfrage',
+    showMinItems: false,
+    fallbackDesc: 'Beantworte kurze Fragen und sichere dir Taler — solange das Budget reicht.',
+  },
 };
+
+// Bon-Boilerplate, die geklonte survey/product_photos-Campaigns geerbt
+// haben. Wird in der Card durch die kind-passende fallbackDesc ersetzt.
+const RECEIPT_BOILERPLATE_DESC =
+  'Cashback auf jeden Einkauf in teilnehmenden Märkten — solange das Budget reicht. Bon scannen, Taler sichern.';
 
 function CampaignListItem({
   campaign,
   onScanBon,
+  onStartSurvey,
   scheme,
 }: {
   campaign: ActiveCampaign;
   onScanBon: (campaignId: string | null) => void;
+  /** Öffnet die zu einer survey-Campaign verknüpften Umfragen. */
+  onStartSurvey?: (campaignId: string) => void;
   scheme: 'light' | 'dark';
 }) {
   const { theme } = useTokens();
@@ -1484,15 +1548,20 @@ function CampaignListItem({
       : 0;
   const budgetColor = pct > 50 ? '#10a18a' : pct > 15 ? '#f59e0b' : '#ef4444';
 
-  const description = (campaign.description || '').trim() || 'Cashback auf deinen Einkauf';
+  // Beschreibung: Bon-Boilerplate (von geklonten Docs geerbt) durch die
+  // kind-passende Copy ersetzen; sonst die gepflegte Beschreibung nutzen.
+  const rawDesc = (campaign.description || '').trim();
+  const description =
+    !rawDesc || rawDesc === RECEIPT_BOILERPLATE_DESC ? meta.fallbackDesc : rawDesc;
 
   const onAction = () => {
     if (kind === 'receipt') {
       onScanBon(campaign.id);
     } else if (kind === 'product_photos') {
       router.push('/product-submit');
-    } else {
-      showInfoToast('Aktuell ist keine Umfrage verfügbar.', 'info', scheme);
+    } else if (onStartSurvey) {
+      // Umfragen-Campaign → verknüpfte Umfragen öffnen (ClickUp 86ca8fbpz).
+      onStartSurvey(campaign.id);
     }
   };
 
@@ -1605,10 +1674,10 @@ function CampaignListItem({
                 <CampaignChip
                   theme={theme}
                   icon="cash"
-                  label={`${(campaign.cashbackPerBonCents / 100).toFixed(2).replace('.', ',')} € pro Bon`}
+                  label={`${(campaign.cashbackPerBonCents / 100).toFixed(2).replace('.', ',')} € ${meta.perLabel}`}
                 />
               ) : null}
-              {typeof campaign.minItems === 'number' && campaign.minItems > 0 ? (
+              {meta.showMinItems && typeof campaign.minItems === 'number' && campaign.minItems > 0 ? (
                 <CampaignChip theme={theme} icon="basket-outline" label={`ab ${campaign.minItems} Artikeln`} />
               ) : null}
             </View>

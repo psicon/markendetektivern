@@ -38,6 +38,7 @@ import {
 } from '@/lib/services/surveyTargeting';
 import type { ActionType } from '@/lib/types/achievements';
 import {
+  isPollRepeatable,
   pollTriggerOf,
   type Poll,
   type PollAnswer,
@@ -61,6 +62,53 @@ let ctxCache: { uid: string; at: number; ctx: SurveyUserContext } | null = null;
 
 function nowMs(): number {
   return Date.now();
+}
+
+// ── Campaign-Gating (ClickUp 86ca8fbpz) ──
+// Eine Umfrage mit campaignId läuft nur, solange die verknüpfte Aktion
+// aktiv ist + im Zeitfenster + Budget hat. Die nutzbaren Campaign-IDs
+// werden 5 Min gecacht (ein collection-Read, klein).
+let usableCampaignsCache: { at: number; ids: Set<string> } | null = null;
+let usableCampaignsInflight: Promise<Set<string>> | null = null;
+
+async function getUsableCampaignIds(): Promise<Set<string>> {
+  if (usableCampaignsCache && nowMs() - usableCampaignsCache.at < POLLS_TTL_MS) {
+    return usableCampaignsCache.ids;
+  }
+  if (usableCampaignsInflight) return usableCampaignsInflight;
+  usableCampaignsInflight = (async () => {
+    try {
+      const snap = await getDocs(
+        query(collection(db, 'cashback_campaigns'), where('active', '==', true)),
+      );
+      const ids = new Set<string>();
+      const now = nowMs();
+      snap.forEach((d: any) => {
+        const c = d.data() || {};
+        const budgetOk =
+          typeof c.budgetRemainingCents !== 'number' || c.budgetRemainingCents > 0;
+        const startOk = !c.startAt?.toMillis || c.startAt.toMillis() <= now;
+        const endOk = !c.endAt?.toMillis || c.endAt.toMillis() >= now;
+        if (budgetOk && startOk && endOk) ids.add(d.id);
+      });
+      // Leeres fromCache-Resultat nicht cachen (Offline-Schutz).
+      if (ids.size > 0 || !(snap as any).metadata?.fromCache) {
+        usableCampaignsCache = { at: nowMs(), ids };
+      }
+      return ids;
+    } catch {
+      return usableCampaignsCache?.ids ?? new Set<string>();
+    } finally {
+      usableCampaignsInflight = null;
+    }
+  })();
+  return usableCampaignsInflight;
+}
+
+/** Ist die Umfrage ausspielbar bzgl. ihrer (optionalen) Campaign-Bindung? */
+function campaignAllows(poll: Poll, usable: Set<string>): boolean {
+  if (!poll.campaignId) return true; // keine Bindung → immer erlaubt
+  return usable.has(poll.campaignId);
 }
 
 function isWithinWindow(poll: Poll): boolean {
@@ -163,15 +211,17 @@ export async function hasAnswered(pollId: string): Promise<boolean> {
  */
 export async function getGeneralSurveys(uid: string): Promise<Poll[]> {
   if (!uid) return [];
-  const [polls, ctx, answered] = await Promise.all([
+  const [polls, ctx, answered, usableCampaigns] = await Promise.all([
     getActivePolls(),
     buildUserContext(uid),
     getAnswered(),
+    getUsableCampaignIds(),
   ]);
   return polls.filter(
     (p) =>
       pollTriggerOf(p).type === 'general' &&
       !answered.has(p.id) &&
+      campaignAllows(p, usableCampaigns) &&
       isPollEligible(p, ctx),
   );
 }
@@ -204,6 +254,7 @@ async function isSnoozed(): Promise<boolean> {
 export async function getActionSurvey(
   uid: string,
   action: ActionType,
+  metadata?: { productId?: string; productType?: string },
 ): Promise<Poll | null> {
   if (!uid) return null;
   // "Heute keine Vorschläge mehr" (User-Stummschaltung) — gilt für ALLE
@@ -217,8 +268,16 @@ export async function getActionSurvey(
   const lastPrompt = lastPromptRaw ? parseInt(lastPromptRaw, 10) || 0 : 0;
   if (nowMs() - lastPrompt < ACTION_GLOBAL_COOLDOWN_MS) return null;
 
-  const [polls, ctx] = await Promise.all([getActivePolls(), buildUserContext(uid)]);
+  const [polls, ctx, usableCampaigns] = await Promise.all([
+    getActivePolls(),
+    buildUserContext(uid),
+    getUsableCampaignIds(),
+  ]);
   const now = nowMs();
+  const productId = metadata?.productId;
+  // Marken-ID des betroffenen Produkts wird nur bei Bedarf (Poll mit
+  // targetBrandIds) aufgelöst — ein gecachter Read, lazy.
+  let brandIdResolved: string | null | undefined; // undefined = noch nicht versucht
   for (const p of polls) {
     const trig = pollTriggerOf(p);
     if (trig.type !== 'action' || trig.action !== action) continue;
@@ -226,10 +285,67 @@ export async function getActionSurvey(
     const dAt = dismissed[p.id];
     const cd = (trig.cooldownHours ?? POLL_DISMISS_COOLDOWN_MS / 3_600_000) * 3_600_000;
     if (dAt && now - dAt < cd) continue;
+    if (!campaignAllows(p, usableCampaigns)) continue;
     if (!isPollEligible(p, ctx)) continue;
+
+    // ── Produkt-Targeting ──
+    if (Array.isArray(p.targetProductIds) && p.targetProductIds.length > 0) {
+      if (!productId || !p.targetProductIds.includes(productId)) continue;
+    }
+    // ── Marken-/Hersteller-Targeting (lazy aufgelöst) ──
+    if (Array.isArray(p.targetBrandIds) && p.targetBrandIds.length > 0) {
+      if (brandIdResolved === undefined) {
+        brandIdResolved = productId
+          ? await resolveProductBrandId(productId, metadata?.productType)
+          : null;
+      }
+      if (!brandIdResolved || !p.targetBrandIds.includes(brandIdResolved)) continue;
+    }
     return p;
   }
   return null;
+}
+
+// Cache: productId → herstellerId (RAM, klein, Marken-Targeting selten).
+const brandIdCache = new Map<string, string | null>();
+
+/**
+ * Löst die Marken-/Hersteller-Doc-ID eines Produkts auf (für Marken-
+ * Targeting). Liest 1 Doc (gecacht). markenProdukte.hersteller zeigt auf
+ * die MARKE (hersteller-Collection), produkte.hersteller auf den echten
+ * Hersteller (hersteller_new) — wir geben die jeweils referenzierte ID
+ * zurück; targetBrandIds kann beide Welten enthalten.
+ */
+async function resolveProductBrandId(
+  productId: string,
+  productType?: string,
+): Promise<string | null> {
+  if (brandIdCache.has(productId)) return brandIdCache.get(productId) ?? null;
+  try {
+    const isMarke = productType === 'markenprodukt' || productType === 'marke' || productType === 'brand';
+    const col = isMarke ? 'markenProdukte' : 'produkte';
+    const snap = await getDocs(
+      query(collection(db, col), where('__name__', '==', productId)),
+    ).catch(() => null);
+    let id: string | null = null;
+    const data = snap && !snap.empty ? (snap.docs[0].data() as any) : null;
+    const ref = data?.hersteller;
+    if (ref) {
+      // Ref-Shapes defensiv: modular .id, Legacy referencePath / path / _path.
+      id =
+        ref.id ||
+        (ref.referencePath ? String(ref.referencePath).split('/').pop() : null) ||
+        (ref._path?.segments ? ref._path.segments[ref._path.segments.length - 1] : null) ||
+        (typeof ref.path === 'string' ? ref.path.split('/').pop() : null) ||
+        (typeof ref === 'string' ? ref.split('/').pop() : null) ||
+        null;
+    }
+    brandIdCache.set(productId, id);
+    return id;
+  } catch {
+    brandIdCache.set(productId, null);
+    return null;
+  }
 }
 
 /** Markiert, dass ein Action-Prompt JETZT gezeigt wurde (globaler Cooldown). */
@@ -268,13 +384,19 @@ export async function submitResponse(args: {
   const { poll, uid, answers, startedAtMs, ctx } = args;
   const completedMs = nowMs();
 
-  // 1. Lokal SOFORT als beantwortet markieren (await: muss persistiert
-  //    sein bevor die UI das Sheet schließt — sonst Re-Trigger-Race,
-  //    siehe Coachmark-Learning).
+  // 1. Frequenz-State setzen (await: muss VOR dem Sheet-Schließen
+  //    persistiert sein — sonst Re-Trigger-Race, siehe Coachmark-Learning).
+  //    • Einmalige Umfragen → answered (nie wieder).
+  //    • Wiederholbare (per_answer / none-action) → NICHT answered, aber
+  //      Dismiss-Cooldown, damit sie nicht sofort erneut aufpoppen.
   try {
-    const answered = await getAnswered();
-    answered.add(poll.id);
-    await AsyncStorage.setItem(K_ANSWERED, JSON.stringify([...answered]));
+    if (isPollRepeatable(poll)) {
+      await markDismissed(poll.id);
+    } else {
+      const answered = await getAnswered();
+      answered.add(poll.id);
+      await AsyncStorage.setItem(K_ANSWERED, JSON.stringify([...answered]));
+    }
   } catch {
     /* nicht fatal */
   }
@@ -310,4 +432,6 @@ export async function submitResponse(args: {
 export function resetSurveyCaches(): void {
   pollsCache = null;
   ctxCache = null;
+  usableCampaignsCache = null;
+  brandIdCache.clear();
 }

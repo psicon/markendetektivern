@@ -658,9 +658,9 @@ class AchievementService {
 
       // 📋 ACTION-GETRIGGERTE UMFRAGE (ClickUp 86ca8fbpz): fire-and-
       // forget — der Bus sucht eine passende, eligible, nicht-
-      // beantwortete Umfrage (mit Cooldown) und blendet sie als Sheet
-      // ein. Darf trackAction nie blockieren/beeinflussen.
-      void requestActionSurvey(userId, action);
+      // beantwortete Umfrage (Produkt-/Marken-Targeting via metadata,
+      // Cooldown) und blendet sie ein. Darf trackAction nie blockieren.
+      void requestActionSurvey(userId, action, metadata);
 
       // Erstelle Event für Logging (optional für spätere Analyse)
       const event: AchievementEvent = {

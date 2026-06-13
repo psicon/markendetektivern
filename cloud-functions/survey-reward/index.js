@@ -55,6 +55,7 @@ exports.onPollResponseCreated = onDocumentCreated(
     //   • sonst → poll.rewardCents (Fallback).
     let fallbackReward = 0;
     let campaignId = null;
+    let rewardTrigger = 'completion';
     try {
       const pollSnap = await db.collection('polls').doc(pollId).get();
       if (pollSnap.exists) {
@@ -62,9 +63,16 @@ exports.onPollResponseCreated = onDocumentCreated(
         const v = pd.rewardCents;
         if (typeof v === 'number' && v > 0) fallbackReward = Math.round(v);
         if (typeof pd.campaignId === 'string' && pd.campaignId) campaignId = pd.campaignId;
+        if (pd.rewardTrigger === 'per_answer' || pd.rewardTrigger === 'none') {
+          rewardTrigger = pd.rewardTrigger;
+        }
       }
     } catch (e) {
       logger.error('[survey-reward] poll read failed', { pollId, err: e.message });
+      return;
+    }
+    if (rewardTrigger === 'none') {
+      // Reine Datensammlung — keine Vergütung.
       return;
     }
     if (!campaignId && fallbackReward <= 0) {
@@ -75,15 +83,21 @@ exports.onPollResponseCreated = onDocumentCreated(
     const userRef = db.collection('users').doc(uid);
     const ledgerCol = userRef.collection('cashback_ledger');
     const campaignRef = campaignId ? db.collection('cashback_campaigns').doc(campaignId) : null;
+    const responseId = event.params.id;
+    // Idempotenz-Schlüssel:
+    //   • completion → EINMAL pro (uid, pollId)
+    //   • per_answer → EINMAL pro Antwort (responseId) — jede Antwort zahlt
+    const perAnswer = rewardTrigger === 'per_answer';
 
     try {
       let creditedCents = 0;
       await db.runTransaction(async (tx) => {
         // ── Reads zuerst (Firestore-Transaktions-Regel) ──
-        // Idempotenz: existiert für diese (uid, pollId) schon ein earn?
-        // Single-Field-Query (kein Composite-Index nötig) + in-memory
-        // type-Filter — der Ledger pro User ist klein.
-        const existing = await tx.get(ledgerCol.where('surveyPollId', '==', pollId));
+        // Idempotenz: Single-Field-Query (kein Composite-Index nötig) +
+        // in-memory Filter — der Ledger pro User ist klein.
+        const dupField = perAnswer ? 'surveyResponseId' : 'surveyPollId';
+        const dupValue = perAnswer ? responseId : pollId;
+        const existing = await tx.get(ledgerCol.where(dupField, '==', dupValue));
         const hasEarn = existing.docs.some((d) => d.data()?.type === 'earn');
         if (hasEarn) {
           // Reward bereits vergeben (Doppel-Submit / Trigger-Retry).

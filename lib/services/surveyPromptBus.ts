@@ -24,17 +24,19 @@ export function setSurveyPrompter(fn: Prompter | null): void {
 
 /**
  * Nach einer App-Action aufrufen (fire-and-forget). Sucht eine passende
- * action-getriggerte Umfrage und blendet sie über den Prompter ein.
- * No-op, wenn kein Prompter aktiv (App noch nicht gemountet) oder keine
- * Umfrage passt / Cooldown greift.
+ * action-getriggerte Umfrage (inkl. Produkt-/Marken-Targeting aus der
+ * metadata) und blendet sie über den Prompter ein. No-op, wenn kein
+ * Prompter aktiv (App noch nicht gemountet) oder keine Umfrage passt /
+ * Cooldown greift.
  */
 export async function requestActionSurvey(
   uid: string,
   action: ActionType,
+  metadata?: { productId?: string; productType?: string } | null,
 ): Promise<void> {
   if (!prompter || !uid) return;
   try {
-    const poll = await getActionSurvey(uid, action);
+    const poll = await getActionSurvey(uid, action, metadata ?? undefined);
     if (poll && prompter) {
       await markActionPromptShown();
       prompter(poll);

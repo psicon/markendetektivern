@@ -94,18 +94,38 @@ export interface Poll {
   // ── App-Erweiterungen (86ca8fbpz) ──
   profileTargeting?: PollProfileTarget[];
   trigger?: PollTrigger;
-  /** Cashback-Taler in Cent pro abgeschlossener Umfrage (0/fehlt = keine).
-   *  Fallback-Reward, wenn KEINE campaignId verknüpft ist. */
+  /** Cashback-Taler in Cent (0/fehlt = keine). Fallback-Betrag, wenn KEINE
+   *  campaignId verknüpft ist. */
   rewardCents?: number;
+  /**
+   * WANN vergütet wird:
+   *   • 'completion' (Default) — EINMALIGE Pauschale bei Abschluss der
+   *     Umfrage. Umfrage danach nicht mehr ausgespielt. Sinnvoll für
+   *     allgemeine Umfragen.
+   *   • 'per_answer' — bei JEDER Beantwortung. Die (action-getriggerte)
+   *     Umfrage wird wiederholt ausgespielt; jede Antwort zahlt.
+   *   • 'none' — keine Vergütung (reine Datensammlung). Action-Umfragen
+   *     bleiben wiederholbar, allgemeine bleiben einmalig.
+   */
+  rewardTrigger?: 'completion' | 'per_answer' | 'none';
   /** Optional: verknüpfte cashback_campaigns-Doc-ID. Wenn gesetzt, kommt
    *  der Reward aus der Aktion (cashbackPerBonCents + Budget-Cap) statt
-   *  aus rewardCents — die CF dekrementiert das Aktions-Budget. */
+   *  aus rewardCents — die CF dekrementiert das Aktions-Budget. Die
+   *  Umfrage wird nur ausgespielt, solange die Aktion aktiv ist + Budget hat. */
   campaignId?: string;
   /** Wie eine action-getriggerte Umfrage erscheint: 'immediate' = Sheet
    *  sofort nach der Aktion; 'hint' = dezenter, antippbarer Hinweis mit
    *  Verdienst-Möglichkeit. Default 'immediate'. (general-Polls ignorieren
    *  das — sie leben in der Umfragen-Liste.) */
   actionDisplay?: 'immediate' | 'hint';
+  /** Produkt-Targeting (action-Trigger): Umfrage nur ausspielen, wenn die
+   *  Aktion eines dieser Produkte betrifft (produkte/markenProdukte-Doc-ID).
+   *  Leer/fehlt = alle Produkte. */
+  targetProductIds?: string[];
+  /** Marken-/Hersteller-Targeting (action-Trigger): Umfrage nur, wenn das
+   *  betroffene Produkt zu einer dieser Marken/Hersteller gehört
+   *  (hersteller/hersteller_new-Doc-ID). Leer/fehlt = alle Marken. */
+  targetBrandIds?: string[];
   // ── Zeitsteuerung (ISO-Strings, RevealyIQ-Konvention) ──
   startDate?: string;
   endDate?: string;
@@ -146,4 +166,17 @@ export interface PollResponse {
 /** Normalisiert den Trigger eines (ggf. alten) Poll-Docs. */
 export function pollTriggerOf(poll: Pick<Poll, 'trigger'>): PollTrigger {
   return poll.trigger?.type === 'action' ? poll.trigger : { type: 'general' };
+}
+
+/**
+ * Darf diese Umfrage MEHRFACH beantwortet werden (vs. einmalig)?
+ *   • per_answer            → ja (jede Antwort zählt/zahlt)
+ *   • none + action-Trigger → ja (wiederholte Datensammlung, gratis)
+ *   • sonst (completion / none+general) → nein (einmalig)
+ */
+export function isPollRepeatable(poll: Pick<Poll, 'trigger' | 'rewardTrigger'>): boolean {
+  const rt = poll.rewardTrigger ?? 'completion';
+  if (rt === 'per_answer') return true;
+  if (rt === 'none' && pollTriggerOf(poll).type === 'action') return true;
+  return false;
 }
