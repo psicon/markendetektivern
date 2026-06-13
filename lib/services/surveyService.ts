@@ -257,6 +257,17 @@ export async function submitResponse(args: {
 
   // 2. poll_responses fire-and-forget (offline → Firestore-Queue →
   //    CF vergibt Reward bei Reconnect). RevealyIQs Schema 1:1.
+  //    WICHTIG: RN-Firestore wirft bei undefined-Feldwerten
+  //    ('Unsupported field value: undefined') — userContext NUR mit
+  //    tatsächlich vorhandenen Werten bauen (anonyme User ohne Profil
+  //    haben hier sonst lauter undefined).
+  const userContext: Record<string, any> = {};
+  if (ctx.favoriteMarket) userContext.favoriteMarket = ctx.favoriteMarket;
+  if (ctx.gender) userContext.gender = ctx.gender;
+  if (typeof ctx.age === 'number') userContext.age = ctx.age;
+  if (ctx.bundesland) userContext.region = ctx.bundesland;
+  if (typeof ctx.isPremium === 'boolean') userContext.isPremium = ctx.isPremium;
+
   const response = {
     pollId: poll.id,
     userId: uid,
@@ -264,13 +275,7 @@ export async function submitResponse(args: {
     startedAt: new Date(startedAtMs).toISOString(),
     completedAt: new Date(completedMs).toISOString(),
     timeSpentSeconds: Math.max(0, Math.round((completedMs - startedAtMs) / 1000)),
-    userContext: {
-      favoriteMarket: ctx.favoriteMarket ?? undefined,
-      gender: ctx.gender ?? undefined,
-      age: ctx.age ?? undefined,
-      region: ctx.bundesland ?? undefined,
-      isPremium: ctx.isPremium ?? undefined,
-    },
+    userContext,
   };
   void addDoc(collection(db, 'poll_responses'), response as any).catch((e) =>
     console.warn('[survey] poll_responses write failed (queued offline?):', (e as Error)?.message),
