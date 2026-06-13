@@ -292,7 +292,7 @@ export async function getActionSurvey(
     getDismissed(),
   ]);
   const lastPrompt = lastPromptRaw ? parseInt(lastPromptRaw, 10) || 0 : 0;
-  if (nowMs() - lastPrompt < ACTION_GLOBAL_COOLDOWN_MS) return null;
+  const globalCooldownActive = nowMs() - lastPrompt < ACTION_GLOBAL_COOLDOWN_MS;
 
   const [polls, ctx, usableCampaigns] = await Promise.all([
     getActivePolls(),
@@ -308,6 +308,9 @@ export async function getActionSurvey(
     const trig = pollTriggerOf(p);
     if (trig.type !== 'action' || trig.action !== action) continue;
     if (answered.has(p.id)) continue;
+    // Globaler Anti-Fatigue-Floor — greift NICHT, wenn die Umfrage
+    // explizit cooldownHours:0 setzt (= "immer zeigen", z.B. zum Testen).
+    if (globalCooldownActive && trig.cooldownHours !== 0) continue;
     const dAt = dismissed[p.id];
     const cd = (trig.cooldownHours ?? POLL_DISMISS_COOLDOWN_MS / 3_600_000) * 3_600_000;
     if (dAt && now - dAt < cd) continue;
