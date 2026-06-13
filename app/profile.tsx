@@ -716,7 +716,7 @@ export default function ProfileScreen() {
       // be in the pristine "first time" state.
       console.warn('revokeCashbackConsent failed', e?.message);
     }
-    safePush('/cashback/consent' as any);
+    safePush('/cashback/consent?from=receipt' as any);
   };
   const onResetUnlocks = async () => {
     try {

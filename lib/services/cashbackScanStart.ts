@@ -50,5 +50,6 @@ export async function startReceiptScanFlow(
   setSelectedCampaignId(
     campaignsEnabled && receiptCampaigns.length === 1 ? receiptCampaigns[0].id : null,
   );
-  router.push(hasConsent ? '/cashback/capture' : '/cashback/consent');
+  // Echter Scan-Intent → nach Consent in den Bon-Scanner (from=receipt).
+  router.push(hasConsent ? '/cashback/capture' : '/cashback/consent?from=receipt');
 }

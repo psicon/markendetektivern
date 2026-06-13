@@ -352,10 +352,35 @@ export default function CashbackConsentScreen() {
   // Paddings, damit Hero + alle 3 Steps ohne Scrollen sichtbar sind.
   const { height: winHeight } = useWindowDimensions();
   const compact = winHeight < 700;
-  // from=settings (Profil-Toggle, ClickUp 86ca6u6xd [5]): nach Accept
-  // zurück zu den Einstellungen statt in den Kamera-Flow.
+  // Context-aware Routing (ClickUp 86ca8h…): der Consent-Screen darf NICHT
+  // mehr blind in den Bon-Scanner springen. Wohin es nach dem Akzeptieren
+  // (bzw. wenn Consent schon gültig ist) geht, hängt vom `from`-Parameter ab:
+  //   • 'receipt'  → Bon-Scanner (/cashback/capture)  — NUR echte Scan-Intents
+  //   • 'product'  → Produkt-Einreichung (/product-submit)
+  //   • sonst (settings/rewards/survey/leer) → zurück (kein Auto-Scanner)
   const params = useLocalSearchParams<{ from?: string }>();
-  const fromSettings = params.from === 'settings';
+  const from = params.from ?? '';
+
+  const goAfterConsent = useCallback(() => {
+    if (from === 'receipt') {
+      router.replace('/cashback/capture');
+    } else if (from === 'product') {
+      router.replace('/product-submit' as any);
+    } else if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)/rewards' as any);
+    }
+  }, [from]);
+
+  // CTA-Label spiegelt den Folge-Schritt (kein "Bon scannen" wenn gar nicht
+  // gescannt wird).
+  const ctaFollowupLabel =
+    from === 'receipt'
+      ? 'Akzeptieren & Bon scannen'
+      : from === 'product'
+        ? 'Akzeptieren & fortfahren'
+        : 'Akzeptieren';
 
   // AGB/Datenschutz im IN-APP-Browser öffnen (SFSafariViewController /
   // Custom Tab) statt extern in Safari — User-Vorgabe 2026-06-11.
@@ -389,20 +414,16 @@ export default function CashbackConsentScreen() {
       if (user?.uid) {
         const valid = await hasValidCashbackConsent(user.uid);
         if (alive && valid) {
-          // Aus den Einstellungen kommend gibt es keinen Auto-Sprung
-          // in den Kamera-Flow — Consent ist schon da, zurück.
-          if (fromSettings) {
-            router.back();
-          } else {
-            router.replace('/cashback/capture');
-          }
+          // Consent schon gültig → context-aware weiter (kein Auto-Scanner
+          // außer from=receipt).
+          goAfterConsent();
         }
       }
     })();
     return () => {
       alive = false;
     };
-  }, [user?.uid, fromSettings]);
+  }, [user?.uid, goAfterConsent]);
 
   const handleAccept = useCallback(async () => {
     if (!user?.uid) {
@@ -433,11 +454,7 @@ export default function CashbackConsentScreen() {
       await acceptCashbackConsent(user.uid);
       setHasAccepted(true);
       setTimeout(() => {
-        if (fromSettings) {
-          router.back();
-        } else {
-          router.replace('/cashback/capture');
-        }
+        goAfterConsent();
       }, 300);
     } catch (error: any) {
       console.warn('acceptCashbackConsent failed:', error);
@@ -448,7 +465,7 @@ export default function CashbackConsentScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [user?.uid, isAnonymous, fromSettings]);
+  }, [user?.uid, isAnonymous, goAfterConsent]);
 
   const handleCancel = useCallback(() => router.back(), []);
 
@@ -781,11 +798,7 @@ export default function CashbackConsentScreen() {
                 color="#fff"
               />
               <Text style={styles.acceptText}>
-                {hasAccepted
-                  ? 'Gespeichert'
-                  : fromSettings
-                    ? 'Akzeptieren'
-                    : 'Akzeptieren & Bon scannen'}
+                {hasAccepted ? 'Gespeichert' : ctaFollowupLabel}
               </Text>
             </>
           )}

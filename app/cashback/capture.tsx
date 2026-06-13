@@ -211,12 +211,12 @@ export default function CashbackCaptureScreen() {
   useEffect(() => {
     let alive = true;
     if (!user?.uid) {
-      router.replace('/cashback/consent');
+      router.replace('/cashback/consent?from=receipt');
       return;
     }
     (async () => {
       const valid = await hasValidCashbackConsent(user.uid);
-      if (alive && !valid) router.replace('/cashback/consent');
+      if (alive && !valid) router.replace('/cashback/consent?from=receipt');
     })();
     return () => {
       alive = false;

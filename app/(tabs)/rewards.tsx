@@ -427,7 +427,9 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
       consentPromptedRef.current = true;
       // Erst persistieren, DANN navigieren (Race-Regel aus CLAUDE.md).
       await markConsentPromptShown();
-      if (alive) router.push('/cashback/consent');
+      // Auto-Prompt beim Rewards-Besuch → nach Consent zurück auf Rewards,
+      // NICHT in den Scanner (from=rewards).
+      if (alive) router.push('/cashback/consent?from=rewards');
     })();
     return () => {
       alive = false;
@@ -616,7 +618,8 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
       if (cashback.hasConsent) {
         router.push('/cashback/capture');
       } else {
-        router.push('/cashback/consent');
+        // Scan-Intent (Kampagne gewählt) → nach Consent in den Scanner.
+        router.push('/cashback/consent?from=receipt');
       }
     },
     [cashback.uid, cashback.hasConsent],
@@ -842,7 +845,9 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
                 router.push('/auth/login');
                 return;
               }
-              router.push('/cashback/consent');
+              // Aktivierungs-Einladung → nach Consent zurück auf Rewards,
+              // nicht in den Scanner (from=rewards).
+              router.push('/cashback/consent?from=rewards');
             }}
             style={{
               flexDirection: 'row',

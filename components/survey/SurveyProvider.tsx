@@ -78,7 +78,8 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
   // sonst dropt der 600-ms-Debounce den zweiten Push.
   const goToCashback = useCallback(() => {
     router.push('/(tabs)/rewards' as any);
-    router.push('/cashback/consent?from=settings' as any);
+    // from=rewards → nach Consent zurück auf Rewards (kein Auto-Scanner).
+    router.push('/cashback/consent?from=rewards' as any);
   }, []);
 
   const [poll, setPoll] = useState<Poll | null>(null);
