@@ -127,6 +127,9 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
           answers,
           startedAtMs: startedAtRef.current || Date.now(),
           ctx,
+          // Consent-Markierung am Response-Doc (sammeln, aber markieren).
+          marketConsent: hasConsent,
+          registered: !isAnonymous,
         });
       } catch (e) {
         console.warn('[survey] submit failed', (e as Error)?.message);
@@ -149,7 +152,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
       showInfoToast(msg, 'info', scheme);
       setActivityNonce((n) => n + 1); // Tile-Liste neu laden
     },
-    [poll, user?.uid, scheme, cashbackEligible],
+    [poll, user?.uid, scheme, cashbackEligible, hasConsent, isAnonymous],
   );
 
   const handleClose = useCallback(() => {

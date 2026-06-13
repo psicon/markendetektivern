@@ -372,8 +372,14 @@ export async function submitResponse(args: {
   answers: PollAnswer[];
   startedAtMs: number;
   ctx: SurveyUserContext;
+  /** Markt-Consent akzeptiert (aktuelle Version)? Markiert das Response-
+   *  Doc, damit RevealyIQ konsentierte von nicht-konsentierten Daten
+   *  trennen kann (User-Vorgabe: sammeln, aber markieren). */
+  marketConsent: boolean;
+  /** Registrierter (nicht-anonymer) Account? */
+  registered: boolean;
 }): Promise<void> {
-  const { poll, uid, answers, startedAtMs, ctx } = args;
+  const { poll, uid, answers, startedAtMs, ctx, marketConsent, registered } = args;
   const completedMs = nowMs();
 
   // 1. Frequenz-State setzen (await: muss VOR dem Sheet-Schließen
@@ -423,6 +429,14 @@ export async function submitResponse(args: {
     completedAt: new Date(completedMs).toISOString(),
     timeSpentSeconds: Math.max(0, Math.round((completedMs - startedAtMs) / 1000)),
     userContext,
+    // Daten-Consent-Markierung (User-Vorgabe: Antworten von Consent-losen
+    // Usern sammeln, ABER markieren). RevealyIQ kann so konsentierte
+    // Marktdaten herausfiltern. Cashback hängt server-seitig ohnehin an
+    // genau diesen Flags (CF survey-reward).
+    consent: {
+      marketConsent, // Markt-Consent akzeptiert (aktuelle Version)
+      registered, // nicht-anonymer Account
+    },
   };
   void addDoc(collection(db, 'poll_responses'), response as any).catch((e) =>
     console.warn('[survey] poll_responses write failed (queued offline?):', (e as Error)?.message),

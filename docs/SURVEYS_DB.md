@@ -112,6 +112,22 @@ User sehen in der App eine ehrliche Meldung („Mit aktiviertem Cashback gäbe e
 dafür X Taler") statt eines falschen Versprechens — und es entsteht kein
 Geister-Guthaben.
 
+**Daten-Markierung:** Jede Antwort trägt im `poll_responses`-Doc ein
+`consent`-Feld, damit die Auswertung konsentierte von nicht-konsentierten
+Antworten trennen kann:
+
+```jsonc
+"consent": {
+  "marketConsent": true,   // hat den Markt-Consent (aktuelle Version) akzeptiert
+  "registered": true        // registrierter (nicht-anonymer) Account
+}
+```
+
+Für verwertbare/verkaufbare B2B-Marktdaten in der Auswertung auf
+`consent.marketConsent === true` filtern. Antworten ohne Consent bleiben für
+interne Engagement-/Funnel-Analysen erhalten, gehören aber NICHT in einen
+Kunden-Report.
+
 ## targeting (Zielgruppe, für general + action)
 
 ```jsonc
