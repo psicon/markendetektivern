@@ -1,0 +1,14 @@
+{
+  "name": "survey-reward",
+  "version": "1.0.0",
+  "description": "Firestore onCreate trigger: gutschreibt den Cashback-Taler-Reward einer abgeschlossenen Umfrage (poll_responses) idempotent in den User-Ledger.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}
