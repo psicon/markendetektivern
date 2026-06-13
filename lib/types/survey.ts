@@ -94,8 +94,18 @@ export interface Poll {
   // ── App-Erweiterungen (86ca8fbpz) ──
   profileTargeting?: PollProfileTarget[];
   trigger?: PollTrigger;
-  /** Cashback-Taler in Cent pro abgeschlossener Umfrage (0/fehlt = keine). */
+  /** Cashback-Taler in Cent pro abgeschlossener Umfrage (0/fehlt = keine).
+   *  Fallback-Reward, wenn KEINE campaignId verknüpft ist. */
   rewardCents?: number;
+  /** Optional: verknüpfte cashback_campaigns-Doc-ID. Wenn gesetzt, kommt
+   *  der Reward aus der Aktion (cashbackPerBonCents + Budget-Cap) statt
+   *  aus rewardCents — die CF dekrementiert das Aktions-Budget. */
+  campaignId?: string;
+  /** Wie eine action-getriggerte Umfrage erscheint: 'immediate' = Sheet
+   *  sofort nach der Aktion; 'hint' = dezenter, antippbarer Hinweis mit
+   *  Verdienst-Möglichkeit. Default 'immediate'. (general-Polls ignorieren
+   *  das — sie leben in der Umfragen-Liste.) */
+  actionDisplay?: 'immediate' | 'hint';
   // ── Zeitsteuerung (ISO-Strings, RevealyIQ-Konvention) ──
   startDate?: string;
   endDate?: string;

@@ -52,6 +52,7 @@ const CTX_TTL_MS = 5 * 60 * 1000;
 const K_ANSWERED = 'survey_answered_v1'; // string[] pollIds
 const K_DISMISSED = 'survey_dismissed_v1'; // Record<pollId, ts>
 const K_LAST_ACTION_PROMPT = 'survey_last_action_prompt_v1'; // ts
+const K_SNOOZE_UNTIL = 'survey_snooze_until_v1'; // ts — "heute keine Vorschläge mehr"
 
 // ── In-memory caches (RAM, kein Persist) ──
 let pollsCache: { at: number; polls: Poll[] } | null = null;
@@ -180,11 +181,34 @@ export async function getGeneralSurveys(uid: string): Promise<Poll[]> {
  * — oder null. Respektiert globalen Cooldown + per-Poll-Dismiss-Cooldown
  * + answered. Gibt die erste passende zurück.
  */
+/** "Heute keine Vorschläge mehr" — Snooze bis zur nächsten lokalen
+ *  Mitternacht (ClickUp 86ca8fbpz, User-Stummschaltung). */
+export async function snoozeActionSurveysToday(): Promise<void> {
+  const d = new Date();
+  d.setHours(24, 0, 0, 0); // nächste Mitternacht
+  try {
+    await AsyncStorage.setItem(K_SNOOZE_UNTIL, String(d.getTime()));
+  } catch {
+    /* ignore */
+  }
+}
+async function isSnoozed(): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(K_SNOOZE_UNTIL);
+    return !!raw && nowMs() < (parseInt(raw, 10) || 0);
+  } catch {
+    return false;
+  }
+}
+
 export async function getActionSurvey(
   uid: string,
   action: ActionType,
 ): Promise<Poll | null> {
   if (!uid) return null;
+  // "Heute keine Vorschläge mehr" (User-Stummschaltung) — gilt für ALLE
+  // action-Vorschläge; die general-Liste im Rewards-Tab bleibt erreichbar.
+  if (await isSnoozed()) return null;
   const [lastPromptRaw, answered, dismissed] = await Promise.all([
     AsyncStorage.getItem(K_LAST_ACTION_PROMPT),
     getAnswered(),

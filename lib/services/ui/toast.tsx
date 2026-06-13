@@ -181,6 +181,9 @@ function showToast(
     onActionPress?: () => void;
     durationMs?: number;
     id?: string;
+    // Von allen Helpern durchgereicht (scheme-aware Styling). War im Typ
+    // bisher nicht deklariert → 10 vorbestehende TS-Fehler; hier ergänzt.
+    colorScheme?: 'light' | 'dark';
   },
 ) {
   const duration = options?.durationMs ?? getToastDuration(category);
@@ -310,6 +313,23 @@ export function showRetryableErrorToast(
     actionLabel: options?.actionLabel ?? 'Wiederholen',
     onActionPress: onRetry,
     colorScheme: options?.colorScheme,
+    durationMs: 8000,
+  });
+}
+
+// Dezenter, antippbarer Umfrage-Hinweis (ClickUp 86ca8fbpz, actionDisplay
+// 'hint'): statt das Sheet sofort einzublenden, ein Hinweis mit Verdienst-
+// Möglichkeit; Tap auf die Action-Pille öffnet die Umfrage.
+export function showSurveyHintToast(
+  message: string,
+  onOpen: () => void,
+  colorScheme?: 'light' | 'dark',
+) {
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  showToast(message, 'INFO', {
+    actionLabel: 'Los geht’s',
+    onActionPress: onOpen,
+    colorScheme,
     durationMs: 8000,
   });
 }

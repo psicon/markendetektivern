@@ -48,28 +48,36 @@ exports.onPollResponseCreated = onDocumentCreated(
       return;
     }
 
-    // Reward-Betrag AUTORITATIV vom Poll lesen (nicht aus dem Response-
+    // Reward-Quelle AUTORITATIV vom Poll lesen (nicht aus dem Response-
     // Doc — das ist client-geschrieben und nicht vertrauenswürdig).
-    let rewardCents = 0;
+    //   • campaignId gesetzt → Reward aus der Aktion (cashbackPerBonCents),
+    //     gedeckelt aufs verbleibende Budget; Budget wird dekrementiert.
+    //   • sonst → poll.rewardCents (Fallback).
+    let fallbackReward = 0;
+    let campaignId = null;
     try {
       const pollSnap = await db.collection('polls').doc(pollId).get();
       if (pollSnap.exists) {
-        const v = pollSnap.data()?.rewardCents;
-        if (typeof v === 'number' && v > 0) rewardCents = Math.round(v);
+        const pd = pollSnap.data() || {};
+        const v = pd.rewardCents;
+        if (typeof v === 'number' && v > 0) fallbackReward = Math.round(v);
+        if (typeof pd.campaignId === 'string' && pd.campaignId) campaignId = pd.campaignId;
       }
     } catch (e) {
       logger.error('[survey-reward] poll read failed', { pollId, err: e.message });
       return;
     }
-    if (rewardCents <= 0) {
-      // Umfrage ohne Reward — nichts gutzuschreiben.
+    if (!campaignId && fallbackReward <= 0) {
+      // Umfrage ohne Reward (kein Budget-Topf, kein Fallback) — nichts zu tun.
       return;
     }
 
     const userRef = db.collection('users').doc(uid);
     const ledgerCol = userRef.collection('cashback_ledger');
+    const campaignRef = campaignId ? db.collection('cashback_campaigns').doc(campaignId) : null;
 
     try {
+      let creditedCents = 0;
       await db.runTransaction(async (tx) => {
         // ── Reads zuerst (Firestore-Transaktions-Regel) ──
         // Idempotenz: existiert für diese (uid, pollId) schon ein earn?
@@ -82,17 +90,34 @@ exports.onPollResponseCreated = onDocumentCreated(
           return;
         }
         const userSnap = await tx.get(userRef);
+        // Aktion frisch IN der Transaktion lesen → Budget race-frei cappen.
+        const campaignSnap = campaignRef ? await tx.get(campaignRef) : null;
+
+        // Reward bestimmen.
+        let rewardCents = fallbackReward;
+        if (campaignSnap && campaignSnap.exists) {
+          const c = campaignSnap.data() || {};
+          const perBon = typeof c.cashbackPerBonCents === 'number' ? c.cashbackPerBonCents : 0;
+          const remaining = typeof c.budgetRemainingCents === 'number' ? c.budgetRemainingCents : 0;
+          rewardCents = Math.max(0, Math.min(perBon, remaining));
+        }
+        if (rewardCents <= 0) {
+          // Budget erschöpft / Aktion liefert 0 → kein Reward (kein no-op-Fehler).
+          return;
+        }
+
         const u = userSnap.exists ? userSnap.data() : {};
         const balance = u.cashback_balance_cents || 0;
         const lifetime = u.cashback_lifetime_cents || 0;
 
-        // ── Write: earn + Balance/Lifetime ──
+        // ── Writes: earn + Balance/Lifetime (+ Budget-Decrement) ──
         const ref = ledgerCol.doc();
         tx.set(ref, {
           type: 'earn',
           cents: rewardCents,
           surveyPollId: pollId,
           surveyResponseId: event.params.id,
+          campaignId: campaignId || null,
           balanceAfterCents: balance + rewardCents,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           reason: 'survey',
@@ -105,8 +130,19 @@ exports.onPollResponseCreated = onDocumentCreated(
           },
           { merge: true },
         );
+        if (campaignRef) {
+          // Budget transaktional dekrementieren (merge+increment → race-frei).
+          tx.set(
+            campaignRef,
+            { budgetRemainingCents: admin.firestore.FieldValue.increment(-rewardCents) },
+            { merge: true },
+          );
+        }
+        creditedCents = rewardCents;
       });
-      logger.info('[survey-reward] credited', { uid, pollId, rewardCents });
+      if (creditedCents > 0) {
+        logger.info('[survey-reward] credited', { uid, pollId, creditedCents, campaignId });
+      }
     } catch (e) {
       logger.error('[survey-reward] ledger tx failed', {
         uid,
