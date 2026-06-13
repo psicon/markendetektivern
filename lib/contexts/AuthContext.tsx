@@ -834,6 +834,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await signOut(auth);
       console.log('✅ Logout erfolgreich');
 
+      // Umfrage-Caches leeren (Account-Wechsel): answered-Counts, Polls,
+      // Session-Cap. Verhindert, dass Stand des alten Users beim nächsten
+      // User durchschlägt. 86ca8h…
+      try {
+        const { resetSurveyCaches } = await import('@/lib/services/surveyService');
+        resetSurveyCaches();
+      } catch {
+        /* non-fatal */
+      }
+
       // 🔁 Re-establish an anonymous session immediately. Without
       // this the tab layout sees `!user` and renders a blank
       // screen (auto-anonymous-login only fires on first mount,

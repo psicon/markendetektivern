@@ -72,9 +72,79 @@ const K_ANSWER_COUNT = 'survey_answer_count_v1'; // Record<pollId, number>
 let pollsCache: { at: number; polls: Poll[] } | null = null;
 let pollsInflight: Promise<Poll[]> | null = null;
 let ctxCache: { uid: string; at: number; ctx: SurveyUserContext } | null = null;
+// Server-seitige Antwort-Zähler pro pollId (aus poll_responses). DAS ist
+// die Wahrheit, ob eine Umfrage schon beantwortet wurde — NICHT der lokale
+// answered-Set allein (der wird bei Reset/Reinstall/Geräte-Wechsel leer →
+// sonst könnte man dieselbe Umfrage erneut ausfüllen + erneut Cashback
+// kassieren). 86ca8h… (kritischer Bug).
+let answeredCountsCache: { uid: string; at: number; counts: Record<string, number> } | null = null;
+let answeredCountsInflight: Promise<Record<string, number>> | null = null;
+const ANSWERED_TTL_MS = 60 * 1000; // 1 Min — frisch genug, ein Read pro Minute
 
 function nowMs(): number {
   return Date.now();
+}
+
+/**
+ * Wie oft hat dieser User jede Umfrage SCHON beantwortet — autoritativ aus
+ * `poll_responses` (Server). Überlebt lokalen Reset/Reinstall/Geräte-Wechsel,
+ * im Gegensatz zum lokalen answered-Set. Cache 1 Min + inflight-Dedup, billig.
+ */
+async function getServerAnsweredCounts(
+  uid: string,
+  force = false,
+): Promise<Record<string, number>> {
+  if (
+    !force &&
+    answeredCountsCache &&
+    answeredCountsCache.uid === uid &&
+    nowMs() - answeredCountsCache.at < ANSWERED_TTL_MS
+  ) {
+    return answeredCountsCache.counts;
+  }
+  if (answeredCountsInflight) return answeredCountsInflight;
+  answeredCountsInflight = (async () => {
+    try {
+      const snap = await getDocs(
+        query(collection(db, 'poll_responses'), where('userId', '==', uid)),
+      );
+      const counts: Record<string, number> = {};
+      snap.forEach((d: any) => {
+        const pid = (d.data() as any)?.pollId;
+        if (pid) counts[pid] = (counts[pid] ?? 0) + 1;
+      });
+      // Leeres fromCache-Resultat NICHT cachen (Offline-Schutz) — sonst klebt
+      // ein leerer Stand fest und die Umfrage käme fälschlich wieder.
+      if (Object.keys(counts).length > 0 || !(snap as any).metadata?.fromCache) {
+        answeredCountsCache = { uid, at: nowMs(), counts };
+      }
+      return counts;
+    } catch (e) {
+      console.warn('[survey] getServerAnsweredCounts failed:', (e as Error)?.message);
+      return answeredCountsCache?.counts ?? {};
+    } finally {
+      answeredCountsInflight = null;
+    }
+  })();
+  return answeredCountsInflight;
+}
+
+/**
+ * Ist diese Umfrage für den User ausgeschöpft? Vereint LOKAL (answered-Set)
+ * + SERVER (poll_responses-Count). Nicht-wiederholbar → schon EINE Antwort
+ * sperrt; wiederholbar → erst maxPerUser erreicht.
+ */
+function isPollExhausted(
+  poll: Poll,
+  localAnswered: Set<string>,
+  serverCount: number,
+): boolean {
+  if (localAnswered.has(poll.id)) return true;
+  if (!isPollRepeatable(poll)) return serverCount >= 1;
+  if (typeof poll.maxPerUser === 'number' && poll.maxPerUser > 0) {
+    return serverCount >= poll.maxPerUser;
+  }
+  return false; // wiederholbar ohne Limit
 }
 
 // ── Budget-Gating (ClickUp 86ca8fbpz) ──
@@ -230,15 +300,18 @@ export async function hasAnswered(pollId: string): Promise<boolean> {
  */
 export async function getGeneralSurveys(uid: string, force = false): Promise<Poll[]> {
   if (!uid) return [];
-  const [polls, ctx, answered] = await Promise.all([
+  const [polls, ctx, answered, serverCounts] = await Promise.all([
     getActivePolls(force),
     buildUserContext(uid),
     getAnswered(),
+    getServerAnsweredCounts(uid, force),
   ]);
   return polls.filter(
     (p) =>
       pollTriggerOf(p).type === 'general' &&
-      !answered.has(p.id) &&
+      // Schon beantwortet? LOKAL oder SERVER (poll_responses) — Server ist
+      // die Wahrheit, überlebt lokalen Reset/Reinstall.
+      !isPollExhausted(p, answered, serverCounts[p.id] ?? 0) &&
       budgetAllows(p) &&
       isPollEligible(p, ctx),
   );
@@ -302,7 +375,11 @@ export async function getActionSurvey(
   // Rewards-Tab bleibt immer erreichbar.
   if (!(await areActionSurveysEnabled())) return null;
   if (await isSnoozed()) return null;
-  const [answered, dismissed] = await Promise.all([getAnswered(), getDismissed()]);
+  const [answered, dismissed, serverCounts] = await Promise.all([
+    getAnswered(),
+    getDismissed(),
+    getServerAnsweredCounts(uid),
+  ]);
 
   const [polls, ctx] = await Promise.all([
     getActivePolls(),
@@ -316,7 +393,9 @@ export async function getActionSurvey(
   for (const p of polls) {
     const trig = pollTriggerOf(p);
     if (trig.type !== 'action' || trig.action !== action) continue;
-    if (answered.has(p.id)) continue;
+    // Schon beantwortet/ausgeschöpft? LOKAL oder SERVER (poll_responses).
+    // Server überlebt Reset/Reinstall → kein erneutes Ausfüllen + Kassieren.
+    if (isPollExhausted(p, answered, serverCounts[p.id] ?? 0)) continue;
     // Pro-Umfrage-Cooldown: nach Antwort/Wegklick (markDismissed) erst
     // nach `cooldownHours` (Default 6 h) wieder zeigen → kein Re-Pop-Spam.
     // Verschiedene Umfragen können weiterhin je auf ihre Aktion feuern.
@@ -429,6 +508,25 @@ export async function submitResponse(args: {
   const { poll, uid, answers, startedAtMs, ctx, marketConsent, registered } = args;
   const completedMs = nowMs();
 
+  // 0. HARTER Re-Submit-Schutz (kritischer Bug 86ca8h…): selbst wenn die
+  //    Umfrage durch verlorenen Lokal-State (Reset/Reinstall/Geräte-Wechsel)
+  //    erneut angezeigt wurde, NICHT erneut schreiben/kassieren, wenn sie
+  //    LOKAL oder am SERVER (poll_responses) bereits ausgeschöpft ist. Der
+  //    Loading-Filter blendet ausgeschöpfte Umfragen zwar schon aus — das
+  //    hier ist die zweite Verteidigungslinie direkt vor dem Write.
+  try {
+    const [localAnswered, serverCounts] = await Promise.all([
+      getAnswered(),
+      getServerAnsweredCounts(uid),
+    ]);
+    if (isPollExhausted(poll, localAnswered, serverCounts[poll.id] ?? 0)) {
+      console.warn('[survey] submit geblockt — Umfrage bereits ausgeschöpft:', poll.id);
+      return;
+    }
+  } catch {
+    /* im Zweifel weiter — die CF-Idempotenz (Ledger) ist der finale Geld-Guard */
+  }
+
   // 1. Frequenz-State setzen (await: muss VOR dem Sheet-Schließen
   //    persistiert sein — sonst Re-Trigger-Race, siehe Coachmark-Learning).
   //    • Antwort-Zähler hochzählen.
@@ -509,6 +607,11 @@ export async function submitResponse(args: {
   void addDoc(collection(db, 'poll_responses'), response as any).catch((e) =>
     console.warn('[survey] poll_responses write failed (queued offline?):', (e as Error)?.message),
   );
+
+  // Server-Antwort-Zähler-Cache invalidieren, damit ein späterer Load die
+  // frische Antwort berücksichtigt (lokaler answered-/count-State gated die
+  // UI ohnehin sofort, das hier hält den Server-Stand konsistent).
+  answeredCountsCache = null;
 }
 
 /** Cache-Reset (z.B. Logout / Account-Wechsel). */
@@ -516,6 +619,7 @@ export function resetSurveyCaches(): void {
   pollsCache = null;
   ctxCache = null;
   brandIdCache.clear();
+  answeredCountsCache = null;
   // Account-Wechsel zählt wie ein frischer Start → Session-Cap zurücksetzen.
   actionPromptedThisSession = false;
 }
