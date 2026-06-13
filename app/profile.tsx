@@ -1429,11 +1429,14 @@ export default function ProfileScreen() {
               value={gamificationDisabled}
               onChange={handleGamificationToggle}
             />
+            {/* Stumm-Schalter: ON = Umfragen stumm (keine Vorschläge nach
+                Aktionen). Intern bleibt actionSurveysEnabled die Wahrheit
+                (an = Vorschläge erlaubt) → hier invertiert dargestellt. */}
             <ToggleRow
-              icon="poll"
-              label="Umfrage-Vorschläge nach Aktionen"
-              value={actionSurveysEnabled}
-              onChange={handleActionSurveyToggle}
+              icon="volume-off"
+              label="Umfragen stumm schalten"
+              value={!actionSurveysEnabled}
+              onChange={(muted) => handleActionSurveyToggle(!muted)}
             />
             {/* T17.31 + ClickUp 86ca6u6xd [5]: Cashback & Markt-
                 Statistiken — der EINE v2-Consent (Bon-Daten + App-
@@ -1448,12 +1451,12 @@ export default function ProfileScreen() {
                   Accept flippt der Snapshot den Toggle automatisch. */}
             <ToggleRow
               icon="cash-multiple"
-              label="Cashback & Markt-Statistiken"
+              label="Cashback & Rewards"
               value={cashback.hasConsent}
               onChange={() => {
                 if (cashback.hasConsent) {
                   Alert.alert(
-                    'Cashback & Markt-Statistiken deaktivieren?',
+                    'Cashback & Rewards deaktivieren?',
                     'Die Erfassung deiner App-Nutzung endet sofort und du kannst keine Bons mehr einreichen. Bereits gutgeschriebenes Cashback bleibt erhalten — Auszahlung wie gewohnt ab 10 €.',
                     [
                       { text: 'Abbrechen', style: 'cancel' },
