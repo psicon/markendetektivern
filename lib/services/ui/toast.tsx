@@ -105,14 +105,19 @@ const StandardToast: React.FC<{
   // Outline.
 
   return (
-    <View style={styles.shell}>
+    // box-none auf allen nicht-interaktiven Ebenen: die Pille verdeckt zwar
+    // visuell, fängt aber KEINE Touches ab → was darunter liegt (Header/
+    // Back-Button/Buttons) bleibt bedienbar. Einzig die Action-Pille
+    // (Pressable) ist tippbar. Optik unverändert.
+    <View style={styles.shell} pointerEvents="box-none">
       <LinearGradient
         colors={bg}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.pill}
+        pointerEvents="box-none"
       >
-        <View style={styles.inner}>
+        <View style={styles.inner} pointerEvents="box-none">
           {emoji ? (
             <Text style={styles.emoji}>{emoji}</Text>
           ) : (
@@ -199,7 +204,10 @@ function showToast(
     duration,
     disableShadow: true, // we draw our own shadow on the card
     width: SCREEN_WIDTH,
-    styles: { view: { backgroundColor: 'transparent' } },
+    // pointerEvents box-none: der full-width Toast-Wrapper fängt KEINE
+    // Touches ab → Bedienelemente darunter (Back-Button etc.) bleiben
+    // nutzbar. Nur die Action-Pille im Custom-Toast ist tippbar.
+    styles: { view: { backgroundColor: 'transparent', pointerEvents: 'box-none' } },
     customToast: (t: RNToast) => (
       <StandardToast
         message={resolveValue(t.message, t) as any}

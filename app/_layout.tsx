@@ -239,11 +239,17 @@ function ThemedApp() {
                 <SplashScreen onAnimationComplete={handleSplashComplete} />
               )}
 
-              {/* Global Toast Host - transparenter Wrapper, damit nur unser Custom-Toast sichtbar ist */}
-              <Toasts 
+              {/* Global Toast Host - transparenter Wrapper, damit nur unser Custom-Toast sichtbar ist.
+                  pointerEvents:'box-none' auf view + pressable: der Toast-
+                  Container darf KEINE Touches abfangen (sonst blockiert die
+                  volle Breite die Bedienelemente darunter — z.B. Back-Button).
+                  Nur die Action-Pille im Custom-Toast bleibt tippbar; alles
+                  andere fällt durch. Swipe-to-dismiss entfällt (Auto-Dismiss
+                  greift ohnehin). 86ca… */}
+              <Toasts
                 defaultStyle={{
-                  view: { backgroundColor: 'transparent', padding: 0, margin: 0, shadowOpacity: 0, elevation: 0 },
-                  pressable: { backgroundColor: 'transparent' },
+                  view: { backgroundColor: 'transparent', padding: 0, margin: 0, shadowOpacity: 0, elevation: 0, pointerEvents: 'box-none' },
+                  pressable: { backgroundColor: 'transparent', pointerEvents: 'box-none' },
                   indicator: { marginRight: 0 },
                 }}
               />
