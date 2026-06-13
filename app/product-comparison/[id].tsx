@@ -1159,6 +1159,13 @@ export default function ProductComparisonScreen() {
         { screenName: 'product-comparison' },
         { price: productData?.preis ?? 0, savings: 0 },
       );
+      // 'add_to_cart'-Action (ClickUp 86ca8fbpz) → ggf. Umfrage-Trigger.
+      achievementService
+        .trackAction(user.uid, 'add_to_cart', {
+          productId,
+          productType: productType === 'markenprodukt' ? 'markenprodukt' : 'noname',
+        })
+        .catch(() => {});
     } catch (e) {
       console.error('Cart toggle failed:', e);
       setCartAnzahlMap((prev) => ({ ...prev, [productId]: prevAnzahl }));

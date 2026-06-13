@@ -169,6 +169,7 @@ export const TOAST_MESSAGES = {
     convert_product: '🔄 Produkt umgewandelt',
     submit_rating: '⭐ Bewertung abgegeben',
     save_product: '💖 Favorit gespeichert',
+    add_to_cart: '🛒 Zum Einkaufszettel',
     daily_streak: '🔥 Täglicher Streak',
     first_action_any: '🎉 Erste Aktion',
     share_app: '🤝 App geteilt',

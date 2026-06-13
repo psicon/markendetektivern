@@ -13,6 +13,7 @@ export type ActionType =
   | 'search_product'       // Produkt suchen
   | 'submit_product'       // Produkt einreichen (später)
   | 'save_product'         // Produkt als Favorit speichern
+  | 'add_to_cart'          // Produkt in den Einkaufszettel gelegt
   | 'create_list'          // Einkaufszettel erstellen
   | 'first_action_any'     // Erste Action überhaupt (10 Punkte Bonus)
   | 'mission_daily_done'   // Tägliche Mission abgeschlossen

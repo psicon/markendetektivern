@@ -70,51 +70,17 @@ function nowMs(): number {
   return Date.now();
 }
 
-// ── Campaign-Gating (ClickUp 86ca8fbpz) ──
-// Eine Umfrage mit campaignId läuft nur, solange die verknüpfte Aktion
-// aktiv ist + im Zeitfenster + Budget hat. Die nutzbaren Campaign-IDs
-// werden 5 Min gecacht (ein collection-Read, klein).
-let usableCampaignsCache: { at: number; ids: Set<string> } | null = null;
-let usableCampaignsInflight: Promise<Set<string>> | null = null;
-
-async function getUsableCampaignIds(): Promise<Set<string>> {
-  if (usableCampaignsCache && nowMs() - usableCampaignsCache.at < POLLS_TTL_MS) {
-    return usableCampaignsCache.ids;
-  }
-  if (usableCampaignsInflight) return usableCampaignsInflight;
-  usableCampaignsInflight = (async () => {
-    try {
-      const snap = await getDocs(
-        query(collection(db, 'cashback_campaigns'), where('active', '==', true)),
-      );
-      const ids = new Set<string>();
-      const now = nowMs();
-      snap.forEach((d: any) => {
-        const c = d.data() || {};
-        const budgetOk =
-          typeof c.budgetRemainingCents !== 'number' || c.budgetRemainingCents > 0;
-        const startOk = !c.startAt?.toMillis || c.startAt.toMillis() <= now;
-        const endOk = !c.endAt?.toMillis || c.endAt.toMillis() >= now;
-        if (budgetOk && startOk && endOk) ids.add(d.id);
-      });
-      // Leeres fromCache-Resultat nicht cachen (Offline-Schutz).
-      if (ids.size > 0 || !(snap as any).metadata?.fromCache) {
-        usableCampaignsCache = { at: nowMs(), ids };
-      }
-      return ids;
-    } catch {
-      return usableCampaignsCache?.ids ?? new Set<string>();
-    } finally {
-      usableCampaignsInflight = null;
-    }
-  })();
-  return usableCampaignsInflight;
-}
-
-/** Ist die Umfrage ausspielbar bzgl. ihrer (optionalen) Campaign-Bindung? */
-function campaignAllows(poll: Poll, usable: Set<string>): boolean {
-  if (!poll.campaignId) return true; // keine Bindung → immer erlaubt
-  return usable.has(poll.campaignId);
+// ── Budget-Gating (ClickUp 86ca8fbpz) ──
+// Eine Umfrage mit eigenem Budget (budgetCents) wird nur ausgespielt,
+// solange Budget übrig ist. Ohne budgetCents → unbegrenzt. Eigenständig,
+// keine Campaign-Verknüpfung mehr.
+function budgetAllows(poll: Poll): boolean {
+  if (typeof poll.budgetCents !== 'number') return true; // kein Budget-Limit
+  const remaining =
+    typeof poll.budgetRemainingCents === 'number'
+      ? poll.budgetRemainingCents
+      : poll.budgetCents;
+  return remaining > 0;
 }
 
 function isWithinWindow(poll: Poll): boolean {
@@ -217,17 +183,16 @@ export async function hasAnswered(pollId: string): Promise<boolean> {
  */
 export async function getGeneralSurveys(uid: string): Promise<Poll[]> {
   if (!uid) return [];
-  const [polls, ctx, answered, usableCampaigns] = await Promise.all([
+  const [polls, ctx, answered] = await Promise.all([
     getActivePolls(),
     buildUserContext(uid),
     getAnswered(),
-    getUsableCampaignIds(),
   ]);
   return polls.filter(
     (p) =>
       pollTriggerOf(p).type === 'general' &&
       !answered.has(p.id) &&
-      campaignAllows(p, usableCampaigns) &&
+      budgetAllows(p) &&
       isPollEligible(p, ctx),
   );
 }
@@ -294,10 +259,9 @@ export async function getActionSurvey(
   const lastPrompt = lastPromptRaw ? parseInt(lastPromptRaw, 10) || 0 : 0;
   const globalCooldownActive = nowMs() - lastPrompt < ACTION_GLOBAL_COOLDOWN_MS;
 
-  const [polls, ctx, usableCampaigns] = await Promise.all([
+  const [polls, ctx] = await Promise.all([
     getActivePolls(),
     buildUserContext(uid),
-    getUsableCampaignIds(),
   ]);
   const now = nowMs();
   const productId = metadata?.productId;
@@ -314,7 +278,7 @@ export async function getActionSurvey(
     const dAt = dismissed[p.id];
     const cd = (trig.cooldownHours ?? POLL_DISMISS_COOLDOWN_MS / 3_600_000) * 3_600_000;
     if (dAt && now - dAt < cd) continue;
-    if (!campaignAllows(p, usableCampaigns)) continue;
+    if (!budgetAllows(p)) continue;
     if (!isPollEligible(p, ctx)) continue;
 
     // ── Produkt-Targeting ──
@@ -461,6 +425,5 @@ export async function submitResponse(args: {
 export function resetSurveyCaches(): void {
   pollsCache = null;
   ctxCache = null;
-  usableCampaignsCache = null;
   brandIdCache.clear();
 }

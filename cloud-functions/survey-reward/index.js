@@ -48,114 +48,98 @@ exports.onPollResponseCreated = onDocumentCreated(
       return;
     }
 
-    // Reward-Quelle AUTORITATIV vom Poll lesen (nicht aus dem Response-
-    // Doc — das ist client-geschrieben und nicht vertrauenswürdig).
-    //   • campaignId gesetzt → Reward aus der Aktion (cashbackPerBonCents),
-    //     gedeckelt aufs verbleibende Budget; Budget wird dekrementiert.
-    //   • sonst → poll.rewardCents (Fallback).
-    let fallbackReward = 0;
-    let campaignId = null;
+    // Umfrage-Felder AUTORITATIV vom Poll lesen (das Response-Doc ist
+    // client-geschrieben, nicht vertrauenswürdig). Umfragen sind jetzt
+    // EIGENSTÄNDIG: eigener rewardCents + optionales eigenes Budget +
+    // optionales Per-User-Limit. KEINE Campaign-Verknüpfung mehr.
+    let rewardCents = 0;
     let rewardTrigger = 'completion';
+    let hasBudget = false;
+    let maxPerUser = 0; // 0 = unbegrenzt
     try {
       const pollSnap = await db.collection('polls').doc(pollId).get();
-      if (pollSnap.exists) {
-        const pd = pollSnap.data() || {};
-        const v = pd.rewardCents;
-        if (typeof v === 'number' && v > 0) fallbackReward = Math.round(v);
-        if (typeof pd.campaignId === 'string' && pd.campaignId) campaignId = pd.campaignId;
-        if (pd.rewardTrigger === 'per_answer' || pd.rewardTrigger === 'none') {
-          rewardTrigger = pd.rewardTrigger;
-        }
-      }
+      if (!pollSnap.exists) return;
+      const pd = pollSnap.data() || {};
+      if (typeof pd.rewardCents === 'number' && pd.rewardCents > 0) rewardCents = Math.round(pd.rewardCents);
+      if (pd.rewardTrigger === 'per_answer' || pd.rewardTrigger === 'none') rewardTrigger = pd.rewardTrigger;
+      if (typeof pd.budgetCents === 'number') hasBudget = true;
+      if (typeof pd.maxPerUser === 'number' && pd.maxPerUser > 0) maxPerUser = Math.round(pd.maxPerUser);
     } catch (e) {
       logger.error('[survey-reward] poll read failed', { pollId, err: e.message });
       return;
     }
-    if (rewardTrigger === 'none') {
-      // Reine Datensammlung — keine Vergütung.
-      return;
-    }
-    if (!campaignId && fallbackReward <= 0) {
-      // Umfrage ohne Reward (kein Budget-Topf, kein Fallback) — nichts zu tun.
+    if (rewardTrigger === 'none' || rewardCents <= 0) {
+      // Reine Datensammlung / kein Betrag — nichts gutzuschreiben.
       return;
     }
 
     const userRef = db.collection('users').doc(uid);
     const ledgerCol = userRef.collection('cashback_ledger');
-    const campaignRef = campaignId ? db.collection('cashback_campaigns').doc(campaignId) : null;
+    const pollRef = db.collection('polls').doc(pollId);
     const responseId = event.params.id;
-    // Idempotenz-Schlüssel:
-    //   • completion → EINMAL pro (uid, pollId)
-    //   • per_answer → EINMAL pro Antwort (responseId) — jede Antwort zahlt
+    // Idempotenz: completion → EINMAL pro (uid, pollId); per_answer →
+    // EINMAL pro Antwort (responseId), aber gedeckelt durch maxPerUser.
     const perAnswer = rewardTrigger === 'per_answer';
 
     try {
       let creditedCents = 0;
       await db.runTransaction(async (tx) => {
         // ── Reads zuerst (Firestore-Transaktions-Regel) ──
-        // Idempotenz: Single-Field-Query (kein Composite-Index nötig) +
-        // in-memory Filter — der Ledger pro User ist klein.
-        const dupField = perAnswer ? 'surveyResponseId' : 'surveyPollId';
-        const dupValue = perAnswer ? responseId : pollId;
-        const existing = await tx.get(ledgerCol.where(dupField, '==', dupValue));
-        const hasEarn = existing.docs.some((d) => d.data()?.type === 'earn');
-        if (hasEarn) {
-          // Reward bereits vergeben (Doppel-Submit / Trigger-Retry).
-          return;
+        const responseDup = await tx.get(ledgerCol.where('surveyResponseId', '==', responseId));
+        if (responseDup.docs.some((d) => d.data()?.type === 'earn')) return; // Doppel-Trigger
+
+        // Alle earns dieser Umfrage des Users → Per-User-Count (+ completion-Dup).
+        const pollEarnsSnap = await tx.get(ledgerCol.where('surveyPollId', '==', pollId));
+        const pollEarns = pollEarnsSnap.docs.filter((d) => d.data()?.type === 'earn');
+        if (!perAnswer && pollEarns.length > 0) return; // completion: schon vergeben
+        if (maxPerUser > 0 && pollEarns.length >= maxPerUser) return; // Per-User-Limit erreicht
+
+        // Budget frisch IN der Transaktion (race-frei).
+        const pollSnap = hasBudget ? await tx.get(pollRef) : null;
+        let pay = rewardCents;
+        if (pollSnap) {
+          const remaining = typeof pollSnap.data()?.budgetRemainingCents === 'number'
+            ? pollSnap.data().budgetRemainingCents
+            : (typeof pollSnap.data()?.budgetCents === 'number' ? pollSnap.data().budgetCents : 0);
+          pay = Math.max(0, Math.min(rewardCents, remaining));
         }
+        if (pay <= 0) return; // Budget erschöpft
+
         const userSnap = await tx.get(userRef);
-        // Aktion frisch IN der Transaktion lesen → Budget race-frei cappen.
-        const campaignSnap = campaignRef ? await tx.get(campaignRef) : null;
-
-        // Reward bestimmen.
-        let rewardCents = fallbackReward;
-        if (campaignSnap && campaignSnap.exists) {
-          const c = campaignSnap.data() || {};
-          const perBon = typeof c.cashbackPerBonCents === 'number' ? c.cashbackPerBonCents : 0;
-          const remaining = typeof c.budgetRemainingCents === 'number' ? c.budgetRemainingCents : 0;
-          rewardCents = Math.max(0, Math.min(perBon, remaining));
-        }
-        if (rewardCents <= 0) {
-          // Budget erschöpft / Aktion liefert 0 → kein Reward (kein no-op-Fehler).
-          return;
-        }
-
         const u = userSnap.exists ? userSnap.data() : {};
         const balance = u.cashback_balance_cents || 0;
         const lifetime = u.cashback_lifetime_cents || 0;
 
-        // ── Writes: earn + Balance/Lifetime (+ Budget-Decrement) ──
+        // ── Writes: earn + Balance/Lifetime (+ Poll-Budget-Decrement) ──
         const ref = ledgerCol.doc();
         tx.set(ref, {
           type: 'earn',
-          cents: rewardCents,
+          cents: pay,
           surveyPollId: pollId,
-          surveyResponseId: event.params.id,
-          campaignId: campaignId || null,
-          balanceAfterCents: balance + rewardCents,
+          surveyResponseId: responseId,
+          balanceAfterCents: balance + pay,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           reason: 'survey',
         });
         tx.set(
           userRef,
           {
-            cashback_balance_cents: balance + rewardCents,
-            cashback_lifetime_cents: lifetime + rewardCents,
+            cashback_balance_cents: balance + pay,
+            cashback_lifetime_cents: lifetime + pay,
           },
           { merge: true },
         );
-        if (campaignRef) {
-          // Budget transaktional dekrementieren (merge+increment → race-frei).
-          tx.set(
-            campaignRef,
-            { budgetRemainingCents: admin.firestore.FieldValue.increment(-rewardCents) },
-            { merge: true },
-          );
+        if (hasBudget) {
+          // budgetRemainingCents initialisieren (= budgetCents) falls fehlt, dann dekrementieren.
+          const cur = pollSnap && typeof pollSnap.data()?.budgetRemainingCents === 'number'
+            ? pollSnap.data().budgetRemainingCents
+            : (pollSnap && typeof pollSnap.data()?.budgetCents === 'number' ? pollSnap.data().budgetCents : 0);
+          tx.set(pollRef, { budgetRemainingCents: cur - pay }, { merge: true });
         }
-        creditedCents = rewardCents;
+        creditedCents = pay;
       });
       if (creditedCents > 0) {
-        logger.info('[survey-reward] credited', { uid, pollId, creditedCents, campaignId });
+        logger.info('[survey-reward] credited', { uid, pollId, creditedCents });
       }
     } catch (e) {
       logger.error('[survey-reward] ledger tx failed', {

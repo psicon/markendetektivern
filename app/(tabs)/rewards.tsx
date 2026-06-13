@@ -115,6 +115,7 @@ function buildEarnActions(
   campaignsEnabled: boolean,
   campaigns: ActiveCampaign[],
   surveyCount: number = 0,
+  surveyRewardCents: number = 0,
 ): EarnAction[] {
   const receiptCount = campaigns.filter((c) => (c.kind ?? 'receipt') === 'receipt').length;
   const photoCount = campaigns.filter((c) => (c.kind ?? 'receipt') === 'product_photos').length;
@@ -147,7 +148,11 @@ function buildEarnActions(
     ? campaignRewardLabel(campaigns, 'receipt')
     : fmtCents(Math.round(RECEIPT_LIMIT.eurEach * 100));
   const photoReward = campaignsEnabled ? campaignRewardLabel(campaigns, 'product_photos') : '';
-  const surveyReward = campaignsEnabled ? campaignRewardLabel(campaigns, 'survey') : '';
+  // Survey-Reward kommt aus den tatsächlich verfügbaren Umfragen (polls),
+  // NICHT aus einer Campaign (ClickUp 86ca8fbpz: Umfragen sind eigenständig).
+  // Nur zeigen wenn auch wirklich Umfragen verfügbar sind — kein
+  // Widerspruch "0,08 € / Aktuell keine" mehr.
+  const surveyReward = surveyCount > 0 && surveyRewardCents > 0 ? fmtCents(surveyRewardCents) : '';
 
   return [
     {
@@ -521,9 +526,14 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
   const [payoutOpen, setPayoutOpen] = useState(false);
   const [payoutBusy, setPayoutBusy] = useState(false);
   const [payoutAmountCents, setPayoutAmountCents] = useState(0);
+  // Höchster Reward unter den verfügbaren Umfragen (für die Tile-Pille).
+  const surveyRewardCents = React.useMemo(
+    () => availableSurveys.reduce((m, s) => Math.max(m, s.rewardCents ?? 0), 0),
+    [availableSurveys],
+  );
   const earnActions = React.useMemo(
-    () => buildEarnActions(weeklyReceiptCount, campaignsEnabled, campaigns, availableSurveys.length),
-    [weeklyReceiptCount, campaignsEnabled, campaigns, availableSurveys.length],
+    () => buildEarnActions(weeklyReceiptCount, campaignsEnabled, campaigns, availableSurveys.length, surveyRewardCents),
+    [weeklyReceiptCount, campaignsEnabled, campaigns, availableSurveys.length, surveyRewardCents],
   );
 
   // T17.26: Anchors für den Spotlight-Walkthrough — Cashback-Hero,

@@ -94,8 +94,7 @@ export interface Poll {
   // ── App-Erweiterungen (86ca8fbpz) ──
   profileTargeting?: PollProfileTarget[];
   trigger?: PollTrigger;
-  /** Cashback-Taler in Cent (0/fehlt = keine). Fallback-Betrag, wenn KEINE
-   *  campaignId verknüpft ist. */
+  /** Cashback-Taler in Cent pro Vergütung (0/fehlt = keine). */
   rewardCents?: number;
   /**
    * WANN vergütet wird:
@@ -108,11 +107,21 @@ export interface Poll {
    *     bleiben wiederholbar, allgemeine bleiben einmalig.
    */
   rewardTrigger?: 'completion' | 'per_answer' | 'none';
-  /** Optional: verknüpfte cashback_campaigns-Doc-ID. Wenn gesetzt, kommt
-   *  der Reward aus der Aktion (cashbackPerBonCents + Budget-Cap) statt
-   *  aus rewardCents — die CF dekrementiert das Aktions-Budget. Die
-   *  Umfrage wird nur ausgespielt, solange die Aktion aktiv ist + Budget hat. */
-  campaignId?: string;
+  /**
+   * Eigenes Gesamt-Budget der Umfrage in Cent (optional). Wenn gesetzt,
+   * wird es pro Vergütung dekrementiert; bei 0 wird die Umfrage nicht mehr
+   * ausgespielt. Fehlt das Feld → kein Budget-Limit. (Ersetzt die frühere
+   * Campaign-Verknüpfung — Umfragen sind jetzt eigenständig.)
+   */
+  budgetCents?: number;
+  budgetRemainingCents?: number;
+  /**
+   * Max. Anzahl VERGÜTETER Antworten PRO USER (optional). Schützt bei
+   * per_answer davor, dass ein User dieselbe Umfrage beliebig oft für
+   * Cashback ausfüllt. Fehlt das Feld → kein Per-User-Limit. (completion
+   * ist ohnehin einmalig.)
+   */
+  maxPerUser?: number;
   /** Wie eine action-getriggerte Umfrage erscheint: 'immediate' = Sheet
    *  sofort nach der Aktion; 'hint' = dezenter, antippbarer Hinweis mit
    *  Verdienst-Möglichkeit. Default 'immediate'. (general-Polls ignorieren

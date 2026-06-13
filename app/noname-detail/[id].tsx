@@ -808,6 +808,11 @@ export default function NoNameDetailScreen() {
         { screenName: 'noname-detail' },
         { price: p.preis ?? 0, savings: (p as any).ersparnis ?? 0 },
       );
+      // 'add_to_cart'-Action (ClickUp 86ca8fbpz): triggert ggf. eine
+      // produkt-/action-getriggerte Umfrage. fire-and-forget.
+      achievementService
+        .trackAction(user.uid, 'add_to_cart', { productId: p.id, productType: 'noname' })
+        .catch(() => {});
     } catch (e) {
       console.error('Cart add failed:', e);
       setCartAnzahl(prev);
