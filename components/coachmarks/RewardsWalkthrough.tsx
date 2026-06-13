@@ -63,7 +63,9 @@ function configForPhase(
         anchorId: REWARDS_ANCHOR_EARN,
         title: 'So sammelst du Cashback',
         body:
-          'Mach ein Foto vom Kassenbon nach dem Einkauf — wir lesen ihn automatisch und schreiben dir dein Cashback gut. Wie viel es pro Bon gibt, siehst du immer direkt bei der aktuellen Aktion.',
+          // Spotlight liegt auf der Schnellzugriff-Row mit DREI Aktionen —
+          // der Text muss alle drei nennen, nicht nur den Bon (86ca8g69x).
+          'Hier verdienst du: Kassenbon nach dem Einkauf abfotografieren, Produkte einreichen oder bei Umfragen mitmachen. Wie viel es gibt, siehst du immer direkt bei der jeweiligen Aktion.',
         lottie: require('@/assets/lottie/task.json'),
       };
     case 'redeem':

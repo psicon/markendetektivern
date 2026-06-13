@@ -30,6 +30,7 @@ import {
 } from '@react-native-firebase/firestore';
 
 import { db } from '@/lib/firebase';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import { getPreferenceProfile } from '@/lib/services/preferenceProfileService';
 import { getUserProfile } from '@/lib/services/userProfile';
 import {
@@ -141,13 +142,42 @@ export async function buildUserContext(uid: string): Promise<SurveyUserContext> 
     getPreferenceProfile(uid),
   ]);
   const p = (profileDoc ?? {}) as any;
+
+  // Alter wie im Journey-consumerProfile (journeyTrackingService): gemeldetes
+  // age + (heute − Meldejahr) hochrechnen, Legacy-Fallback birthDate.
+  let age: number | null = null;
+  if (typeof p.age === 'number') {
+    age =
+      typeof p.ageReportedYear === 'number'
+        ? p.age + Math.max(0, new Date().getFullYear() - p.ageReportedYear)
+        : p.age;
+  } else if (p.birthDate?.toDate) {
+    const bd = p.birthDate.toDate();
+    age = Math.floor((Date.now() - bd.getTime()) / (365.25 * 24 * 3600 * 1000));
+  }
+  if (!(typeof age === 'number' && age > 0 && age < 120)) age = null;
+
+  // Level + Ersparnis gespiegelt aus Journey-consumerProfile.
+  const stats = p.stats || {};
+  const level =
+    typeof stats.currentLevel === 'number'
+      ? stats.currentLevel
+      : typeof p.level === 'number'
+        ? p.level
+        : null;
+  const savingsRaw =
+    Number(p.totalSavings) || Number(stats.totalSavings) || Number(stats.savingsTotal) || 0;
+  const savingsTotal = savingsRaw > 0 ? Math.round(savingsRaw * 100) / 100 : null;
+
   const ctx: SurveyUserContext = {
-    age: typeof p.age === 'number' ? p.age : null,
+    age,
     gender: p.gender ?? null,
     bundesland: p.bundesland ?? p.guessedBundesland ?? null,
     favoriteMarket: p.favoriteMarket ?? null,
     favoriteMarketName: p.favoriteMarketName ?? null,
     isPremium: !!p.isPremium,
+    level,
+    savingsTotal,
     profile: prefProfile,
   };
   ctxCache = { uid, at: nowMs(), ctx };
@@ -192,10 +222,10 @@ export async function hasAnswered(pollId: string): Promise<boolean> {
  * Allgemeine Umfragen für die Liste im Rewards-Tab: aktiv, general,
  * eligible, noch nicht beantwortet.
  */
-export async function getGeneralSurveys(uid: string): Promise<Poll[]> {
+export async function getGeneralSurveys(uid: string, force = false): Promise<Poll[]> {
   if (!uid) return [];
   const [polls, ctx, answered] = await Promise.all([
-    getActivePolls(),
+    getActivePolls(force),
     buildUserContext(uid),
     getAnswered(),
   ]);
@@ -414,14 +444,34 @@ export async function submitResponse(args: {
   //    ('Unsupported field value: undefined') — userContext NUR mit
   //    tatsächlich vorhandenen Werten bauen (anonyme User ohne Profil
   //    haben hier sonst lauter undefined).
+  // userContext so VOLLSTÄNDIG wie das Journey-consumerProfile (ClickUp
+  // 86ca8g6jf) — nur definierte Werte (RN-Firestore wirft bei undefined).
   const userContext: Record<string, any> = {};
   if (ctx.favoriteMarket) userContext.favoriteMarket = ctx.favoriteMarket;
+  if (ctx.favoriteMarketName) userContext.favoriteMarketName = ctx.favoriteMarketName;
   if (ctx.gender) userContext.gender = ctx.gender;
   if (typeof ctx.age === 'number') userContext.age = ctx.age;
   if (ctx.bundesland) userContext.region = ctx.bundesland;
   if (typeof ctx.isPremium === 'boolean') userContext.isPremium = ctx.isPremium;
+  if (typeof ctx.level === 'number') userContext.level = ctx.level;
+  if (typeof ctx.savingsTotal === 'number') userContext.savingsTotal = ctx.savingsTotal;
+  // Präferenz-Profil-Dimensionen (0..1) für die B2B-Auswertung (analog
+  // Journey-Motivation). Nur setzen, wenn vorhanden.
+  if (ctx.profile?.dimensions && Object.keys(ctx.profile.dimensions).length > 0) {
+    userContext.profileDimensions = ctx.profile.dimensions;
+  }
 
-  const response = {
+  // Journey-Verknüpfung: aktuelle Journey-ID (falls eine läuft) ans
+  // Response heften, damit RevealyIQ die Umfrage-Antwort mit dem
+  // Verhaltens-Funnel der Journey joinen kann (86ca8g6jf).
+  let journeyId: string | null = null;
+  try {
+    journeyId = journeyTrackingService.getCurrentJourneyId();
+  } catch {
+    journeyId = null;
+  }
+
+  const response: Record<string, any> = {
     pollId: poll.id,
     userId: uid,
     answers,
@@ -429,6 +479,7 @@ export async function submitResponse(args: {
     completedAt: new Date(completedMs).toISOString(),
     timeSpentSeconds: Math.max(0, Math.round((completedMs - startedAtMs) / 1000)),
     userContext,
+    ...(journeyId ? { journeyId } : {}),
     // Daten-Consent-Markierung (User-Vorgabe: Antworten von Consent-losen
     // Usern sammeln, ABER markieren). RevealyIQ kann so konsentierte
     // Marktdaten herausfiltern. Cashback hängt server-seitig ohnehin an

@@ -13,8 +13,10 @@ import { SurveyRunner } from '@/components/survey/SurveyRunner';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
+import { router } from 'expo-router';
+
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
+import { hasValidCashbackConsent } from '@/lib/services/cashbackService';
 import { formatCents } from '@/lib/types/cashback';
 import {
   buildUserContext,
@@ -23,7 +25,12 @@ import {
   snoozeActionSurveysToday,
 } from '@/lib/services/surveyService';
 import { setSurveyPrompter } from '@/lib/services/surveyPromptBus';
-import { showInfoToast, showSurveyHintToast } from '@/lib/services/ui/toast';
+import { isAnySheetOpen, whenSheetsIdle } from '@/lib/services/sheetPresence';
+import {
+  showCashbackNudgeToast,
+  showInfoToast,
+  showSurveyHintToast,
+} from '@/lib/services/ui/toast';
 import { pollTriggerOf, type Poll, type PollAnswer } from '@/lib/types/survey';
 
 /**
@@ -61,12 +68,18 @@ export function useSurvey(): SurveyContextValue {
 
 export function SurveyProvider({ children }: { children: React.ReactNode }) {
   const { user, isAnonymous } = useAuth();
-  const { hasConsent } = useCashbackUserState();
   const scheme = useColorScheme() ?? 'light';
   const { theme } = useTokens();
-  // Cashback gibt's NUR für registrierte User mit aktivem Markt-Consent.
-  // Der Reward-Toast darf sonst nichts versprechen (kein "X Taler unterwegs"-Lügen).
-  const cashbackEligible = !isAnonymous && hasConsent;
+
+  // Button "Zum Cashback" (ClickUp 86ca8gc8r): führt zur Cashback-
+  // Aktivierung — Rewards-Tab als Basis, dann Consent-Screen (from=settings
+  // → nach Accept zurück auf Rewards). Walkthrough wird NICHT übersteuert,
+  // wir navigieren nur. router.push (nicht safePush) für die 2-Schritt-Nav,
+  // sonst dropt der 600-ms-Debounce den zweiten Push.
+  const goToCashback = useCallback(() => {
+    router.push('/(tabs)/rewards' as any);
+    router.push('/cashback/consent?from=settings' as any);
+  }, []);
 
   const [poll, setPoll] = useState<Poll | null>(null);
   const [visible, setVisible] = useState(false);
@@ -74,12 +87,23 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
   const startedAtRef = useRef(0);
   const completedRef = useRef(false);
 
-  // Öffnet das Sheet direkt (general-Liste + Hint-Tap + immediate-Action).
+  // Öffnet das Sheet. WICHTIG: niemals ein zweites RN-Modal über einem
+  // bereits offenen Sheet präsentieren (RatingsSheet/FilterSheet) — das
+  // deadlockt iOS (App-Freeze, 86ca8g2p9). Ist gerade ein anderes Sheet
+  // offen, warten wir, bis alle zu sind, + kurzer Puffer für die Dismiss-
+  // Animation. Auf normalen Screens (kein Sheet offen) öffnet es sofort.
   const showSurvey = useCallback((p: Poll) => {
-    setPoll(p);
-    startedAtRef.current = Date.now();
-    completedRef.current = false;
-    setVisible(true);
+    const present = () => {
+      setPoll(p);
+      startedAtRef.current = Date.now();
+      completedRef.current = false;
+      setVisible(true);
+    };
+    if (isAnySheetOpen()) {
+      whenSheetsIdle(() => setTimeout(present, 350));
+    } else {
+      present();
+    }
   }, []);
 
   // Bus-Prompter (action-getriggert): entscheidet Sheet vs. Hinweis.
@@ -119,6 +143,21 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
       }
       completedRef.current = true;
       setVisible(false);
+
+      // Cashback-Berechtigung AUTORITATIV + FRISCH bestimmen (ClickUp
+      // 86ca8ge7y): NICHT den evtl. veralteten Hook-Wert nehmen, sondern
+      // live lesen — exakt die CF-Regel (registriert + gültiger Consent
+      // inkl. Versions-Match). Sonst zeigte der Toast "mit aktiviertem
+      // Cashback gäbe es…" obwohl Cashback längst aktiv ist.
+      let validConsent = false;
+      try {
+        validConsent = await hasValidCashbackConsent(uid);
+      } catch {
+        validConsent = false;
+      }
+      const registered = !isAnonymous;
+      const eligible = registered && validConsent;
+
       try {
         const ctx = await buildUserContext(uid);
         await submitResponse({
@@ -128,31 +167,38 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
           startedAtMs: startedAtRef.current || Date.now(),
           ctx,
           // Consent-Markierung am Response-Doc (sammeln, aber markieren).
-          marketConsent: hasConsent,
-          registered: !isAnonymous,
+          marketConsent: validConsent,
+          registered,
         });
       } catch (e) {
         console.warn('[survey] submit failed', (e as Error)?.message);
       }
-      // Reward-Text NUR wenn der User wirklich Cashback bekommt
-      // (registriert + Consent) UND die Umfrage vergütet. Sonst ehrlich
-      // danken + positiv auf Cashback hinweisen (kein Frust-Ton).
+
+      // Reward-Text NUR wenn die Umfrage vergütet. Berechtigt → "unterwegs".
+      // Nicht berechtigt → freundlicher Hinweis MIT "Zum Cashback"-Button
+      // (führt zur Aktivierung). Positiver Ton, kein Frust.
       const pays =
         (p.rewardTrigger ?? 'completion') !== 'none' &&
         typeof p.rewardCents === 'number' &&
         p.rewardCents > 0;
-      let msg: string;
-      if (pays && cashbackEligible) {
-        msg = `Danke für deine Antwort! ${formatCents(p.rewardCents!)} Taler sind unterwegs.`;
-      } else if (pays && !cashbackEligible) {
-        msg = `Danke für deine Antwort! Mit aktiviertem Cashback gäbe es dafür ${formatCents(p.rewardCents!)} Taler.`;
+      if (pays && eligible) {
+        showInfoToast(
+          `Danke für deine Antwort! ${formatCents(p.rewardCents!)} Taler sind unterwegs.`,
+          'info',
+          scheme,
+        );
+      } else if (pays && !eligible) {
+        showCashbackNudgeToast(
+          `Danke für deine Antwort! Mit aktiviertem Cashback gäbe es dafür ${formatCents(p.rewardCents!)} Taler.`,
+          goToCashback,
+          scheme,
+        );
       } else {
-        msg = 'Danke für deine Antwort!';
+        showInfoToast('Danke für deine Antwort!', 'info', scheme);
       }
-      showInfoToast(msg, 'info', scheme);
       setActivityNonce((n) => n + 1); // Tile-Liste neu laden
     },
-    [poll, user?.uid, scheme, cashbackEligible, hasConsent, isAnonymous],
+    [poll, user?.uid, scheme, isAnonymous, goToCashback],
   );
 
   const handleClose = useCallback(() => {
@@ -181,6 +227,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
         visible={visible}
         title={poll?.title ?? 'Umfrage'}
         onClose={handleClose}
+        registerPresence={false}
       >
         {poll ? (
           <View>

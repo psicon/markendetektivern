@@ -25,6 +25,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { registerSheetOpen } from '@/lib/services/sheetPresence';
 
 const SWIPE_CLOSE_THRESHOLD = 110;
 const SWIPE_CLOSE_VELOCITY = 500;
@@ -155,6 +156,15 @@ export function RatingsSheet({
   const [mounted, setMounted] = useState(visible);
   const translateY = useSharedValue(SCREEN_HEIGHT);
   const backdropOpacity = useSharedValue(0);
+
+  // Globalen Sheet-Zähler pflegen, solange das Modal präsentiert ist —
+  // sonst öffnet die "Danke fürs Bewerten"-Umfrage ihr Modal über diesem
+  // RatingsSheet und iOS friert ein (86ca8g2p9).
+  useEffect(() => {
+    if (!mounted) return;
+    const release = registerSheetOpen();
+    return release;
+  }, [mounted]);
 
   useEffect(() => {
     if (visible) {

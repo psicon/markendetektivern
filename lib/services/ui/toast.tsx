@@ -334,6 +334,24 @@ export function showSurveyHintToast(
   });
 }
 
+// Cashback-Aktivierungs-Hinweis (ClickUp 86ca8gc8r): erscheint, wenn der
+// User eine vergütete Umfrage beantwortet, aber (noch) nicht cashback-
+// berechtigt ist (nicht registriert / kein Consent). Die Action-Pille
+// "Zum Cashback" führt zur Aktivierung. Positiver Ton, kein Frust.
+export function showCashbackNudgeToast(
+  message: string,
+  onOpen: () => void,
+  colorScheme?: 'light' | 'dark',
+) {
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  showToast(message, 'INFO', {
+    actionLabel: 'Zum Cashback',
+    onActionPress: onOpen,
+    colorScheme,
+    durationMs: 8000,
+  });
+}
+
 export function showPurchasedToast(
   message: string,
   colorScheme?: 'light' | 'dark',

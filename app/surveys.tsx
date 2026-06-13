@@ -1,7 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
@@ -32,6 +32,7 @@ export default function SurveysScreen() {
   const { showSurvey, activityNonce } = useSurvey();
 
   const [surveys, setSurveys] = useState<Poll[] | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -57,6 +58,20 @@ export default function SurveysScreen() {
     return cleanup;
   }, [load, activityNonce]);
 
+  // Pull-to-refresh: Poll-Cache busten + frisch laden (86ca8g6eh).
+  const onRefresh = useCallback(async () => {
+    if (!user?.uid) return;
+    setRefreshing(true);
+    try {
+      const s = await getGeneralSurveys(user.uid, true);
+      setSurveys(s);
+    } catch {
+      /* lokalen Stand behalten */
+    } finally {
+      setRefreshing(false);
+    }
+  }, [user?.uid]);
+
   const list = surveys ?? [];
 
   return (
@@ -70,6 +85,14 @@ export default function SurveysScreen() {
           gap: 12,
         }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={brand.primary}
+            colors={[brand.primary]}
+          />
+        }
       >
         <Text
           style={{

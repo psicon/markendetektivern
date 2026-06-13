@@ -33,6 +33,10 @@ export interface SurveyUserContext {
   /** users.favoriteMarketName (Anzeigename). */
   favoriteMarketName?: string | null;
   isPremium?: boolean;
+  /** Aktuelles Level (stats.currentLevel ?? level) — wie Journey-consumerProfile. */
+  level?: number | null;
+  /** Gesamtersparnis in € — wie Journey-consumerProfile. */
+  savingsTotal?: number | null;
   profile?: PreferenceProfile | null;
 }
 

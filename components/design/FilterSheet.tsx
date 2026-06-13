@@ -24,6 +24,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { registerSheetOpen } from '@/lib/services/sheetPresence';
 
 type Props = {
   visible: boolean;
@@ -32,6 +33,13 @@ type Props = {
   children?: React.ReactNode;
   /** Max height as a fraction of the screen (0-1). Default 0.78. */
   maxHeightRatio?: number;
+  /**
+   * Beim globalen sheetPresence-Zähler anmelden (Default true). Verhindert,
+   * dass eine action-Umfrage ihr Modal über diesem Sheet öffnet (iOS-
+   * Doppel-Modal-Freeze, 86ca8g2p9). Die Survey-EIGENE FilterSheet setzt
+   * `false`, sonst zählte sie sich selbst.
+   */
+  registerPresence?: boolean;
 };
 
 const SWIPE_CLOSE_THRESHOLD = 100;
@@ -50,6 +58,7 @@ export function FilterSheet({
   onClose,
   children,
   maxHeightRatio = 0.78,
+  registerPresence = true,
 }: Props) {
   const { theme } = useTokens();
   const insets = useSafeAreaInsets();
@@ -57,6 +66,14 @@ export function FilterSheet({
   // Mount the Modal as long as we still have an animation to play, even
   // after the parent flipped `visible` to false.
   const [mounted, setMounted] = useState(visible);
+
+  // Globalen Sheet-Zähler pflegen, solange das Modal präsentiert ist —
+  // damit eine action-Umfrage nicht ihr Modal darüber öffnet (Freeze).
+  useEffect(() => {
+    if (!registerPresence || !mounted) return;
+    const release = registerSheetOpen();
+    return release;
+  }, [registerPresence, mounted]);
 
   // translateY: SCREEN_HEIGHT (off-screen below) → 0 (fully up).
   const translateY = useSharedValue(SCREEN_HEIGHT);

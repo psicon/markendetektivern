@@ -853,7 +853,7 @@ export default function HomeScreen() {
     // Light-Modus und dunkelgrau im Dark-Modus → theme.text liest
     // sich in beiden Modi korrekt.
     { icon: 'heart-outline'        as const, label: 'Deine\nFavoriten',    background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/favorites' as any) },
-    { icon: 'poll'                 as const, label: 'Umfragen',            background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/achievements' as any) },
+    { icon: 'poll'                 as const, label: 'Umfragen',            background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/surveys' as any) },
   ], [onScanBon, theme.surfaceAlt]);
 
   return (

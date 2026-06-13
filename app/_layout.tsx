@@ -167,7 +167,12 @@ function ThemedApp() {
               <Stack>
                 <Stack.Screen name="index" options={{ headerShown: false }} />
                 <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                {/* gestureEnabled:false — die Tab-Gruppe ist die Wurzel der
+                    App; ein Swipe-back von Home würde aus dem Tab-Navigator
+                    heraus poppen und die Auth-/Onboarding-Nav-Gates auslösen
+                    (router.replace nach /auth/welcome etc.). Es gibt kein
+                    sinnvolles Ziel hinter den Tabs → Geste aus (86ca8gbkh). */}
+                <Stack.Screen name="(tabs)" options={{ headerShown: false, gestureEnabled: false }} />
                 <Stack.Screen name="auth/welcome" options={{ headerShown: false }} />
                 <Stack.Screen name="auth/login" options={{ headerShown: false }} />
                 <Stack.Screen name="auth/register" options={{ headerShown: false }} />
