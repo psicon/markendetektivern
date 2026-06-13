@@ -466,23 +466,16 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
       } else if (list.length > 1) {
         setSurveyPickerList(list);
         setSurveyPickerOpen(true);
-      } else {
-        showInfoToast('Aktuell ist keine Umfrage für dich verfügbar.', 'info', scheme);
       }
+      // list leer → no-op: das Tile ist bei 0 Umfragen gar nicht erst
+      // tippbar (kein irritierender "keine Umfrage"-Toast mehr).
     },
-    [showSurvey, scheme],
+    [showSurvey],
   );
   // Schnellzugriff-Tile: alle eligible Umfragen.
   const openSurveys = useCallback(() => {
     openSurveyList(availableSurveys);
   }, [availableSurveys, openSurveyList]);
-  // survey-Campaign-Card: nur die zu DIESER Aktion verknüpften Umfragen.
-  const openSurveysForCampaign = useCallback(
-    (campaignId: string) => {
-      openSurveyList(availableSurveys.filter((s) => s.campaignId === campaignId));
-    },
-    [availableSurveys, openSurveyList],
-  );
   React.useEffect(() => {
     let alive = true;
     getCashbackConfig()
@@ -514,6 +507,14 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
   // wählbar (photo/survey haben eigene Tiles / Flows).
   const receiptCampaigns = React.useMemo(
     () => campaigns.filter((c) => (c.kind ?? 'receipt') === 'receipt'),
+    [campaigns],
+  );
+  // "Aktive Aktionen"-Cards: Bon + Produktfotos (echte Tu-was-Aktionen).
+  // Umfrage-Aktionen NICHT als Card — Umfragen erscheinen über das
+  // Umfragen-Tile bzw. als Auto-Popup; die Aktion ist nur ihr Budget-Topf
+  // (ClickUp 86ca8fbpz: polls/campaigns-Verwirrung entzerrt).
+  const cardCampaigns = React.useMemo(
+    () => campaigns.filter((c) => (c.kind ?? 'receipt') !== 'survey'),
     [campaigns],
   );
   const [campaignPickerOpen, setCampaignPickerOpen] = useState(false);
@@ -924,7 +925,7 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
                   ? startReceiptScan
                   : a.k === 'photo'
                     ? () => router.push('/product-submit')
-                    : a.k === 'survey'
+                    : a.k === 'survey' && availableSurveys.length > 0
                       ? openSurveys
                       : undefined
               }
@@ -1107,15 +1108,15 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
       {/* ── Aktive Aktionen — echte Liste (mehrere gleichzeitig möglich,
           User wählt beim Einreichen die Aktion). Sitzt unter den
           Aktions-Buttons (Schnellzugriff/Bons/Einlösen). ── */}
-      {campaigns.length > 0 ? (
+      {cardCampaigns.length > 0 ? (
         <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
           <SectionHeader
             title="Aktive Aktionen"
-            sub={`${campaigns.length} ${campaigns.length === 1 ? 'Aktion' : 'Aktionen'}`}
+            sub={`${cardCampaigns.length} ${cardCampaigns.length === 1 ? 'Aktion' : 'Aktionen'}`}
           />
           <View style={{ gap: 10, marginTop: 10 }}>
-            {campaigns.map((c) => (
-              <CampaignListItem key={c.id} campaign={c} onScanBon={onScanBon} onStartSurvey={openSurveysForCampaign} scheme={scheme} />
+            {cardCampaigns.map((c) => (
+              <CampaignListItem key={c.id} campaign={c} onScanBon={onScanBon} scheme={scheme} />
             ))}
           </View>
         </View>
@@ -1523,13 +1524,10 @@ const RECEIPT_BOILERPLATE_DESC =
 function CampaignListItem({
   campaign,
   onScanBon,
-  onStartSurvey,
   scheme,
 }: {
   campaign: ActiveCampaign;
   onScanBon: (campaignId: string | null) => void;
-  /** Öffnet die zu einer survey-Campaign verknüpften Umfragen. */
-  onStartSurvey?: (campaignId: string) => void;
   scheme: 'light' | 'dark';
 }) {
   const { theme } = useTokens();
@@ -1560,10 +1558,9 @@ function CampaignListItem({
       onScanBon(campaign.id);
     } else if (kind === 'product_photos') {
       router.push('/product-submit');
-    } else if (onStartSurvey) {
-      // Umfragen-Campaign → verknüpfte Umfragen öffnen (ClickUp 86ca8fbpz).
-      onStartSurvey(campaign.id);
     }
+    // survey-Campaigns rendern nicht als Card (Umfragen leben im Tile) —
+    // daher kein survey-Zweig hier.
   };
 
   return (
@@ -1960,7 +1957,9 @@ function QuickActionTile({
         borderRadius: 14,
         padding: 12,
         justifyContent: 'space-between',
-        opacity: pressed ? 0.85 : 1,
+        // Inaktiv (keine Aktion verfügbar) → gedimmt, signalisiert "nichts
+        // zu tun" statt eines toten Taps (ClickUp 86ca8fbpz).
+        opacity: !action.available ? 0.55 : pressed ? 0.85 : 1,
       })}
     >
       {/* Top row — icon left, reward chip top-right corner. */}

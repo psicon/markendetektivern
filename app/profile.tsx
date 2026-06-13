@@ -110,6 +110,8 @@ export default function ProfileScreen() {
   const [showDemographicsTest, setShowDemographicsTest] = useState(false);
   const [showOnboardingButton, setShowOnboardingButton] = useState(false);
   const [gamificationDisabled, setGamificationDisabled] = useState(false);
+  // Umfrage-Vorschläge nach Aktionen (ClickUp 86ca8fbpz) — Default an.
+  const [actionSurveysEnabled, setActionSurveysEnabled] = useState(true);
   const [appVersion, setAppVersion] = useState('1.0.0');
   // Levels catalogue — loaded from achievementService so the level
   // card shows the level's actual colour + icon + threshold (same
@@ -308,6 +310,30 @@ export default function ProfileScreen() {
       setGamificationDisabled(next);
     } catch (e) {
       console.warn('Profile: gamification toggle failed', e);
+    }
+  };
+
+  // Umfrage-Vorschläge nach Aktionen an/aus (dauerhaft). Initial laden +
+  // beim Umschalten persistieren (surveyService, AsyncStorage).
+  useEffect(() => {
+    let alive = true;
+    import('@/lib/services/surveyService')
+      .then((m) => m.areActionSurveysEnabled())
+      .then((v) => {
+        if (alive) setActionSurveysEnabled(v);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const handleActionSurveyToggle = async (next: boolean) => {
+    setActionSurveysEnabled(next);
+    try {
+      const m = await import('@/lib/services/surveyService');
+      await m.setActionSurveysEnabled(next);
+    } catch (e) {
+      console.warn('Profile: survey toggle failed', e);
     }
   };
 
@@ -1402,6 +1428,12 @@ export default function ProfileScreen() {
               label="Spielerische Inhalte ausblenden"
               value={gamificationDisabled}
               onChange={handleGamificationToggle}
+            />
+            <ToggleRow
+              icon="poll"
+              label="Umfrage-Vorschläge nach Aktionen"
+              value={actionSurveysEnabled}
+              onChange={handleActionSurveyToggle}
             />
             {/* T17.31 + ClickUp 86ca6u6xd [5]: Cashback & Markt-
                 Statistiken — der EINE v2-Consent (Bon-Daten + App-

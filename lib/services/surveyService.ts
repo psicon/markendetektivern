@@ -45,8 +45,13 @@ import {
 } from '@/lib/types/survey';
 
 // ── Frequency-Konfig ──
-const ACTION_GLOBAL_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 h zwischen Action-Prompts
-const POLL_DISMISS_COOLDOWN_MS = 24 * 60 * 60 * 1000; // abgebrochene Poll: 24 h Ruhe
+// Globaler Floor zwischen ZWEI Action-Prompts (egal welche Umfrage) —
+// verhindert Survey-Fatigue, ohne das Verdienen auszubremsen. 1 h ist
+// ein vernünftiger "stört nicht"-Default (6 h war zu selten).
+const ACTION_GLOBAL_COOLDOWN_MS = 60 * 60 * 1000; // 1 h
+// Re-Ask-/Dismiss-Cooldown EINER Umfrage. Pro Umfrage via trigger.
+// cooldownHours überschreibbar (0 = sofort wieder, z.B. zum Testen).
+const POLL_DISMISS_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 h Default
 const POLLS_TTL_MS = 5 * 60 * 1000;
 const CTX_TTL_MS = 5 * 60 * 1000;
 
@@ -54,6 +59,7 @@ const K_ANSWERED = 'survey_answered_v1'; // string[] pollIds
 const K_DISMISSED = 'survey_dismissed_v1'; // Record<pollId, ts>
 const K_LAST_ACTION_PROMPT = 'survey_last_action_prompt_v1'; // ts
 const K_SNOOZE_UNTIL = 'survey_snooze_until_v1'; // ts — "heute keine Vorschläge mehr"
+const K_ACTION_ENABLED = 'survey_action_enabled_v1'; // '0' = dauerhaft aus (Profil-Setting)
 
 // ── In-memory caches (RAM, kein Persist) ──
 let pollsCache: { at: number; polls: Poll[] } | null = null;
@@ -231,6 +237,24 @@ export async function getGeneralSurveys(uid: string): Promise<Poll[]> {
  * — oder null. Respektiert globalen Cooldown + per-Poll-Dismiss-Cooldown
  * + answered. Gibt die erste passende zurück.
  */
+/** DAUERHAFTE Stummschaltung action-getriggerter Umfragen (Profil-
+ *  Einstellung). Allgemeine Umfragen im Rewards-Tab bleiben erreichbar. */
+export async function setActionSurveysEnabled(enabled: boolean): Promise<void> {
+  try {
+    await AsyncStorage.setItem(K_ACTION_ENABLED, enabled ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+}
+export async function areActionSurveysEnabled(): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(K_ACTION_ENABLED);
+    return raw !== '0'; // Default: an
+  } catch {
+    return true;
+  }
+}
+
 /** "Heute keine Vorschläge mehr" — Snooze bis zur nächsten lokalen
  *  Mitternacht (ClickUp 86ca8fbpz, User-Stummschaltung). */
 export async function snoozeActionSurveysToday(): Promise<void> {
@@ -257,8 +281,10 @@ export async function getActionSurvey(
   metadata?: { productId?: string; productType?: string },
 ): Promise<Poll | null> {
   if (!uid) return null;
-  // "Heute keine Vorschläge mehr" (User-Stummschaltung) — gilt für ALLE
-  // action-Vorschläge; die general-Liste im Rewards-Tab bleibt erreichbar.
+  // Stummschaltung (User): dauerhaftes Profil-Setting ODER Tages-Snooze.
+  // Beide gelten nur für action-Vorschläge — die general-Liste im
+  // Rewards-Tab bleibt immer erreichbar.
+  if (!(await areActionSurveysEnabled())) return null;
   if (await isSnoozed()) return null;
   const [lastPromptRaw, answered, dismissed] = await Promise.all([
     AsyncStorage.getItem(K_LAST_ACTION_PROMPT),
