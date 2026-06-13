@@ -1548,11 +1548,12 @@ function CampaignListItem({
       : 0;
   const budgetColor = pct > 50 ? '#10a18a' : pct > 15 ? '#f59e0b' : '#ef4444';
 
-  // Beschreibung: Bon-Boilerplate (von geklonten Docs geerbt) durch die
-  // kind-passende Copy ersetzen; sonst die gepflegte Beschreibung nutzen.
+  // Beschreibung: NUR bei non-receipt-Aktionen die geerbte Bon-Boilerplate
+  // durch die kind-passende Copy ersetzen (bei Bons ist sie korrekt).
+  // Leere Beschreibung → kind-Fallback.
   const rawDesc = (campaign.description || '').trim();
-  const description =
-    !rawDesc || rawDesc === RECEIPT_BOILERPLATE_DESC ? meta.fallbackDesc : rawDesc;
+  const inheritedBoilerplate = kind !== 'receipt' && rawDesc === RECEIPT_BOILERPLATE_DESC;
+  const description = !rawDesc || inheritedBoilerplate ? meta.fallbackDesc : rawDesc;
 
   const onAction = () => {
     if (kind === 'receipt') {
