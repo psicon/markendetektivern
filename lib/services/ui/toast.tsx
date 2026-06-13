@@ -204,10 +204,17 @@ function showToast(
     duration,
     disableShadow: true, // we draw our own shadow on the card
     width: SCREEN_WIDTH,
-    // pointerEvents box-none: der full-width Toast-Wrapper fängt KEINE
-    // Touches ab → Bedienelemente darunter (Back-Button etc.) bleiben
-    // nutzbar. Nur die Action-Pille im Custom-Toast ist tippbar.
-    styles: { view: { backgroundColor: 'transparent', pointerEvents: 'box-none' } },
+    // pointerEvents box-none auf BEIDEN lib-Wrappern: die `pressable` ist die
+    // eigentliche full-width Touch-Falle (onPressIn/onPress + Swipe-Gesten-
+    // Detector), die `view` der innere Container. box-none → der Toast fängt
+    // KEINE Touches ab; Bedienelemente darunter (Back-Button etc.) bleiben
+    // nutzbar, nur die Action-Pille im Custom-Toast ist tippbar. Per-Call
+    // (statt nur defaultStyle in _layout), weil die lib `toast.styles?.*`
+    // ZULETZT merged → gewinnt sicher, und es greift via Hot-Reload.
+    styles: {
+      view: { backgroundColor: 'transparent', pointerEvents: 'box-none' },
+      pressable: { pointerEvents: 'box-none' },
+    },
     customToast: (t: RNToast) => (
       <StandardToast
         message={resolveValue(t.message, t) as any}
