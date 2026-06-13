@@ -148,13 +148,15 @@ export function bannerDataFromLevelUp(
     ? `Level ${newLevel} erreicht – ${levelName}`
     : `Level ${newLevel} erreicht`;
 
-  // Subtitle:
-  //   1. Kategorie-Unlock (höchste Priorität — handlungsrelevant)
-  //   2. Level-Description aus dem Catalog
-  //   3. Fallback "Du bist jetzt auf Level X"
-  const subtitle = unlockedCategory
-    ? `Neue Kategorie verfügbar: ${unlockedCategory.name}`
-    : levelDescription || `Du bist jetzt auf Level ${newLevel}`;
+  // Subtitle = motivierende Level-Beschreibung (wie im Banner-/Toast-Tester).
+  // BEWUSST KEIN Kategorie-Unlock-Text ("Neue Kategorie verfügbar"/"…
+  // freigeschaltet") mehr (ClickUp 86ca8h1x8): die Level-Up-Feier soll die
+  // schöne Beschreibung zeigen — nicht die kategorie-bezogene Meldung. Die
+  // Kategorie wird trotzdem freigeschaltet (Funktion unberührt), nur nicht
+  // hier announced. unlockedCategory bleibt im Signatur-Vertrag (Caller +
+  // Tester übergeben es), wird für den Untertitel aber nicht genutzt.
+  void unlockedCategory;
+  const subtitle = levelDescription || `Du bist jetzt auf Level ${newLevel}`;
 
   return {
     title,

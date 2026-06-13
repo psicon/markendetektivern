@@ -366,6 +366,11 @@ export default function CashbackConsentScreen() {
       router.replace('/cashback/capture');
     } else if (from === 'product') {
       router.replace('/product-submit' as any);
+    } else if (from === 'rewards') {
+      // Aktivierung aus dem Rewards-Kontext (Card / Umfrage-Nudge / Auto-
+      // Prompt) → nach dem Akzeptieren auf den Rewards-Tab (replace, damit
+      // der Consent nicht im Back-Stack bleibt). 86ca8hnmb.
+      router.replace('/(tabs)/rewards' as any);
     } else if (router.canGoBack()) {
       router.back();
     } else {

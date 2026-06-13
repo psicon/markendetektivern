@@ -10,6 +10,10 @@ import { Pressable, Text, View } from 'react-native';
 
 import { FilterSheet } from '@/components/design/FilterSheet';
 import { SurveyRunner } from '@/components/survey/SurveyRunner';
+import {
+  bannerDataFromCashbackPayout,
+  useGamification,
+} from '@/components/ui/GamificationProvider';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
@@ -70,6 +74,9 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
   const { user, isAnonymous } = useAuth();
   const scheme = useColorScheme() ?? 'light';
   const { theme } = useTokens();
+  // Cashback-Gutschrift-Feier (Glow-Banner) — wie bei Bons. Für berechtigte
+  // Umfragen statt grauem Mini-Toast (ClickUp 86ca8hqt8).
+  const { showBanner } = useGamification();
 
   // Button "Zum Cashback" (ClickUp 86ca8gc8r): führt zur Cashback-
   // Aktivierung — Rewards-Tab als Basis, dann Consent-Screen (from=settings
@@ -77,8 +84,11 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
   // wir navigieren nur. router.push (nicht safePush) für die 2-Schritt-Nav,
   // sonst dropt der 600-ms-Debounce den zweiten Push.
   const goToCashback = useCallback(() => {
-    router.push('/(tabs)/rewards' as any);
-    // from=rewards → nach Consent zurück auf Rewards (kein Auto-Scanner).
+    // NUR EINE Navigation (86ca8hnmb): vorher wurde erst der Rewards-Tab UND
+    // dann der Consent gepusht — der Rewards-Screen hat aber selbst einen
+    // Auto-Consent-Prompt beim Erstbesuch → zwei Consent-Screens stapelten
+    // sich (Duplikat). Direkt zum Consent; from=rewards landet nach dem
+    // Akzeptieren auf Rewards (siehe goAfterConsent), kein Auto-Scanner.
     router.push('/cashback/consent?from=rewards' as any);
   }, []);
 
@@ -183,11 +193,10 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
         typeof p.rewardCents === 'number' &&
         p.rewardCents > 0;
       if (pays && eligible) {
-        showInfoToast(
-          `Danke für deine Antwort! ${formatCents(p.rewardCents!)} Taler sind unterwegs.`,
-          'info',
-          scheme,
-        );
+        // Berechtigt → dieselbe Cashback-Gutschrift-Feier wie bei Bons:
+        // Glow-Banner statt grauem Mini-Toast (ClickUp 86ca8hqt8). Der CF
+        // schreibt den Betrag gleich gut → optimistisch sofort feiern.
+        showBanner(bannerDataFromCashbackPayout(p.rewardCents!));
       } else if (pays && !eligible) {
         // Betrag ZUERST — der Hinweis-Toast kürzt lange Texte (2 Zeilen +
         // Action-Pille), sonst wird der Betrag abgeschnitten (86ca…).
@@ -201,7 +210,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
       }
       setActivityNonce((n) => n + 1); // Tile-Liste neu laden
     },
-    [poll, user?.uid, scheme, isAnonymous, goToCashback],
+    [poll, user?.uid, scheme, isAnonymous, goToCashback, showBanner],
   );
 
   const handleClose = useCallback(() => {

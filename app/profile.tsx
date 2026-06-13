@@ -1254,31 +1254,32 @@ export default function ProfileScreen() {
                      schaften-Seite (Level-Catalog + Achievement-Liste).
                 Wenn beide versteckt sind rückt die Einkaufszettel-Row
                 in die `first`-Position. */}
+            {/* "Belohnungen" führt zum Cashback-Konto (echtes Geld) → IMMER
+                sichtbar, auch wenn Gamification aus ist (ClickUp 86ca8hpgd).
+                Nur "Level & Errungenschaften" (reine Gamification) hängt am
+                Toggle. */}
+            <MenuRow
+              icon="gift-outline"
+              color="#f97316"
+              label="Belohnungen"
+              sub={`${cashbackEurStr} € Cashback-Konto`}
+              onPress={() => safePush('/(tabs)/rewards' as any)}
+              first
+            />
             {gamificationEnabled ? (
-              <>
-                <MenuRow
-                  icon="gift-outline"
-                  color="#f97316"
-                  label="Belohnungen"
-                  sub={`${cashbackEurStr} € Cashback-Konto`}
-                  onPress={() => safePush('/(tabs)/rewards' as any)}
-                  first
-                />
-                <MenuRow
-                  icon="trophy-outline"
-                  color="#e0a800"
-                  label="Level & Errungenschaften"
-                  sub={`Level ${level} · ${points.toLocaleString('de-DE')} Pkt`}
-                  onPress={() => safePush('/achievements' as any)}
-                />
-              </>
+              <MenuRow
+                icon="trophy-outline"
+                color="#e0a800"
+                label="Level & Errungenschaften"
+                sub={`Level ${level} · ${points.toLocaleString('de-DE')} Pkt`}
+                onPress={() => safePush('/achievements' as any)}
+              />
             ) : null}
             <MenuRow
               icon="format-list-checks"
               color={theme.primary}
               label="Einkaufszettel"
               onPress={() => safePush('/shopping-list' as any)}
-              first={!gamificationEnabled}
             />
             <MenuRow
               icon="heart-outline"
