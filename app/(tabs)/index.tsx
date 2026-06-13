@@ -58,6 +58,8 @@ import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { startReceiptScanFlow } from '@/lib/services/cashbackScanStart';
 import { useShoppingCartCount } from '@/lib/hooks/useShoppingCartCount';
+import { useSurvey } from '@/components/survey/SurveyProvider';
+import { getGeneralSurveys } from '@/lib/services/surveyService';
 import { achievementService } from '@/lib/services/achievementService';
 import { AlgoliaService } from '@/lib/services/algolia';
 import { FirestoreService } from '@/lib/services/firestore';
@@ -92,6 +94,22 @@ export default function HomeScreen() {
   // Live cart-count für das Einkaufsliste-Schnellzugriff-Card-Badge.
   // Shared mit FloatingShoppingListButton — gleicher Listener-Wert.
   const { count: cartCount } = useShoppingCartCount();
+
+  // Anzahl verfügbarer allgemeiner Umfragen → Badge auf der Umfragen-
+  // Schnellzugriff-Card (analog cartCount). activityNonce triggert ein
+  // Reload nach jeder Beantwortung/Schließen; isFocused beim Zurückkehren.
+  const { activityNonce } = useSurvey();
+  const [surveyCount, setSurveyCount] = useState(0);
+  useEffect(() => {
+    if (!user?.uid || !isFocused) return;
+    let alive = true;
+    getGeneralSurveys(user.uid)
+      .then((s) => alive && setSurveyCount(s.length))
+      .catch(() => alive && setSurveyCount(0));
+    return () => {
+      alive = false;
+    };
+  }, [user?.uid, isFocused, activityNonce]);
 
   // Tap target for "Kassenbon scannen" — campaign-aware scan start
   // (shared with "Meine Bons"). Bug 86ca24dk4.
@@ -847,7 +865,7 @@ export default function HomeScreen() {
     // Sitzt zwischen "Produkte einreichen" und "Deine Favoriten" —
     // Action-orientierte Cards (Bon, Produkt, Einkaufsliste) gehören
     // visuell zusammen, gefolgt von Browse-Cards (Favoriten, Umfragen).
-    { icon: 'cart'                 as const, label: 'Einkaufs-\nliste',    background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/shopping-list' as any) },
+    { icon: 'cart'                 as const, label: 'Einkaufs-\nzettel',    background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/shopping-list' as any) },
     // Theme-aware bg statt hardcoded `#dde2e4` (das war im Dark-Modus
     // mit weißem text unlesbar). theme.surfaceAlt ist hellgrau im
     // Light-Modus und dunkelgrau im Dark-Modus → theme.text liest
@@ -960,10 +978,16 @@ export default function HomeScreen() {
                 background={item.background}
                 dark={item.dark}
                 onPress={item.onPress}
-                // Nur die Einkaufsliste-Card zeigt einen Live-Count
-                // — das Cart-Icon ist der Anker. Andere Cards
-                // bleiben badge-frei.
-                count={item.icon === 'cart' ? cartCount : undefined}
+                // Live-Count-Badge: Cart-Card → Einkaufszettel-Anzahl,
+                // Umfragen-Card → Anzahl verfügbarer Umfragen. Andere
+                // Cards bleiben badge-frei (count <= 0 rendert nichts).
+                count={
+                  item.icon === 'cart'
+                    ? cartCount
+                    : item.icon === 'poll'
+                      ? surveyCount
+                      : undefined
+                }
               />
             ))}
           </Animated.ScrollView>
