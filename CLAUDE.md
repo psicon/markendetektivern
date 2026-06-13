@@ -1472,21 +1472,7 @@ should produce a toast so the user gets confirmation.
 
 **Position auto-routing:** POINTS, STREAK, ANTI_ABUSE land at the
 BOTTOM (near the gamification "score zone"). Everything else lands
-at the TOP. Don't fight this — it's intentional. Position pro Call
-überschreibbar via `showToast(..., { position })` (z.B. der Umfrage-
-Hinweis liegt BOTTOM, damit er nicht den Header verdeckt).
-
-**Touch-Transparenz (PFLICHT, sonst blockiert der Toast die UI darunter):**
-Der Toast-Container (`@backpackapp-io`) ist full-width + absolute oben/unten
-und fing in voller Breite Touches ab → Back-Button & andere Bedienelemente
-darunter waren tot, solange der Toast sichtbar war. Fix: ALLE nicht-
-interaktiven Ebenen tragen `pointerEvents: 'box-none'` — die lib-Wrapper via
-`<Toasts defaultStyle={{ view:{…,pointerEvents:'box-none'}, pressable:{…,
-pointerEvents:'box-none'} }}/>` (app/_layout.tsx) + per-Call `styles.view`,
-und im Custom-Toast `shell`/`pill`/`inner`. NUR die Action-Pille
-(`Pressable`) bleibt `auto`. RNGH respektiert natives Hit-Testing → box-none
-neutralisiert auch die Swipe-Geste (Auto-Dismiss greift ohnehin). Optik
-bleibt 1:1. NIE einen full-width Toast-Layer ohne box-none lassen.
+at the TOP. Don't fight this — it's intentional.
 
 **Don't:**
 - Roll your own toast/snackbar component. Always use the helpers.

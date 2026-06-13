@@ -239,23 +239,11 @@ function ThemedApp() {
                 <SplashScreen onAnimationComplete={handleSplashComplete} />
               )}
 
-              {/* Global Toast Host.
-                  WICHTIG (Back-Button-Blockade): Der äußere Toast-Container ist
-                  bereits box-none, ABER jede Toast-Pille rendert in einer
-                  full-width <Pressable> (onPressIn/onPress + RNGH-Pan-Gesten-
-                  Detector). RNGH fängt auf Fabric Touches auf NATIVER Ebene ab —
-                  pointerEvents:'box-none' allein verhindert das NICHT. Deshalb
-                  schieben wir die Top-Toasts per extraInsets.top UNTER den
-                  Header (DETAIL_HEADER_ROW_HEIGHT 48): die Pille sitzt knapp
-                  unter dem Header, und der Header-Bereich (Back-Button) liegt
-                  über der box-none-Container-Fläche → wieder tippbar.
-                  box-none auf view/pressable bleibt als zusätzliche
-                  Durchlässigkeit. 86ca8g…/86ca8h… */}
+              {/* Global Toast Host - transparenter Wrapper, damit nur unser Custom-Toast sichtbar ist */}
               <Toasts
-                extraInsets={{ top: 40 }}
                 defaultStyle={{
-                  view: { backgroundColor: 'transparent', padding: 0, margin: 0, shadowOpacity: 0, elevation: 0, pointerEvents: 'box-none' },
-                  pressable: { backgroundColor: 'transparent', pointerEvents: 'box-none' },
+                  view: { backgroundColor: 'transparent', padding: 0, margin: 0, shadowOpacity: 0, elevation: 0 },
+                  pressable: { backgroundColor: 'transparent' },
                   indicator: { marginRight: 0 },
                 }}
               />

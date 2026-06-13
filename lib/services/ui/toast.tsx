@@ -105,19 +105,14 @@ const StandardToast: React.FC<{
   // Outline.
 
   return (
-    // box-none auf allen nicht-interaktiven Ebenen: die Pille verdeckt zwar
-    // visuell, fängt aber KEINE Touches ab → was darunter liegt (Header/
-    // Back-Button/Buttons) bleibt bedienbar. Einzig die Action-Pille
-    // (Pressable) ist tippbar. Optik unverändert.
-    <View style={styles.shell} pointerEvents="box-none">
+    <View style={styles.shell}>
       <LinearGradient
         colors={bg}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.pill}
-        pointerEvents="box-none"
       >
-        <View style={styles.inner} pointerEvents="box-none">
+        <View style={styles.inner}>
           {emoji ? (
             <Text style={styles.emoji}>{emoji}</Text>
           ) : (
@@ -128,9 +123,7 @@ const StandardToast: React.FC<{
             />
           )}
           <Text
-            // Mit Action-Pille frisst der Button horizontalen Platz → eine
-            // Zeile mehr, damit längere Hinweise nicht abgeschnitten werden.
-            numberOfLines={actionLabel && onActionPress ? 3 : 2}
+            numberOfLines={2}
             style={[styles.text, { color: textColor }]}
           >
             {text}
@@ -191,30 +184,17 @@ function showToast(
     // Von allen Helpern durchgereicht (scheme-aware Styling). War im Typ
     // bisher nicht deklariert → 10 vorbestehende TS-Fehler; hier ergänzt.
     colorScheme?: 'light' | 'dark';
-    // Position-Override (sonst kategorie-basiert). Genutzt z.B. für den
-    // Umfrage-Hinweis: BOTTOM, damit er nicht den Header verdeckt.
-    position?: ToastPosition;
   },
 ) {
   const duration = options?.durationMs ?? getToastDuration(category);
 
   toast(message, {
     id: options?.id,
-    position: options?.position ?? positionForCategory(category),
+    position: positionForCategory(category),
     duration,
     disableShadow: true, // we draw our own shadow on the card
     width: SCREEN_WIDTH,
-    // pointerEvents box-none auf BEIDEN lib-Wrappern: die `pressable` ist die
-    // eigentliche full-width Touch-Falle (onPressIn/onPress + Swipe-Gesten-
-    // Detector), die `view` der innere Container. box-none → der Toast fängt
-    // KEINE Touches ab; Bedienelemente darunter (Back-Button etc.) bleiben
-    // nutzbar, nur die Action-Pille im Custom-Toast ist tippbar. Per-Call
-    // (statt nur defaultStyle in _layout), weil die lib `toast.styles?.*`
-    // ZULETZT merged → gewinnt sicher, und es greift via Hot-Reload.
-    styles: {
-      view: { backgroundColor: 'transparent', pointerEvents: 'box-none' },
-      pressable: { pointerEvents: 'box-none' },
-    },
+    styles: { view: { backgroundColor: 'transparent' } },
     customToast: (t: RNToast) => (
       <StandardToast
         message={resolveValue(t.message, t) as any}
@@ -351,8 +331,6 @@ export function showSurveyHintToast(
     onActionPress: onOpen,
     colorScheme,
     durationMs: 8000,
-    // BOTTOM, damit der Hinweis nicht den Header (Back/Titel) verdeckt.
-    position: ToastPosition.BOTTOM,
   });
 }
 
