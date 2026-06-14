@@ -41,6 +41,12 @@ import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { db } from '@/lib/firebase';
+import {
+  formatNum,
+  formatPack,
+  formatPrice,
+  normalizeGrade,
+} from '@/lib/utils/externalProductFormat';
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import {
   AlgoliaService,
@@ -63,62 +69,8 @@ const SOURCE_LABEL: Record<string, string> = {
   openfood: 'OpenFoodFacts',
 };
 
-function formatPrice(eur?: number): string | null {
-  if (typeof eur !== 'number') return null;
-  return `${eur.toFixed(2).replace('.', ',')} €`;
-}
-
-function formatNum(v?: number, unit?: string): string | null {
-  if (typeof v !== 'number') return null;
-  const fixed = v % 1 === 0 ? v.toString() : v.toFixed(1).replace('.', ',');
-  return `${fixed}${unit ? ` ${unit}` : ''}`;
-}
-
-// Pack-Label + Grundpreis — 1:1 aus Stöbern (explore.tsx formatPack), damit
-// die Alternativen-Cards exakt wie das Stöbern-/Home-Grid aussehen.
-//   size=170, unit='g',  price=0.99 → ('170g',  '5,82€/kg')
-//   size=1.5, unit='l',  price=0.55 → ('1.5l',  '0,37€/L')
-//   size=25,  unit='Stk',price=1.19 → ('25 Stk','0,05€/Stk.')
-function formatPack(
-  size?: number,
-  unit?: string,
-  price?: number,
-): { sizeLabel: string | null; unitPriceLabel: string | null } {
-  if (!size || !unit) return { sizeLabel: null, unitPriceLabel: null };
-  const u = unit.toLowerCase().replace(/\.$/, '');
-  const isStk = u === 'stk' || u === 'stück';
-  const sizeLabel = isStk ? `${size} ${unit}` : `${size}${unit}`;
-  let unitPriceLabel: string | null = null;
-  if (price && price > 0) {
-    if (u === 'g') unitPriceLabel = `${((price / size) * 1000).toFixed(2).replace('.', ',')}€/kg`;
-    else if (u === 'kg') unitPriceLabel = `${(price / size).toFixed(2).replace('.', ',')}€/kg`;
-    else if (u === 'ml') unitPriceLabel = `${((price / size) * 1000).toFixed(2).replace('.', ',')}€/L`;
-    else if (u === 'l') unitPriceLabel = `${(price / size).toFixed(2).replace('.', ',')}€/L`;
-    else if (isStk) unitPriceLabel = `${(price / size).toFixed(2).replace('.', ',')}€/Stk.`;
-  }
-  return { sizeLabel, unitPriceLabel };
-}
-
-// OpenFood liefert für Nutri-/Eco-Score teils 'not-applicable', 'unknown'
-// oder leere Strings statt einer echten Note. Das ist KEINE Bewertung →
-// solche Badges weglassen, statt 'NOT-APPLICABLE' anzuzeigen. Gültig:
-// a–e (Buchstaben-Scores) bzw. 1–4 (NOVA).
-function normalizeGrade(
-  raw: string | undefined,
-  kind: 'letter' | 'nova',
-): string | null {
-  if (!raw) return null;
-  const v = String(raw).trim().toLowerCase();
-  if (!v || v.includes('not') || v.includes('unknown') || v === 'na' || v === 'n/a') {
-    return null;
-  }
-  if (kind === 'letter') {
-    const c = v.charAt(0);
-    return ['a', 'b', 'c', 'd', 'e'].includes(c) ? c.toUpperCase() : null;
-  }
-  const n = v.replace(/[^1-4]/g, '').charAt(0);
-  return ['1', '2', '3', '4'].includes(n) ? n : null;
-}
+// formatPrice / formatNum / formatPack / normalizeGrade → ausgelagert nach
+// lib/utils/externalProductFormat.ts (pure + unit-testbar).
 
 export default function ExternalProductScreen() {
   const { ean } = useLocalSearchParams<{ ean: string; source?: string }>();

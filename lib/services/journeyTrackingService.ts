@@ -4,6 +4,7 @@ import * as Application from 'expo-application';
 import { Platform } from 'react-native';
 import { analyticsService } from './analyticsService';
 import { AnonymousLocationService } from './anonymousLocationService';
+import { collectionForProductType } from '@/lib/utils/journeyProductRef';
 
 // Journey-Tracking läuft für ALLE User (anonym + registriert + eingeloggt),
 // UNABHÄNGIG vom Cashback/Markt-Daten-Consent (User-Vorgabe 2026-06-14:
@@ -287,23 +288,6 @@ export interface JourneyContext {
     level?: number;                // stats.currentLevel
     savingsTotal?: number;         // stats.savingsTotal (€ bisher gespart)
   };
-}
-
-/**
- * Firestore-Collection für eine productRef je productType. Externe Produkte
- * (productId = EAN) zeigen auf external_products — NICHT auf ein nicht-
- * existentes produkte/{EAN} (Bogus-Ref, Datenstruktur-Schutz). EINZIGE
- * Quelle der Wahrheit für alle productRef-Builder unten, damit nicht jede
- * Stelle einzeln den 'external'-Fall vergessen kann.
- */
-function collectionForProductType(
-  t: 'brand' | 'noname' | 'external',
-): string {
-  return t === 'brand'
-    ? 'markenProdukte'
-    : t === 'external'
-    ? 'external_products'
-    : 'produkte';
 }
 
 class JourneyTrackingService {
