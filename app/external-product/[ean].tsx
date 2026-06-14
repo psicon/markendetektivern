@@ -65,6 +65,31 @@ function formatNum(v?: number, unit?: string): string | null {
   return `${fixed}${unit ? ` ${unit}` : ''}`;
 }
 
+// Pack-Label + Grundpreis — 1:1 aus Stöbern (explore.tsx formatPack), damit
+// die Alternativen-Cards exakt wie das Stöbern-/Home-Grid aussehen.
+//   size=170, unit='g',  price=0.99 → ('170g',  '5,82€/kg')
+//   size=1.5, unit='l',  price=0.55 → ('1.5l',  '0,37€/L')
+//   size=25,  unit='Stk',price=1.19 → ('25 Stk','0,05€/Stk.')
+function formatPack(
+  size?: number,
+  unit?: string,
+  price?: number,
+): { sizeLabel: string | null; unitPriceLabel: string | null } {
+  if (!size || !unit) return { sizeLabel: null, unitPriceLabel: null };
+  const u = unit.toLowerCase().replace(/\.$/, '');
+  const isStk = u === 'stk' || u === 'stück';
+  const sizeLabel = isStk ? `${size} ${unit}` : `${size}${unit}`;
+  let unitPriceLabel: string | null = null;
+  if (price && price > 0) {
+    if (u === 'g') unitPriceLabel = `${((price / size) * 1000).toFixed(2).replace('.', ',')}€/kg`;
+    else if (u === 'kg') unitPriceLabel = `${(price / size).toFixed(2).replace('.', ',')}€/kg`;
+    else if (u === 'ml') unitPriceLabel = `${((price / size) * 1000).toFixed(2).replace('.', ',')}€/L`;
+    else if (u === 'l') unitPriceLabel = `${(price / size).toFixed(2).replace('.', ',')}€/L`;
+    else if (isStk) unitPriceLabel = `${(price / size).toFixed(2).replace('.', ',')}€/Stk.`;
+  }
+  return { sizeLabel, unitPriceLabel };
+}
+
 export default function ExternalProductScreen() {
   const { ean } = useLocalSearchParams<{ ean: string; source?: string }>();
   const router = useRouter();
@@ -254,7 +279,46 @@ export default function ExternalProductScreen() {
         if (!alive) return;
       }
 
-      if (alive) setAlternatives(hits);
+      if (!alive) return;
+
+      // Enrich (max 6): Algolia liefert discounter/handelsmarke NUR als
+      // Pfad-Strings ('discounter/abc') — daher fehlten Markt + Eigenmarke
+      // auf den Cards. getSearchCardData löst sie (gecacht) zu echten
+      // Objekten auf + liefert bildClean + packSize + packTypInfo. Damit
+      // sehen die Cards exakt aus wie das Stöbern-/Home-Grid.
+      const top = hits.slice(0, 6);
+      const enriched = await Promise.all(
+        top.map(async (h) => {
+          try {
+            const fs: any = await FirestoreService.getSearchCardData(h.objectID, false);
+            if (!fs) return h;
+            return {
+              ...h,
+              ...(fs.bildClean ? { bildClean: fs.bildClean } : {}),
+              ...(fs.bildThumb ? { bildThumb: fs.bildThumb } : {}),
+              ...(fs.packSize != null ? { packSize: fs.packSize } : {}),
+              ...(fs.packTypInfo && typeof fs.packTypInfo === 'object'
+                ? { packTypInfo: fs.packTypInfo }
+                : {}),
+              ...(fs.discounter && typeof fs.discounter === 'object'
+                ? { discounter: fs.discounter }
+                : {}),
+              ...(fs.handelsmarke && typeof fs.handelsmarke === 'object'
+                ? { handelsmarke: fs.handelsmarke }
+                : {}),
+              ...(fs.hersteller && typeof fs.hersteller === 'object'
+                ? { hersteller: fs.hersteller }
+                : {}),
+              ...(typeof fs.preis === 'number' ? { preis: fs.preis } : {}),
+              ...(fs.stufe != null ? { stufe: fs.stufe } : {}),
+            };
+          } catch {
+            return h;
+          }
+        }),
+      );
+
+      if (alive) setAlternatives(enriched);
       if (alive) setAltLoading(false);
     })();
 
@@ -979,11 +1043,10 @@ export default function ExternalProductScreen() {
           </View>
         ) : (
           // 2-column grid mit Standard-ProductCard (gleicher Look wie
-          // Stöbern-Grid / Home-Top-Rated). Max 6 Items (Algolia-Limit).
-          // Algolia liefert nur Basisfelder — packSize/unitPrice können
-          // wir hier nicht zeigen weil das ein Firestore-Enrich
-          // bräuchte; für Alternativen-Übersicht ist Stufe + Markt +
-          // Preis aussagekräftig genug.
+          // Stöbern-Grid / Home-Top-Rated). Max 6 Items. Die Hits sind
+          // oben Firestore-enriched → Markt-Logo (discounter.bild) +
+          // Eigenmarke (handelsmarke.bezeichnung) + Grundpreis sind da,
+          // identisch zur Stöbern-Card.
           <View
             style={{
               flexDirection: 'row',
@@ -991,15 +1054,27 @@ export default function ExternalProductScreen() {
               paddingHorizontal: 10,
             }}
           >
-            {alternatives.slice(0, 6).map((alt, index) => {
+            {alternatives.slice(0, 6).map((alt: any) => {
               const stufeNum =
                 typeof alt.stufe === 'string'
                   ? parseInt(alt.stufe, 10) || undefined
                   : (alt.stufe as any);
-              const eyebrow =
-                alt.handelsmarke?.bezeichnung ?? alt.discounter?.name ?? null;
-              const eyebrowLogo =
-                alt.discounter?.bild ?? alt.handelsmarke?.bild ?? null;
+              // Kanonisches NoName-Eyebrow (= Stöbern renderListCard):
+              // Text = Eigenmarke (handelsmarke), Logo = Markt (discounter).
+              const disc = alt.discounter as { name?: string; bild?: string } | undefined;
+              const hm = alt.handelsmarke as
+                | { bezeichnung?: string; name?: string; bild?: string }
+                | undefined;
+              const brandName = hm?.bezeichnung ?? hm?.name ?? disc?.name ?? null;
+              const eyebrowLogo = disc?.bild ?? hm?.bild ?? null;
+              const herstellerName =
+                alt.hersteller?.herstellername ?? alt.hersteller?.name ?? null;
+              const unit = alt.packTypInfo?.typKurz ?? alt.packTypInfo?.typ;
+              const { sizeLabel, unitPriceLabel } = formatPack(
+                alt.packSize,
+                unit,
+                typeof alt.preis === 'number' ? alt.preis : undefined,
+              );
               return (
                 <View
                   key={alt.objectID}
@@ -1012,12 +1087,14 @@ export default function ExternalProductScreen() {
                 >
                   <ProductCard
                     title={alt.name ?? ''}
-                    brand={eyebrow}
+                    brand={brandName}
                     eyebrowLogoUri={eyebrowLogo}
-                    hersteller={alt.hersteller?.name ?? null}
-                    imageUri={alt.bild ?? null}
+                    hersteller={herstellerName}
+                    product={alt}
                     price={typeof alt.preis === 'number' ? alt.preis : 0}
                     stufe={stufeNum ?? null}
+                    sizeLabel={sizeLabel}
+                    unitPriceLabel={unitPriceLabel}
                     variant="grid"
                     height={278}
                     onPress={() => {
