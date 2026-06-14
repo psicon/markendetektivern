@@ -1,10 +1,17 @@
 /**
- * Root-Jest-Config — Phase 1: Pure-Logic-Unit-Tests.
+ * Root-Jest-Config — Phase 1 (Pure-Logic) + Phase 2 (Service-Layer mit
+ * Firestore-Mocks).
  *
  * Zwei Projekte unter einem `npm test`:
- *   • app — App-/lib-TS-Pure-Logik via ts-jest (node-Env, diagnostics:false →
- *     schnell + unabhängig vom strict-tsc-Gate; Typsicherheit deckt
- *     `tsc --noEmit` separat ab). KEIN RN-Runtime (Phase 1 ist pure Logik).
+ *   • app — App-/lib-TS via ts-jest (node-Env, diagnostics:false → schnell +
+ *     unabhängig vom strict-tsc-Gate; Typsicherheit deckt `tsc --noEmit`
+ *     separat ab). Deckt Phase 1 (pure Utils) UND Phase 2 (Services) ab —
+ *     letztere mocken die RN-Deps (@react-native-firebase/*, expo-*,
+ *     react-native) per `jest.mock`, sodass die Service-Logik in Node läuft.
+ *     `moduleNameMapper` löst den `@/`-Pfad-Alias auf (Services importieren
+ *     intern via `@/lib/...`). `resetMocks: false`, weil die geteilten
+ *     Mock-Factories (z.B. `__helpers__/rnfirestoreMock`) ihre Default-
+ *     Implementierungen behalten müssen; `clearMocks` räumt nur Call-Counts.
  *   • cf  — Cloud-Function-Logik (plain CommonJS-JS, kein Transform). Requires
  *     der CFs lösen aus deren eigenen node_modules auf.
  *
@@ -22,8 +29,11 @@ module.exports = {
       transform: {
         '^.+\\.tsx?$': ['ts-jest', { diagnostics: false }],
       },
+      moduleNameMapper: {
+        '^@/(.*)$': '<rootDir>/$1',
+      },
       clearMocks: true,
-      resetMocks: true,
+      resetMocks: false,
     },
     {
       displayName: 'cf',
