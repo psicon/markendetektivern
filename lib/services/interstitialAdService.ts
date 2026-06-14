@@ -9,6 +9,7 @@ const COUNTER_KEYS = {
   SCAN: '@interstitial_scan_count',
   SEARCH: '@interstitial_search_count',
   LAST_SHOWN: '@interstitial_last_shown',
+  LIFETIME_ACTIONS: '@interstitial_lifetime_actions', // monotone Lebensdauer-Aktionen
 };
 
 // Thresholds
@@ -17,6 +18,13 @@ const THRESHOLDS = {
   SCAN: 3, // Nach jedem 3. Scan
   SEARCH: 3, // Nach jeder 3. Suche
 };
+
+// Grace-Period für NEUE User (App-Store-Reviews: "Werbung schon nach paar
+// Produkten" zerstört den ersten Eindruck). Die ersten N qualifizierenden
+// Aktionen (Produktaufrufe + Scans + Suchen, über die gesamte App-Lebens-
+// dauer gezählt) bleiben KOMPLETT werbefrei — Full-Page-Ads kommen erst
+// danach, mit der normalen Frequenz. ~12 ≈ eine entspannte erste Session.
+const GRACE_PERIOD_ACTIONS = 12;
 
 // Minimum time between ads (in milliseconds)
 const MIN_TIME_BETWEEN_ADS = 60000; // 1 Minute
@@ -125,6 +133,19 @@ class InterstitialAdService {
   }
 
   private async canShowAd(): Promise<boolean> {
+    // Grace-Period für neue User: erst NACH GRACE_PERIOD_ACTIONS qualifizierenden
+    // Aktionen überhaupt Full-Page-Ads zeigen (sauberer erster Eindruck).
+    try {
+      const lifetimeStr = await AsyncStorage.getItem(COUNTER_KEYS.LIFETIME_ACTIONS);
+      const lifetime = lifetimeStr ? parseInt(lifetimeStr, 10) || 0 : 0;
+      if (lifetime < GRACE_PERIOD_ACTIONS) {
+        console.log(`🆕 Ad-Grace-Period aktiv (${lifetime}/${GRACE_PERIOD_ACTIONS}) — noch keine Interstitials`);
+        return false;
+      }
+    } catch {
+      /* im Zweifel weiter (Counter nicht lesbar) */
+    }
+
     // Check last shown time
     const lastShownStr = await AsyncStorage.getItem(COUNTER_KEYS.LAST_SHOWN);
     if (lastShownStr) {
@@ -140,6 +161,22 @@ class InterstitialAdService {
 
   private async updateLastShownTime() {
     await AsyncStorage.setItem(COUNTER_KEYS.LAST_SHOWN, Date.now().toString());
+  }
+
+  // Monotone Lebensdauer-Zählung qualifizierender Aktionen (für die Grace-
+  // Period). Wird einmal pro track*-Call erhöht; nie zurückgesetzt (außer
+  // resetCounters/Dev). Deckelt bei GRACE_PERIOD_ACTIONS, damit der Wert
+  // nicht unbegrenzt wächst.
+  private async bumpLifetimeActions() {
+    try {
+      const str = await AsyncStorage.getItem(COUNTER_KEYS.LIFETIME_ACTIONS);
+      const cur = str ? parseInt(str, 10) || 0 : 0;
+      if (cur < GRACE_PERIOD_ACTIONS) {
+        await AsyncStorage.setItem(COUNTER_KEYS.LIFETIME_ACTIONS, String(cur + 1));
+      }
+    } catch {
+      /* nicht fatal */
+    }
   }
 
   async showIfReady(isPremium: boolean, retryCount: number = 0) {
@@ -219,6 +256,7 @@ class InterstitialAdService {
   }
 
   async trackProductView(isPremium: boolean) {
+    await this.bumpLifetimeActions();
     const countStr = await AsyncStorage.getItem(COUNTER_KEYS.PRODUCT_VIEW) || '0';
     const count = parseInt(countStr) + 1;
     
@@ -237,6 +275,7 @@ class InterstitialAdService {
   }
 
   async trackScan(isPremium: boolean) {
+    await this.bumpLifetimeActions();
     const countStr = await AsyncStorage.getItem(COUNTER_KEYS.SCAN) || '0';
     const count = parseInt(countStr) + 1;
     
@@ -255,6 +294,7 @@ class InterstitialAdService {
   }
 
   async trackSearch(isPremium: boolean) {
+    await this.bumpLifetimeActions();
     const countStr = await AsyncStorage.getItem(COUNTER_KEYS.SEARCH) || '0';
     const count = parseInt(countStr) + 1;
     
@@ -286,6 +326,7 @@ class InterstitialAdService {
       COUNTER_KEYS.SCAN,
       COUNTER_KEYS.SEARCH,
       COUNTER_KEYS.LAST_SHOWN,
+      COUNTER_KEYS.LIFETIME_ACTIONS,
     ]);
     console.log('🔄 All interstitial counters reset');
   }
