@@ -4,7 +4,27 @@ import * as Application from 'expo-application';
 import { Platform } from 'react-native';
 import { analyticsService } from './analyticsService';
 import { AnonymousLocationService } from './anonymousLocationService';
-import { isMarketDataConsentGranted } from './trackingConsent';
+
+// Journey-Tracking läuft für ALLE User (anonym + registriert + eingeloggt),
+// UNABHÄNGIG vom Cashback/Markt-Daten-Consent (User-Vorgabe 2026-06-14:
+// "journey tracking muss immer für alle laufen, hat nichts mit cashback zu
+// tun; auch anon→registriert/login muss sauber gehen"). Das frühere
+// Consent-Gate (86ca6u6xd) wird im Journey-Pfad bewusst NICHT mehr
+// angewandt — daher hier eine lokale Always-true-Variante statt des Imports
+// aus ./trackingConsent. Alle isMarketDataConsentGranted()-Checks in diesem
+// File passen damit immer. Die sensiblere IP-Standortabfrage bleibt separat
+// consent-gated (anonymousLocationService importiert weiter das echte Gate).
+function isMarketDataConsentGranted(): boolean {
+  return true;
+}
+
+// Eine als 'active' in Firestore liegende Journey, die seit länger als das
+// nicht mehr berührt wurde, ist eine TOTE Session (App-Kill ohne sauberes
+// completeJourney — solche 'active'-Journeys häuften sich an, solange das
+// Consent-Gate completeJourney mit-blockte). loadActiveJourney setzt sie auf
+// 'inactive' statt sie tagelang fortzusetzen, und startet eine frische
+// Session — damit hat jede neue Nutzung wieder eine eigene startTime.
+const JOURNEY_RESUME_MAX_IDLE_MS = 6 * 60 * 60 * 1000; // 6 Stunden
 
 // App-Kontext pro Journey (User-Vorgabe): Version + Build-Nr + OS. Einmal beim
 // Modul-Load gelesen (Application-Getter sind synchron; in Expo Go ggf. null).
@@ -621,7 +641,34 @@ class JourneyTrackingService {
       if (!snapshot.empty) {
         const journeyDoc = snapshot.docs[0];
         const data = journeyDoc.data();
-        
+
+        // Staleness-Guard: ist die jüngste 'active' Journey lange nicht mehr
+        // berührt worden (App-Kill ohne completeJourney), NICHT fortsetzen —
+        // sonst hängt jede neue Session an einer tage-/wochenalten Journey und
+        // es entsteht nie eine mit aktueller startTime. Stattdessen: alte als
+        // 'inactive' schließen + frische Session starten. Die Kauf-Closure
+        // (receipt-matcher) findet die Journey weiterhin per cart-item
+        // journeyId — statusunabhängig — also kein Closure-Bruch.
+        const lastTouchedMs =
+          data.lastUpdated?.toMillis?.() ?? data.startTime?.toMillis?.() ?? 0;
+        if (Date.now() - lastTouchedMs > JOURNEY_RESUME_MAX_IDLE_MS) {
+          const idleH = Math.round((Date.now() - lastTouchedMs) / 3_600_000);
+          console.log(
+            `🧹 Stale 'active' Journey ${journeyDoc.id} (idle ${idleH}h) → schließen + frische Session`,
+          );
+          try {
+            await updateDoc(journeyDoc.ref, {
+              status: 'inactive',
+              completionReason: 'stale_resume',
+              completedAt: serverTimestamp(),
+            });
+          } catch (e) {
+            console.warn('stale-journey close failed (ignored)', (e as any)?.message);
+          }
+          this.startJourney('browse', 'app_start', undefined, userId);
+          return; // NICHT die stale Journey restoren (finally resettet isLoadingJourney)
+        }
+
         // Rekonstruiere Journey-Context
         this.currentJourney = {
           journeyId: data.journeyId,

@@ -104,11 +104,12 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
   useEffect(() => {
     if (!user?.uid) return;
     const uid = user.uid;
-    return startMarketDataConsentSync(uid, (granted) => {
-      if (granted) {
-        journeyTrackingService.loadActiveJourney(uid);
-      }
-    });
+    // Journey-Tracking läuft für ALLE User (User-Vorgabe 2026-06-14) →
+    // aktive Journey IMMER laden, unabhängig vom Cashback-Consent. Der
+    // Consent-Sync läuft trotzdem weiter (steuert die separat gegatete
+    // IP-Standortabfrage + ggf. den Marktdaten-Verkauf).
+    journeyTrackingService.loadActiveJourney(uid);
+    return startMarketDataConsentSync(uid);
   }, [user?.uid]);
 
   // ─── Attribution Capture (T4, ClickUp 86c9zbxy7) ─────────────
