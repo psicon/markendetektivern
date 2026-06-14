@@ -89,47 +89,47 @@ export default function BarcodeScannerScreen() {
     setIsSmallDevice(height < 700); // iPhone SE Detection
   }, [height]);
   
-  // 🎥 Kamera-Initialisierung nach Navigation optimieren  
-  useEffect(() => {
-    // Für Expo Go: Warte auf Permission, für Native: Starte sofort
-    if (isExpoGo() && !permission?.granted) return;
-    
-    // Kamera erst nach allen Navigationsinteraktionen initialisieren
-    const interaction = InteractionManager.runAfterInteractions(() => {
-      setCameraReady(true);
-    });
-    
-    return () => interaction.cancel();
-  }, [permission?.granted]);
-  
   const topOffset = isSmallDevice ? height * 0.08 + 90 : height * 0.12 + 140;
   const bottomSpaceAvailable = height - topOffset - scanAreaHeight - 100; // Space für Content
 
 
 
-  // Lade Scanhistorie beim Mount und Focus
+  // Lade Scanhistorie + (re-)initialisiere die Kamera bei JEDEM Focus.
+  // WICHTIG (86ca8mqg4): der Cleanup setzt beim Verlassen cameraReady=false
+  // (Kamera freigeben). Bei Zurück-Navigation (z.B. aus "Zuletzt gescannt")
+  // MUSS die Kamera hier wieder armiert werden — ein separater Mount-Effekt
+  // mit [permission]-Deps lief beim Re-Focus NICHT erneut → Kamera blieb
+  // schwarz, Scanner hing. Deshalb gehört das Kamera-Re-Arm in den Focus-Effekt.
   useFocusEffect(
     useCallback(() => {
-      if (user?.uid) {
-        loadScanHistory();
-        // Subscribe für Live-Updates
-        const unsubscribe = scanHistoryService.subscribeToScanHistory(
-          user.uid,
-          10,
-          (items: ScanHistoryItem[]) => setScanHistory(items)
-        );
-        return () => {
-          unsubscribe();
-          // Reset Scanner-Status beim Verlassen
-          setScanned(false);
-          setHasNavigated(false);
-          setScanningLoading(false);
-          setCameraReady(false); // 🎥 Kamera-Status zurücksetzen
-          lastScannedTimestampRef.current = 0;
-          lastScannedEANRef.current = '';
-        };
+      if (!user?.uid) return;
+      loadScanHistory();
+      // Subscribe für Live-Updates
+      const unsubscribe = scanHistoryService.subscribeToScanHistory(
+        user.uid,
+        10,
+        (items: ScanHistoryItem[]) => setScanHistory(items)
+      );
+      // Kamera nach den Navigations-Animationen armieren (Expo Go: erst nach
+      // Permission). Bei jedem Focus → kein Hang nach Zurück-Navigation.
+      let camInteraction: { cancel: () => void } | undefined;
+      if (!(isExpoGo() && !permission?.granted)) {
+        camInteraction = InteractionManager.runAfterInteractions(() => {
+          setCameraReady(true);
+        });
       }
-    }, [user])
+      return () => {
+        camInteraction?.cancel();
+        unsubscribe();
+        // Reset Scanner-Status beim Verlassen
+        setScanned(false);
+        setHasNavigated(false);
+        setScanningLoading(false);
+        setCameraReady(false); // 🎥 Kamera-Status zurücksetzen
+        lastScannedTimestampRef.current = 0;
+        lastScannedEANRef.current = '';
+      };
+    }, [user, permission?.granted])
   );
 
   const loadScanHistory = async () => {

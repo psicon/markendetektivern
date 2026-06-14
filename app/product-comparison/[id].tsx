@@ -1999,11 +1999,15 @@ export default function ProductComparisonScreen() {
                 const nnDisc = (nn as any).discounter as
                   | { name?: string; color?: string; bild?: string }
                   | undefined;
-                const hmName = nnHm?.bezeichnung ?? nnHm?.name ?? null;
-                // Handelsmarken rarely carry a logo in our DB — prefer the
-                // (always-populated) discounter logo first and fall back to
-                // any handelsmarke logo that does exist.
+                // Eyebrow EXAKT wie die kanonischen Cards in Stöbern/Home
+                // (ProductCard): Markt-Logo (discounter) + Eigenmarke-Name
+                // (Handelsmarke). Fehlt der Eigenmarke-Name → Markt-Name als
+                // Text, damit nie ein leeres/„Not applicable"-Feld bleibt
+                // (86ca8mqjx). KEIN generisches „Eigenmarke" mehr, KEIN
+                // Farb-Quadrat-Platzhalter.
                 const hmLogo = nnDisc?.bild ?? nnHm?.bild ?? null;
+                const eyebrowText =
+                  nnHm?.bezeichnung ?? nnHm?.name ?? nnDisc?.name ?? null;
                 const nnPackParts = formatPackParts(
                   (nn as any).packSize,
                   (nn as any).packTypInfo?.typKurz ?? (nn as any).packTypInfo?.typ,
@@ -2144,50 +2148,45 @@ export default function ProductComparisonScreen() {
                             Eigenmarke name stay in the same position
                             across every card, regardless of how long
                             the product name below is. */}
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                          {hmLogo ? (
-                            <View
-                              style={{
-                                width: 16,
-                                height: 16,
-                                borderRadius: 4,
-                                backgroundColor: '#fff',
-                                overflow: 'hidden',
-                                borderWidth: 0.5,
-                                borderColor: theme.border,
-                              }}
-                            >
-                              <Image
-                                source={{ uri: hmLogo }}
-                                style={{ width: '100%', height: '100%' }}
-                                resizeMode="contain"
-                              />
-                            </View>
-                          ) : (
-                            <View
-                              style={{
-                                width: 16,
-                                height: 16,
-                                borderRadius: 4,
-                                backgroundColor: nnDisc?.color ?? theme.surfaceAlt,
-                              }}
-                            />
-                          )}
-                          <Text
-                            numberOfLines={1}
-                            style={{
-                              flex: 1,
-                              fontFamily,
-                              fontWeight: fontWeight.bold,
-                              fontSize: 11,
-                              color: theme.primary,
-                              letterSpacing: 0.3,
-                              textTransform: 'uppercase',
-                            }}
-                          >
-                            {hmName ?? 'Eigenmarke'}
-                          </Text>
-                        </View>
+                        {hmLogo || eyebrowText ? (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 16 }}>
+                            {hmLogo ? (
+                              <View
+                                style={{
+                                  width: 16,
+                                  height: 16,
+                                  borderRadius: 4,
+                                  backgroundColor: '#fff',
+                                  overflow: 'hidden',
+                                  borderWidth: 0.5,
+                                  borderColor: theme.border,
+                                }}
+                              >
+                                <Image
+                                  source={{ uri: hmLogo }}
+                                  style={{ width: '100%', height: '100%' }}
+                                  resizeMode="contain"
+                                />
+                              </View>
+                            ) : null}
+                            {eyebrowText ? (
+                              <Text
+                                numberOfLines={1}
+                                style={{
+                                  flex: 1,
+                                  fontFamily,
+                                  fontWeight: fontWeight.bold,
+                                  fontSize: 11,
+                                  color: theme.primary,
+                                  letterSpacing: 0.3,
+                                  textTransform: 'uppercase',
+                                }}
+                              >
+                                {eyebrowText}
+                              </Text>
+                            ) : null}
+                          </View>
+                        ) : null}
                         {/* Produktname sitzt direkt unter dem Eyebrow
                             (flex-start, NICHT mehr center). Vorher ließ
                             justifyContent:'center' einen 1-zeiligen
