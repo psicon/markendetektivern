@@ -6,7 +6,6 @@ import { AppState, AppStateStatus, InteractionManager, Platform } from 'react-na
 // Version wird aus Constants gelesen, nicht aus package.json
 import { analyticsService } from '../services/analyticsService';
 import journeyTrackingService from '../services/journeyTrackingService';
-import { startMarketDataConsentSync } from '../services/trackingConsent';
 import { PERF } from '../perfFlags';
 import { isExpoGo } from '../utils/platform';
 
@@ -103,13 +102,13 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
   // User-Wechsel → Cleanup schließt das Gate (Default: kein Tracking).
   useEffect(() => {
     if (!user?.uid) return;
-    const uid = user.uid;
-    // Journey-Tracking läuft für ALLE User (User-Vorgabe 2026-06-14) →
-    // aktive Journey IMMER laden, unabhängig vom Cashback-Consent. Der
-    // Consent-Sync läuft trotzdem weiter (steuert die separat gegatete
-    // IP-Standortabfrage + ggf. den Marktdaten-Verkauf).
-    journeyTrackingService.loadActiveJourney(uid);
-    return startMarketDataConsentSync(uid);
+    // Journey-Tracking + IP-Location laufen für ALLE User (anon +
+    // registriert), unabhängig vom Cashback-Consent (User-Vorgabe
+    // 2026-06-14, DSGVO-konform). Beim User-Wechsel (anon→account) lädt
+    // loadActiveJourney die aktive Journey des neuen Users bzw. startet eine
+    // frische Session; der Owner-Mismatch-Guard im Persist verhindert
+    // Cross-User-Writes.
+    journeyTrackingService.loadActiveJourney(user.uid);
   }, [user?.uid]);
 
   // ─── Attribution Capture (T4, ClickUp 86c9zbxy7) ─────────────
