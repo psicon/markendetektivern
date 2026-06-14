@@ -18,7 +18,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image as ExpoImage } from 'expo-image';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
-import { safePush } from '@/lib/utils/safeNav';
+import { safeReplace } from '@/lib/utils/safeNav';
 import { backOrHome } from '@/lib/utils/nav';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
@@ -1244,7 +1244,13 @@ export default function ExternalProductScreen() {
                       } catch {}
                       // Via Resolver → richtige Detail-Seite je Stufe (statt
                       // blind noname-detail, was bei Stufe 3-5 falsch wäre).
-                      safePush(`/product/${alt.objectID}` as any);
+                      // safeReplace (nicht push): die external-product-Seite
+                      // wird durch die Alternative ERSETZT, damit Back von der
+                      // Alternative auf das führt, was unter dem externen
+                      // Produkt liegt (= Home im Scan-Flow, der mit
+                      // router.replace auf /external-product kommt) — statt
+                      // zurück aufs externe Produkt (User-Vorgabe 2026-06-14).
+                      safeReplace(`/product/${alt.objectID}` as any);
                     }}
                   />
                 </View>
