@@ -115,8 +115,12 @@ function scoreLabels(noname, original) {
   const lo = original?.labels || {};
 
   // Nutri-Score: a(beste)…e. Niedriger = besser.
+  // WICHTIG: für Nicht-Strings -1 (nicht null) zurückgeben — `null >= 0`
+  // coerced in JS zu `true`, dann würde der Guard unten greifen und
+  // `.toUpperCase()` auf dem Nicht-String werfen. -1 lässt den Guard korrekt
+  // fehlschlagen (unbekannt = nicht vergleichbar).
   const grade = (g) => {
-    if (typeof g !== 'string') return null;
+    if (typeof g !== 'string') return -1;
     const c = g.trim().toLowerCase();
     return ['a', 'b', 'c', 'd', 'e'].indexOf(c); // 0..4, -1 wenn unbekannt
   };
