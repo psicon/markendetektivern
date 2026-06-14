@@ -377,7 +377,12 @@ class AnalyticsService {
     await this.trackEvent({
       event_name: 'product_viewed',
       event_category: 'product_interaction',
-      screen_name: productType === 'noname' ? 'noname_detail' : 'product_comparison',
+      screen_name:
+        productType === 'noname'
+          ? 'noname_detail'
+          : productType === 'external'
+          ? 'external_product_detail'
+          : 'product_comparison',
       product_id: productId,
       product_type: productType,
       ...additionalData

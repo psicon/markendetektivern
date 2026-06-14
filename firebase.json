@@ -141,6 +141,18 @@
       ]
     },
     {
+      "source": "cloud-functions/external-product-lookup",
+      "codebase": "external-product-lookup",
+      "runtime": "nodejs22",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ]
+    },
+    {
       "source": "cloud-functions/b2b-insights-aggregator",
       "codebase": "b2b-insights-aggregator",
       "runtime": "nodejs22",

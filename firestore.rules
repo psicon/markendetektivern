@@ -627,6 +627,16 @@ match /aggregates/{document} {
       allow update, delete: if false;
     }
 
+    // Externe Produkte (OpenFood/REWE/Scraper-Cache). Client liest sie für
+    // die Anzeige + die KI-Live-Subscription (aiAssessment). Writes laufen
+    // AUSSCHLIESSLICH server-seitig (cloud-functions/external-product-lookup
+    // + ai-product-comparison via Admin-SDK, das Rules umgeht) — der Client
+    // schreibt hier NICHT. external_lookup_misses bleibt server-only.
+    match /external_products/{ean} {
+      allow read: if true;
+      allow write: if false;
+    }
+
 // LAST PIECE
     match /{document=**} {
       allow read, write: if false;

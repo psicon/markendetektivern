@@ -269,6 +269,23 @@ export interface JourneyContext {
   };
 }
 
+/**
+ * Firestore-Collection für eine productRef je productType. Externe Produkte
+ * (productId = EAN) zeigen auf external_products — NICHT auf ein nicht-
+ * existentes produkte/{EAN} (Bogus-Ref, Datenstruktur-Schutz). EINZIGE
+ * Quelle der Wahrheit für alle productRef-Builder unten, damit nicht jede
+ * Stelle einzeln den 'external'-Fall vergessen kann.
+ */
+function collectionForProductType(
+  t: 'brand' | 'noname' | 'external',
+): string {
+  return t === 'brand'
+    ? 'markenProdukte'
+    : t === 'external'
+    ? 'external_products'
+    : 'produkte';
+}
+
 class JourneyTrackingService {
   private static instance: JourneyTrackingService;
   private currentJourney: JourneyContext | null = null;
@@ -890,18 +907,9 @@ class JourneyTrackingService {
             productId: productId,
             productName: safeProductName,
             productType: productType,
-            // Externe Produkte (productId = EAN) haben KEIN produkte/
-            // markenProdukte-Doc → Ref auf external_products zeigen lassen,
-            // NICHT auf ein nicht-existentes produkte/{EAN} (Bogus-Ref).
-            productRef: doc(
-              db,
-              productType === 'brand'
-                ? 'markenProdukte'
-                : productType === 'external'
-                  ? 'external_products'
-                  : 'produkte',
-              productId,
-            ),
+            // Externe Produkte (productId = EAN) → Ref auf external_products,
+            // NICHT produkte/{EAN} (Bogus-Ref). Via collectionForProductType.
+            productRef: doc(db, collectionForProductType(productType), productId),
             fromScreen: this.currentJourney.screenName,
             fromFilters: JSON.parse(
               JSON.stringify(this.currentJourney.activeFilters || {}),
@@ -989,11 +997,11 @@ class JourneyTrackingService {
         productId: mainProductId,
         productName: mainProductName,
         productType: mainProductType,
-        productRef: doc(db, mainProductType === 'brand' ? 'markenProdukte' : 'produkte', mainProductId),
+        productRef: doc(db, collectionForProductType(mainProductType), mainProductId),
         fromScreen: this.currentJourney!.screenName,
         comparedProducts: comparedProducts.map(p => ({
           ...p,
-          productRef: doc(db, p.productType === 'brand' ? 'markenProdukte' : 'produkte', p.productId)
+          productRef: doc(db, collectionForProductType(p.productType), p.productId)
         })),
         motivation: this.calculateActionMotivation({
           type: 'compared',
@@ -1261,7 +1269,7 @@ class JourneyTrackingService {
       productId: productId,
       productName: productName,
       productType: productType,
-      productRef: doc(db, productType === 'brand' ? 'markenProdukte' : 'produkte', productId),
+      productRef: doc(db, collectionForProductType(productType), productId),
       fromFilters: JSON.parse(JSON.stringify(this.currentJourney.activeFilters || {})),
       price: priceInfo?.price,
       savings: priceInfo?.savings,
@@ -1380,7 +1388,7 @@ class JourneyTrackingService {
         productId: product.productId,
         productName: product.productName,
         productType: product.productType,
-        productRef: doc(db, product.productType === 'brand' ? 'markenProdukte' : 'produkte', product.productId),
+        productRef: doc(db, collectionForProductType(product.productType), product.productId),
         price: product.finalPrice,
         savings: product.finalSavings,
         motivation: this.calculateActionMotivation({
@@ -2261,7 +2269,7 @@ class JourneyTrackingService {
       productId: productId,
       productName: productName,
       productType: productType,
-      productRef: doc(db, productType === 'brand' ? 'markenProdukte' : 'produkte', productId),
+      productRef: doc(db, collectionForProductType(productType), productId),
       motivation: this.calculateActionMotivation({
         type: 'removedFromCart'
       }, this.currentJourney.activeFilters)
@@ -2572,7 +2580,7 @@ class JourneyTrackingService {
           if (product.finalSavings !== undefined) safeAction.savings = product.finalSavings;
           if ((product as any).quantity !== undefined) safeAction.quantity = (product as any).quantity;
           if (product.productId) {
-            safeAction.productRef = doc(db, product.productType === 'brand' ? 'markenProdukte' : 'produkte', product.productId);
+            safeAction.productRef = doc(db, collectionForProductType(product.productType), product.productId);
           }
           safeAction.motivation = { primary: 'price', confidence: 0.8 };
 
@@ -2707,7 +2715,7 @@ class JourneyTrackingService {
           if (product.finalSavings !== undefined) safeAction.savings = product.finalSavings;
           if ((product as any).quantity !== undefined) safeAction.quantity = (product as any).quantity;
           if (product.productId) {
-            safeAction.productRef = doc(db, product.productType === 'brand' ? 'markenProdukte' : 'produkte', product.productId);
+            safeAction.productRef = doc(db, collectionForProductType(product.productType), product.productId);
           }
           safeAction.motivation = { primary: 'price', confidence: 0.8 };
 
@@ -2855,7 +2863,7 @@ class JourneyTrackingService {
           productId: removeAction.productId,
           productName: removeAction.productName,
           productType: removeAction.productType,
-          productRef: doc(db, removeAction.productType === 'brand' ? 'markenProdukte' : 'produkte', removeAction.productId),
+          productRef: doc(db, collectionForProductType(removeAction.productType), removeAction.productId),
           motivation: { primary: 'exploration', confidence: 0.5 },
         };
         viewedProduct.actions.push(safeAction);
@@ -2887,7 +2895,7 @@ class JourneyTrackingService {
           productId: purchaseAction.productId,
           productName: purchaseAction.productName,
           productType: purchaseAction.productType,
-          productRef: doc(db, purchaseAction.productType === 'brand' ? 'markenProdukte' : 'produkte', purchaseAction.productId),
+          productRef: doc(db, collectionForProductType(purchaseAction.productType), purchaseAction.productId),
           motivation: { primary: 'price', confidence: 0.8 },
         };
         if (purchaseAction.finalPrice !== undefined) safeAction.price = purchaseAction.finalPrice;
@@ -2997,7 +3005,7 @@ class JourneyTrackingService {
         if (productName) safeAction.productName = productName;
         if (productType) safeAction.productType = productType;
         if (productId) {
-          safeAction.productRef = doc(db, productType === 'brand' ? 'markenProdukte' : 'produkte', productId);
+          safeAction.productRef = doc(db, collectionForProductType(productType), productId);
         }
         safeAction.motivation = { primary: 'exploration', confidence: 0.5 };
         

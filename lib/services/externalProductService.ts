@@ -10,7 +10,8 @@
  * Cache-Regel: `cachedAt + 4 Wochen < now` → stale → Re-Fetch nötig.
  */
 
-import { db } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
+import { isOnline } from '@/lib/services/network';
 import {
   collection,
   deleteDoc,
@@ -718,8 +719,15 @@ function sourcePriority(s: ExternalProductSource): number {
  * Falls die jetzt was haben, Cache-Update + bessere Daten anzeigen.
  *
  * **Garantie**: throwt NIE.
+ *
+ * @deprecated DEAD CODE seit der Server-Migration: die Cascade läuft jetzt
+ * server-seitig in cloud-functions/external-product-lookup (Client-Writes auf
+ * external_products sind durch Firestore-Rules gesperrt). Bleibt vorerst als
+ * Referenz/Notfall-Pfad stehen; das öffentliche `lookupByEAN` unten ruft die
+ * CF. TODO: nach erfolgreichem CF-Rollout dieses Insel-Stück (alle try-,
+ * normalise-, runFullCascade + OpenFood/ScrapedProducts-Imports) entfernen.
  */
-async function lookupByEAN(ean: string): Promise<ExternalLookupResult | null> {
+async function lookupByEANViaCascade(ean: string): Promise<ExternalLookupResult | null> {
   try {
     const norm = normaliseEan(ean);
     if (!norm) return null;
@@ -926,7 +934,9 @@ async function refreshSilent(
  *
  * Throwt NIE — bei Delete-Fehler trotzdem Cascade ausführen.
  */
-async function forceLookupByEAN(
+// @deprecated DEAD CODE — siehe lookupByEANViaCascade. Das öffentliche
+// forceLookupByEAN unten ruft die CF mit force=true.
+async function forceLookupByEANViaCascade(
   ean: string,
 ): Promise<ExternalLookupResult | null> {
   try {
@@ -938,11 +948,96 @@ async function forceLookupByEAN(
     } catch (e: any) {
       console.warn('forceLookupByEAN: cache-delete failed', e?.message);
     }
-    return await lookupByEAN(norm);
+    return await lookupByEANViaCascade(norm);
   } catch (e: any) {
     console.warn('forceLookupByEAN failed', e?.message);
     return null;
   }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Server-seitiger Lookup (cloud-functions/external-product-lookup)
+// ════════════════════════════════════════════════════════════════════════
+//
+// Die komplette Cascade + alle external_products/external_lookup_misses-
+// Writes laufen server-seitig (Admin-Rechte; Client-Writes sind durch
+// Firestore-Rules gesperrt). Der Client ruft die CF und liest das Cache-Doc
+// (read:true) als Offline-/Sofort-Fallback.
+//
+// WICHTIG: Das von der CF per HTTP zurückgegebene `product` trägt
+// Timestamps als `{_seconds,_nanoseconds}` (JSON), NICHT als Firestore-
+// Timestamp. Für die ANZEIGE (Name/Preis/Bild/Nährwerte/aiAssessment) egal.
+// Timestamp-Methoden (.toMillis()) NUR auf dem via getCached gelesenen Doc
+// aufrufen. Die KI-Karte aktualisiert der external-product-Screen ohnehin
+// live via onSnapshot aufs echte Doc.
+const EXTERNAL_LOOKUP_FN_BASE =
+  process.env.EXPO_PUBLIC_EXTERNAL_LOOKUP_FN_BASE ||
+  'https://europe-west1-markendetektive-895f7.cloudfunctions.net';
+
+async function resolveViaCF(
+  ean: string,
+  force: boolean,
+): Promise<ExternalLookupResult | null> {
+  try {
+    const user = auth.currentUser;
+    if (!user) return null; // ohne Auth kein CF-Call (anonyme User haben Auth)
+    const idToken = await user.getIdToken();
+    const res = await fetch(`${EXTERNAL_LOOKUP_FN_BASE}/resolveExternalProduct`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({ ean, force }),
+    });
+    if (!res.ok) {
+      console.warn('[external-lookup] CF non-ok', res.status);
+      return null;
+    }
+    const json: any = await res.json();
+    if (!json?.product) return null;
+    return {
+      product: json.product as ExternalProductDoc,
+      fromCache: !!json.fromCache,
+      refreshed: !!json.refreshed,
+    };
+  } catch (e: any) {
+    console.warn('[external-lookup] CF call failed', e?.message);
+    return null;
+  }
+}
+
+/**
+ * Öffentlicher Lookup: online → Server-CF (Cascade + Write + KI-Trigger);
+ * offline/CF-Fehler → das gecachte external_products-Doc (Firestore-Offline-
+ * Cache bedient es, sofern die EAN schon einmal aufgelöst wurde). throwt NIE.
+ */
+async function lookupByEAN(ean: string): Promise<ExternalLookupResult | null> {
+  const norm = normaliseEan(ean);
+  if (!norm) return null;
+  if (isOnline()) {
+    const viaCf = await resolveViaCF(norm, false);
+    if (viaCf) return viaCf;
+  }
+  const cached = await getCached(norm);
+  return cached ? { product: cached, fromCache: true, refreshed: false } : null;
+}
+
+/**
+ * Cache-busted Lookup (Dev „Cache leeren"-Button): zwingt die CF zur
+ * kompletten Neu-Cascade (force=true → Doc-Delete + Re-Fetch server-seitig).
+ */
+async function forceLookupByEAN(
+  ean: string,
+): Promise<ExternalLookupResult | null> {
+  const norm = normaliseEan(ean);
+  if (!norm) return null;
+  if (isOnline()) {
+    const viaCf = await resolveViaCF(norm, true);
+    if (viaCf) return viaCf;
+  }
+  const cached = await getCached(norm);
+  return cached ? { product: cached, fromCache: true, refreshed: false } : null;
 }
 
 export const ExternalProductService = {
