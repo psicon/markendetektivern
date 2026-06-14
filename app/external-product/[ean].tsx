@@ -16,6 +16,7 @@
 //     mit derselben Hersteller-Ref → dann KEIN Hinweis (echter Match).
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { Image as ExpoImage } from 'expo-image';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
 import { backOrHome } from '@/lib/utils/nav';
@@ -90,6 +91,27 @@ function formatPack(
   return { sizeLabel, unitPriceLabel };
 }
 
+// OpenFood liefert für Nutri-/Eco-Score teils 'not-applicable', 'unknown'
+// oder leere Strings statt einer echten Note. Das ist KEINE Bewertung →
+// solche Badges weglassen, statt 'NOT-APPLICABLE' anzuzeigen. Gültig:
+// a–e (Buchstaben-Scores) bzw. 1–4 (NOVA).
+function normalizeGrade(
+  raw: string | undefined,
+  kind: 'letter' | 'nova',
+): string | null {
+  if (!raw) return null;
+  const v = String(raw).trim().toLowerCase();
+  if (!v || v.includes('not') || v.includes('unknown') || v === 'na' || v === 'n/a') {
+    return null;
+  }
+  if (kind === 'letter') {
+    const c = v.charAt(0);
+    return ['a', 'b', 'c', 'd', 'e'].includes(c) ? c.toUpperCase() : null;
+  }
+  const n = v.replace(/[^1-4]/g, '').charAt(0);
+  return ['1', '2', '3', '4'].includes(n) ? n : null;
+}
+
 export default function ExternalProductScreen() {
   const { ean } = useLocalSearchParams<{ ean: string; source?: string }>();
   const router = useRouter();
@@ -105,10 +127,18 @@ export default function ExternalProductScreen() {
   const [connectedBrands, setConnectedBrands] = useState<
     Array<{ id: string; name: string; bild: string | null; source: string }>
   >([]);
+  // Hero-Bild: wenn die (externe, oft OpenFood-)URL nicht lädt, zeigen
+  // wir das Package-Icon statt einer grauen Box, die ewig hängt.
+  const [heroImgFailed, setHeroImgFailed] = useState(false);
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
+
+  // Bei Produktwechsel den Bild-Fehler-State zurücksetzen.
+  useEffect(() => {
+    setHeroImgFailed(false);
+  }, [product?.imageUrl]);
 
   // Daten laden — primär Cache, sonst Cascade.
   const loadProduct = useCallback(
@@ -434,6 +464,12 @@ export default function ExternalProductScreen() {
     { key: 'lactosefree', label: 'Laktosefrei', on: product.isLactoseFree },
   ].filter((f) => f.on === true);
 
+  // Scores: nur echte Noten zeigen ('not-applicable'/'unknown' raus).
+  const nutriGrade = normalizeGrade(product.scoreNutri, 'letter');
+  const ecoGrade = normalizeGrade(product.scoreEco, 'letter');
+  const novaGrade = normalizeGrade(product.scoreNova, 'nova');
+  const hasAnyScore = !!(nutriGrade || ecoGrade || novaGrade);
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <DetailHeader
@@ -512,11 +548,14 @@ export default function ExternalProductScreen() {
                 overflow: 'hidden',
               }}
             >
-              {product.imageUrl ? (
-                <RNImage
+              {product.imageUrl && !heroImgFailed ? (
+                <ExpoImage
                   source={{ uri: product.imageUrl }}
                   style={{ width: 96, height: 96 }}
-                  resizeMode="contain"
+                  contentFit="contain"
+                  transition={150}
+                  cachePolicy="memory-disk"
+                  onError={() => setHeroImgFailed(true)}
                 />
               ) : (
                 <MaterialCommunityIcons
@@ -644,26 +683,21 @@ export default function ExternalProductScreen() {
           </View>
         ) : null}
 
-        {/* Scores (Nutri, Eco, NOVA) */}
-        {(product.scoreNutri || product.scoreEco || product.scoreNova) ? (
-          <View
-            style={{
-              flexDirection: 'row',
-              gap: 8,
-              marginHorizontal: 16,
-              marginTop: 14,
-            }}
-          >
-            {product.scoreNutri ? (
-              <ScoreBadge label="Nutri-Score" value={product.scoreNutri.toUpperCase()} />
-            ) : null}
-            {product.scoreEco ? (
-              <ScoreBadge label="Eco-Score" value={product.scoreEco.toUpperCase()} />
-            ) : null}
-            {product.scoreNova ? (
-              <ScoreBadge label="NOVA" value={product.scoreNova} />
-            ) : null}
-          </View>
+        {/* Scores (Nutri, Eco, NOVA) — in einer Section-Card wie alle
+            anderen Datengruppen (vorher floateten die Badges nackt auf
+            dem Hintergrund, als einziges Element ohne Surface). Es werden
+            NUR valide Noten gerendert; 'not-applicable'/'unknown' fallen
+            raus statt 'NOT-APPLICABLE' zu zeigen. */}
+        {hasAnyScore ? (
+          <Section title="Bewertung">
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {nutriGrade ? (
+                <ScoreBadge label="Nutri-Score" value={nutriGrade} />
+              ) : null}
+              {ecoGrade ? <ScoreBadge label="Eco-Score" value={ecoGrade} /> : null}
+              {novaGrade ? <ScoreBadge label="NOVA" value={novaGrade} /> : null}
+            </View>
+          </Section>
         ) : null}
 
         {/* Nutrition */}
