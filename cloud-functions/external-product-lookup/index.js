@@ -52,6 +52,15 @@ const { onRequest } = require('firebase-functions/v2/https');
 
 if (!admin.apps.length) admin.initializeApp();
 
+// KRITISCH: Die Normalizer produzieren `undefined`-Felder (price/nutr_*/
+// brandName, wenn eine Source ein Feld nicht liefert). firebase-admin
+// Firestore `.set()` WIRFT bei undefined-Werten (anders als der Client-
+// RNFirebase-SDK, das sie still strippt) → writeThrough würde silent failen
+// und external_products NIE schreiben. ignoreUndefinedProperties strippt
+// undefined-Felder beim Write — Pflicht, MUSS vor der ersten Firestore-Op
+// gesetzt werden.
+admin.firestore().settings({ ignoreUndefinedProperties: true });
+
 const REGION = 'europe-west1';
 
 // ─── Constants (mirror lib/services/externalProductService.ts) ──────────
