@@ -420,14 +420,16 @@ export default function BarcodeScannerScreen() {
           `✅ Found external product: ${product.productName} (source=${product.source}, cache=${fromCache})`,
         );
 
-        // Track successful external scan
+        // Track successful external scan. productType 'external' (NICHT
+        // 'brand') → die Journey unterscheidet externe von kuratierten
+        // Produkten; der Detail-Screen ergänzt den viewedProducts-Eintrag.
         journeyTrackingService.trackScannedCode(
           ean,
           true,
           {
             productId: product.ean,
             productName: product.productName,
-            productType: 'brand', // External wird als Markenprodukt behandelt
+            productType: 'external',
           },
           user?.uid,
         );
@@ -440,6 +442,8 @@ export default function BarcodeScannerScreen() {
             scan_type: 'camera',
             product_found: true,
             is_fallback: true,
+            product_type: 'external',
+            source: product.source,
             fallback_source: product.source,
             from_cache: fromCache,
             product_id: product.ean,

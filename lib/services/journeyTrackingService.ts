@@ -88,7 +88,7 @@ export interface JourneyContext {
   // Product Context - NEU: Erweitert um alle Aktionen pro Produkt
   viewedProducts: {
     productId: string;
-    productType: 'brand' | 'noname';
+    productType: 'brand' | 'noname' | 'external';
     productName: string;
     timestamp: number;
     position?: number; // Position in Liste
@@ -102,7 +102,7 @@ export interface JourneyContext {
       comparedWithProducts?: { // Bei Vergleichsansicht
         productId: string;
         productName: string;
-        productType: 'brand' | 'noname';
+        productType: 'brand' | 'noname' | 'external';
       }[];
       // NEU: Bei Conversion-Result
       fromProductId?: string;
@@ -119,7 +119,7 @@ export interface JourneyContext {
       // Produkt-Details (nur bei Cross-Product Actions wie Conversion)
       productId?: string;
       productName?: string;
-      productType?: 'brand' | 'noname';
+      productType?: 'brand' | 'noname' | 'external';
       productRef?: DocumentReference;
       
       fromScreen?: string;
@@ -129,7 +129,7 @@ export interface JourneyContext {
       comparedProducts?: {
         productId: string;
         productName: string;
-        productType: 'brand' | 'noname';
+        productType: 'brand' | 'noname' | 'external';
         productRef?: DocumentReference;
         price: number;
         savings: number;
@@ -149,7 +149,7 @@ export interface JourneyContext {
         actionProduct?: { // Falls die Aktion ein anderes Produkt betrifft
           productId: string;
           productName: string;
-          productType: 'brand' | 'noname';
+          productType: 'brand' | 'noname' | 'external';
         };
       };
       
@@ -230,7 +230,7 @@ export interface JourneyContext {
     ean: string;
     timestamp: number;
     hasResult: boolean;
-    productType?: 'brand' | 'noname'; // nur wenn hasResult true
+    productType?: 'brand' | 'noname' | 'external'; // nur wenn hasResult true
     productId?: string; // nur wenn hasResult true
     productName?: string; // nur wenn hasResult true
   }>;
@@ -824,7 +824,7 @@ class JourneyTrackingService {
    */
   ensureProductTracked(
     productId: string,
-    productType: 'brand' | 'noname',
+    productType: 'brand' | 'noname' | 'external',
     productName: string,
     userId?: string,
   ): void {
@@ -840,7 +840,7 @@ class JourneyTrackingService {
 
   trackProductView(
     productId: string,
-    productType: 'brand' | 'noname',
+    productType: 'brand' | 'noname' | 'external',
     productName: string,
     position?: number,
     userId?: string
@@ -890,9 +890,16 @@ class JourneyTrackingService {
             productId: productId,
             productName: safeProductName,
             productType: productType,
+            // Externe Produkte (productId = EAN) haben KEIN produkte/
+            // markenProdukte-Doc → Ref auf external_products zeigen lassen,
+            // NICHT auf ein nicht-existentes produkte/{EAN} (Bogus-Ref).
             productRef: doc(
               db,
-              productType === 'brand' ? 'markenProdukte' : 'produkte',
+              productType === 'brand'
+                ? 'markenProdukte'
+                : productType === 'external'
+                  ? 'external_products'
+                  : 'produkte',
               productId,
             ),
             fromScreen: this.currentJourney.screenName,
@@ -956,7 +963,7 @@ class JourneyTrackingService {
     comparedProducts: Array<{
       productId: string;
       productName: string;
-      productType: 'brand' | 'noname';
+      productType: 'brand' | 'noname' | 'external';
       price: number;
       savings: number;
     }>,
@@ -1330,7 +1337,7 @@ class JourneyTrackingService {
     products: {
       productId: string;
       productName: string;
-      productType: 'brand' | 'noname';
+      productType: 'brand' | 'noname' | 'external';
       finalPrice?: number;
       finalSavings?: number;
       quantity?: number; // NEU 2026-05-07
@@ -2219,7 +2226,7 @@ class JourneyTrackingService {
   trackRemoveFromCart(
     productId: string,
     productName: string,
-    productType: 'brand' | 'noname',
+    productType: 'brand' | 'noname' | 'external',
     userId?: string
   ): void {
     if (!this.currentJourney) {
@@ -2465,7 +2472,7 @@ class JourneyTrackingService {
     products: {
       productId: string;
       productName: string;
-      productType: 'brand' | 'noname';
+      productType: 'brand' | 'noname' | 'external';
       finalPrice?: number;
       finalSavings?: number;
       viewedProductIndex?: number;
@@ -2497,7 +2504,7 @@ class JourneyTrackingService {
     products: {
       productId: string;
       productName: string;
-      productType: 'brand' | 'noname';
+      productType: 'brand' | 'noname' | 'external';
       finalPrice?: number;
       finalSavings?: number;
     }[],
@@ -2604,7 +2611,7 @@ class JourneyTrackingService {
     products: {
       productId: string;
       productName: string;
-      productType: 'brand' | 'noname';
+      productType: 'brand' | 'noname' | 'external';
       finalPrice?: number;
       finalSavings?: number;
       viewedProductIndex?: number; // NEU: Index für eindeutige Zuordnung
@@ -2766,13 +2773,13 @@ class JourneyTrackingService {
       removeActions: Array<{
         productId: string;
         productName: string;
-        productType: 'brand' | 'noname';
+        productType: 'brand' | 'noname' | 'external';
         viewedProductIndex?: number;
       }>;
       purchaseActions: Array<{
         productId: string;
         productName: string;
-        productType: 'brand' | 'noname';
+        productType: 'brand' | 'noname' | 'external';
         finalPrice?: number;
         finalSavings?: number;
         viewedProductIndex?: number;
@@ -2905,7 +2912,7 @@ class JourneyTrackingService {
     journeyId: string,
     productId: string,
     productName: string,
-    productType: 'brand' | 'noname',
+    productType: 'brand' | 'noname' | 'external',
     userId: string,
     viewedProductIndex?: number // NEU: Index für eindeutige Zuordnung
   ): Promise<void> {
@@ -2930,7 +2937,7 @@ class JourneyTrackingService {
     journeyId: string,
     productId: string,
     productName: string,
-    productType: 'brand' | 'noname',
+    productType: 'brand' | 'noname' | 'external',
     userId: string,
     viewedProductIndex?: number // NEU: Index für eindeutige Zuordnung
   ): Promise<void> {
@@ -3146,7 +3153,7 @@ class JourneyTrackingService {
     productInfo?: {
       productId: string;
       productName: string;
-      productType: 'brand' | 'noname';
+      productType: 'brand' | 'noname' | 'external';
     },
     userId?: string
   ): void {

@@ -39,7 +39,9 @@ import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/Deta
 import { ProductCard } from '@/components/design/ProductCard';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { useAuth } from '@/lib/contexts/AuthContext';
 import { db } from '@/lib/firebase';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import {
   AlgoliaService,
   type AlgoliaSearchResult,
@@ -124,6 +126,7 @@ export default function ExternalProductScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { theme, brand, shadows } = useTokens();
+  const { user } = useAuth();
 
   const [product, setProduct] = useState<ExternalProductDoc | null>(null);
   const [loading, setLoading] = useState(true);
@@ -199,6 +202,23 @@ export default function ExternalProductScreen() {
     );
     return () => unsub();
   }, [ean]);
+
+  // Journey-Tracking: den externen Produkt-View als viewedProducts-Eintrag
+  // erfassen (productType 'external', productId = EAN) — analog zu
+  // noname-detail. ensureProductTracked ist idempotent (no-op wenn das
+  // Produkt schon in der Journey steht). Damit fehlt der externe View nicht
+  // mehr in der Journey, und der Receipt-Matcher kann den Kauf später per
+  // EAN schließen.
+  useEffect(() => {
+    const norm = String(ean ?? '').replace(/\D/g, '');
+    if (!norm || !product?.productName) return;
+    journeyTrackingService.ensureProductTracked(
+      norm,
+      'external',
+      product.productName,
+      user?.uid,
+    );
+  }, [ean, product?.productName, user?.uid]);
 
   // T17.45: Hersteller-Match auf unsere hersteller_new-Collection.
   // External Source liefert manufacturerName als String → Levenshtein-
@@ -854,7 +874,20 @@ export default function ExternalProductScreen() {
             Komponente, gespeist aus product.aiAssessment (server-seitig von
             ai-product-comparison berechnet, live nachgeladen via onSnapshot).
             Rendert null solange keine Bewertung da ist → keine leere Karte. */}
-        <AiHealthScale aiAssessment={product.aiAssessment ?? null} />
+        <AiHealthScale
+          aiAssessment={product.aiAssessment ?? null}
+          onExpand={() => {
+            const norm = String(ean ?? '').replace(/\D/g, '');
+            if (norm) {
+              journeyTrackingService.trackQualityEngagement(
+                norm,
+                'ai_expanded',
+                undefined,
+                user?.uid,
+              );
+            }
+          }}
+        />
 
         {/* Hersteller-Section — wird IMMER angezeigt wenn die Source
             einen Hersteller-Namen liefert. Drei Zustände:
@@ -1091,6 +1124,17 @@ export default function ExternalProductScreen() {
         <AiManufacturerCard
           aiHersteller={manufacturerAi}
           herstellerName={manufacturerMatch?.name ?? null}
+          onExpand={() => {
+            const norm = String(ean ?? '').replace(/\D/g, '');
+            if (norm) {
+              journeyTrackingService.trackQualityEngagement(
+                norm,
+                'manufacturer_origin',
+                undefined,
+                user?.uid,
+              );
+            }
+          }}
         />
 
         {/* Alternative Eigenmarkenprodukte */}

@@ -4,7 +4,10 @@ import { db } from '../firebase';
 export interface PurchasedProduct {
   id: string;
   name: string;
-  type: 'markenprodukt' | 'noname';
+  // 'external' = gescanntes externes Produkt (productId = EAN), das per Bon
+  // gekauft + zugeordnet wurde. Non-breaking erweitert, damit externe Käufe
+  // in Kaufhistorie + Ausgaben auftauchen (vorher fielen sie raus).
+  type: 'markenprodukt' | 'noname' | 'external';
   preis: number;
   bild: string;
   purchasedAt: Date;
@@ -53,7 +56,7 @@ class PurchaseHistoryService {
     userId: string, 
     pageSize: number = 20,
     lastDoc?: any,
-    productType?: 'markenprodukt' | 'noname'
+    productType?: 'markenprodukt' | 'noname' | 'external'
   ): Promise<{
     products: PurchasedProduct[];
     lastDoc: any;

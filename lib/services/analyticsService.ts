@@ -49,7 +49,7 @@ interface AnalyticsEvent {
   
   // Product Context (wenn relevant)
   product_id?: string;
-  product_type?: 'noname' | 'brand';
+  product_type?: 'noname' | 'brand' | 'external';
   brand_id?: string;
   category_id?: string;
   ean?: string;
@@ -373,7 +373,7 @@ class AnalyticsService {
   }
 
   // PRODUCT INTERACTIONS  
-  async trackProductView(productId: string, productType: 'noname' | 'brand', userId?: string, additionalData?: any) {
+  async trackProductView(productId: string, productType: 'noname' | 'brand' | 'external', userId?: string, additionalData?: any) {
     await this.trackEvent({
       event_name: 'product_viewed',
       event_category: 'product_interaction',
