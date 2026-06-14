@@ -228,6 +228,13 @@ export default function HistoryScreen() {
 
   const onScanPress = (item: ScanHistoryItem) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (item.productType === 'external') {
+      // Externe Produkte (reweapify/openfood) haben kein product-comparison-
+      // Modell → eigene Route, EAN ist der Key. Kein Prefetch (andere Quelle).
+      const src = item.source ? `?source=${item.source}` : '';
+      safePush(`/external-product/${item.ean}${src}` as any);
+      return;
+    }
     if (item.productType === 'noname') {
       FirestoreService.prefetchComparisonData(item.productId, false);
       safePush(`/product-comparison/${item.productId}?type=noname` as any);
@@ -615,6 +622,32 @@ function ScanCard({
         >
           {(item as any).productName ?? 'Unbekanntes Produkt'}
         </Text>
+        {(item as ScanHistoryItem).productType === 'external' ? (
+          <View
+            style={{
+              alignSelf: 'flex-start',
+              marginTop: 4,
+              paddingHorizontal: 6,
+              paddingVertical: 1,
+              borderRadius: 4,
+              backgroundColor: theme.surfaceAlt ?? theme.surface,
+              borderWidth: 0.5,
+              borderColor: theme.border,
+            }}
+          >
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 9,
+                letterSpacing: 0.3,
+                color: theme.textMuted,
+              }}
+            >
+              Externe Quelle
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <Text

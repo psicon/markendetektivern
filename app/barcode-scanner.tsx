@@ -226,7 +226,11 @@ export default function BarcodeScannerScreen() {
             }
           }
           
-          await scanHistoryService.saveScan(user.uid, {
+          // Fire-and-forget: NICHT awaiten — ein Firestore-Write (addDoc) löst
+          // erst bei Server-Ack auf und HÄNGT offline ewig (Forbidden Pattern).
+          // Der Scan soll sofort weiternavigieren; die Live-Subscription
+          // aktualisiert den Verlauf. saveScan ist intern try/catch-gekapselt.
+          void scanHistoryService.saveScan(user.uid, {
             ean,
             productId: product.id,
             productName: product.name,
@@ -311,7 +315,11 @@ export default function BarcodeScannerScreen() {
         
         // Speichere in Scanhistorie
         if (user?.uid) {
-          await scanHistoryService.saveScan(user.uid, {
+          // Fire-and-forget: NICHT awaiten — ein Firestore-Write (addDoc) löst
+          // erst bei Server-Ack auf und HÄNGT offline ewig (Forbidden Pattern).
+          // Der Scan soll sofort weiternavigieren; die Live-Subscription
+          // aktualisiert den Verlauf. saveScan ist intern try/catch-gekapselt.
+          void scanHistoryService.saveScan(user.uid, {
             ean,
             productId: product.id,
             productName: product.name,
@@ -444,9 +452,27 @@ export default function BarcodeScannerScreen() {
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
         setScanningLoading(true);
 
-        // External-Produkte NICHT in die History — wir wollen nur
-        // kuratierte Produkte da drin.
-        console.log('📝 Skipping history for external product');
+        // External-Produkte AUCH in den Scanverlauf (ClickUp: User sahen
+        // "8 gescannt, nur 3 im Verlauf", weil extern aufgelöste Scans früher
+        // übersprungen wurden). productType 'external' → productId = EAN, Tap
+        // führt auf /external-product/[ean]. Preis nur wenn vorhanden
+        // (reweapify ja, openfood nicht).
+        if (user?.uid) {
+          // Fire-and-forget: NICHT awaiten — ein Firestore-Write (addDoc) löst
+          // erst bei Server-Ack auf und HÄNGT offline ewig (Forbidden Pattern).
+          // Der Scan soll sofort weiternavigieren; die Live-Subscription
+          // aktualisiert den Verlauf. saveScan ist intern try/catch-gekapselt.
+          void scanHistoryService.saveScan(user.uid, {
+            ean,
+            productId: ean,
+            productName: product.productName,
+            productImage: product.imageUrl,
+            productType: 'external',
+            brandName: product.brandName,
+            price: product.price, // saveScan normalisiert (typeof → null)
+            source: product.source,
+          });
+        }
 
         setHasNavigated(true);
         setIsSearching(false);
@@ -919,10 +945,17 @@ export default function BarcodeScannerScreen() {
                         key={item.id}
                         style={[styles.historyCard, { backgroundColor: colors.cardBackground }]}
                         onPress={() => {
-                          // Navigiere zum Produkt
-                          const route = item.productType === 'noname' 
-                            ? `/product-comparison/${item.productId}?type=noname`
-                            : `/product-comparison/${item.productId}?type=brand`;
+                          // Navigiere zum Produkt. Externe (reweapify/openfood)
+                          // haben kein product-comparison-Modell → eigene Route
+                          // (EAN = Key), sonst bricht die Navigation (86ca…).
+                          let route: string;
+                          if (item.productType === 'external') {
+                            route = `/external-product/${item.ean}${item.source ? `?source=${item.source}` : ''}`;
+                          } else if (item.productType === 'noname') {
+                            route = `/product-comparison/${item.productId}?type=noname`;
+                          } else {
+                            route = `/product-comparison/${item.productId}?type=brand`;
+                          }
                           safePush(route as any);
                         }}
                         activeOpacity={0.7}

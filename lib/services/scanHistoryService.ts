@@ -22,10 +22,15 @@ export interface ScanHistoryItem {
   productName: string;
   productImage?: string;
   productThumb?: string | null;
-  productType: 'noname' | 'markenprodukt';
+  // 'external' = nur über die Fallback-Quellen (reweapify/openfood) gefunden,
+  // KEIN kuratiertes produkte/markenProdukte-Doc. productId == ean, Tap führt
+  // auf /external-product/[ean]. (ClickUp: Scanverlauf-Vollständigkeit.)
+  productType: 'noname' | 'markenprodukt' | 'external';
   brandName?: string;
   brandImage?: string;
   price?: number;
+  /** Nur bei productType 'external': Herkunft (z.B. 'rewe' | 'openfood'). */
+  source?: string;
   timestamp?: any;
   deleted?: boolean;
   // Firestore references - für Kompatibilität mit altem Schema
@@ -55,23 +60,28 @@ class ScanHistoryService {
     productName: string;
     productImage?: string;
     productThumb?: string;
-    productType: 'noname' | 'markenprodukt';
+    productType: 'noname' | 'markenprodukt' | 'external';
     brandName?: string;
     brandImage?: string;
     price?: number;
+    /** Nur 'external': Herkunft (z.B. 'rewe' | 'openfood'). */
+    source?: string;
   }): Promise<void> {
     if (!userId || !scanData.ean || !scanData.productId) return;
-    
+
     try {
       const historyRef = collection(db, 'users', userId, 'scanHistory');
-      
+
       // 🚀 IMMER speichern - jeder Scan ist ein neuer Eintrag!
-      
-      // Erstelle Firestore-Referenz für Kompatibilität
+
+      const isExternal = scanData.productType === 'external';
+      // Firestore-Referenz NUR für kuratierte Produkte. Externe haben KEIN
+      // produkte/markenProdukte-Doc → keine (sonst bogus) Referenz, kein
+      // 'undefined'-Feld (RN-Firestore wirft bei undefined).
       let productRef: DocumentReference | undefined;
       if (scanData.productType === 'noname') {
         productRef = doc(db, 'produkte', scanData.productId);
-      } else {
+      } else if (scanData.productType === 'markenprodukt') {
         productRef = doc(db, 'markenProdukte', scanData.productId);
       }
 
@@ -79,24 +89,27 @@ class ScanHistoryService {
         ean: scanData.ean,
         productId: scanData.productId,
         productName: scanData.productName,
-        productImage: scanData.productImage,
+        productImage: scanData.productImage ?? null,
         productThumb: scanData.productThumb ?? null,
         productType: scanData.productType,
-        brandName: scanData.brandName,
-        brandImage: scanData.brandImage,
-        price: scanData.price,
+        brandName: scanData.brandName ?? null,
+        brandImage: scanData.brandImage ?? null,
+        price: typeof scanData.price === 'number' ? scanData.price : null,
         timestamp: serverTimestamp(),
         deleted: false,
         // Alte Schema-Kompatibilität
         EAN: scanData.ean, // Großschreibung für altes Schema
         isMarke: scanData.productType === 'markenprodukt',
-        ...(scanData.productType === 'markenprodukt' && productRef 
-          ? { markenProduktRef: productRef } 
-          : { produktRef: productRef }
-        )
+        ...(isExternal ? { isExternal: true, source: scanData.source ?? null } : {}),
+        // Referenz nur für kuratierte Produkte setzen.
+        ...(!isExternal && productRef
+          ? scanData.productType === 'markenprodukt'
+            ? { markenProduktRef: productRef }
+            : { produktRef: productRef }
+          : {}),
       });
-      
-      console.log('✅ Scan gespeichert:', scanData.productName);
+
+      console.log('✅ Scan gespeichert:', scanData.productName, isExternal ? '(extern)' : '');
       
       // Alte Einträge löschen (behalte nur die letzten 50)
       await this.cleanupOldScans(userId);
@@ -137,11 +150,12 @@ class ScanHistoryService {
           brandName: data.brandName,
           brandImage: data.brandImage,
           price: data.price,
+          source: data.source,
           timestamp: data.timestamp,
           deleted: data.deleted || false
         });
       });
-      
+
       console.log(`✅ ${scans.length} Scans geladen für User: ${userId}`);
       return scans;
     } catch (error) {
@@ -186,11 +200,12 @@ class ScanHistoryService {
             brandName: data.brandName,
             brandImage: data.brandImage,
             price: data.price,
+            source: data.source,
             timestamp: data.timestamp,
             deleted: data.deleted || false
           });
         });
-        
+
         console.log(`🔄 Scan-Historie Live-Update: ${scans.length} Items`);
         callback(scans);
       }, (error) => {
