@@ -1002,6 +1002,15 @@ class JourneyTrackingService {
         position_in_journey: this.currentJourney.viewedProducts.length,
         journey_duration_ms: Date.now() - this.currentJourney.startTime,
       });
+
+      // WICHTIG: nach dem in-memory-Push SOFORT (debounced) persistieren.
+      // Ein Produkt-View ist DAS Kern-Journey-Event — ohne diesen Persist
+      // landete der viewedProducts-Eintrag nur dann in Firestore, wenn
+      // zufällig später ein anderer Trigger (Screen-Wechsel/Engagement)
+      // flushte. Bei externen Produkten (CF-geladen, oft ohne Folge-
+      // Interaktion) ging der Eintrag sonst verloren (Repro 2026-06-14).
+      const persistUid = userId || this.lastUserId || undefined;
+      if (persistUid) this.persistJourneyToFirestore(persistUid);
     } catch (err) {
       // Never let analytics break navigation. Log + carry on.
       console.warn('journeyTrackingService.trackProductView failed', err);
