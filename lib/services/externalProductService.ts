@@ -43,6 +43,12 @@ import {
 const COLLECTION = 'external_products';
 const MISSES_COLLECTION = 'external_lookup_misses';
 
+// Wie lange nach einem (erfolglosen) Online-Upgrade-Versuch für eine
+// schwache (openfood-)Quelle NICHT erneut versucht wird. Verhindert, dass
+// JEDER Screen-Aufruf die Source-Cascade online anstößt ("nicht immer
+// online nachladen"). Dazwischen wird sofort aus dem Cache bedient.
+const UPGRADE_RETRY_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 Tage
+
 /** Normalisiert einen EAN-String auf nur Ziffern (Doc-Id-safe). */
 export function normaliseEan(ean: string): string {
   return String(ean ?? '').trim().replace(/\D/g, '');
@@ -103,6 +109,27 @@ async function writeThrough(
     await setDoc(ref, payload, { merge: true });
   } catch (e: any) {
     console.warn('ExternalProductService.writeThrough failed', e?.message);
+  }
+}
+
+/**
+ * Stempelt `lastUpgradeAttemptAt = now` auf das Cache-Doc, damit künftige
+ * Lookups innerhalb der Cooldown-Frist KEINE erneute Online-Upgrade-
+ * Cascade anstoßen. Fire-and-forget — blockiert den Lookup nie (und
+ * `lastUpgradeAttemptAt` ist NICHT in RELEVANT_EXTERNAL_FIELDS der CF →
+ * triggert kein Re-Assessment).
+ */
+async function stampUpgradeAttempt(ean: string): Promise<void> {
+  const norm = normaliseEan(ean);
+  if (!norm) return;
+  try {
+    await setDoc(
+      doc(db, COLLECTION, norm),
+      { lastUpgradeAttemptAt: serverTimestamp() as Timestamp },
+      { merge: true },
+    );
+  } catch {
+    // egal — Cooldown ist Best-Effort
   }
 }
 
@@ -733,20 +760,32 @@ async function lookupByEAN(ean: string): Promise<ExternalLookupResult | null> {
       }
 
       // Niedrig-Priorität-Cache (openfood) → versuche Upgrade auf
-      // bessere Sources. Wenn keine Upgrade möglich → cached zurück.
+      // bessere Sources. ABER nur wenn nicht auf Cooldown — sonst stößt
+      // jeder Screen-Aufruf die Online-Cascade an ("immer online
+      // nachgeladen"). Dazwischen sofort aus dem Cache.
       if (lowPrio) {
-        const upgraded = await tryHigherPrioritySources(norm);
-        if (upgraded) {
-          console.error(`[external-lookup] cache upgraded openfood → ${upgraded.source}`);
-          return { product: upgraded, fromCache: false, refreshed: true };
+        const lastAttempt =
+          (cached as any).lastUpgradeAttemptAt?.toMillis?.() ?? 0;
+        const onCooldown = Date.now() - lastAttempt < UPGRADE_RETRY_COOLDOWN_MS;
+        if (!onCooldown) {
+          // Versuchszeitpunkt sofort stempeln (fire-and-forget) → die
+          // nächsten Views innerhalb der Cooldown-Frist überspringen.
+          void stampUpgradeAttempt(norm);
+          const upgraded = await tryHigherPrioritySources(norm);
+          if (upgraded) {
+            console.error(`[external-lookup] cache upgraded openfood → ${upgraded.source}`);
+            return { product: upgraded, fromCache: false, refreshed: true };
+          }
+          // Upgrade fehlgeschlagen — EAN hat NUR openfood-Daten. Miss
+          // erneut tracken damit der Processor noch eine Runde dreht.
+          void recordMiss(
+            norm,
+            ['reweapify', 'nutritionscrape', 'scraped_products', GLOBUS_ENABLED ? 'globus-cf' : 'globus-cf(disabled)'],
+            'openfood',
+          );
+        } else {
+          console.log('[external-lookup] upgrade on cooldown → serve cache');
         }
-        // Upgrade fehlgeschlagen — EAN hat NUR openfood-Daten. Miss
-        // erneut tracken damit der Processor noch eine Runde dreht.
-        void recordMiss(
-          norm,
-          ['reweapify', 'nutritionscrape', 'scraped_products', GLOBUS_ENABLED ? 'globus-cf' : 'globus-cf(disabled)'],
-          'openfood',
-        );
       }
 
       // Stale (hoch-priorität) → trigger background refresh, return cached.

@@ -31,10 +31,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { doc, getDoc, onSnapshot } from '@react-native-firebase/firestore';
+
+import { AiHealthScale } from '@/components/design/AiHealthScale';
+import { AiManufacturerCard } from '@/components/design/AiManufacturerCard';
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { ProductCard } from '@/components/design/ProductCard';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { db } from '@/lib/firebase';
 import {
   AlgoliaService,
   type AlgoliaSearchResult,
@@ -46,6 +51,7 @@ import {
   type ManufacturerMatch,
 } from '@/lib/services/manufacturerMatchService';
 import type { ExternalProductDoc } from '@/lib/types/externalProduct';
+import type { AiHersteller } from '@/lib/types/firestore';
 
 const SOURCE_LABEL: Record<string, string> = {
   rewe: 'REWE',
@@ -130,6 +136,9 @@ export default function ExternalProductScreen() {
   // Hero-Bild: wenn die (externe, oft OpenFood-)URL nicht lädt, zeigen
   // wir das Package-Icon statt einer grauen Box, die ewig hängt.
   const [heroImgFailed, setHeroImgFailed] = useState(false);
+  // KI-Hersteller-Einschätzung (aiHersteller vom gematchten
+  // hersteller_new-Doc) → AiManufacturerCard, identisch zu noname-detail.
+  const [manufacturerAi, setManufacturerAi] = useState<AiHersteller | null>(null);
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -167,6 +176,30 @@ export default function ExternalProductScreen() {
     void loadProduct(false);
   }, [loadProduct]);
 
+  // Live-Subscription auf das external_products-Doc: die KI-Analyse
+  // (aiAssessment) wird nach dem ersten Scan server-seitig berechnet
+  // (cloud-functions/ai-product-comparison). Wir hören live mit, damit
+  // die AiHealthScale erscheint sobald sie fertig ist — ohne Reload, ohne
+  // erneutes Online-Nachladen. Überlagert NUR aiAssessment auf den
+  // bestehenden Produkt-State (clobbert keine Cascade-Felder).
+  useEffect(() => {
+    const norm = String(ean ?? '').replace(/\D/g, '');
+    if (!norm) return;
+    const unsub = onSnapshot(
+      doc(db, 'external_products', norm),
+      (snap) => {
+        if (!snap.exists()) return;
+        const ai = (snap.data() as ExternalProductDoc | undefined)?.aiAssessment;
+        if (!ai) return;
+        setProduct((prev) => (prev ? { ...prev, aiAssessment: ai } : prev));
+      },
+      () => {
+        /* offline / permission → ignorieren, Live-Update ist Best-Effort */
+      },
+    );
+    return () => unsub();
+  }, [ean]);
+
   // T17.45: Hersteller-Match auf unsere hersteller_new-Collection.
   // External Source liefert manufacturerName als String → Levenshtein-
   // Match. Wenn confidence ≥ 0.75 → zeige Connected-Brands-Section
@@ -177,6 +210,7 @@ export default function ExternalProductScreen() {
     if (!extName) {
       setManufacturerMatch(null);
       setConnectedBrands([]);
+      setManufacturerAi(null);
       return;
     }
     (async () => {
@@ -185,10 +219,22 @@ export default function ExternalProductScreen() {
         if (!alive) return;
         setManufacturerMatch(match);
         if (match) {
-          const brands = await FirestoreService.getConnectedBrandsForHersteller(match.id);
-          if (alive) setConnectedBrands(brands ?? []);
+          // Connected-Brands + die KI-Hersteller-Einschätzung (aiHersteller)
+          // parallel laden. aiHersteller wird von ai-product-comparison pro
+          // hersteller_new-Doc berechnet → identische Karte wie noname-detail.
+          const [brands, herstellerSnap] = await Promise.all([
+            FirestoreService.getConnectedBrandsForHersteller(match.id),
+            getDoc(doc(db, 'hersteller_new', match.id)).catch(() => null),
+          ]);
+          if (!alive) return;
+          setConnectedBrands(brands ?? []);
+          const ai = (herstellerSnap?.data() as any)?.aiHersteller ?? null;
+          setManufacturerAi(ai && typeof ai === 'object' ? (ai as AiHersteller) : null);
         } else {
-          if (alive) setConnectedBrands([]);
+          if (alive) {
+            setConnectedBrands([]);
+            setManufacturerAi(null);
+          }
         }
       } catch (e) {
         console.warn('manufacturer match flow failed', e);
@@ -689,7 +735,7 @@ export default function ExternalProductScreen() {
             NUR valide Noten gerendert; 'not-applicable'/'unknown' fallen
             raus statt 'NOT-APPLICABLE' zu zeigen. */}
         {hasAnyScore ? (
-          <Section title="Bewertung">
+          <Section title="Scores">
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {nutriGrade ? (
                 <ScoreBadge label="Nutri-Score" value={nutriGrade} />
@@ -802,6 +848,13 @@ export default function ExternalProductScreen() {
             </Text>
           </Section>
         ) : null}
+
+        {/* KI-Inhaltsstoff-/Health-Analyse (Standalone, kategorie-relativ).
+            Identisch zu noname-detail Stufe 1/2: dieselbe AiHealthScale-
+            Komponente, gespeist aus product.aiAssessment (server-seitig von
+            ai-product-comparison berechnet, live nachgeladen via onSnapshot).
+            Rendert null solange keine Bewertung da ist → keine leere Karte. */}
+        <AiHealthScale aiAssessment={product.aiAssessment ?? null} />
 
         {/* Hersteller-Section — wird IMMER angezeigt wenn die Source
             einen Hersteller-Namen liefert. Drei Zustände:
@@ -1031,6 +1084,14 @@ export default function ExternalProductScreen() {
             ) : null}
           </Section>
         ) : null}
+
+        {/* KI-Hersteller-Einschätzung (Info-Karte, kein Score) — identisch
+            zu noname-detail. Quelle: aiHersteller vom gematchten
+            hersteller_new-Doc. Rendert null wenn kein Match / keine Daten. */}
+        <AiManufacturerCard
+          aiHersteller={manufacturerAi}
+          herstellerName={manufacturerMatch?.name ?? null}
+        />
 
         {/* Alternative Eigenmarkenprodukte */}
         <View

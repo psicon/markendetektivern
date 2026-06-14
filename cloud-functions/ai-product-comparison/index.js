@@ -1308,6 +1308,281 @@ exports.scheduledHerstellerNewBackfill = functions.scheduler.onSchedule(
   },
 );
 
+// ════════════════════════════════════════════════════════════════════
+// EXTERNAL_PRODUCTS — Standalone-KI-Assessment für gescannte externe
+// Produkte (OpenFood/REWE/Scraper), die NICHT in produkte/markenProdukte
+// liegen. Reuse desselben assessor.js wie für Stufe-1/2-NoNames.
+//
+// Warum: externe Produkte sollen NICHT immer online nachgeladen werden —
+// ihre Inhaltsstoff-/Health-Bewertung wird EINMAL berechnet und am
+// external_products-Doc persistiert (Feld aiAssessment). Die App liest
+// sie von dort (kein erneuter Online-Call).
+//
+// Pattern wie hersteller_new: sofort-Trigger (low-volume, ein Cascade pro
+// gescanntem Produkt) + inputHash-Dedup (kein erneuter Gemini-Call bei
+// unveränderten Nährwerten/Zutaten) + cursor-Backfill (Reset bei
+// ASSESSMENT_PROMPT_VERSION-Bump → komplettes Re-Backfill).
+//
+// KEINE Änderung am produkte-/markenProdukte-Pfad: alles hier ist additiv.
+// ════════════════════════════════════════════════════════════════════
+
+const EXTERNAL_COLLECTION = 'external_products';
+
+// Kategorie-String eines external_products-Docs aufs letzte sinnvolle
+// Segment reduzieren (z.B. "Getränke › Limonade" → "Limonade").
+function externalCategoryLabel(raw) {
+  if (typeof raw !== 'string') return null;
+  const parts = raw
+    .split(/[›>|,/]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const last = parts.length ? parts[parts.length - 1] : raw.trim();
+  return last && last.length >= 2 ? last : null;
+}
+
+async function runExternalAssessment(db, ean, opts = {}) {
+  const { force = false, apiKey } = opts;
+  const norm = String(ean || '').replace(/\D/g, '');
+  if (!norm) return { state: 'invalid-ean' };
+  const ref = db.collection(EXTERNAL_COLLECTION).doc(norm);
+  const docSnap = await ref.get();
+  if (!docSnap.exists) return { state: 'not-found' };
+  const data = docSnap.data() || {};
+  const snap = assessmentSnapshotFromDoc(data);
+
+  if (!isAssessable(snap)) {
+    // Weder Nährwerte noch Zutaten → nichts zu bewerten. skipped setzen,
+    // damit nicht jeder Trigger es erneut versucht.
+    await ref.set(
+      {
+        aiAssessment: {
+          skipped: 'no-data',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          promptVersion: ASSESSMENT_PROMPT_VERSION,
+        },
+      },
+      { merge: true },
+    );
+    return { state: 'assessment-no-data' };
+  }
+
+  // Hash über Nährwerte + Zutaten (wie runAssessment) → Idempotenz.
+  const hashKey = JSON.stringify([
+    snap.energy, snap.fat, snap.satFat, snap.carbs, snap.sugar,
+    snap.fiber, snap.protein, snap.salt,
+    String(snap.ingredients || '').toLowerCase().replace(/\s+/g, ' ').trim(),
+  ]);
+  const hash = require('crypto').createHash('sha256').update(hashKey).digest('hex').slice(0, 16);
+  const prev = data.aiAssessment;
+  if (
+    !force &&
+    prev?.inputHash === hash &&
+    prev?.promptVersion === ASSESSMENT_PROMPT_VERSION &&
+    typeof prev?.healthScore === 'number'
+  ) {
+    return { state: 'assessment-skipped-nochange' };
+  }
+
+  // Kategorie kommt bei externen Produkten als String (kein Ref).
+  const categoryName = externalCategoryLabel(data.category);
+
+  let result;
+  try {
+    result = await callGeminiAssessment({
+      apiKey: apiKey || GEMINI_API_KEY.value(),
+      snapshot: snap,
+      category: categoryName,
+    });
+  } catch (e) {
+    console.error(`[ai-external] Gemini failed für ${norm}:`, e.message);
+    await ref.set(
+      {
+        aiAssessment: {
+          lastError: String(e.message || e).slice(0, 200),
+          lastErrorAt: admin.firestore.FieldValue.serverTimestamp(),
+          promptVersion: ASSESSMENT_PROMPT_VERSION,
+        },
+      },
+      { merge: true },
+    );
+    return { state: 'assessment-gemini-failed', detail: e.message };
+  }
+
+  await ref.set(
+    {
+      aiAssessment: {
+        healthScore: result.healthScore,
+        reasoning: result.reasoning,
+        model: result.model,
+        promptVersion: result.promptVersion,
+        inputHash: hash,
+        category: categoryName,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastError: admin.firestore.FieldValue.delete(),
+        lastErrorAt: admin.firestore.FieldValue.delete(),
+        skipped: admin.firestore.FieldValue.delete(),
+      },
+    },
+    { merge: true },
+  );
+
+  return {
+    state: 'assessment-updated',
+    detail: `healthScore=${result.healthScore} model=${result.model}`,
+  };
+}
+
+// Trigger: neues external_products-Doc → sofort bewerten.
+exports.onExternalProductCreateForAssessment = onDocumentCreated(
+  { ...COMMON_OPTS, document: 'external_products/{ean}' },
+  async (event) => {
+    const id = event.params.ean;
+    try {
+      const res = await runExternalAssessment(admin.firestore(), id);
+      console.log(`[ai-external][onCreate] ${id} → ${res.state} ${res.detail || ''}`);
+    } catch (e) {
+      console.error(`[ai-external][onCreate] ${id} unexpected:`, e?.message);
+    }
+  },
+);
+
+// Trigger: external_products-Doc geändert → neu bewerten, NUR wenn
+// Nährwerte/Zutaten sich geändert haben. aiAssessment, cachedAt,
+// lastUpgradeAttemptAt, scoreNutri etc. sind NICHT relevant → kein
+// Re-Trigger-Loop wenn die CF selbst (oder der Upgrade-Stamp) schreibt.
+const RELEVANT_EXTERNAL_FIELDS = [
+  'nutr_Energie_val',
+  'nutr_Fett_val',
+  'nutr_FettdavongesttigteFettsuren_val',
+  'nutr_Kohlenhydrate_val',
+  'nutr_KohlenhydratedavonZucker_val',
+  'nutr_Ballaststoffe_val',
+  'nutr_Eiwei_val',
+  'nutr_Salz_val',
+  'attr_ingredientStatement',
+];
+exports.onExternalProductUpdateForAssessment = onDocumentUpdated(
+  { ...COMMON_OPTS, document: 'external_products/{ean}' },
+  async (event) => {
+    const id = event.params.ean;
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    if (!relevantFieldsChanged(before, after, RELEVANT_EXTERNAL_FIELDS)) return;
+    try {
+      const res = await runExternalAssessment(admin.firestore(), id);
+      console.log(`[ai-external][onUpdate] ${id} → ${res.state} ${res.detail || ''}`);
+    } catch (e) {
+      console.error(`[ai-external][onUpdate] ${id} unexpected:`, e?.message);
+    }
+  },
+);
+
+// HTTPS — runExternalAssessmentForEan (admin/debug, sofort + force).
+exports.runExternalAssessmentForEan = onRequest(
+  { ...COMMON_OPTS, secrets: [GEMINI_API_KEY, TRIGGER_KEY] },
+  async (req, res) => {
+    const triggerKey = TRIGGER_KEY.value();
+    const provided = req.query?.key || req.body?.key;
+    if (!triggerKey || provided !== triggerKey) {
+      res.status(401).send('Unauthorized');
+      return;
+    }
+    const ean = String(req.query?.ean || req.body?.ean || '').trim();
+    if (!ean) {
+      res.status(400).send('Missing ean');
+      return;
+    }
+    const force = String(req.query?.force || req.body?.force || '') === '1';
+    try {
+      const result = await runExternalAssessment(admin.firestore(), ean, { force });
+      res.status(200).json({ ean, ...result });
+    } catch (e) {
+      res.status(500).send(String(e?.message || e));
+    }
+  },
+);
+
+// SCHEDULED — External-Assessment-Backfill (cursor-basiert, wie hersteller).
+// Reset bei ASSESSMENT_PROMPT_VERSION-Bump → komplettes Re-Backfill.
+const EXTERNAL_BACKFILL_STATE_PATH = 'aggregates/aiExternalAssessmentBackfill';
+const EXTERNAL_BACKFILL_BATCH = 200;
+const EXTERNAL_BACKFILL_CONCURRENCY = 6;
+
+exports.scheduledExternalAssessmentBackfill = functions.scheduler.onSchedule(
+  { ...COMMON_OPTS, schedule: 'every 5 minutes' },
+  async () => {
+    const db = admin.firestore();
+    const stateRef = db.doc(EXTERNAL_BACKFILL_STATE_PATH);
+    const stateSnap = await stateRef.get();
+    const state = stateSnap.exists ? stateSnap.data() : {};
+
+    if (state.promptVersion !== ASSESSMENT_PROMPT_VERSION) {
+      console.log(
+        `[external-backfill] promptVersion ${state.promptVersion} → ${ASSESSMENT_PROMPT_VERSION}, reset`,
+      );
+      await stateRef.set(
+        {
+          promptVersion: ASSESSMENT_PROMPT_VERSION,
+          cursor: null,
+          completedAt: null,
+          processed: 0,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      return;
+    }
+    if (state.completedAt) return;
+
+    let q = db
+      .collection(EXTERNAL_COLLECTION)
+      .orderBy(admin.firestore.FieldPath.documentId())
+      .limit(EXTERNAL_BACKFILL_BATCH);
+    if (state.cursor) q = q.startAfter(state.cursor);
+
+    const snap = await q.get();
+    if (snap.empty) {
+      await stateRef.set(
+        { completedAt: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+      console.log('[external-backfill] keine weiteren Docs → completed');
+      return;
+    }
+
+    const lastDocId = snap.docs[snap.docs.length - 1].id;
+    const toProcess = snap.docs.filter((doc) => {
+      const ai = doc.data()?.aiAssessment;
+      return !(
+        ai?.promptVersion === ASSESSMENT_PROMPT_VERSION &&
+        (typeof ai.healthScore === 'number' || ai.skipped)
+      );
+    });
+    const processed = await runPool(toProcess, EXTERNAL_BACKFILL_CONCURRENCY, async (doc) => {
+      try {
+        await runExternalAssessment(db, doc.id);
+      } catch (e) {
+        console.error(`[external-backfill] ${doc.id} failed:`, e?.message);
+        throw e;
+      }
+    });
+
+    const reachedEnd = snap.size < EXTERNAL_BACKFILL_BATCH;
+    await stateRef.set(
+      {
+        cursor: lastDocId,
+        processed: (state.processed || 0) + processed,
+        completedAt: reachedEnd ? admin.firestore.FieldValue.serverTimestamp() : null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    console.log(
+      `[external-backfill] batch: ${processed} verarbeitet, cursor=${lastDocId}, reachedEnd=${reachedEnd}`,
+    );
+  },
+);
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }

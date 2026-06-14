@@ -20,6 +20,7 @@
  */
 
 import type { Timestamp } from '@react-native-firebase/firestore';
+import type { AiAssessment } from '@/lib/types/firestore';
 
 export type ExternalProductSource = 'rewe' | 'globus' | 'openfood' | string;
 
@@ -102,6 +103,22 @@ export interface ExternalProductDoc {
 
   // ─── Beschreibung / Sonst ────────────────────────────────────────
   productDescription?: string;
+
+  // ─── KI-Analyse (Standalone-Assessment) ──────────────────────────
+  // Wird von cloud-functions/ai-product-comparison berechnet (derselbe
+  // assessor.js wie für Stufe-1/2-NoNames) und aufs Doc geschrieben.
+  // Kategorie-relativer Health-Score 1-5 + Begründungstext. Die App
+  // rendert es via <AiHealthScale aiAssessment={...} /> — identisch zu
+  // noname-detail. Liegt direkt am external_products-Doc, also KEIN
+  // erneutes Online-Nachladen nötig sobald es einmal berechnet ist.
+  aiAssessment?: AiAssessment;
+
+  // ─── Upgrade-Cooldown ─────────────────────────────────────────────
+  // Letzter Zeitpunkt, an dem für eine schwache (openfood-)Quelle ein
+  // Online-Upgrade auf bessere Sources versucht wurde. Verhindert, dass
+  // jeder Screen-Aufruf erneut die Source-Cascade online anstößt
+  // ("nicht immer online nachladen"). Siehe lookupByEAN.
+  lastUpgradeAttemptAt?: Timestamp;
 
   // ─── Debug / Audit ───────────────────────────────────────────────
   /** Roh-Daten der Source — für Debugging und spätere Re-Normalisierung. */
