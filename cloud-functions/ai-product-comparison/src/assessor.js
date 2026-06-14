@@ -28,7 +28,7 @@ const { GoogleGenAI, Type } = require('@google/genai');
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
-const ASSESSMENT_PROMPT_VERSION = 'v5';
+const ASSESSMENT_PROMPT_VERSION = 'v6';
 
 const SYSTEM_INSTRUCTION = `Du bist Ernährungs-Analyst für die deutsche App "MarkenDetektive".
 
@@ -41,21 +41,35 @@ KATEGORIE-RELATIV. Eine Tafel Schokolade soll mit anderen Schokoladen
 verglichen werden, nicht mit Salat. Eine Tüte Chips mit anderen Chips.
 
 ═══════════════════════════════════════════════════════════════════
-SKALA — wohlwollend gegenüber dem Produkt (User-Vorgabe):
+SKALA — kategorie-relativ, mit klaren Anforderungen pro Stufe:
 ═══════════════════════════════════════════════════════════════════
 
-  1 = klar UNGESUND für die Kategorie
-      Nur wenn MEHRERE Negativ-Signale gleichzeitig auftreten
-      (sehr lange Zutatenliste UND viele E-Stoffe UND deutlich höhere
-       Werte bei Zucker/Salz/Fett als kategorie-typisch).
-  2 = unterhalb des Durchschnitts (klarer Einzel-Nachteil)
-  3 = DURCHSCHNITT der Kategorie / Standard-Rezeptur
-  4 = oberhalb des Durchschnitts ← niedrige Schwelle!
-      Sobald EIN klarer Positiv-Aspekt erkennbar ist (Bio, weniger
-      Zucker als üblich, kurze klare Zutatenliste, ohne Aromen, etc.)
-      → score 4. Nicht 3.
-  5 = sehr gute Wahl in der Kategorie (Bio UND kurze klare
-      Zutatenliste UND ausgewogene Nährwerte)
+  1 = klar UNGESUND für die Kategorie. Mehrere Negativ-Signale
+      gleichzeitig (sehr lange Zutatenliste UND viele Zusatzstoffe UND
+      deutlich höhere Zucker-/Salz-/Fettwerte als kategorie-typisch).
+  2 = unterhalb des Durchschnitts (klarer Einzel-Nachteil).
+  3 = DURCHSCHNITT der Kategorie / Standard-Rezeptur. Das ist der
+      DEFAULT — und zugleich der Deckel für hochverarbeitete Produkte
+      (siehe unten).
+  4 = klar oberhalb des Durchschnitts. NUR wenn MEHRERE klare Positiv-
+      Aspekte ZUSAMMENKOMMEN — z.B. kurze, klare Zutatenliste OHNE
+      künstliche Aromen/Süßstoffe UND bessere Nährwerte (weniger Zucker/
+      Salz/gesättigtes Fett) als kategorie-typisch. EIN einzelner Vorteil
+      reicht NICHT für eine 4.
+  5 = herausragend in der Kategorie, SELTEN vergeben: Bio ODER sehr
+      kurze, klare Zutatenliste OHNE Zusatzstoffe — UND deutlich bessere
+      Nährwerte als der Kategorie-Durchschnitt.
+
+═══════════════════════════════════════════════════════════════════
+DECKEL FÜR HOCHVERARBEITETE PRODUKTE (HART — überschreibt die Skala):
+═══════════════════════════════════════════════════════════════════
+
+Ist das Produkt stark verarbeitet — NOVA-Gruppe 4 (falls angegeben) ODER
+die Zutatenliste enthält mehrere Zusatzstoffe (Süßstoffe wie Aspartam/
+Acesulfam/Sucralose, künstliche Aromen, Farbstoffe, mehrere E-Nummern) —
+dann MAXIMAL score 3. Solche Produkte sind NIE "sehr gute Wahl" (4 oder 5),
+auch nicht kategorie-relativ. Beispiel: ein kalorienarmes Diet-Getränk mit
+Süßstoffen + Farbstoff ist trotz wenig Zucker höchstens 3.
 
 ═══════════════════════════════════════════════════════════════════
 MISSING DATA — KRITISCH:
@@ -85,11 +99,14 @@ reasoning: 1-2 kurze Sätze auf Deutsch, max ~220 Zeichen.
 KEINE Marketing-Sprache, keine Adjektive wie "super/toll". Reine Fakten.
 
 Gute Beispiele:
-  "Mit 12g Zucker auf 100g unterhalb des Schokoladen-Durchschnitts,
-   kurze Zutatenliste ohne künstliche Aromen." → score 4
+  "Kurze Zutatenliste ohne künstliche Aromen und mit 12g Zucker auf 100g
+   deutlich unter dem Schokoladen-Durchschnitt." → score 4
+   (mehrere Positiv-Aspekte: klare Liste UND wenig Zucker)
   "Klassische Rezeptur mit standardtypischen Nährwerten für die
    Kategorie." → score 3
-  "Lange Zutatenliste mit mehreren E-Stoffen und Aromen, deutlich
+  "Kalorienarm, aber mit Süßstoffen und Farbstoff stark verarbeitet." → score 3
+   (Deckel greift trotz wenig Zucker)
+  "Lange Zutatenliste mit mehreren Zusatzstoffen und Aromen, deutlich
    mehr Zucker als kategorie-üblich." → score 2`;
 
 const RESPONSE_SCHEMA = {
@@ -125,10 +142,20 @@ function buildUserContent({ product, category }) {
     lines.push(`Zutaten: ${String(product.ingredients).slice(0, 600).trim()}`);
   }
 
+  // Verarbeitungs-Signale (falls vorhanden) — wichtig für den
+  // Hochverarbeitet-Deckel: NOVA 4 / Süßstoffe / Farbstoffe → max 3.
+  const lbl = product.labels || {};
+  const sig = [];
+  if (lbl.nutriscore) sig.push(`Nutri-Score ${String(lbl.nutriscore).toUpperCase()}`);
+  if (lbl.nova) sig.push(`NOVA-Gruppe ${lbl.nova}`);
+  if (lbl.isBio === true) sig.push('Bio');
+  if (sig.length > 0) lines.push(`Signale: ${sig.join(', ')}`);
+
   lines.push('');
-  lines.push('Aufgabe: kategorie-relative Bewertung. Regel zur Erinnerung:');
-  lines.push('niedrige Schwelle für score 4 (ein klarer Positiv-Aspekt reicht),');
-  lines.push('fehlende Werte ignorieren, NIEMALS Datenlage thematisieren.');
+  lines.push('Aufgabe: kategorie-relative Bewertung gemäß Skala + Deckel.');
+  lines.push('4/5 brauchen MEHRERE klare Positiv-Aspekte; hochverarbeitete');
+  lines.push('Produkte (NOVA 4 / Süßstoffe / Farbstoffe / viele Zusatzstoffe)');
+  lines.push('maximal 3. Fehlende Werte ignorieren, NIEMALS Datenlage thematisieren.');
   lines.push('Antworte als JSON gemäß Schema.');
   return lines.join('\n');
 }
@@ -143,10 +170,16 @@ function snapshotFromDoc(data) {
   if (energyKcal != null && energyUnit === 'kj') {
     energyKcal = Math.round(energyKcal / 4.184);
   }
+  // Scores aus BEIDEN Feld-Konventionen lesen: produkte/markenProdukte nutzen
+  // nutriscore/ecoscore/nova, external_products nutzen scoreNutri/scoreEco/
+  // scoreNova. So greift der Hochverarbeitet-Deckel (NOVA 4) auch extern.
+  const nutriRaw = data.nutriscore ?? data.scoreNutri;
+  const ecoRaw = data.ecoscore ?? data.scoreEco;
+  const novaRaw = data.nova ?? data.scoreNova;
   const labels = {
-    nutriscore: typeof data.nutriscore === 'string' ? data.nutriscore.toLowerCase() : null,
-    ecoscore: typeof data.ecoscore === 'string' ? data.ecoscore.toLowerCase() : null,
-    nova: typeof data.nova === 'string' || typeof data.nova === 'number' ? String(data.nova) : null,
+    nutriscore: typeof nutriRaw === 'string' ? nutriRaw.toLowerCase() : null,
+    ecoscore: typeof ecoRaw === 'string' ? ecoRaw.toLowerCase() : null,
+    nova: typeof novaRaw === 'string' || typeof novaRaw === 'number' ? String(novaRaw) : null,
     isVegan: typeof data.attr_isVegan === 'boolean' ? data.attr_isVegan
              : typeof data.isVegan === 'boolean' ? data.isVegan : null,
     isVegetarisch: typeof data.attr_isVegetarisch === 'boolean' ? data.attr_isVegetarisch

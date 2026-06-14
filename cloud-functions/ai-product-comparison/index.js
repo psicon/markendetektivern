@@ -1583,6 +1583,98 @@ exports.scheduledExternalAssessmentBackfill = functions.scheduler.onSchedule(
   },
 );
 
+// SCHEDULED — Re-Backfill der STANDALONE-Assessments auf produkte (aiAssessment)
+// bei ASSESSMENT_PROMPT_VERSION-Bump. WICHTIG: verarbeitet NUR produkte, die
+// bereits ein aiAssessment mit veralteter promptVersion tragen — NICHT die
+// aiComparison-Produkte. So werden die Standalone-Bewertungen neu kalibriert,
+// OHNE alle Vergleiche neu laufen zu lassen (kein Comparator-Re-Run, kein
+// Score-Drift bei den Vergleichen).
+const PRODUKT_ASSESSMENT_BACKFILL_STATE_PATH = 'aggregates/aiProduktAssessmentBackfill';
+const PRODUKT_ASSESSMENT_BACKFILL_BATCH = 300;
+const PRODUKT_ASSESSMENT_BACKFILL_CONCURRENCY = 6;
+
+exports.scheduledProduktAssessmentBackfill = functions.scheduler.onSchedule(
+  { ...COMMON_OPTS, schedule: 'every 5 minutes' },
+  async () => {
+    const db = admin.firestore();
+    const stateRef = db.doc(PRODUKT_ASSESSMENT_BACKFILL_STATE_PATH);
+    const stateSnap = await stateRef.get();
+    const state = stateSnap.exists ? stateSnap.data() : {};
+
+    if (state.promptVersion !== ASSESSMENT_PROMPT_VERSION) {
+      console.log(
+        `[produkt-assessment-backfill] promptVersion ${state.promptVersion} → ${ASSESSMENT_PROMPT_VERSION}, reset`,
+      );
+      await stateRef.set(
+        {
+          promptVersion: ASSESSMENT_PROMPT_VERSION,
+          cursor: null,
+          completedAt: null,
+          processed: 0,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      return;
+    }
+    if (state.completedAt) return;
+
+    let q = db
+      .collection('produkte')
+      .orderBy(admin.firestore.FieldPath.documentId())
+      .limit(PRODUKT_ASSESSMENT_BACKFILL_BATCH);
+    if (state.cursor) q = q.startAfter(state.cursor);
+
+    const snap = await q.get();
+    if (snap.empty) {
+      await stateRef.set(
+        { completedAt: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+      console.log('[produkt-assessment-backfill] keine weiteren Docs → completed');
+      return;
+    }
+
+    const lastDocId = snap.docs[snap.docs.length - 1].id;
+    // NUR Produkte mit bestehendem Standalone-Assessment (aiAssessment), dessen
+    // promptVersion veraltet ist. aiComparison-Produkte bleiben unangetastet.
+    const toProcess = snap.docs.filter((doc) => {
+      const ai = doc.data()?.aiAssessment;
+      return (
+        ai &&
+        ai.promptVersion !== ASSESSMENT_PROMPT_VERSION &&
+        (typeof ai.healthScore === 'number' || ai.skipped)
+      );
+    });
+    const processed = await runPool(
+      toProcess,
+      PRODUKT_ASSESSMENT_BACKFILL_CONCURRENCY,
+      async (doc) => {
+        try {
+          await runAssessment(db, doc.id);
+        } catch (e) {
+          console.error(`[produkt-assessment-backfill] ${doc.id} failed:`, e?.message);
+          throw e;
+        }
+      },
+    );
+
+    const reachedEnd = snap.size < PRODUKT_ASSESSMENT_BACKFILL_BATCH;
+    await stateRef.set(
+      {
+        cursor: lastDocId,
+        processed: (state.processed || 0) + processed,
+        completedAt: reachedEnd ? admin.firestore.FieldValue.serverTimestamp() : null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    console.log(
+      `[produkt-assessment-backfill] batch: ${processed} verarbeitet, cursor=${lastDocId}, reachedEnd=${reachedEnd}`,
+    );
+  },
+);
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }

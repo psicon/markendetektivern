@@ -5,7 +5,7 @@
  * Anders als AiComparisonScale (NoName↔Marken-Vergleich) zeigt diese
  * Komponente eine KATEGORIE-RELATIVE Einschätzung:
  *   healthScore 1 = unter Durchschnitt der Produkt-Kategorie
- *   healthScore 5 = sehr gute Wahl in der Kategorie
+ *   healthScore 5 = gute Wahl in der Kategorie
  *
  * Use-Case: Stufe 1/2 (NoNames ohne MP-Link) UND verknüpfte Produkte,
  * die mangels Daten nicht vergleichbar sind (Marke ohne Nährwerte/Zutaten).
@@ -63,7 +63,7 @@ export function AiHealthScale({
   const category = aiAssessment.category;
 
   const worseActive = score < 3; // unter Durchschnitt
-  const betterActive = score > 3; // sehr gute Wahl
+  const betterActive = score > 3; // gute Wahl
 
   const pillStyle = {
     paddingHorizontal: 8,
@@ -191,10 +191,10 @@ export function AiHealthScale({
         ) : null}
         {betterActive ? (
           <View style={pillStyle}>
-            <Text style={pillText}>sehr gute Wahl</Text>
+            <Text style={pillText}>gute Wahl</Text>
           </View>
         ) : (
-          <Text style={plainText}>sehr gute Wahl</Text>
+          <Text style={plainText}>gute Wahl</Text>
         )}
       </View>
 
