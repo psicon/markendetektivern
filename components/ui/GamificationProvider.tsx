@@ -1,5 +1,6 @@
 import * as Haptics from 'expo-haptics';
-import { safePush } from '@/lib/utils/safeNav';
+import { safeNavigate, safePush } from '@/lib/utils/safeNav';
+import { getCurrentPathname } from '@/lib/utils/currentRoute';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { subscribeUserCashbackHistoryPaged } from '@/lib/services/cashbackUpload';
@@ -182,6 +183,15 @@ export function bannerDataFromLevelUp(
   };
 }
 
+// ClickUp 86caak83r: Die Cashback-Übersicht ist die Belohnungen-Tab
+// (`/(tabs)/rewards` → Pathname `/rewards`). Der Bon-VERLAUF
+// (`/cashback/history`) ist NICHT die Cashback-Seite. Wenn der User schon
+// auf der Cashback-Seite ist, soll der Banner-Tap nicht erneut navigieren.
+function isOnCashbackPage(): boolean {
+  const p = getCurrentPathname();
+  return p === '/rewards' || p === '/(tabs)/rewards';
+}
+
 // T17.22: Cashback-Payout Celebration. Wird vom pending/[id]-Screen
 // gefeuert wenn state pending→approved transitioniert. Zentral hier
 // gebaut damit's durch dieselbe Banner-Pipeline läuft wie Achievements/
@@ -212,7 +222,12 @@ export function bannerDataFromCashbackPayout(cashbackCents: number): BannerData 
     withGlow: true,
     onTap: () => {
       try {
-        safePush('/cashback/history' as any);
+        // ClickUp 86caak83r: zur Cashback-Übersicht (Belohnungen-Tab),
+        // NICHT zur Bon-Liste. Schon auf der Cashback-Seite → kein
+        // erneutes Weiterleiten. safeNavigate (statt push), damit der Tab
+        // re-used statt auf den Stack gepusht wird.
+        if (isOnCashbackPage()) return;
+        safeNavigate('/(tabs)/rewards' as any);
       } catch (e) {
         console.warn('Cashback banner nav failed (non-fatal):', e);
       }

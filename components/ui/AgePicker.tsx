@@ -76,6 +76,30 @@ export function AgePicker({
     }).start();
   }, [isSet, labelOpacity, compact]);
 
+  // ── Android-Mount-Autofire-Guard (ClickUp 86ca8qhax) ──────────────
+  // @react-native-community/slider feuert auf Android `onValueChange`
+  // EINMAL beim Mount — ohne echten Touch. Das würde AGE_DEFAULT (30)
+  // als Auswahl committen und im Demografie-Sheet "Speichern" aktivieren,
+  // obwohl der User nichts gewählt hat → viele tippen einfach mit dem
+  // Default weiter. Wir committen erst nach einer echten Interaktion
+  // (onSlidingStart / onSlidingComplete). iOS feuert beim Mount nicht →
+  // dort ist der Guard folgenlos.
+  const hasInteractedRef = useRef(false);
+  // Re-arm wenn der Wert von außen zurückgesetzt wird (z.B. Sheet öffnet
+  // erneut → value zurück auf null): der nächste Mount-Autofire darf dann
+  // wieder nicht committen.
+  useEffect(() => {
+    if (value === null) hasInteractedRef.current = false;
+  }, [value]);
+  const commitAge = (v: number) => {
+    hasInteractedRef.current = true;
+    const rounded = Math.round(v);
+    if (rounded !== displayValue) {
+      Haptics.selectionAsync().catch(() => {});
+    }
+    onChange(rounded);
+  };
+
   const slider = (
     <Slider
       style={styles.slider}
@@ -83,12 +107,19 @@ export function AgePicker({
       maximumValue={AGE_MAX}
       step={1}
       value={displayValue}
+      onSlidingStart={() => {
+        hasInteractedRef.current = true;
+      }}
       onValueChange={(v) => {
-        const rounded = Math.round(v);
-        if (rounded !== displayValue) {
-          Haptics.selectionAsync().catch(() => {});
-        }
-        onChange(rounded);
+        // Mount-Autofire (Android) ignorieren — nur Live-Updates während
+        // einer echten Interaktion durchlassen.
+        if (!hasInteractedRef.current) return;
+        commitAge(v);
+      }}
+      onSlidingComplete={(v) => {
+        // Garantiert, dass auch ein reiner Tap (ohne Value-Change, z.B.
+        // exakt auf die Default-Position) als Auswahl zählt.
+        commitAge(v);
       }}
       minimumTrackTintColor={tint}
       maximumTrackTintColor={isDark ? '#444' : '#e2e2e2'}

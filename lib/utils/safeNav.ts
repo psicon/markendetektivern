@@ -52,6 +52,22 @@ export function safePush(href: any): boolean {
   return true;
 }
 
+/**
+ * Debounced navigate — wie safePush, aber via `router.navigate`. Für
+ * Ziele die KEIN neuer Stack-Push sein sollen (z.B. ein Tab): navigate
+ * wechselt zum Ziel und re-used den vorhandenen Screen statt ihn erneut
+ * auf den Stack zu legen. Returns true wenn die Navigation gefeuert hat.
+ */
+export function safeNavigate(href: any): boolean {
+  const now = Date.now();
+  if (now - lastNavAt < NAV_DEBOUNCE_MS) {
+    return false;
+  }
+  lastNavAt = now;
+  router.navigate(href);
+  return true;
+}
+
 export function safeReplace(href: any): boolean {
   const now = Date.now();
   if (now - lastNavAt < NAV_DEBOUNCE_MS) {

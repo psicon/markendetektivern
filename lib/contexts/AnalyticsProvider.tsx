@@ -7,6 +7,7 @@ import { AppState, AppStateStatus, InteractionManager, Platform } from 'react-na
 import { analyticsService } from '../services/analyticsService';
 import journeyTrackingService from '../services/journeyTrackingService';
 import { PERF } from '../perfFlags';
+import { setCurrentPathname } from '../utils/currentRoute';
 import { isExpoGo } from '../utils/platform';
 
 interface AnalyticsContextType {
@@ -56,6 +57,13 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
   const pathname = usePathname();
   const lastScreenRef = useRef<string>('');
   const screenStartTimeRef = useRef<Date>(new Date());
+
+  // Globalen Route-Spiegel pflegen, damit Nicht-Hook-Code (z.B. der onTap
+  // eines global gefeuerten Banners) weiß, wo der User gerade ist und
+  // redundante Navigation vermeiden kann. ClickUp 86caak83r.
+  useEffect(() => {
+    setCurrentPathname(pathname);
+  }, [pathname]);
 
   // Update User-Level im Analytics Service wenn sich userProfile ändert
   useEffect(() => {
