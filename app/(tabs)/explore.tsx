@@ -1546,9 +1546,14 @@ export default function ExploreScreen() {
     const wasOnline = prevNetOnlineRef.current;
     prevNetOnlineRef.current = netStatus.online;
     if (wasOnline || !netStatus.online) return; // nur offline→online
-    if (searchActiveQuery) return;
-    if (nonames.length === 0) void loadNonames(true);
-    if (markenprodukte.length === 0) void loadMarken(true);
+    if (searchActiveQuery) return; // Suche hat ihren eigenen Retry-Toast (s.o.)
+    // ClickUp 86cad6c4p (2.18): Browse-Listen bei der offline→online-Flanke
+    // IMMER neu laden (reset) — nicht nur wenn leer. Sonst bleibt eine stale/
+    // partielle Liste nach Reconnect stehen, bis der User manuell einen Filter
+    // setzt. Die Flanke feuert nur bei echtem offline→online-Übergang
+    // (prevNetOnlineRef), daher kein Dauer-Reload bei stabilem Netz.
+    void loadNonames(true);
+    void loadMarken(true);
     if (discounter.length === 0) {
       FirestoreService.getDiscounter()
         .then((ds) => {
