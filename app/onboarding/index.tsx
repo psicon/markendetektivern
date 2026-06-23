@@ -46,7 +46,6 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { OnboardingService } from '@/lib/services/onboardingService';
-import { remoteConfigService } from '@/lib/services/remoteConfigService';
 import { revenueCatService } from '@/lib/services/revenueCatService';
 import { detectCountry, type DachCountry } from '@/lib/utils/country';
 
@@ -825,63 +824,21 @@ export default function OnboardingScreen() {
 
       console.log('✅ Onboarding completed with session:', sessionId);
 
-      // Verwende bereits gecheckte Premium-Status wenn verfügbar
-      let currentPremiumStatus = isPremiumUser;
-      
-      // Nur neu prüfen wenn noch nicht gecheckt wurde
-      if (!premiumStatusChecked) {
-        console.log('🔄 Prüfe Premium Status direkt bei RevenueCat...');
-        
-        // Erst Käufe wiederherstellen
-        try {
-          
-          await revenueCatService.restorePurchases();
-          console.log('✅ Käufe wiederhergestellt');
-          
-          // Dann direkt Premium Status prüfen
-          currentPremiumStatus = await revenueCatService.isPremium();
-          console.log('🛒 Premium Status von RevenueCat:', currentPremiumStatus);
-        } catch (e) {
-          console.log('⚠️ Konnte Käufe nicht wiederherstellen:', e);
-        }
-      } else {
-        console.log('🛒 Verwende bereits geprüften Premium Status:', currentPremiumStatus);
-      }
-      
-      // Remote Config prüfen für Paywall
-      const shouldShowPaywall = await remoteConfigService.shouldShowOnboardingPaywall();
-      
-      console.log('🛒 Paywall Entscheidung:', { 
-        shouldShowPaywall, 
-        isPremium: currentPremiumStatus,
-        willShowPaywall: shouldShowPaywall && !currentPremiumStatus 
-      });
-      
-      // NUR Paywall zeigen wenn Remote Config JA sagt UND User KEIN Premium hat
-      if (shouldShowPaywall && !currentPremiumStatus) {
-        console.log('🛒 Zeige Onboarding Paywall (User hat kein Premium)');
-        try {
-          const paywallResult = await presentPaywall('onboarding');
-          console.log('🛒 Paywall result:', paywallResult.result);
-        } catch (error) {
-          console.error('❌ Paywall error:', error);
-          // App soll trotzdem weiterlaufen
-        }
-      } else {
-        if (currentPremiumStatus) {
-          console.log('✅ User hat bereits Premium - keine Paywall!');
-        } else {
-          console.log('🛒 Remote Config: Paywall deaktiviert');
-        }
-      }
-      
-      // WICHTIG: Premium Status Force-Refresh VOR Navigation!
+      // ClickUp 86cacp9hy (1.11): restorePurchases()/isPremium()/Paywall NICHT
+      // mehr im kritischen Navigations-Pfad — das war der StoreKit-Cold-Start
+      // (>10s beim ersten Mal; ~2s beim zweiten, weil dann gecached). Wie der
+      // Auth-Pfad (completeOnboardingForAuth) nur das Flag setzen + sofort
+      // navigieren; app/(tabs)/index.tsx präsentiert die Onboarding-Paywall
+      // danach auf Home (inkl. refreshPremiumStatus + RevenueCat-Init-Warten +
+      // presentPaywall). Die Mirror-Writes oben bleiben awaited (Firestore
+      // offline-first, schnell) — nur der StoreKit-Roundtrip fällt aus dem
+      // Boot-Pfad.
       try {
-        await refreshPremiumStatus();
-      } catch (error) {
-        console.warn('⚠️ Premium Status Refresh fehlgeschlagen:', error);
+        await AsyncStorage.setItem('pending_onboarding_paywall', '1');
+      } catch (e) {
+        console.warn('⚠️ pending_onboarding_paywall set failed:', e);
       }
-      
+
       // Zur App navigieren
       router.replace('/(tabs)');
       
