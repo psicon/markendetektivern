@@ -1033,7 +1033,10 @@ export default function OnboardingScreen() {
               data={markets}
               numColumns={2}
               keyExtractor={(item) => item.id}
-              showsVerticalScrollIndicator={false}
+              // ClickUp 86cacp9ar (1.6): Scroll-Indikator SICHTBAR — sonst sieht
+              // der User bei offener Tastatur nicht, dass die Kachel-Liste noch
+              // weiter scrollbar ist (weitere Märkte hinter dem Keyboard).
+              showsVerticalScrollIndicator={true}
               // iOS: scroll-content automatisch so anpassen dass das
               // fokussierte TextInput überm Keyboard sichtbar bleibt.
               // Plus keyboardShouldPersistTaps damit ein Tap auf eine
@@ -1247,7 +1250,10 @@ export default function OnboardingScreen() {
               data={PRIORITIES}
               numColumns={2}
               keyExtractor={(item) => item.id}
-              showsVerticalScrollIndicator={false}
+              // ClickUp 86cacp9ar (1.8): Scroll-Indikator SICHTBAR — sonst sieht
+              // der User bei offener Tastatur nicht, dass die Prioritäten-Liste
+              // noch weiter scrollbar ist (z.B. "Anderes" hinter dem Keyboard).
+              showsVerticalScrollIndicator={true}
               automaticallyAdjustKeyboardInsets
               keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => {
