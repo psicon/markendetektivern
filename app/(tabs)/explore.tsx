@@ -1332,12 +1332,14 @@ export default function ExploreScreen() {
         setNonames((prev) => {
           const existing = reset ? new Set<string>() : new Set(prev.map((p) => p.id));
           const incoming = (res.products as any[]).filter((p) => !existing.has(p.id));
-          // Sort only on reset — on append we preserve whatever order the
-          // earlier items had so their positions don't shift and the user's
-          // current scroll offset stays anchored.
+          // ClickUp 86cad6c0d (2.13b): immer nach dem aktiven Sort sortieren.
+          // Bei canSort=true (Server-orderBy) ist die Concat schon global
+          // sortiert (startAfter) → .sort() ist ein No-op, kein Scroll-Sprung.
+          // Bei canSort=false (Komplex-Filter, Server unsortiert) korrigiert es
+          // die sonst kaputte Sortierung beim Nachladen.
           const next = reset
             ? ([...incoming].sort(productSorter) as any)
-            : ([...prev, ...incoming] as any);
+            : ([...prev, ...incoming].sort(productSorter) as any);
           // Seed the module-level cache so a later Stöbern remount
           // lands on this state instantly. Only do it for default
           // filters (see isDefaultFilters comment).
@@ -1460,9 +1462,11 @@ export default function ExploreScreen() {
         setMarkenprodukte((prev) => {
           const existing = reset ? new Set<string>() : new Set(prev.map((p) => p.id));
           const incoming = (res.products as any[]).filter((p) => !existing.has(p.id));
+          // ClickUp 86cad6c0d (2.13b): immer nach dem aktiven Sort sortieren
+          // (No-op bei canSort=true/Server-sortiert, korrigiert canSort=false).
           const next = reset
             ? ([...incoming].sort(productSorter) as any)
-            : ([...prev, ...incoming] as any);
+            : ([...prev, ...incoming].sort(productSorter) as any);
           if (reset && isDefaultFilters()) {
             setCachedMarken({ items: next, lastDoc: res.lastDoc, hasMore: res.hasMore });
           }
@@ -2714,13 +2718,12 @@ export default function ExploreScreen() {
       ...nonames.map((p) => ({ ...(p as any), __kind: 'eigen' as const })),
       ...markenprodukte.map((p) => ({ ...(p as any), __kind: 'marken' as const })),
     ];
-    tagged.sort((a, b) =>
-      String(a.name ?? '').localeCompare(String(b.name ?? ''), 'de', {
-        sensitivity: 'base',
-      }),
-    );
+    // ClickUp 86cad6c0d (2.13b): nach dem AKTIVEN Sort sortieren (Name/Preis),
+    // nicht hartkodiert nach Name — sonst ignoriert der Default-"Alle"-Tab die
+    // gewählte Sortierung komplett.
+    tagged.sort(productSorter);
     return tagged;
-  }, [nonames, markenprodukte]);
+  }, [nonames, markenprodukte, productSorter]);
 
   // ─── Search-side filter projection ─────────────────────────────
   //
