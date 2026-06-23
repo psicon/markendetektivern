@@ -75,7 +75,14 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
         const cats = await categoryAccessService.getAllCategoriesWithAccess(99, true);
         if (cancelled) return;
         const alkohol = cats.find(c => (c.bezeichnung ?? '').toLowerCase().trim() === 'alkohol');
-        if (alkohol?.bild) setAlkoholIconUrl(alkohol.bild);
+        // ClickUp 86cacp9pc (1.13): Bild ERST in den expo-image-Cache prefetchen,
+        // DANN die URL setzen — sonst lädt/dekodiert ExpoImage erst beim Render
+        // (sichtbar als kurzes "Flimmern"). transition={0} unten ergänzt das
+        // (kein Fade mehr). Non-fatal — bei Fehler greift der Icon-Fallback.
+        if (alkohol?.bild) {
+          try { await ExpoImage.prefetch(alkohol.bild); } catch {}
+          if (!cancelled) setAlkoholIconUrl(alkohol.bild);
+        }
       } catch {
         // Silent fallback — icon-fallback rendert dann.
       }
@@ -127,7 +134,7 @@ export function DemographicsPromptSheet({ visible, onSubmit, onSkip }: Props) {
                 source={{ uri: alkoholIconUrl }}
                 style={styles.benefitIconImage}
                 contentFit="contain"
-                transition={150}
+                transition={0}
               />
             ) : (
               <MaterialCommunityIcons name="bottle-wine" size={22} color={Colors.light.tint} />
