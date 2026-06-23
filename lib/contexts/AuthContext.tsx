@@ -35,6 +35,7 @@ import {
 } from '../services/auth/facebookAuth';
 import { createUserProfile, getUserProfile, patchUserProfile, UserProfile } from '../services/userProfile';
 import { scheduleRegionGuess } from '../services/regionGuess';
+import { isOnline } from '../services/network';
 import { FirestoreService } from '../services/firestore';
 import { doc, setDoc } from '@react-native-firebase/firestore';
 import { db } from '../firebase';
@@ -695,32 +696,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const handleSignInWithApple = async (): Promise<boolean> => {
-    // T17.13: Seamless Apple-Sign-In (matches production-App-Behavior).
+    // ClickUp 86cacp8xx (1.17) + 86cacp900 (1.22): Apple läuft jetzt — wie
+    // Google/Facebook — über `linkOrSignIn` statt über den alten Sonderpfad
+    // (signOut + standalone signInWithCredential).
     //
-    // Wir verzichten auf `linkWithCredential` für Apple. Stattdessen:
-    //   • Anon-User vorher abmelden (falls da), damit Firebase keine
-    //     stale Anon-Session beim Apple-Sign-In versucht zu linken.
-    //   • `signInWithCredential(apple-credential)` — Firebase entscheidet
-    //     automatisch: existierender Apple-Sub? → sign in. Neu? → create.
+    // Warum der alte Pfad falsch war:
+    //   • signOut(anon) verwarf die Anon-UID inkl. aller frisch gemirrorten
+    //     Onboarding-Daten → User blieb "Anonymer Detektiv" / Lieblingsmarkt
+    //     fiel auf Alt-Daten zurück (1.17).
+    //   • Der signOut erzeugte ein kurzes Null-User-Fenster; der folgende
+    //     Server-Call hängt offline ewig → Tabs-Escape-Hatch-Schleife +
+    //     App-Hänger (1.22).
     //
-    // Vorteil: EIN Apple-Sheet, kein "Duplicate credential"-Dance, gleicher
-    // Flow wie die alte Production-Version.
-    //
-    // Trade-off: Wenn ein anon-User Favoriten/Cart angesammelt hat, sind
-    // die nach dem Apple-Sign-In NICHT mehr im neuen User. War in der
-    // alten Production-Version aber auch so — ist die akzeptierte Norm.
-
+    // `linkOrSignIn`: bei Anon-User → linkWithCredential (UID + Daten bleiben,
+    // EIN Apple-Sheet, kein zweiter Dialog). Nur wenn die Apple-Identität
+    // bereits einem ANDEREN Konto gehört, greift der Confirm + signInWith-
+    // Credential-Fallback (isCredentialAlreadyInUse deckt Apples
+    // `auth/unknown`+"duplicate"-Variante ab).
     try {
       const bundle = await getAppleCredential();
       if (!bundle) return false;
 
-      // Stale Anon-Session abmelden, sonst Firebase versucht implizit
-      // zu linken und triggert wieder den "Duplicate credential"-Pfad.
-      if (auth.currentUser?.isAnonymous) {
-        try { await signOut(auth); } catch {}
+      // Offline-Guard (1.22): Apples Token-Issue gelingt lokal oft auch
+      // offline, aber linkWithCredential/signInWithCredential muss zum
+      // Firebase-Server — offline hängt die Promise ewig. Früh + sauber
+      // abbrechen, damit der Caller die Offline-Meldung zeigt statt eines
+      // App-Hängers. (Fällt die Offline-Detection aus → isOnline()=true →
+      // No-op, kein Regress.)
+      if (!isOnline()) {
+        const err: any = new Error('Keine Internetverbindung');
+        err.code = 'auth/network-request-failed';
+        throw err;
       }
 
-      const userCredential = await signInWithCredential(auth, bundle.credential);
+      const userCredential = await linkOrSignIn(bundle.credential);
 
       const isNewUser = userCredential.additionalUserInfo?.isNewUser;
       if (isNewUser && userCredential.user) {
@@ -731,7 +740,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
         console.log(`✅ Apple Sign-In: NEUER USER → Profil angelegt (${userCredential.user.email})`);
       } else {
-        console.log('✅ Apple Sign-In: bestehender User');
+        console.log('✅ Apple Sign-In: bestehender/verknüpfter User');
+      }
+
+      // Namens-Sync (analog handleSignInWithGoogle, ClickUp 1.17): beim
+      // Anon→Apple-LINK ist isNewUser=false → oben wird kein Profil angelegt,
+      // und Firebase setzt den displayName beim Linken NICHT. Apple liefert
+      // fullName NUR beim allerersten Consent — wenn ein ECHTER Name dabei ist
+      // und das Profil noch namenlos ist, nachtragen, damit der User nicht
+      // "Anonymer Detektiv" bleibt. Nur füllen, nie einen selbst gewählten
+      // Namen überschreiben.
+      try {
+        const hasRealAppleName = !!(
+          bundle.fullName?.givenName || bundle.fullName?.familyName
+        );
+        if (hasRealAppleName && userCredential.user) {
+          const uid = userCredential.user.uid;
+          const profile = await getUserProfile(uid);
+          const currentName = (profile?.display_name ?? '').trim();
+          const isPlaceholder =
+            !currentName ||
+            currentName === 'Anonymer Nutzer' ||
+            currentName === 'Anonymer Detektiv';
+          if (profile && isPlaceholder) {
+            await patchUserProfile(uid, {
+              display_name: buildAppleDisplayName(bundle.fullName),
+            });
+            await refreshUserProfile();
+          }
+        }
+      } catch (e) {
+        console.warn('Apple Sign-In: Profil-Namen-Sync fehlgeschlagen (non-fatal):', e);
       }
       return true;
     } catch (error: any) {
