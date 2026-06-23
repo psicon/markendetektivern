@@ -481,6 +481,7 @@ export class FirestoreService {
     filters?: {
       categoryFilters?: string[];
       discounterFilters?: string[];
+      handelsmarkeFilters?: string[]; // handelsmarken Doc-IDs (ClickUp 86cad6c0d / 2.13a)
       stufeFilters?: number[];
       priceMin?: number;
       priceMax?: number;
@@ -508,9 +509,10 @@ export class FirestoreService {
       const sortDirection = sortBy === 'preis' ? 'asc' : 'asc';
       
       // Check if we have complex filters (not just category)
-      const hasComplexFilters = (filters?.discounterFilters && filters.discounterFilters.length > 0) || 
-                        (filters?.stufeFilters && filters.stufeFilters.length > 0) || 
-                        filters?.priceMin !== undefined || 
+      const hasComplexFilters = (filters?.discounterFilters && filters.discounterFilters.length > 0) ||
+                        (filters?.handelsmarkeFilters && filters.handelsmarkeFilters.length > 0) ||
+                        (filters?.stufeFilters && filters.stufeFilters.length > 0) ||
+                        filters?.priceMin !== undefined ||
                         filters?.priceMax !== undefined;
       
       // Sortierung möglich bei category-only Filtern (braucht composite index)
@@ -541,6 +543,22 @@ export class FirestoreService {
           // Multiple discounters - use 'in' query (max 10)
           const discounterRefs = filters.discounterFilters.slice(0, 10).map(id => doc(db, 'discounter', id));
           q = query(q, where('discounter', 'in', discounterRefs));
+        }
+      }
+
+      // ClickUp 86cad6c0d (2.13a): Handelsmarken-Filter im Browse-Modus.
+      // `produkte.handelsmarke` ist eine DocumentReference → handelsmarken.
+      // Equality-Filter; da `handelsmarke` in hasComplexFilters steht, läuft die
+      // Query ohne orderBy (canSort=false) → Single-Field-Equality, KEIN neuer
+      // Composite-Index nötig (für den Handelsmarke-allein-Fall).
+      if (filters?.handelsmarkeFilters && filters.handelsmarkeFilters.length > 0) {
+        if (filters.handelsmarkeFilters.length === 1) {
+          const handelsmarkeRef = doc(db, 'handelsmarken', filters.handelsmarkeFilters[0]);
+          q = query(q, where('handelsmarke', '==', handelsmarkeRef));
+        } else {
+          // Mehrere Handelsmarken → 'in' (max 10)
+          const handelsmarkeRefs = filters.handelsmarkeFilters.slice(0, 10).map(id => doc(db, 'handelsmarken', id));
+          q = query(q, where('handelsmarke', 'in', handelsmarkeRefs));
         }
       }
 
