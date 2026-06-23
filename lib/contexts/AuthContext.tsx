@@ -38,8 +38,56 @@ import { createUserProfile, getUserProfile, patchUserProfile, UserProfile } from
 import { scheduleRegionGuess } from '../services/regionGuess';
 import { isOnline } from '../services/network';
 import { FirestoreService } from '../services/firestore';
-import { doc, setDoc } from '@react-native-firebase/firestore';
+import { doc, getDoc, setDoc } from '@react-native-firebase/firestore';
 import { db } from '../firebase';
+
+/**
+ * ClickUp 86cacp981 (1.18) + 86cacp8xx (1.17): Überträgt die Onboarding-Felder
+ * vom (beim Provider-Login verworfenen) Anon-Konto auf das BESTEHENDE Konto,
+ * auf das gewechselt wurde — aber NUR Felder, die dort noch leer sind.
+ * Bestehende Werte des Kontos gewinnen (passend zum Confirm-Dialog „du machst
+ * mit deinem bestehenden Konto weiter").
+ *
+ * Strikt non-destruktiv: füllt nur Lücken, überschreibt nie. Der Caller wickelt
+ * den Aufruf in try/catch — scheitert er, läuft der Login normal weiter
+ * (schlimmstenfalls No-op = bisheriges Verhalten).
+ */
+const ONBOARDING_CARRY_KEYS = [
+  'favoriteMarket',
+  'favoriteMarketName',
+  'favoriteMarkets',
+  'primaryMarket',
+  'weeklyBudgetEur',
+  'priorities',
+  'prioritiesOther',
+  'country',
+] as const;
+
+async function carryOnboardingFields(fromUid: string, toUid: string): Promise<void> {
+  const [fromSnap, toSnap] = await Promise.all([
+    getDoc(doc(db, 'users', fromUid)),
+    getDoc(doc(db, 'users', toUid)),
+  ]);
+  if (!fromSnap.exists()) return;
+  const from = (fromSnap.data() ?? {}) as Record<string, any>;
+  const to = (toSnap.exists() ? toSnap.data() ?? {} : {}) as Record<string, any>;
+
+  const isEmpty = (v: any) =>
+    v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+
+  const patch: Record<string, any> = {};
+  for (const key of ONBOARDING_CARRY_KEYS) {
+    if (!isEmpty(from[key]) && isEmpty(to[key])) {
+      patch[key] = from[key];
+    }
+  }
+  if (Object.keys(patch).length > 0) {
+    await setDoc(doc(db, 'users', toUid), patch, { merge: true });
+    console.log(
+      `✅ Onboarding-Felder vom Anon-Konto übernommen: ${Object.keys(patch).join(', ')}`,
+    );
+  }
+}
 
 interface AdditionalProfileData {
   realName?: string;
@@ -482,6 +530,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     if (currentUser?.isAnonymous) {
+      const anonUid = currentUser.uid;
       try {
         return await linkWithCredential(currentUser, credential);
       } catch (e: any) {
@@ -493,7 +542,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             throw err;
           }
           // Fallback: drop anon, sign in with the existing account.
-          return await signInWithCredential(auth, credential);
+          const result = await signInWithCredential(auth, credential);
+          // ClickUp 86cacp981 (1.18) + 86cacp8xx (1.17): leere Felder des
+          // bestehenden Kontos aus den frischen Onboarding-Daten füllen
+          // (fill-only-missing). Non-fatal — Login läuft auch ohne Carry-over.
+          if (result.user && result.user.uid !== anonUid) {
+            try {
+              await carryOnboardingFields(anonUid, result.user.uid);
+            } catch (ce) {
+              console.warn('Onboarding-Carry-over fehlgeschlagen (non-fatal):', ce);
+            }
+          }
+          return result;
         }
         throw e;
       }
