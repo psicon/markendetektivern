@@ -1472,10 +1472,10 @@ export default function OnboardingScreen() {
                     IS_SMALL_SCREEN && { fontSize: 36, marginBottom: 4 },
                   ]}
                 >
-                  {yearlySavings}€
+                  {yearlySavings.toLocaleString('de-DE')} €
                 </Text>
                 <Text style={styles.yearlySubtext}>
-                  {monthlySavings}€/Monat · {weeklySavings}€/Woche
+                  {monthlySavings.toLocaleString('de-DE')} €/Monat · {weeklySavings.toLocaleString('de-DE')} €/Woche
                 </Text>
               </View>
 
