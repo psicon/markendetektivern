@@ -3,6 +3,7 @@ import Constants from 'expo-constants';
 import {
   createUserWithEmailAndPassword,
   EmailAuthProvider,
+  fetchSignInMethodsForEmail,
   FirebaseAuthTypes,
   linkWithCredential,
   onAuthStateChanged,
@@ -783,12 +784,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const handleSignInWithFacebook = async (): Promise<boolean> => {
+    // E-Mail aus dem FB-Graph merken, damit wir sie im catch (account-exists)
+    // noch haben (bundle ist dort nicht mehr in scope).
+    let fbEmail = '';
     try {
       const bundle = await getFacebookCredential();
       if (!bundle) {
         // User hat das Facebook-Sheet abgebrochen.
         return false;
       }
+      fbEmail = bundle.email || '';
       const userCredential = await linkOrSignIn(bundle.credential);
 
       // Facebook liefert beim ersten Sign-In email + displayName + photoURL
@@ -807,6 +812,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return false;
+
+      // ClickUp 86cacp92p (1.19): Die Facebook-E-Mail gehört bereits einem
+      // Konto mit ANDEREM Provider (Google/Apple/E-Mail). Firebase wirft
+      // `auth/account-exists-with-different-credential`. Statt des rohen
+      // FB-Debug-Strings (siehe Diagnostik-Block unten) dem User freundlich
+      // sagen, womit er sich anmelden soll (Copy-Ton positiv, gem. CLAUDE.md).
+      if (error?.code === 'auth/account-exists-with-different-credential') {
+        const email = fbEmail || error?.userInfo?.email || error?.email || '';
+        let methods: string[] = [];
+        if (email) {
+          try {
+            methods = await fetchSignInMethodsForEmail(auth, email);
+          } catch {
+            // egal — dann generischer Hinweis ohne Provider-Namen
+          }
+        }
+        const labels: Record<string, string> = {
+          'google.com': 'Google',
+          'apple.com': 'Apple',
+          'facebook.com': 'Facebook',
+          password: 'E-Mail & Passwort',
+        };
+        const known = methods
+          .map((m) => labels[m])
+          .filter((v): v is string => !!v);
+        const msg =
+          known.length > 0
+            ? `Mit dieser E-Mail gibt es schon ein Konto. Melde dich bitte mit ${known.join(' oder ')} an.`
+            : 'Mit dieser E-Mail gibt es bereits ein Konto bei einem anderen Anmelde-Weg. Bitte melde dich darüber an.';
+        const friendly: any = new Error(msg);
+        friendly.code = 'auth/account-exists-with-different-credential';
+        throw friendly;
+      }
+
       if (__DEV__) {
         if (error?.code === 'auth/facebook-sdk-unavailable') {
           console.warn('Facebook Sign-In skipped (SDK unavailable on this build):', error?.message);
