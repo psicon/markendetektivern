@@ -207,7 +207,11 @@ export default function FavoritesScreen() {
 
   const splitDataByTab = (data: any[]) => {
     const brandProducts = data.filter((item: any) => item.type === 'markenprodukt');
-    const noNameProducts = data.filter((item: any) => item.type === 'noname');
+    // ClickUp 86cad6d6h (6.9): externe Favoriten im NoNames-Bucket mitführen
+    // (minimal-invasiv, kein 3. Tab/PagerView-Umbau); Routing → external-product.
+    const noNameProducts = data.filter(
+      (item: any) => item.type === 'noname' || item.type === 'external',
+    );
 
     // Build PER-TAB market sets so the filter sheet only ever
     // shows markets that actually exist on that tab. (A market
@@ -329,6 +333,11 @@ export default function FavoritesScreen() {
 
   // ─── Card actions ───────────────────────────────────────────────
   const handleProductPress = (product: any) => {
+    if (product.type === 'external') {
+      // ClickUp 86cad6d6h (6.9): externes Produkt → eigene Route (product.id = EAN)
+      safePush(`/external-product/${product.id}` as any);
+      return;
+    }
     if (product.type === 'markenprodukt') {
       FirestoreService.prefetchComparisonData(product.id, true);
       safePush(`/product-comparison/${product.id}?type=brand` as any);

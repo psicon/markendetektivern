@@ -39,6 +39,8 @@ import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/Deta
 import { ProductCard } from '@/components/design/ProductCard';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
+import { useFavoriteStatus } from '@/lib/hooks/useFavorites';
+import { showFavoriteAddedToast, showFavoriteRemovedToast, showInfoToast } from '@/lib/services/ui/toast';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { db } from '@/lib/firebase';
 import {
@@ -78,6 +80,11 @@ export default function ExternalProductScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { theme, brand, shadows } = useTokens();
+
+  // ClickUp 86cad6d6h (6.9): externes Produkt favorisierbar machen.
+  // Doc-Id der external_products-/Favoriten-Einträge = bereinigte EAN.
+  const favEan = String(ean ?? '').replace(/\D/g, '');
+  const { isFavorite: isFav, toggleFavorite: toggleFav } = useFavoriteStatus(favEan, 'external');
   const { user } = useAuth();
 
   const [product, setProduct] = useState<ExternalProductDoc | null>(null);
@@ -498,35 +505,75 @@ export default function ExternalProductScreen() {
         // die Cascade von vorne. Damit kann man testen ob neue Sources
         // jetzt Daten haben statt am alten OpenFood-Cache zu hängen.
         right={
-          __DEV__ ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {/* ClickUp 86cad6d6h (6.9): Favoriten-Toggle für externe Produkte. */}
             <Pressable
-              onPress={() => loadProduct(true)}
+              onPress={async () => {
+                const wasFav = isFav;
+                try {
+                  await toggleFav({
+                    id: favEan,
+                    name: product.productName,
+                    preis: product.price,
+                    bild: product.imageUrl,
+                    type: 'external',
+                    brand: product.brandName,
+                  } as any);
+                  (wasFav ? showFavoriteRemovedToast : showFavoriteAddedToast)(
+                    product.productName ?? 'Produkt',
+                  );
+                } catch {
+                  showInfoToast('Favorit konnte nicht gespeichert werden.', 'error');
+                }
+              }}
               accessibilityRole="button"
-              accessibilityLabel="Cache leeren & neu suchen"
+              accessibilityLabel={isFav ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen'}
+              hitSlop={8}
               style={({ pressed }) => ({
-                paddingHorizontal: 10,
-                paddingVertical: 6,
-                borderRadius: 999,
-                backgroundColor: pressed ? brand.primaryContainer : theme.surfaceAlt,
-                flexDirection: 'row',
+                width: 40,
+                height: 40,
+                borderRadius: 20,
                 alignItems: 'center',
-                gap: 4,
+                justifyContent: 'center',
+                backgroundColor: pressed ? theme.surfaceAlt : 'transparent',
               })}
             >
-              <MaterialCommunityIcons name="refresh" size={14} color={brand.primary} />
-              <Text
-                style={{
-                  fontFamily,
-                  fontWeight: fontWeight.bold as any,
-                  fontSize: 11,
-                  color: brand.primary,
-                  letterSpacing: 0.2,
-                }}
-              >
-                Cache leeren
-              </Text>
+              <MaterialCommunityIcons
+                name={isFav ? 'heart' : 'heart-outline'}
+                size={24}
+                color={isFav ? '#E5484D' : theme.text}
+              />
             </Pressable>
-          ) : null
+            {__DEV__ ? (
+              <Pressable
+                onPress={() => loadProduct(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Cache leeren & neu suchen"
+                style={({ pressed }) => ({
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  borderRadius: 999,
+                  backgroundColor: pressed ? brand.primaryContainer : theme.surfaceAlt,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                })}
+              >
+                <MaterialCommunityIcons name="refresh" size={14} color={brand.primary} />
+                <Text
+                  style={{
+                    fontFamily,
+                    fontWeight: fontWeight.bold as any,
+                    fontSize: 11,
+                    color: brand.primary,
+                    letterSpacing: 0.2,
+                  }}
+                >
+                  Cache leeren
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
         }
       />
 
