@@ -20,7 +20,7 @@ import { isExpoGo, platformLog } from '@/lib/utils/platform';
 import { Camera, CameraType, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
-import { safePush } from '@/lib/utils/safeNav';
+import { safePush, safeReplace } from '@/lib/utils/safeNav';
 import { getDoc } from '@react-native-firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, InteractionManager, Linking, Platform, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -952,14 +952,25 @@ export default function BarcodeScannerScreen() {
                           // Navigiere zum Produkt. Externe (reweapify/openfood)
                           // haben kein product-comparison-Modell → eigene Route
                           // (EAN = Key), sonst bricht die Navigation (86ca…).
-                          let route: string;
+                          //
+                          // ClickUp 86cad6ccq (3.15): Externe via safeReplace
+                          // (statt push) öffnen — so liegt external-product
+                          // immer direkt über (tabs), egal ob via Live-Scan
+                          // (schon replace) oder hier aus der History. Damit
+                          // führt Zurück aus einer vom externen Produkt
+                          // geöffneten Alternative deterministisch auf Home
+                          // (statt mal Scanner / mal Home). Noname/Marken
+                          // bleiben push (Back → Scanner, wie gehabt).
                           if (item.productType === 'external') {
-                            route = `/external-product/${item.ean}${item.source ? `?source=${item.source}` : ''}`;
-                          } else if (item.productType === 'noname') {
-                            route = `/product-comparison/${item.productId}?type=noname`;
-                          } else {
-                            route = `/product-comparison/${item.productId}?type=brand`;
+                            safeReplace(
+                              `/external-product/${item.ean}${item.source ? `?source=${item.source}` : ''}` as any,
+                            );
+                            return;
                           }
+                          const route =
+                            item.productType === 'noname'
+                              ? `/product-comparison/${item.productId}?type=noname`
+                              : `/product-comparison/${item.productId}?type=brand`;
                           safePush(route as any);
                         }}
                         activeOpacity={0.7}
