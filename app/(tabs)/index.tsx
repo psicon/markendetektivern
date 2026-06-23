@@ -406,6 +406,15 @@ export default function HomeScreen() {
         const snap = await getDoc(doc(db, 'users', user.uid));
         const data = snap.exists ? snap.data() : null;
 
+        // ClickUp 86cad6cy5 (6.19/6.20): per-UID-Marker prüfen. Nach Abmelden
+        // bzw. Account-Löschen entsteht eine FRISCHE Anon-UID OHNE
+        // `onboardingCompletedAt` → das Sheet darf dann NICHT erneut kommen.
+        // (Das device-lokale `hasPassedOnboarding()` oben übersteht den Logout
+        // und würde sonst fälschlich durchlassen; `onboardingCompletedAt` wird
+        // im Onboarding-Climax UND -Skip ans User-Doc geschrieben, also nur für
+        // Identitäten gesetzt, die den Flow tatsächlich durchlaufen haben.)
+        if (data?.onboardingCompletedAt == null) { why('onboardingCompletedAt fehlt (frische UID nach Logout/Delete)'); return; }
+
         // Daten bereits vorhanden? Nicht nochmal fragen.
         if (data?.age != null) { why('age schon im User-Doc'); return; }
         if (typeof data?.gender === 'string' && data.gender.length > 0) { why('gender schon im User-Doc'); return; }

@@ -527,6 +527,23 @@ export default function OnboardingScreen() {
       await OnboardingService.markSkippedMid();
     }
 
+    // ClickUp 86cad6cy5 (6.19/6.20): per-UID-Marker ans User-Doc, dass DIESE
+    // Identität den Onboarding-Flow durchlaufen hat (auch bei Skip) — damit das
+    // Demografie-Sheet auf Home greift, aber NICHT nach Logout/Account-Löschen
+    // (frische Anon-UID hat das Feld nicht). Non-fatal.
+    try {
+      const skipUid = authMod.currentUser?.uid;
+      if (skipUid) {
+        await setDoc(
+          doc(db, 'users', skipUid),
+          { onboardingCompletedAt: serverTimestamp() },
+          { merge: true },
+        );
+      }
+    } catch (e) {
+      console.warn('⚠️ skip onboardingCompletedAt write failed:', e);
+    }
+
     // KEIN pending_onboarding_paywall bei Skip (T2 Variante B):
     // User der das Onboarding wegwischt soll NICHT sofort eine
     // Paywall sehen — kostenlos-erst-ausprobieren. Paywall greift
