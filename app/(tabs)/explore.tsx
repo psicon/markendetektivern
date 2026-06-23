@@ -80,6 +80,7 @@ import { DemographicsPromptSheet, type DemographicsResult } from '@/components/o
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { showInfoToast } from '@/lib/services/ui/toast';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { usePreferenceProfile, dominantDimension } from '@/hooks/usePreferenceProfile';
@@ -2592,8 +2593,19 @@ export default function ExploreScreen() {
   // (Sicherheitsnetz + Instant-Feedback bis die neue Response da ist).
 
   const submitSearch = useCallback(() => {
+    // ClickUp 86cad6dep (2.8): Min-3-Zeichen-Guard auch hier (nicht nur in Home).
+    // submitSearch ist der einzige manuelle Submit-Pfad (Keyboard-Return + Such-
+    // Button) in Stöbern; runSearch selbst bleibt ungated, weil der Home-Route-
+    // Pfad bereits ≥3 erzwingt. 1-2 Zeichen → kurzer Hinweis; leer → still.
+    const trimmed = query.trim();
+    if (trimmed.length < 3) {
+      if (trimmed.length > 0) {
+        showInfoToast('Bitte mindestens 3 Zeichen für die Suche eingeben.', 'info', scheme);
+      }
+      return;
+    }
     void runSearch(query);
-  }, [query, runSearch]);
+  }, [query, runSearch, scheme]);
 
   const clearSearch = useCallback(() => {
     // In-flight Such-Pagination invalidieren (Seq-Bump) + Guard-Flag
