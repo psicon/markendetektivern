@@ -526,6 +526,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (e?.code === 'auth/email-already-in-use') return true;
       const msg = String(e?.message ?? '').toLowerCase();
       if (e?.code === 'auth/unknown' && msg.includes('duplicate')) return true;
+      // R3 (ClickUp 86cacp8xx): Apple-Reinstall-Link-Konflikt. Firebase-iOS
+      // mappt die Server-Prosa "duplicate credential received" auf KEINEN
+      // bekannten Code → fällt auf auth/internal-error zurück (über die
+      // RNFirebase-Bridge), sodass die Code-Checks oben NICHT greifen, der
+      // Roh-Fehler beim User landet UND die frische Anon-Session stuck bleibt
+      // (jeder Retry wiederholt denselben Fehler; nach Neustart = Gast).
+      // Die Credential-Konflikt-Prosa daher CODE-AGNOSTISCH matchen, damit der
+      // Duplicate in den Fallback (confirmAccountSwitch → signInWithCredential
+      // = sauberer Wechsel ins bestehende Apple-Konto) geroutet wird. Eng auf
+      // die Konflikt-Prosa beschränkt, um transiente internal-errors nicht zu
+      // verschlucken. (SDK-Versionen variieren die Prosa → beide Formen.)
+      if (msg.includes('duplicate credential')) return true;
+      if (msg.includes('credential') && msg.includes('already')) return true;
       return false;
     };
 
