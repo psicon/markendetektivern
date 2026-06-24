@@ -72,7 +72,7 @@ export function useFavorites() {
 
   const addToFavorites = useCallback(async (
     productId: string, 
-    productType: 'markenprodukt' | 'noname' | 'external',
+    productType: 'markenprodukt' | 'noname',
     productData?: any
   ) => {
     if (!user) {
@@ -101,7 +101,7 @@ export function useFavorites() {
 
   const removeFromFavorites = useCallback(async (
     productId: string, 
-    productType: 'markenprodukt' | 'noname' | 'external'
+    productType: 'markenprodukt' | 'noname'
   ) => {
     if (!user) return false;
 
@@ -117,7 +117,7 @@ export function useFavorites() {
 
   const toggleFavorite = useCallback(async (
     productId: string,
-    productType: 'markenprodukt' | 'noname' | 'external',
+    productType: 'markenprodukt' | 'noname',
     productData?: any
   ) => {
     if (!user) return false;
@@ -138,22 +138,17 @@ export function useFavorites() {
         console.error('❌ Save Product Achievement Tracking Fehler:', error);
       });
 
-      // 🎯 Track zu Journey — NICHT für externe Produkte: trackAddToFavorites
-      // baut die productRef über collectionForProductType('noname'/'brand') und
-      // kennt 'external' nicht → würde eine Bogus produkte/{ean}-Ref schreiben
-      // (ClickUp 86cad6d6h). save_product-Achievement oben läuft trotzdem.
-      if (productType !== 'external') {
-        const productName = productData?.name || productData?.produktName || 'Unbekanntes Produkt';
-        const journeyProductType = productType === 'markenprodukt' ? 'brand' : 'noname';
+      // 🎯 Track zu Journey
+      const productName = productData?.name || productData?.produktName || 'Unbekanntes Produkt';
+      const journeyProductType = productType === 'markenprodukt' ? 'brand' : 'noname';
 
-        const priceInfo = {
-          price: productData?.preis || productData?.price || 0,
-          savings: productData?.ersparnis || productData?.savings || 0
-        };
+      const priceInfo = {
+        price: productData?.preis || productData?.price || 0,
+        savings: productData?.ersparnis || productData?.savings || 0
+      };
 
-        const journeyTrackingService = (await import('../services/journeyTrackingService')).default;
-        journeyTrackingService.trackAddToFavorites(productId, productName, journeyProductType, user.uid, priceInfo);
-      }
+      const journeyTrackingService = (await import('../services/journeyTrackingService')).default;
+      journeyTrackingService.trackAddToFavorites(productId, productName, journeyProductType, user.uid, priceInfo);
     }
 
     console.log(`✅ Toggled favorite: ${productId} - now: ${isNowFavorite}`);
@@ -162,7 +157,7 @@ export function useFavorites() {
 
   const isFavorite = useCallback(async (
     productId: string, 
-    productType: 'markenprodukt' | 'noname' | 'external'
+    productType: 'markenprodukt' | 'noname'
   ) => {
     if (!user) return false;
 
@@ -177,7 +172,7 @@ export function useFavorites() {
   // Helper: Ist Produkt in lokalen Favoriten?
   const isLocalFavorite = useCallback((
     productId: string, 
-    productType: 'markenprodukt' | 'noname' | 'external'
+    productType: 'markenprodukt' | 'noname'
   ) => {
     return favorites.some(fav => 
       fav.productId === productId && fav.productType === productType
@@ -206,7 +201,7 @@ export function useFavorites() {
 /**
  * Hook für einzelne Produkt-Favoriten Status  
  */
-export function useFavoriteStatus(productId: string, productType: 'markenprodukt' | 'noname' | 'external') {
+export function useFavoriteStatus(productId: string, productType: 'markenprodukt' | 'noname') {
   const { user } = useAuth();
   const [isFav, setIsFav] = useState(false);
   const [loading, setLoading] = useState(true);

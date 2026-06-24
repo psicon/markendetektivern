@@ -5,7 +5,7 @@ export interface FavoriteProduct {
   id: string;
   userId: string;
   productId: string;
-  productType: 'markenprodukt' | 'noname' | 'external';
+  productType: 'markenprodukt' | 'noname';
   productData?: any;
   addedAt: Date;
 }
@@ -16,7 +16,7 @@ export interface ProductForFavorites {
   preis: number;
   packSize?: number;
   bild?: string;
-  type: 'markenprodukt' | 'noname' | 'external';
+  type: 'markenprodukt' | 'noname';
   category?: string;
   brand?: string;
 }
@@ -39,7 +39,7 @@ class FavoritesService {
   async addToFavorites(
     userId: string, 
     productId: string, 
-    productType: 'markenprodukt' | 'noname' | 'external',
+    productType: 'markenprodukt' | 'noname',
     productData?: any
   ): Promise<void> {
     try {
@@ -95,7 +95,7 @@ class FavoritesService {
   async removeFromFavorites(
     userId: string, 
     productId: string, 
-    productType: 'markenprodukt' | 'noname' | 'external'
+    productType: 'markenprodukt' | 'noname'
   ): Promise<void> {
     try {
       // L Migration: doc(parent, ...) wo parent ein DocumentReference ist
@@ -128,7 +128,7 @@ class FavoritesService {
   async isFavorite(
     userId: string, 
     productId: string, 
-    productType: 'markenprodukt' | 'noname' | 'external'
+    productType: 'markenprodukt' | 'noname'
   ): Promise<boolean> {
     try {
       // L Migration: doc(parent, ...) wo parent ein DocumentReference ist
@@ -243,27 +243,6 @@ class FavoritesService {
                 savings: savingsResult,
                 hersteller, // EXAKT wie im Einkaufszettel: hersteller.name + hersteller.bild
                 discounter: null
-              };
-            }
-          } else if (favorite.productType === 'external') {
-            // ClickUp 86cad6d6h (6.9): Externe Produkte aus external_products
-            // (Doc-Id = EAN). MUSS vor dem produkte/markenProdukte-else stehen,
-            // sonst landet die EAN im NoName-Pfad und wird zu null gefiltert.
-            // Auf das Card-Schema mappen (name/preis/bild/type/brand).
-            const extDoc = await getDoc(doc(db, 'external_products', favorite.productId));
-            if (extDoc.exists()) {
-              const raw = extDoc.data() as any;
-              productData = {
-                ...raw,
-                id: favorite.productId,
-                name: raw.productName ?? raw.name ?? 'Produkt',
-                preis: typeof raw.price === 'number' ? raw.price : 0,
-                bild: raw.imageUrl ?? raw.bild ?? null,
-                type: 'external',
-                brand: raw.brandName ?? null,
-                savings: 0,
-                handelsmarke: null,
-                discounter: null,
               };
             }
           } else {
@@ -387,7 +366,7 @@ class FavoritesService {
   async toggleFavorite(
     userId: string, 
     productId: string, 
-    productType: 'markenprodukt' | 'noname' | 'external',
+    productType: 'markenprodukt' | 'noname',
     productData?: any
   ): Promise<boolean> {
     try {
