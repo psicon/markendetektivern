@@ -532,7 +532,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (currentUser?.isAnonymous) {
       const anonUid = currentUser.uid;
       try {
-        return await linkWithCredential(currentUser, credential);
+        const linked = await linkWithCredential(currentUser, credential);
+        // R2 (ClickUp 86cadntj7): Beim In-Place-Upgrade Anon→Provider bleibt
+        // die UID gleich → `onAuthStateChanged` feuert NICHT (RNFirebase
+        // emittiert beim Link nur onUserChanged/onIdTokenChanged; der native
+        // iOS-AuthState-Listener feuert nur bei Identitätswechsel). Dadurch
+        // blieben Context-`user`/`isAnonymous` stehen → die UI behandelte den
+        // frisch eingeloggten User weiter als Gast („Anonymer Detektiv"),
+        // obwohl Firebase-seitig isAnonymous bereits false war (der Avatar
+        // updatete via refreshUserProfile → genau der gemeldete Split).
+        // Hier den State explizit aus dem frischen auth.currentUser nachziehen.
+        // UID unverändert → die schweren onAuthStateChanged-Side-Effects
+        // (Gamification-Reset/Init, createUserProfile, Streak) NICHT erneut
+        // auslösen; nur User-Ref + isAnonymous fürs UI aktualisieren.
+        const upgraded = auth.currentUser;
+        if (upgraded) {
+          setUser(upgraded);
+          setIsAnonymous(upgraded.isAnonymous ?? false);
+        }
+        return linked;
       } catch (e: any) {
         if (isCredentialAlreadyInUse(e)) {
           const confirmed = await confirmAccountSwitch();
