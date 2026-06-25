@@ -125,6 +125,13 @@ interface AuthContextType {
   logout: () => Promise<void>;
   isAppleAuthAvailable: () => Promise<boolean>;
   refreshUserProfile: () => Promise<void>;
+  /** ClickUp 86cacp92p (1.19): geführtes Facebook↔E-Mail/Passwort-Linking.
+   *  Nicht-null = Link-Sheet zeigen (FB-E-Mail gehört einem Passwort-Konto). */
+  facebookLinkPrompt: { email: string } | null;
+  /** Im Link-Sheet: mit dem Passwort ins Bestandskonto einloggen + FB verknüpfen. */
+  completeFacebookLink: (password: string) => Promise<void>;
+  /** Link-Sheet abbrechen (Pending-FB-Credential verwerfen). */
+  cancelFacebookLink: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -181,6 +188,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAnonymous, setIsAnonymous] = useState(false);
+  // ClickUp 86cacp92p (1.19): Pending FB-Credential fürs geführte Linking.
+  // useRef (KEIN State, nie persistiert): der FB-Access-Token ist sensibel +
+  // muss den Re-Auth-Round-Trip ohne Re-Render-Race überleben.
+  const pendingFbLink = useRef<{ credential: FirebaseAuthTypes.AuthCredential; email: string } | null>(null);
+  const [facebookLinkPrompt, setFacebookLinkPrompt] = useState<{ email: string } | null>(null);
   // T17.14: True während logout() läuft (signOut → signInAnonymously).
   // Tabs-Layout liest das damit die "user==null"-Escape-Hatch zu
   // /auth/welcome NICHT feuert während des kurzen null-User-Fensters
@@ -903,9 +915,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const handleSignInWithFacebook = async (): Promise<boolean> => {
-    // E-Mail aus dem FB-Graph merken, damit wir sie im catch (account-exists)
-    // noch haben (bundle ist dort nicht mehr in scope).
+    // E-Mail + Credential aus dem FB-Graph merken, damit wir sie im catch
+    // (account-exists) noch haben (bundle ist dort nicht mehr in scope).
     let fbEmail = '';
+    let fbCredential: FirebaseAuthTypes.AuthCredential | null = null;
     try {
       const bundle = await getFacebookCredential();
       if (!bundle) {
@@ -913,6 +926,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return false;
       }
       fbEmail = bundle.email || '';
+      fbCredential = bundle.credential;
       const userCredential = await linkOrSignIn(bundle.credential);
 
       // Facebook liefert beim ersten Sign-In email + displayName + photoURL
@@ -956,6 +970,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const known = methods
           .map((m) => labels[m])
           .filter((v): v is string => !!v);
+        // ClickUp 86cacp92p (1.19): Manons Fall — die FB-E-Mail gehört einem
+        // E-Mail/Passwort-Konto. Statt Sackgassen-Hinweis ein GEFÜHRTES Linking:
+        // FB-Credential merken + Link-Sheet zeigen. Der User loggt sich EINMAL
+        // mit Passwort ein (completeFacebookLink) → danach ist FB ans Konto
+        // geknüpft und künftige FB-Logins funktionieren. (Scope bewusst nur
+        // Passwort; Google/Apple-Konten bekommen weiter den Hinweis unten.)
+        if (methods.includes('password') && fbCredential) {
+          pendingFbLink.current = { credential: fbCredential, email };
+          setFacebookLinkPrompt({ email });
+          return false;
+        }
         const msg =
           known.length > 0
             ? `Mit dieser E-Mail gibt es schon ein Konto. Melde dich bitte mit ${known.join(' oder ')} an.`
@@ -987,6 +1012,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       throw error;
     }
+  };
+
+  // ClickUp 86cacp92p (1.19): Aktionen fürs FB-Link-Sheet.
+  const cancelFacebookLink = () => {
+    pendingFbLink.current = null;
+    setFacebookLinkPrompt(null);
+  };
+
+  const completeFacebookLink = async (password: string) => {
+    const pending = pendingFbLink.current;
+    if (!pending) {
+      throw new Error('Keine Facebook-Verknüpfung ausstehend');
+    }
+    // 1. In das bestehende E-Mail/Passwort-Konto einloggen. Das Link-Sheet IST
+    //    die Account-Switch-Bestätigung → signInWithEmailAndPassword direkt
+    //    (kein zusätzlicher confirmAccountSwitch-Dialog wie in signIn()).
+    await signInWithEmailAndPassword(auth, pending.email, password);
+    // 2. FB-Credential ans jetzt eingeloggte Konto knüpfen → künftige FB-Logins
+    //    treffen den normalen signInWithCredential-Erfolgspfad.
+    try {
+      if (auth.currentUser) {
+        await linkWithCredential(auth.currentUser, pending.credential);
+      }
+    } catch (e: any) {
+      // credential-already-in-use = FB ist bereits verknüpft (Race) → als Erfolg behandeln.
+      if (e?.code !== 'auth/credential-already-in-use') throw e;
+    }
+    pendingFbLink.current = null;
+    setFacebookLinkPrompt(null);
   };
 
   const handleSignInAnonymously = async () => {
@@ -1223,6 +1277,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       logout,
       isAppleAuthAvailable,
       refreshUserProfile,
+      facebookLinkPrompt,
+      completeFacebookLink,
+      cancelFacebookLink,
       ...__DEV__ && { resetAuthForDevelopment },
     }),
     [
@@ -1239,6 +1296,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       handleSignInAnonymously,
       logout,
       refreshUserProfile,
+      facebookLinkPrompt,
+      completeFacebookLink,
+      cancelFacebookLink,
     ],
   );
   const value = PERF.memoAuthValue
@@ -1256,6 +1316,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         isAppleAuthAvailable,
         refreshUserProfile,
+        facebookLinkPrompt,
+        completeFacebookLink,
+        cancelFacebookLink,
         ...(__DEV__ && { resetAuthForDevelopment }),
       };
 

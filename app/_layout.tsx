@@ -20,6 +20,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { FontLoader } from '@/components/ui/FontLoader';
 import { GamificationProvider } from '@/components/ui/GamificationProvider';
 import { SplashScreen } from '@/components/ui/SplashScreen';
+import { FacebookLinkSheet } from '@/components/auth/FacebookLinkSheet';
 import { SurveyProvider } from '@/components/survey/SurveyProvider';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -247,6 +248,11 @@ function ThemedApp() {
                   indicator: { marginRight: 0 },
                 }}
               />
+
+              {/* ClickUp 86cacp92p (1.19): globales Facebook↔E-Mail/Passwort-
+                  Link-Sheet. Erscheint nur, wenn ein FB-Login auf ein
+                  bestehendes E-Mail/Passwort-Konto trifft. */}
+              <FacebookLinkSheet />
             </NavigationThemeProvider>
               </SurveyProvider>
               </GamificationProvider>
