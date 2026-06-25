@@ -434,59 +434,75 @@ export default function HomeScreen() {
     return () => { cancelled = true; };
   }, [user?.uid, homeCoachmark.visible, isFocused, anyWalkthroughActive]);
 
-  const handleDemographicsSubmit = useCallback(async (result: DemographicsResult) => {
+  const handleDemographicsSubmit = useCallback((result: DemographicsResult) => {
+    // R7 (ClickUp 86cacp9pc): Sheet SOFORT schließen; den Firestore-Write
+    // fire-and-forget (lokaler Cache updatet sofort, kein UI-Block, offline
+    // kein Hänger) und refreshUserProfile ERST NACH den Animationen. Vorher
+    // löste das awaitete refreshUserProfile sein setUserProfile ~200–500ms
+    // später aus — MITTEN in der Sheet-Dismiss-Animation — und re-renderte den
+    // MorphingHeader-BlurView des Home-Screens → genau das gemeldete Flimmern.
     setShowDemographicsSheet(false);
-    try {
-      if (!user?.uid) return;
-      const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
-      const { db } = await import('@/lib/firebase');
-      // T11.18: Wir speichern eine eigenständige Capture-Timestamp
-      // SPEZIFISCH für age (nicht nur das umbrella `demographicsCapturedAt`)
-      // damit wir das Alter über die Zeit hochrechnen können — User
-      // hat heute 32 angegeben, in 4 Jahren ist er ≈ 36.
-      // Plus `ageReportedYear` für schnellen Client-side-Lookup
-      // ohne Firestore-Timestamp-Deserialisierung.
-      const now = new Date();
-      await setDoc(
-        doc(db, 'users', user.uid),
-        {
-          age: result.age,
-          ageBucket: result.ageBucket,
-          ageReportedAt: serverTimestamp(),
-          ageReportedYear: now.getFullYear(),
-          gender: result.gender,
-          demographicsCapturedAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
-      await AsyncStorage.removeItem('pending_demographics_prompt');
-      // T17.15: AuthContext-userProfile refreshen, sonst sieht
-      // email-register die frisch geschriebenen age/gender Werte
-      // NICHT (Pre-Fill bleibt leer, User muss alles nochmal eingeben).
-      try { await refreshUserProfile(); } catch {}
-    } catch (err) {
-      console.warn('[Home] demographics save failed:', err);
-    }
+    if (!user?.uid) return;
+    const uid = user.uid;
+    const now = new Date();
+    void (async () => {
+      try {
+        const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
+        const { db } = await import('@/lib/firebase');
+        // T11.18: eigenständige age-Capture-Timestamp + ageReportedYear, damit
+        // wir das Alter über die Zeit hochrechnen können (heute 32 → in 4 Jahren ≈ 36).
+        void setDoc(
+          doc(db, 'users', uid),
+          {
+            age: result.age,
+            ageBucket: result.ageBucket,
+            ageReportedAt: serverTimestamp(),
+            ageReportedYear: now.getFullYear(),
+            gender: result.gender,
+            demographicsCapturedAt: serverTimestamp(),
+          },
+          { merge: true },
+        ).catch((err) => console.warn('[Home] demographics save failed:', err));
+        await AsyncStorage.removeItem('pending_demographics_prompt');
+      } catch (err) {
+        console.warn('[Home] demographics save failed:', err);
+      }
+    })();
+    // T17.15: AuthContext-userProfile refreshen (sonst sieht email-register die
+    // frischen age/gender-Werte nicht) — aber hinter den Animationen (s.o.).
+    // Liest den lokal bereits geupdateten Cache, braucht den Server-Ack nicht.
+    InteractionManager.runAfterInteractions(() => {
+      refreshUserProfile().catch(() => {});
+    });
   }, [user?.uid, refreshUserProfile]);
 
-  const handleDemographicsSkip = useCallback(async () => {
+  const handleDemographicsSkip = useCallback(() => {
+    // R7 (86cacp9pc): analog Submit — Sheet sofort schließen, Write
+    // fire-and-forget, refreshUserProfile hinter die Animation (kein Flimmern).
     setShowDemographicsSheet(false);
-    try {
-      await AsyncStorage.removeItem('pending_demographics_prompt');
-      if (!user?.uid) return;
-      const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
-      const { db } = await import('@/lib/firebase');
-      await setDoc(
-        doc(db, 'users', user.uid),
-        {
-          demographicsSkipped: true,
-          demographicsSkippedAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
-      try { await refreshUserProfile(); } catch {}
-    } catch (err) {
-      console.warn('[Home] demographics skip-mark failed:', err);
+    const uid = user?.uid;
+    void (async () => {
+      try {
+        await AsyncStorage.removeItem('pending_demographics_prompt');
+        if (!uid) return;
+        const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
+        const { db } = await import('@/lib/firebase');
+        void setDoc(
+          doc(db, 'users', uid),
+          {
+            demographicsSkipped: true,
+            demographicsSkippedAt: serverTimestamp(),
+          },
+          { merge: true },
+        ).catch((err) => console.warn('[Home] demographics skip-mark failed:', err));
+      } catch (err) {
+        console.warn('[Home] demographics skip-mark failed:', err);
+      }
+    })();
+    if (user?.uid) {
+      InteractionManager.runAfterInteractions(() => {
+        refreshUserProfile().catch(() => {});
+      });
     }
   }, [user?.uid, refreshUserProfile]);
 
