@@ -507,6 +507,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    */
   const linkOrSignIn = async (
     credential: FirebaseAuthTypes.AuthCredential,
+    // R3-deeper (ClickUp 86cacp8xx): optionaler Refresher für ein FRISCHES
+    // Provider-Credential. Apple-idTokens sind bei Firebase EINMALIG einlösbar:
+    // nach einem gescheiterten `linkWithCredential` ist das Credential
+    // verbraucht, und ein `signInWithCredential` mit DEMSELBEN Credential failt
+    // erneut mit "duplicate credential" (genau Manons Screenrecording: Confirm-
+    // Dialog erscheint → Sign-in failt dann). Im Account-Switch-Fallback daher
+    // ein frisches Credential holen (Apple re-prompt — passiert nur im seltenen
+    // Konflikt-/Reinstall-Fall). Nur Provider mit Single-Use-Credential (Apple)
+    // übergeben den Refresher; ohne ihn bleibt das bisherige Verhalten.
+    refreshCredential?: () => Promise<FirebaseAuthTypes.AuthCredential | null>,
   ): Promise<FirebaseAuthTypes.UserCredential> => {
     const currentUser = auth.currentUser;
     // Helper: "credential already attached to a different user"
@@ -573,7 +583,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             throw err;
           }
           // Fallback: drop anon, sign in with the existing account.
-          const result = await signInWithCredential(auth, credential);
+          // R3-deeper (86cacp8xx): das ursprüngliche Credential kann beim Sign-in
+          // single-use-verbraucht sein (Apple-idToken). Wenn ein Refresher da ist,
+          // ein FRISCHES Credential holen — sonst failt signInWithCredential mit
+          // demselben "duplicate credential" wie das vorangegangene linkWithCredential.
+          let signInCred = credential;
+          if (refreshCredential) {
+            const fresh = await refreshCredential();
+            if (fresh) signInCred = fresh;
+          }
+          const result = await signInWithCredential(auth, signInCred);
           // ClickUp 86cacp981 (1.18) + 86cacp8xx (1.17): leere Felder des
           // bestehenden Kontos aus den frischen Onboarding-Daten füllen
           // (fill-only-missing). Non-fatal — Login läuft auch ohne Carry-over.
@@ -821,7 +840,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw err;
       }
 
-      const userCredential = await linkOrSignIn(bundle.credential);
+      // R3-deeper (86cacp8xx): Refresher fürs Account-Switch-Fallback mitgeben.
+      // Apple-idToken ist EINMALIG einlösbar — wenn der anon→Apple-Link mit
+      // "duplicate credential" failt (Apple-Identität gehört bereits einem
+      // anderen Konto, z.B. nach Reinstall), ist das erste Credential verbraucht.
+      // Dann holt linkOrSignIn über diesen Callback ein FRISCHES Apple-Credential,
+      // bevor es signInWithCredential ins bestehende Konto macht.
+      const userCredential = await linkOrSignIn(bundle.credential, async () => {
+        const fresh = await getAppleCredential();
+        return fresh?.credential ?? null;
+      });
 
       const isNewUser = userCredential.additionalUserInfo?.isNewUser;
       if (isNewUser && userCredential.user) {
