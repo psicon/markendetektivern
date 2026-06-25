@@ -985,7 +985,7 @@ export default function OnboardingScreen() {
 
 
           <View style={styles.mainContent}>
-            <Text style={styles.stepTitle}>Wo kaufst du am liebsten ein?</Text>
+            <Text style={[styles.stepTitle, IS_SMALL_SCREEN && { fontSize: 22, marginBottom: 6 }]}>Wo kaufst du am liebsten ein?</Text>
              {/* Country-Toggle (Pills): wir haben das Land aus der
                  Device-Locale vorbelegt (DE/AT/CH), aber falls's
                  daneben liegt kann der User hier kompakt korrigieren.
@@ -1007,7 +1007,7 @@ export default function OnboardingScreen() {
                  </TouchableOpacity>
                ))}
              </View>
-             <Text style={styles.counter}>{selectedMarkets.length}/3 ausgewählt</Text>
+             <Text style={[styles.counter, IS_SMALL_SCREEN && { marginBottom: 4 }]}>{selectedMarkets.length}/3 ausgewählt</Text>
              {/* Hinweis dass der ERSTE ausgewählte Markt zum Lieblingsmarkt
                  wird. Sichtbar erst nachdem mindestens ein Markt
                  selektiert ist — sonst zeigt der Satz ins Leere. Der
@@ -1033,15 +1033,19 @@ export default function OnboardingScreen() {
               data={markets}
               numColumns={2}
               keyExtractor={(item) => item.id}
-              // ClickUp 86cacp9ar (1.6): Scroll-Indikator SICHTBAR — sonst sieht
-              // der User bei offener Tastatur nicht, dass die Kachel-Liste noch
-              // weiter scrollbar ist (weitere Märkte hinter dem Keyboard).
+              // ClickUp 86cacp9ar (1.6/1.8) — echter Layout-Fix: Die FlatList ist
+              // das EINZIGE flexible Kind in mainContent. Ohne flex frisst der
+              // Keyboard-Druck (via KeyboardAvoidingView 'padding') die ganze
+              // Listenhöhe → auf kleinen Displays kollabiert sie auf ~0 und es ist
+              // KEINE Kachel mehr wählbar. flex:1 lässt sie eine echte (scrollbare)
+              // Höhe behalten; paddingBottom gibt der zuletzt angehängten
+              // "Anderer"-Kachel Scroll-Runway. automaticallyAdjustKeyboardInsets
+              // ENTFERNT — kämpfte mit dem padding-KeyboardAvoidingView (der den
+              // Input bereits über die Tastatur schiebt). keyboardShouldPersistTaps
+              // bleibt, damit ein Tile-Tap nicht erst das Keyboard schließt.
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: 24 }}
               showsVerticalScrollIndicator={true}
-              // iOS: scroll-content automatisch so anpassen dass das
-              // fokussierte TextInput überm Keyboard sichtbar bleibt.
-              // Plus keyboardShouldPersistTaps damit ein Tap auf eine
-              // Market-Tile nicht den Keyboard schließt + den Tap eats.
-              automaticallyAdjustKeyboardInsets
               keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => {
                 const isSelected = selectedMarkets.some(m => m.id === item.id);
@@ -1120,7 +1124,7 @@ export default function OnboardingScreen() {
             />
 
             {selectedMarkets.some(m => m.isOther) && (
-              <View style={styles.textInputContainer}>
+              <View style={[styles.textInputContainer, IS_SMALL_SCREEN && { marginTop: 12, marginBottom: 12 }]}>
                 <TextInput
                   style={styles.textInput}
                   placeholder="Welcher Markt ist das?"
@@ -1242,19 +1246,21 @@ export default function OnboardingScreen() {
           
 
           <View style={styles.mainContent}>
-            <Text style={styles.stepTitle}>Was ist dir beim Einkauf wichtig?</Text>
+            <Text style={[styles.stepTitle, IS_SMALL_SCREEN && { fontSize: 22, marginBottom: 6 }]}>Was ist dir beim Einkauf wichtig?</Text>
             <Text style={styles.subtitle}>Wähle bis zu 3 Aspekte</Text>
-            <Text style={styles.counter}>{priorities.length}/3 ausgewählt</Text>
+            <Text style={[styles.counter, IS_SMALL_SCREEN && { marginBottom: 4 }]}>{priorities.length}/3 ausgewählt</Text>
             
             <FlatList
               data={PRIORITIES}
               numColumns={2}
               keyExtractor={(item) => item.id}
-              // ClickUp 86cacp9ar (1.8): Scroll-Indikator SICHTBAR — sonst sieht
-              // der User bei offener Tastatur nicht, dass die Prioritäten-Liste
-              // noch weiter scrollbar ist (z.B. "Anderes" hinter dem Keyboard).
+              // ClickUp 86cacp9ar (1.8) — echter Layout-Fix (analog Markt-Step):
+              // flex:1 verhindert den Kollaps der Liste bei offener Tastatur;
+              // paddingBottom gibt der "Anderes"-Kachel Scroll-Runway;
+              // automaticallyAdjustKeyboardInsets entfernt (kämpfte mit der KAV).
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: 24 }}
               showsVerticalScrollIndicator={true}
-              automaticallyAdjustKeyboardInsets
               keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => {
                 const isSelected = priorities.includes(item.id);
@@ -1298,7 +1304,7 @@ export default function OnboardingScreen() {
             />
 
             {priorities.includes('anderes') && (
-              <View style={styles.textInputContainer}>
+              <View style={[styles.textInputContainer, IS_SMALL_SCREEN && { marginTop: 12, marginBottom: 12 }]}>
                 <TextInput
                   style={styles.textInput}
                   placeholder="Was ist dir sonst noch wichtig?"
