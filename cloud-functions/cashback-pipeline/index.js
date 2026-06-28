@@ -124,7 +124,7 @@ const CONFIG_DOC_PATH = 'cashback_config/v1';
 // months. Go-Live (ClickUp 86caf62v6): echtes Limit aktiviert (vorher 9999 =
 // quasi aus, nur fürs Testen). Das aktions-spezifische maxAgeDays hat weiterhin
 // Vorrang (effectiveMaxAgeDays); per cashback_config tunebar machbar (future).
-const MAX_BON_AGE_DAYS = 14;
+const MAX_BON_AGE_DAYS = 7;
 
 // Hamming-distance threshold for "near-duplicate" dHash matches.
 // 0 = bit-identical (same image, possibly re-encoded at different
