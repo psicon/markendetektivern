@@ -1869,6 +1869,18 @@ Docs/Collections:
 - `users/{uid}/purchased_products/*` = OCR-Artikel pro Bon (fürs Matching;
   Kategorie liegt unter `productData.kategorie`, Ersparnis `productData.ersparnis`,
   Hersteller `productData.hersteller` — Top-Level ist leer/0/null).
+  **ACHTUNG (86caf62v6): enthält NICHT nur akzeptierte Bons.** Seit dem B2B-
+  Change schreibt `writePurchasedProducts` auch valide-aber-ABGELEHNTE Bons
+  (`RELIABLE_REJECT_REASONS` = bon_too_old | unknown_merchant | below_min_items),
+  markiert mit `rewardEligible:false` + `bonStatus`/`rejectReason`. Nicht-erfasst
+  bleiben suspekte/doppelte (not_a_receipt, reconciliation_delta, duplicate_*,
+  no_bon_date, max_retries, review). Geld/Ledger ist UNBERÜHRT (nur approved
+  bekommt Cashback). Der `receipt-matcher` überspringt `rewardEligible===false`
+  im Auto-Trigger + Manual-Re-Match (`matchStatus:'skipped_ineligible'`, kein
+  Journey-Closure / kein receiptMatch). **Wer purchased_products für B2B-/Geld-
+  Metriken liest, MUSS auf `rewardEligible===true` filtern** — und `matchBacklog
+  Manual` schreibt bei non-dryRun noch receiptMatch für rejected (offener
+  Follow-up: dort auch auf rewardEligible filtern oder dryRun=1 fahren).
 - `users/{uid}/cashback_ledger/*` = Geld-Ledger (earn/reverse/payout),
   idempotent per `receiptId`. Balance `cashback_balance_cents`/
   `cashback_lifetime_cents`; Counter `cashback_monthly`/`cashback_campaign_weekly`/
