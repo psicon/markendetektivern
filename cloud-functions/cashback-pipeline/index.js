@@ -1759,9 +1759,10 @@ exports.processPayout = onDocumentCreated(
         reward?.redemption_link ||
         reward?.link ||
         null;
-      // Sandbox-Diagnose: einmal die Reward-Struktur mitloggen, um das
-      // echte Link-Feld zu bestätigen.
-      logger.info('tremendous-reward-shape', { payoutId, reward });
+      // SECURITY (Go-Live): KEIN Log des vollen reward-Objekts hier — es enthält
+      // den einlösbaren Redemption-Link (delivery.link), der sonst bei JEDEM
+      // Payout im Cloud Logging landet (= auslesbarer Geldwert). Wir loggen
+      // unten nur `hasLink` (Boolean), nie den Link selbst.
       await snap.ref.update({
         status: 'sent',
         tremendousOrderId: orderId,
