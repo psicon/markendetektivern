@@ -57,6 +57,9 @@ const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 const TREMENDOUS_API_KEY = defineSecret('TREMENDOUS_API_KEY');
 // Webhook-Signing-Key (Tremendous „Private key") für die Signaturprüfung.
 const TREMENDOUS_WEBHOOK_SECRET = defineSecret('TREMENDOUS_WEBHOOK_SECRET');
+// Admin-Key für resolveCashbackReview — wiederverwendet das projektweite
+// Trigger-Secret (kein neues Secret nötig). ClickUp 86caf62v6.
+const CASHBACK_ADMIN_KEY = defineSecret('NUTRITION_SCRAPER_TRIGGER_KEY');
 
 const { extractReceipt, reconcile, countEligibleItems, tierFor, isPfandItem, DEFAULT_MODEL } = require('./lib/ocr');
 const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
@@ -1341,6 +1344,27 @@ exports.processCashback = onMessagePublished(
         status = 'approved';
       }
 
+      // 6w) Go-Live (86caf62v6): risiko-gegate Auto-Freigabe. Ein Bon, der sonst
+      // SOFORT echtes Geld bekäme (status 'approved'), wird stattdessen auf
+      // 'review' GEHALTEN — NICHT abgelehnt, NICHT gutgeschrieben (syncLedger
+      // creditet nur bei status==='approved', verifiziert) → die App zeigt
+      // „Bon wird geprüft". Trigger: Self-Consistency-Confidence der Robust-OCR
+      // ist nicht 'high' (medium/low/none) ODER die Forensik markiert das Bild
+      // als bearbeitet (suspiciousSoftware, Photoshop/GIMP-EXIF). Der berechnete
+      // cashbackCents bleibt erhalten; resolveCashbackReview gibt später frei
+      // (→ approved + Gutschrift) oder lehnt ab. Rejected/no_reward bleiben
+      // unverändert — durch DIESES Gate wird KEIN Bon abgelehnt.
+      let reviewReason = null;
+      if (status === 'approved') {
+        const conf = ocr.robust?.confidence || null;
+        const lowConfidence = conf === 'medium' || conf === 'low' || conf === 'none';
+        const editedImage = receipt.capture?.forensicFlags?.suspiciousSoftware === true;
+        if (lowConfidence || editedImage) {
+          status = 'review';
+          reviewReason = editedImage ? 'forensics_software' : `ocr_confidence_${conf}`;
+        }
+      }
+
       // 6z) Ledger + Budget ATOMAR verbuchen — VOR dem Mirror/Receipt-Write,
       // weil die Budget-Deckelung in der Transaktion den Betrag (und damit
       // den Status) noch ändern kann. Idempotent per receiptId.
@@ -1429,6 +1453,7 @@ exports.processCashback = onMessagePublished(
       await docRef.update({
         status,
         rejectReason,
+        reviewReason,
         ocr: buildOcrField(ocr, recon, escalation),
         merchant: merchantInfo
           ? {
@@ -1916,5 +1941,89 @@ exports.tremendousWebhook = onRequest(
       logger.error('tremendous-webhook-failed', { err: e.message });
     }
     res.status(200).send('ok');
+  },
+);
+
+// ─── resolveCashbackReview (HTTPS, Admin) ───────────────────────────
+//
+// ClickUp 86caf62v6. Gibt einen auf 'review' GEHALTENEN Bon (Gate-Schritt 6w:
+// low-confidence ODER suspiciousSoftware) manuell frei oder lehnt ihn ab.
+//   approve → syncLedgerForReceipt('approved') (idempotent per receiptId) →
+//             Gutschrift; Status 'approved' (bzw. 'no_reward' falls Aktions-
+//             Budget leer).
+//   reject  → Status 'rejected' (keine Gutschrift — es war nie eine).
+// Nur Bons im Status 'review' sind auflösbar (schützt vor Doppel-Credit).
+// Key-gated (Secret NUTRITION_SCRAPER_TRIGGER_KEY). Aufruf:
+//   …/resolveCashbackReview?key=…&receiptId=…&decision=approve|reject
+exports.resolveCashbackReview = onRequest(
+  { region: REGION, timeoutSeconds: 30, memory: '256MiB', cors: false, secrets: [CASHBACK_ADMIN_KEY] },
+  async (req, res) => {
+    if (String(req.query.key || '') !== CASHBACK_ADMIN_KEY.value()) {
+      res.status(403).json({ code: 'forbidden' });
+      return;
+    }
+    const receiptId = String(req.query.receiptId || '');
+    const decision = String(req.query.decision || '');
+    if (!receiptId || (decision !== 'approve' && decision !== 'reject')) {
+      res.status(400).json({ code: 'bad_request', message: 'receiptId + decision=approve|reject erforderlich' });
+      return;
+    }
+    try {
+      const ref = db.collection('receipts').doc(receiptId);
+      const snap = await ref.get();
+      if (!snap.exists) {
+        res.status(404).json({ code: 'not_found' });
+        return;
+      }
+      const r = snap.data() || {};
+      // Nur 'review' ist auflösbar → kein Doppel-Credit/Zustandsfehler.
+      if (r.status !== 'review') {
+        res.status(409).json({ code: 'not_in_review', status: r.status || null });
+        return;
+      }
+      const uid = r.userId;
+      const ts = admin.firestore.FieldValue.serverTimestamp();
+      const mirrorRef = db.doc(`users/${uid}/cashback_status/${receiptId}`);
+
+      if (decision === 'reject') {
+        await ref.update({ status: 'rejected', rejectReason: 'manual_review_rejected', updatedAt: ts });
+        await mirrorRef.set(
+          { status: 'rejected', rejectReason: 'manual_review_rejected', updatedAt: ts },
+          { merge: true },
+        );
+        logger.info('cashback-review-rejected', { receiptId, uid });
+        res.json({ ok: true, status: 'rejected' });
+        return;
+      }
+
+      // approve: gutschreiben. syncLedgerForReceipt ist idempotent per receiptId
+      // (netActive===0-Guard) → ein versehentlicher Doppel-Aufruf erzeugt keinen
+      // zweiten earn; zudem ist der Bon danach 'approved' (oben 409).
+      const cents = Number(r.cashbackCents) || 0;
+      const config = await loadConfig();
+      const campaignMode = !!config.campaignsEnabled && !!r.campaignId;
+      const settle = await syncLedgerForReceipt(
+        db.doc(`users/${uid}`),
+        receiptId,
+        'approved',
+        cents,
+        r.bonDate || null,
+        r.campaignId || null,
+        campaignMode,
+      );
+      const credited = Number(settle?.creditedCents) || 0;
+      const finalStatus = credited > 0 ? 'approved' : 'no_reward';
+      const finalReason = credited > 0 ? null : 'campaign_budget_exhausted';
+      await ref.update({ status: finalStatus, cashbackCents: credited, rejectReason: finalReason, updatedAt: ts });
+      await mirrorRef.set(
+        { status: finalStatus, cashbackCents: credited, rejectReason: finalReason, updatedAt: ts },
+        { merge: true },
+      );
+      logger.info('cashback-review-approved', { receiptId, uid, credited, finalStatus });
+      res.json({ ok: true, status: finalStatus, creditedCents: credited });
+    } catch (e) {
+      logger.error('resolveCashbackReview-failed', { receiptId, err: e.message });
+      res.status(500).json({ code: 'internal' });
+    }
   },
 );
