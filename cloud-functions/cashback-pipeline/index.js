@@ -1793,9 +1793,11 @@ exports.processPayout = onDocumentCreated(
 // setzen status 'delivered' + redeemedForm + redeemedAt → die Statusseite
 // (Live-Subscription) zieht automatisch nach.
 //
-// TODO Produktion: Signatur verifizieren (HMAC mit Webhook-Signing-Secret).
-// Aktuell (Sandbox) wird das rohe Event geloggt, um die echte Struktur zu
-// bestätigen, und ungeprüft verarbeitet (ändert nur Status-Felder, kein Geld).
+// Signatur wird verifiziert (HMAC-SHA256 `sha256=<hex>` über den rohen Body,
+// timingSafeEqual) → unsignierte/ungültige Events werden NICHT verarbeitet.
+// Idempotent (Marker pro Event-Typ+Resource-ID). REWARDS.DELIVERY.SUCCEEDED →
+// status 'delivered'; FAILED/CANCELED/ORDERS.FAILED/CANCELED → Guthaben
+// zurückbuchen (refundFailedPayout) + status 'failed'.
 exports.tremendousWebhook = onRequest(
   { region: REGION, timeoutSeconds: 20, memory: '256MiB', cors: false, invoker: 'public', secrets: [TREMENDOUS_WEBHOOK_SECRET] },
   async (req, res) => {
@@ -1803,57 +1805,56 @@ exports.tremendousWebhook = onRequest(
       res.status(405).send('method_not_allowed');
       return;
     }
-    // ── Signaturprüfung (HMAC-SHA256 über den ROHEN Body mit dem
-    // Tremendous „Private key"). Header-Format/Scheme variiert → wir
-    // berechnen die Signatur, loggen Treffer/Header zum Bestätigen und
-    // LEHNEN bei Mismatch noch NICHT ab (Sandbox-Iteration). Sobald das
-    // Scheme bestätigt ist → harte Ablehnung aktivieren.
-    const sigHeader =
-      req.get('Tremendous-Webhook-Signature') ||
-      req.get('tremendous-webhook-signature') ||
-      req.get('X-Tremendous-Signature') ||
-      null;
+    // ── Signaturprüfung (Tremendous-Doku-Schema, Go-Live):
+    // Header `Tremendous-Webhook-Signature` = `sha256=<hex>`, HMAC-SHA256 über
+    // den ROHEN Request-Body, hexadezimal. Konstantzeit-Vergleich
+    // (timingSafeEqual über gleich-lange Buffer). KEIN JSON.stringify-Fallback
+    // (würde nie matchen → Bypass-Risiko) und KEIN Logging des Digests.
     let sigOk = false;
     try {
       const secret = TREMENDOUS_WEBHOOK_SECRET.value();
-      const raw = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
-      const computedHex = crypto.createHmac('sha256', secret).update(raw).digest('hex');
-      const computedB64 = crypto.createHmac('sha256', secret).update(raw).digest('base64');
-      sigOk = !!sigHeader && (sigHeader.includes(computedHex) || sigHeader.includes(computedB64));
-      logger.info('tremendous-webhook-sig', { sigHeader, computedHex, computedB64, sigOk });
+      const raw = req.rawBody; // Firebase v2 liefert den rohen Body als Buffer
+      const header = req.get('Tremendous-Webhook-Signature') || '';
+      const provided = header.startsWith('sha256=') ? header.slice('sha256='.length).trim() : header.trim();
+      if (secret && raw && provided) {
+        const computed = crypto.createHmac('sha256', secret).update(raw).digest('hex');
+        const a = Buffer.from(provided, 'utf8');
+        const b = Buffer.from(computed, 'utf8');
+        sigOk = a.length === b.length && crypto.timingSafeEqual(a, b);
+      }
     } catch (e) {
       logger.warn('tremendous-webhook-sig-failed', { err: e.message });
     }
-
-    // Signatur ist bestätigt (sha256=<hex> über rawBody) → unsignierte
-    // Events nicht verarbeiten. 200, damit Tremendous nicht endlos retried.
     if (!sigOk) {
-      logger.warn('tremendous-webhook-unsigned', { sigHeader });
+      // 200, damit Tremendous nicht endlos retried; unsignierte/ungültige
+      // Events werden NICHT verarbeitet (kein Status, kein Geld).
+      logger.warn('tremendous-webhook-unsigned');
       res.status(200).send('ignored_unsigned');
       return;
     }
 
     const body = req.body || {};
-    logger.info('tremendous-webhook', { event: body.event || null, keys: Object.keys(body) });
-    try {
-      const pl = body.payload || {};
-      const meta = pl.meta || {};
-      const resource = pl.resource || {};
-      const reward = pl.reward || (Array.isArray(meta.rewards) ? meta.rewards[0] : null) || {};
-      const rewardId = reward.id || (resource.type === 'rewards' ? resource.id : null) || null;
-      const orderId =
-        meta.id || (resource.type === 'orders' ? resource.id : null) || pl.order_id || null;
+    const ev = String(body.event || '').toUpperCase();
+    const resource = body.payload?.resource || {};
+    const resourceType = resource.type || null; // 'rewards' | 'orders' | …
+    const resourceId = resource.id || null;
+    logger.info('tremendous-webhook', { event: body.event || null, resourceType, resourceId });
 
-      // Redeem-Form defensiv (Feldname unbekannt bis ein echtes Redeem-
-      // Event kommt — Tremendous liefert es in diesem Setup aber nicht).
-      const redeemedForm =
-        reward?.products?.[0]?.name ||
-        reward?.redemption?.product?.name ||
-        reward?.redemption?.method ||
-        pl?.product?.name ||
-        null;
-      const ev = String(body.event || '').toUpperCase();
-      const isRedeem = ev.includes('REDEEM') || !!redeemedForm;
+    // Idempotenz: jedes (Event-Typ + Resource-ID) nur einmal verarbeiten.
+    // Marker wird ERST nach erfolgreicher Verarbeitung geschrieben (crash-sicher),
+    // hier nur prüfen → Replays eines bereits verarbeiteten Events früh raus.
+    const evKey = ev && resourceId ? `${ev}_${resourceId}` : null;
+    if (evKey) {
+      const seen = await db.collection('cashback_webhook_events').doc(evKey).get();
+      if (seen.exists) {
+        res.status(200).send('already_processed');
+        return;
+      }
+    }
+
+    try {
+      const rewardId = resourceType === 'rewards' ? resourceId : null;
+      const orderId = resourceType === 'orders' ? resourceId : null;
 
       // Payout per Reward-ID ODER Order-ID finden.
       let doc = null;
@@ -1866,20 +1867,46 @@ exports.tremendousWebhook = onRequest(
         if (!qs.empty) doc = qs.docs[0];
       }
 
-      if (doc) {
-        const cur = doc.data();
-        await doc.ref.set(
-          {
-            status: isRedeem ? 'delivered' : cur.status,
-            redeemedForm: redeemedForm || cur.redeemedForm || null,
-            redeemedAt: isRedeem ? admin.firestore.FieldValue.serverTimestamp() : cur.redeemedAt || null,
-            lastWebhookEvent: body.event || null,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: true },
-        );
-      } else {
+      if (!doc) {
         logger.info('tremendous-webhook-no-match', { rewardId, orderId, event: body.event });
+      } else {
+        const cur = doc.data();
+        const ts = admin.firestore.FieldValue.serverTimestamp();
+        // Endgültiger Fehlschlag/Storno → das beim Payout-Request bereits
+        // debitierte Guthaben zurückbuchen (refundFailedPayout ist idempotent
+        // per admin_adjust-Guard) + status 'failed'.
+        const FAIL_EVENTS = ['REWARDS.DELIVERY.FAILED', 'REWARDS.CANCELED', 'ORDERS.FAILED', 'ORDERS.CANCELED'];
+        if (FAIL_EVENTS.includes(ev)) {
+          if (cur.status !== 'failed') {
+            await refundFailedPayout(cur.userId, doc.id, Number(cur.amountCents) || 0);
+            await doc.ref.set(
+              { status: 'failed', error: `tremendous_${ev.toLowerCase()}`, lastWebhookEvent: body.event || null, updatedAt: ts },
+              { merge: true },
+            );
+          }
+        } else if (ev === 'REWARDS.DELIVERY.SUCCEEDED') {
+          const redeemedForm =
+            resource?.products?.[0]?.name ||
+            body.payload?.reward?.products?.[0]?.name ||
+            cur.redeemedForm ||
+            null;
+          await doc.ref.set(
+            { status: 'delivered', redeemedForm, redeemedAt: ts, lastWebhookEvent: body.event || null, updatedAt: ts },
+            { merge: true },
+          );
+        } else {
+          // Informative Events (ORDERS.CREATED/APPROVED, REWARDS.FLAGGED, …) →
+          // nur protokollieren, kein Status-/Geld-Change.
+          await doc.ref.set({ lastWebhookEvent: body.event || null, updatedAt: ts }, { merge: true });
+        }
+      }
+
+      // Erst NACH erfolgreicher Verarbeitung den Idempotenz-Marker setzen.
+      if (evKey) {
+        await db
+          .collection('cashback_webhook_events')
+          .doc(evKey)
+          .set({ event: body.event || null, processedAt: admin.firestore.FieldValue.serverTimestamp() });
       }
     } catch (e) {
       logger.error('tremendous-webhook-failed', { err: e.message });
