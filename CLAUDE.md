@@ -1814,6 +1814,32 @@ werden muss (mehrfach durchexerziert, sonst 1 h verloren):
   `gemini-3.5-flash`, Setup in `cloud-functions/ai-product-comparison`
   (wiederverwendbar). Key lesen: `firebase-tools functions:secrets:access`.
 
+## Cashback Go-Live / Tremendous PRODUCTION — Persistenz-Gotcha (86caf62v6)
+
+Scharfgeschaltet 2026-06-28. Der Production-Flip lebt in `cloud-functions/
+cashback-pipeline/.env` (`TREMENDOUS_ENV=production` + `TREMENDOUS_CAMPAIGN_ID=
+FPJPQK8WTF8O`). **Diese `.env` ist gitignored** → sie ist NUR auf der Maschine
+vorhanden, von der zuletzt deployt wurde. Konsequenz/Falle:
+
+- Ein Redeploy von `cashback-pipeline` aus einem **Clean-Checkout ohne diese
+  lokale `.env`** deployt mit `TREMENDOUS_ENV` UNSET → der Code fällt auf
+  Sandbox (`testflight.tremendous.com`) zurück → **echte Auszahlungen brechen
+  still**. (Der Campaign-Default im Code ist zwar `FPJPQK8WTF8O`, aber `ENV`
+  hat keinen Prod-Default — unset = Sandbox.)
+- **VOR jedem `cashback-pipeline`-Deploy prüfen:** `grep TREMENDOUS_ENV
+  cloud-functions/cashback-pipeline/.env` muss `production` zeigen. Der Deploy-
+  Log bestätigt „Loaded environment variables from .env".
+- Secrets liegen korrekt in Secret Manager (PROD): `TREMENDOUS_API_KEY`
+  (Prefix `PROD_`), `TREMENDOUS_WEBHOOK_SECRET` (20 Zeichen), Admin-Resolver-Key
+  = `NUTRITION_SCRAPER_TRIGGER_KEY`. Deploy bindet die LATEST-Version → ein
+  Redeploy aktiviert sie. Prefix/Länge prüfen ohne Leak via `gcloud secrets
+  versions access latest --secret=… | cut -c1-5` bzw. `… | wc -c`.
+- Read-only PROD-Smoke (kein Geld): `GET api.tremendous.com/api/v2/
+  funding_sources` (Auth + Balance) + `/campaigns` (Campaign existiert). Ein
+  ECHTER Test-Payout bewegt echtes Geld → nur mit User-OK (Betrag+Empfänger).
+- Rollback auf Sandbox: `.env` `TREMENDOUS_ENV` entfernen + Campaign
+  `I0UO36DNEAU2`, redeploy.
+
 ## Cashback-Pipeline — Architektur-Map + Learnings (Task 86ca0wbg7)
 
 Flow: `enqueueCashback` (https.onRequest; billige Pre-OCR-Dedups: Byte-Hash
