@@ -1814,21 +1814,27 @@ werden muss (mehrfach durchexerziert, sonst 1 h verloren):
   `gemini-3.5-flash`, Setup in `cloud-functions/ai-product-comparison`
   (wiederverwendbar). Key lesen: `firebase-tools functions:secrets:access`.
 
-## Cashback Go-Live / Tremendous PRODUCTION — Persistenz-Gotcha (86caf62v6)
+## Cashback Go-Live / Tremendous PRODUCTION (86caf62v6)
 
-Scharfgeschaltet 2026-06-28. Der Production-Flip lebt in `cloud-functions/
-cashback-pipeline/.env` (`TREMENDOUS_ENV=production` + `TREMENDOUS_CAMPAIGN_ID=
-FPJPQK8WTF8O`). **Diese `.env` ist gitignored** → sie ist NUR auf der Maschine
-vorhanden, von der zuletzt deployt wurde. Konsequenz/Falle:
+Scharfgeschaltet 2026-06-28. **PRODUCTION ist der fail-safe Code-Default**
+(`index.js`: `TREMENDOUS_SANDBOX = process.env.TREMENDOUS_ENV === 'sandbox'`;
+`TREMENDOUS_BASE` = Sandbox NUR bei diesem expliziten Opt-in, sonst
+`api.tremendous.com`). Die `.env` MUSS Production NICHT erzwingen — ein Redeploy
+aus einem Clean-Checkout, eine fehlende/vertippte Variable, eine fehlende `.env`
+landen ALLE sicher auf Production.
 
-- Ein Redeploy von `cashback-pipeline` aus einem **Clean-Checkout ohne diese
-  lokale `.env`** deployt mit `TREMENDOUS_ENV` UNSET → der Code fällt auf
-  Sandbox (`testflight.tremendous.com`) zurück → **echte Auszahlungen brechen
-  still**. (Der Campaign-Default im Code ist zwar `FPJPQK8WTF8O`, aber `ENV`
-  hat keinen Prod-Default — unset = Sandbox.)
-- **VOR jedem `cashback-pipeline`-Deploy prüfen:** `grep TREMENDOUS_ENV
-  cloud-functions/cashback-pipeline/.env` muss `production` zeigen. Der Deploy-
-  Log bestätigt „Loaded environment variables from .env".
+(Frühere Falle, an der Wurzel behoben — Commit R3: davor wählte der Code Live
+nur bei `TREMENDOUS_ENV==='production'`; da das env in der gitignorierten `.env`
+lebte, wäre ein Clean-Redeploy still auf Sandbox gefallen und hätte echte
+Auszahlungen gebrochen. Default invertiert → kein „dran-denken" mehr nötig.)
+
+- **Sandbox (nur lokal/Test):** explizit `TREMENDOUS_ENV=sandbox` in
+  `cashback-pipeline/.env` + Sandbox-Campaign `I0UO36DNEAU2`. Zurück auf Prod =
+  die Zeile wieder entfernen (Default greift).
+- **Welche Base eine deployte Function nutzt prüfen** (kein Geld): `gcloud
+  functions describe processPayout --region=europe-west3 --gen2 --project=
+  markendetektive-895f7 --format="yaml(serviceConfig.environmentVariables)"
+  | grep -i tremendous` → fehlt `TREMENDOUS_ENV` ODER ≠ 'sandbox' = Production.
 - Secrets liegen korrekt in Secret Manager (PROD): `TREMENDOUS_API_KEY`
   (Prefix `PROD_`), `TREMENDOUS_WEBHOOK_SECRET` (20 Zeichen), Admin-Resolver-Key
   = `NUTRITION_SCRAPER_TRIGGER_KEY`. Deploy bindet die LATEST-Version → ein
@@ -1837,8 +1843,6 @@ vorhanden, von der zuletzt deployt wurde. Konsequenz/Falle:
 - Read-only PROD-Smoke (kein Geld): `GET api.tremendous.com/api/v2/
   funding_sources` (Auth + Balance) + `/campaigns` (Campaign existiert). Ein
   ECHTER Test-Payout bewegt echtes Geld → nur mit User-OK (Betrag+Empfänger).
-- Rollback auf Sandbox: `.env` `TREMENDOUS_ENV` entfernen + Campaign
-  `I0UO36DNEAU2`, redeploy.
 
 ## Cashback-Pipeline — Architektur-Map + Learnings (Task 86ca0wbg7)
 
