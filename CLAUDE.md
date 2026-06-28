@@ -1843,6 +1843,14 @@ Auszahlungen gebrochen. Default invertiert → kein „dran-denken" mehr nötig.
 - Read-only PROD-Smoke (kein Geld): `GET api.tremendous.com/api/v2/
   funding_sources` (Auth + Balance) + `/campaigns` (Campaign existiert). Ein
   ECHTER Test-Payout bewegt echtes Geld → nur mit User-OK (Betrag+Empfänger).
+- **Tremendous-MINDESTBETRAG = €1.** Die Campaign `FPJPQK8WTF8O`-Produkte haben
+  alle min ≥ €1 (Bank Transfer/PayPal/Amazon/Visa/Google Play = €1, Apple €2,
+  Penny/Kaufland/Lieferando €5). Eine Order < €1 failt mit `"Amount €X EUR does
+  not meet the minimum for available products"` (HTTP 400, validation failure)
+  → unser `processPayout` bucht das Guthaben sauber zurück (Refund-Pfad
+  bewiesen). Konsequenz: `payoutThresholdCents` NIE < 100 setzen (sonst kann der
+  User einen Betrag wählen, der garantiert an Tremendous scheitert). Beim
+  Test-Setup also Schwelle ≥ 100c + Betrag ≥ €1 (und ≤ Tremendous-Funding-Balance).
 
 ## Cashback-Pipeline — Architektur-Map + Learnings (Task 86ca0wbg7)
 
