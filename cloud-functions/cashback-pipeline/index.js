@@ -1671,12 +1671,17 @@ exports.requestPayout = onRequest(
 // Status-Guard (nur 'requested' wird verarbeitet). Bei Fehler:
 // Guthaben transaktional zurückbuchen (refund) + status 'failed'.
 //
-// env: TREMENDOUS_ENV=production → Live-API; sonst Sandbox (testflight).
-//      TREMENDOUS_CAMPAIGN_ID überschreibt die Default-Campaign.
-const TREMENDOUS_BASE =
-  process.env.TREMENDOUS_ENV === 'production'
-    ? 'https://api.tremendous.com/api/v2'
-    : 'https://testflight.tremendous.com/api/v2';
+// PRODUCTION ist der DEFAULT — Sandbox NUR bei explizitem TREMENDOUS_ENV=sandbox.
+// Bewusst fail-safe-to-production: ein Redeploy aus einem Clean-Checkout (ohne
+// die gitignorierte .env), ein fehlendes/vertipptes env darf NIEMALS still auf
+// Sandbox fallen und echte Auszahlungen brechen. Sandbox ist die deliberate
+// Ausnahme (lokales Testen via TREMENDOUS_ENV=sandbox), nicht der Default.
+// Go-Live-Härtung R3 (ClickUp 86caf62v6). TREMENDOUS_CAMPAIGN_ID überschreibt
+// die Default-Campaign (Default ist bereits die Prod-Campaign).
+const TREMENDOUS_SANDBOX = process.env.TREMENDOUS_ENV === 'sandbox';
+const TREMENDOUS_BASE = TREMENDOUS_SANDBOX
+  ? 'https://testflight.tremendous.com/api/v2'
+  : 'https://api.tremendous.com/api/v2';
 const TREMENDOUS_CAMPAIGN_ID = process.env.TREMENDOUS_CAMPAIGN_ID || 'FPJPQK8WTF8O';
 
 /** Fehlgeschlagene Auszahlung → Guthaben transaktional zurückbuchen. */
