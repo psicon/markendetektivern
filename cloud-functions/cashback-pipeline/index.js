@@ -121,10 +121,10 @@ const CONFIG_DOC_PATH = 'cashback_config/v1';
 
 // Bon must be no older than this many days (server-time check, not
 // client). Avoids backdated bons + bons forgotten in a drawer for
-// months. Configurable via cashback_config.maxBonAgeDays in future.
-// Currently effectively disabled for testing — bump back to 5 once
-// the dev/test phase is done.
-const MAX_BON_AGE_DAYS = 9999;
+// months. Go-Live (ClickUp 86caf62v6): echtes Limit aktiviert (vorher 9999 =
+// quasi aus, nur fürs Testen). Das aktions-spezifische maxAgeDays hat weiterhin
+// Vorrang (effectiveMaxAgeDays); per cashback_config tunebar machbar (future).
+const MAX_BON_AGE_DAYS = 14;
 
 // Hamming-distance threshold for "near-duplicate" dHash matches.
 // 0 = bit-identical (same image, possibly re-encoded at different
@@ -201,10 +201,14 @@ const DEFAULT_CONFIG = {
   consentVersion: 'v1.0-2026-05',
   // Auszahlung erst ab diesem Guthaben (Cent). 1000 = 10 €.
   payoutThresholdCents: 1000,
-  // Max. Cashback pro Kalendermonat (Cent). 0 = KEIN Limit (Default).
-  // >0 aktiviert die serverseitige Monats-Begrenzung (cappt cashbackCents
-  // auf die verbleibende Monats-Headroom).
-  monthlyMaxCents: 0,
+  // Max. Cashback pro User + Kalendermonat (Cent) im Dauer-Modus. 0 = KEIN
+  // Limit. Go-Live (86caf62v6): konservativer Sicherheits-Default 2000 (20 €/
+  // User/Monat) gegen Account-Missbrauch — legitime Nutzer erreichen das im
+  // Dauer-Modus nicht (Tageslimit 1 Bon → ~2 €/Monat). Cappt cashbackCents auf
+  // die Rest-Headroom (Teilbetrag bleibt approved). PRODUKT-ENTSCHEIDUNG: in
+  // cashback_config/v1 ohne Deploy anpassbar. Globales Gesamt-Dach gegen
+  // Runaway-Spend = Tremendous-Funding-Balance.
+  monthlyMaxCents: 2000,
   // Aktions-Modus: true → Cashback NUR während aktiver Kampagne
   // (cashback_campaigns). Keine Aktion → Bon verarbeitet + Produkte
   // getrackt, aber 0 Vergütung. Default false = Dauer-Cashback (kein Change).
