@@ -129,6 +129,17 @@ const CONFIG_DOC_PATH = 'cashback_config/v1';
 // Vorrang (effectiveMaxAgeDays); per cashback_config tunebar machbar (future).
 const MAX_BON_AGE_DAYS = 7;
 
+// Der EXIF-Alters-HARD-REJECT am enqueue (vor OCR/Campaign-Auflösung) nutzt
+// bewusst eine GROSSZÜGIGE Obergrenze statt MAX_BON_AGE_DAYS. Grund: das echte,
+// aktionsspezifische Limit (effectiveMaxAgeDays) ist erst in processCashback
+// bekannt — würde der enqueue-Gate mit den globalen 7 Tagen hart ablehnen,
+// blockt er bei einer langlaufenden Aktion (maxAgeDays>7) legitime Bons VOR der
+// Campaign-Auflösung. Deshalb fängt der enqueue-Gate nur absurd alte Foto-
+// Uploads (>90 Tage) + Zukunfts-Datierungen (Clock-Tamper, limit-unabhängig)
+// ab; die präzise Kauf-Alters-Prüfung besitzt der bonDate-Gate in
+// processCashback (campaign-aware). Go-Live-Härtung (ClickUp 86caf62v6).
+const MAX_BON_AGE_DAYS_EXIF_CEILING = 90;
+
 // Hamming-distance threshold for "near-duplicate" dHash matches.
 // 0 = bit-identical (same image, possibly re-encoded at different
 // JPEG quality). ≤5 still very likely the same image. We pick a
@@ -662,14 +673,17 @@ exports.enqueueCashback = onRequest(
       ]);
       serverDhash = dHash;
       exifMeta = exif;
-      forensicFlags = deriveForensicFlags(exif, Date.now(), MAX_BON_AGE_DAYS);
+      forensicFlags = deriveForensicFlags(exif, Date.now(), MAX_BON_AGE_DAYS_EXIF_CEILING);
 
-      // Hard reject: EXIF says the photo is too old or future-dated
+      // Hard reject am enqueue NUR für absurd alte Foto-Uploads (>Ceiling) oder
+      // Zukunfts-Datierung. Das präzise Kauf-Alters-Limit (global 7 / Aktion)
+      // erzwingt der bonDate-Gate in processCashback — hier NICHT vorgreifen,
+      // sonst werden langlaufende Aktionen vor der Campaign-Auflösung geblockt.
       if (forensicFlags.exifAgeRejectable) {
         logger.warn('forensics-reject-exif-age', {
           uid,
           exifAgeDays: forensicFlags.exifAgeDays,
-          maxBonAgeDays: MAX_BON_AGE_DAYS,
+          maxBonAgeDays: MAX_BON_AGE_DAYS_EXIF_CEILING,
         });
         res.status(422).json({
           code: 'bon_too_old',
@@ -1939,6 +1953,14 @@ exports.tremendousWebhook = onRequest(
       }
     } catch (e) {
       logger.error('tremendous-webhook-failed', { err: e.message });
+      // 5xx → Tremendous stellt das Event erneut zu. Der Idempotenz-Marker
+      // wird NUR nach erfolgreicher Verarbeitung gesetzt (oben), also
+      // verarbeitet ein Retry sauber neu — refundFailedPayout (admin_adjust-
+      // Guard) + die Status-Writes (merge/Status-Check) sind idempotent. Ohne
+      // Retry ginge bei einem transienten Fehler z.B. eine FAILED-Rückbuchung
+      // still verloren (User bekäme sein Guthaben nicht zurück).
+      res.status(500).send('error_will_retry');
+      return;
     }
     res.status(200).send('ok');
   },
