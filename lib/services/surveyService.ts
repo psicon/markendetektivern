@@ -160,16 +160,40 @@ function budgetAllows(poll: Poll): boolean {
   return remaining > 0;
 }
 
+/**
+ * Poll-Zeitfeld (startDate/endDate) robust nach ms auflösen.
+ *
+ * WICHTIG: die DATEN sind NICHT die deklarierten ISO-Strings — RevealyIQ /
+ * das Admin-Tool schreibt Firestore-TIMESTAMPS (`{ _seconds, _nanoseconds }`
+ * bzw. ein Timestamp-Objekt mit `.toMillis()`). Ein blindes
+ * `Date.parse(timestamp)` ergab `NaN` → `Number.isFinite(NaN)` ist false →
+ * der Window-Check wurde STILL übersprungen → abgelaufene Umfragen erschienen
+ * trotzdem (app-weit). Darum hier defensiv ALLE Repräsentationen abdecken.
+ * null = leer/unbekannt (→ kein Limit auf der jeweiligen Seite).
+ */
+function pollTimeMs(v: unknown): number | null {
+  if (v == null) return null;
+  const a = v as any;
+  if (typeof a.toMillis === 'function') {
+    try { const m = a.toMillis(); return Number.isFinite(m) ? m : null; } catch { /* fallthrough */ }
+  }
+  if (typeof a.toDate === 'function') {
+    try { const t = a.toDate().getTime(); return Number.isFinite(t) ? t : null; } catch { /* fallthrough */ }
+  }
+  if (typeof a._seconds === 'number') return a._seconds * 1000 + Math.floor((a._nanoseconds || 0) / 1e6);
+  if (typeof a.seconds === 'number') return a.seconds * 1000 + Math.floor((a.nanoseconds || 0) / 1e6);
+  if (v instanceof Date) { const t = v.getTime(); return Number.isFinite(t) ? t : null; }
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string') { const t = Date.parse(v); return Number.isFinite(t) ? t : null; }
+  return null;
+}
+
 function isWithinWindow(poll: Poll): boolean {
   const now = nowMs();
-  if (poll.startDate) {
-    const s = Date.parse(poll.startDate);
-    if (Number.isFinite(s) && now < s) return false;
-  }
-  if (poll.endDate) {
-    const e = Date.parse(poll.endDate);
-    if (Number.isFinite(e) && now > e) return false;
-  }
+  const s = pollTimeMs(poll.startDate);
+  if (s != null && now < s) return false;
+  const e = pollTimeMs(poll.endDate);
+  if (e != null && now > e) return false;
   return true;
 }
 

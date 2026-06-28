@@ -137,9 +137,14 @@ export interface Poll {
   /** Marken-/Hersteller-Targeting (action-Trigger): Firestore-REFERENZEN
    *  auf hersteller/* oder hersteller_new/*. Leer/fehlt = alle Marken. */
   targetBrands?: any[];
-  // ── Zeitsteuerung (ISO-Strings, RevealyIQ-Konvention) ──
-  startDate?: string;
-  endDate?: string;
+  // ── Zeitsteuerung ──
+  // ACHTUNG: trotz früherer „ISO-String"-Annahme schreibt RevealyIQ / das
+  // Admin-Tool hier Firestore-TIMESTAMPS (Objekt mit `.toMillis()` bzw.
+  // `{ _seconds, _nanoseconds }`), NICHT zwingend Strings. NIE direkt
+  // `Date.parse()` darauf (ergibt bei Timestamps NaN → Window-Check wird
+  // still übersprungen). IMMER über `pollTimeMs()` (surveyService) auflösen.
+  startDate?: string | number | Date | { toMillis?: () => number; seconds?: number; _seconds?: number };
+  endDate?: string | number | Date | { toMillis?: () => number; seconds?: number; _seconds?: number };
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;

@@ -29,6 +29,30 @@ const db = admin.firestore();
 // Konsistent mit der Cashback-Pipeline (gleicher Ledger).
 const REGION = 'europe-west3';
 
+// Reward-Grace nach endDate: wer einen Tick nach Ablauf submittet (5-Min-
+// Anzeige-Cache + Ausfüllzeit + kurze Offline-Sync-Verzögerung) bekommt den
+// Taler noch. Die ANZEIGE ist strikt (surveyService.isWithinWindow), hier nur
+// eine kleine Toleranz gegen Frust. 0 = strikt.
+const REWARD_GRACE_MS = 60 * 60 * 1000; // 1 h
+
+/**
+ * Poll-Zeitfeld robust nach ms. Die DATEN sind Firestore-Timestamps (RevealyIQ),
+ * NICHT die im Typ deklarierten ISO-Strings → `Date.parse(timestamp)` wäre NaN.
+ * Deckt Timestamp (.toMillis/.toDate), serialisierten Timestamp, ISO-String,
+ * ms-Zahl und Date ab. null = leer/unbekannt.
+ */
+function pollTimeMs(v) {
+  if (v == null) return null;
+  if (typeof v.toMillis === 'function') { try { const m = v.toMillis(); return Number.isFinite(m) ? m : null; } catch { /* */ } }
+  if (typeof v.toDate === 'function') { try { const t = v.toDate().getTime(); return Number.isFinite(t) ? t : null; } catch { /* */ } }
+  if (typeof v._seconds === 'number') return v._seconds * 1000 + Math.floor((v._nanoseconds || 0) / 1e6);
+  if (typeof v.seconds === 'number') return v.seconds * 1000 + Math.floor((v.nanoseconds || 0) / 1e6);
+  if (v instanceof Date) { const t = v.getTime(); return Number.isFinite(t) ? t : null; }
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string') { const t = Date.parse(v); return Number.isFinite(t) ? t : null; }
+  return null;
+}
+
 exports.onPollResponseCreated = onDocumentCreated(
   {
     document: 'poll_responses/{id}',
@@ -64,6 +88,24 @@ exports.onPollResponseCreated = onDocumentCreated(
       if (pd.rewardTrigger === 'per_answer' || pd.rewardTrigger === 'none') rewardTrigger = pd.rewardTrigger;
       if (typeof pd.budgetCents === 'number') hasBudget = true;
       if (typeof pd.maxPerUser === 'number' && pd.maxPerUser > 0) maxPerUser = Math.round(pd.maxPerUser);
+
+      // ── Zeitfenster server-autoritativ prüfen (Bug-Fix: endDate wurde
+      // NIRGENDS beachtet). endDate/startDate sind Firestore-Timestamps, NICHT
+      // die deklarierten ISO-Strings → via pollTimeMs auflösen (Date.parse wäre
+      // NaN). Gegen den SERVER-Zeitpunkt des Response-Writes (event.time)
+      // prüfen, nicht gegen client-Zeit. endDate mit Grace; Antwort bleibt in
+      // jedem Fall gespeichert (RevealyIQ-Auswertung), nur kein Taler.
+      const respMs = event.time ? Date.parse(event.time) : Date.now();
+      const startMs = pollTimeMs(pd.startDate);
+      const endMs = pollTimeMs(pd.endDate);
+      if (startMs != null && Number.isFinite(respMs) && respMs < startMs) {
+        logger.info('[survey-reward] skip: poll not started', { pollId });
+        return;
+      }
+      if (endMs != null && Number.isFinite(respMs) && respMs > endMs + REWARD_GRACE_MS) {
+        logger.info('[survey-reward] skip: poll ended', { pollId });
+        return;
+      }
     } catch (e) {
       logger.error('[survey-reward] poll read failed', { pollId, err: e.message });
       return;
