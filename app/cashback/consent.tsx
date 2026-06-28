@@ -333,10 +333,18 @@ function RewardsMarquee({
 // Trust-Badges — sitzen DIREKT über dem Akzeptieren-Button (Best
 // Practice: Safety-Signale am Entscheidungspunkt, nicht als eigene
 // Listen-Sektion). Nur Headlines (User-Vorgabe 2026-06-10), die
-// Langfassung steht in Datenschutzerklärung + AGB (Links darüber).
-// v2.0 (ClickUp 86ca6u6xd): "Anonyme Marktdaten" = anonymisierte
-// Verwertung von Einkaufs- + Nutzungsdaten (B2B-Insights). Ob
-// Headline-only für die "informierte" Einwilligung reicht → Anwalt.
+// Langfassung steht in Datenschutzerklärung + AGB (Links im Footer).
+//
+// Consent-Struktur (ClickUp 86caf62v6, Go-Live): bewusstes LAYERED CONSENT —
+// die Kurz-Headline hier + die rechtsverbindliche Einwilligung in der Footer-
+// Zeile ("Mit Akzeptieren stimmst du AGB & Datenschutzerklärung zu", beide
+// verlinkt). "Anonyme Marktdaten" = die App wertet Einkaufs-/Nutzungsdaten
+// ANONYMISIERT/aggregiert aus und gibt diese Markt-Statistiken entgeltlich an
+// Handels-/Industriepartner weiter (B2B). Die vollständige, informierte
+// Aufklärung dazu steht in der verlinkten Datenschutzerklärung + AGB §8.2 —
+// Rechtsgrundlage Einwilligung (Art. 6 Abs. 1 lit. a DSGVO). Finale rechtliche
+// Abnahme (insb. Benennung des Auszahlungs-Drittanbieters + Drittland) erfolgt
+// auf Doc-Ebene durch den Anwalt, nicht im App-Text.
 const TRUST: { icon: string; label: string }[] = [
   { icon: 'shield-check-outline', label: 'EU-Datenschutz' },
   { icon: 'chart-box-outline', label: 'Anonyme Marktdaten' },
