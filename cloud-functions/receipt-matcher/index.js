@@ -396,6 +396,14 @@ exports.onPurchasedProductMatch = onDocumentCreated(
     if (!snap) return;
     const d = snap.data() || {};
     if (d.matchVersion === matcher.MATCH_VERSION) return; // bereits gematcht (idempotent)
+    // 86caf62v6 (B2B): valide-aber-abgelehnte Bons (rewardEligible===false) sind
+    // GESPEICHERT für die spätere B2B-Auswertung, werden aber NICHT auto-gematcht —
+    // sonst würde matchLine die Journey/den Einkaufswagen fälschlich abhaken +
+    // receiptMatch schreiben. Backlog-Match (noClose) ist der B2B-Coverage-Pfad.
+    if (d.rewardEligible === false) {
+      await snap.ref.set({ matchStatus: 'skipped_ineligible' }, { merge: true }).catch(() => {});
+      return;
+    }
     try {
       await matcher.matchLine({
         itemName: d.itemName,
@@ -433,6 +441,12 @@ exports.matchReceiptManual = onRequest(
         const d = doc.data();
         if (!force && d.matchVersion === matcher.MATCH_VERSION) {
           tally.skipped = (tally.skipped || 0) + 1;
+          continue;
+        }
+        // 86caf62v6 (B2B): abgelehnte-aber-erfasste Bons hier NICHT matchen
+        // (Journey-Closure-Schutz). Backlog-Match (noClose) ist ihr B2B-Pfad.
+        if (d.rewardEligible === false) {
+          tally.skipped_ineligible = (tally.skipped_ineligible || 0) + 1;
           continue;
         }
         const r = await matcher.matchLine(

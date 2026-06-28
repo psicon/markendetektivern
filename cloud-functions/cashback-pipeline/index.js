@@ -333,7 +333,14 @@ function slugify(s) {
     .slice(0, 60);
 }
 
-async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo) {
+// 86caf62v6 (B2B): Reject-Gründe mit VERLÄSSLICHEN Items — deren Bons werden
+// trotz Ablehnung ins purchased_products-Trail geschrieben (rewardEligible=false),
+// damit sie später im B2B ausgewertet werden können. Ausgeschlossen bleiben
+// Gründe mit suspekten/fehlenden/doppelten Items (not_a_receipt,
+// reconciliation_delta, duplicate*, no_bon_date, max_retries_exceeded).
+const RELIABLE_REJECT_REASONS = new Set(['bon_too_old', 'unknown_merchant', 'below_min_items']);
+
+async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo, meta = {}) {
   if (!parsed || !Array.isArray(parsed.items)) return;
   const col = db.collection(`users/${uid}/purchased_products`);
   const writes = [];
@@ -355,6 +362,14 @@ async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo) {
           discounterId: merchantInfo?.discounterId || null,
           merchantName: merchantInfo?.name || null,
           merchantLand: merchantInfo?.land || null,
+          // B2B-Marker (86caf62v6): bonStatus = finaler Bon-Status; rewardEligible
+          // = war der Bon angenommen/vergütet. rewardEligible=false markiert
+          // valide-aber-abgelehnte Bons → der Matcher auto-matcht/Journey-schließt
+          // sie NICHT (kein Cart-/receiptMatch-Side-Effect), sie bleiben aber für
+          // die spätere B2B-Produktauswertung gespeichert.
+          bonStatus: meta.status || null,
+          rejectReason: meta.rejectReason || null,
+          rewardEligible: meta.rewardEligible !== false,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         { merge: true },
@@ -1505,12 +1520,22 @@ exports.processCashback = onMessagePublished(
         updatedAt: now,
       });
 
-      // 7a) Produkt-Tracking ist UNABHÄNGIG von der Vergütung: jeder gültige
-      // Bon (approved ODER no_reward = angenommen, aber keine Aktion/0 €)
-      // schreibt seine Positionen — fürs Matching/Tracking. „Einreichung
-      // geht immer", auch ohne laufende Aktion.
-      if (status === 'approved' || status === 'no_reward') {
-        await writePurchasedProducts(uid, cashbackId, ocr.parsed, merchantInfo);
+      // 7a) Produkt-Tracking: jeder gültige Bon (approved/no_reward) schreibt
+      // seine Positionen fürs Matching/Tracking. ZUSÄTZLICH (86caf62v6, B2B):
+      // valide-aber-abgelehnte Bons (zu alt / Markt unbekannt / zu wenige
+      // Positionen) werden AUCH erfasst — mit rewardEligible=false, damit sie
+      // für die spätere B2B-Produktauswertung verfügbar sind. Geld/Ledger bleibt
+      // unberührt (nur approved bekommt Cashback); der Matcher überspringt
+      // rewardEligible=false beim Auto-Match (keine Journey-/Geld-Side-Effects).
+      const rewardEligible = status === 'approved' || status === 'no_reward';
+      const captureProducts =
+        rewardEligible || (status === 'rejected' && RELIABLE_REJECT_REASONS.has(rejectReason));
+      if (captureProducts) {
+        await writePurchasedProducts(uid, cashbackId, ocr.parsed, merchantInfo, {
+          status,
+          rejectReason,
+          rewardEligible,
+        });
       }
 
       if (status === 'approved' && cashbackCents > 0) {
