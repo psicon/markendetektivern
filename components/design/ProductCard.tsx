@@ -60,6 +60,11 @@ type Props = {
   unitPriceLabel?: string | null;
   variant?: ProductCardVariant;
   onPress?: () => void;
+  /** Stable per-item press handler (Stöbern-Grid) — vermeidet die inline
+   *  Arrow, die `React.memo` bricht. Bekommt das Produkt + seinen Listen-Index.
+   *  Hat Vorrang vor `onPress`, wenn gesetzt. */
+  onPressItem?: (product: any, index: number) => void;
+  itemIndex?: number;
   /** Width override (defaults: horizontal=168, grid='100%'). */
   width?: number | string;
   /** Height override — when set, the Pressable fills exactly this
@@ -108,6 +113,8 @@ function ProductCardImpl({
   unitPriceLabel,
   variant = 'horizontal',
   onPress,
+  onPressItem,
+  itemIndex,
   width,
   height,
   imageOverlayTopLeft,
@@ -141,13 +148,25 @@ function ProductCardImpl({
   // blendet via `transition` weich ins echte Bild. Shimmer bleibt
   // Fallback fuer Produkte ohne Hash.
   const thumb = (product as any)?.bildThumb as string | undefined;
-  React.useEffect(() => {
+  // Reset shimmer when the row re-binds to a different product (URI change).
+  // DURING render (React-Pattern) statt im useEffect, damit eine vom LegendList
+  // RECYCELTE Kachel nie für einen Frame das alte Produktbild zeigt.
+  const lastUriRef = React.useRef(resolvedImageUri);
+  if (lastUriRef.current !== resolvedImageUri) {
+    lastUriRef.current = resolvedImageUri;
     setImageLoaded(false);
-  }, [resolvedImageUri]);
+  }
+
+  // Stabiler Press-Handler — hält die `React.memo` aktiv (kein neuer
+  // Funktions-Identity pro Parent-Render). `onPressItem` (Stöbern) hat Vorrang.
+  const handlePress = React.useCallback(() => {
+    if (onPressItem) onPressItem(product, itemIndex ?? 0);
+    else onPress?.();
+  }, [onPressItem, onPress, product, itemIndex]);
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       style={({ pressed }) => ({
         width: cardWidth,
         ...(height ? { height } : null),

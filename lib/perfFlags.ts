@@ -17,6 +17,8 @@
 // Side-Effects — nur weniger Re-Renders und weniger Konkurrenz mit
 // User-Input.
 
+import { Platform } from 'react-native';
+
 export const PERF = {
   // Fix A: AuthContext `value` Object via `useMemo` stabilisieren.
   // Heute: jedes Re-Render von AuthProvider erzeugt ein neues
@@ -101,7 +103,13 @@ export const PERF = {
   // Visuell unsichtbar bei normalem Scrollen.
   // Rollback: PERF.legendListPlainScrollView = false → fällt
   // zurück auf LegendList's default `Animated.ScrollView`.
-  legendListPlainScrollView: true,
+  //
+  // Android-Perf-Gate: NUR iOS. Auf Android bringt der plain-ScrollView-Fork
+  // keinen Nutzen (kein Status-Bar-Tap) und zwingt die Chrome-scrollY über
+  // einen JS-onScroll PRO FRAME statt den UI-Thread-useScrollViewOffset-Pfad
+  // (= „Fix F an, Fix G aus", oben als funktionierend dokumentiert). Rollback
+  // bei Android-Scroll-Problemen: wieder `true` (beide Plattformen, Alt-Stand).
+  legendListPlainScrollView: Platform.OS === 'ios',
 
   // Phase 0 C: kategorien-Liste (für Filter-Sheet) lazy laden statt
   // beim Stöbern-Mount. Wird nur gebraucht wenn der User auf das
@@ -120,6 +128,15 @@ export const PERF = {
   // Spart 1 große Firestore-Query (1.2 s) auf Critical-Path.
   // Rollback: PERF.lazyHandelsmarken = false.
   lazyHandelsmarken: true,
+
+  // Android-Perf: LegendList View-RECYCLING in Stöbern statt Mount/Unmount pro
+  // Scroll (→ ExpoImage-Re-Decode + Shimmer-Reset + GC-Druck). NUR Android —
+  // iOS läuft ohne Recycling sauber, kein Risiko auf der working-Plattform.
+  // Voraussetzungen erfüllt: Product-/BrandCard resetten ihren imageLoaded-State
+  // beim Re-Bind (URI-Wechsel, DURING render → kein Stale-Bild-Flash), und der
+  // gemischte 'Alle'-Tab setzt getItemType(__kind), damit eine ProductCard nie
+  // in einen BrandCard-Slot recycelt. Rollback: false.
+  legendListRecycle: Platform.OS === 'android',
 };
 
 // Konstanten für Fix E (referenced by GamificationProvider).

@@ -1105,8 +1105,20 @@ export default function ExploreScreen() {
       if (PERF_FIXES.abortStaleSearch) searchSeq.current++;
     };
   }, []);
+  // Stable merge order for the 'Alle' tab (see alleItems memo): each item's
+  // position is frozen on first sight so later pages append instead of the
+  // whole list re-sorting (→ visible rows jumped, v.a. Android). Re-frozen each
+  // reload generation (reset below) und bei Sort-Toggle (im Memo).
+  const alleOrderRef = useRef<{
+    sorter: ((a: any, b: any) => number) | null;
+    map: Map<string, number>;
+    next: number;
+  }>({ sorter: null, map: new Map(), next: 0 });
   useEffect(() => {
     const mySeq = ++reloadSeq.current;
+    // Android-Reorder-Fix: neue Reload-Generation → 'Alle'-Merge-Reihenfolge neu
+    // einfrieren (keine stale Positionen aus dem alten Filter/Sort/Search).
+    alleOrderRef.current = { sorter: null, map: new Map(), next: 0 };
     const wasFirst = isFirstMount.current;
     const delay = wasFirst ? 0 : 120;
     isFirstMount.current = false;
@@ -1340,7 +1352,11 @@ export default function ExploreScreen() {
           // die sonst kaputte Sortierung beim Nachladen.
           const next = reset
             ? ([...incoming].sort(productSorter) as any)
-            : ([...prev, ...incoming].sort(productSorter) as any);
+            : // Android-Reorder-Fix: append-only beim Nachladen — NICHT global
+              // re-sortieren. Sonst keilen sich neue Pages (bei canSort=false
+              // liefert Firestore Dokument-ID-Order) zwischen schon sichtbare
+              // Zeilen → die springen. Folge-Pages appenden stabil.
+              ([...prev, ...incoming] as any);
           // Seed the module-level cache so a later Stöbern remount
           // lands on this state instantly. Only do it for default
           // filters (see isDefaultFilters comment).
@@ -1467,7 +1483,9 @@ export default function ExploreScreen() {
           // (No-op bei canSort=true/Server-sortiert, korrigiert canSort=false).
           const next = reset
             ? ([...incoming].sort(productSorter) as any)
-            : ([...prev, ...incoming].sort(productSorter) as any);
+            : // Android-Reorder-Fix: append-only beim Nachladen (siehe
+              // loadNonames) — Folge-Pages appenden stabil statt global re-sortiert.
+              ([...prev, ...incoming] as any);
           if (reset && isDefaultFilters()) {
             setCachedMarken({ items: next, lastDoc: res.lastDoc, hasMore: res.hasMore });
           }
@@ -2735,10 +2753,28 @@ export default function ExploreScreen() {
       ...nonames.map((p) => ({ ...(p as any), __kind: 'eigen' as const })),
       ...markenprodukte.map((p) => ({ ...(p as any), __kind: 'marken' as const })),
     ];
-    // ClickUp 86cad6c0d (2.13b): nach dem AKTIVEN Sort sortieren (Name/Preis),
-    // nicht hartkodiert nach Name — sonst ignoriert der Default-"Alle"-Tab die
-    // gewählte Sortierung komplett.
-    tagged.sort(productSorter);
+    // Android-Reorder-Fix: statt den ganzen Merge bei jeder Quell-Änderung
+    // (Page 2, Background-Prefetch, Enrich) global zu re-sortieren — was schon
+    // sichtbare Zeilen springen ließ — die Position jedes Items beim ERSTEN
+    // Auftauchen einfrieren. Neue Items werden im eigenen Batch nach dem aktiven
+    // Sort sortiert und ans ENDE gehängt; bestehende behalten ihre Position.
+    // Reset: bei Sort-Toggle (reg.sorter ≠ productSorter) + jeder Reload-
+    // Generation (alleOrderRef wird im reload-Effect auf sorter:null gesetzt).
+    // Idempotent ggü. StrictMode-Doppel-Invoke (bereits gemappte Items = fresh∅).
+    const reg = alleOrderRef.current;
+    if (reg.sorter !== productSorter) {
+      reg.sorter = productSorter;
+      reg.map = new Map();
+      reg.next = 0;
+    }
+    const fresh = tagged.filter((t) => !reg.map.has(String(t.id)));
+    if (fresh.length) {
+      fresh.sort(productSorter);
+      for (const t of fresh) reg.map.set(String(t.id), reg.next++);
+    }
+    tagged.sort(
+      (a, b) => (reg.map.get(String(a.id)) ?? 0) - (reg.map.get(String(b.id)) ?? 0),
+    );
     return tagged;
   }, [nonames, markenprodukte, productSorter]);
 
@@ -2893,7 +2929,8 @@ export default function ExploreScreen() {
               unitPriceLabel={unitPriceLabel}
               variant="grid"
               height={278}
-              onPress={() => openProduct(p, index)}
+              onPressItem={openProduct}
+              itemIndex={index}
             />
           </View>
         );
@@ -2921,12 +2958,22 @@ export default function ExploreScreen() {
             unitPriceLabel={unitPriceLabel}
             alternativeCount={m.relatedProdukteIDs?.length ?? 0}
             height={278}
-            onPress={() => openBrand(m, index)}
+            onPressItem={openBrand}
+            itemIndex={index}
           />
         </View>
       );
     },
     [packungstypenMap, openProduct, openBrand],
+  );
+
+  // getItemType für den gemischten 'Alle'-Tab: damit LegendList beim Recycling
+  // (PERF.legendListRecycle, nur Android) eine ProductCard NIE in einen
+  // BrandCard-Slot wiederverwendet. Single-Type-Tabs (Eigenmarken/Marken)
+  // brauchen es nicht. Stabile Identity → kein Re-Layout.
+  const getItemTypeAlle = useCallback(
+    (item: any) => ((item as any)?.__kind === 'marken' ? 'marken' : 'eigen'),
+    [],
   );
 
   // ─── Items per tab — factored out so the LegendList path can reuse
@@ -3880,6 +3927,8 @@ export default function ExploreScreen() {
             numColumns={2}
             estimatedItemSize={290}
             drawDistance={fillDrawDistance}
+            recycleItems={PERF.legendListRecycle}
+            getItemType={getItemTypeAlle}
             onScroll={onScrollAlleProp}
             renderScrollComponent={renderScrollComponentProp}
             scrollEventThrottle={16}
@@ -3945,6 +3994,7 @@ export default function ExploreScreen() {
             numColumns={2}
             estimatedItemSize={290}
             drawDistance={fillDrawDistance}
+            recycleItems={PERF.legendListRecycle}
             onScroll={onScrollEigenProp}
             renderScrollComponent={renderScrollComponentProp}
             scrollEventThrottle={16}
@@ -4003,6 +4053,7 @@ export default function ExploreScreen() {
             numColumns={2}
             estimatedItemSize={290}
             drawDistance={fillDrawDistance}
+            recycleItems={PERF.legendListRecycle}
             onScroll={onScrollMarkenProp}
             renderScrollComponent={renderScrollComponentProp}
             scrollEventThrottle={16}

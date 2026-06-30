@@ -1,6 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image as ExpoImage } from 'expo-image';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
@@ -31,6 +31,11 @@ type Props = {
   /** Price per unit — e.g. "8,90€/kg", "0,05€/Stk.". */
   unitPriceLabel?: string | null;
   onPress?: () => void;
+  /** Stable per-item press handler (Stöbern-Grid) — vermeidet die inline
+   *  Arrow, die `React.memo` bricht. Bekommt das Produkt + seinen Listen-Index.
+   *  Hat Vorrang vor `onPress`, wenn gesetzt. */
+  onPressItem?: (product: any, index: number) => void;
+  itemIndex?: number;
   /**
    * Optionaler Marken-/Hersteller-Info-Text (z.B. aus
    * Discounter/Hersteller `infos`-Feld). Wenn gesetzt, rendert die
@@ -72,6 +77,8 @@ function BrandCardImpl({
   sizeLabel,
   unitPriceLabel,
   onPress,
+  onPressItem,
+  itemIndex,
   infos,
   onInfoPress,
   height,
@@ -86,13 +93,25 @@ function BrandCardImpl({
   const [imageLoaded, setImageLoaded] = useState(false);
   // Mini-Bild-Platzhalter (86c9pz8pz v3) — siehe ProductCard.
   const thumb = (product as any)?.bildThumb as string | undefined;
-  useEffect(() => {
+  // Reset shimmer beim Re-Bind auf ein anderes Produkt (URI-Wechsel) — DURING
+  // render (React-Pattern), damit eine RECYCELTE Kachel nie kurz das alte Bild
+  // zeigt. Ersetzt den useEffect-Reset.
+  const lastUriRef = React.useRef(resolvedImageUri);
+  if (lastUriRef.current !== resolvedImageUri) {
+    lastUriRef.current = resolvedImageUri;
     setImageLoaded(false);
-  }, [resolvedImageUri]);
+  }
+
+  // Stabiler Press-Handler — hält die `React.memo` aktiv. `onPressItem`
+  // (Stöbern) hat Vorrang vor `onPress`.
+  const handlePress = React.useCallback(() => {
+    if (onPressItem) onPressItem(product, itemIndex ?? 0);
+    else onPress?.();
+  }, [onPressItem, onPress, product, itemIndex]);
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       style={({ pressed }) => ({
         width: '100%',
         ...(height ? { height } : null),
