@@ -195,6 +195,10 @@ function ProductCardImpl({
                 the old FadingImage approach stays away). */}
             <ExpoImage
               source={{ uri: resolvedImageUri }}
+              // recyclingKey: bei LegendList-Recycling (Android) sofort das
+              // alte Bild verwerfen statt es bis zum Laden des neuen zu zeigen
+              // (sonst "Produkt A kurz sichtbar, dann springt's auf B").
+              recyclingKey={resolvedImageUri}
               style={{ width: '100%', height: '100%' }}
               contentFit="contain"
               placeholder={thumb ? { uri: thumb } : undefined}
@@ -343,6 +347,7 @@ function ProductCardImpl({
               >
                 <ExpoImage
                   source={{ uri: eyebrowLogoUri }}
+                  recyclingKey={eyebrowLogoUri}
                   style={{ width: '100%', height: '100%' }}
                   contentFit="contain"
                   cachePolicy="memory-disk"
@@ -354,6 +359,9 @@ function ProductCardImpl({
                 numberOfLines={1}
                 style={{
                   fontFamily,
+                  // Android packt sonst vertikales Extra-Padding um Text →
+                  // Zeilen höher als iOS → Card-Content clippt. iOS ignoriert es.
+                  includeFontPadding: false,
                   fontWeight: fontWeight.bold,
                   fontSize: 10,
                   color: theme.primary,
@@ -372,6 +380,7 @@ function ProductCardImpl({
           numberOfLines={2}
           style={{
             fontFamily,
+            includeFontPadding: false,
             fontWeight: fontWeight.semibold,
             fontSize: 15,
             lineHeight: 19,
@@ -394,6 +403,7 @@ function ProductCardImpl({
           <Text
             style={{
               fontFamily,
+              includeFontPadding: false,
               fontWeight: fontWeight.bold,
               fontSize: 16,
               color: theme.text,
@@ -406,6 +416,7 @@ function ProductCardImpl({
               numberOfLines={1}
               style={{
                 fontFamily,
+                includeFontPadding: false,
                 fontWeight: fontWeight.medium,
                 fontSize: 11,
                 color: theme.textMuted,

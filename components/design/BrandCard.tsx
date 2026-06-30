@@ -134,6 +134,9 @@ function BrandCardImpl({
           <>
             <ExpoImage
               source={{ uri: resolvedImageUri }}
+              // recyclingKey: bei LegendList-Recycling (Android) sofort das alte
+              // Bild verwerfen statt es bis zum Laden des neuen zu zeigen.
+              recyclingKey={resolvedImageUri}
               style={{ width: '100%', height: '100%' }}
               contentFit="contain"
               placeholder={thumb ? { uri: thumb } : undefined}
@@ -239,6 +242,7 @@ function BrandCardImpl({
               >
                 <ExpoImage
                   source={{ uri: brandLogoUri }}
+                  recyclingKey={brandLogoUri}
                   style={{ width: '100%', height: '100%' }}
                   contentFit="contain"
                   cachePolicy="memory-disk"
@@ -249,6 +253,9 @@ function BrandCardImpl({
               numberOfLines={1}
               style={{
                 fontFamily,
+                // Android-Extra-Text-Padding aus → Zeilenhöhe wie iOS, kein
+                // Card-Content-Clipping. iOS ignoriert die Prop.
+                includeFontPadding: false,
                 fontWeight: fontWeight.bold,
                 fontSize: 10,
                 color: theme.textMuted,
@@ -289,6 +296,7 @@ function BrandCardImpl({
           numberOfLines={2}
           style={{
             fontFamily,
+            includeFontPadding: false,
             fontWeight: fontWeight.semibold,
             fontSize: 15,
             lineHeight: 19,
@@ -307,7 +315,7 @@ function BrandCardImpl({
             flexWrap: 'wrap',
           }}
         >
-          <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 16, color: theme.text }}>
+          <Text style={{ fontFamily, includeFontPadding: false, fontWeight: fontWeight.bold, fontSize: 16, color: theme.text }}>
             {formatEur(price)}
           </Text>
           {sizeLabel || unitPriceLabel ? (
@@ -315,6 +323,7 @@ function BrandCardImpl({
               numberOfLines={1}
               style={{
                 fontFamily,
+                includeFontPadding: false,
                 fontWeight: fontWeight.medium,
                 fontSize: 11,
                 color: theme.textMuted,
@@ -327,7 +336,7 @@ function BrandCardImpl({
             </Text>
           ) : null}
           {typeof savingsEur === 'number' && savingsEur > 0 ? (
-            <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 12, color: theme.primary }}>
+            <Text style={{ fontFamily, includeFontPadding: false, fontWeight: fontWeight.bold, fontSize: 12, color: theme.primary }}>
               −{formatEur(savingsEur)}
             </Text>
           ) : null}
