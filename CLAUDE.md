@@ -1908,6 +1908,18 @@ hosting:markendetektive-895f7` — die Admin-Site `md-receipt-admin` NICHT
 anfassen. QR = `react-native-qrcode-svg` (rein JS auf react-native-svg, kein
 native Rebuild; lokal generiert, immer weißer Grund + dunkle Module).
 
+**App-weit „aktuelle Liste" (`lib/services/activeListService.ts`):** Die im
+Einkaufszettel gewählte Liste ist DAS Add-Ziel für die ganze App (persistiert
+in `active_cart_list_v1`; Key wird NUR vom Service geschrieben). Produktseiten
+(noname-detail, product-comparison), Favorites-Bulk-Add und der Cart-Badge-Hook
+(`useShoppingCartCount`) lesen/abonnieren den Service — Adds, Mengen-Pills und
+Counter folgen also der aktiven Liste. Lazy Session-Validierung gegen
+`memberIds` (entfernte User → Fallback persönlicher Zettel). Beim Hinzufügen
+NEUER Cart-Callsites: `ActiveListService.getCartTarget(displayName)` ans
+`cartTarget` der FirestoreService-Methode reichen + Status-Reads mit
+`(await ActiveListService.getActiveList())?.listId` — sonst landet der Add
+im falschen Zettel.
+
 **Produktentscheidung (User 2026-07-02):** Abhaken in geteilten Listen vergibt
 Punkte/Ersparnis/Kaufhistorie an den ABHAKENDEN (identisch zum eigenen Zettel —
 „wer kauft, kriegt den Kauf"), und ALLE Aktionen (add/+1, purchase, remove,
