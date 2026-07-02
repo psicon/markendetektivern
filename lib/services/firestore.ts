@@ -4076,7 +4076,13 @@ export class FirestoreService {
         name: productName,
         anzahl: wasGekauft || !exists ? 1 : increment(1),
       };
-      if (currentJourneyId !== null && currentJourneyId !== undefined) {
+      // journeyId NUR im persönlichen Zettel persistieren. In geteilten
+      // Listen zeigt sie auf die Journey EINES Mitglieds — hakt ein anderes
+      // ab, findet dessen Flush die Journey nicht (Silent-Drop), und jedes
+      // +1 würde die ID überschreiben (Journey-Audit 2026-07-02). Ohne
+      // journeyId greift beim Abhaken/Löschen der saubere Fallback in die
+      // aktive Journey des jeweils Ausführenden.
+      if (currentJourneyId !== null && currentJourneyId !== undefined && !cartTarget?.sharedListId) {
         writePayload.journeyId = currentJourneyId;
       }
       if (source) writePayload.source = source;
@@ -4085,7 +4091,11 @@ export class FirestoreService {
         writePayload.priceAtTime = priceInfo.price;
         writePayload.savingsAtTime = priceInfo.savings;
       }
-      if (viewedProductIndex !== null) writePayload.viewedProductIndex = viewedProductIndex;
+      // viewedProductIndex ist an die Journey des Adders gebunden — ohne
+      // journeyId (shared) nutzlos/irreführend, daher gleiches Gate.
+      if (viewedProductIndex !== null && !cartTarget?.sharedListId) {
+        writePayload.viewedProductIndex = viewedProductIndex;
+      }
       if (!exists) {
         // Erstmalig: Produkt-Reference setzen
         if (isMarke) {
@@ -4352,11 +4362,14 @@ export class FirestoreService {
 
         // Background tracking — der Caller hat die Daten geliefert,
         // kein zusätzlicher Read auf den eben gelöschten Doc nötig.
+        // Geteilte Liste: journeyId im Payload kann von einem ANDEREN
+        // Mitglied stammen (Alt-Doc) → Specific-Flush würde still verwerfen;
+        // immer der Fallback in die Journey des Ausführenden.
         if (!trackingPayload.isCustomItem && trackingPayload.productId) {
           void (async () => {
             try {
               const journeyTrackingService = (await import('./journeyTrackingService')).default;
-              if (trackingPayload.journeyId) {
+              if (trackingPayload.journeyId && !sharedListId) {
                 await journeyTrackingService.trackRemoveInSpecificJourney(
                   trackingPayload.journeyId,
                   trackingPayload.productId,
@@ -4435,9 +4448,11 @@ export class FirestoreService {
         if (productData && productId) {
           // Track mit Journey
           const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
-          
+
           // NEU: Verwende die gespeicherte journeyId UND Index!
-          if (cartData.journeyId) {
+          // (Nur persönlicher Zettel — in geteilten Listen kann die ID von
+          // einem anderen Mitglied stammen → Fallback, siehe Fast-Path.)
+          if (cartData.journeyId && !sharedListId) {
             console.log('🎯 Tracking Remove in Specific Journey:', cartData.journeyId, 'Index:', cartData.viewedProductIndex);
             // Fix (2026-05-07): Fire-and-forget. trackRemoveInSpecificJourney
             // macht intern getDocs + updateDoc mit der KOMPLETTEN
@@ -4571,7 +4586,10 @@ export class FirestoreService {
           journeyTrackingService.getViewedProductIndexAfterAction(productId);
         const cartAnzahl = (cartData.anzahl ?? 1) as number;
 
-        if (cartData.journeyId) {
+        // Geteilte Liste: eine evtl. (Alt-Doc) vorhandene journeyId gehört
+        // einem ANDEREN Mitglied → Specific-Flush würde still verwerfen.
+        // Immer den Fallback in die Journey des Abhakenden nehmen.
+        if (cartData.journeyId && !sharedListId) {
           await journeyTrackingService.trackPurchaseInSpecificJourney(
             cartData.journeyId,
             [
@@ -4842,11 +4860,15 @@ export class FirestoreService {
           timestamp: serverTimestamp(),
           name: productData?.name || 'NoName Produkt',
         };
-        const jid = currentJourneyId || trackingDetail?.originalJourneyId;
-        if (jid != null) newCartItem.journeyId = jid;
-        const vpi = trackingDetail?.originalViewedProductIndex;
-        if (vpi != null) newCartItem.viewedProductIndex = vpi;
-        if (cartTarget?.sharedListId) {
+        // journeyId/viewedProductIndex nur im persönlichen Zettel — in
+        // geteilten Listen zeigen sie auf die Journey EINES Mitglieds
+        // (Silent-Drop beim Abhaken durch andere; Journey-Audit 2026-07-02).
+        if (!cartTarget?.sharedListId) {
+          const jid = currentJourneyId || trackingDetail?.originalJourneyId;
+          if (jid != null) newCartItem.journeyId = jid;
+          const vpi = trackingDetail?.originalViewedProductIndex;
+          if (vpi != null) newCartItem.viewedProductIndex = vpi;
+        } else {
           newCartItem.addedBy = userId;
           newCartItem.addedByName = cartTarget.addedByName ?? null;
         }

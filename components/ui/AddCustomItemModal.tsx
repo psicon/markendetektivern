@@ -162,23 +162,21 @@ export const AddCustomItemModal: React.FC<AddCustomItemModalProps> = ({
 
       await FirestoreService.addCustomItemToShoppingCart(userId, customItem, cartTarget);
       // 86ca2rt88: Freitext-Eintrag in der Journey festhalten (hinzugefügt).
-      // NUR für den persönlichen Zettel — ein Item in einer GETEILTEN Liste
-      // liegt nie im persönlichen Wagen und gehört nicht in die persönliche
-      // Journey (Review-Finding Stufe 5).
-      if (!cartTarget) {
-        try {
-          journeyTrackingService.trackCustomItem(
-            'added',
-            {
-              name: customItem.name,
-              type: customItem.type,
-              marketName: (customItem as any).marketName,
-            },
-            userId,
-          );
-        } catch {
-          /* fire-and-forget — Tracking darf den Add nie blockieren */
-        }
+      // Läuft auch für GETEILTE Listen (User-Entscheidung 2026-07-02: alle
+      // Aktionen des Users landen in SEINER Journey — konsistent mit
+      // purchased/deleted; Journeys sind immer user-eigen).
+      try {
+        journeyTrackingService.trackCustomItem(
+          'added',
+          {
+            name: customItem.name,
+            type: customItem.type,
+            marketName: (customItem as any).marketName,
+          },
+          userId,
+        );
+      } catch {
+        /* fire-and-forget — Tracking darf den Add nie blockieren */
       }
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => {},
