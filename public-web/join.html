@@ -72,16 +72,38 @@
       btn.textContent = 'Link unvollständig — App öffnen';
       appUrl = 'markendetektivern://';
     }
-    // Android Chrome: intent:// öffnet die App direkt (mit Play-Store-Fallback).
+    // Android (User-Report 2026-07-02: „lande immer im Play Store"):
+    // Der intent://-Weg mit Play-Fallback schlug in Nicht-Chrome-Browsern
+    // (Mi Browser, Samsung Internet …) fehl → Fallback feuerte TROTZ
+    // installierter App. Robuste Kaskade: (1) plain Custom-Scheme (öffnet
+    // die App in praktisch allen Browsern), (2) falls die Seite nach 1,6 s
+    // noch sichtbar ist → intent:// OHNE Store-Fallback (Chrome-Pfad),
+    // (3) Play Store nur noch als manueller Badge-Link unten.
     var isAndroid = /android/i.test(navigator.userAgent);
     var androidIntent = 'intent://join-list/' + code +
-      '#Intent;scheme=markendetektivern;package=de.markendetektive;' +
-      'S.browser_fallback_url=' + encodeURIComponent('https://play.google.com/store/apps/details?id=de.markendetektive') + ';end';
-    btn.href = isAndroid ? androidIntent : appUrl;
+      '#Intent;scheme=markendetektivern;package=de.markendetektive;end';
+    var tryOpenAndroid = function () {
+      var t = setTimeout(function () {
+        if (!document.hidden) location.href = androidIntent;
+      }, 1600);
+      document.addEventListener('visibilitychange', function () {
+        if (document.hidden) clearTimeout(t); // App hat übernommen
+      }, { once: true });
+      location.href = appUrl;
+    };
+    if (isAndroid) {
+      btn.addEventListener('click', function (e) { e.preventDefault(); tryOpenAndroid(); });
+      btn.href = '#';
+    } else {
+      btn.href = appUrl;
+    }
     // Auto-Versuch beim Laden (iOS Safari fragt „In MarkenDetektive öffnen?").
     // Button bleibt der zuverlässige Pfad, falls der Auto-Versuch still scheitert.
     if (code) {
-      setTimeout(function () { location.href = isAndroid ? androidIntent : appUrl; }, 350);
+      setTimeout(function () {
+        if (isAndroid) tryOpenAndroid();
+        else location.href = appUrl;
+      }, 350);
     }
   </script>
 </body>

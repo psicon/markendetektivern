@@ -170,10 +170,17 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
           if (cancelled) return;
         }
 
-        // Push-Korrektiv: RC meldet Käufe/Renewals/Abläufe (auch von
-        // anderen Geräten) aktiv — bestätigte Werte, direkt übernehmen.
+        // Push-Korrektiv: RC meldet Käufe/Renewals (auch von anderen
+        // Geräten) aktiv. REGRESSION-FIX 2026-07-02: NUR-TRUE-Semantik!
+        // Der Listener feuert bei der Registrierung sofort mit der
+        // gecachten CustomerInfo — bei Receipt-gebundenem Premium (Kauf
+        // hängt am Apple-Account, nicht am RC-User der uid) ist die OHNE
+        // Entitlement → ein confirm(false) hier vergiftete Cache+State,
+        // BEVOR der Boot-Restore das Premium zurückholen konnte („Premium
+        // wird GAR NICHT mehr erkannt"). Downgrades laufen ausschließlich
+        // über den Restore-Pfad unten bzw. explizite Force-Refreshes.
         unsubscribePremium = revenueCatService.onPremiumChanged((premium) => {
-          if (!cancelled) confirmPremium(premium);
+          if (!cancelled && premium === true) confirmPremium(true);
         });
 
         // Ersten Premium-Status holen (cached innerhalb von RC SDK).
@@ -181,35 +188,37 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
         // unbekannt → bestehenden (Cache-)Wert behalten.
         const isPremiumUser = await revenueCatService.isPremiumOrNull();
         if (cancelled) return;
-        if (isPremiumUser !== null) confirmPremium(isPremiumUser);
+        if (isPremiumUser === true) confirmPremium(true);
 
-        // Sofortiger Server-Abgleich im Hintergrund (User-Vorgabe
-        // 2026-06-11: "beim Start die Käufe checken"). WICHTIG: über
-        // forceRefreshPremiumOrNull — der alte Pfad invalidierte erst den
-        // SDK-Cache und lieferte bei Netz-Fehlern Mock-false, womit er den
-        // korrekten Wert ÜBERSCHRIEB und den AsyncStorage-Cache vergiftete
-        // (Root-Cause von "Premium-User sieht Werbung, oft dauerhaft").
+        // Sofortiger Server-Abgleich im Hintergrund — NUR-TRUE: er läuft
+        // PARALLEL zum Restore und darf dessen Ergebnis (oder den
+        // Cache-Wert) nicht mit einem Vor-Restore-false überschreiben.
         revenueCatService
           .forceRefreshPremiumOrNull()
           .then((premiumNow) => {
-            if (!cancelled && premiumNow !== null) confirmPremium(premiumNow);
+            if (!cancelled && premiumNow === true) confirmPremium(true);
           })
           .catch(() => {});
 
-        // Falls (noch) kein Premium: restore im Hintergrund versuchen.
-        // Cleanup-Flag verhindert state-set nach Unmount.
-        // NICHT im Simulator: restorePurchases triggert dort den
-        // Sandbox-Apple-ID-Login-Prompt in Endlosschleife (Sim hat
-        // keinen App-Store-Account) — blockiert jedes Sim-Testing.
-        if (isPremiumUser === false && Device.isDevice) {
-          revenueCatService.restorePurchases()
-            .then(async () => {
-              if (cancelled) return;
-              const isPremiumNow = await revenueCatService.isPremiumOrNull();
-              if (cancelled) return;
-              if (isPremiumNow === true) confirmPremium(true);
-            })
-            .catch(() => {});
+        if (isPremiumUser === false) {
+          if (Device.isDevice) {
+            // Restore-first: Ein „kein Premium" ist erst FINAL, wenn der
+            // Restore-Versuch durch ist (Receipt-Sync). Das Ergebnis kommt
+            // DIREKT aus der restore-CustomerInfo — kein zweiter Cache-
+            // Read (der stale sein konnte: „Restore bringt es nur
+            // MANCHMAL zurück"). NICHT im Simulator: restorePurchases
+            // triggert dort den Sandbox-Apple-ID-Prompt in Endlosschleife.
+            revenueCatService
+              .restorePremiumOrNull()
+              .then((restored) => {
+                if (cancelled || restored === null) return;
+                confirmPremium(restored);
+              })
+              .catch(() => {});
+          } else {
+            // Simulator: kein Restore möglich → SDK-false gilt.
+            confirmPremium(false);
+          }
         }
 
         // Offerings parallel laden mit Timeout
@@ -328,12 +337,15 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
         return;
       }
 
-      const Purchases = await import('react-native-purchases');
-      await Purchases.default.restorePurchases();
-      
-      // Premium Status aktualisieren
-      await refreshPremiumStatus();
-      console.log('✅ Purchases restored');
+      // REGRESSION-FIX 2026-07-02: Das Restore-Ergebnis kommt DIREKT aus
+      // der vom SDK zurückgegebenen CustomerInfo. Vorher lief danach ein
+      // separater Cache-Read (refreshPremiumStatus), der stale sein konnte
+      // → „Käufe wiederherstellen bringt es nur MANCHMAL zurück".
+      const restored = await revenueCatService.restorePremiumOrNull();
+      if (restored !== null) {
+        confirmPremium(restored);
+      }
+      console.log('✅ Purchases restored, premium:', restored);
 
     } catch (error) {
       console.error('❌ Error restoring purchases:', error);

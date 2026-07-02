@@ -418,6 +418,26 @@ class RevenueCatService {
   }
 
   /**
+   * Restore mit EHRLICHEM Ergebnis (Premium-Regression-Fix 2026-07-02):
+   * wertet die vom SDK ZURÜCKGEGEBENE CustomerInfo direkt aus — kein
+   * zweiter Cache-Read danach (der lieferte stale Werte: „Käufe
+   * wiederherstellen bringt es nur MANCHMAL zurück"). null = Restore
+   * fehlgeschlagen/nicht möglich (Status bleibt unangetastet).
+   */
+  async restorePremiumOrNull(): Promise<boolean | null> {
+    if (this.isExpoGo) return null;
+    if (!this._isInitialized) return null;
+    try {
+      const Purchases = require('react-native-purchases');
+      const customerInfo = await Purchases.default.restorePurchases();
+      return this.derivePremium(customerInfo);
+    } catch (error) {
+      console.warn('⚠️ restorePremiumOrNull: Restore fehlgeschlagen:', error);
+      return null;
+    }
+  }
+
+  /**
    * Push-Korrektiv: RevenueCat meldet CustomerInfo-Änderungen (Kauf,
    * Renewal, Ablauf, Restore — auch von anderen Geräten) aktiv. Gibt eine
    * Unsubscribe-Funktion zurück. In Expo Go / vor Init: No-op.

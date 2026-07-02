@@ -73,7 +73,6 @@ import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { Crossfade, ProductCardSkeleton } from '@/components/design/Skeletons';
 import { getStufeCopy, loadStufeCopy } from '@/lib/utils/stufeCopy';
 import { StufenChips } from '@/components/design/StufenChips';
-import { StufenLegendSheet } from '@/components/design/StufenLegendSheet';
 import { collection, getDocs } from '@react-native-firebase/firestore';
 
 import { BannerAd } from '@/components/ads/BannerAd';
@@ -781,15 +780,6 @@ export default function ExploreScreen() {
   // angegebenes Alter). Greift NUR für die Alkohol-Kategorie und
   // führt zum DemographicsPromptSheet.
   const [showAgeGateSheet, setShowAgeGateSheet] = useState(false);
-  // Stufen-Legende (Kernkonzept erklären) — geöffnet über die Stufen-Pill auf
-  // den Produktkarten. Stabiler Handler, damit ProductCards React.memo hält.
-  const [stufeLegendVisible, setStufeLegendVisible] = useState(false);
-  const [stufeLegendHighlight, setStufeLegendHighlight] = useState<number | null>(null);
-  const handleStufePress = useCallback((s: number) => {
-    setStufeLegendHighlight(s);
-    setStufeLegendVisible(true);
-  }, []);
-
   // ─── Tab-Re-Press Scroll-to-Top ──────────────────────────────────────
   // Re-Tap auf das Stöbern-Icon im Tab-Bar scrollt die aktive Page zum
   // Anfang. Mirror-Behavior zu iOS-Status-Bar-Tap (`scrollsToTop`-Prop)
@@ -2981,7 +2971,6 @@ export default function ExploreScreen() {
               height={gridCardH}
               onPressItem={openProduct}
               itemIndex={index}
-              onStufePress={handleStufePress}
             />
           </View>
         );
@@ -3015,7 +3004,7 @@ export default function ExploreScreen() {
         </View>
       );
     },
-    [packungstypenMap, openProduct, openBrand, gridOuterH, gridCardH, handleStufePress],
+    [packungstypenMap, openProduct, openBrand, gridOuterH, gridCardH],
   );
 
   // getItemType für den gemischten 'Alle'-Tab: damit LegendList beim Recycling
@@ -4882,14 +4871,6 @@ export default function ExploreScreen() {
           }
         }}
         onSkip={() => setShowAgeGateSheet(false)}
-      />
-
-      {/* Stufen-Legende — erklärt das Kernkonzept (alle 5 Stufen). Geöffnet
-          über die antippbare Stufen-Pill auf den Produktkarten. */}
-      <StufenLegendSheet
-        visible={stufeLegendVisible}
-        onClose={() => setStufeLegendVisible(false)}
-        highlight={stufeLegendHighlight}
       />
 
       {/* ─── Locked category modal (Alkohol gating) ─────────────────── */}

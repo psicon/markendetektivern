@@ -51,7 +51,6 @@ import { RatingsSheet, type Rating, type SubmittedRating } from '@/components/de
 import { AiComparisonScale } from '@/components/design/AiComparisonScale';
 import { AiHealthScale } from '@/components/design/AiHealthScale';
 import { AiManufacturerCard } from '@/components/design/AiManufacturerCard';
-import { StufenLegendSheet } from '@/components/design/StufenLegendSheet';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { CoachmarkScrollProvider } from '@/components/coachmarks/CoachmarkScrollContext';
 import {
@@ -648,7 +647,6 @@ export default function ProductComparisonScreen() {
   // sauber durchläuft). 280 ms Verzögerung passt zur Pop-Out-Spring.
   const [pillVisible, setPillVisible] = useState(false);
   // Stufen-Legende (Kernkonzept) — geöffnet über die Detektiv-Check-Zeile.
-  const [stufenLegendVisible, setStufenLegendVisible] = useState(false);
   const pillUnmountTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pillAutoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closePill = useCallback(() => {
@@ -2548,11 +2546,9 @@ export default function ProductComparisonScreen() {
                 globale Row ausgeblendet, weil dann jede Alt-Card ihre
                 eigene Stufe inline trägt. */}
             {!STUFE_IN_CARD && picked ? (
-              <Pressable
-                onPress={() => setStufenLegendVisible(true)}
-                accessibilityRole="button"
-                accessibilityLabel={`Stufe ${pickedStufe} von 5, ${pickedInfo.label}. Antippen für die Erklärung aller Stufen.`}
-                style={({ pressed }) => ({
+              <View
+                accessibilityLabel={`Stufe ${pickedStufe} von 5, ${pickedInfo.label}.`}
+                style={{
                   marginHorizontal: 20,
                   marginTop: 16,
                   padding: 14,
@@ -2562,8 +2558,7 @@ export default function ProductComparisonScreen() {
                   flexDirection: 'row',
                   gap: 12,
                   alignItems: 'flex-start',
-                  opacity: pressed ? 0.85 : 1,
-                })}
+                }}
               >
                 {/* StufenChips (same component as the Stöbern grid) so
                     the similarity indicator lives in EXACTLY one place
@@ -2603,13 +2598,7 @@ export default function ProductComparisonScreen() {
                     </>
                   ) : null}
                 </Text>
-                <MaterialCommunityIcons
-                  name="information-outline"
-                  size={16}
-                  color={theme.textMuted}
-                  style={{ marginTop: 3 }}
-                />
-              </Pressable>
+              </View>
             ) : null}
           </View>
         ) : (
@@ -2820,13 +2809,6 @@ export default function ProductComparisonScreen() {
 
         <View style={{ height: 24 }} />
       </Animated.ScrollView>
-
-      {/* Stufen-Legende — erklärt das Kernkonzept (alle 5 Stufen). */}
-      <StufenLegendSheet
-        visible={stufenLegendVisible}
-        onClose={() => setStufenLegendVisible(false)}
-        highlight={pickedStufe}
-      />
 
       {/* Marken-Info-Sheet — geöffnet vom (i)-Icon im Hersteller-
           Chip am Hero. Zeigt die `infos`-Zusatzdaten der Marke /
