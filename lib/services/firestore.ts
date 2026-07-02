@@ -3798,24 +3798,65 @@ export class FirestoreService {
   // ========================================
   // EINKAUFSZETTEL / SHOPPING CART METHODS
   // ========================================
+  //
+  // Stufe 5 (86cahgwmn): Alle Cart-Methoden können optional gegen eine
+  // GETEILTE Liste laufen (shared_lists/{id}/items — GLEICHES Doc-Schema
+  // wie users/{uid}/einkaufswagen, plus addedBy/addedByName). Default
+  // bleibt der persönliche Einkaufswagen — bestehende Aufrufer sind
+  // unverändert. So rendert/verhält sich eine geteilte Liste 1:1 wie
+  // der eigene Zettel (gleiche Pipeline, gleiche Handler).
+
+  /** Ziel-Collection für Cart-Ops (persönlich vs. geteilte Liste). */
+  private static cartCollectionRef(userId: string, sharedListId?: string | null) {
+    return sharedListId
+      ? collection(db, 'shared_lists', sharedListId, 'items')
+      : collection(db, 'users', userId, 'einkaufswagen');
+  }
+
+  /** Ziel-Doc für Cart-Ops (persönlich vs. geteilte Liste). */
+  private static cartDocRef(userId: string, itemId: string, sharedListId?: string | null) {
+    return sharedListId
+      ? doc(db, 'shared_lists', sharedListId, 'items', itemId)
+      : doc(db, 'users', userId, 'einkaufswagen', itemId);
+  }
 
   /**
    * Holt alle Einkaufszettel-Einträge für einen User
    */
-  static async getShoppingCartItems(userId: string): Promise<FirestoreDocument<Einkaufswagen>[]> {
+  static async getShoppingCartItems(
+    userId: string,
+    sharedListId?: string | null,
+  ): Promise<FirestoreDocument<Einkaufswagen>[]> {
     try {
-      const userRef = doc(db, 'users', userId);
-      const q = query(
-        collection(userRef, 'einkaufswagen'),
-        where('gekauft', '==', false),
-        orderBy('timestamp', 'desc')
-      );
+      const colRef = this.cartCollectionRef(userId, sharedListId);
+      // Geteilte Liste: KEIN where/orderBy im Query — (a) ein orderBy
+      // bräuchte einen Composite-Index auf der items-Collection (Indizes
+      // werden hier bewusst nicht angefasst, siehe Index-Learning in
+      // CLAUDE.md), (b) Legacy-Items aus dem ersten Shared-Release tragen
+      // `purchased` statt `gekauft` und würden vom Equality-Filter
+      // ausgeschlossen. Filter + Sortierung laufen client-seitig;
+      // Listen sind klein (<200 Items).
+      const q = sharedListId
+        ? query(colRef)
+        : query(colRef, where('gekauft', '==', false), orderBy('timestamp', 'desc'));
 
       const snapshot = await getDocs(q);
-      const rawItems = snapshot.docs.map((d) => ({
+      let rawItems = snapshot.docs.map((d) => ({
         id: d.id,
         ...d.data(),
       })) as FirestoreDocument<Einkaufswagen>[];
+
+      if (sharedListId) {
+        // Offen = weder gekauft (neues Schema) noch purchased (Legacy).
+        rawItems = rawItems.filter(
+          (it: any) => it.gekauft !== true && it.purchased !== true,
+        );
+        // Client-seitige timestamp-desc-Sortierung (siehe Query-Kommentar).
+        rawItems.sort(
+          (a: any, b: any) =>
+            (b.timestamp?.toMillis?.() ?? 0) - (a.timestamp?.toMillis?.() ?? 0),
+        );
+      }
 
       // ─── Cart-Schema v2: Read-Side Merge by productId ───
       // Falls User Legacy Auto-ID-Docs UND neue Det-ID-Docs für dasselbe
@@ -3894,23 +3935,30 @@ export class FirestoreService {
       marketName?: string;
       marketLand?: string;
       marketBild?: string;
-    }
+    },
+    cartTarget?: { sharedListId: string; addedByName?: string | null },
   ): Promise<string> {
     try {
-      const userRef = doc(db, 'users', userId);
       // T17.38: Menge auf top-level `anzahl` schreiben (gleiches Schema
       // wie DB-Produkte) — so liest CustomCard's EnrichedItem.anzahl
       // den Wert direkt aus dem doc, ohne customItem.quantity-Sonderfall.
       const anzahl = Math.max(1, Math.min(99, customItem.quantity ?? 1));
-      const data: Partial<Einkaufswagen> = {
+      const data: Partial<Einkaufswagen> & Record<string, any> = {
         customItem: customItem,
         gekauft: false,
         name: customItem.name, // Für schnelle Anzeige
         anzahl,
         timestamp: serverTimestamp() as Timestamp
       };
+      if (cartTarget?.sharedListId) {
+        data.addedBy = userId;
+        data.addedByName = cartTarget.addedByName ?? null;
+      }
 
-      const docRef = await addDoc(collection(userRef, 'einkaufswagen'), data);
+      const docRef = await addDoc(
+        this.cartCollectionRef(userId, cartTarget?.sharedListId),
+        data,
+      );
       console.log('✅ Added custom item to shopping cart:', docRef.id, customItem);
       return docRef.id;
     } catch (error) {
@@ -3929,9 +3977,10 @@ export class FirestoreService {
     userId: string,
     cartDocId: string,
     anzahl: number,
+    sharedListId?: string | null,
   ): Promise<void> {
     const clamped = Math.max(1, Math.min(99, anzahl));
-    const ref = doc(db, 'users', userId, 'einkaufswagen', cartDocId);
+    const ref = this.cartDocRef(userId, cartDocId, sharedListId);
     await updateDoc(ref, { anzahl: clamped });
   }
 
@@ -3959,17 +4008,16 @@ export class FirestoreService {
       mainProductId: string;
       mainProductName: string;
       mainProductType: 'brand' | 'noname';
-    }
+    },
+    cartTarget?: { sharedListId: string; addedByName?: string | null }
   ): Promise<string> {
     try {
-      const userRef = doc(db, 'users', userId);
-
       // ─── Cart-Schema v2 (2026-05-07): Deterministische Doc-ID ───
       // analog zu Favoriten — eine Cart-Zeile pro Produkt mit anzahl
       // statt N separate Auto-ID-Docs. Eliminiert getDocs-Query im
       // Remove-Pfad (war WatchStream-Stress-Quelle bei Cart-Burst).
       const detId = `${isMarke ? 'brand' : 'noname'}_${productId}`;
-      const detRef = doc(db, 'users', userId, 'einkaufswagen', detId);
+      const detRef = this.cartDocRef(userId, detId, cartTarget?.sharedListId);
 
       // Hole Journey-ID + tracke synchron in-memory.
       const journeyTrackingService = await import('./journeyTrackingService').then(m => m.default);
@@ -4045,6 +4093,12 @@ export class FirestoreService {
         } else {
           writePayload.handelsmarkenProdukt = doc(db, 'produkte', productId);
         }
+        // Geteilte Liste: Ersteller-Attribution (nur beim Erst-Write —
+        // der ursprüngliche Hinzufüger bleibt sichtbar).
+        if (cartTarget?.sharedListId) {
+          writePayload.addedBy = userId;
+          writePayload.addedByName = cartTarget.addedByName ?? null;
+        }
       }
       // Fire-and-forget (86ca7ugym, Forbidden Pattern: die Promise löst
       // erst beim SERVER-Ack — im Funkloch hängt sonst der Button-Spinner
@@ -4098,10 +4152,11 @@ export class FirestoreService {
     isMarke: boolean,
     currentAnzahl?: number,
     trackingPayload?: CartRemoveTrackingPayload,
+    sharedListId?: string | null,
   ): Promise<number> {
     try {
       const detId = `${isMarke ? 'brand' : 'noname'}_${productId}`;
-      const detRef = doc(db, 'users', userId, 'einkaufswagen', detId);
+      const detRef = this.cartDocRef(userId, detId, sharedListId);
 
       // ─── Fast-Path: Caller weiß was er hat ───
       if (typeof currentAnzahl === 'number') {
@@ -4115,7 +4170,7 @@ export class FirestoreService {
         } else {
           // anzahl === 1 → full remove. Caller liefert Tracking-Daten,
           // KEIN getDoc nötig.
-          await this.removeFromShoppingCart(userId, detId, trackingPayload);
+          await this.removeFromShoppingCart(userId, detId, trackingPayload, sharedListId);
           return 0;
         }
       }
@@ -4123,6 +4178,14 @@ export class FirestoreService {
       // ─── Slow-Path: legacy / Aufrufer ohne State ───
       const snap = await getDoc(detRef);
       if (!snap.exists()) {
+        if (sharedListId) {
+          // Geteilte Liste: kein Legacy-Auto-ID-Schema → der Personal-
+          // Sweep (removeFromShoppingCartByProductId ist hart auf
+          // users/{uid}/einkaufswagen verdrahtet!) würde hier das
+          // GLEICHNAMIGE det-ID-Doc aus dem persönlichen Zettel löschen
+          // (Review-Finding). Item weg = fertig, No-op.
+          return 0;
+        }
         await this.removeFromShoppingCartByProductId(userId, productId, isMarke);
         return 0;
       }
@@ -4131,7 +4194,7 @@ export class FirestoreService {
         await updateDoc(detRef, { anzahl: increment(-1), timestamp: serverTimestamp() });
         return anz - 1;
       } else {
-        await this.removeFromShoppingCart(userId, detId);
+        await this.removeFromShoppingCart(userId, detId, undefined, sharedListId);
         return 0;
       }
     } catch (error) {
@@ -4274,9 +4337,10 @@ export class FirestoreService {
     userId: string,
     itemId: string,
     trackingPayload?: CartRemoveTrackingPayload,
+    sharedListId?: string | null,
   ): Promise<void> {
     try {
-      const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
+      const cartItemRef = this.cartDocRef(userId, itemId, sharedListId);
 
       // ─── Fast-Path ───────────────────────────────────────────────
       if (trackingPayload) {
@@ -4440,8 +4504,12 @@ export class FirestoreService {
    * Funktionalität bleibt 100% erhalten — gleiche Funktionen, gleiche
    * Daten, gleiche Targets. Nur entkoppelt vom UI-Critical-Path.
    */
-  static async markAsPurchased(userId: string, itemId: string): Promise<void> {
-    const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
+  static async markAsPurchased(
+    userId: string,
+    itemId: string,
+    sharedListId?: string | null,
+  ): Promise<void> {
+    const cartItemRef = this.cartDocRef(userId, itemId, sharedListId);
 
     // ─── Critical Write: gekauft:true ────────────────────────────
     // Fire-and-forget (86ca7ugym): der lokale Cache wendet die Mutation
@@ -4548,8 +4616,12 @@ export class FirestoreService {
    * Markiert ein Produkt als gekauft OHNE Journey-Tracking (für Bulk-Operations).
    * Gleiches Pattern wie markAsPurchased: 1 awaited updateDoc, Rest bg.
    */
-  static async markAsPurchasedWithoutTracking(userId: string, itemId: string): Promise<void> {
-    const cartItemRef = doc(db, 'users', userId, 'einkaufswagen', itemId);
+  static async markAsPurchasedWithoutTracking(
+    userId: string,
+    itemId: string,
+    sharedListId?: string | null,
+  ): Promise<void> {
+    const cartItemRef = this.cartDocRef(userId, itemId, sharedListId);
 
     // Critical: gekauft:true. Item verschwindet aus der active-cart-Query.
     // Fire-and-forget (86ca7ugym) — lokaler Cache sofort, Sync bei Reconnect.
@@ -4700,20 +4772,20 @@ export class FirestoreService {
    */
   static async convertToNoName(
     userId: string,
-    conversions: ProductToConvert[]
+    conversions: ProductToConvert[],
+    cartTarget?: { sharedListId: string; addedByName?: string | null }
   ): Promise<{ newItems: any[], idMapping: { [oldId: string]: string } }> {
     try {
       const batch = writeBatch(db);
-      const userRef = doc(db, 'users', userId);
       const idMapping: { [oldId: string]: string } = {};
       const newItems: any[] = [];
-      
+
       // First get ALL product details for tracking
       const detailPromises = conversions.map(async (conversion) => {
         const [markenDoc, noNameDoc, cartDoc] = await Promise.all([
           getDoc(doc(db, 'markenProdukte', conversion.markenProduktRef)),
           getDoc(doc(db, 'produkte', conversion.produktRef)),
-          getDoc(doc(db, 'users', userId, 'einkaufswagen', conversion.einkaufswagenRef))
+          getDoc(this.cartDocRef(userId, conversion.einkaufswagenRef, cartTarget?.sharedListId))
         ]);
         
         const noNameData = noNameDoc.exists() ? noNameDoc.data() : null;
@@ -4752,13 +4824,13 @@ export class FirestoreService {
       
       conversions.forEach((conversion, index) => {
         // Lösche alten Eintrag
-        batch.delete(doc(db, 'users', userId, 'einkaufswagen', conversion.einkaufswagenRef));
-        
+        batch.delete(this.cartDocRef(userId, conversion.einkaufswagenRef, cartTarget?.sharedListId));
+
         // Füge neuen NoName Eintrag hinzu
-        const newDoc = doc(collection(userRef, 'einkaufswagen'));
+        const newDoc = doc(this.cartCollectionRef(userId, cartTarget?.sharedListId));
         const productData = productDetails[index];
         const trackingDetail = trackingDetails[index];
-        
+
         // WICHTIG (Task 86ca5fjhn — Convert schlägt fehl): Firestore wirft
         // hart bei `undefined`-Feldwerten ("Unsupported field value: undefined").
         // journeyId + viewedProductIndex sind oft undefined (keine aktive
@@ -4774,6 +4846,10 @@ export class FirestoreService {
         if (jid != null) newCartItem.journeyId = jid;
         const vpi = trackingDetail?.originalViewedProductIndex;
         if (vpi != null) newCartItem.viewedProductIndex = vpi;
+        if (cartTarget?.sharedListId) {
+          newCartItem.addedBy = userId;
+          newCartItem.addedByName = cartTarget.addedByName ?? null;
+        }
 
         batch.set(newDoc, newCartItem);
         

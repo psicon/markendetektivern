@@ -237,13 +237,30 @@
       ]
     }
   ],
-  "hosting": {
-    "site": "md-receipt-admin",
-    "public": "receipt-admin-web",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ]
-  }
+  "hosting": [
+    {
+      "site": "md-receipt-admin",
+      "public": "receipt-admin-web",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ]
+    },
+    {
+      "site": "markendetektive-895f7",
+      "public": "public-web",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "/join-list/**",
+          "destination": "/join.html"
+        }
+      ]
+    }
+  ]
 }

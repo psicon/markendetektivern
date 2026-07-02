@@ -25,7 +25,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import React, {
   forwardRef,
   useCallback,
@@ -109,10 +109,13 @@ import {
   showRetryableErrorToast,
 } from '@/lib/services/ui/toast';
 import { updateUserStats } from '@/lib/services/userProfile';
+import { doc } from '@react-native-firebase/firestore';
+import { db } from '@/lib/firebase';
+import { SharedListManageSheet } from '@/components/ui/SharedListManageSheet';
 import {
   SharedListService,
   type SharedListDoc,
-  type SharedListItem,
+  type SharedListSeedDoc,
 } from '@/lib/services/sharedListService';
 import {
   Einkaufswagen,
@@ -171,6 +174,9 @@ type EnrichedItem = {
    *  mitmarkiert/-gelöscht werden, sonst bleiben Geister-Docs in
    *  Firestore und tauchen beim nächsten Refresh wieder auf. */
   legacyIds?: string[];
+  /** Geteilte Listen (Stufe 5): Anzeigename des Mitglieds, das das Item
+   *  hinzugefügt hat. Persönliche Zettel-Docs tragen das Feld nicht. */
+  addedByName?: string | null;
 };
 
 // Height of the sticky SegmentedTabs row that sits below the DetailHeader.
@@ -274,81 +280,108 @@ export function buildShoppingListShareText(
   return lines.join('\n');
 }
 
-// ─── Leiste „Geteilte Listen" (oben im Zettel) ──────────────────────
-// Additiv: zeigt die geteilten Listen des Users als horizontale Karten. Antippen
-// öffnet die geteilte Liste. Rein präsentational (Daten kommen vom Parent), damit
-// der persönliche Zettel-Datenpfad unangetastet bleibt.
-function ShoppingSharedListsStrip({
+// ─── Listen-Umschalter-Chips (Stufe 5) ──────────────────────────────
+// EINE kompakte Zeile: „Meine Liste" + ein Chip pro geteilter Liste
+// (Personen-Counter, Artikel-Counter auf dem aktiven Chip). Tippen
+// schaltet die Datenquelle um — GLEICHER Screen, GLEICHE UI. Aktiven
+// Shared-Chip erneut tippen → Verwaltungs-Sheet (Einladen/Mitglieder).
+// Rendert nichts, solange es keine geteilten Listen gibt.
+function ListSwitcherChips({
   lists,
-  myUid,
+  activeId,
+  activeItemCount,
   theme,
   brand,
-  onOpen,
+  onSelect,
+  onManage,
 }: {
   lists: SharedListDoc[];
-  myUid?: string;
+  activeId: string | null;
+  activeItemCount: number;
   theme: any;
   brand: any;
-  onOpen: (id: string) => void;
+  onSelect: (id: string | null) => void;
+  onManage: (id: string) => void;
 }) {
   if (!lists.length) return null;
-  return (
-    <View style={{ marginTop: 8, marginBottom: 6 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, marginBottom: 8 }}>
-        <MaterialCommunityIcons name="account-multiple" size={15} color={theme.textSub} />
-        <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 12, color: theme.textSub, letterSpacing: 0.4, textTransform: 'uppercase' }}>
-          Geteilte Listen
-        </Text>
-      </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        scrollsToTop={false}
-        contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
-      >
-        {lists.map((l) => {
-          const count = l.memberIds?.length ?? 1;
-          const mine = l.ownerId === myUid;
-          return (
-            <Pressable
-              key={l.id}
-              onPress={() => onOpen(l.id)}
-              style={({ pressed }) => ({
-                width: 172,
-                backgroundColor: theme.surface,
-                borderRadius: radii.lg,
-                borderWidth: 1,
-                borderColor: theme.border,
-                padding: 12,
-                opacity: pressed ? 0.85 : 1,
-              })}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 15,
-                    backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <MaterialCommunityIcons name="cart-outline" size={16} color={brand.primary} />
-                </View>
-                <Text numberOfLines={1} style={{ flex: 1, fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.text, letterSpacing: -0.2 }}>
-                  {l.name}
-                </Text>
-              </View>
-              <Text numberOfLines={1} style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 11, color: theme.textMuted, marginTop: 8 }}>
-                {count} {count === 1 ? 'Mitglied' : 'Mitglieder'}
-                {mine ? ' · von dir' : l.ownerName ? ` · ${l.ownerName}` : ''}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+  const chipStyle = (active: boolean, pressed: boolean) => ({
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 5,
+    height: 32,
+    paddingHorizontal: 12,
+    borderRadius: radii.md,
+    backgroundColor: active ? (theme.primaryContainer ?? theme.surfaceAlt) : theme.surface,
+    borderWidth: active ? 1.5 : 1,
+    borderColor: active ? brand.primary : theme.border,
+    opacity: pressed ? 0.8 : 1,
+  });
+  const CounterPill = ({ icon, value }: { icon: any; value: number }) => (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+      <MaterialCommunityIcons name={icon} size={12} color={theme.textSub} />
+      <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 11, color: theme.textSub }}>
+        {value}
+      </Text>
     </View>
+  );
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      scrollsToTop={false}
+      contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingTop: 8, paddingBottom: 2, alignItems: 'center' }}
+    >
+      <Pressable onPress={() => onSelect(null)} style={({ pressed }) => chipStyle(!activeId, pressed)}>
+        <MaterialCommunityIcons
+          name="account"
+          size={14}
+          color={!activeId ? brand.primary : theme.textMuted}
+        />
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.extraBold,
+            fontSize: 12,
+            color: !activeId ? theme.text : theme.textSub,
+          }}
+        >
+          Meine Liste
+        </Text>
+      </Pressable>
+      {lists.map((l) => {
+        const active = l.id === activeId;
+        return (
+          <Pressable
+            key={l.id}
+            onPress={() => (active ? onManage(l.id) : onSelect(l.id))}
+            style={({ pressed }) => chipStyle(active, pressed)}
+          >
+            <MaterialCommunityIcons
+              name="account-multiple"
+              size={14}
+              color={active ? brand.primary : theme.textMuted}
+            />
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 12,
+                color: active ? theme.text : theme.textSub,
+                maxWidth: 132,
+              }}
+            >
+              {l.name}
+            </Text>
+            <CounterPill icon="account-multiple-outline" value={l.memberIds?.length ?? 1} />
+            {active ? <CounterPill icon="cart-outline" value={activeItemCount} /> : null}
+            {active ? (
+              <MaterialCommunityIcons name="cog-outline" size={13} color={theme.textMuted} />
+            ) : null}
+          </Pressable>
+        );
+      })}
+    </ScrollView>
   );
 }
 
@@ -601,13 +634,27 @@ const SwipeRow = forwardRef<SwipeRowHandle, SwipeRowProps>(function SwipeRow(
 
   const enterCollapse = () => setPhase('collapsing');
 
+  // ─── Props in Refs spiegeln (Stale-Closure-Fix, Stufe 5) ────────
+  // triggerBought/triggerDelete werden von Reanimated-Worklets via
+  // runOnJS captured (withTiming-Completion + Pan-onEnd) UND das
+  // useImperativeHandle memoized auf [phase]. Beide halten dadurch
+  // die Callback-Closure eines ALTEN Renders. Solange das Ziel immer
+  // der persönliche Zettel war, war das unsichtbar — mit dem Listen-
+  // Umschalter schrieb ein ✓ in der geteilten Liste dann aber auf den
+  // persönlichen Zettel (activeSharedListId=null im alten Snapshot).
+  // Refs sind render-stabil → der Body liest IMMER die frische Prop.
+  const onSwipeBoughtRef = useRef(onSwipeBought);
+  const onSwipeDeleteRef = useRef(onSwipeDelete);
+  onSwipeBoughtRef.current = onSwipeBought;
+  onSwipeDeleteRef.current = onSwipeDelete;
+
   const triggerBought = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    onSwipeBought();
+    onSwipeBoughtRef.current();
   };
   const triggerDelete = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-    onSwipeDelete();
+    onSwipeDeleteRef.current();
   };
 
   // Spielt die Bought-Animation: erst Strike-Line zieht durch, dann
@@ -1616,6 +1663,22 @@ function BrandCard({
             >
               {formatEur((product?.preis || 0) * (item.anzahl ?? 1))}
             </Text>
+            {/* Geteilte Liste: wer hat's hinzugefügt (persönliche Docs
+                tragen kein addedByName → keine Anzeige, Höhe unverändert). */}
+            {item.addedByName ? (
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily,
+                  fontWeight: fontWeight.medium,
+                  fontSize: 11,
+                  color: theme.textMuted,
+                  flexShrink: 1,
+                }}
+              >
+                · von {item.addedByName}
+              </Text>
+            ) : null}
           </View>
           {/* "Ersparnis möglich"-Zeile entfernt — der Footer-Button
               "Alternativen" zusammen mit den −X% Bannern auf den
@@ -2125,6 +2188,21 @@ function NoNameCard({
           >
             {formatEur((p?.preis || 0) * (item.anzahl ?? 1))}
           </Text>
+          {/* Geteilte Liste: wer hat's hinzugefügt. */}
+          {item.addedByName ? (
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 11,
+                color: theme.textMuted,
+                flexShrink: 1,
+              }}
+            >
+              · von {item.addedByName}
+            </Text>
+          ) : null}
         </View>
         {/* Gespart-% liegt jetzt als Banner auf dem Image-Sticker. */}
       </View>
@@ -2277,6 +2355,7 @@ function CustomCard({
             >
               {item.markt.name}
               {item.markt.land ? ` (${item.markt.land})` : ''}
+              {item.addedByName ? ` · von ${item.addedByName}` : ''}
             </Text>
           </View>
         ) : (
@@ -2290,6 +2369,7 @@ function CustomCard({
             }}
           >
             Freitext-Eintrag
+            {item.addedByName ? ` · von ${item.addedByName}` : ''}
           </Text>
         )}
       </View>
@@ -2404,16 +2484,19 @@ export default function ShoppingListScreen() {
   const [showFilter, setShowFilter] = useState(false);
   const [showCustomItemModal, setShowCustomItemModal] = useState(false);
 
-  // ─── Teilen: Chooser (verschicken ODER gemeinsame Liste erstellen) ───
-  // Additive Brücke in das isolierte Shared-Lists-Feature (Stufe 5). Der
-  // persönliche Zettel bleibt unangetastet — wir LESEN nur die bereits
-  // geladenen Items und befüllen daraus einmalig eine neue shared_lists-Liste.
+  // ─── Geteilte Listen — VOLL integriert (Stufe 5, kein Screenwechsel) ───
+  // Die aktive Datenquelle ist entweder der persönliche Einkaufswagen
+  // (activeSharedListId = null) oder shared_lists/{id}/items — GLEICHES
+  // Doc-Schema, GLEICHE Pipeline, GLEICHE Handler (cartTarget-Param im
+  // FirestoreService). Umschalten über die Chips-Zeile oben; die geteilte
+  // Liste rendert 1:1 wie der eigene Zettel.
   const [showShareSheet, setShowShareSheet] = useState(false);
   const [creatingShared, setCreatingShared] = useState(false);
+  const [activeSharedListId, setActiveSharedListId] = useState<string | null>(null);
+  const [showManageSheet, setShowManageSheet] = useState(false);
 
-  // Meine geteilten Listen (Live) — für die Leiste ganz oben im Zettel, damit man
-  // direkt sieht, welche Listen geteilt sind. Bis die Rules deployt sind, feuert der
-  // Listener permission-denied → Service liefert [] → Leiste bleibt leer (graceful).
+  // Meine geteilten Listen (Live). Bis die Rules deployt sind, feuert der
+  // Listener permission-denied → Service liefert [] (graceful).
   const [mySharedLists, setMySharedLists] = useState<SharedListDoc[]>([]);
   useEffect(() => {
     if (!user?.uid) {
@@ -2423,27 +2506,108 @@ export default function ShoppingListScreen() {
     return SharedListService.subscribeMySharedLists(user.uid, setMySharedLists);
   }, [user?.uid]);
 
+  const activeSharedList = useMemo(
+    () => mySharedLists.find((l) => l.id === activeSharedListId) ?? null,
+    [mySharedLists, activeSharedListId],
+  );
+
+  // Deep-Link/Join-Einstieg: /shopping-list?list=<id> aktiviert die Liste direkt.
+  const { list: listParam } = useLocalSearchParams<{ list?: string }>();
+  useEffect(() => {
+    if (typeof listParam === 'string' && listParam.trim()) {
+      setActiveSharedListId(listParam.trim());
+    }
+  }, [listParam]);
+
+  // Wenn ich aus der aktiven Liste entfernt wurde / sie gelöscht wurde
+  // (Liste verschwindet aus der Subscription), zurück auf „Meine Liste".
+  useEffect(() => {
+    if (
+      activeSharedListId &&
+      mySharedLists.length > 0 &&
+      !mySharedLists.some((l) => l.id === activeSharedListId)
+    ) {
+      setActiveSharedListId(null);
+      showInfoToast('Diese geteilte Liste ist nicht mehr verfügbar.', 'info');
+    }
+  }, [mySharedLists, activeSharedListId]);
+
   const myDisplayName =
     (userProfile as any)?.display_name ||
     (user as any)?.displayName ||
     'Ich';
 
-  /** Aktuelle Zettel-Items → self-contained SharedListItems (Read-Side-Map,
-   *  kein Datenmodell-Touch am persönlichen Zettel). */
-  const buildSharedItems = useCallback((): Omit<SharedListItem, 'id'>[] => {
-    const map = (arr: EnrichedItem[], kind: 'brand' | 'noname') =>
-      arr.map((it) => ({
-        name: it.name || it.product?.name || it.product?.produktName || 'Produkt',
-        kind,
-        anzahl: it.anzahl ?? 1,
-        marketName: it.product?.discounter?.name || it.markt?.name || null,
-        savings: kind === 'noname' ? (it.savings ?? null) : null,
-        productId: it.productId || it.product?.id || null,
-        bild: it.product?.bild || it.markt?.bild || null,
-        addedByName: myDisplayName,
-      }));
-    return [...map(brandProducts, 'brand'), ...map(noNameProducts, 'noname')];
-  }, [brandProducts, noNameProducts, myDisplayName]);
+  /** cartTarget für alle FirestoreService-Cart-Ops: undefined = persönlicher
+   *  Zettel, sonst die aktive geteilte Liste (+ Attribution). */
+  const cartTarget = useMemo(
+    () =>
+      activeSharedListId
+        ? { sharedListId: activeSharedListId, addedByName: myDisplayName }
+        : undefined,
+    [activeSharedListId, myDisplayName],
+  );
+
+  // ─── Stale-Closure-/Race-Guards (Review-Findings) ────────────────
+  // (a) activeSharedListIdRef: render-stabiler Zugriff für SPÄTE Callbacks
+  //     (Outbox-Flush, Fehler-Reverts, Retry-Toasts), die sonst den Wert
+  //     eines alten Renders einfrieren würden.
+  // (b) loadEpochRef: monotoner Zähler gegen out-of-order Loads — ein
+  //     langsamer Load der ALTEN Quelle darf nach dem Umschalten nicht
+  //     mehr in den State der NEUEN Quelle schreiben.
+  const activeSharedListIdRef = useRef<string | null>(activeSharedListId);
+  activeSharedListIdRef.current = activeSharedListId;
+  const loadEpochRef = useRef(0);
+
+  /** Aktuelle Zettel-Items 1:1 im EINKAUFSWAGEN-SCHEMA als Seed-Docs für eine
+   *  neue geteilte Liste (det-IDs bleiben erhalten → anzahl-Increments etc.
+   *  funktionieren dort identisch). */
+  const buildSeedDocs = useCallback((): SharedListSeedDoc[] => {
+    const docs: SharedListSeedDoc[] = [];
+    const push = (arr: EnrichedItem[], kind: 'brand' | 'noname') => {
+      for (const it of arr) {
+        const name = it.name || it.product?.name || 'Produkt';
+        const anzahl = it.anzahl ?? 1;
+        if (it.isCustom) {
+          docs.push({
+            data: {
+              customItem: {
+                name,
+                type: it.customType ?? kind,
+                ...(it.customIcon ? { icon: it.customIcon } : {}),
+                ...(it.markt?.name ? { marketName: it.markt.name } : {}),
+                ...(it.markt?.land ? { marketLand: it.markt.land } : {}),
+                ...(it.markt?.bild ? { marketBild: it.markt.bild } : {}),
+              },
+              gekauft: false,
+              name,
+              anzahl,
+            },
+          });
+          continue;
+        }
+        const productId = it.productId || it.product?.id;
+        if (!productId) continue;
+        docs.push({
+          id: `${kind}_${productId}`,
+          data: {
+            ...(kind === 'brand'
+              ? { markenProdukt: doc(db, 'markenProdukte', productId) }
+              : { handelsmarkenProdukt: doc(db, 'produkte', productId) }),
+            gekauft: false,
+            name,
+            anzahl,
+            ...(typeof it.product?.preis === 'number' ? { priceAtTime: it.product.preis } : {}),
+            ...(kind === 'noname' && typeof it.savings === 'number'
+              ? { savingsAtTime: it.savings }
+              : {}),
+          },
+        });
+      }
+    };
+    push(brandProducts, 'brand');
+    push(noNameProducts, 'noname');
+    return docs;
+  }, [brandProducts, noNameProducts]);
 
   /** Option A — Liste als schöner Text ins native Share-Sheet. Erst das
    *  FilterSheet schließen, DANN präsentieren: iOS darf kein
@@ -2458,9 +2622,10 @@ export default function ShoppingListScreen() {
     }, 350);
   }, [brandProducts, noNameProducts]);
 
-  /** Option B — aus dem aktuellen Zettel eine gemeinsame Liste erstellen und
-   *  hinein navigieren (dort: Einladen + Umbenennen). Konto-Pflicht wie in der
-   *  Übersicht (anonyme Owner verlieren die Liste beim Reinstall). */
+  /** Option B — aus dem aktuellen Zettel eine gemeinsame Liste erstellen —
+   *  OHNE Screenwechsel: die neue Liste wird direkt aktiv und das Teilen-
+   *  Sheet (QR + Link) öffnet sofort. Konto-Pflicht (anonyme Owner verlieren
+   *  die Liste beim Reinstall). */
   const handleCreateSharedList = useCallback(async () => {
     if (creatingShared) return;
     if (isAnonymous || !user) {
@@ -2471,22 +2636,23 @@ export default function ShoppingListScreen() {
     }
     setCreatingShared(true);
     try {
-      const items = buildSharedItems();
+      const seedDocs = buildSeedDocs();
       const id = await SharedListService.createSharedList(
         'Gemeinsamer Einkauf',
-        items,
+        seedDocs,
         myDisplayName,
       );
       setShowShareSheet(false);
-      showInfoToast('Gemeinsame Liste erstellt — jetzt Freunde einladen! 🎉', 'info');
-      // ?share=1 → im Ziel-Screen öffnet sich das Teilen-Sheet (QR + Link) sofort.
-      router.push(`/shared-list/${id}?share=1` as any);
+      setActiveSharedListId(id);
+      // Teilen startet DIREKT: Manage-Sheet (QR + Link) öffnen, sobald das
+      // Chooser-Sheet zu ist (iOS: nie zwei Modals gleichzeitig präsentieren).
+      setTimeout(() => setShowManageSheet(true), 380);
     } catch {
       showInfoToast('Die gemeinsame Liste konnte gerade nicht erstellt werden.', 'error');
     } finally {
       setCreatingShared(false);
     }
-  }, [creatingShared, isAnonymous, user, buildSharedItems, myDisplayName, router]);
+  }, [creatingShared, isAnonymous, user, buildSeedDocs, myDisplayName, router]);
   const [filters, setFilters] = useState<{
     markets: string[];
     categories: string[];
@@ -2527,11 +2693,18 @@ export default function ShoppingListScreen() {
   }, [navigation]);
 
   // ─── Load shopping cart ────────────────────────────────────────
+  // Läuft IDENTISCH für den persönlichen Zettel und die aktive geteilte
+  // Liste — nur die Quell-Collection wechselt (activeSharedListId).
   const loadShoppingCart = useCallback(async () => {
     if (!user?.uid) return;
+    // Epoch beim Start capturen — schreibt dieser Load später in den State,
+    // muss er noch der AKTUELLE sein (Quellen-Wechsel bumpt den Zähler).
+    const epoch = loadEpochRef.current;
+    const isStale = () => epoch !== loadEpochRef.current;
     try {
       setSelectedConversions([]);
-      const items = await FirestoreService.getShoppingCartItems(user.uid);
+      const items = await FirestoreService.getShoppingCartItems(user.uid, activeSharedListId);
+      if (isStale()) return;
 
       const customBrandItems: EnrichedItem[] = [];
       const customNoNameItems: EnrichedItem[] = [];
@@ -2555,8 +2728,34 @@ export default function ShoppingListScreen() {
                   }
                 : null,
             anzahl: ((item as any).anzahl ?? 1) as number,
+            addedByName: ((item as any).addedByName ?? null) as string | null,
           };
           if (item.customItem.type === 'brand') customBrandItems.push(enriched);
+          else customNoNameItems.push(enriched);
+        } else if (
+          activeSharedListId &&
+          !(item as any).markenProdukt &&
+          !(item as any).handelsmarkenProdukt &&
+          (item as any).name
+        ) {
+          // Legacy-Fallback (Übergang Stufe-5-v1→v2): geteilte Listen aus dem
+          // ersten Release trugen ein eigenes Item-Schema ({name, kind,
+          // marketName…}) ohne Produkt-Referenzen. Statt sie zu verwerfen
+          // (leere Liste!) als Freitext-Items rendern — abhaken/löschen
+          // funktioniert über die normalen Custom-Pfade (updateDoc/deleteDoc).
+          const legacy: any = item as any;
+          const legacyKind = legacy.kind === 'brand' ? 'brand' : 'noname';
+          const enriched: EnrichedItem = {
+            id: item.id,
+            kind: legacyKind === 'brand' ? 'custom-brand' : 'custom-noname',
+            isCustom: true,
+            name: legacy.name,
+            customType: legacyKind,
+            markt: legacy.marketName ? { name: legacy.marketName } : null,
+            anzahl: (legacy.anzahl ?? 1) as number,
+            addedByName: (legacy.addedByName ?? null) as string | null,
+          };
+          if (legacyKind === 'brand') customBrandItems.push(enriched);
           else customNoNameItems.push(enriched);
         } else {
           dbItems.push(item);
@@ -2660,6 +2859,9 @@ export default function ShoppingListScreen() {
                   // Mark/Remove müssen alle mit weggeräumt werden.
                   legacyIds: (item as any).legacyIds ?? [],
                   name: productData?.name,
+                  // Geteilte Liste: wer hat's hinzugefügt (persönliche
+                  // Docs tragen das Feld nicht → null → keine Anzeige).
+                  addedByName: ((item as any).addedByName ?? null) as string | null,
                 } satisfies EnrichedItem,
                 potentialSavings: maxSavings,
                 bestAlternative,
@@ -2764,6 +2966,7 @@ export default function ShoppingListScreen() {
         }
       }
 
+      if (isStale()) return; // Quelle wurde inzwischen gewechselt
       setSelectedConversions(newSelected);
       setBrandProducts(brandItems);
       setNoNameProducts(noNameItems);
@@ -2779,19 +2982,25 @@ export default function ShoppingListScreen() {
         kind: it.kind,
         marketName: (it as any)?.markt?.name ?? null,
       });
-      CartSnapshotService.save(user.uid, {
-        brand: brandItems.map(toSnap),
-        noname: noNameItems.map(toSnap),
-      });
+      if (!activeSharedListId) {
+        // Offline-Snapshot nur für den persönlichen Zettel — geteilte
+        // Listen sind live-synchronisiert und werden nicht gespiegelt.
+        CartSnapshotService.save(user.uid, {
+          brand: brandItems.map(toSnap),
+          noname: noNameItems.map(toSnap),
+        });
+      }
       // Totals werden via useMemo derived → keine Setter nötig.
     } catch (error: any) {
       console.error('Error loading shopping cart:', error);
+      if (isStale()) return; // stale Load: weder Fallback noch Toast
       // Offline-Fallback (86ca7uhg7): ohne Netz den letzten Stand aus
-      // AsyncStorage zeigen statt Fehler-Toast + leerer Liste.
-      if (!isOnline()) {
+      // AsyncStorage zeigen statt Fehler-Toast + leerer Liste (nur
+      // persönlicher Zettel — der Snapshot spiegelt nie geteilte Listen).
+      if (!isOnline() && !activeSharedListId) {
         const snap = await CartSnapshotService.load(user.uid);
         if (snap && (snap.brand.length > 0 || snap.noname.length > 0)) {
-          setOfflineSnapshot(snap);
+          if (!isStale()) setOfflineSnapshot(snap);
           return;
         }
       }
@@ -2802,20 +3011,62 @@ export default function ShoppingListScreen() {
         'error',
       );
     } finally {
-      setInitialLoading(false);
-      setRefreshing(false);
+      // Nur der AKTUELLE Load darf das Loading beenden — sonst blendet ein
+      // stale Load den Skeleton weg, während die neue Quelle noch lädt.
+      if (!isStale()) {
+        setInitialLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [user?.uid, favoriteMarketId]);
+  }, [user?.uid, favoriteMarketId, activeSharedListId]);
 
+  // Persönlicher Zettel: einmalig laden (+ bei Lieblingsmarkt-Wechsel).
+  // Geteilte Liste: Live-Listener auf die items-Subcollection — jede
+  // Remote-Änderung (Mitglied fügt hinzu / hakt ab) triggert einen
+  // debounced Reload durch DIESELBE Pipeline. Echtzeit-Sync, 1:1-UI.
   useEffect(() => {
-    if (user?.uid) loadShoppingCart();
-  }, [user?.uid, loadShoppingCart]);
+    if (!user?.uid) return;
+    // Quellen-/Config-Wechsel: Epoch bumpen → in-flight Loads der alten
+    // Quelle werden beim Resolven verworfen (Review-Finding: out-of-order).
+    loadEpochRef.current += 1;
+    if (!activeSharedListId) {
+      loadShoppingCart();
+      return;
+    }
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    const unsub = SharedListService.subscribeSharedListItemsTrigger(
+      activeSharedListId,
+      () => {
+        // Debounce: Batch-Writes (Convert, Bulk) feuern N Snapshots.
+        if (reloadTimer) clearTimeout(reloadTimer);
+        reloadTimer = setTimeout(() => void loadShoppingCart(), 250);
+      },
+      () => {
+        // permission-denied → aus der Liste entfernt / Liste weg.
+        setActiveSharedListId(null);
+        showInfoToast('Diese geteilte Liste ist nicht mehr verfügbar.', 'info');
+      },
+    );
+    return () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      unsub();
+    };
+  }, [user?.uid, activeSharedListId, loadShoppingCart]);
 
   // 3.2 (Stufe 3): Outbox-Replay. subscribeNetwork feuert einmal sofort (Mount)
   // und danach bei jeder Netz-Änderung — so werden offline (auch vor einem
   // App-Kill) gemerkte Abhak-Aktionen nachgespielt, sobald wieder Netz da ist.
   // Idempotent + fail-open im Service; nur bei online. Ein Refetch danach zieht
   // die Liste sauber nach.
+  //
+  // Stufe 5 (Review-Finding): loadShoppingCart NICHT als eingefrorene Closure
+  // benutzen — die Mount-Version hält activeSharedListId=null und würde nach
+  // einem Listen-Wechsel die persönlichen Items in die Shared-Ansicht laden.
+  // Deshalb Ref-Indirektion + Refetch nur, wenn gerade der PERSÖNLICHE Zettel
+  // aktiv ist (die Outbox ist personal-only; die geteilte Liste zieht sich
+  // über ihren eigenen Live-Listener nach).
+  const loadShoppingCartRef = useRef(loadShoppingCart);
+  loadShoppingCartRef.current = loadShoppingCart;
   useEffect(() => {
     const uid = user?.uid;
     if (!uid) return;
@@ -2834,14 +3085,14 @@ export default function ShoppingListScreen() {
         }
       })
         .then((n) => {
-          if (n > 0) void loadShoppingCart();
+          if (n > 0 && !activeSharedListIdRef.current) {
+            void loadShoppingCartRef.current();
+          }
         })
         .catch(() => {});
     });
     return unsub;
-    // loadShoppingCart bewusst nicht in den Deps — ein evtl. leicht veralteter
-    // Refetch ist harmlos, und wir wollen den Listener nur bei uid-Wechsel neu
-    // aufsetzen.
+    // Nur bei uid-Wechsel neu aufsetzen — frische Werte kommen über die Refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
@@ -3000,7 +3251,7 @@ export default function ShoppingListScreen() {
       // Den Convert-WRITE awaiten (Batch, schnell) — Erfolg NICHT vortäuschen
       // (Bug 86ca5fjhn: „meldet umgewandelt, dann schlägt fehl"). NUR der
       // schwere loadShoppingCart-Refetch bleibt fire-and-forget → kein Freeze.
-      await FirestoreService.convertToNoName(user.uid, conversions);
+      await FirestoreService.convertToNoName(user.uid, conversions, cartTarget);
       void loadShoppingCart();
       setTimeout(() => onTabChange('noname'), 100);
       showConvertSuccessToast(savingsAmount);
@@ -3091,7 +3342,7 @@ export default function ShoppingListScreen() {
               // NICHT im UI-Pfad awaiten — sonst hängt der Loader bis zum
               // Server-Ack (Freeze). Loader schließt + Toast/Tab-Switch sofort;
               // Reload (zeigt die neuen NoNames) im Hintergrund nach dem Write.
-              FirestoreService.convertToNoName(user.uid, selectedConversions)
+              FirestoreService.convertToNoName(user.uid, selectedConversions, cartTarget)
                 .then(() => FirestoreService.updateUserTotalSavings(user.uid, totalPotentialSavings))
                 .then(() => {
                   Promise.allSettled(sideEffects);
@@ -3170,7 +3421,13 @@ export default function ShoppingListScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 
     // Revert: Item zurück an die alte Position, falls der Write failed.
+    // Guard (Review-Finding): der Catch feuert potenziell Sekunden später —
+    // hat der User inzwischen die Liste gewechselt, würde das Item der ALTEN
+    // Liste als Geister-Row in die NEUE Ansicht eingefügt. Dann: kein Revert
+    // (das Doc existiert in der alten Liste weiter und lädt dort frisch).
+    const listAtCall = activeSharedListId;
     const revert = () => {
+      if (activeSharedListIdRef.current !== listAtCall) return;
       if (targetIsNoName) {
         setNoNameProducts((prev) => {
           if (prev.some((i) => i.id === matched.id)) return prev;
@@ -3195,13 +3452,18 @@ export default function ShoppingListScreen() {
     // lokale State (optimistische Removal oben) treibt die UI; bei Fehler
     // revertieren wir. Genau diese Regression war Ursache des Reports.
     const writeP = isCustomItem
-      ? FirestoreService.removeFromShoppingCart(user.uid, itemId, {
-          productId: itemId,
-          productName: matched.name ?? 'Custom item',
-          productType: matched.customType === 'brand' ? 'brand' : 'noname',
-          isCustomItem: true,
-        })
-      : FirestoreService.markAsPurchased(user.uid, itemId);
+      ? FirestoreService.removeFromShoppingCart(
+          user.uid,
+          itemId,
+          {
+            productId: itemId,
+            productName: matched.name ?? 'Custom item',
+            productType: matched.customType === 'brand' ? 'brand' : 'noname',
+            isCustomItem: true,
+          },
+          activeSharedListId,
+        )
+      : FirestoreService.markAsPurchased(user.uid, itemId, activeSharedListId);
     writeP.catch((error: unknown) => {
       console.error('Error marking as purchased:', error);
       // 3.2 (Stufe 3): offline (Android hat keine native Write-Queue) → NICHT
@@ -3209,7 +3471,9 @@ export default function ShoppingListScreen() {
       // behalten. Wird beim Reconnect (auch nach App-Kill) nachgespielt. Punkte/
       // Ersparnis sind oben bereits einmal optimistisch vergeben — der Replay
       // macht nur den DB-Write nach.
-      if (!isOnline()) {
+      // GETEILTE Liste: Outbox ist personal-only (der Replay liefe sonst gegen
+      // den persönlichen Zettel) → dort stattdessen revert + Info.
+      if (!isOnline() && !activeSharedListId) {
         void CartOutboxService.enqueue(
           user.uid,
           isCustomItem
@@ -3227,7 +3491,12 @@ export default function ShoppingListScreen() {
       }
       revert();
       showRetryableErrorToast(TOAST_MESSAGES.SHOPPING.purchaseError, () => {
-        void handleMarkAsPurchased(itemId, unitSavings);
+        // Retry nur, wenn noch dieselbe Liste aktiv ist — sonst würde die
+        // gecapturte Handler-Instanz State-Updates auf die falsche Ansicht
+        // anwenden (Review-Finding).
+        if (activeSharedListIdRef.current === listAtCall) {
+          void handleMarkAsPurchased(itemId, unitSavings);
+        }
       });
     });
 
@@ -3250,7 +3519,7 @@ export default function ShoppingListScreen() {
     // markieren — fire-and-forget.
     const legacyIds = matched.legacyIds ?? [];
     for (const legacyId of legacyIds) {
-      FirestoreService.markAsPurchasedWithoutTracking(user.uid, legacyId).catch((e) => {
+      FirestoreService.markAsPurchasedWithoutTracking(user.uid, legacyId, activeSharedListId).catch((e) => {
         console.warn('[mark-purchased] legacy dupe fail:', legacyId, (e as Error)?.message);
       });
     }
@@ -3282,6 +3551,8 @@ export default function ShoppingListScreen() {
       showInfoToast('Gerade kein Empfang — die Änderung klappt, sobald du wieder online bist.', 'info');
       return;
     }
+    // Guard-Anker für den späten Retry-Toast (siehe handleMarkAsPurchased).
+    const listAtCall = activeSharedListId;
     setDeletingItems((prev) => new Set(prev).add(itemId));
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -3303,7 +3574,7 @@ export default function ShoppingListScreen() {
             isCustomItem: !!matched.isCustom,
           }
         : undefined;
-      await FirestoreService.removeFromShoppingCart(user.uid, itemId, payload);
+      await FirestoreService.removeFromShoppingCart(user.uid, itemId, payload, activeSharedListId);
       // 86ca2rt88: Freitext-Eintrag als GELÖSCHT in der Journey festhalten.
       if (matched?.isCustom) {
         try {
@@ -3321,7 +3592,7 @@ export default function ShoppingListScreen() {
       // Tracking-Payload (kein zweites Tracking-Event).
       const legacyIds = matched?.legacyIds ?? [];
       for (const legacyId of legacyIds) {
-        FirestoreService.removeFromShoppingCart(user.uid, legacyId).catch((e) => {
+        FirestoreService.removeFromShoppingCart(user.uid, legacyId, undefined, activeSharedListId).catch((e) => {
           console.warn('[remove] legacy dupe fail:', legacyId, (e as Error)?.message);
         });
       }
@@ -3336,7 +3607,9 @@ export default function ShoppingListScreen() {
       showRetryableErrorToast(
         TOAST_MESSAGES.SHOPPING.removeError,
         () => {
-          void handleRemoveFromCart(itemId);
+          if (activeSharedListIdRef.current === listAtCall) {
+            void handleRemoveFromCart(itemId);
+          }
         },
       );
     } finally {
@@ -3376,7 +3649,7 @@ export default function ShoppingListScreen() {
         );
       }
       try {
-        await FirestoreService.updateCustomItemQuantity(user.uid, item.id, newAnzahl);
+        await FirestoreService.updateCustomItemQuantity(user.uid, item.id, newAnzahl, activeSharedListId);
       } catch (e) {
         // Revert
         if (isBrand) {
@@ -3421,6 +3694,8 @@ export default function ShoppingListScreen() {
         'shopping_list_increment' as any,
         { screenName: 'shopping-list' },
         { price: productData?.preis ?? 0, savings: 0 },
+        undefined,
+        cartTarget,
       );
     } catch (e) {
       // Revert
@@ -3466,7 +3741,7 @@ export default function ShoppingListScreen() {
         );
       }
       try {
-        await FirestoreService.updateCustomItemQuantity(user.uid, item.id, newAnzahl);
+        await FirestoreService.updateCustomItemQuantity(user.uid, item.id, newAnzahl, activeSharedListId);
       } catch (e) {
         // Revert
         if (isBrand) {
@@ -3528,6 +3803,7 @@ export default function ShoppingListScreen() {
         isMarke,
         prevAnzahl,
         trackingPayload,
+        activeSharedListId,
       );
       // Wenn voll-entfernt: gleichen Toast wie Swipe-to-delete zeigen
       if (newAnzahl <= 0) {
@@ -3659,7 +3935,7 @@ export default function ShoppingListScreen() {
       if (dbProducts.length > 0) {
         for (const item of dbProducts) {
           for (const id of allIdsForItem(item)) {
-            promises.push(FirestoreService.markAsPurchasedWithoutTracking(user.uid, id));
+            promises.push(FirestoreService.markAsPurchasedWithoutTracking(user.uid, id, activeSharedListId));
           }
         }
       }
@@ -3667,9 +3943,9 @@ export default function ShoppingListScreen() {
       if (dbBrandItems.length > 0) {
         for (const item of dbBrandItems) {
           // Primary mit Tracking, Legacy-Dupes ohne (sonst Doppel-Tracking).
-          promises.push(FirestoreService.markAsPurchased(user.uid, item.id));
+          promises.push(FirestoreService.markAsPurchased(user.uid, item.id, activeSharedListId));
           for (const legacyId of (item.legacyIds ?? []) as string[]) {
-            promises.push(FirestoreService.markAsPurchasedWithoutTracking(user.uid, legacyId));
+            promises.push(FirestoreService.markAsPurchasedWithoutTracking(user.uid, legacyId, activeSharedListId));
           }
         }
       }
@@ -3677,12 +3953,17 @@ export default function ShoppingListScreen() {
       if (customItems.length > 0) {
         promises.push(
           ...customItems.map((item) =>
-            FirestoreService.removeFromShoppingCart(user.uid, item.id, {
-              productId: item.id,
-              productName: item.name ?? 'Custom item',
-              productType: item.customType === 'brand' ? 'brand' : 'noname',
-              isCustomItem: true,
-            }),
+            FirestoreService.removeFromShoppingCart(
+              user.uid,
+              item.id,
+              {
+                productId: item.id,
+                productName: item.name ?? 'Custom item',
+                productType: item.customType === 'brand' ? 'brand' : 'noname',
+                isCustomItem: true,
+              },
+              activeSharedListId,
+            ),
           ),
         );
         // 86ca2rt88: jeder Freitext-Eintrag im Bulk-Kauf wird als GEKAUFT in
@@ -3990,12 +4271,22 @@ export default function ShoppingListScreen() {
           renderItem={({ item }) => renderItem(item, { allowExpand })}
           ListHeaderComponent={
             <>
-              <ShoppingSharedListsStrip
+              <ListSwitcherChips
                 lists={mySharedLists}
-                myUid={user?.uid}
+                activeId={activeSharedListId}
+                activeItemCount={brandProducts.length + noNameProducts.length}
                 theme={theme}
                 brand={brand}
-                onOpen={(sid) => router.push(`/shared-list/${sid}` as any)}
+                onSelect={(id) => {
+                  // Guard (Review-Finding, critical): Tap auf den bereits
+                  // aktiven Chip darf NICHT initialLoading=true setzen —
+                  // React bailt beim identischen State-Wert, der Lade-Effect
+                  // feuert nicht erneut → Skeleton würde nie wieder aufgelöst.
+                  if (id === activeSharedListId) return;
+                  setActiveSharedListId(id);
+                  setInitialLoading(true);
+                }}
+                onManage={() => setShowManageSheet(true)}
               />
               {!isPremium ? (
                 <View style={{ marginHorizontal: 16, marginTop: 6, marginBottom: 4 }}>
@@ -4354,12 +4645,19 @@ export default function ShoppingListScreen() {
           BlurView so there's no visible seam between header and
           tab bar. zIndex 10, absolute over the scrollable body. */}
       <Chrome
-        title="Einkaufszettel"
+        title={activeSharedList?.name ?? 'Einkaufszettel'}
         onBack={() => router.back()}
         right={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Pressable
               onPress={() => {
+                // Geteilte Liste aktiv → direkt das Einladen/Verwalten-Sheet
+                // (QR + Link). Persönliche Liste → Chooser (verschicken /
+                // gemeinsame Liste erstellen).
+                if (activeSharedListId) {
+                  setShowManageSheet(true);
+                  return;
+                }
                 if (!brandProducts.length && !noNameProducts.length) {
                   showInfoToast('Dein Einkaufszettel ist noch leer.', 'info');
                   return;
@@ -4661,11 +4959,22 @@ export default function ShoppingListScreen() {
         visible={showCustomItemModal}
         onClose={() => setShowCustomItemModal(false)}
         userId={user?.uid || ''}
+        cartTarget={cartTarget}
         onSuccess={(message) => {
           showInfoToast(message, 'success');
           loadShoppingCart();
         }}
         onError={(message) => showInfoToast(message, 'error')}
+      />
+
+      {/* Verwaltung der aktiven geteilten Liste — Einladen (QR + Link),
+          Mitglieder, Verlassen. Kein Screenwechsel (Stufe 5). */}
+      <SharedListManageSheet
+        visible={showManageSheet}
+        onClose={() => setShowManageSheet(false)}
+        list={activeSharedList}
+        myUid={user?.uid}
+        onLeft={() => setActiveSharedListId(null)}
       />
     </GestureHandlerRootView>
   );

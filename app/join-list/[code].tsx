@@ -47,7 +47,9 @@ export default function JoinListScreen() {
           (userProfile as any)?.display_name || (user as any)?.displayName || '';
         const res = await SharedListService.joinViaCode(c, myName);
         if (res?.listId) {
-          router.replace(`/shared-list/${res.listId}` as any);
+          // Die geteilte Liste lebt IM Einkaufszettel (Stufe 5, kein
+          // eigener Screen) — ?list= aktiviert sie dort direkt.
+          router.replace(`/shopping-list?list=${res.listId}` as any);
         } else {
           setState('error');
           setErrorMsg('Der Beitritt hat nicht geklappt.');

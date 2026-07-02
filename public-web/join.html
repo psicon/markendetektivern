@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Einkaufsliste beitreten — MarkenDetektive</title>
+  <meta name="robots" content="noindex" />
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f5f7f8; color: #191c1d;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+    }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0f1214; color: #f2f4f5; }
+      .card { background: #191d20 !important; }
+      .sub { color: #9aa4a8 !important; }
+    }
+    .card {
+      background: #fff; border-radius: 22px; padding: 36px 28px;
+      max-width: 380px; width: 100%; text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,.08);
+    }
+    .logo {
+      width: 72px; height: 72px; border-radius: 20px; margin: 0 auto 18px;
+      background: #0d8575; display: flex; align-items: center; justify-content: center;
+      font-size: 36px;
+    }
+    h1 { font-size: 21px; font-weight: 800; letter-spacing: -.3px; margin-bottom: 10px; }
+    .sub { font-size: 14px; line-height: 1.5; color: #5c676b; margin-bottom: 26px; }
+    .btn {
+      display: block; width: 100%; padding: 15px 18px; border-radius: 14px;
+      background: #0d8575; color: #fff; font-size: 16px; font-weight: 800;
+      text-decoration: none; margin-bottom: 12px;
+    }
+    .btn:active { opacity: .85; }
+    .store { display: flex; gap: 10px; justify-content: center; margin-top: 18px; }
+    .store a { font-size: 13px; font-weight: 700; color: #0d8575; text-decoration: none; }
+    .hint { font-size: 12px; color: #8b9498; margin-top: 20px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">🛒</div>
+    <h1>Du bist eingeladen!</h1>
+    <p class="sub">Tritt der gemeinsamen Einkaufsliste in der MarkenDetektive-App bei — alle sehen Änderungen in Echtzeit.</p>
+    <a id="open" class="btn" href="#">In der App öffnen</a>
+    <div class="store">
+      <a href="https://apps.apple.com/de/app/id6471081082">App Store</a>
+      <span style="color:#c3cbce">·</span>
+      <a href="https://play.google.com/store/apps/details?id=de.markendetektive">Google Play</a>
+    </div>
+    <p class="hint">App schon installiert und nichts passiert? Tippe oben auf „In der App öffnen".</p>
+  </div>
+  <script>
+    // Code aus dem Pfad lesen: /join-list/<code>
+    var m = location.pathname.match(/\/join-list\/([A-Za-z0-9_-]+)/);
+    var code = m ? m[1] : '';
+    var appUrl = 'markendetektive://join-list/' + code;
+    var btn = document.getElementById('open');
+    if (!code) {
+      btn.textContent = 'Link unvollständig — App öffnen';
+      appUrl = 'markendetektive://';
+    }
+    // Android Chrome: intent:// öffnet die App direkt (mit Play-Store-Fallback).
+    var isAndroid = /android/i.test(navigator.userAgent);
+    var androidIntent = 'intent://join-list/' + code +
+      '#Intent;scheme=markendetektive;package=de.markendetektive;' +
+      'S.browser_fallback_url=' + encodeURIComponent('https://play.google.com/store/apps/details?id=de.markendetektive') + ';end';
+    btn.href = isAndroid ? androidIntent : appUrl;
+    // Auto-Versuch beim Laden (iOS Safari fragt „In MarkenDetektive öffnen?").
+    // Button bleibt der zuverlässige Pfad, falls der Auto-Versuch still scheitert.
+    if (code) {
+      setTimeout(function () { location.href = isAndroid ? androidIntent : appUrl; }, 350);
+    }
+  </script>
+</body>
+</html>

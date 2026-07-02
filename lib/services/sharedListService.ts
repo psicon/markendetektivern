@@ -4,6 +4,13 @@
  * ADDITIV: fasst den persönlichen Zettel (users/{uid}/einkaufswagen) NICHT an.
  * Alle Writes hier gehen auf die neue Top-Level-Collection `shared_lists`.
  *
+ * Items einer geteilten Liste leben in `shared_lists/{listId}/items` und tragen
+ * EXAKT das Einkaufswagen-Doc-Schema (markenProdukt/handelsmarkenProdukt als
+ * DocumentReference, customItem, gekauft, name, anzahl, timestamp — plus
+ * addedBy/addedByName für die Attribution). Dadurch laufen Laden/Enrichment/
+ * Mutationen über DIESELBEN FirestoreService-Cart-Methoden wie der persönliche
+ * Zettel (cartTarget-Parameter) → identische UI + identisches Verhalten.
+ *
  * Security-Kern (siehe firestore.rules + CF): `memberIds` wird client-seitig NUR
  * geschrumpft (leave/remove). Der BEITRITT läuft ausschließlich über die
  * Callable `joinSharedList` — hier via fetch aufgerufen, damit kein
@@ -14,12 +21,12 @@ import * as Crypto from 'expo-crypto';
 import {
   addDoc,
   collection,
-  deleteDoc,
   doc,
   getDoc,
   onSnapshot,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
   type Unsubscribe,
@@ -30,6 +37,14 @@ import { auth, db } from '@/lib/firebase';
 const PROJECT = 'markendetektive-895f7';
 const REGION = 'europe-west3';
 const CALLABLE_URL = `https://${REGION}-${PROJECT}.cloudfunctions.net/joinSharedList`;
+/**
+ * Einladungs-Links sind HTTPS (Firebase Hosting Join-Page), NICHT das Custom-
+ * Scheme: die iOS-Kamera weigert sich, `markendetektive://…` aus QR-Codes zu
+ * öffnen („Keine nutzbaren Daten gefunden"). Die Web-Page leitet auf das
+ * App-Scheme weiter (+ Store-Fallback). Seite: public-web/, Hosting-Site
+ * markendetektive-895f7 (Default-Site des Projekts).
+ */
+const INVITE_LINK_BASE = `https://${PROJECT}.web.app/join-list`;
 export const SHARED_LIST_MAX_MEMBERS = 6;
 const INVITE_TTL_MS = 48 * 60 * 60 * 1000; // 48h
 
@@ -47,22 +62,12 @@ export interface SharedListDoc {
   updatedAt?: any;
 }
 
-/** Denormalisiertes Item (self-contained, keine Cross-User-Refs). Genug, um
- *  eine Card zu rendern — beim Teilen aus den bereits angereicherten
- *  persönlichen Items befüllt. */
-export interface SharedListItem {
-  id: string;
-  name: string;
-  kind: 'brand' | 'noname';
-  anzahl?: number;
-  gekauft?: boolean;
-  addedBy?: string;
-  addedByName?: string | null;
-  marketName?: string | null;
-  savings?: number | null;
-  productId?: string | null;
-  bild?: string | null;
-  timestamp?: any;
+/** Ein Item im Einkaufswagen-Schema, das beim Erstellen 1:1 in die geteilte
+ *  Liste kopiert wird. `id` gesetzt = deterministische Doc-ID (brand_/noname_),
+ *  sonst Auto-ID (Custom-Items). `data` = das komplette Cart-Doc-Payload. */
+export interface SharedListSeedDoc {
+  id?: string;
+  data: Record<string, any>;
 }
 
 async function randomCode(): Promise<string> {
@@ -80,10 +85,12 @@ async function randomCode(): Promise<string> {
 
 export const SharedListService = {
   /** Erstellt eine geteilte Liste (Owner = aktueller User) und übernimmt die
-   *  übergebenen Items EINMALIG. Gibt die neue listId zurück. */
+   *  übergebenen Cart-Docs EINMALIG (Einkaufswagen-Schema, det-IDs erhalten —
+   *  so funktionieren anzahl-Increments per addToShoppingCart identisch).
+   *  Gibt die neue listId zurück. */
   async createSharedList(
     name: string,
-    items: Omit<SharedListItem, 'id'>[] = [],
+    seedDocs: SharedListSeedDoc[] = [],
     ownerName?: string | null,
   ): Promise<string> {
     const uid = auth.currentUser?.uid;
@@ -101,15 +108,20 @@ export const SharedListService = {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+    const itemsCol = collection(db, `shared_lists/${listRef.id}/items`);
     await Promise.all(
-      (items || []).slice(0, 200).map((it) =>
-        addDoc(collection(db, `shared_lists/${listRef.id}/items`), {
-          ...it,
+      (seedDocs || []).slice(0, 200).map((seed) => {
+        const payload = {
+          ...seed.data,
           addedBy: uid,
-          gekauft: !!it.gekauft,
+          addedByName: displayName,
           timestamp: serverTimestamp(),
-        }).catch(() => null),
-      ),
+        };
+        const write = seed.id
+          ? setDoc(doc(db, `shared_lists/${listRef.id}/items`, seed.id), payload)
+          : addDoc(itemsCol, payload);
+        return write.catch(() => null);
+      }),
     );
     return listRef.id;
   },
@@ -155,49 +167,20 @@ export const SharedListService = {
     );
   },
 
-  subscribeSharedListItems(
+  /** Live-Trigger auf die Items einer geteilten Liste. Payload wird bewusst
+   *  NICHT gemappt — der Einkaufszettel lädt/enriched über seine bestehende
+   *  Pipeline (FirestoreService.getShoppingCartItems mit sharedListId); der
+   *  Listener signalisiert nur „etwas hat sich geändert" (Echtzeit-Sync).
+   *  onError feuert z.B. bei permission-denied (User wurde entfernt). */
+  subscribeSharedListItemsTrigger(
     listId: string,
-    cb: (items: SharedListItem[]) => void,
+    onChange: () => void,
+    onError?: () => void,
   ): Unsubscribe {
     return onSnapshot(
       collection(db, `shared_lists/${listId}/items`),
-      (qs: any) => {
-        const rows: SharedListItem[] = qs.docs.map((d: any) => ({
-          id: d.id,
-          ...(d.data() as any),
-        }));
-        cb(rows);
-      },
-      () => cb([]),
-    );
-  },
-
-  // — Item-Writes (fire-and-forget wie beim persönlichen Zettel, CLAUDE.md) —
-  addItem(
-    listId: string,
-    item: Omit<SharedListItem, 'id' | 'addedBy' | 'gekauft' | 'timestamp'>,
-    addedByName?: string | null,
-  ): void {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    void addDoc(collection(db, `shared_lists/${listId}/items`), {
-      ...item,
-      addedBy: uid,
-      addedByName: addedByName ?? null,
-      gekauft: false,
-      timestamp: serverTimestamp(),
-    }).catch((e) => console.warn('sharedList addItem failed', e));
-  },
-
-  markItemPurchased(listId: string, itemId: string, purchased = true): void {
-    void updateDoc(doc(db, `shared_lists/${listId}/items`, itemId), {
-      gekauft: purchased,
-    }).catch((e) => console.warn('sharedList markItemPurchased failed', e));
-  },
-
-  removeItem(listId: string, itemId: string): void {
-    void deleteDoc(doc(db, `shared_lists/${listId}/items`, itemId)).catch((e) =>
-      console.warn('sharedList removeItem failed', e),
+      () => onChange(),
+      () => onError?.(),
     );
   },
 
@@ -244,8 +227,7 @@ export const SharedListService = {
   },
 
   inviteLinkFor(code: string): string {
-    // App-Scheme (bereits registriert: markendetektive ist der saubere).
-    return `markendetektive://join-list/${code}`;
+    return `${INVITE_LINK_BASE}/${code}`;
   },
 
   /** Beitritt via Callable joinSharedList (fetch + Auth-ID-Token). */
