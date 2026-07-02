@@ -1891,9 +1891,18 @@ hosting:markendetektive-895f7` — die Admin-Site `md-receipt-admin` NICHT
 anfassen. QR = `react-native-qrcode-svg` (rein JS auf react-native-svg, kein
 native Rebuild; lokal generiert, immer weißer Grund + dunkle Module).
 
-**Produktentscheidung:** Abhaken in geteilten Listen vergibt Punkte/Ersparnis/
-Kaufhistorie an den ABHAKENDEN (identisch zum eigenen Zettel — „wer kauft,
-kriegt den Kauf"). Journey-Tracking für Custom-Adds läuft nur personal.
+**Produktentscheidung (User 2026-07-02):** Abhaken in geteilten Listen vergibt
+Punkte/Ersparnis/Kaufhistorie an den ABHAKENDEN (identisch zum eigenen Zettel —
+„wer kauft, kriegt den Kauf"), und ALLE Aktionen (add/+1, purchase, remove,
+convert, custom) tracken in die User-Journey des jeweils AUSFÜHRENDEN Mitglieds
+(Journeys sind architektonisch immer user-eigen, kein Listen-Scope).
+**journeyId/viewedProductIndex werden bei geteilten Listen NIE ins Item-Doc
+geschrieben** (Write-Gates in addToShoppingCart/convertToNoName) und beim Lesen
+ignoriert (Read-Gates in markAsPurchased/removeFromShoppingCart) — eine fremde
+journeyId im Doc führte sonst zum Silent-Drop des Events beim Specific-Flush
+(users/{ich}/journeys kennt die Journey des anderen Mitglieds nicht, kein
+Fallback) und jedes +1 überschrieb die ID. Ohne journeyId greift überall der
+saubere Fallback in die aktive Journey des Ausführenden.
 
 **Deploy-Status: BEIDE Prod-Deploys sind LIVE (2026-07-02).**
 1. `firebase deploy --only firestore:rules` ✅ (Erstellen/Lesen im Sim bewiesen).
