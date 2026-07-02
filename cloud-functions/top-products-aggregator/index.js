@@ -7,9 +7,9 @@
  *      × Engagement-Score (Bewertungs-Anzahl + Kommentar-Anzahl).
  *   2. **Top 10 letzter Monat (rating)** — gleiche Logik, gefiltert
  *      auf Bewertungen mit `ratedate >= now - 30d`.
- *   3. **Top 10 meist aufgerufen (letzter Monat)** — eindeutige
- *      Journey-Sessions die ein Produkt enthielten, letzte 30 Tage.
- *      Gibt das beste Trending-Signal: zeigt was diesen Monat
+ *   3. **Top 10 meist aufgerufen (letzte Woche)** — eindeutige
+ *      Journey-Sessions die ein Produkt enthielten, letzte 7 Tage.
+ *      Gibt das beste Trending-Signal: zeigt was diese Woche
  *      tatsächlich angeklickt wird, unabhängig davon ob bewertet.
  *
  * Output: `aggregates/topProducts_v1` mit Feldern `overall`,
@@ -180,7 +180,9 @@ async function aggregateMostViewed() {
   console.log('  [B] streaming journeys.viewedProducts (collectionGroup) …');
   const start = Date.now();
 
-  const cutoffMonth = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  // Fenster = 1 Woche (User-Wunsch 2026-07: "meist aufgerufen DER WOCHE" als
+  // frische, oft wechselnde Liste, die zum häufigeren Reinschauen motiviert).
+  const cutoffWeek = Date.now() - 7 * 24 * 60 * 60 * 1000;
   // Map<key="noname:<id>"|"marken:<id>", { id, type, count }>.
   // Pro Journey wird ein Produkt nur 1× gezählt (Set-Dedupe), damit
   // ein einzelner User der das gleiche Produkt 100× öffnet nicht
@@ -193,7 +195,7 @@ async function aggregateMostViewed() {
   // (siehe firestore.indexes.json).
   // Plus kleinere Page-Size: `viewedProducts`-Arrays können groß
   // sein, 2k pro Batch hält die Antwort-Pakete handhabbar.
-  const cutoffTs = admin.firestore.Timestamp.fromMillis(cutoffMonth);
+  const cutoffTs = admin.firestore.Timestamp.fromMillis(cutoffWeek);
   let lastDoc = null;
   const PAGE = 2000;
   let scanned = 0;
@@ -242,7 +244,7 @@ async function aggregateMostViewed() {
   }
 
   console.log(
-    `    → ${scanned} journeys scanned (${withinWindow} within last 30d), ${counts.size} unique products viewed (${Date.now() - start} ms)`,
+    `    → ${scanned} journeys scanned (${withinWindow} within last 7d), ${counts.size} unique products viewed (${Date.now() - start} ms)`,
   );
   // Top-N nach Count, Tiebreaker random für Variation pro Run.
   const ranked = Array.from(counts.values()).sort((a, b) => {

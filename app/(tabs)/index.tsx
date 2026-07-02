@@ -36,7 +36,6 @@ import {
   MORPHING_HEADER_ROW_HEIGHT,
 } from '@/components/design/MorphingHeader';
 import { ProductCard } from '@/components/design/ProductCard';
-import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { StufenChips } from '@/components/design/StufenChips';
 import { QuickAccessCard } from '@/components/design/QuickAccessCard';
 import { Shimmer } from '@/components/design/Skeletons';
@@ -74,15 +73,6 @@ import { FirestoreDocument, Handelsmarken, Produkte } from '@/lib/types/firestor
 import { getProductImage } from '@/lib/utils/productImage';
 
 type DiscounterInfo = { color: string; short: string; bild?: string };
-
-// C3 (Stufe 1): Tabs für die zusammengefaltete „Top Bewertete Produkte"-
-// Sektion. `as const` → literale Key-Typen, damit SegmentedTabs korrekt
-// typt (onChange = setTopTab).
-const TOP_TABS = [
-  { key: 'overall', label: 'Gesamt' },
-  { key: 'month', label: 'Monat' },
-  { key: 'viewed', label: 'Aufgerufen' },
-] as const;
 
 export default function HomeScreen() {
   // Splash-Overlay erst ausblenden, wenn dieser Screen gerendert ist
@@ -298,18 +288,13 @@ export default function HomeScreen() {
   // Aggregation die andere nicht blockiert. `TopRatedItem` ist
   // unten am Modul-Ende definiert (geteilt mit der TopRatedCard +
   // TopRatedSection).
-  const [topRatedOverall, setTopRatedOverall] = useState<TopRatedItem[]>([]);
-  const [topRatedOverallLoading, setTopRatedOverallLoading] = useState(true);
   const [topRatedMonth, setTopRatedMonth] = useState<TopRatedItem[]>([]);
   const [topRatedMonthLoading, setTopRatedMonthLoading] = useState(true);
   // "Meist aufgerufen" — eindeutige Journey-Sessions die das Produkt
-  // angesehen haben, letzte 30 Tage. Trending-Signal unabhängig von
-  // Bewertungen.
+  // angesehen haben (Fenster: 1 Woche, siehe top-products-aggregator).
+  // Trending-Signal unabhängig von Bewertungen.
   const [mostViewed, setMostViewed] = useState<TopRatedItem[]>([]);
   const [mostViewedLoading, setMostViewedLoading] = useState(true);
-  // C3 (Stufe 1): die drei „Top"-Listen teilen sich EINE Sektion mit
-  // SegmentedTabs statt drei fast identischer Karussells untereinander.
-  const [topTab, setTopTab] = useState<'overall' | 'month' | 'viewed'>('overall');
 
   // ─── UMP consent SAFETY-NET (Android only) ──────────────────────────────────
   // Primary-Pfad ist seit ClickUp 86c9qd5qu in app/index.tsx (vor
@@ -788,14 +773,12 @@ export default function HomeScreen() {
       try {
         const data = await FirestoreService.getTopProducts();
         if (cancelled) return;
-        setTopRatedOverall((data.overall as any) ?? []);
         setTopRatedMonth((data.monthly as any) ?? []);
         setMostViewed((data.mostViewed as any) ?? []);
       } catch {
         /* Empty-States, keine Crashes */
       } finally {
         if (!cancelled) {
-          setTopRatedOverallLoading(false);
           setTopRatedMonthLoading(false);
           setMostViewedLoading(false);
         }
@@ -1517,54 +1500,27 @@ export default function HomeScreen() {
           </LinearGradient>
         </View>
 
-        {/* ── Top Bewertete Produkte — EIN Karussell, per SegmentedTabs
-            umschaltbar (Gesamt / Monat / Aufgerufen) statt drei fast
-            identischer Listen untereinander (C3, Stufe 1). */}
-        <View style={{ marginTop: 28, paddingHorizontal: 20 }}>
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.bold,
-              fontSize: 13,
-              color: theme.textMuted,
-              letterSpacing: 0.6,
-              textTransform: 'uppercase',
-              marginBottom: 12,
-            }}
-          >
-            Top Bewertete Produkte
-          </Text>
-          <SegmentedTabs tabs={TOP_TABS} value={topTab} onChange={setTopTab} />
-        </View>
-
-        {topTab === 'overall' ? (
-          <TopRatedSection
-            title=""
-            topMargin={12}
-            loading={topRatedOverallLoading}
-            items={topRatedOverall}
-            emptyText="Noch keine Bewertungen vorhanden — sei der erste, der ein Produkt enttarnt und seine Meinung teilt."
-            onItemPress={handleTopRatedPress}
-          />
-        ) : topTab === 'month' ? (
-          <TopRatedSection
-            title=""
-            topMargin={12}
-            loading={topRatedMonthLoading}
-            items={topRatedMonth}
-            emptyText="Im letzten Monat wurden noch keine Produkte bewertet — sei der erste, der ein Produkt enttarnt und seine Meinung teilt."
-            onItemPress={handleTopRatedPress}
-          />
-        ) : (
-          <TopRatedSection
-            title=""
-            topMargin={12}
-            loading={mostViewedLoading}
-            items={mostViewed}
-            emptyText="Noch keine Aufruf-Daten vorhanden — schau dir Produkte an um die Liste zu füllen."
-            onItemPress={handleTopRatedPress}
-          />
-        )}
+        {/* ── Zwei feste Karussells (User-Wunsch 2026-07): frische, oft
+            wechselnde Listen motivieren häufigeres Reinschauen. Kein Tab —
+            beide immer sichtbar untereinander. */}
+        <TopRatedSection
+          eyebrow="Diesen Monat top bewertet"
+          title="Top-Bewertungen des Monats"
+          topMargin={28}
+          loading={topRatedMonthLoading}
+          items={topRatedMonth}
+          emptyText="Im letzten Monat wurden noch keine Produkte bewertet — sei der erste, der ein Produkt enttarnt und seine Meinung teilt."
+          onItemPress={handleTopRatedPress}
+        />
+        <TopRatedSection
+          eyebrow="Diese Woche am meisten angeschaut"
+          title="Meist aufgerufen diese Woche"
+          topMargin={22}
+          loading={mostViewedLoading}
+          items={mostViewed}
+          emptyText="Noch keine Aufrufe diese Woche — schau dir ein paar Produkte an, dann füllt sich die Liste."
+          onItemPress={handleTopRatedPress}
+        />
 
       </Animated.ScrollView>
 
