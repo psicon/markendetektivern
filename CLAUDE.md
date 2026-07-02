@@ -1794,6 +1794,66 @@ Grundlage — beim Hinzufügen neuer Client-Reads/Writes die Rules mitziehen.
       `achievementService.getAllLevels()`)
     - `achievements/*` — Achievement catalogue
 
+## Geteilte Einkaufszettel — `shared_lists` (Stufe 5, 86cahgwmn)
+
+Wachstums-Feature: Einkaufszettel mit Familie/Freunden teilen, Echtzeit-Sync.
+**Bewusst 100% ISOLIERT gebaut** — der persönliche `shopping-list.tsx` (4500
+Zeilen) wurde NICHT angefasst. Neue Collection, neue CF-Codebase, neue Screens,
+nur additive Touches sonst. „Nichts kaputt machen"-Garantie by design.
+
+**Datenmodell:**
+- `shared_lists/{listId}` = `{ ownerId, ownerName, name, memberIds: string[],
+  memberNames: {uid→name}, inviteCode, inviteExpiresAt, createdAt, updatedAt }`.
+  `memberIds` ist das Autorisierungs-Feld (`array-contains` Query + Rules-Gate).
+- `shared_lists/{listId}/items/{itemId}` = `{ name, addedBy(uid), addedByName,
+  purchased, purchasedBy?, savingsCents?, createdAt }`.
+- **Warum `memberNames`/`addedByName` denormalisiert:** fremde `users/*`-Profile
+  sind per Rules owner-only → Clients können Namen anderer Mitglieder NICHT
+  direkt lesen. Namen wandern darum als Map aufs List-Doc + pro Item.
+
+**Firestore-Rules (`shared_lists`-Block, VOR dem finalen deny-all):**
+- read: `signedIn() && uid in resource.data.memberIds`.
+- create: nur Owner mit `memberIds.size()==1 && memberIds[0]==uid` (man kann sich
+  nicht selbst in eine Liste mit Fremden schreiben).
+- update: `ownerId` unverändert + **keine Client-Expansion von `memberIds`**
+  (`new.difference(old).size()==0`) + (Owner ODER Self-Leave
+  `old.difference(new)==[uid]`). Beitritt läuft NUR server-seitig (CF).
+- delete: nur Owner. items-Subcollection: read/write via
+  `get(/shared_lists/$(listId)).data.memberIds`.
+- Rules-Tests: 15 zusätzliche in `rules-tests/firestore.rules.test.js`
+  (Gesamt 46), beide Richtungen (Expansion-Angriff scheitert, legit Flows gehen).
+
+**Beitritt = Cloud Function (server-only, kein Client-Write auf memberIds):**
+- `cloud-functions/shared-lists/index.js` → `joinSharedList` (v2 onCall,
+  europe-west3, MAX_MEMBERS=6). Prüft Auth, **lehnt anonyme User ab**
+  (`sign_in_provider==='anonymous'`), findet Liste per `inviteCode`, Transaktion:
+  Ablauf (48h) + Kapazität + Idempotenz, dann `memberIds.concat([uid])` +
+  `memberNames[uid]`.
+- Client ruft die Callable per **`fetch`** (kein `@react-native-firebase/
+  functions` installiert → kein nativer Rebuild nötig): POST an
+  `https://europe-west3-…/joinSharedList`, Body `{"data":{inviteCode,displayName}}`,
+  `Authorization: Bearer <idToken>`. Siehe `sharedListService.joinViaCode`.
+
+**Client-Service:** `lib/services/sharedListService.ts` — `createSharedList`,
+`subscribeMySharedLists` (`array-contains`), `subscribe(SharedList|Items)`,
+`addItem`, `markItemPurchased`, `removeItem`, `leaveList`/`removeMember`,
+`rename`, `rotateInvite`, `inviteLinkFor` (`markendetektive://join-list/<code>`),
+`joinViaCode`. Alle Writes modular-API + fire-and-forget wo im UI-Pfad.
+
+**Screens (alle NEU, isoliert):** `app/shared-lists.tsx` (Übersicht),
+`app/shared-list/[id].tsx` (die Liste: Mitglieder-Sheet, Teilen-Sheet, Item-
+Add/Check/Remove, „Gemeinsam gespart"), `app/join-list/[code].tsx` (Deep-Link-
+Ziel). Einstieg via Profil → „Geteilte Listen". Deep-Links in `pushDeepLinks`
+gewhitelistet (`/shared-lists`, `/shared-list`, `/join-list`).
+
+**⚠️ DEPLOY-PFLICHT (Feature ist „dark" bis dahin):** zwei Prod-Deploys nötig,
+sonst permission-denied im Sim/Prod:
+1. `firebase deploy --only firestore:rules` (Rules-Tests VORHER grün — sind es).
+2. `firebase deploy --only functions:shared-lists` (Node 22 / firebase-tools
+   ≥15.15, neue Codebase in `firebase.json`).
+Bis beide durch sind: UI rendert (Übersicht, Empty-State, Sheets), aber Erstellen
+/Beitreten scheitert sauber mit Fehler-Toast — kein Crash.
+
 ## Apple-Sign-In im SIMULATOR testen (Sim-Build-Saga 2026-06-11)
 
 Vier Fallen in Serie, jede hat einen Build/eine Stunde gekostet:
