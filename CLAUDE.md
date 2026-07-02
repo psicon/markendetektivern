@@ -281,6 +281,22 @@ Recent-Sessions.
   {duration:0}), withTiming(ZIEL, {...})), -1)`. Kostete am 2026-06-12
   zwei Test-Runden beim SheenSweep.
 
+- **Callback-Props in Reanimated-Worklets (`runOnJS`) oder deps-limitierten
+  Memos (`useImperativeHandle([x])`, `useCallback`) capturen, wenn der Callback
+  kontext-abhängige Writes macht.** Worklets + Handles halten die Closure des
+  ERSTELLUNGS-Renders. Beispiel (Stufe 5, Ground-Truth-verifiziert): SwipeRows
+  Bought-Animation rief `onSwipeBought` vom Mount-Render → ✓ in der GETEILTEN
+  Liste schrieb `gekauft:true` auf den PERSÖNLICHEN Zettel (det-IDs in beiden
+  Collections identisch → still falsches Doc). Unsichtbar, solange das Ziel
+  konstant ist; jeder neue Kontext-Switch (Listen-Umschalter!) macht es zum
+  Datenbug. Fix-Pattern: Props in Refs spiegeln (`propRef.current = prop` pro
+  Render), Worklet-Callbacks lesen `propRef.current`. Analog für SPÄTE
+  Callbacks (Fehler-Reverts, Retry-Toasts, Netz-Listener): via Ref lesen oder
+  gegen den beim Aufruf gecapturten Kontext guarden. Und async Loads mit
+  wechselbarer Quelle brauchen einen Epoch-Guard (monotoner Zähler, vor jedem
+  setState prüfen) — sonst überschreibt ein langsamer Load der alten Quelle
+  den State der neuen.
+
 - **Fire-and-forget `void asyncStorageWrite(...)` direkt vor
   `setVisible(false)`/`setState`** — Race-Garantie. Wenn ein Listener
   auf das State-Change wartet und dann den just-geschriebenen Wert
@@ -1801,12 +1817,17 @@ Wachstums-Feature: Einkaufszettel mit Familie/Freunden teilen, Echtzeit-Sync.
 Zeilen) wurde NICHT angefasst. Neue Collection, neue CF-Codebase, neue Screens,
 nur additive Touches sonst. „Nichts kaputt machen"-Garantie by design.
 
-**Datenmodell:**
+**Datenmodell (v2, nach User-Feedback komplett neu geschnitten):**
 - `shared_lists/{listId}` = `{ ownerId, ownerName, name, memberIds: string[],
   memberNames: {uid→name}, inviteCode, inviteExpiresAt, createdAt, updatedAt }`.
   `memberIds` ist das Autorisierungs-Feld (`array-contains` Query + Rules-Gate).
-- `shared_lists/{listId}/items/{itemId}` = `{ name, addedBy(uid), addedByName,
-  purchased, purchasedBy?, savingsCents?, createdAt }`.
+- `shared_lists/{listId}/items/{itemId}` = **EXAKT das Einkaufswagen-Doc-Schema**
+  (`markenProdukt`/`handelsmarkenProdukt` als DocumentReference, `customItem`,
+  `gekauft`, `name`, `anzahl`, `timestamp` — plus `addedBy`/`addedByName`).
+  Det-IDs (`brand_<id>`/`noname_<id>`) bleiben erhalten. NIEMALS wieder ein
+  eigenes Item-Schema erfinden — das v1-Schema (`{name, kind, purchased…}`)
+  erzwang einen separaten Simpel-Screen und wurde vom User zu Recht zerlegt
+  („muss 1:1 sein"). Ein Legacy-Fallback rendert v1-Items als Freitext.
 - **Warum `memberNames`/`addedByName` denormalisiert:** fremde `users/*`-Profile
   sind per Rules owner-only → Clients können Namen anderer Mitglieder NICHT
   direkt lesen. Namen wandern darum als Map aufs List-Doc + pro Item.
@@ -1834,37 +1855,45 @@ nur additive Touches sonst. „Nichts kaputt machen"-Garantie by design.
   `https://europe-west3-…/joinSharedList`, Body `{"data":{inviteCode,displayName}}`,
   `Authorization: Bearer <idToken>`. Siehe `sharedListService.joinViaCode`.
 
-**Client-Service:** `lib/services/sharedListService.ts` — `createSharedList`,
-`subscribeMySharedLists` (`array-contains`), `subscribe(SharedList|Items)`,
-`addItem`, `markItemPurchased`, `removeItem`, `leaveList`/`removeMember`,
-`rename`, `rotateInvite`, `inviteLinkFor` (`markendetektive://join-list/<code>`),
-`joinViaCode`. Alle Writes modular-API + fire-and-forget wo im UI-Pfad.
+**Vollintegration im Einkaufszettel (KEINE eigenen Screens):** Die geteilte
+Liste IST der Einkaufszettel — `shopping-list.tsx` schaltet per
+`activeSharedListId` die Datenquelle um (kompakte Chips-Zeile oben:
+`Meine Liste | <Name> 👥N [🛒N ⚙ wenn aktiv]`; aktiver Chip nochmal =
+Verwaltungs-Sheet). Gleiche Pipeline, gleiche Cards, gleiche Handler: alle 9
+Cart-Methoden im `FirestoreService` haben einen optionalen `sharedListId`/
+`cartTarget`-Param (Helper `cartDocRef`/`cartCollectionRef`; Default =
+personal, externe Aufrufer unverändert). Live-Sync via onSnapshot-Trigger +
+debounced Reload. Attribution „· von X" rendert in den Cards nur, wenn das
+Feld existiert (= shared). `app/shared-list/[id].tsx` + `app/shared-lists.tsx`
+wurden GELÖSCHT — nicht wieder anlegen. `app/join-list/[code].tsx` (Deep-Link-
+Ziel) routet nach Join zu `/shopping-list?list=<id>`.
+`components/ui/SharedListManageSheet.tsx` = Einladen (QR/Link) + Mitglieder +
+Verlassen. Race-Schutz im Screen: Epoch-Guard in `loadShoppingCart` (out-of-
+order Loads), Refs für späte Callbacks (Outbox-Flush, Retry/Revert),
+Chip-Tap-Guard (aktiver Chip ≠ initialLoading).
 
-**Screens (alle NEU, isoliert):** `app/shared-lists.tsx` (Übersicht),
-`app/shared-list/[id].tsx` (die Liste: „GETEILTE LISTE"-Eyebrow, Mitglieder-Sheet,
-Teilen-Sheet mit **QR-Code** + Link, Item-Add/Check/Remove mit Attribution
-„von X · Markt", „Gemeinsam gespart"), `app/join-list/[code].tsx` (Deep-Link-
-Ziel). Einstieg via Profil → „Geteilte Listen". Deep-Links in `pushDeepLinks`
-gewhitelistet (`/shared-lists`, `/shared-list`, `/join-list`).
+**Client-Service:** `lib/services/sharedListService.ts` — `createSharedList
+(name, seedDocs, ownerName)` (Seeds = Cart-Doc-Payloads 1:1, det-IDs via
+setDoc), `subscribeMySharedLists`, `subscribeSharedList`,
+`subscribeSharedListItemsTrigger` (nur Change-Signal, Laden macht die Cart-
+Pipeline), `leaveList`/`removeMember`, `rename`, `rotateInvite`,
+`inviteLinkFor`, `joinViaCode`. Item-CRUD läuft NICHT hier, sondern über die
+FirestoreService-Cart-Methoden (cartTarget).
 
-**Einstiegspunkte im persönlichen Zettel (`shopping-list.tsx`, additiv, kein
-Datenmodell-Touch):**
-- Teilen-Button (Header) öffnet einen Chooser: „Als Nachricht verschicken"
-  (bestehendes `buildShoppingListShareText`) ODER „Gemeinsame Liste erstellen"
-  (`buildSharedItems` mappt die geladenen Items read-side → `createSharedList`).
-- Oben eine Leiste „GETEILTE LISTEN" (`ShoppingSharedListsStrip`, horizontale
-  Karten im `ListHeaderComponent` jeder Tab-Page) via `subscribeMySharedLists`.
-  Antippen → `/shared-list/[id]`. Bis Rules deployt → `[]` → Leiste leer.
-- „Teilen direkt starten": nach dem Erstellen navigiert der Zettel mit `?share=1`
-  → der Ziel-Screen öffnet das Teilen-Sheet (QR + Link) automatisch (einmalig,
-  `sharePromptedRef`, sobald `list` geladen).
+**Einladungs-Links sind HTTPS, NIE das Custom-Scheme:** die iOS-Kamera öffnet
+`markendetektive://…` aus QR-Codes NICHT („Keine nutzbaren Daten gefunden" —
+kostete einen User-Report). `inviteLinkFor` →
+`https://markendetektive-895f7.web.app/join-list/<code>`; `public-web/join.html`
+(Firebase Hosting, Default-Site, Rewrite `/join-list/**`) leitet aufs
+App-Scheme weiter (iOS Auto-Versuch + Button, Android `intent://` mit
+Play-Fallback, Store-Links). Deploy: `firebase deploy --only
+hosting:markendetektive-895f7` — die Admin-Site `md-receipt-admin` NICHT
+anfassen. QR = `react-native-qrcode-svg` (rein JS auf react-native-svg, kein
+native Rebuild; lokal generiert, immer weißer Grund + dunkle Module).
 
-**QR-Code = `react-native-qrcode-svg` (6.3.x):** REIN JS auf dem schon
-vorhandenen `react-native-svg` → **kein native Rebuild**, aber ein **EAS-App-Build
-nötig, damit die UI-Änderungen (Chooser/Leiste/QR) echte Nutzer erreichen** — die
-Backend-Deploys (rules/functions) allein liefern nur das Backend. QR wird LOKAL
-generiert (kein Invite-Code an fremde QR-Dienste), immer weißer Grund + dunkle
-Module (scanbar auch im Dark-Mode).
+**Produktentscheidung:** Abhaken in geteilten Listen vergibt Punkte/Ersparnis/
+Kaufhistorie an den ABHAKENDEN (identisch zum eigenen Zettel — „wer kauft,
+kriegt den Kauf"). Journey-Tracking für Custom-Adds läuft nur personal.
 
 **Deploy-Status: BEIDE Prod-Deploys sind LIVE (2026-07-02).**
 1. `firebase deploy --only firestore:rules` ✅ (Erstellen/Lesen im Sim bewiesen).
