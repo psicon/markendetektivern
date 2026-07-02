@@ -1729,6 +1729,51 @@ Bonus: Match-Precision lässt sich direkt an den bereits gesammelten
 - Firestore rules: aggregates doc path is `aggregates/leaderboard_v1`,
   `allow read: if true; allow write: if false`. Write is admin-only
   (Cloud Function).
+
+## Firestore Security Rules — WHITELIST, getestet (Stufe 0, 86cahgwmn)
+
+`firestore.rules` wurde 2026-07 komplett neu geschrieben (vorher organisch
+gewachsen + in kritischen Teilen offen). **Regeln:**
+- **WHITELIST-Prinzip:** finaler `match /{document=**} { allow read, write: if
+  false }` — jede Collection braucht einen bewussten Eintrag. Neue Collection =
+  neuer Rules-Block, sonst gesperrt.
+- **GENAU EIN `/users/{userId}`-Block.** NIE einen zweiten anlegen — Firestore
+  unioniert (OR) alle zutreffenden match-Blöcke, der lockerste gewinnt → jede
+  Validierung im strengeren Block wird toter Code. (Genau das war der alte Bug:
+  5 überlappende /users-Blöcke + ein Blanket-Subcollection-Write hebelten die
+  Ledger/Geld-Validierung aus.)
+- **GELD ist server-only.** `cashback_balance_cents`/`_lifetime_cents`/
+  `cashback_monthly`/`cashback_campaign_*`/`cashback_last_bon_date` sind per
+  `touchesMoneyFields`-Whitelist vom User-Doc-Update ausgenommen;
+  `users/*/cashback_ledger` + `purchased_products` write:false. Punkte
+  (`users/*/ledger`) sind client-append-only + shape-validiert (KEIN Geld —
+  darum weiter client-schreibbar; NIE Punkte→Geld-Brücke bauen solange das so
+  ist). Cloud Functions (Admin-SDK) umgehen Rules → Geld-Writes laufen dort.
+- **Öffentlicher Katalog** (produkte/markenProdukte/hersteller*/handelsmarken/
+  kategorien/discounter/packungstypen/merchants/external_products/reweapify/
+  nutritionscrape/aggregates/achievements/cashback_config/cashback_campaigns/
+  polls) = `read: if true` (Boot-Reads laufen teils VOR abgeschlossenem
+  Anonymous-Sign-In → kein `auth != null` als read-Gate einbauen, sonst Boot-
+  Race), `write: if false`. `produkte/markenProdukte` hatten mal `update: if
+  true` (jeder konnte den Katalog defacen) — NIE wieder.
+- Owner-only + Owner-Feld-Check: `poll_responses`/`productRatings`/`userfeedback`/
+  `pushTokens`/`crowd_uploads` verlangen `request.resource.data.userId (bzw.
+  userID) == request.auth.uid`. `leaderboards/{uid}` write nur eigenes Doc.
+
+**Rules-Tests sind PFLICHT vor jedem `deploy --only firestore:rules`:**
+`npm run test:rules` (`rules-tests/firestore.rules.test.js`, 31 Tests via
+`@firebase/rules-unit-testing` + Firestore-Emulator). Testet BEIDE Richtungen:
+Angriffe scheitern (Guthaben-Fälschung, Umfrage-Mint, Rang-Forgery, Katalog-
+Defacement, Cross-User-Read, FlutterFlow-Backdoor) UND jeder legitime App-Flow
+geht durch. **Emulator braucht Java 21+** — firebase-tools 15.15 lehnt <21 ab;
+`openjdk 25` liegt unter `/usr/local/Cellar/openjdk/*/libexec/openjdk.jdk/
+Contents/Home` (JAVA_HOME setzen). Beim Ändern der Rules IMMER: (1) Test
+anpassen/erweitern, (2) `npm run test:rules` grün, (3) deploy `--only
+firestore:rules` (NIE `firestore:indexes` mit-deployen — Indizes separat
+verwaltet, siehe Index-Learning oben), (4) Live-Regression (App im Sim durch
+Kern-Screens, `permission-denied` im Metro-Log = Regel bricht einen Flow).
+Client-Nutzungs-Census (jede erlaubte Op braucht eine echte Callsite) ist die
+Grundlage — beim Hinzufügen neuer Client-Reads/Writes die Rules mitziehen.
 - Achievements + leaderboards data lives at:
     - `users/{uid}.stats.{pointsTotal, currentLevel, currentStreak, …}`
     - `users/{uid}/ledger/{id}` — per-event point ledger
