@@ -1841,10 +1841,30 @@ nur additive Touches sonst. „Nichts kaputt machen"-Garantie by design.
 `joinViaCode`. Alle Writes modular-API + fire-and-forget wo im UI-Pfad.
 
 **Screens (alle NEU, isoliert):** `app/shared-lists.tsx` (Übersicht),
-`app/shared-list/[id].tsx` (die Liste: Mitglieder-Sheet, Teilen-Sheet, Item-
-Add/Check/Remove, „Gemeinsam gespart"), `app/join-list/[code].tsx` (Deep-Link-
+`app/shared-list/[id].tsx` (die Liste: „GETEILTE LISTE"-Eyebrow, Mitglieder-Sheet,
+Teilen-Sheet mit **QR-Code** + Link, Item-Add/Check/Remove mit Attribution
+„von X · Markt", „Gemeinsam gespart"), `app/join-list/[code].tsx` (Deep-Link-
 Ziel). Einstieg via Profil → „Geteilte Listen". Deep-Links in `pushDeepLinks`
 gewhitelistet (`/shared-lists`, `/shared-list`, `/join-list`).
+
+**Einstiegspunkte im persönlichen Zettel (`shopping-list.tsx`, additiv, kein
+Datenmodell-Touch):**
+- Teilen-Button (Header) öffnet einen Chooser: „Als Nachricht verschicken"
+  (bestehendes `buildShoppingListShareText`) ODER „Gemeinsame Liste erstellen"
+  (`buildSharedItems` mappt die geladenen Items read-side → `createSharedList`).
+- Oben eine Leiste „GETEILTE LISTEN" (`ShoppingSharedListsStrip`, horizontale
+  Karten im `ListHeaderComponent` jeder Tab-Page) via `subscribeMySharedLists`.
+  Antippen → `/shared-list/[id]`. Bis Rules deployt → `[]` → Leiste leer.
+- „Teilen direkt starten": nach dem Erstellen navigiert der Zettel mit `?share=1`
+  → der Ziel-Screen öffnet das Teilen-Sheet (QR + Link) automatisch (einmalig,
+  `sharePromptedRef`, sobald `list` geladen).
+
+**QR-Code = `react-native-qrcode-svg` (6.3.x):** REIN JS auf dem schon
+vorhandenen `react-native-svg` → **kein native Rebuild**, aber ein **EAS-App-Build
+nötig, damit die UI-Änderungen (Chooser/Leiste/QR) echte Nutzer erreichen** — die
+Backend-Deploys (rules/functions) allein liefern nur das Backend. QR wird LOKAL
+generiert (kein Invite-Code an fremde QR-Dienste), immer weißer Grund + dunkle
+Module (scanbar auch im Dark-Mode).
 
 **⚠️ DEPLOY-PFLICHT (Feature ist „dark" bis dahin):** zwei Prod-Deploys nötig,
 sonst permission-denied im Sim/Prod:
