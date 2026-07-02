@@ -89,8 +89,18 @@ exports.joinSharedList = onCall({ region: REGION }, async (request) => {
       );
     }
 
+    // Anzeigename des Beitretenden (untrusted → coercen + kürzen). Wird in
+    // memberNames gespiegelt, weil Clients fremde users/*-Profile per Rules
+    // NICHT lesen dürfen — die Mitglieder-UI braucht den Namen aber.
+    const displayName = String((request.data && request.data.displayName) || '')
+      .trim()
+      .slice(0, 40);
+    const memberNames = d.memberNames && typeof d.memberNames === 'object' ? d.memberNames : {};
+    memberNames[uid] = displayName || 'Mitglied';
+
     tx.update(listRef, {
       memberIds: members.concat([uid]),
+      memberNames,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     logger.info('joinSharedList', { listId: doc.id, uid, newSize: members.length + 1 });

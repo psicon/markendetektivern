@@ -54,6 +54,9 @@ const ALLOWED_ROOTS = new Set([
   '/tipps-und-tricks',
   '/purchase-history',
   '/surveys',
+  '/shared-lists',
+  '/shared-list',
+  '/join-list',
 ]);
 
 /** Default-Route wenn der Deep-Link fehlt / nicht parsebar / nicht erlaubt. */

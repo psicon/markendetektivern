@@ -37,7 +37,10 @@ export interface SharedListDoc {
   id: string;
   name: string;
   ownerId: string;
+  ownerName?: string;
   memberIds: string[];
+  /** uid → Anzeigename (Clients dürfen fremde users/*-Profile nicht lesen). */
+  memberNames?: Record<string, string>;
   inviteCode?: string;
   inviteExpiresAt?: any;
   createdAt?: any;
@@ -81,14 +84,18 @@ export const SharedListService = {
   async createSharedList(
     name: string,
     items: Omit<SharedListItem, 'id'>[] = [],
+    ownerName?: string | null,
   ): Promise<string> {
     const uid = auth.currentUser?.uid;
     if (!uid) throw new Error('not-authenticated');
     const code = await randomCode();
+    const displayName = (ownerName || '').trim().slice(0, 40) || 'Ich';
     const listRef = await addDoc(collection(db, 'shared_lists'), {
       name: (name || '').trim() || 'Unsere Liste',
       ownerId: uid,
+      ownerName: displayName,
       memberIds: [uid],
+      memberNames: { [uid]: displayName },
       inviteCode: code,
       inviteExpiresAt: new Date(Date.now() + INVITE_TTL_MS),
       createdAt: serverTimestamp(),
@@ -244,6 +251,7 @@ export const SharedListService = {
   /** Beitritt via Callable joinSharedList (fetch + Auth-ID-Token). */
   async joinViaCode(
     inviteCode: string,
+    displayName?: string | null,
   ): Promise<{ listId: string; name?: string; alreadyMember?: boolean; joined?: boolean }> {
     const user = auth.currentUser;
     if (!user) throw new Error('not-authenticated');
@@ -254,7 +262,12 @@ export const SharedListService = {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ data: { inviteCode: String(inviteCode).trim() } }),
+      body: JSON.stringify({
+        data: {
+          inviteCode: String(inviteCode).trim(),
+          displayName: (displayName || '').trim().slice(0, 40),
+        },
+      }),
     });
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok || json?.error) {
