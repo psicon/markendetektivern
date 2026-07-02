@@ -36,10 +36,12 @@
       text-decoration: none; margin-bottom: 12px;
     }
     .btn:active { opacity: .85; }
-    /* Offizielle Store-Badges (Apple Marketing Toolbox / Google Play Badge). */
-    .store { display: flex; gap: 12px; justify-content: center; align-items: center; margin-top: 18px; }
-    .store img.apple { height: 44px; display: block; }
-    .store img.google { height: 65px; display: block; margin: -10px; }
+    /* Offizielle Store-Badges (Apple Marketing Toolbox / Google Play Badge).
+       Das Google-PNG trägt ~20% transparentes Padding — height + negative
+       Margins so gewählt, dass BEIDE Badges optisch 40px hoch sind. */
+    .store { display: flex; gap: 10px; justify-content: center; align-items: center; margin-top: 18px; }
+    .store img.apple { height: 40px; display: block; }
+    .store img.google { height: 50px; display: block; margin: -5px; }
     .hint { font-size: 12px; color: #8b9498; margin-top: 20px; line-height: 1.5; }
   </style>
 </head>
@@ -59,16 +61,21 @@
     // Code aus dem Pfad lesen: /join-list/<code>
     var m = location.pathname.match(/\/join-list\/([A-Za-z0-9_-]+)/);
     var code = m ? m[1] : '';
-    var appUrl = 'markendetektive://join-list/' + code;
+    // WICHTIG: Scheme = markendetektivern (mit n). Die AUSGELIEFERTEN Builds
+    // registrieren NUR dieses Scheme in Info.plist/AndroidManifest — der
+    // saubere Alias `markendetektive` steht zwar in app.json, wurde aber nie
+    // in die nativen Projekte übernommen (bare workflow, kein Prebuild).
+    // `markendetektive://` → Safari: „Adresse ungültig" (User-Report 2026-07-02).
+    var appUrl = 'markendetektivern://join-list/' + code;
     var btn = document.getElementById('open');
     if (!code) {
       btn.textContent = 'Link unvollständig — App öffnen';
-      appUrl = 'markendetektive://';
+      appUrl = 'markendetektivern://';
     }
     // Android Chrome: intent:// öffnet die App direkt (mit Play-Store-Fallback).
     var isAndroid = /android/i.test(navigator.userAgent);
     var androidIntent = 'intent://join-list/' + code +
-      '#Intent;scheme=markendetektive;package=de.markendetektive;' +
+      '#Intent;scheme=markendetektivern;package=de.markendetektive;' +
       'S.browser_fallback_url=' + encodeURIComponent('https://play.google.com/store/apps/details?id=de.markendetektive') + ';end';
     btn.href = isAndroid ? androidIntent : appUrl;
     // Auto-Versuch beim Laden (iOS Safari fragt „In MarkenDetektive öffnen?").
