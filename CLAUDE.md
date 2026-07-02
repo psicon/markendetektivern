@@ -333,6 +333,10 @@ Recent-Sessions.
   Fenster-Verhalten gebaut: styles.xml AppTheme = AppCompat.DayNight.
   NoActionBar + opake weiße navigationBarColor + android:windowOptOut
   EdgeToEdgeEnforcement (targetApi 35) + app.json edgeToEdgeEnabled:false.
+  ACHTUNG: Der ENTSCHEIDENDE Schalter im bare workflow ist
+  **android/gradle.properties → expo.edgeToEdgeEnabled=false** — expo-modules
+  aktivieren Edge-to-Edge sonst PROGRAMMATISCH (enableEdgeToEdge) und
+  überschreiben Theme + app.json. Alle drei Stellen müssen false sein.
   NICHT reaktivieren, ohne ALLE Screens auf insets.bottom umzubauen.
 
 - **Lokaler Android-Debug-Build (`npx expo run:android`) braucht JDK 17**
