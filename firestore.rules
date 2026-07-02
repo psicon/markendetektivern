@@ -286,6 +286,52 @@ service cloud.firestore {
       }
     }
 
+    // ── Geteilte Einkaufszettel (Stufe 5) ────────────────────────────
+    // Top-Level-Container. Der PERSÖNLICHE Zettel (users/*/einkaufswagen)
+    // bleibt unberührt — das hier ist additiv.
+    // Sicherheits-Kern (Lektion aus Stufe 0): `memberIds` darf client-seitig
+    // NIE ERWEITERT werden. Beitritt läuft AUSSCHLIESSLICH über die Cloud
+    // Function joinSharedList (Admin-SDK, umgeht Rules) — sonst lädt man sich
+    // selbst in fremde Listen ein. Clients dürfen memberIds nur SCHRUMPFEN.
+    match /shared_lists/{listId} {
+      // Lesen: nur wer Mitglied ist.
+      allow read: if signedIn() && request.auth.uid in resource.data.memberIds;
+
+      // Anlegen: der Owner, mit sich als ownerId UND genau sich als einzigem
+      // Mitglied (verhindert das Anlegen einer Liste mit Fremden).
+      allow create: if signedIn()
+                     && request.resource.data.ownerId == request.auth.uid
+                     && request.resource.data.memberIds is list
+                     && request.resource.data.memberIds.size() == 1
+                     && request.resource.data.memberIds[0] == request.auth.uid;
+
+      // Ändern: ownerId unveränderlich; memberIds darf NIE wachsen (neue Menge
+      // ⊆ alte Menge). Owner darf umbenennen + Mitglieder entfernen; ein
+      // Nicht-Owner-Mitglied darf NUR sich selbst entfernen (Liste verlassen).
+      allow update: if signedIn()
+                     && request.auth.uid in resource.data.memberIds
+                     && request.resource.data.ownerId == resource.data.ownerId
+                     && request.resource.data.memberIds.toSet()
+                          .difference(resource.data.memberIds.toSet()).size() == 0
+                     && (
+                          resource.data.ownerId == request.auth.uid
+                          || resource.data.memberIds.toSet()
+                               .difference(request.resource.data.memberIds.toSet())
+                               == [request.auth.uid].toSet()
+                        );
+
+      // Löschen: nur der Owner.
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+
+      // Items der Liste: lesen/schreiben nur Mitglieder (get() auf die Parent-
+      // Liste). Gleiche Item-Form wie der persönliche Zettel + `addedBy`.
+      match /items/{itemId} {
+        allow read, write: if signedIn()
+          && request.auth.uid in
+             get(/databases/$(database)/documents/shared_lists/$(listId)).data.memberIds;
+      }
+    }
+
     // ── Finaler deny-all ─────────────────────────────────────────────
     // Alles Ungematchte (inkl. der früher offenen Legacy-Collections:
     // FlutterFlow-Backdoor, MDM/master_*, *_aliases, mdm_*, scraper-

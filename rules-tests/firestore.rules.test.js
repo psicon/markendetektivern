@@ -36,6 +36,7 @@ const path = require('path');
 
 const ALICE = 'alice-uid';
 const MALLORY = 'mallory-uid';
+const BOB = 'bob-uid';
 
 let env;
 
@@ -69,6 +70,28 @@ beforeAll(async () => {
     await setDoc(doc(db, `users/${ALICE}/searchHistory/sh1`), { term: 'bier' });
     await setDoc(doc(db, `users/${ALICE}/einkaufswagen/cart1`), { name: 'Butter' });
     await setDoc(doc(db, `users/${ALICE}/someFutureSub/x1`), { any: 1 });
+
+    // Stufe 5 — geteilte Listen. Getrennte Doc-IDs für mutierende Tests,
+    // damit sie sich nicht gegenseitig beeinflussen. Owner = ALICE, Mitglied = BOB.
+    await setDoc(doc(db, 'shared_lists/list1'), {
+      ownerId: ALICE, memberIds: [ALICE, BOB], name: 'Familie', inviteCode: 'code1',
+    });
+    await setDoc(doc(db, 'shared_lists/list1/items/i1'), { name: 'Milch', addedBy: ALICE });
+    await setDoc(doc(db, 'shared_lists/list_leave'), {
+      ownerId: ALICE, memberIds: [ALICE, BOB], name: 'L',
+    });
+    await setDoc(doc(db, 'shared_lists/list_remove'), {
+      ownerId: ALICE, memberIds: [ALICE, BOB], name: 'L',
+    });
+    await setDoc(doc(db, 'shared_lists/list_rename'), {
+      ownerId: ALICE, memberIds: [ALICE, BOB], name: 'L',
+    });
+    await setDoc(doc(db, 'shared_lists/list_del'), {
+      ownerId: ALICE, memberIds: [ALICE], name: 'L',
+    });
+    await setDoc(doc(db, 'shared_lists/list_expand'), {
+      ownerId: ALICE, memberIds: [ALICE], name: 'L',
+    });
   });
 });
 
@@ -332,5 +355,92 @@ describe('Legacy-Collections + FlutterFlow-Backdoor sind dicht', () => {
     await assertFails(setDoc(doc(ff, 'users/opfer'), { pwned: true }));
     await assertFails(getDoc(doc(ff, `users/${ALICE}`)));
     await assertFails(setDoc(doc(ff, 'irgendwas/x'), { a: 1 }));
+  });
+});
+
+// ─── STUFE 5: Geteilte Einkaufszettel ────────────────────────────────
+// Kern: memberIds ist client-seitig NICHT erweiterbar (Beitritt nur via CF);
+// Items nur für Mitglieder; Verlassen/Entfernen sauber getrennt (Owner vs Member).
+describe('Stufe 5: shared_lists — Mitgliederschutz + Item-Zugriff', () => {
+  const bob = () => env.authenticatedContext(BOB).firestore();
+
+  test('Mitglied liest die Liste', async () => {
+    await assertSucceeds(getDoc(doc(alice(), 'shared_lists/list1')));
+    await assertSucceeds(getDoc(doc(bob(), 'shared_lists/list1')));
+  });
+  test('Nicht-Mitglied kann die Liste NICHT lesen', async () => {
+    await assertFails(getDoc(doc(mallory(), 'shared_lists/list1')));
+    await assertFails(getDoc(doc(unauth(), 'shared_lists/list1')));
+  });
+
+  test('Owner legt Liste mit genau sich selbst an', async () => {
+    await assertSucceeds(setDoc(doc(mallory(), 'shared_lists/new-m'), {
+      ownerId: MALLORY, memberIds: [MALLORY], name: 'M',
+    }));
+  });
+  test('Anlegen mit Fremden in memberIds scheitert', async () => {
+    await assertFails(setDoc(doc(mallory(), 'shared_lists/new-bad'), {
+      ownerId: MALLORY, memberIds: [MALLORY, ALICE], name: 'M',
+    }));
+  });
+  test('Anlegen mit fremder ownerId scheitert', async () => {
+    await assertFails(setDoc(doc(mallory(), 'shared_lists/new-bad2'), {
+      ownerId: ALICE, memberIds: [MALLORY], name: 'M',
+    }));
+  });
+
+  test('Mitglied liest + schreibt Items', async () => {
+    await assertSucceeds(getDoc(doc(bob(), 'shared_lists/list1/items/i1')));
+    await assertSucceeds(
+      setDoc(doc(bob(), 'shared_lists/list1/items/i2'), { name: 'Brot', addedBy: BOB }),
+    );
+  });
+  test('Nicht-Mitglied kann KEINE Items lesen/schreiben', async () => {
+    await assertFails(getDoc(doc(mallory(), 'shared_lists/list1/items/i1')));
+    await assertFails(
+      setDoc(doc(mallory(), 'shared_lists/list1/items/hack'), { name: 'x', addedBy: MALLORY }),
+    );
+  });
+
+  test('Fremder kann sich NICHT selbst zur Liste hinzufügen', async () => {
+    await assertFails(
+      updateDoc(doc(mallory(), 'shared_lists/list_expand'), { memberIds: [ALICE, MALLORY] }),
+    );
+  });
+  test('Owner kann memberIds NICHT erweitern (nur die CF darf das)', async () => {
+    await assertFails(
+      updateDoc(doc(alice(), 'shared_lists/list_expand'), { memberIds: [ALICE, MALLORY] }),
+    );
+  });
+
+  test('Mitglied darf sich selbst entfernen (Liste verlassen)', async () => {
+    await assertSucceeds(
+      updateDoc(doc(bob(), 'shared_lists/list_leave'), { memberIds: [ALICE] }),
+    );
+  });
+  test('Nicht-Owner darf KEIN anderes Mitglied entfernen', async () => {
+    await assertFails(
+      updateDoc(doc(bob(), 'shared_lists/list_remove'), { memberIds: [BOB] }),
+    );
+  });
+  test('Owner darf ein Mitglied entfernen', async () => {
+    await assertSucceeds(
+      updateDoc(doc(alice(), 'shared_lists/list_remove'), { memberIds: [ALICE] }),
+    );
+  });
+  test('Nicht-Owner darf NICHT umbenennen', async () => {
+    await assertFails(
+      updateDoc(doc(bob(), 'shared_lists/list_rename'), { name: 'Bobs Liste' }),
+    );
+  });
+  test('Owner darf umbenennen', async () => {
+    await assertSucceeds(
+      updateDoc(doc(alice(), 'shared_lists/list_rename'), { name: 'Neuer Name' }),
+    );
+  });
+
+  test('Nur der Owner darf die Liste löschen', async () => {
+    await assertFails(deleteDoc(doc(mallory(), 'shared_lists/list_del')));
+    await assertSucceeds(deleteDoc(doc(alice(), 'shared_lists/list_del')));
   });
 });
