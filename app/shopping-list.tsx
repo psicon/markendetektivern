@@ -294,6 +294,7 @@ function ListSwitcherChips({
   brand,
   onSelect,
   onManage,
+  bleed = false,
 }: {
   lists: SharedListDoc[];
   activeId: string | null;
@@ -302,6 +303,10 @@ function ListSwitcherChips({
   brand: any;
   onSelect: (id: string | null) => void;
   onManage: (id: string) => void;
+  /** true, wenn der Parent-Container bereits 16px horizontal padded: der
+   *  Scroller bricht dann mit -16 aus, damit die Chips bündig bei 16 starten
+   *  (statt 32 = doppelt eingerückt), aber bis zum Screen-Rand scrollen. */
+  bleed?: boolean;
 }) {
   if (!lists.length) return null;
   const chipStyle = (active: boolean, pressed: boolean) => ({
@@ -329,6 +334,7 @@ function ListSwitcherChips({
       horizontal
       showsHorizontalScrollIndicator={false}
       scrollsToTop={false}
+      style={bleed ? { marginHorizontal: -16 } : undefined}
       contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingTop: 8, paddingBottom: 2, alignItems: 'center' }}
     >
       <Pressable onPress={() => onSelect(null)} style={({ pressed }) => chipStyle(!activeId, pressed)}>
@@ -1028,7 +1034,10 @@ function SummaryBanner({ variant, potential, earned }: BannerProps) {
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 0 }}
       style={{
-        marginHorizontal: 16,
+        // KEIN marginHorizontal — der Banner rendert im ListHeader, der
+        // bereits im 16px-paddingHorizontal des Listen-Containers liegt.
+        // Ein eigenes Margin ergab doppelte Einrückung (schmaler als die
+        // Cards — User-Report 2026-07-02).
         marginTop: 10,
         marginBottom: 6,
         borderRadius: 14,
@@ -4277,6 +4286,7 @@ export default function ShoppingListScreen() {
                 activeItemCount={brandProducts.length + noNameProducts.length}
                 theme={theme}
                 brand={brand}
+                bleed={!isEmpty}
                 onSelect={(id) => {
                   // Guard (Review-Finding, critical): Tap auf den bereits
                   // aktiven Chip darf NICHT initialLoading=true setzen —
@@ -4289,7 +4299,9 @@ export default function ShoppingListScreen() {
                 onManage={() => setShowManageSheet(true)}
               />
               {!isPremium ? (
-                <View style={{ marginHorizontal: 16, marginTop: 6, marginBottom: 4 }}>
+                // Bündig mit den Cards: der Container padded schon 16 —
+                // nur im Empty-State (Container-Padding 0) selbst einrücken.
+                <View style={{ marginHorizontal: isEmpty ? 16 : 0, marginTop: 6, marginBottom: 4 }}>
                   <BannerAd style={{ marginHorizontal: 0 }} />
                 </View>
               ) : null}
